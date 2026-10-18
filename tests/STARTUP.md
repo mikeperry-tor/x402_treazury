@@ -32,6 +32,10 @@ regressions cover opposite completion orders, three owners, exact selectors,
 unique tools, listener isolation and captured bindings; strict loading still rejects
 duplicate names.
 
+The explicit-sync scope regressions also preserve configured wallets, generated
+identities and accepted removed recipients despite invalid unrelated templates,
+spending settings or bindings, without creating allocations or funding work.
+
 ## Reproducible measurement
 
 ```sh

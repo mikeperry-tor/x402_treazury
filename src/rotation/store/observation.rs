@@ -7,14 +7,39 @@ use std::{
 };
 use tokio::time::Instant;
 
+pub(crate) struct BalanceObservation {
+    pub result: Result<U256>,
+    pub next_due: Option<Instant>,
+}
+
 pub(crate) const CADENCE: Duration = Duration::from_secs(60);
+/// Storage/ownership failure cannot be treated as an unavailable advisory RPC.
+#[derive(Debug)]
+pub(crate) struct BalanceStoreUnavailable;
+impl std::fmt::Display for BalanceStoreUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("balance observation storage unavailable")
+    }
+}
+
+impl std::error::Error for BalanceStoreUnavailable {}
+
+#[derive(Default)]
+enum Outcome {
+    Value(U256),
+    #[default]
+    Unavailable,
+    StoreUnavailable,
+    RpcFailure(super::super::base::RpcFailure),
+}
+
 #[cfg(test)]
 mod tests;
 #[derive(Default)]
 pub(super) struct Observation {
     due: Option<Instant>,
     failures: u32,
-    value: Option<U256>,
+    outcome: Outcome,
 }
 type Owner = Arc<tokio::sync::Mutex<Observation>>;
 pub(super) type Observers = Arc<Mutex<BTreeMap<String, Owner>>>;
@@ -104,19 +129,42 @@ impl StoreHandle {
         wallet: String,
         base: super::super::base::BaseRpc,
     ) -> Result<U256> {
+        self.observe_balance_scheduled(pool, wallet, base)
+            .await
+            .result
+    }
+    /// Capture result and its authoritative retry schedule under the same owner.
+    pub(crate) async fn observe_balance_scheduled(
+        &self,
+        pool: String,
+        wallet: String,
+        base: super::super::base::BaseRpc,
+    ) -> BalanceObservation {
         let store = self.clone();
         let owner = self.balance_acquisition_owner(&wallet).await;
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let mut observation = owner.lock_owned().await;
             if observation.due.is_some_and(|due| Instant::now() < due) {
-                return observation
-                    .value
-                    .context("advisory balance observation unavailable");
+                let result = match &observation.outcome {
+                    Outcome::Value(value) => Ok(*value),
+                    Outcome::Unavailable => {
+                        Err(anyhow::anyhow!("advisory balance observation unavailable"))
+                    }
+                    Outcome::StoreUnavailable => Err(anyhow::Error::new(BalanceStoreUnavailable)),
+                    Outcome::RpcFailure(error) => Err(anyhow::Error::new(error.clone())),
+                };
+                return BalanceObservation {
+                    result,
+                    next_due: observation.due,
+                };
             }
             let (group, id) = (pool.clone(), wallet.clone());
             let result = match store.call(move |s| s.begin_balance(&group, &id)).await {
                 Ok(address) => base.current_balance(&address).await,
-                Err(error) => Err(error),
+                Err(error) if error.is::<super::balances::AdvisoryIdentityUnavailable>() => {
+                    Err(error)
+                }
+                Err(error) => Err(error.context(BalanceStoreUnavailable)),
             };
             let value = result.as_ref().ok().copied();
             let published = store
@@ -136,11 +184,37 @@ impl StoreHandle {
                     .min(300)
             };
             observation.due = Some(Instant::now() + Duration::from_secs(seconds));
-            observation.value = if published.is_ok() { value } else { None };
-            published?;
-            result
-        })
-        .await
-        .context("balance observation owner stopped")?
+            observation.outcome = if published.is_err()
+                || result
+                    .as_ref()
+                    .err()
+                    .is_some_and(|error| error.is::<BalanceStoreUnavailable>())
+            {
+                Outcome::StoreUnavailable
+            } else if let Some(failure) = result
+                .as_ref()
+                .err()
+                .and_then(|error| error.downcast_ref::<super::super::base::RpcFailure>())
+            {
+                // Retain only the existing content-free labels/numeric codes,
+                // never arbitrary upstream error prose or credential-bearing causes.
+                Outcome::RpcFailure(failure.clone())
+            } else {
+                value.map_or(Outcome::Unavailable, Outcome::Value)
+            };
+            BalanceObservation {
+                result: published
+                    .map_err(|error| error.context(BalanceStoreUnavailable))
+                    .and(result),
+                next_due: observation.due,
+            }
+        });
+        match task.await {
+            Ok(observation) => observation,
+            Err(error) => BalanceObservation {
+                result: Err(anyhow::Error::new(error).context(BalanceStoreUnavailable)),
+                next_due: None,
+            },
+        }
     }
 }

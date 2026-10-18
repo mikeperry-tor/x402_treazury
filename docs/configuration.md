@@ -16,6 +16,7 @@ subcommand; running it without arguments displays help and never starts serving.
 | `config show --config FILE` or `--provider FILE` | Resolve file settings offline, including wallet bindings for deployments |
 | `config check --config FILE` or `--provider FILE` | Fetch catalogs and validate selected tools without signing, probing prices or funding |
 | `wallet bootstrap --config FILE` | Fund captured managed reserve claims, without listeners; requires `auto_fund=true` |
+| `wallet sync --config FILE` | Discover ZEC and existing configured managed-USDC balances once, including outstanding funding recipients |
 | `wallet ...` | Administer the treasury |
 | `sources inspect --config FILE` | Read persisted agent-added source records |
 | `build-info` | Print build identity and provenance |
@@ -29,6 +30,12 @@ retain their distinct authority and side effects.
 
 `--config FILE` selects a deployment: sources, listeners, wallets and network
 policy. Wallet commands accept the same file without loading API sources.
+`wallet sync` requires exclusive administration ownership (stop `serve` first).
+It resolves treasury and relevant managed-Base settings without provider catalogs,
+NEAR credentials or automatic funding. Treasury-only deployments need no Base
+configuration; independent per-asset results report partial failure. `wallet status`
+reads saved observations without network traffic. See the
+[CLI output and discovery scope](wallet-cli.md#one-configuration-for-wallet-commands).
 `--meta-config` remains a deployment alias. `--provider FILE` selects a reusable
 provider for standalone serving and catalog inspection. `--network-config FILE` is an optional network-only
 file for standalone operations, not an override for deployments.

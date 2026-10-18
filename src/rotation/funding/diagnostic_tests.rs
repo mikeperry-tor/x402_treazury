@@ -102,7 +102,10 @@ async fn expected_waits_are_info_but_retain_error_backoff_and_other_failures_war
                     kind: Kind::Source,
                     result: Err(error),
                 },
-                1000,
+                &TickClock {
+                    epoch: 1000,
+                    started: tokio::time::Instant::now(),
+                },
             )
             .with_subscriber(subscriber)
             .await

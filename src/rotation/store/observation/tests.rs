@@ -4,7 +4,11 @@ fn cached(failures: u32) -> Owner {
     Arc::new(tokio::sync::Mutex::new(Observation {
         due: Some(Instant::now() + CADENCE),
         failures,
-        value: (failures == 0).then_some(U256::ZERO),
+        outcome: if failures == 0 {
+            Outcome::Value(U256::ZERO)
+        } else {
+            Outcome::Unavailable
+        },
     }))
 }
 

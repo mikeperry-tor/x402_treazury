@@ -338,7 +338,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             .unwrap();
         let clock = TickClock {
             epoch: now().unwrap(),
-            started: std::time::Instant::now(),
+            started: tokio::time::Instant::now(),
         };
         let (result, observed) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             tokio::join!(
@@ -405,32 +405,56 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         };
         axum::Json(json!({"jsonrpc":"2.0","id":1,"result":result}))
     };
+    let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = requests.clone();
     let server = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            axum::Router::new()
-                .route("/", axum::routing::post(rpc))
-                .route(
-                    "/forbidden",
-                    axum::routing::post(|| async {
-                        (axum::http::StatusCode::FORBIDDEN, "secret upstream body")
-                    }),
-                )
-                .route(
-                    "/limited",
-                    axum::routing::post(|| async {
-                        (
-                            axum::http::StatusCode::TOO_MANY_REQUESTS,
-                            "secret upstream body",
-                        )
-                    }),
-                ),
-        )
-        .await
-        .unwrap()
+        let app = axum::Router::new()
+            .route("/", axum::routing::post(rpc))
+            .route(
+                "/forbidden",
+                axum::routing::post(|| async {
+                    (axum::http::StatusCode::FORBIDDEN, "secret upstream body")
+                }),
+            )
+            .route(
+                "/limited",
+                axum::routing::post(|| async {
+                    (
+                        axum::http::StatusCode::TOO_MANY_REQUESTS,
+                        "secret upstream body",
+                    )
+                }),
+            )
+            .layer(axum::middleware::from_fn(
+                move |request: axum::extract::Request, next: axum::middleware::Next| {
+                    let counted = counted.clone();
+                    async move {
+                        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        next.run(request).await
+                    }
+                },
+            ));
+        axum::serve(listener, app).await.unwrap();
     });
-    let unchanged = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
+    // Keep blocking Store publication from auto-advancing the paused clock;
+    // each intended new acquisition explicitly advances its actual due time.
+    let active = tokio::spawn(async {
+        loop {
+            tokio::task::yield_now().await;
+        }
+    });
+    tokio::time::pause();
+    let mut expected = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
+    let address = expected["pools"][0]["addresses"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["id"] == job.wallet_id)
+        .unwrap();
+    address["balance_refresh_error"] = json!("observation_unavailable");
     for (path, code) in [("forbidden", "403"), ("limited", "429")] {
+        let due = store.balance_due(&job.wallet_id).await;
+        tokio::time::advance(due.saturating_duration_since(tokio::time::Instant::now())).await;
         backend.base = super::super::base::BaseRpc::new(&format!("{url}/{path}"), 12).unwrap();
         let error = backend
             .credit(&job)
@@ -441,13 +465,51 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         assert!(category.contains(code), "{category}");
         assert!(category.contains("retaining reservations"));
         assert!(!category.contains("secret"));
+        let count = requests.load(std::sync::atomic::Ordering::SeqCst);
+        let cached = backend.credit(&job).await.unwrap_err();
         assert_eq!(
-            unchanged,
-            serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
+            safe_error(&cached, &FundingPhase::VerifyingCredit),
+            category
+        );
+        assert_eq!(
+            requests.load(std::sync::atomic::Ordering::SeqCst),
+            count,
+            "cached failure must not issue another RPC"
+        );
+        assert_eq!(
+            expected,
+            serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap(),
+            "only the explicit advisory failure field may change"
         );
     }
     backend.base = super::super::base::BaseRpc::new(&url, 12).unwrap();
+    let due = store.balance_due(&job.wallet_id).await;
+    tokio::time::advance(due.saturating_duration_since(tokio::time::Instant::now())).await;
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    db.execute_batch("CREATE TRIGGER reject_credit BEFORE UPDATE OF readiness_requirement ON funding_jobs BEGIN SELECT RAISE(ABORT,'private sqlite path'); END;").unwrap();
     let before = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
+    let failure = backend.credit(&job).await.unwrap_err();
+    let category = safe_error(&failure, &FundingPhase::VerifyingCredit);
+    assert!(
+        category.contains("local credit state could not be committed"),
+        "{category}"
+    );
+    for forbidden in ["RPC access", "rate limits", "private", "secret"] {
+        assert!(!category.contains(forbidden), "{category}");
+    }
+    let count = requests.load(std::sync::atomic::Ordering::SeqCst);
+    db.execute_batch("DROP TRIGGER reject_credit;").unwrap();
+    drop(db);
+    let cached = backend.credit(&job).await.unwrap_err();
+    assert_eq!(
+        safe_error(&cached, &FundingPhase::VerifyingCredit),
+        category
+    );
+    assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), count);
+    assert_eq!(
+        before,
+        serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
+    );
     let mut missing = job.clone();
     missing.wallet_id = "not-a-candidate".into();
     assert!(
@@ -455,12 +517,14 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             .credit(&missing)
             .await
             .unwrap_err()
-            .is::<rusqlite::Error>()
+            .is::<crate::rotation::store::balances::AdvisoryIdentityUnavailable>()
     );
     assert_eq!(
         before,
         serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
     );
+    let due = store.balance_due(&job.wallet_id).await;
+    tokio::time::advance(due.saturating_duration_since(tokio::time::Instant::now())).await;
     backend.credit(&job).await.unwrap();
     // Advisory credit publication does not acquire the payment group's lock.
     let gate = store.group_gate(&job.pool_id).unwrap();
@@ -472,6 +536,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     drop(backend);
     drop(store);
     worker.await.unwrap();
+    active.abort();
 }
 
 #[test]

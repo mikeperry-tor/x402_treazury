@@ -491,7 +491,9 @@ spec="nonexistent.json"
         String::from_utf8_lossy(&human.stderr)
     );
     let human = String::from_utf8(human.stdout).unwrap();
-    assert!(human.contains("Wallet synchronization completed."));
+    assert!(human.contains(
+        "Wallet synchronization: ZEC completed; managed USDC inapplicable (0 attempted, 0 completed, 0 failed)."
+    ));
     assert!(human.contains("Scanned height: 2000000"));
     assert!(human.contains("Saved spendable shielded balance: 0.00000000 ZEC"));
     assert!(human.contains("Primary ZEC address:"));
@@ -513,6 +515,14 @@ spec="nonexistent.json"
     let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(output["state"]["sync"]["phase"], "ready");
     assert_eq!(output["state"]["sync_complete"], true);
+    assert_eq!(
+        output["observations"]["zec"],
+        serde_json::json!({"status":"completed", "attempted":1, "completed":1, "failed":0})
+    );
+    assert_eq!(
+        output["observations"]["usdc"],
+        serde_json::json!({"status":"inapplicable", "attempted":0, "completed":0, "failed":0})
+    );
     let context =
         x402_treazury::network::NetworkContext::new(x402_treazury::network::NetworkPolicy {
             mode: x402_treazury::network::Mode::Tor,
@@ -1125,13 +1135,21 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
     let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
         .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
-        .args(["wallet", "sync", "--config"])
+        .args(["wallet", "sync", "--json", "--config"])
         .arg(config)
         .output()
         .await
         .unwrap();
     assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
+    let reported: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(reported["state"].is_object());
+    assert!(reported["receive_addresses"].is_array());
+    assert_eq!(reported["observations"]["zec"]["status"], "failed");
+    assert_eq!(
+        reported["observations"]["zec"]["error"],
+        "indexer_network_mismatch"
+    );
+    assert_eq!(reported["observations"]["usdc"]["status"], "inapplicable");
     let logs = String::from_utf8_lossy(&output.stderr);
     assert!(logs.contains("synchronizing wallet with indexer"), "{logs}");
     assert!(logs.contains("indexer_network_mismatch"), "{logs}");
@@ -1481,4 +1499,214 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
     assert_eq!(store.operation("jobless").unwrap().attempts, 0);
     assert_eq!(store.status().unwrap().treasury_operations.len(), 1);
     server.abort();
+}
+
+#[tokio::test]
+async fn sync_cli_reports_independent_assets_without_provider_or_near_credentials() {
+    use std::sync::atomic::AtomicUsize;
+    for (indexer_mode, base_available) in [
+        ("missing", true),
+        ("invalid", true),
+        ("conflicting", true),
+        ("valid", false),
+        ("unrelated", true),
+        ("snapshot", true),
+    ] {
+        let zec_available = matches!(indexer_mode, "valid" | "unrelated");
+        let dir = tempfile::tempdir().unwrap();
+        let treasury = wallet(dir.path()).await;
+        capacity_fixture::treasury_pair(
+            &treasury,
+            "configured",
+            "2",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .await
+        .unwrap();
+        let treasury_id = treasury.status().await.unwrap().treasury_id;
+        treasury.close().await.unwrap();
+        if indexer_mode == "snapshot" {
+            let mut store = x402_treazury::rotation::store::Store::open(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &treasury_id,
+            )
+            .unwrap();
+            let (revision, _) = store.snapshot().unwrap();
+            store
+                .save_snapshot(revision, b"authenticated but incompatible SDK snapshot")
+                .unwrap();
+        }
+        let (indexer, indexer_calls, indexer_server, _) = mock("main").await;
+        let base_calls = Arc::new(AtomicUsize::new(0));
+        let seen = base_calls.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_endpoint = format!("http://{}/rpc", listener.local_addr().unwrap());
+        let app = axum::Router::new().route("/rpc", axum::routing::post(move |axum::Json(request):axum::Json<serde_json::Value>| {
+            seen.fetch_add(1,Ordering::SeqCst);
+            async move {
+                assert_eq!(request["method"],"eth_call");
+                assert_eq!(request["params"][1],"latest");
+                axum::Json(serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":format!("0x{:064x}",17)}))
+            }
+        }));
+        let base_server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let indexer_setting = match indexer_mode {
+            "missing" => "indexer_url_env='MISSING_ZEC_ENDPOINT'".into(),
+            "invalid" => "indexer_url='http://off-machine.invalid'".into(),
+            "conflicting" => format!("indexer_url='{indexer}'\nindexer_url_env='SYNC_INDEXER'"),
+            "unrelated" => format!(
+                "indexer_url='{indexer}'\nsubmission_url='http://off-machine.invalid'\nsubmission_url_env='MISSING_SUBMISSION'\nmax_funding_transaction_fee_zec='invalid'\nmax_refund_shielding_fee_zec='invalid'"
+            ),
+            _ => format!("indexer_url='{indexer}'"),
+        };
+        let config = dir.path().join("sync.toml");
+        std::fs::write(&config, format!("version=1\nservers={{}}\n[treasury]\nstate_dir='state'\nkey_file='key'\n{indexer_setting}\n[funding]\nbase_rpc_url_env='SYNC_BASE_RPC'\nbase_rpc_fallback_url_envs=[]\nnear_api_key_env='MISSING_NEAR_KEY'\nnear_user_session_env='MISSING_NEAR_SESSION'\n[sources.unused]\nspec='http://127.0.0.1:1/never-fetch'\napi_key_env='MISSING_PROVIDER_KEY'\n[wallets.configured]\nmode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n[wallets.configured.reserves.small]\nfunding_amount_usdc='2'\n[wallets.configured.reserves.large]\nfunding_amount_usdc='2'\n")).unwrap();
+        if indexer_mode == "unrelated" {
+            let mut text =
+                std::fs::read_to_string(&config)
+                    .unwrap()
+                    .replacen("servers={}\n", "", 1);
+            text.push_str(
+                "[wallet_templates.unused]\nmode='zcash_rotation'\nmax_api_payment_usdc='invalid'\nmax_funding_spend_zec='invalid'\nmax_conversion_overhead_percent=5\n[wallet_templates.unused.reserves.small]\nfunding_amount_usdc='invalid'\n[servers.unrelated]\nlisten='127.0.0.1:8080'\nsources=['unused','missing']\nwallet='missing-wallet'\n",
+            );
+            std::fs::write(&config, text).unwrap();
+        }
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
+        command
+            .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+            .args(["wallet", "sync", "--json", "--config"])
+            .arg(&config);
+        if base_available {
+            command.env("SYNC_BASE_RPC", &base_endpoint);
+        }
+        if indexer_mode == "conflicting" {
+            command.env("SYNC_INDEXER", &indexer);
+        }
+        if indexer_mode == "snapshot" {
+            let owner = x402_treazury::rotation::store::Store::open(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &treasury_id,
+            )
+            .unwrap();
+            let rejected = command.output().await.unwrap();
+            assert!(!rejected.status.success());
+            assert!(rejected.stdout.is_empty());
+            assert_eq!(base_calls.load(Ordering::SeqCst), 0);
+            assert!(indexer_calls.lock().unwrap().is_empty());
+            drop(owner);
+        }
+        let output = command.output().await.unwrap();
+        assert_eq!(
+            output.status.success(),
+            zec_available && base_available,
+            "{indexer_mode}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let reported: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+        if indexer_mode == "unrelated" {
+            let other_command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+                .env_clear()
+                .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+                .args(["wallet", "addresses", "--config"])
+                .arg(&config)
+                .output()
+                .await
+                .unwrap();
+            assert!(
+                !other_command.status.success(),
+                "other commands retain full validation"
+            );
+            assert!(other_command.stdout.is_empty());
+        }
+        let zec = &reported["observations"]["zec"];
+        let usdc = &reported["observations"]["usdc"];
+        if zec_available {
+            assert_eq!(zec["status"], "completed");
+        } else {
+            assert_eq!(zec["status"], "failed");
+            assert_eq!(zec["attempted"], 0);
+            assert!(indexer_calls.lock().unwrap().is_empty());
+        }
+        if indexer_mode == "snapshot" {
+            assert_eq!(zec["error"], "zec_snapshot_unavailable");
+            assert_eq!(reported["receive_addresses"], serde_json::json!([]));
+            let store = x402_treazury::rotation::store::Store::open(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &treasury_id,
+            )
+            .unwrap();
+            assert_eq!(
+                store.snapshot().unwrap().1.as_slice(),
+                b"authenticated but incompatible SDK snapshot"
+            );
+            assert_eq!(store.funding_jobs().unwrap().len(), 2);
+            let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+            for table in ["outgoing", "operation_network", "payment_attempts"] {
+                let count: i64 = db
+                    .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })
+                    .unwrap();
+                assert_eq!(count, 0, "snapshot failure must not create {table}");
+            }
+        }
+        if base_available {
+            assert_eq!(usdc["status"], "completed");
+            assert_eq!(usdc["completed"], 2);
+            assert_eq!(base_calls.load(Ordering::SeqCst), 2);
+            assert!(
+                reported["state"]["pools"][0]["addresses"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|wallet| wallet["balance_estimate_atomic"] == "17")
+            );
+        } else {
+            assert_eq!(usdc["status"], "failed");
+            assert_eq!(usdc["attempted"], 0);
+            assert_eq!(usdc["error"], "usdc_configuration_unavailable");
+            assert_eq!(base_calls.load(Ordering::SeqCst), 0);
+        }
+        assert!(
+            reported["state"]["treasury_operations"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !indexer_calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|method| method == "SendTransaction")
+        );
+        base_server.abort();
+        indexer_server.abort();
+    }
+}
+
+#[tokio::test]
+async fn sync_cli_keeps_exclusive_treasury_ownership() {
+    let dir = tempfile::tempdir().unwrap();
+    let treasury = wallet(dir.path()).await;
+    let config = dir.path().join("sync.toml");
+    std::fs::write(&config,"version=1\nservers={}\n[treasury]\nstate_dir='state'\nkey_file='key'\nindexer_url_env='MISSING_INDEXER'\n").unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+        .args(["wallet", "sync", "--json", "--config"])
+        .arg(config)
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(!treasury.status().await.unwrap().outgoing_pending);
+    treasury.close().await.unwrap();
 }

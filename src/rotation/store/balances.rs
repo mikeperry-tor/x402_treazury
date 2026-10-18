@@ -9,6 +9,18 @@ impl std::fmt::Display for AdvisoryIdentityUnavailable {
 }
 impl std::error::Error for AdvisoryIdentityUnavailable {}
 impl Store {
+    /// Explicit inspection resolves configured names without decoding unrelated
+    /// wallet balances, keys, or financial history, and never declares a pool.
+    pub(crate) fn advisory_pools(&self, names: &[String]) -> Result<Vec<String>> {
+        let mut query = self.db.prepare("SELECT id FROM pools WHERE name=?1")?;
+        let mut pools = Vec::new();
+        for name in names {
+            if let Some(pool) = query.query_row([name], |row| row.get(0)).optional()? {
+                pools.push(pool);
+            }
+        }
+        Ok(pools)
+    }
     pub(crate) fn low_balance(&mut self, pool: &str, wallet: &str) -> Result<()> {
         ensure!(
             self.db.execute(

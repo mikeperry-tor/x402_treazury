@@ -33,6 +33,10 @@ struct Key {
     operation: String,
     kind: Kind,
 }
+enum RetrySchedule {
+    Poll(u64),
+    At(u64),
+}
 struct Record {
     reported_phase: Option<FundingPhase>,
     due: u64,
@@ -64,6 +68,7 @@ impl std::error::Error for AlreadyOwned {}
 enum Observation<Q> {
     None,
     Status(SwapStatus),
+    Credit(CreditObservation),
     Prerequisite(Q),
     Quote(Quote),
 }
@@ -243,7 +248,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
     ) -> Result<()> {
         let clock = TickClock {
             epoch: instant,
-            started: std::time::Instant::now(),
+            started: tokio::time::Instant::now(),
         };
         let (reader, health_after, allocation_groups) = {
             let backend = self.backend.lock().await;
@@ -362,10 +367,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 flight.release(&completion);
                 let id = completion.job.id.clone();
                 let operation = completion.job.operation_id.clone();
-                match self
-                    .publish_observation(&lease, completion, clock.now())
-                    .await
-                {
+                match self.publish_observation(&lease, completion, &clock).await {
                     Ok(Some(ready)) => flight.quote_pending = Some(ready),
                     Ok(None) => {}
                     Err(error) => {
@@ -541,8 +543,9 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     let reader = reader.clone();
                     flight.reads.push(
                         async move {
-                            let result =
-                                reader.credit(job.clone()).await.map(|()| Observation::None);
+                            let result = Ok(Observation::Credit(
+                                reader.credit_observation(job.clone()).await,
+                            ));
                             Completion { job, kind, result }
                         }
                         .boxed(),
@@ -583,7 +586,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         let _lease = lease;
                         let source_clock = TickClock {
                             epoch,
-                            started: std::time::Instant::now(),
+                            started: tokio::time::Instant::now(),
                         };
                         let result = worker
                             .source_step(&job, &source_clock)
@@ -646,13 +649,14 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         &self,
         lease: &Lease,
         completion: Completion<<B::Observations as FundingObservations>::QuoteRequest>,
-        instant: u64,
+        clock: &TickClock,
     ) -> Result<
         Option<(
             FundingJob,
             <B::Observations as FundingObservations>::QuoteRequest,
         )>,
     > {
+        let instant = clock.now();
         let Completion { job, kind, result } = completion;
         let id = job.id.clone();
         let current = self.store.call(move |s| s.funding_job(&id)).await?;
@@ -661,7 +665,15 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         }
 
         let mut prerequisite = None;
+        let mut credit_due = None;
         let result = match result {
+            Ok(Observation::Credit(observation)) => {
+                // Map from the existing monotonic root, rounding outward once.
+                // Relative whole-second offsets can wake before a fractional due
+                // time and count a cached failure again without a new acquisition.
+                credit_due = observation.next_due.map(|due| clock.ceil_epoch(due));
+                observation.result
+            }
             Ok(Observation::Status(status)) => {
                 let (id, operation) = (job.id.clone(), job.operation_id.clone());
                 self.store
@@ -744,7 +756,14 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         };
         let (next, streak, health, condition) = {
             let mut state = lease.state.lock().expect("funding schedule lock");
-            state.complete(&job, kind, instant, self.poll_seconds, error, condition);
+            state.complete(
+                &job,
+                kind,
+                instant,
+                credit_due.map_or(RetrySchedule::Poll(self.poll_seconds), RetrySchedule::At),
+                error,
+                condition,
+            );
             let (next, streak, health) = state.health(&job.operation_id, instant, applicable);
             (
                 next,
@@ -864,7 +883,7 @@ impl State {
         job: &FundingJob,
         kind: Kind,
         now: u64,
-        poll: u64,
+        schedule: RetrySchedule,
         error: Option<String>,
         condition: Option<super::super::error::FundingCondition>,
     ) {
@@ -881,18 +900,24 @@ impl State {
         } else {
             0
         };
-        let delay = poll
-            .saturating_mul(1u64 << record.streak.min(6))
-            .min(300)
-            .max(if kind == Kind::Credit {
-                CREDIT_POLL_SECONDS
-            } else if job.timed_out {
-                60
-            } else {
-                1
-            });
-        let jitter = job.id.bytes().map(u64::from).sum::<u64>() % poll.saturating_add(1).max(1);
-        record.due = now.saturating_add(delay).saturating_add(jitter);
+        record.due = match schedule {
+            RetrySchedule::At(due) => due,
+            RetrySchedule::Poll(poll) => {
+                let delay = poll
+                    .saturating_mul(1u64 << record.streak.min(6))
+                    .min(300)
+                    .max(if kind == Kind::Credit {
+                        CREDIT_POLL_SECONDS
+                    } else if job.timed_out {
+                        60
+                    } else {
+                        1
+                    });
+                let jitter =
+                    job.id.bytes().map(u64::from).sum::<u64>() % poll.saturating_add(1).max(1);
+                now.saturating_add(delay).saturating_add(jitter)
+            }
+        };
         record.error = error;
         record.condition = condition;
     }

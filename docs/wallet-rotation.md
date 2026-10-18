@@ -572,15 +572,28 @@ them through waiter cancellation. Each recurring requested read waits at least
 up to 300 seconds. New requests cannot shorten the cooldown. Startup and explicit
 one-pass inspection can reuse the owner's completed result during its cooldown;
 reuse does not clear a refresh requested after that acquisition began. Accepted
-initial-funding credit checks retain their separate operation scheduler. Payment
-responses and successful payments alone request no observation. Explicit canonical
-qualification keeps its separate inspection and authority contracts.
+initial-funding credit checks retain their separate operation scheduler while
+using the recipient acquisition's existing due time. Cached failures do not add
+another credit retry backoff or count as new recurring observations. Payment
+responses and successful payments alone request no observation. Explicit canonical qualification
+keeps its separate inspection and authority contracts.
 
 Scalar acquisitions lazily discard unused default metadata and expired successful
 results when no acquisition or waiter owns them. Failed observations retain their
 consecutive backoff while the wallet remains live; retired-wallet failures can be
 discarded after their existing cooldown. Cleanup never drops active ownership or
 changes durable claims, estimates or financial journals.
+
+Before accepting a new initial-funding calculation, the treasury first obtains an
+SDK proposal using actual spendable funds and validates its inputs and fee. It then
+requests one scalar observation of that exact Base destination, reusing an active
+or recently completed acquisition. Positive credit consumes the unused claim, and
+source acceptance rechecks that claim after the read. A failed advisory destination
+RPC read preserves previous information and does not prohibit funding. Failure to
+publish a positive observation or verify Store ownership defers source acceptance,
+including callers sharing that failed acquisition during its cooldown. Waiting for ZEC
+or rejecting an invalid proposal does not repeatedly probe Base destinations; no
+whole-inventory discovery barrier precedes an individual preparation.
 
 ## Best-effort wallet rules
 
@@ -640,13 +653,16 @@ incoming-transfer surveillance or a new enforcement layer to prove that wallets
 are never topped up operationally. A requested low-balance check can observe those
 funds through the same ordinary advisory read.
 
-Initial-credit polling begins only after durable source acceptance, not for fresh
-allocations or unsigned quotes awaiting spendable ZEC. Accepted preparation and
+Recurring initial-credit polling begins only after durable source acceptance,
+not for fresh allocations or unsigned quotes awaiting spendable ZEC. Actual
+preparation has the one-pass destination discovery described above. Accepted preparation and
 signed or previously submitted work remain observable across restart even when
 their current phase is stale or their source is already confirmed. Base credit
-reads start immediately for that work and repeat no sooner than 60 seconds after
-completion, plus existing jitter/backoff; unrelated source or provider-status
-progress cannot shorten this interval. This does not change the first-positive
+reads start immediately when the shared recipient observation is due; a preceding
+preparation read retains its cooldown. Repeated reads start no sooner than 60 seconds after
+completion, with the shared recipient acquisition's error backoff; credit adds no
+separate jitter or backoff. Unrelated source or provider-status progress cannot
+shorten this interval. This does not change the first-positive
 credit rule or grant authority for another deposit.
 
 Accepted calculations, exact selected inputs, signed bytes and submission intent

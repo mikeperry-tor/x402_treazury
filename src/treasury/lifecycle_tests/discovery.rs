@@ -1,0 +1,225 @@
+//! Exact destination discovery through the production treasury and Base owners.
+use super::*;
+use crate::rotation::{
+    base::BaseRpc,
+    funding::{Backend, FundingBackend},
+    near::NearClient,
+};
+use axum::{Json, Router, routing::post};
+use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
+
+async fn base_fixture(balance: u64) -> (BaseRpc, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
+    let app = Router::new().route(
+        "/",
+        post(move |Json(v): Json<Value>| {
+            let calls = counter.clone();
+            async move {
+                assert_eq!(v["method"], "eth_call");
+                assert_eq!(v["params"][1], "latest");
+                calls.fetch_add(1, Ordering::SeqCst);
+                Json(json!({"jsonrpc":"2.0", "id":v["id"], "result":format!("0x{balance:064x}")}))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 2).unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (base, calls, server)
+}
+
+#[tokio::test]
+async fn destination_discovery_follows_sdk_spendability_and_prevents_another_deposit() {
+    check_destination(false, false).await;
+    check_destination(true, false).await;
+}
+
+#[tokio::test]
+async fn failed_positive_credit_publication_blocks_preparation_through_cached_cooldown() {
+    check_destination(true, true).await;
+}
+
+async fn check_destination(funded: bool, publication_failure: bool) {
+    let (dir, _net, owner, endpoint) =
+        funded_fixture_amount(2, if funded { 1_000_000 } else { 10_000 }).await;
+    owner
+        .ensure_capacity_group(
+            "alpha".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let job = store
+        .call(|s| {
+            s.fill_funding_vacancies("alpha")?;
+            Ok(s.funding_jobs()?.remove(0))
+        })
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&store, vec![job.clone()], deadline).await;
+    let (base, calls, server) = base_fixture(1).await;
+    let (handle, commands) = actor::channel();
+    let stop = CancellationToken::new();
+    let sender = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint,
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    if publication_failure {
+        db.execute_batch("CREATE TRIGGER reject_credit BEFORE UPDATE OF readiness_requirement ON funding_jobs BEGIN SELECT RAISE(ABORT,'fixture credit publication failure'); END;").unwrap();
+    }
+    let task = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
+    let error = handle
+        .prepare_funding(request(&job, deadline), base.clone())
+        .await
+        .err()
+        .unwrap();
+    assert!(error.is::<PreparationDeferred>(), "{error:#}");
+    if !funded {
+        assert_eq!(
+            error.downcast_ref::<crate::rotation::error::FundingCondition>(),
+            Some(&crate::rotation::error::FundingCondition::InsufficientFunds)
+        );
+    }
+    if publication_failure {
+        assert!(
+            error.is::<crate::rotation::store::observation::BalanceStoreUnavailable>(),
+            "{error:#}"
+        );
+        db.execute_batch("DROP TRIGGER reject_credit;").unwrap();
+        let cached = handle
+            .prepare_funding(request(&job, deadline), base)
+            .await
+            .err()
+            .unwrap();
+        assert!(
+            cached.is::<crate::rotation::store::observation::BalanceStoreUnavailable>(),
+            "{cached:#}"
+        );
+        assert!(cached.is::<PreparationDeferred>());
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), usize::from(funded));
+    store
+        .call(move |s| {
+            let facts = s.funding_facts(&job.id, &job.operation_id)?;
+            assert_eq!(
+                facts.initial_credit_recorded,
+                funded && !publication_failure
+            );
+            assert!(!facts.preparation_accepted && !facts.source_pending);
+            s.require_unstarted_preparation(&job.operation_id)?;
+            assert!(!s.status()?.outgoing_pending && s.status()?.treasury_operations.is_empty());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    stop.cancel();
+    drop(handle);
+    drop(store);
+    task.await.unwrap().unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn credit_reuses_destination_observation_without_restoring_a_journal_debit() {
+    let (_dir, _net, owner, _endpoint) = funded_fixture_amount(2, 10_000).await;
+    owner
+        .ensure_capacity_group(
+            "alpha".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0,
+        )
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let job = store
+        .call(|s| {
+            s.fill_funding_vacancies("alpha")?;
+            Ok(s.funding_jobs()?.remove(0))
+        })
+        .await
+        .unwrap();
+    let (base, calls, server) = base_fixture(5_000_000).await;
+    store
+        .observe_balance(job.pool_id.clone(), job.wallet_id.clone(), base.clone())
+        .await
+        .unwrap();
+    let observed = job.clone();
+    store
+        .call(move |s| {
+            let payer = s.payment_candidate(&observed.pool_id)?;
+            let payment = s.prepare_advisory_payment(
+                &observed.pool_id,
+                alloy_primitives::U256::from(1_000_000u64),
+                "fixture",
+                &payer,
+            )?;
+            let clock = now()?;
+            s.journal_authorization(
+                &payment,
+                crate::rotation::store::Authorization {
+                    payer: payer.address,
+                    payee: "0x0000000000000000000000000000000000000001".into(),
+                    nonce: format!("0x{:064x}", 1),
+                    valid_after: clock.saturating_sub(1),
+                    valid_before: clock + 60,
+                },
+                None,
+            )
+        })
+        .await
+        .unwrap();
+    let (handle, _commands) = actor::channel();
+    let mut backend = Backend {
+        treasury: handle,
+        store: store.clone(),
+        near: NearClient::synthetic_at("http://127.0.0.1:1").unwrap(),
+        base,
+        wallets: BTreeMap::new(),
+        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE"})).unwrap(),
+        max_network_fee: 30_000,
+    };
+    backend.credit(&job).await.unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "credit handoff shares the recipient cooldown"
+    );
+    store
+        .call(move |s| {
+            let value = s
+                .status()?
+                .pools
+                .into_iter()
+                .flat_map(|p| p.addresses)
+                .find(|w| w.id == job.wallet_id)
+                .unwrap();
+            assert_eq!(value.confirmed_balance, "4000000");
+            assert!(
+                s.funding_facts(&job.id, &job.operation_id)?
+                    .initial_credit_recorded
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(backend);
+    drop(store);
+    owner.close().await.unwrap();
+    server.abort();
+}

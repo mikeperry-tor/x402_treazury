@@ -222,20 +222,34 @@ fn credit_failure_backoff_survives_sibling_success_and_uses_completion_time() {
             &job,
             Kind::Credit,
             completed,
-            5,
+            RetrySchedule::Poll(5),
             Some("RPC unavailable".into()),
             None,
         );
         let delay = (5u64 * (1u64 << failure.min(6))).clamp(60, 300);
         let due = completed + delay + jitter;
         for kind in [Kind::Source, Kind::Status] {
-            state.complete(&job, kind, completed + 1, 5, None, None);
+            state.complete(
+                &job,
+                kind,
+                completed + 1,
+                RetrySchedule::Poll(5),
+                None,
+                None,
+            );
         }
         assert_eq!(state.admit(&credit, &job, due - 1, &active), Some(false));
         assert_eq!(state.admit(&credit, &job, due, &active), Some(true));
         assert_eq!(state.records[&credit].streak, failure as u32);
     }
-    state.complete(&job, Kind::Credit, 10000, 5, None, None);
+    state.complete(
+        &job,
+        Kind::Credit,
+        10000,
+        RetrySchedule::Poll(5),
+        None,
+        None,
+    );
     assert_eq!(state.records[&credit].streak, 0);
     assert_eq!(state.records[&credit].due, 10060 + jitter);
 }

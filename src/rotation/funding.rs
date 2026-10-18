@@ -14,11 +14,29 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) mod scheduler;
 
+/// An acquisition may supply its existing owner schedule instead of asking the
+/// operation scheduler to impose another network backoff.
+pub struct CreditObservation {
+    pub result: Result<()>,
+    pub next_due: Option<tokio::time::Instant>,
+}
+
 pub trait FundingObservations: Clone + Send + Sync + 'static {
     type QuoteRequest: Clone + Send + Sync + 'static;
     fn quote(&self, request: Self::QuoteRequest) -> impl Future<Output = Result<Quote>> + Send;
     fn status(&self, quote: Quote) -> impl Future<Output = Result<SwapStatus>> + Send;
     fn credit(&self, job: FundingJob) -> impl Future<Output = Result<()>> + Send;
+    fn credit_observation(
+        &self,
+        job: FundingJob,
+    ) -> impl Future<Output = CreditObservation> + Send {
+        async move {
+            CreditObservation {
+                result: self.credit(job).await,
+                next_due: None,
+            }
+        }
+    }
 }
 
 pub trait FundingBackend: Send + 'static {
@@ -81,11 +99,17 @@ pub trait FundingBackend: Send + 'static {
 // Every authority decision reads it again after awaited work.
 struct TickClock {
     epoch: u64,
-    started: std::time::Instant,
+    started: tokio::time::Instant,
 }
 impl TickClock {
     fn now(&self) -> u64 {
         self.epoch.saturating_add(self.started.elapsed().as_secs())
+    }
+    fn ceil_epoch(&self, due: tokio::time::Instant) -> u64 {
+        let elapsed = due.saturating_duration_since(self.started);
+        self.epoch
+            .saturating_add(elapsed.as_secs())
+            .saturating_add(u64::from(elapsed.subsec_nanos() != 0))
     }
 }
 
@@ -556,30 +580,33 @@ impl FundingBackend for Backend {
             "persisted funding binding mismatch"
         );
         self.treasury
-            .prepare(super::transaction::PrepareRequest {
-                managed_funding: Some(super::transaction::ManagedFundingAuthority {
-                    job_id: job.id.clone(),
-                    auto_fund: self.funding.auto_fund,
-                    max_attempts,
-                }),
+            .prepare_funding(
+                super::transaction::PrepareRequest {
+                    managed_funding: Some(super::transaction::ManagedFundingAuthority {
+                        job_id: job.id.clone(),
+                        auto_fund: self.funding.auto_fund,
+                        max_attempts,
+                    }),
 
-                operation_id: job.operation_id.clone(),
-                pool_id: Some(job.pool_id.clone()),
+                    operation_id: job.operation_id.clone(),
+                    pool_id: Some(job.pool_id.clone()),
 
-                deadline: checked.deadline,
-                recipient: checked.deposit.context("missing deposit")?,
-                amount_zatoshis: checked.input,
-                max_fee_zatoshis: limits
-                    .max_input
-                    .checked_sub(checked.input)
-                    .context("input cap exceeded")?
-                    .min(self.max_network_fee),
-                max_input_zatoshis: checked
-                    .input
-                    .checked_add(self.max_network_fee)
-                    .context("funding cost overflow")?
-                    .min(limits.max_input),
-            })
+                    deadline: checked.deadline,
+                    recipient: checked.deposit.context("missing deposit")?,
+                    amount_zatoshis: checked.input,
+                    max_fee_zatoshis: limits
+                        .max_input
+                        .checked_sub(checked.input)
+                        .context("input cap exceeded")?
+                        .min(self.max_network_fee),
+                    max_input_zatoshis: checked
+                        .input
+                        .checked_add(self.max_network_fee)
+                        .context("funding cost overflow")?
+                        .min(limits.max_input),
+                },
+                self.base.clone(),
+            )
             .await?;
         Ok(())
     }
@@ -707,18 +734,28 @@ impl FundingObservations for Observations {
         self.near.status(&quote).await
     }
     async fn credit(&self, job: FundingJob) -> Result<()> {
-        let balance = self.base.current_balance(&job.recipient).await?;
-        self.store
-            .call(move |s| {
-                s.record_funding_balance(
-                    &job.id,
-                    &job.operation_id,
-                    &job.wallet_id,
-                    &job.recipient,
-                    balance,
-                )
-            })
-            .await
+        self.credit_observation(job).await.result
+    }
+    async fn credit_observation(&self, job: FundingJob) -> CreditObservation {
+        // Shared acquisition already publishes exactly once. Republishing its
+        // cached scalar could undo a subsequent authorization's journal debit.
+        let observation = self
+            .store
+            .observe_balance_scheduled(job.pool_id, job.wallet_id, self.base.clone())
+            .await;
+        CreditObservation {
+            next_due: observation.next_due,
+            result: observation
+                .result
+                .map_err(|error| {
+                    if error.is::<super::store::observation::BalanceStoreUnavailable>() {
+                        error.context(super::base::VerificationStage("funding credit persistence"))
+                    } else {
+                        error
+                    }
+                })
+                .map(|_| ()),
+        }
     }
 }
 

@@ -100,6 +100,25 @@ fn quote(job: &FundingJob) -> Quote {
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn acquisition_due_rounds_outward_from_the_root_clock_anchor() {
+    let clock = TickClock {
+        epoch: 1000,
+        started: tokio::time::Instant::now(),
+    };
+    tokio::time::advance(std::time::Duration::from_millis(550)).await;
+    let due = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+    assert_eq!(clock.ceil_epoch(due), 1061);
+    assert_eq!(
+        clock.ceil_epoch(clock.started + std::time::Duration::from_secs(60)),
+        1060
+    );
+    assert_eq!(clock.ceil_epoch(clock.started), 1000);
+    tokio::time::advance(std::time::Duration::from_millis(59_450)).await;
+    assert_eq!(clock.now(), 1060);
+    assert!(clock.now() < clock.ceil_epoch(due));
+}
+
 #[test]
 fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
     use crate::rotation::error::FundingCondition;
@@ -139,11 +158,11 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
         &job,
         Kind::Source,
         100,
-        10,
+        RetrySchedule::Poll(10),
         Some("shortage".into()),
         Some(FundingCondition::InsufficientFunds),
     );
-    state.complete(&job, Kind::Credit, 101, 10, None, None);
+    state.complete(&job, Kind::Credit, 101, RetrySchedule::Poll(10), None, None);
     assert_eq!(
         state.condition(&job.operation_id, [true; 4]),
         Some(FundingCondition::InsufficientFunds)
@@ -152,7 +171,7 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
     applicable[Kind::Source as usize] = false;
     assert_eq!(state.condition(&job.operation_id, applicable), None);
     assert_eq!(state.condition("another-operation", [true; 4]), None);
-    state.complete(&job, Kind::Source, 200, 10, None, None);
+    state.complete(&job, Kind::Source, 200, RetrySchedule::Poll(10), None, None);
     assert_eq!(state.condition(&job.operation_id, [true; 4]), None);
 }
 
@@ -189,7 +208,14 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
             if n == 0 {
                 active.insert(key);
             } else {
-                state.complete(&job, kind, 100, 10, Some("fixture outage".into()), None);
+                state.complete(
+                    &job,
+                    kind,
+                    100,
+                    RetrySchedule::Poll(10),
+                    Some("fixture outage".into()),
+                    None,
+                );
             }
             jobs.push(job);
         }
@@ -221,7 +247,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
         );
         assert_eq!(state.records.len(), RECORDS);
         // Completion still finds the active record after eviction pressure.
-        state.complete(&jobs[0], kind, due, 10, None, None);
+        state.complete(&jobs[0], kind, due, RetrySchedule::Poll(10), None, None);
         active.remove(&protected);
         assert_eq!(state.admit(&protected, &jobs[0], due, &active), Some(false));
         // A new operation on the same job has independent retry metadata.
@@ -310,7 +336,10 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
                         job: old.clone(),
                         kind,
                     },
-                    1000
+                    &TickClock {
+                        epoch: 1000,
+                        started: tokio::time::Instant::now(),
+                    }
                 )
                 .await
                 .unwrap()
@@ -670,7 +699,7 @@ async fn completion_storage_failure_is_fatal() {
                 &job,
                 Kind::Source,
                 900,
-                1,
+                RetrySchedule::Poll(1),
                 Some("funding_quote_failed; fixture outage".into()),
                 None,
             );
@@ -697,7 +726,10 @@ async fn completion_storage_failure_is_fatal() {
                             Observation::None
                         }),
                     },
-                    1000,
+                    &TickClock {
+                        epoch: 1000,
+                        started: tokio::time::Instant::now(),
+                    },
                 )
                 .await;
             assert!(result.err().unwrap().is::<rusqlite::Error>());

@@ -28,6 +28,7 @@ struct Bridge {
     deposits: Arc<Vec<String>>,
     quotes: Arc<Mutex<BTreeMap<String, Value>>>,
     quote_count: Arc<AtomicUsize>,
+    base_calls: Arc<AtomicUsize>,
     quotes_entered: Arc<tokio::sync::Semaphore>,
     release_quotes: CancellationToken,
     signed: Arc<Mutex<Vec<Value>>>,
@@ -81,6 +82,7 @@ async fn credited(store: &StoreHandle, recipient: String) -> bool {
         .unwrap()
 }
 async fn base(State(f): State<Bridge>, Json(v): Json<Value>) -> Json<Value> {
+    f.base_calls.fetch_add(1, Ordering::SeqCst);
     let confirmed = f
         .store
         .call(|s| {
@@ -186,7 +188,7 @@ async fn tick(worker: &FundingWorker<Backend>) {
         .unwrap();
 }
 async fn complete(worker: &FundingWorker<Backend>, net: &MockNet, count: usize) {
-    for _ in 0..20 {
+    for _ in 0..80 {
         tick(worker).await;
         let done = worker
             .store
@@ -291,6 +293,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         deposits: Arc::new(deposits),
         quotes: Default::default(),
         quote_count: Default::default(),
+        base_calls: Default::default(),
         quotes_entered: Arc::new(tokio::sync::Semaphore::new(0)),
         release_quotes: CancellationToken::new(),
         signed: Default::default(),
@@ -563,8 +566,14 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
     // Actual preparation owns SDK synchronization. Queue it before the actor's
     // maintenance tick so an incidental background scan cannot satisfy the test.
     let prepare_handle = handle.clone();
-    let prepare =
-        tokio::spawn(async move { prepare_handle.prepare(request(&job, deadline)).await });
+    let base = backend.base.clone();
+    // An unavailable advisory destination endpoint cannot prohibit a valid
+    // SDK-funded preparation. Actual Store publication failures are different.
+    let prepare = tokio::spawn(async move {
+        prepare_handle
+            .prepare_funding(request(&job, deadline), base)
+            .await
+    });
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while commands.test_is_empty() {
             assert!(!prepare.is_finished());
@@ -625,6 +634,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
         deposits: Arc::new(vec![DEPOSIT.into()]),
         quotes: Default::default(),
         quote_count: Default::default(),
+        base_calls: Default::default(),
         quotes_entered: Arc::new(tokio::sync::Semaphore::new(0)),
         release_quotes: CancellationToken::new(),
         signed: Default::default(),
@@ -725,6 +735,11 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
             .await
             .unwrap();
         assert_eq!(sends.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            f.base_calls.load(Ordering::SeqCst),
+            0,
+            "repeated SDK shortages must not probe the destination"
+        );
     }
     let deposit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
     {
@@ -758,8 +773,14 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
         })
         .await
         .unwrap();
+    assert_eq!(
+        f.base_calls.load(Ordering::SeqCst),
+        0,
+        "invalid fee proposals must not probe the destination"
+    );
     worker.backend.lock().await.max_network_fee = 30_000;
     worker.tick(epoch + 360).await.unwrap();
+    assert_eq!(f.base_calls.load(Ordering::SeqCst), 1);
     let job = original.clone();
     store
         .call(move |s| {

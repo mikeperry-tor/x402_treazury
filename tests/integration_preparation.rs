@@ -1042,7 +1042,7 @@ spec="missing.json"
             .kill_on_drop(true)
             .env_clear()
             .env("INDEXER", &endpoint)
-            .args(["wallet", "sync", "--config"])
+            .args(["wallet", "sync", "--json", "--config"])
             .arg(&config)
             .output(),
     )
@@ -1050,10 +1050,39 @@ spec="missing.json"
     .unwrap()
     .unwrap();
     assert!(!output.status.success());
-    assert!(
-        output.stdout.is_empty(),
-        "failed sync must not publish successful state"
+    let reported: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        reported["observations"]["zec"],
+        serde_json::json!({
+            "status":"failed", "attempted":1, "completed":0, "failed":1,
+            "error":"indexer_tip_failed",
+        })
     );
+    assert_eq!(
+        reported["observations"]["usdc"],
+        serde_json::json!({
+            "status":"inapplicable", "attempted":0, "completed":0, "failed":0,
+        })
+    );
+    let state = &reported["state"];
+    assert_eq!(state["treasury_id"], id);
+    assert_eq!(state["sync_complete"], false);
+    assert!(state["sync"]["checked_at"].is_null());
+    assert!(
+        state["sync"]["last_error"]
+            .as_str()
+            .unwrap()
+            .contains("indexer_request_failed")
+    );
+    assert!(
+        reported["receive_addresses"]
+            .as_array()
+            .is_some_and(|addresses| !addresses.is_empty())
+    );
+    for field in ["pools", "funding_jobs", "treasury_operations"] {
+        assert!(state[field].as_array().unwrap().is_empty(), "{field}");
+    }
+    assert_eq!(state["outgoing_pending"], false);
     assert!(!output.stderr.is_empty());
     assert!(calls.load(std::sync::atomic::Ordering::SeqCst) > 0);
     let reopened = x402_treazury::treasury::Treasury::open(
@@ -1063,7 +1092,10 @@ spec="missing.json"
     )
     .await
     .unwrap();
-    assert!(reopened.status().await.unwrap().pools.is_empty());
+    let saved = reopened.status().await.unwrap();
+    assert!(saved.pools.is_empty());
+    assert!(saved.funding_jobs.is_empty() && saved.treasury_operations.is_empty());
+    assert!(!saved.sync_complete && !saved.outgoing_pending);
     reopened.close().await.unwrap();
     server.abort();
 }

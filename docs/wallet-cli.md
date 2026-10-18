@@ -27,13 +27,38 @@ Human status also shows the primary shielded ZEC receive address from the encryp
 snapshot when the wallet key is available. If the key or snapshot cannot be read,
 status still shows saved metadata and explicitly marks the address unavailable.
 Use `wallet init --json`, `wallet sync --json`, or `wallet status --json` for
-machine-readable output. Init and sync return `{state, receive_addresses}`;
-status returns the saved state object. `wallet addresses` continues to return JSON.
+machine-readable output. Init returns `{state, receive_addresses}`; sync retains those fields and adds
+`observations.zec` and `observations.usdc`, each with `status` (`completed`,
+`failed`, or `inapplicable`), wallet/pass counts `attempted`, `completed`, `failed`,
+and an optional content-free `error` category. Setup failure attempts no remote
+observation. Sync prints independent asset results even on partial failure and
+returns a nonzero exit code if either applicable scope fails. Status returns the saved state object. `wallet addresses` continues to return JSON.
 Progress logs remain on stderr in both modes.
+
+Stop `serve` before running `wallet sync`: it acquires the same exclusive treasury
+ownership. Explicit sync performs one ZEC scan and one pass over existing eligible
+configured managed-USDC wallets plus outstanding accepted initial-funding
+recipients, including removed profiles. It neither allocates wallets nor starts
+funding or a background watcher. ZEC and Base run independently: a failed endpoint
+or missing asset setting does not suppress the other pass. Only treasury and
+relevant managed-Base settings are resolved; no provider catalogs, listener tokens,
+static signing keys or NEAR credentials are required. Treasury-only deployments
+remain valid without `[funding]` or Base settings. Existing scoped USDC recipients
+require the Base settings in `[funding]` even when their profile was removed.
+Observation scope uses managed profile modes and valid generated bindings without
+validating spending limits or unused templates. Broken unrelated bindings do not
+hide existing configured wallets or accepted funding recipients; serving retains
+its strict configuration validation.
+An authenticated store with an SDK-incompatible Zcash snapshot still permits the
+Base pass: ZEC reports `zec_snapshot_unavailable` and `receive_addresses` is empty
+(the human summary marks the address unavailable). Store authentication, schema,
+identity and exclusive-ownership failures remain command setup errors and perform
+neither asset's remote observation.
+
 
 While `serve` is running, use `wallet status --config FILE` with the same deployment
 file to see the shielded receive address, saved balances and sync progress. This
-read-only command does not acquire treasury ownership. `wallet addresses` also
+read-only command does not acquire treasury ownership. Status remains a cached read with no network traffic; idle incoming funds may be absent until startup, explicit sync, or another authorized discovery trigger. `wallet addresses` also
 reads the encrypted snapshot without exclusive ownership and returns all saved
 receive addresses as JSON. Neither command derives an address or changes sync
 readiness. `wallet init` refuses an existing wallet; `wallet address` creates a new
@@ -328,14 +353,15 @@ a durable refresh marker and allocates a fresh operation/refund identity.
 Historical unclassified recovery records still count. Signed operations never refresh. Insufficient shielded
 spendable funds leave the job unprepared; another attempt still needs current authority.
 
-Fresh allocations and unsigned funding quotes do not poll Base for USDC credit.
-The first credit check runs when durable source work has been accepted, including
-uncertain preparation and signed or previously submitted transactions restored
-after restart. Further Base credit checks wait at least 60 seconds after the
-previous read completes, plus the existing per-job jitter (up to five seconds with
-the default polling setting). Source reconciliation and NEAR status checks keep
-their independent cadence. This observation interval is not an expected settlement
-time or a deadline, and it never stops observation of accepted financial work.
+Fresh allocations and unsigned funding quotes do not start Base credit polling.
+Actual preparation reads its exact destination once after the SDK provides a valid
+spendable proposal. Accepted preparation and signed or previously submitted work
+retain their own credit lane across restart, using the recipient acquisition's
+existing due time without another credit backoff or jitter. Recurring Base reads
+start at least 60 seconds after the preceding acquisition completes. Source
+reconciliation and NEAR status checks keep their independent configured cadence.
+This observation interval is not a settlement deadline and never stops observation
+of accepted financial work.
 
 `swap_timeout_seconds` is a health-warning threshold, default 1,800 seconds from
 the first durable broadcast intent, not an abort deadline. When exceeded,
@@ -553,8 +579,10 @@ Credit-persistence messages distinguish missing credit and local state failures
 from RPC access failures.
 An SDK proposal rejected for insufficient funds defers initial funding, while
 existing Base wallets remain usable. Background funding observations retain independent
-failure backoff up to five minutes, plus per-job jitter. Successful observations
-reset only their own error streak: source and provider-status checks use the
+failure backoff up to five minutes, with per-job jitter for source and provider
+checks. Base credit uses the shared recipient acquisition schedule; cached errors
+do not count as new recurring observations. Successful observations reset only
+their own error streak: source and provider-status checks use the
 configured polling cadence (five seconds by default), while Base initial-credit
 checks retain their one-minute floor. Failed checks retain pending ownership. Saved estimates never grant payment
 authority or prohibit an otherwise authorized signing attempt.

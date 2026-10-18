@@ -4,7 +4,7 @@ use crate::deployment::MetaConfig;
 use alloy_primitives::U256;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const AUTO_PREFIX: &str = "auto_v1_";
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -61,6 +61,36 @@ impl Scope {
         }
     }
 }
+
+/// Project observation scope without validating spending or serving settings.
+/// Only existing Store pools are read by the caller; this never grants allocation
+/// authority. Broken unrelated bindings do not hide independent managed pools.
+pub(crate) fn managed_names(config: &MetaConfig) -> Vec<String> {
+    let mut names = config
+        .wallets
+        .iter()
+        .filter_map(|(name, wallet)| wallet.managed().then_some(name.clone()))
+        .collect::<BTreeSet<_>>();
+    if let Some(assignment) = &config.wallet_assignment
+        && config
+            .wallet_templates
+            .get(&assignment.template)
+            .is_some_and(WalletConfig::managed)
+    {
+        for (server_name, server) in &config.servers {
+            for source_name in &server.sources {
+                let Some(source) = config.sources.get(source_name) else {
+                    continue;
+                };
+                if source.wallet.is_none() && server.wallet.is_none() {
+                    names.insert(assignment.scope.identity(server_name, source_name));
+                }
+            }
+        }
+    }
+    names.into_iter().collect()
+}
+
 pub fn resolve(config: &MetaConfig) -> Result<Resolution> {
     for name in config.wallets.keys() {
         ensure!(

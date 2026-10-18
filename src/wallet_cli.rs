@@ -4,6 +4,8 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 mod output;
+#[cfg(feature = "zcash")]
+mod sync;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -67,7 +69,7 @@ enum Action {
         #[arg(long)]
         funding_amount_usdc: Option<String>,
     },
-    /// Sync the configured treasury; never starts automatic funding.
+    /// Refresh the treasury and configured managed USDC wallets; never starts funding.
     Sync {
         /// Print machine-readable JSON.
         #[arg(long)]
@@ -110,7 +112,11 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
             "wallet pool was removed; configure managed wallet reserves and explicit max_api_payment_usdc in the deployment, then use wallet bootstrap --config FILE"
         );
     }
-    let settings = load_wallet_settings(args.config.as_ref(), args.network_config.as_ref())?;
+    let settings = load_wallet_settings(
+        args.config.as_ref(),
+        args.network_config.as_ref(),
+        matches!(&args.command, Action::Sync { .. }),
+    )?;
     if let Some(command) = configured_command(&args.command, args.config.as_ref())? {
         return Ok(command);
     }
@@ -186,6 +192,7 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
 fn load_wallet_settings(
     config_path: Option<&PathBuf>,
     network_path: Option<&PathBuf>,
+    sync_only: bool,
 ) -> Result<Option<crate::rotation::config::TreasuryConfig>> {
     use anyhow::{Context, ensure};
     let settings = if let Some(path) = config_path {
@@ -194,7 +201,11 @@ fn load_wallet_settings(
         ensure!(config.version == 1, "unsupported deployment version");
         crate::network::install(config.network)?;
         let mut treasury = config.treasury.context("missing [treasury]")?;
-        treasury.validate()?;
+        if sync_only {
+            treasury.validate_shared()?;
+        } else {
+            treasury.validate()?;
+        }
         treasury.resolve(path);
         Some(treasury)
     } else {
@@ -414,6 +425,14 @@ async fn run_args(
     };
     let command = resolve_args(args)?;
     #[cfg(feature = "zcash")]
+    if let Command::Sync {
+        meta_config,
+        qualification_parent_stdin,
+    } = command
+    {
+        return sync::run(meta_config, network, qualification_parent_stdin, json).await;
+    }
+    #[cfg(feature = "zcash")]
     if let Command::Bootstrap { meta_config } = command {
         let summary = crate::deployment::bootstrap_wallets(&meta_config).await?;
         if json {
@@ -484,7 +503,6 @@ async fn run_args(
     #[cfg(feature = "zcash")]
     {
         let initializing = matches!(&command, Command::Init { .. });
-        let syncing = matches!(&command, Command::Sync { .. });
         let treasury = execute_wallet_command(command, network).await?;
         if initializing && !json {
             let addresses = treasury.addresses().await?;
@@ -494,19 +512,6 @@ async fn run_args(
             treasury.close().await?;
             println!(
                 "Zcash wallet initialized.\n\nPrimary ZEC address:\n{address}\n\nSend ZEC to this address to fund your wallet."
-            );
-            return Ok(());
-        }
-        if syncing && !json {
-            let status = treasury.status().await?;
-            let addresses = treasury.addresses().await?;
-            let address = addresses[0]["encoded_address"]
-                .as_str()
-                .context("wallet has no primary receive address")?;
-            let summary = output::status(&status);
-            treasury.close().await?;
-            println!(
-                "Wallet synchronization completed.\n\n{summary}\nPrimary ZEC address:\n{address}"
             );
             return Ok(());
         }
@@ -579,10 +584,7 @@ async fn execute_wallet_command(
             rebroadcast,
         } => reconcile(meta_config, operation_id, rebroadcast, network).await?,
 
-        Command::Sync {
-            meta_config,
-            qualification_parent_stdin,
-        } => sync(meta_config, network, qualification_parent_stdin).await?,
+        Command::Sync { .. } => unreachable!("sync owns its per-asset output"),
 
         Command::Init {
             state_dir,
@@ -778,62 +780,6 @@ async fn reconcile(
         }
         treasury.close().await?;
         return Err(error);
-    }
-    Ok(treasury)
-}
-
-#[cfg(feature = "zcash")]
-async fn sync(
-    meta_config: PathBuf,
-    network: crate::rotation::store::TreasuryNetwork,
-    supervised: bool,
-) -> Result<crate::treasury::Treasury> {
-    let mut parent = crate::supervision::Parent::from_stdin(supervised)?;
-    tracing::info!("wallet sync: loading configuration and opening encrypted wallet");
-    let (mut treasury, _) = configured(&meta_config, network).await?;
-    tracing::info!("wallet sync: wallet opened; starting synchronization");
-    let stop = tokio_util::sync::CancellationToken::new();
-    let result = {
-        let work = treasury.sync_once(&stop);
-        tokio::pin!(work);
-        tokio::select! {
-            biased;
-            closed = parent.closed() => {
-                eprintln!("treasury sync supervisor stopped: deliberately cancelling and checkpointing for wallet safety");
-                stop.cancel();
-                let drained = crate::server::drain_or_force("wallet_sync", work).await;
-                if let Err(error) = drained
-                    && error.is::<crate::server::ForcedShutdown>() {
-                    return Err(error);
-                }
-                closed.and_then(|()| anyhow::bail!("treasury sync cancelled by supervisor"))
-            }
-            result = &mut work => result,
-            signal = shutdown_signal() => {
-                eprintln!("treasury sync interrupted: deliberately cancelling and checkpointing for wallet safety");
-                stop.cancel();
-                let result = crate::server::drain_or_force("wallet_command", work).await;
-                signal?;
-                result
-            }
-        }
-    };
-    if let Err(error) = result {
-        if error.is::<crate::server::ForcedShutdown>() {
-            return Err(error);
-        }
-        crate::treasury::diagnostics::warn_sync_failure(&error);
-        treasury.close().await?;
-        return Err(error);
-    }
-    if let Some(sync) = treasury.status().await?.sync
-        && let (Some(height), Some(tip)) = (sync.height, sync.observed_tip_height)
-        && tip > height
-    {
-        eprintln!(
-            "treasury sync accepted with bounded tip lag: scanned={height}, observed_tip={tip}, lag={} blocks; background sync continues while serving",
-            tip - height
-        );
     }
     Ok(treasury)
 }

@@ -16,6 +16,15 @@ use zingo_netutils::Indexer;
 
 impl TransactionPreparer for Treasury {
     async fn prepare(&mut self, request: PrepareRequest) -> Result<PreparedTransaction> {
+        self.prepare_with_observation(request, None).await
+    }
+}
+impl Treasury {
+    pub(crate) async fn prepare_with_observation(
+        &mut self,
+        request: PrepareRequest,
+        base: Option<crate::rotation::base::BaseRpc>,
+    ) -> Result<PreparedTransaction> {
         ensure!(
             self.healthy,
             "treasury requires reopen after failed preparation"
@@ -43,7 +52,8 @@ impl TransactionPreparer for Treasury {
         let deposit = request.recipient.clone();
         let binding_pool = request.pool_id.clone();
         let deadline = request.deadline;
-        let (treasury_id, _, _) = self
+        let observe_destination = base.is_some();
+        let (treasury_id, observation_scope) = self
             .store
             .call(move |s| {
                 s.require_preparation_binding(
@@ -57,9 +67,26 @@ impl TransactionPreparer for Treasury {
                 s.require_preparation_authority(&id, authority.as_ref())
                     .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
                 s.require_unstarted_preparation(&id)?;
-                s.funding_preparation_context()
+                let (treasury_id, _, _) = s.funding_preparation_context()?;
+                let scope = if observe_destination {
+                    let authority = authority
+                        .as_ref()
+                        .context("destination observation requires managed funding")?;
+                    let job = s
+                        .funding_job(&authority.job_id)?
+                        .context("funding job missing")?;
+                    ensure!(
+                        job.operation_id == id && Some(&job.pool_id) == binding_pool.as_ref(),
+                        "funding observation binding changed"
+                    );
+                    Some((job.pool_id, job.wallet_id))
+                } else {
+                    None
+                };
+                Ok((treasury_id, scope))
             })
             .await?;
+        let observation = base.zip(observation_scope);
         let identity = crate::network::IsolationId::treasury(&treasury_id);
         // Read-only checks precede any reservation, library mutation or poisoning.
         let preflight: Result<_> = async {
@@ -163,6 +190,21 @@ impl TransactionPreparer for Treasury {
                 return Err(error.context(crate::rotation::transaction::PreparationDeferred));
             }
         };
+        // Spendability and actual fees are known before destination discovery.
+        // This advisory one-pass read cannot gate valid preparation on RPC health;
+        // its positive result consumes the claim checked again at acceptance.
+        if let Some((base, (pool, wallet))) = observation
+            && let Err(error) = self.store.observe_balance(pool, wallet, base).await
+        {
+            if error.is::<crate::rotation::store::observation::BalanceStoreUnavailable>() {
+                client.clear_proposal().await;
+                return Err(error.context(crate::rotation::transaction::PreparationDeferred));
+            }
+            tracing::warn!(
+                category = "funding_destination_observation_unavailable",
+                "Initial funding destination observation unavailable; continuing with existing claim information"
+            );
+        }
         let id = request.operation_id.clone();
         let pool = request.pool_id.clone();
         let deadline = request.deadline;

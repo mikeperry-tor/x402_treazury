@@ -258,6 +258,7 @@ pub(crate) fn record_readiness(
 impl Store {
     /// Persist a current advisory read against the captured initial operation.
     /// A positive credit consumes that wallet's unique claim, including partial credit.
+    #[cfg(test)]
     pub(crate) fn record_funding_balance(
         &mut self,
         job: &str,

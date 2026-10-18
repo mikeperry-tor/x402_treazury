@@ -3,8 +3,8 @@
 //! queued work and cancels interruptible sync/submission according to their contracts.
 use super::Treasury;
 use crate::rotation::transaction::{
-    PrepareRequest, PreparedTransaction, SubmissionOutcome, TransactionPreparer,
-    TransactionPresence, TransactionSubmission,
+    PrepareRequest, PreparedTransaction, SubmissionOutcome, TransactionPresence,
+    TransactionSubmission,
 };
 use anyhow::{Context, Result};
 use tokio::sync::{mpsc, oneshot};
@@ -21,7 +21,11 @@ enum Command {
     ),
     Refund(String, oneshot::Sender<Result<String>>),
     Sync(oneshot::Sender<Result<()>>),
-    Prepare(PrepareRequest, oneshot::Sender<Result<PreparedTransaction>>),
+    Prepare(
+        Box<PrepareRequest>,
+        Option<crate::rotation::base::BaseRpc>,
+        oneshot::Sender<Result<PreparedTransaction>>,
+    ),
     Submit(String, bool, oneshot::Sender<Result<SubmissionOutcome>>),
     Reconcile(String, oneshot::Sender<Result<TransactionPresence>>),
 }
@@ -63,7 +67,16 @@ impl TreasuryHandle {
         self.call(Command::Sync).await
     }
     pub async fn prepare(&self, request: PrepareRequest) -> Result<PreparedTransaction> {
-        self.call(|reply| Command::Prepare(request, reply)).await
+        self.call(|reply| Command::Prepare(Box::new(request), None, reply))
+            .await
+    }
+    pub(crate) async fn prepare_funding(
+        &self,
+        request: PrepareRequest,
+        base: crate::rotation::base::BaseRpc,
+    ) -> Result<PreparedTransaction> {
+        self.call(|reply| Command::Prepare(Box::new(request), Some(base), reply))
+            .await
     }
     pub async fn submit(&self, id: String, retry: bool) -> Result<SubmissionOutcome> {
         self.call(|reply| Command::Submit(id, retry, reply)).await
@@ -183,9 +196,9 @@ impl Treasury {
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(stop).await); }
-                        Command::Prepare(request, reply) => {
+                        Command::Prepare(request, base, reply) => {
                             let result = match self.sync_for_command(stop).await {
-                                Ok(()) if !stop.is_cancelled() => self.prepare(request).await,
+                                Ok(()) if !stop.is_cancelled() => self.prepare_with_observation(*request, base).await,
                                 Ok(()) => Err(anyhow::anyhow!("treasury stopping")),
                                 Err(error) if self.healthy => Err(error.context(crate::rotation::transaction::PreparationDeferred)),
                                 Err(error) => Err(error),
@@ -267,9 +280,9 @@ impl TreasuryCommands {
                 }));
                 ObservedCommand::RecoverFunding(id, limit, allow_new_attempt)
             }
-            Command::Prepare(request, reply) => {
+            Command::Prepare(request, _base, reply) => {
                 let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
-                ObservedCommand::Prepare(request)
+                ObservedCommand::Prepare(*request)
             }
             Command::Submit(id, retry, reply) => {
                 let _ = reply.send(Err(anyhow::anyhow!("fixture command observed")));
@@ -518,7 +531,7 @@ mod tests {
         let (send, reply) = oneshot::channel();
         handle
             .sender
-            .send(Command::Prepare(request, send))
+            .send(Command::Prepare(Box::new(request), None, send))
             .await
             .unwrap();
         let task = tokio::spawn(treasury.run_commands(commands, NoSubmission, stop.clone()));
