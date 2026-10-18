@@ -179,28 +179,77 @@ idle balances/status may omit incoming funds until a discovery trigger.
 
 ## Implementation sequence
 
-1. Establish a source-matched baseline and independent design review of complete
-   estimate, maintenance, funding-source and treasury command consumers. Read the
-   owning guides; compare CogC/CycC under the
-   [complexity review discipline](../../tests/COMPLEXITY.md#review-discipline).
-2. Replace blanket USDC sweeps with requested refresh ownership/cooldowns. Delete
-   unnecessary regular-sweep cursors, pages and due state; retain explicit one-pass
-   inspection where its API contract requires it. Preserve post-failure races and
-   truthful error status before relying on removal of the old sweep's retries.
-3. Make treasury discovery demand-driven and pace recurring source/provider
-   observations at a minute or longer. Preserve immediate valid phase progress,
-   SDK spendability and exact accepted-work recovery; do not create duplicate sync
-   loops, monetary tracking or readiness frameworks.
-4. Wire startup, exact-destination pre-funding discovery and explicit deployment
-   sync through those owners. Verify fresh unsolicited USDC consumes only an unused
-   claim and fresh unsolicited ZEC/transparent capital is available through the SDK.
-5. Update permanent documentation with each implemented behavior, perform combined
-   independent financial/concurrency/network review and focused validation, then
-   remove this completed plan after its documentation handoff is verified.
+Before implementation, capture the exact starting SHA and source-matched
+CogC/CycC baseline, and obtain an independent design review of complete estimate,
+maintenance, funding-source and treasury command consumers. Read the owning guides
+and follow the [complexity review discipline](../../tests/COMPLEXITY.md#review-discipline).
+This preparation does not require an artificial code or metrics commit; generated
+evidence belongs under ignored `target/`.
 
-Use independently reviewed commits and fixups under AGENTS.md. Keep sources and
-executables frozen during validation. This plan authorizes no live-funded tests,
-private wallet inspection, consensus invocation or state conversion.
+### Commit boundaries
+
+Implement these commits in order, with the wider review gates below between them.
+Each implementation commit includes its focused tests and affected permanent
+documentation, so the tree describes its actual delivered behavior at that point.
+UP04 reconciles the accumulated handoff; it is not permission to defer all policy
+documentation until the end.
+
+| Commit | Coherent scope | Required evidence before proceeding |
+| --- | --- | --- |
+| **UP01 — Requested USDC refresh and finite startup discovery** | Replace blanket background sweeps with requested refresh ownership and minute cooldowns. Preserve failed-request retries and notifications arriving during reads. Include the finite startup Base pass in this same change so deleting the sweep does not temporarily remove startup discovery. Delete unnecessary regular-sweep cursors/pages/due state; preserve existing explicit one-pass inspection contracts. | Idle funded siblings produce no recurring RPC; startup performs a finite pass behind bound listeners; success at zero ends the captured refresh; newer notifications and failed reads retain follow-up work; signing/decrement semantics are unchanged. |
+| **UP02 — Targeted funding and explicit sync discovery** | Reuse UP01's observation path for the exact initial-funding destination and the managed-USDC scope of `wallet sync`. Preserve treasury-only CLI configuration, exclusive ownership and honest per-asset output. Do not introduce a whole-inventory barrier before one wallet's funding. | Unsolicited positive destination credit consumes only the unused claim and prevents a new deposit; claim changes are rechecked at acceptance; empty ZEC waiting does not repeatedly probe Base; preparation/credit handoff honors the recipient cooldown; explicit sync needs no provider/NEAR credentials. Then complete **G1** before UP03. |
+| **UP03 — Demand-driven treasury and accepted-work cadence** | Replace unconditional ZEC scanning with startup/explicit-sync/funding-demand/accepted-work triggers. Pace recurring source and provider observations at a minute or longer, integrate existing SDK reuse and shielding owners, and stop idle discovery. Include the notification paths that resume work; do not split the stop rule from its wakeup/recovery path. | Empty-treasury waiting detects later deposits; idle treasury has no recurring requests; accepted source/shielding/publication survives credit arrival, configuration removal and restart; unchanged-tip work cannot cause fast probes; actual validation and valid preparation/submission progress remain immediate when permitted. Then complete **G2** before UP04. |
+| **UP04 — Accumulated acceptance and permanent documentation handoff** | Reconcile all observation cases and their evidence; finish the permanent wallet-policy section, direct AGENTS.md links, CLI/config/startup explanations and both inventories. Keep this plan until **G3** verifies the handoff. Runtime defects found here are fixups to their introducing implementation commits, not unrelated code hidden in a documentation commit. | All acceptance cases have executed evidence or an explicitly resolved scope decision; maintained rules match implementation; permanent links resolve independently of this plan. Complete **G3** before deleting the plan. |
+| **UP05 — Remove the completed plan** | Remove this plan and its temporary index/AGENTS.md references after G3, preserving the permanent rule links and focused unfinished work, if any. Do not create an implemented-plan archive. | Independently review the exact cleanup SHA and any cleanup fixups, then confirm final links, rules and combined branch diff. Documentation-only cleanup needs no repeated runtime suite unless it exposes a new concern. |
+
+Independently review every exact UP commit SHA and every fixup SHA under AGENTS.md;
+the reviewer must not be the author. Address findings with
+`git commit --fixup=<introducing-SHA>` and retain unsquashed history through final
+integration review. Resolve material findings before building on the affected
+decision or crossing the next gate. Per-commit approval does not replace a wider
+gate. If a boundary cannot deliver its complete behavior safely, revise the plan
+with independent design review before implementing that affected split.
+
+### Wider review gates and fixup antipattern analysis
+
+At **each** gate, give the independent reviewer the user intent, exact starting
+baseline, current committed SHA, all preceding UP commits and fixups, relevant
+consumers and source-matched validation evidence. Review the combined implementation
+and complete call chains, not only the latest patch or whether a prior fix passed
+its regression test. Include relevant pre-existing code and historical fixes where
+they explain a recurring hazard.
+
+For every prior fixup, trace its cause into surrounding consumers and classify what
+was missed: an observation trigger/stop path, accepted owner, publication or retry
+race, scoped failure, CLI/configuration contract, documentation claim or test path.
+Look for the same assumption elsewhere. In particular examine lost pending work,
+new-event cooldown bypass, duplicate observers, stale phase labels hiding accepted
+work, a shared completion flag conflating source and destination lifetimes,
+mandatory inventory scans, advisory values becoming permission, and needless new
+tracking or freshness frameworks. State whether the pattern requires a broader
+audit, regression coverage or a simpler representation that removes responsibility.
+Resolve the finding and independently review its fixup; do not merely list prior
+fixups as already approved. Retain detailed evidence under ignored `target/`, with
+durable design decisions in the owning guides rather than a completed-plan archive.
+
+| Gate | Position and combined scope | Required review outcome |
+| --- | --- | --- |
+| **G1 — USDC observation and discovery** | After UP02 and its fixups, before UP03. Review UP01 + UP02 through selection/journaling, requested maintenance, startup, funding acceptance and explicit sync. | Verify estimate replacement/decrement, post-failure follow-up, coalescing/cooldown ownership, finite startup and first-positive claim consumption together. Check that removing the sweep did not remove a necessary retry or inspection consumer. Analyze every UP01/UP02 fixup for the same race/assumption elsewhere. |
+| **G2 — Cross-chain financial ownership and lifecycle** | After UP03 and its fixups, before UP04. Review the complete implementation so far, including all G1 fixes and source/provider/treasury/SDK/shielding/publication consumers. | Verify independent lifetimes, demand stop/resume, cancellation/restart/configuration removal, source input/byte ownership, error isolation, network identity and validation-versus-polling boundaries. Revisit prior USDC fixes for analogous ZEC or shared-owner hazards; do not treat G1 approval as an exclusion from this review. |
+| **G3 — Final implementation and documentation integration** | After UP04 and all required fixups, before UP05. Review the entire unsquashed branch against its baseline, not only the documentation handoff. | Reassess every prior fixup and any recurring pattern across assets/entry points, verify the full acceptance evidence and current rule links, and reconcile all old cadence/readiness claims. Compare source-matched CogC/CycC with the agreed baseline and review unchanged high-risk hotspots and concrete simplification opportunities. Approve plan removal only once the permanent rules are discoverable from AGENTS.md without it. |
+
+G1 and G2 also require CogC/CycC review for their substantive Rust changes and
+complete affected call chains; G3 reuses source-matched evidence only while its
+relevant sources remain unchanged. Scores and passing tests do not by themselves
+justify the current ownership/scheduling organization. A material post-gate fix
+reopens the affected gate concerns and is included at every subsequent gate;
+broaden or repeat validation only as that change or an unresolved concern requires.
+UP05's exact-SHA review and final branch confirmation complete integration after
+G3; a pre-cleanup approval alone is not the final branch review.
+
+Keep sources and executables frozen during validation. This plan authorizes no
+live-funded tests, private wallet inspection, consensus invocation or state
+conversion.
 
 ## Acceptance evidence
 
