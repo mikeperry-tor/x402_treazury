@@ -866,8 +866,13 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
     {
         return "qualification_funding_denied; funding permit missing, exhausted, changed, or unavailable; inspect qualification registry; existing active-wallet calls remain available";
     }
+    if error.downcast_ref::<super::error::FundingCondition>()
+        == Some(&super::error::FundingCondition::InsufficientFunds)
+    {
+        return "treasury_insufficient_spendable_funds; waiting for confirmed spendable ZEC; run wallet status --config FILE with the same deployment file as serve to see your shielded receive address, saved balances and sync progress; send ZEC to that address and allow confirmations; while serve is running, deposits are synced and funding retries automatically";
+    }
     if error.is::<super::transaction::PreparationDeferred>() {
-        return "treasury_preparation_deferred; pre-preparation sync unavailable; no calculation started; retrying";
+        return "treasury_preparation_deferred; transaction preparation could not proceed; existing work retained and checks will retry";
     }
     for cause in error.chain() {
         match cause.to_string().as_str() {
@@ -887,9 +892,6 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
                 return "funding_input_cap_exceeded; bridge quote exceeds max_funding_spend_zec; no funds submitted";
             }
             "near_http_429" => return "near_rate_limited; backing off",
-            "treasury_insufficient_spendable_funds" => {
-                return "treasury_insufficient_spendable_funds; refill paused before transaction preparation; fund and sync the shielded treasury; existing funded wallets remain usable";
-            }
             "prepared_quote_window_exhausted" => {
                 return "prepared_quote_window_exhausted; the returned swap quote deadline expired; no submission attempted; signed bytes retained; automatic recovery will wait for transaction expiry before retrying funding; wallet recover can inspect recovery";
             }

@@ -346,6 +346,43 @@ fn unseal(key: &[u8; 32], aad: &str, bytes: &[u8]) -> Result<Zeroizing<Vec<u8>>>
             .map_err(|_| anyhow::anyhow!("wrong encryption key or corrupt state"))?,
     ))
 }
+fn read_key(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
+    use std::io::Read;
+    existing_private_path(path)?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    private_options(&mut options);
+    let mut file = options.open(path)?;
+    validate_private_metadata(&file.metadata()?)?;
+    let mut key = Zeroizing::new([0u8; 32]);
+    file.read_exact(key.as_mut())?;
+    let mut extra = [0u8; 1];
+    ensure!(
+        file.read(&mut extra)? == 0,
+        "encryption key must be exactly 32 bytes"
+    );
+    Ok(key)
+}
+fn read_snapshot(
+    db: &Connection,
+    key: &[u8; 32],
+    id: &str,
+    network: TreasuryNetwork,
+) -> Result<(i64, Zeroizing<Vec<u8>>)> {
+    let (revision, bytes): (i64, Vec<u8>) = db.query_row(
+        "SELECT revision,bytes FROM snapshots ORDER BY revision DESC LIMIT 1",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok((
+        revision,
+        unseal(
+            key,
+            &format!("v1:{id}:{}:snapshot:{revision}", network.name()),
+            &bytes,
+        )?,
+    ))
+}
 impl Store {
     pub fn create(dir: &Path, key_file: &Path, birthday: u32, snapshot: &[u8]) -> Result<Self> {
         Self::create_with_network(dir, key_file, birthday, snapshot, TreasuryNetwork::Mainnet)
@@ -445,15 +482,7 @@ impl Store {
                 "unsupported state schema; stopped-service conversion required"
             );
         }
-        let mut file = private_file(key_file, false)?;
-        use std::io::Read;
-        let mut key = Zeroizing::new([0u8; 32]);
-        file.read_exact(key.as_mut())?;
-        let mut extra = [0u8; 1];
-        ensure!(
-            file.read(&mut extra)? == 0,
-            "encryption key must be exactly 32 bytes"
-        );
+        let key = read_key(key_file)?;
         let db = Connection::open_with_flags(
             dir.join("state.sqlite"),
             OpenFlags::SQLITE_OPEN_READ_WRITE,
@@ -496,19 +525,7 @@ impl Store {
         &self.id
     }
     pub fn snapshot(&self) -> Result<(i64, Zeroizing<Vec<u8>>)> {
-        let (revision, bytes): (i64, Vec<u8>) = self.db.query_row(
-            "SELECT revision,bytes FROM snapshots ORDER BY revision DESC LIMIT 1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        Ok((
-            revision,
-            unseal(
-                &self.key,
-                &format!("v1:{}:{}:snapshot:{revision}", self.id, self.network.name()),
-                &bytes,
-            )?,
-        ))
+        read_snapshot(&self.db, &self.key, &self.id, self.network)
     }
     pub fn save_snapshot(&mut self, expected: i64, bytes: &[u8]) -> Result<i64> {
         self.save_sync_snapshot(expected, bytes, None)
@@ -1004,6 +1021,32 @@ pub fn static_ownership(dir: &Path) -> Result<(String, Vec<String>)> {
 
 pub fn status(dir: &Path) -> Result<Status> {
     inspect_state(dir, read_status)
+}
+/// Authenticate one committed wallet snapshot without acquiring treasury ownership.
+#[cfg(feature = "zcash")]
+pub(crate) fn inspect_wallet_snapshot(
+    dir: &Path,
+    key_file: &Path,
+    expected_id: Option<&str>,
+) -> Result<(Status, Zeroizing<Vec<u8>>)> {
+    let key = read_key(key_file)?;
+    inspect_state(dir, |db| {
+        let status = read_status(db)?;
+        ensure!(
+            expected_id.is_none_or(|id| id == status.treasury_id),
+            "state identity mismatch"
+        );
+        let (network, account): (String, u32) =
+            db.query_row("SELECT network,account FROM instance", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
+        ensure!(
+            network == TreasuryNetwork::Mainnet.name() && account == 0,
+            "state identity/network/schema mismatch"
+        );
+        let (_, bytes) = read_snapshot(db, &key, &status.treasury_id, TreasuryNetwork::Mainnet)?;
+        Ok((status, bytes))
+    })
 }
 fn read_status(db: &Connection) -> Result<Status> {
     let (id, birthday, version): (String, u32, u32) =

@@ -71,6 +71,14 @@ spec="https://unreachable.invalid/openapi.json"
                 .unwrap()
         )
     );
+    assert!(text_status.contains("Primary shielded ZEC receive address:"));
+    assert!(
+        text_status.contains(
+            addresses["receive_addresses"][0]["encoded_address"]
+                .as_str()
+                .unwrap()
+        )
+    );
     assert_eq!(before, success(wallet(&config, &["status", "--json"])));
     assert!(
         !wallet(&config, &["init", "--birthday", "1"])
@@ -92,6 +100,99 @@ spec="https://unreachable.invalid/openapi.json"
     assert!(!rejected.status.success());
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("state identity mismatch"));
 }
+#[test]
+fn status_displays_receive_address_while_owned_and_keeps_metadata_without_a_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("deployment.toml");
+    let text = "version=1\nservers={}\n[treasury]\nstate_dir='wallet'\n";
+    std::fs::write(&config, text).unwrap();
+    let mnemonic = dir.path().join("mnemonic");
+    let mut seed_options = std::fs::OpenOptions::new();
+    seed_options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        seed_options.mode(0o600);
+    }
+    use std::io::Write;
+    seed_options.open(&mnemonic).unwrap().write_all(
+        b"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    ).unwrap();
+    let initialized = success(wallet(
+        &config,
+        &[
+            "init",
+            "--birthday",
+            "2000000",
+            "--json",
+            "--mnemonic-file",
+            mnemonic.to_str().unwrap(),
+        ],
+    ));
+    let address = initialized["receive_addresses"][0]["encoded_address"]
+        .as_str()
+        .unwrap();
+    let state = dir.path().join("wallet");
+    let key = state.join("wallet.key");
+    let mut owner = x402_treazury::rotation::store::Store::open(
+        &state,
+        &key,
+        initialized["state"]["treasury_id"].as_str().unwrap(),
+    )
+    .unwrap();
+    let before = serde_json::to_value(owner.status().unwrap()).unwrap();
+    let snapshot = owner.snapshot().unwrap();
+    let status = wallet(&config, &["status"]);
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status = String::from_utf8(status.stdout).unwrap();
+    assert!(status.contains(address), "{status}");
+    assert!(!status.contains("unavailable"), "{status}");
+    let addresses = success(wallet(&config, &["addresses"]));
+    assert_eq!(
+        addresses["receive_addresses"],
+        initialized["receive_addresses"]
+    );
+    assert_eq!(before, success(wallet(&config, &["status", "--json"])));
+    assert_eq!(
+        serde_json::to_value(owner.status().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(owner.snapshot().unwrap(), snapshot);
+    assert!(!wallet(&config, &["address"]).status.success());
+
+    // A later owner commit is visible without releasing ownership or deriving addresses.
+    let revision = owner.save_snapshot(snapshot.0, &snapshot.1).unwrap();
+    let shown = success(wallet(&config, &["addresses"]));
+    assert_eq!(shown["state"]["snapshot_revision"], revision);
+    assert_eq!(shown["receive_addresses"], initialized["receive_addresses"]);
+
+    let wrong_key = dir.path().join("wrong.key");
+    std::fs::copy(&key, &wrong_key).unwrap();
+    std::fs::write(&wrong_key, [0u8; 32]).unwrap();
+    for key_name in ["missing.key", "wrong.key"] {
+        std::fs::write(
+            &config,
+            text.replace("[treasury]", &format!("[treasury]\nkey_file='{key_name}'")),
+        )
+        .unwrap();
+        let status = wallet(&config, &["status"]);
+        assert!(status.status.success());
+        let status = String::from_utf8(status.stdout).unwrap();
+        assert!(status.contains("Zcash wallet status"));
+        assert!(status.contains("Primary shielded ZEC receive address: unavailable"));
+        assert!(!status.contains(address));
+        assert_eq!(
+            success(wallet(&config, &["status", "--json"])),
+            serde_json::to_value(owner.status().unwrap()).unwrap()
+        );
+    }
+    assert_eq!(owner.snapshot().unwrap().0, revision);
+}
+
 #[test]
 fn conflicting_wallet_inputs_and_missing_explicit_endpoint_fail_before_creation() {
     let dir = tempfile::tempdir().unwrap();

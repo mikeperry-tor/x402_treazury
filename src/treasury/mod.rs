@@ -282,12 +282,17 @@ impl Treasury {
         key: PathBuf,
         expected_id: Option<String>,
     ) -> Result<serde_json::Value> {
+        let (state, addresses) = Self::inspect_status(dir, key, expected_id).await?;
+        Ok(serde_json::json!({"state": state, "receive_addresses": addresses}))
+    }
+    /// Read saved status and receive addresses from one authenticated, offline snapshot.
+    pub(crate) async fn inspect_status(
+        dir: PathBuf,
+        key: PathBuf,
+        expected_id: Option<String>,
+    ) -> Result<(Status, serde_json::Value)> {
         let (state, bytes) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let id = expected_id.unwrap_or(crate::rotation::store::status(&dir)?.treasury_id);
-            let store = Store::open(&dir, &key, &id)?;
-            let state = store.status()?;
-            let (_, bytes) = store.snapshot()?;
-            Ok((state, bytes))
+            crate::rotation::store::inspect_wallet_snapshot(&dir, &key, expected_id.as_deref())
         })
         .await??;
         let scratch = tempfile::tempdir()?;
@@ -301,7 +306,7 @@ impl Treasury {
             client.indexer_uri().is_none(),
             "offline treasury must not connect to an indexer"
         );
-        Ok(serde_json::json!({"state": state, "receive_addresses": address_info(&client).await?}))
+        Ok((state, address_info(&client).await?))
     }
     pub async fn derive_address(&mut self) -> Result<serde_json::Value> {
         ensure!(

@@ -48,7 +48,7 @@ enum Action {
     Addresses,
     /// Derive and save a new shielded receive address.
     Address,
-    /// Read persisted status without unlocking or network access.
+    /// Read saved status and the primary receive address without network access.
     Status {
         /// Print machine-readable JSON.
         #[arg(long)]
@@ -153,7 +153,10 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
     let treasury_id = resolve_administrative_identity(&args.command, &state_dir, expected)?;
     Ok(match args.command {
         Action::Pool { .. } => unreachable!("removed command rejected before state access"),
-        Action::Status { .. } => Command::Status { state_dir },
+        Action::Status { .. } => Command::Status {
+            state_dir,
+            key_file,
+        },
         Action::Addresses => Command::Addresses {
             state_dir,
             key_file,
@@ -355,9 +358,10 @@ enum Command {
         /// Internal supervisor lifetime pipe; EOF cancels and checkpoints sync.
         qualification_parent_stdin: bool,
     },
-    /// Read last persisted metadata without unlocking or network access.
+    /// Read last persisted metadata and an optional authenticated receive address.
     Status {
         state_dir: PathBuf,
+        key_file: PathBuf,
     },
     /// Initialize an encrypted treasury; discover a new wallet birthday unless supplied.
     Init {
@@ -423,16 +427,12 @@ async fn run_args(
     if let Command::Recover { meta_config } = command {
         return recover_funding(meta_config, network).await;
     }
-    if let Command::Status { state_dir } = command {
-        let status =
-            tokio::task::spawn_blocking(move || crate::rotation::store::status(&state_dir))
-                .await??;
-        if json {
-            println!("{}", serde_json::to_string_pretty(&status)?);
-        } else {
-            print!("{}", output::status(&status));
-        }
-        return Ok(());
+    if let Command::Status {
+        state_dir,
+        key_file,
+    } = command
+    {
+        return show_status(state_dir, key_file, json).await;
     }
     #[cfg(feature = "zcash")]
     if let Command::Addresses {
@@ -518,6 +518,42 @@ async fn run_args(
         );
         treasury.close().await
     }
+}
+
+async fn show_status(state_dir: PathBuf, key_file: PathBuf, json: bool) -> Result<()> {
+    if json {
+        let status =
+            tokio::task::spawn_blocking(move || crate::rotation::store::status(&state_dir))
+                .await??;
+        println!("{}", serde_json::to_string_pretty(&status)?);
+        return Ok(());
+    }
+    #[cfg(feature = "zcash")]
+    let inspected = crate::treasury::Treasury::inspect_status(state_dir.clone(), key_file, None)
+        .await
+        .ok();
+    #[cfg(not(feature = "zcash"))]
+    let inspected: Option<(crate::rotation::store::Status, serde_json::Value)> = {
+        let _ = key_file;
+        None
+    };
+    let (status, addresses) = match inspected {
+        Some(inspected) => inspected,
+        None => (
+            tokio::task::spawn_blocking(move || crate::rotation::store::status(&state_dir))
+                .await??,
+            serde_json::Value::Null,
+        ),
+    };
+    print!("{}", output::status(&status));
+    if let Some(address) = addresses[0]["encoded_address"].as_str() {
+        println!("\nPrimary shielded ZEC receive address:\n{address}");
+    } else {
+        println!(
+            "\nPrimary shielded ZEC receive address: unavailable (requires a readable wallet key and saved snapshot in a Zcash-enabled build)"
+        );
+    }
+    Ok(())
 }
 
 #[cfg(feature = "zcash")]

@@ -34,7 +34,10 @@ fn command_value(command: Command) -> Value {
         } => {
             json!({"kind":"init","state":state_dir,"key":key_file,"birthday":birthday,"indexer":indexer_url,"mnemonic":mnemonic_file})
         }
-        Command::Status { state_dir } => json!({"kind":"status","state":state_dir}),
+        Command::Status {
+            state_dir,
+            key_file,
+        } => json!({"kind":"status","state":state_dir,"key":key_file}),
         Command::Addresses {
             state_dir,
             key_file,
@@ -438,7 +441,7 @@ fn administrative_identity_resolution_preserves_saved_state_and_optional_asserti
     );
     assert_eq!(
         resolved(dir.path(), &["status", "--state-dir", "missing"])["ok"],
-        json!({"kind":"status","state":"missing"})
+        json!({"kind":"status","state":"missing","key":"missing/wallet.key"})
     );
     assert_eq!(
         resolved(dir.path(), &["addresses", "--state-dir", "missing"])["ok"],
@@ -500,9 +503,8 @@ fn administrative_identity_resolution_preserves_saved_state_and_optional_asserti
                 );
                 continue;
             }
-            let mut value = json!({"kind":action,"state":"state"});
+            let mut value = json!({"kind":action,"state":"state","key":"external.key"});
             if action != "status" {
-                value["key"] = json!("external.key");
                 value["id"] = if action == "addresses" && expected.is_none() {
                     Value::Null
                 } else {

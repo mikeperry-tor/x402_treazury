@@ -23,10 +23,23 @@ x402_treazury wallet sync --config examples/deployments/privacy.local.toml
 `wallet init` prints the primary ZEC receive address and a prompt to send ZEC to
 it. `wallet sync` and `wallet status` show readable summaries by default, with
 saved balance observations distinguished from current spending authority.
+Human status also shows the primary shielded ZEC receive address from the encrypted
+snapshot when the wallet key is available. If the key or snapshot cannot be read,
+status still shows saved metadata and explicitly marks the address unavailable.
 Use `wallet init --json`, `wallet sync --json`, or `wallet status --json` for
 machine-readable output. Init and sync return `{state, receive_addresses}`;
 status returns the saved state object. `wallet addresses` continues to return JSON.
 Progress logs remain on stderr in both modes.
+
+While `serve` is running, use `wallet status --config FILE` with the same deployment
+file to see the shielded receive address, saved balances and sync progress. This
+read-only command does not acquire treasury ownership. `wallet addresses` also
+reads the encrypted snapshot without exclusive ownership and returns all saved
+receive addresses as JSON. Neither command derives an address or changes sync
+readiness. `wallet init` refuses an existing wallet; `wallet address` creates a new
+address and requires exclusive ownership, so it cannot run against the same
+treasury while `serve` owns it. Status JSON retains its existing saved-state shape
+and needs neither the key nor SDK snapshot decoding.
 
 Only `treasury.state_dir` is required in the treasury table.
 Actual spendable funds after reservations, confirmations and fees govern enabled funding;

@@ -753,6 +753,52 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
 }
 
 #[test]
+fn funding_preparation_diagnostics_distinguish_shortage_from_other_deferrals() {
+    use crate::rotation::{error::FundingCondition, transaction::PreparationDeferred};
+
+    let shortage = safe_error(
+        &anyhow::Error::new(FundingCondition::InsufficientFunds),
+        &FundingPhase::Quoted,
+    );
+    let wrapped_shortage = safe_error(
+        &anyhow::Error::new(FundingCondition::InsufficientFunds)
+            .context(PreparationDeferred)
+            .context("private upstream prose"),
+        &FundingPhase::Quoted,
+    );
+    assert_eq!(shortage, wrapped_shortage);
+    assert!(shortage.starts_with("treasury_insufficient_spendable_funds;"));
+    assert!(shortage.contains("waiting for confirmed spendable ZEC"));
+    assert!(shortage.contains("shielded receive address"));
+    assert!(shortage.contains("while serve is running"));
+    assert!(shortage.contains("funding retries automatically"));
+    assert!(shortage.contains("wallet status --config FILE"));
+    for excluded in [
+        "sync unavailable",
+        "private upstream prose",
+        "wallet init",
+        "wallet address",
+    ] {
+        assert!(!shortage.contains(excluded), "{shortage}");
+    }
+
+    let deferred = safe_error(
+        &anyhow::anyhow!("private proposal or sync failure").context(PreparationDeferred),
+        &FundingPhase::Quoted,
+    );
+    assert!(deferred.starts_with("treasury_preparation_deferred;"));
+    assert!(deferred.contains("checks will retry"));
+    for excluded in [
+        "sync unavailable",
+        "no calculation started",
+        "private proposal or sync failure",
+        "insufficient",
+    ] {
+        assert!(!deferred.contains(excluded), "{deferred}");
+    }
+}
+
+#[test]
 fn startup_condition_classification_uses_producer_types_not_message_copies() {
     use crate::rotation::error::{AdmissionError, FundingCondition};
     for condition in [
