@@ -402,8 +402,8 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
             .err()
             .expect("empty wallet prepared a deposit");
         assert!(
-            format!("{error:#}").contains("insufficient_spendable"),
-            "{error}"
+            error.is::<x402_treazury::rotation::transaction::PreparationDeferred>(),
+            "{error:#}"
         );
         assert_eq!(calls.lock().unwrap().len(), before);
         assert_eq!(
