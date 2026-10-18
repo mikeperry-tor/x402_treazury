@@ -517,7 +517,11 @@ impl PaidClient {
                     &[],
                 )
                 .await?
-                .context("no eligible managed payment identity")?,
+                .context(
+                    crate::rotation::error::AdmissionError::WalletNotReady(
+                        "no eligible payment identity",
+                    ),
+                )?,
             ),
             _ => None,
         };
