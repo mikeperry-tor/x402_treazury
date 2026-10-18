@@ -529,10 +529,16 @@ async fn overlapping_resolution_reads_preserve_first_proof_in_either_completion_
         let saved: (String,String,i64,String) = fixture.store.db.query_row(
             "SELECT outcome,hash,height,support FROM payment_resolutions WHERE attempt_id='proof'",[],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
-        fixture
+        // A concurrent checkpoint change can reject an old capture. It does
+        // not overwrite the first proof or demand a foreground repair read.
+        let error = fixture
             .store
             .publish_scoped_evidence(&fixture.pool, second)
-            .unwrap();
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<EvidenceFailure>(),
+            Some(&EvidenceFailure::CompatibilityRequired)
+        );
         let retained: (String,String,i64,String) = fixture.store.db.query_row(
             "SELECT outcome,hash,height,support FROM payment_resolutions WHERE attempt_id='proof'",[],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();

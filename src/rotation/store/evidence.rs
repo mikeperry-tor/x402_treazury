@@ -466,7 +466,11 @@ mod tests {
             .remove("valid_until");
         for (support, failure) in [
             (
-                serde_json::to_string(&wrong_height).unwrap(),
+                {
+                    let mut historical = serde_json::to_value(&wrong_height).unwrap();
+                    historical["observation"]["valid_until"] = serde_json::json!(1000);
+                    historical.to_string()
+                },
                 EvidenceFailure::AmountContradiction,
             ),
             ("{broken".into(), EvidenceFailure::MalformedSupport),
