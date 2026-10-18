@@ -62,6 +62,36 @@ Ordinary serving binds listeners before funding and exposes usable tools while
 managed funding/discovery is pending or degraded. Strict inspection and separately
 authorized qualification retain their completeness and authority requirements.
 
+## Independent subagent workflows
+
+Use independent subagents for design, audits and review as a normal part of the
+workflow; do not wait for the user to request delegation each time.
+
+- Before substantive implementation, have an independent design reviewer challenge
+  the approach, necessity of checks and opportunities to delete responsibilities.
+  Resolve material design findings before building on the affected decision.
+- For audits, assign distinct concerns that can be investigated independently.
+  Inspect surrounding consumers, failure paths and test coverage, not just changed
+  lines. Report concrete findings and evidence, including where no issue was found.
+- Independently review every exact committed SHA and its relevant consumers. The
+  reviewer must not be the author of the change. Review meaningful architecture
+  gates across the combined implementation, especially financial ownership,
+  concurrency, network policy and documentation handoffs.
+- Address findings with `git commit --fixup=<introducing-SHA>` and independently
+  review each fixup. Preserve unsquashed history through final integration review;
+  check that local fixes have not introduced a recurring problem elsewhere.
+- Give reviewers the user intent, scope, baseline and validation evidence. Ask them
+  to verify claims and question unnecessary enforcement, not merely confirm the
+  author's approach. The coordinating agent integrates findings and owns completion.
+- Keep review/audit agents read-only by default. Parallelize independent analysis;
+  coordinate delegated edits with explicit file ownership and avoid competing
+  builds or source changes during validation. Do not impose a fixed reviewer count
+  or duplicate identical checks without a concrete reason.
+
+Resolve material findings before declaring completion. If subagent tooling is
+unavailable, disclose that limitation and perform the available checks without
+claiming an independent review occurred.
+
 ## Read the relevant guide before editing
 
 Load the documents for the area being changed; the detailed contracts and defaults
