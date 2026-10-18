@@ -31,6 +31,8 @@ enum Wire {
     Generic,
     Malformed,
     Oversized,
+    StalledVerification,
+    StalledSettlement,
     SuccessfulHeader,
     HeldSuccess,
     Expired,
@@ -194,22 +196,27 @@ async fn seller(
             );
             response
         }
-        Wire::Verification => {
+        Wire::Verification | Wire::StalledVerification => {
             let fixture: Value = serde_json::from_str(include_str!(
                 "../../tests/fixtures/x402/insufficient-funds.json"
             ))
             .unwrap();
             let v = fixture["verification"].clone();
-            (
+            let mut response = (
                 StatusCode::PAYMENT_REQUIRED,
                 [("payment-required", STANDARD.encode(v.to_string()))],
                 "{}",
             )
-                .into_response()
+                .into_response();
+            if matches!(f.wire, Wire::StalledVerification) {
+                *response.body_mut() = stalled_body();
+            }
+            response
         }
         Wire::Settlement
         | Wire::Allowance
         | Wire::Oversized
+        | Wire::StalledSettlement
         | Wire::SuccessfulHeader
         | Wire::HeldSuccess
         | Wire::Expired
@@ -225,7 +232,7 @@ async fn seller(
             .unwrap();
             let mut v = fixture["settlement"].clone();
             v["errorReason"] = json!(reason);
-            (
+            let mut response = (
                 if matches!(f.wire, Wire::SuccessfulHeader) {
                     StatusCode::OK
                 } else {
@@ -238,7 +245,11 @@ async fn seller(
                     "{}".into()
                 },
             )
-                .into_response()
+                .into_response();
+            if matches!(f.wire, Wire::StalledSettlement) {
+                *response.body_mut() = stalled_body();
+            }
+            response
         }
         Wire::Prose => (StatusCode::PAYMENT_REQUIRED, "insufficient_funds").into_response(),
         Wire::Generic => (StatusCode::PAYMENT_REQUIRED, Json(challenge())).into_response(),
@@ -249,6 +260,9 @@ async fn seller(
         )
             .into_response(),
     }
+}
+fn stalled_body() -> axum::body::Body {
+    axum::body::Body::from_stream(futures_util::stream::pending::<Result<Bytes, std::io::Error>>())
 }
 async fn run(
     method: &str,
@@ -394,7 +408,11 @@ async fn run(
     } else if let Some((_, claim, _)) = &authority {
         Some(claim.invoke(client.execute(route)).await)
     } else {
-        Some(client.execute(route).await)
+        Some(
+            tokio::time::timeout(std::time::Duration::from_secs(10), client.execute(route))
+                .await
+                .expect("payment traversal must not wait for an unused failure body"),
+        )
     };
     client.drain().await;
     let success = result.as_ref().is_some_and(Result::is_ok);
@@ -430,7 +448,13 @@ async fn run(
         .unwrap();
     if matches!(
         wire,
-        Wire::Verification | Wire::Settlement | Wire::HeldSuccess | Wire::QualifiedThree
+        Wire::Verification
+            | Wire::Settlement
+            | Wire::HeldSuccess
+            | Wire::QualifiedThree
+            | Wire::Oversized
+            | Wire::StalledVerification
+            | Wire::StalledSettlement
     ) {
         assert_eq!(
             low,
@@ -540,18 +564,30 @@ async fn captured_inventory_exhausts_and_keeps_every_chargeable_authorization() 
     assert!(error.contains("earlier authorizations may still charge"));
 }
 #[tokio::test]
-async fn prose_allowance_generic_malformed_and_truncated_responses_earn_no_retry() {
-    for wire in [
-        Wire::Prose,
-        Wire::Allowance,
-        Wire::Generic,
-        Wire::Malformed,
-        Wire::Oversized,
-    ] {
+async fn prose_allowance_generic_and_malformed_headers_earn_no_retry() {
+    for wire in [Wire::Prose, Wire::Allowance, Wire::Generic, Wire::Malformed] {
         let (success, signed, requests, _) = run("GET", wire, 1).await;
         assert!(!success);
         assert_eq!(signed.len(), 1);
         assert_eq!(requests.len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn recognized_failure_headers_allow_fallback_without_reading_oversized_or_stalled_bodies() {
+    for method in ["GET", "POST"] {
+        for wire in [
+            Wire::Oversized,
+            Wire::StalledVerification,
+            Wire::StalledSettlement,
+        ] {
+            let (success, signed, requests, error) = run(method, wire, 1).await;
+            assert!(success, "recognized headers must suffice: {error}");
+            assert_eq!(signed.len(), 2);
+            assert_ne!(signed[0].0, signed[1].0);
+            assert_ne!(signed[0].1, signed[1].1);
+            assert_eq!(requests.len(), 4);
+        }
     }
 }
 

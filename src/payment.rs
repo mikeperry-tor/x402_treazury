@@ -578,10 +578,9 @@ impl PaidClient {
                             {
                                 let status = paid.status();
                                 let version = paid.version();
-                                // A truncated or lost error body earns no retry. This
-                                // uses the existing paid-response byte/read limits.
-                                crate::limits::read(paid,self.max_response_bytes,"API response","max_response_bytes").await
-                                    .context("signed insufficient-funds response incomplete; authorization may still charge")?;
+                                // Structured headers classify this failure. Its
+                                // unused body must not delay or veto fallback.
+                                drop(paid);
                                 if let Some(call) = &mut cover {
                                     call.protocol(version);
                                     call.rejected_padding(status);
