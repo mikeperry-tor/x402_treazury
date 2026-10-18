@@ -405,7 +405,10 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
             error.is::<x402_treazury::rotation::transaction::PreparationDeferred>(),
             "{error:#}"
         );
-        assert_eq!(calls.lock().unwrap().len(), before);
+        let observed = calls.lock().unwrap();
+        assert_eq!(observed.len(), before + 1);
+        assert!(observed[before].ends_with("/GetLightdInfo"));
+        drop(observed);
         assert_eq!(
             treasury.status().await.unwrap().snapshot_revision,
             status.snapshot_revision
