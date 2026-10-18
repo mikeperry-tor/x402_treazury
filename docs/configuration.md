@@ -314,12 +314,13 @@ payer to ACTIVE and opens that slot for refill. Vacancies allocate small-first,
 independently of which wallet can pay.
 Consumed reserve wallets become active, previous active wallets become retained,
 and retained wallets remain usable without automatic top-ups or slot reassignment.
-Partial external credits retain the allocation and its funding claim until full
-readiness; disabling a slot does not discard accepted work or historical liabilities.
+First positive external credit permanently consumes the initial funding claim,
+including partial credit. Disabling a slot retains accepted source ownership.
 
 `max_retirement_remainder_usdc` is a finite nonnegative micro-USDC amount, default
-`"0"`. It authorizes eligible retained-wallet retirement during reconciliation,
-independently of `auto_fund`, vacancies and treasury capacity. Retirement leaves
+`"0"`. It authorizes eligible retained-wallet retirement on the canonical-publication
+path, independently of `auto_fund`, vacancies and treasury capacity. Ordinary
+advisory refresh does not collect those canonical proofs or retire wallets. Retirement leaves
 funds and keys at their address, stops routine polling/selection, transfers nothing
 and never releases financial obligations. Positive tolerance trades purchasing
 power for less observation work; it does not bound cumulative stranded capital.
@@ -409,9 +410,9 @@ captures the enabled slot generations and waits for those original
 destination obligations, without chasing replacement generations or source-only
 settlement backlog. A stopped or cancelled waiter preserves accepted work.
 `auto_fund=false` still observes accepted operations but cannot allocate or prepare
-new funding. A partial allocation—even $3 toward a $10 target—cannot pay until its
-full readiness requirement is met; disabling it does not detach the claim or free
-its liabilities. Insufficient accepted source work remains owned for reconciliation,
+new funding. The first positive credit—even $3 toward a $10 target—consumes its
+initial funding claim permanently and publishes the funded role. No top-up follows;
+existing source liabilities remain owned even after disablement. Insufficient accepted source work remains owned for reconciliation,
 not automatically abandoned or replaced.
 
 Reopen applies changed caps, targets and slot enablement. Existing accepted terms,
@@ -745,10 +746,10 @@ actual EVM address identity. A rotated address gets a new pool of connections.
 Shared treasury sync uses the treasury UUID; specs, pricing and help use discovery
 origin identities. Pending operations keep their original recipient identity after
 restart and retirement. All modes use these same pools and payment state machines.
-A changed payer before signing gets one fresh challenge attempt for GET/HEAD;
-non-idempotent tools return `payer_changed_before_payment` for an explicit caller
-retry. Once a payment is signed/journaled, failures never trigger automatic replay
-or a new payer.
+Paid traversal follows the [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules):
+a recognized structured insufficient-funds 402 after a signed attempt can visit
+each captured eligible wallet once. Earlier authorizations remain chargeable;
+other failures and restarts do not grant a logical-call replay.
 
 Tor mode sends destination DNS through SOCKS, preserves TLS validation, and ignores
 ambient proxy/NO_PROXY settings. Direct mode also ignores those settings: the explicit

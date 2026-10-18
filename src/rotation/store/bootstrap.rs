@@ -67,10 +67,12 @@ impl StartupPath {
         }
         // Original accepted bytes/outcomes remain observed even if permission to
         // start another attempt has since been disabled or exhausted.
-        if self
-            .operation
-            .as_ref()
-            .is_some_and(|operation| operation.submission != "EXPIRED")
+        if self.facts.preparation_accepted
+            || self.facts.source_pending
+            || self
+                .operation
+                .as_ref()
+                .is_some_and(|operation| operation.submission != "EXPIRED")
         {
             return Waiting;
         }
@@ -87,7 +89,13 @@ impl StartupPath {
             return Obstructed("preparation_or_swap_requires_review");
         }
         if !self.facts.enabled {
-            return Obstructed("funding_group_disabled");
+            return Obstructed(match self.condition {
+                Some(super::super::error::FundingCondition::Disabled) => "funding_disabled",
+                Some(super::super::error::FundingCondition::QualificationDenied) => {
+                    "qualification_funding_denied"
+                }
+                _ => "funding_group_disabled",
+            });
         }
         use super::super::error::FundingCondition as Condition;
         let reason = match self.condition {
@@ -317,8 +325,8 @@ mod tests {
     fn current_status_contract_has_explicit_authority_and_claims() {
         let (_dir, store, _pool) = fixture();
         let value = serde_json::to_value(store.status().unwrap()).unwrap();
-        assert_eq!(value["schema_version"], 4);
-        assert_eq!(value["state_schema_version"], 20);
+        assert_eq!(value["schema_version"], 5);
+        assert_eq!(value["state_schema_version"], 21);
         let keys: Vec<_> = value["pools"][0]
             .as_object()
             .unwrap()

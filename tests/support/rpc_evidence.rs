@@ -99,7 +99,18 @@ pub fn credit(
             .join()
             .unwrap()
     });
-    store.record_verified_credit(wallet, view).map(|_| ())
+    store.record_verified_credit(wallet, view)?;
+    for job in store
+        .funding_jobs()?
+        .into_iter()
+        .filter(|j| j.wallet_id == wallet)
+    {
+        let facts = store.funding_facts(&job.id, &job.operation_id)?;
+        if !facts.source_pending && !facts.preparation_accepted {
+            store.finish_funding_if_proven(&job.id, &job.operation_id)?;
+        }
+    }
+    Ok(())
 }
 
 pub async fn credit_owned(

@@ -7,7 +7,8 @@ Implement advisory USDC wallet selection and SDK-owned Zcash spending state on
 branch `best_effort_wallet_balances`, based on
 `49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. BE02 (`798b211`, fixup `0951464`) and BE03 (`879d712`, fixup `59f8317`)
 passed independent exact-commit and combined payment-transition review. BE04 (`fb4667a`, fixups `fb7cc7d` and `46092e7`) passed exact independent review
-and focused acceptance; BE05 is in progress, BE06–BE07 remain pending.
+and focused acceptance. BE05 and its exact fixup have passed review and focused
+acceptance; BE06 is in progress and BE07 remains pending.
 
 Cross-wallet repetition after an insufficient-funds response is explicitly accepted,
 even when the first authorization remains chargeable and both attempts could charge
@@ -408,6 +409,11 @@ recertification helpers and balance-certificate expiry fields are deleted.
 Complexity artifact `20261018T020557Z-00f01e41` records the owning changed chains;
 BE06 still owns historical source/refund traversal and monetary closure deletion.
 
+BE05 review gate: `42e86d5` and `106b43e` accepted after focused Base,
+receipt, scan/coverage and retired-config checks. Final matching complexity artifact
+is `20261018T020815Z-54d47599`; earlier stale artifacts are not acceptance evidence.
+The late BE04 fixture correction `f48f745` passed its focused partial-credit test.
+
 ### BE06: Source recovery and accounting removal
 
 - Derive recovery from typed operation/input ownership facts, not `last_error`
@@ -495,6 +501,42 @@ consumers and document the remaining external contract limits.
 Recheck existing action permissions at source preparation/submission boundaries.
 The BE04 authority check must survive recovery and restart; do not create a second
 policy or capability framework.
+
+BE06 implementation decisions: schema 21 removes `budget_entries` and
+`refund_outputs` from current state. Read-only historical reporting remains; mutable
+opens reject other schemas before using keys or mutating state. Exact encrypted
+calculation ownership moves atomically into outgoing records with the SDK snapshot
+and signed bytes. The selected-input manifest comes from the pinned SDK proposal,
+including transparent outpoints and shielded note identities; dummy Orchard actions
+are not selected inputs. Every original input must survive canonical expiry recovery.
+The single pending-input fence remains because this SDK cannot exclude another
+accepted calculation's inputs; it is not a second capital balance.
+
+SDK proposals and actual amount/fee safeguards replace application affordability
+and historical refund/source monetary equality. Shielding charges its actual fee,
+not returned principal. Known rejected proposals defer; accepted calculation with
+unknown outcome retains ownership. Completed bytes survive local validation and
+publication failures with the existing owner. Only identical local publication
+retries, on the existing maintenance cadence; a lost acknowledgement or cancelled
+close waiter cannot cause another calculation or submission. Irrecoverable storage
+failure/forced process death can lose unpublished bytes, leaving the durable input
+claim uncertain. SDK reconstruction remains R01.
+
+Source work routing uses actual acceptance, pending bytes and original submission
+facts, including disabled/retired pools and stale COMPLETE/PREPARING display phases.
+First-send permission reuses the current initial claim predicate at the serialized
+boundary; partial initial credit cannot authorize another deposit. Historical
+source/refund credit traversal and `source_accounted` are deleted. Expiry zero is
+unbounded by consensus; finite N is inclusive. Replacement still needs two exact
+covered scans and every original input. Returned quote deadlines govern; the local
+300-second margin, requested-window minimum and shielding wall deadline are removed.
+The external 1Click Zcash arrival/confirmation/refund contract is still unqualified.
+
+Current qualification exports immutable encrypted preparation/raw identities and
+transaction facts, including archived original attempts. Registry allowances retain
+each attempt under its original job/pool permit; missing facts stay unknown. Modern
+reports mark removed monetary projections unavailable and retain historical report
+readers. Advisory estimate damage and stale phases cannot become signing gates.
 
 ### BE07: Integration and documentation
 
@@ -654,6 +696,8 @@ merely moved into other helpers.
   provider success message or `COMPLETE` label mints new funding authority.
 
 ## Deferred owner recovery and shielding
+
+The maintained unfinished work is [treasury owner follow-ups](treasury_owner_followups.md).
 
 Plan two follow-ons after the core BE01–BE07 simplification:
 

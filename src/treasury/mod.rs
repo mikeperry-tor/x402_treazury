@@ -4,8 +4,10 @@ pub mod birthday;
 mod coverage;
 pub(crate) mod diagnostics;
 mod expiry;
+mod inputs;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod lifecycle_tests;
+mod publication;
 pub mod recovery;
 mod refunds;
 #[cfg(all(test, feature = "zcash-regtest"))]
@@ -53,6 +55,7 @@ pub struct Treasury {
     worker: tokio::task::JoinHandle<()>,
     revision: i64,
     healthy: bool,
+    completed: Option<publication::CompletedPreparation>,
     sync_settings: Option<SyncSettings>,
     reusable_sync_revision: Option<i64>,
     // Scheduling only; never used to date or authorize spending evidence.
@@ -176,6 +179,7 @@ impl Treasury {
             worker,
             revision: 1,
             healthy: true,
+            completed: None,
             sync_settings: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
@@ -247,6 +251,7 @@ impl Treasury {
             worker,
             revision,
             healthy: true,
+            completed: None,
             sync_settings: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
@@ -518,7 +523,19 @@ impl Treasury {
         }
         self.close().await
     }
-    pub async fn close(mut self) -> Result<()> {
+    pub async fn close(self) -> Result<()> {
+        // A response waiter cannot abandon accepted local publication.
+        tokio::spawn(self.close_owned())
+            .await
+            .context("treasury close owner stopped")?
+    }
+    async fn close_owned(mut self) -> Result<()> {
+        while self.completed.is_some() {
+            if self.publish_completed().await.is_err() {
+                Self::warn_publication_pending();
+                tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS)).await;
+            }
+        }
         if let Some(client) = &mut self.client {
             client.go_offline().await;
         }
@@ -680,54 +697,9 @@ impl SyncSession {
             height,
         )
         .await?;
-        // A later fork can invalidate a spend whose source cost was already
-        // accounted. Keep that cost consumed and fail closed until the same
-        // transaction regains the required depth; never make it spendable again
-        // merely because its outgoing journal entry was resolved earlier.
-        tracing::debug!(
-            "treasury sync: chain checks completed; reconciling prior spending and balances"
-        );
-        let boundary = self.store.call(|s| s.source_recheck_boundary()).await?;
+        // SDK state is usable without replaying historical monetary accounting.
         let wallet = self.client.wallet();
         let wallet = wallet.read().await;
-        let mut cursor = String::new();
-        loop {
-            let after = cursor.clone();
-            let operations = self
-                .store
-                .call(move |s| s.source_recheck_page(&after, boundary))
-                .await?;
-            let Some(last) = operations.last() else { break };
-            cursor = last.operation_id.clone();
-            for operation in operations {
-                let txid = zcash_primitives::transaction::TxId::from_hex(&operation.facts.txid)
-                    .context(if operation.submission == "EXPIRED" {
-                        "invalid transaction identity"
-                    } else {
-                        "invalid confirmed transaction identity"
-                    })?;
-                let record = wallet.wallet_transactions.get(&txid);
-                if operation.submission == "EXPIRED" {
-                    ensure!(
-                        height
-                            >= u64::from(operation.facts.expiry_height)
-                                + u64::from(settings.confirmations.get())
-                            && !record.is_some_and(|r| r.status().is_confirmed()),
-                        "treasury_expiry_reorg: recovered source requires review"
-                    );
-                } else {
-                    let confirmed_height = record
-                        .and_then(|r| r.status().get_confirmed_height())
-                        .map(|h| u64::from(u32::from(h)));
-                    ensure!(
-                        confirmed_height.is_some_and(|h| h > 0
-                            && height >= h
-                            && height - h + 1 >= u64::from(settings.confirmations.get())),
-                        "treasury_confirmed_spend_reorg: source spend requires recovery"
-                    );
-                }
-            }
-        }
         let balance = wallet
             .account_balance(zip32::AccountId::ZERO)
             .map_err(|_| anyhow::anyhow!("treasury balance unavailable"))?;
@@ -750,9 +722,6 @@ impl SyncSession {
             .map_err(|_| anyhow::anyhow!("treasury spendable balance unavailable"))?
             .into_u64();
         drop(wallet);
-        tracing::debug!("treasury sync: spending and balances checked; reconciling refunds");
-        self.reconcile_refunds(height, settings.confirmations.get())
-            .await?;
         observation.checked_at = checked_at;
         observation.height = Some(height);
         Ok(())

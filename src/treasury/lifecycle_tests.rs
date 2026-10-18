@@ -63,7 +63,7 @@ async fn pending(store: &StoreHandle, job: &FundingJob, raw: &[u8]) {
             assert!(s.status()?.outgoing_pending);
             assert_eq!(PreparedTransaction::load(s, &operation)?.bytes(), raw);
             assert!(s.abandon_unprepared(&operation).is_err());
-            assert!(s.require_spend_ready(now()?, 1).is_err());
+            assert!(s.require_preparation_available().is_err());
             Ok(())
         })
         .await
@@ -76,17 +76,12 @@ fn accounting(state: &Path, prepared: &PreparedTransaction, confirmed: bool) {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .unwrap();
-    let saved: (i64, i64) = db
-        .query_row(
-            "SELECT reserved,consumed FROM budget_entries WHERE id=?1",
-            [prepared.operation_id()],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
-    let facts = prepared.facts().unwrap();
-    let cost = i64::try_from(facts.amount_zatoshis + facts.fee_zatoshis).unwrap();
-    assert!(facts.fee_zatoshis > 0);
-    assert_eq!(saved, if confirmed { (0, cost) } else { (cost, 0) });
+    let (submission, raw, owner): (String,Vec<u8>,Vec<u8>) = db.query_row(
+        "SELECT t.submission,o.raw,o.preparation FROM treasury_operations t JOIN outgoing o ON o.id=t.id WHERE t.id=?1",
+        [prepared.operation_id()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert!(!raw.is_empty() && !owner.is_empty());
+    assert_eq!(submission == "CONFIRMED", confirmed);
+    assert!(prepared.facts().unwrap().fee_zatoshis > 0);
 }
 
 // Pause after durable intent, while retaining the real production sender.
@@ -570,7 +565,7 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
     store
         .call(move |s| {
             assert_eq!(s.operation(&id)?.attempts, 1);
-            assert!(s.require_spend_ready(now()?, 1).is_err());
+            assert!(s.require_preparation_available().is_err());
             Ok(())
         })
         .await

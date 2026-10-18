@@ -25,6 +25,7 @@ pub(crate) mod inventory;
 mod ownership;
 mod reporting;
 pub use reporting::{BalancePointStatus, RetirementAccounting, RuntimeBalanceEvidence};
+pub mod preparation;
 pub mod refunds;
 pub(crate) mod scheduling;
 pub(crate) mod selection;
@@ -63,7 +64,7 @@ pub struct Status {
     pub sync_complete: bool,
     pub treasury_operations: Vec<OperationStatus>,
     pub funding_jobs: Vec<funding::FundingJob>,
-    pub refunds: Vec<refunds::RefundStatus>,
+    pub legacy_refunds: Option<Vec<refunds::RefundStatus>>,
 }
 /// Persisted observations, never an authorization to spend on their own.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -440,7 +441,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 20,
+                version == 21,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -640,7 +641,7 @@ impl Store {
             // Recovery may have committed before the registry acknowledgement.
             // Only durable archived operations with no bytes or consumed funds
             // can release an old source reservation. Current operations cannot.
-            let mut query = self.db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE r.job_id=?1 AND NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=r.operation_id AND b.consumed!=0)")?;
+            let mut query = self.db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE r.job_id=?1 AND NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM operation_network n WHERE n.operation_id=r.operation_id AND n.preparation IS NOT NULL)")?;
             for old in query.query_map([&job], |r| r.get::<_, String>(0))? {
                 super::restriction::permit_result(
                     permits.retire_unprepared(&self.id, &job, &old?),
@@ -654,47 +655,11 @@ impl Store {
         }
         Ok(())
     }
-    pub fn require_spend_ready(&self, _now: u64, input_zatoshis: u64) -> Result<()> {
+    pub fn require_preparation_available(&self) -> Result<()> {
         self.funding_restriction
             .require_new_funding("treasury_preparation")?;
-        let outgoing_pending: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
-            [],
-            |row| row.get(0),
-        )?;
-        ensure!(!outgoing_pending, "treasury_send_pending");
-        let observation: String = self
-            .db
-            .query_row(
-                "SELECT observation FROM treasury_sync WHERE singleton=1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?
-            .context("treasury_not_synced")?;
-        let observation: SyncObservation = serde_json::from_str(&observation)?;
-        let revision: i64 = self.db.query_row(
-            "SELECT revision FROM snapshots ORDER BY revision DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )?;
-        ensure!(
-            (observation.phase == SyncPhase::Ready && observation.snapshot_revision == revision),
-            "treasury_snapshot_changed"
-        );
-        if input_zatoshis > observation.spendable_shielded_zatoshis {
-            tracing::warn!(
-                category = "treasury_insufficient_spendable_funds",
-                required_zatoshis = input_zatoshis,
-                spendable_zatoshis = observation.spendable_shielded_zatoshis,
-                confirmed_shielded_zatoshis = observation.confirmed_shielded_zatoshis,
-                "Zcash treasury cannot fund this refill; fund and sync the treasury; existing funded EVM wallets remain usable"
-            );
-        }
-        ensure!(
-            input_zatoshis > 0 && input_zatoshis <= observation.spendable_shielded_zatoshis,
-            super::error::FundingCondition::InsufficientFunds
-        );
+        let pending:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",[],|r|r.get(0))?;
+        ensure!(!pending, "treasury_send_pending");
         Ok(())
     }
     pub fn disable_pool(&mut self, name: &str) -> Result<()> {
@@ -767,43 +732,6 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-    /// Reserve total input+fee across all pools. Unknown exposure survives UTC rollover.
-    pub fn reserve(&mut self, id: &str, pool: Option<&str>, day: u32, zatoshis: i64) -> Result<()> {
-        ensure!(zatoshis > 0, "invalid ZEC reservation amount");
-        self.check_operation_permit(id, u64::try_from(zatoshis)?)?;
-        let tx = self
-            .db
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let existing: Option<(Option<String>, u32, i64, i64)> = tx
-            .query_row(
-                "SELECT pool_id,original_day,requested,consumed FROM budget_entries WHERE id=?1",
-                [id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )
-            .optional()?;
-        if let Some((p, d, r, _consumed)) = existing {
-            ensure!(
-                p.as_deref() == pool && d == day && r == zatoshis,
-                "operation_conflict"
-            );
-            return Ok(());
-        }
-        self.funding_restriction
-            .require_new_funding("source_reservation")?;
-        if let Some(pool) = pool {
-            let enabled: bool =
-                tx.query_row("SELECT enabled FROM pools WHERE id=?1", [pool], |r| {
-                    r.get(0)
-                })?;
-            ensure!(enabled, "pool disabled");
-        }
-        tx.execute(
-            "INSERT INTO budget_entries VALUES (?1,?2,?3,?3,?4,?4,0)",
-            params![id, pool, day, zatoshis],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
     /// Persist exact prepared bytes and the corresponding wallet snapshot in one commit.
     pub fn prepare(
         &mut self,
@@ -863,16 +791,9 @@ impl Store {
             }
             return Ok(revision);
         }
-        self.funding_restriction
-            .require_new_funding("source_preparation_commit")?;
-        if self.funding_permits.is_some() {
-            let requested: i64 = self.db.query_row(
-                "SELECT requested FROM budget_entries WHERE id=?1",
-                [id],
-                |r| r.get(0),
-            )?;
-            self.check_operation_permit(id, u64::try_from(requested)?)?;
-        }
+        // This completes the same already accepted calculation. A later pause,
+        // permit expiry or destination credit cannot discard its signed result.
+        let intent = self.preparation_intent(id)?;
         let next = expected_revision
             .checked_add(1)
             .context("snapshot revision overflow")?;
@@ -897,51 +818,29 @@ impl Store {
         ensure!(n == 0, "treasury_send_pending");
         let current: i64 = tx.query_row("SELECT MAX(revision) FROM snapshots", [], |r| r.get(0))?;
         ensure!(current == expected_revision, "snapshot_revision_conflict");
-        let reserved: i64 = tx.query_row(
-            "SELECT reserved FROM budget_entries WHERE id=?1",
-            [id],
-            |r| r.get(0),
-        )?;
-        ensure!(reserved > 0, "operation has no reservation");
-        let enabled:bool=tx.query_row("SELECT COALESCE(p.enabled,1) FROM budget_entries b LEFT JOIN pools p ON p.id=b.pool_id WHERE b.id=?1",[id],|r|r.get(0))?;
-        ensure!(enabled, "pool disabled");
-        let funding: Option<String> = tx
-            .query_row(
-                "SELECT phase FROM funding_progress WHERE operation_id=?1",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if let Some(phase) = funding {
-            ensure!(
-                serde_json::from_str::<funding::FundingPhase>(&phase)?
-                    == funding::FundingPhase::Preparing,
-                "funding candidate changed during preparation"
-            );
-        }
         tx.execute("INSERT INTO snapshots VALUES (?1,?2)", params![next, snap])?;
-        tx.execute(
-            "INSERT INTO outgoing VALUES (?1,'PREPARED',?2,?3)",
+        ensure!(tx.execute(
+            "INSERT INTO outgoing(id,state,raw,revision,preparation) SELECT ?1,'PREPARED',?2,?3,preparation FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL",
             params![id, encrypted, next],
-        )?;
+        )? == 1, "accepted calculation owner changed");
         if let Some(facts) = facts {
             let cost = facts
                 .amount_zatoshis
                 .checked_add(facts.fee_zatoshis)
                 .context("source cost overflow")?;
             ensure!(
-                cost > 0 && cost <= reserved as u64 && facts.expiry_height > 0,
+                cost == intent.cost_zatoshis,
                 "invalid source cost or expiry"
             );
             tx.execute(
                 "INSERT INTO treasury_operations VALUES (?1,?2,'PREPARED',0)",
                 params![id, serde_json::to_string(&facts)?],
             )?;
-            tx.execute(
-                "UPDATE budget_entries SET reserved=?1 WHERE id=?2",
-                params![i64::try_from(cost)?, id],
-            )?;
         }
+        tx.execute(
+            "UPDATE operation_network SET preparation=NULL WHERE operation_id=?1",
+            [id],
+        )?;
         tx.execute("UPDATE funding_progress SET phase='\"PREPARED\"' WHERE operation_id=?1 AND phase='\"PREPARING\"'", [id])?;
         tx.commit()?;
         Ok(next)
@@ -949,7 +848,7 @@ impl Store {
     /// Proof for the pre-preparation path only; historical effects forbid deferral.
     pub fn require_unstarted_preparation(&self, id: &str) -> Result<()> {
         let touched: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL)",
             [id], |row| row.get(0),
         )?;
         ensure!(
@@ -981,34 +880,24 @@ impl Store {
             &bytes,
         )
     }
-    /// Future verified reconciliation calls this after confirming source spend.
-    pub fn confirm_spend(&mut self, id: &str, actual: i64, confirmation_day: u32) -> Result<()> {
+    /// Called only after exact transaction and canonical confirmation observation.
+    pub fn confirm_spend(&mut self, id: &str) -> Result<()> {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let state: String =
-            tx.query_row("SELECT state FROM outgoing WHERE id=?1", [id], |r| r.get(0))?;
-        let (reserved, consumed): (i64, i64) = tx.query_row(
-            "SELECT reserved,consumed FROM budget_entries WHERE id=?1",
+        let expired: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| r.get(0),
         )?;
-        if state == "RESOLVED" {
-            ensure!(consumed == actual, "operation_conflict");
-            return Ok(());
-        }
+        ensure!(!expired, "expired operation confirmation conflict");
         ensure!(
-            actual > 0 && actual <= reserved,
-            "source cost exceeds reservation"
+            tx.execute("UPDATE outgoing SET state='RESOLVED' WHERE id=?1", [id])? == 1,
+            "unknown prepared operation"
         );
-        tx.execute("UPDATE outgoing SET state='RESOLVED' WHERE id=?1", [id])?;
         tx.execute(
             "UPDATE treasury_operations SET submission='CONFIRMED' WHERE id=?1",
             [id],
-        )?;
-        tx.execute(
-            "UPDATE budget_entries SET reserved=0,consumed=?1,day=MAX(day,?3) WHERE id=?2",
-            params![actual, id, confirmation_day],
         )?;
         tx.commit()?;
         Ok(())
@@ -1082,7 +971,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 20,
+        schema == 21,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1139,7 +1028,7 @@ fn read_status(db: &Connection) -> Result<Status> {
         None
     };
     let outgoing_pending = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
+        if version>=21 {"SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)"} else {"SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')"},
         [],
         |r| r.get(0),
     )?;
@@ -1164,12 +1053,12 @@ fn read_status(db: &Connection) -> Result<Status> {
         });
     }
     Ok(Status {
-        schema_version: 4,
+        schema_version: 5,
         state_schema_version: version,
-        refunds: if version >= 7 {
-            refunds::read_refunds(db)?
+        legacy_refunds: if (7..21).contains(&version) {
+            Some(refunds::read_refunds(db)?)
         } else {
-            vec![]
+            None
         },
         funding_jobs,
         treasury_operations,
@@ -1290,7 +1179,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 20,
+        version == 21,
         "unsupported state schema; private-state conversion requires separate authorization; a code rollback is not a state downgrade"
     );
     // Additive lookup optimization for existing schema16 stores; financial
@@ -1497,7 +1386,7 @@ impl Store {
         let address: alloy_primitives::Address = recipient.parse()?;
         let recipient = address.to_string();
         self.db.execute(
-            "INSERT OR IGNORE INTO operation_network(operation_id,recipient) VALUES (?1,?2)",
+            "INSERT INTO operation_network(operation_id,recipient) VALUES (?1,?2) ON CONFLICT(operation_id) DO UPDATE SET recipient=COALESCE(recipient,excluded.recipient)",
             params![operation, recipient],
         )?;
         let saved: String = self.db.query_row(
@@ -1509,7 +1398,7 @@ impl Store {
         Ok(())
     }
     pub fn operation_recipient(&self, operation: &str) -> Result<Option<String>> {
-        let rows = self.db.prepare("SELECT recipient FROM operation_network WHERE operation_id=?1 UNION SELECT w.address FROM funding_progress p JOIN funding_jobs j ON j.id=p.job_id JOIN wallets w ON w.id=j.wallet_id WHERE p.operation_id=?1 UNION SELECT w.address FROM funding_recovery p JOIN funding_jobs j ON j.id=p.job_id JOIN wallets w ON w.id=j.wallet_id WHERE p.operation_id=?1")?.query_map([operation], |r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let rows = self.db.prepare("SELECT recipient FROM operation_network WHERE operation_id=?1 AND recipient IS NOT NULL UNION SELECT w.address FROM funding_progress p JOIN funding_jobs j ON j.id=p.job_id JOIN wallets w ON w.id=j.wallet_id WHERE p.operation_id=?1 UNION SELECT w.address FROM funding_recovery p JOIN funding_jobs j ON j.id=p.job_id JOIN wallets w ON w.id=j.wallet_id WHERE p.operation_id=?1")?.query_map([operation], |r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let mut address = None;
         for row in rows {
             let parsed: alloy_primitives::Address = row.parse()?;
@@ -1715,7 +1604,7 @@ impl Store {
         ).optional()?.context("operation metadata missing")?;
         Ok(OperationStatus {
             operation_id: id.to_owned(),
-            facts: serde_json::from_str(&facts)?,
+            facts: serde_json::from_str(&facts).context(scheduling::FundingDecodeFailure)?,
             submission,
             attempts,
         })
@@ -1727,10 +1616,11 @@ impl Store {
             |r| r.get(0),
         )?;
         ensure!(!exists, "cannot abandon prepared transaction");
-        self.db.execute(
-            "DELETE FROM budget_entries WHERE id=?1 AND consumed=0",
-            [id],
-        )?;
+        let accepted:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL)",[id],|r|r.get(0))?;
+        ensure!(
+            !accepted,
+            "accepted calculation requires recovery; cannot abandon input owner"
+        );
         Ok(())
     }
     /// The network request may occur only after this returns successfully.
@@ -1743,11 +1633,7 @@ impl Store {
     ) -> Result<i64> {
         ensure!(self.operation_pending(id)?, "transaction is not pending");
         let operation = self.operation(id)?;
-        ensure!(now < operation.facts.deadline, "funding_deadline_expired");
-        ensure!(
-            height < u64::from(operation.facts.expiry_height),
-            "transaction_expired"
-        );
+        operation.facts.require_protocol_validity(now, height)?;
         ensure!(
             retry || operation.attempts == 0,
             "explicit_rebroadcast_required"
@@ -1773,17 +1659,19 @@ impl Store {
                         .context("source cost overflow")?,
                 )?;
                 ensure!(
-                    capacity::current_funding_claim(&self.db, &job)?.is_some(),
+                    capacity::funding_claim_present(&self.db, &job)?,
                     "initial funding claim consumed or disabled"
                 );
             } else {
-                let enabled: bool = self.db.query_row("SELECT COALESCE(p.enabled,1) FROM budget_entries b LEFT JOIN pools p ON p.id=b.pool_id WHERE b.id=?1", [id], |r| r.get(0))?;
-                ensure!(enabled, "pool disabled");
+                if let Some(pool) = self.preparation_intent(id)?.pool {
+                    let enabled: bool = self.db.query_row(
+                        "SELECT enabled FROM pools WHERE id=?1",
+                        [pool],
+                        |r| r.get(0),
+                    )?;
+                    ensure!(enabled, "pool disabled");
+                }
             }
-            ensure!(
-                operation.facts.deadline - now >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
-                "funding_deadline_too_close"
-            );
         }
         let attempt = operation
             .attempts

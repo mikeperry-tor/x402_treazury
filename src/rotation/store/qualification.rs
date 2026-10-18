@@ -160,9 +160,11 @@ pub fn qualification_state(dir: &Path) -> Result<Value> {
     Ok(state)
 }
 fn read(db: &Connection) -> Result<Value> {
+    use sha2::{Digest, Sha256};
     for (table, label) in [
         ("payment_attempts", "payment attempts"),
-        ("budget_entries", "source budget entries"),
+        ("outgoing", "source operations"),
+        ("operation_network", "source preparation bindings"),
         ("wallets", "wallet observations"),
     ] {
         let count: i64 =
@@ -193,21 +195,27 @@ fn read(db: &Connection) -> Result<Value> {
             "height":r.get::<_,i64>(2)?,"hash":r.get::<_,String>(3)?,"block_time":r.get::<_,i64>(4)?})))?
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
-    let mut stmt = db.prepare(
-        "SELECT id,day,original_day,requested,reserved,consumed FROM budget_entries ORDER BY id",
-    )?;
-    let budget=stmt.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"day":r.get::<_,i64>(1)?,"original_day":r.get::<_,i64>(2)?,"requested":r.get::<_,i64>(3)?,"reserved":r.get::<_,i64>(4)?,"consumed":r.get::<_,i64>(5)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    let pending = db
-        .prepare("SELECT id FROM outgoing WHERE state='PREPARED' ORDER BY id")?
-        .query_map([], |r| r.get::<_, String>(0))?
+    let preparations = db.prepare("SELECT operation_id,preparation FROM operation_network WHERE preparation IS NOT NULL UNION ALL SELECT id,preparation FROM outgoing ORDER BY 1")?
+        .query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,Vec<u8>>(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let archived = db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=r.operation_id AND b.consumed!=0) ORDER BY r.operation_id")?.query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut owners = std::collections::BTreeSet::new();
+    let preparations = preparations.into_iter().map(|(id, bytes)| {
+        ensure!(owners.insert(id.clone()), "duplicate source preparation owner");
+        let binding: Option<(String,String)> = db.query_row("SELECT f.id,p.name FROM funding_jobs f JOIN pools p ON p.id=f.pool_id WHERE f.id IN (SELECT job_id FROM funding_progress WHERE operation_id=?1 UNION SELECT job_id FROM funding_recovery WHERE operation_id=?1)",[&id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        let raw:Option<Vec<u8>>=db.query_row("SELECT raw FROM outgoing WHERE id=?1",[&id],|r|r.get(0)).optional()?;
+        let raw=raw.map(|bytes|format!("{:x}",Sha256::digest(&bytes)));
+        Ok(json!({"operation_id":id,"preparation_sha256":format!("{:x}",Sha256::digest(&bytes)),"prepared_record_sha256":raw,"job_id":binding.as_ref().map(|v|&v.0),"pool_name":binding.as_ref().map(|v|&v.1)}))
+    }).collect::<Result<Vec<_>>>()?;
+    let pending = db.prepare("SELECT operation_id FROM operation_network WHERE preparation IS NOT NULL UNION ALL SELECT id FROM outgoing WHERE state='PREPARED' ORDER BY 1")?
+        .query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let archived = db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM operation_network n WHERE n.operation_id=r.operation_id AND n.preparation IS NOT NULL) ORDER BY r.operation_id")?
+        .query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let status = read_status(db)?;
-    let wallets = db.prepare("SELECT id,pool_id,role,balance,block_height,block_hash FROM wallets ORDER BY id")?
-        .query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"role":r.get::<_,String>(2)?,"balance":r.get::<_,String>(3)?,"height":r.get::<_,Option<i64>>(4)?,"hash":r.get::<_,Option<String>>(5)?})))?
+    let wallets = db.prepare("SELECT id,pool_id,role,balance FROM wallets ORDER BY id")?
+        .query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"role":r.get::<_,String>(2)?,"balance":r.get::<_,String>(3).ok().and_then(|v|amount(&v).ok()).map(|v|v.to_string()),"height":null,"hash":null,"observation_model":"advisory_estimate"})))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(
-        json!({"wallet_observations":wallets,"lifecycle":lifecycle(db, &status)?,"treasury_status":status,"payment_attempts":attempts,"payment_resolutions":resolutions,"source_budget_entries":budget,"pending_source_operations":pending,"unprepared_archives":archived}),
+        json!({"wallet_observations":wallets,"lifecycle":lifecycle(db, &status)?,"treasury_status":status,"payment_attempts":attempts,"payment_resolutions":resolutions,"source_preparations":preparations,"pending_source_operations":pending,"unprepared_archives":archived}),
     )
 }
 
@@ -215,6 +223,55 @@ fn read(db: &Connection) -> Result<Value> {
 mod tests {
     use super::*;
     use crate::rotation::base::{Anchor, AuthorizationOutcome, AuthorizationResolution, ChainView};
+    #[test]
+    fn malformed_advisory_estimates_export_unknown_without_hiding_other_wallets() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"initial",
+        )
+        .unwrap();
+        super::super::test_support::declare_two_reserves(
+            &mut store,
+            "estimates",
+            "1",
+            Some(U256::from(100)),
+            0,
+        )
+        .unwrap();
+        let wallets = store.status().unwrap().pools.remove(0).addresses;
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET balance=X'00' WHERE id=?1",
+                [&wallets[0].id],
+            )
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET balance='7' WHERE id=?1",
+                [&wallets[1].id],
+            )
+            .unwrap();
+        let snapshot = store.qualification_state().unwrap();
+        let rows = snapshot["wallet_observations"].as_array().unwrap();
+        assert!(rows.iter().find(|v| v["id"] == wallets[0].id).unwrap()["balance"].is_null());
+        assert_eq!(
+            rows.iter().find(|v| v["id"] == wallets[1].id).unwrap()["balance"],
+            "7"
+        );
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET balance='malformed' WHERE id=?1",
+                [&wallets[0].id],
+            )
+            .unwrap();
+        assert!(store.qualification_state().is_ok());
+    }
     #[test]
     fn snapshot_row_bound_rejects_with_warning_and_consumer_error() {
         use std::sync::{Arc, Mutex};
@@ -230,7 +287,7 @@ mod tests {
             }
         }
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE payment_attempts(id); CREATE TABLE budget_entries(id); CREATE TABLE wallets(id); WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10001) INSERT INTO wallets SELECT x FROM n;").unwrap();
+        db.execute_batch("CREATE TABLE payment_attempts(id); CREATE TABLE outgoing(id); CREATE TABLE operation_network(id); CREATE TABLE wallets(id); WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<10001) INSERT INTO wallets SELECT x FROM n;").unwrap();
         let writer = Writer(Arc::default());
         let sink = writer.clone();
         let subscriber = tracing_subscriber::fmt()
@@ -301,8 +358,8 @@ mod tests {
             .find(|w| w["id"] == wallet)
             .unwrap();
         assert_eq!(saved["balance"], "100");
-        assert_eq!(saved["height"], 12);
-        assert_eq!(saved["hash"], hash);
+        assert!(saved["height"].is_null());
+        assert!(saved["hash"].is_null());
         let evidence = store.qualification_payment("new").unwrap();
         assert_eq!(evidence["ownership_evidence_version"], 1);
         assert_eq!(evidence["payer_role"], "ACTIVE");
@@ -437,13 +494,15 @@ mod tests {
         let key = dir.path().join("key");
         let mut store = Store::create(&state, &key, 1, b"fixture").unwrap();
         let id = store.id().to_owned();
-        store.reserve("operation", None, 0, 100).unwrap();
+        store
+            .accept_preparation("operation", None, 100, None)
+            .unwrap();
         let facts = TransactionFacts {
             txid: "fixture-tx".into(),
             expiry_height: 200,
             amount_zatoshis: 90,
             fee_zatoshis: 10,
-            deadline: 5000,
+            deadline: Some(5000),
         };
         store
             .prepare_with_facts(

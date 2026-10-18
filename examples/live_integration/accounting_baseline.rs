@@ -50,8 +50,16 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
     let before = crate::accounting::capture(&historical)?;
     let old = crate::accounting::summarize(&before)?;
     let new = crate::accounting::summarize(current)?;
+    let modern = current["schema_version"] == 2 || before["schema_version"] == 2;
+    if current["schema_version"] == 2 && before["schema_version"] == 2 {
+        let owners = rows(current, "source_preparations", "operation_id");
+        for entry in before["source_preparations"].as_array().unwrap() {
+            ensure!(owners.get(entry["operation_id"].as_str().unwrap()).is_some_and(|v|v["preparation_sha256"] == entry["preparation_sha256"] && (entry["prepared_record_sha256"].is_null() || v["prepared_record_sha256"] == entry["prepared_record_sha256"])), "baseline calculation changed or disappeared");
+        }
+    }
+    if !modern {
     let entries = rows(current, "source_budget_entries", "id");
-    let ops = rows(current, "operations", "operation_id");
+
     for entry in before["source_budget_entries"].as_array().unwrap() {
         if entry["consumed"].as_u64().unwrap() > 0 {
             let saved = entries
@@ -63,6 +71,8 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
             );
         }
     }
+    }
+    let ops = rows(current, "operations", "operation_id");
     for op in before["operations"].as_array().unwrap() {
         let saved = ops
             .get(op["operation_id"].as_str().unwrap())
@@ -72,6 +82,7 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
             "baseline transaction facts changed"
         );
     }
+    if !modern {
     let refunds: BTreeMap<_, _> = current["refunds"]
         .as_array()
         .unwrap()
@@ -98,6 +109,7 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
             "baseline refund changed"
         );
     }
+    }
     let mut deltas = serde_json::Map::new();
     for field in [
         "recorded_principal_zatoshis",
@@ -106,6 +118,10 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
         "source_reserved_zatoshis",
         "recorded_refund_outputs_zatoshis",
     ] {
+        if old[field].is_null() || new[field].is_null() {
+            deltas.insert(field.into(), json!({"baseline":old[field],"observed":new[field],"change":null}));
+            continue;
+        }
         let a = old[field].as_u64().unwrap();
         let b = new[field].as_u64().unwrap();
         deltas.insert(

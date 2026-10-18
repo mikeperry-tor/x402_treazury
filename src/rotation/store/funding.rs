@@ -3,23 +3,19 @@
 pub(super) const RECOVERY_COUNT_SQL: &str = "SELECT COUNT(*) FROM funding_recovery r WHERE job_id=?1 AND NOT EXISTS(SELECT 1 FROM funding_quote_refreshes q WHERE q.operation_id=r.operation_id)";
 
 use super::*;
-// Absence of bytes never proves that an interrupted preparer did no work.
-// Only untouched phases or an exactly bound, already committed closure suffice.
-pub(crate) fn safely_unprepared(job: &FundingJob, facts: &FundingFacts) -> bool {
-    matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted) || facts.source_closed
+// The current schema journals acceptance before any SDK calculation. A missing
+// accepted intent AND outgoing journal proves that this code never calculated.
+pub(crate) fn safely_unprepared(_job: &FundingJob, facts: &FundingFacts) -> bool {
+    facts.source_closed
+        || (!facts.preparation_accepted
+            && !facts.source_pending
+            && facts.source_submission.is_none())
 }
-
 pub(crate) fn can_recover_facts(
     job: &FundingJob,
     operation: Option<&crate::rotation::transaction::OperationStatus>,
     facts: &FundingFacts,
 ) -> bool {
-    if job.phase == FundingPhase::RefundPending {
-        return false;
-    }
-    if job.phase != FundingPhase::RecoveryRequired {
-        return true;
-    }
     operation
         .map(|op| op.submission != "CONFIRMED")
         .unwrap_or_else(|| safely_unprepared(job, facts))
@@ -89,6 +85,7 @@ pub struct FundingJob {
 pub struct FundingFacts {
     pub enabled: bool,
     pub source_pending: bool,
+    pub preparation_accepted: bool,
     pub initial_credit_recorded: bool,
     pub accepted_quote: bool,
     pub archived: bool,
@@ -114,11 +111,11 @@ impl FundingFacts {
             && !self.provider_refunded
     }
     pub fn source_reconciliation_needed(&self) -> bool {
-        self.source_pending
+        self.source_pending && self.source_attempts > 0
     }
 }
 
-/// Historical conversion preflight fixture. Runtime opens now require schema16
+/// Historical conversion preflight fixture. Runtime opens now require the current schema
 /// before any mutation; this preserves the original unsupported-proof regression.
 #[cfg(test)]
 pub(super) fn preflight_funding_upgrade(db: &Connection, version: u32) -> Result<()> {
@@ -237,7 +234,7 @@ pub(crate) fn initial_credit_recorded(db: &Connection, wallet: &str) -> Result<b
     )?)
 }
 fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
-    Ok(db.query_row(r#"SELECT (NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1) AND (EXISTS(SELECT 1 FROM funding_recovery WHERE operation_id=?1) OR EXISTS(SELECT 1 FROM funding_progress WHERE operation_id=?1 AND phase IN ('"ALLOCATED"','"QUOTED"')))) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0))"#,[operation],|r|r.get(0))?)
+    Ok(db.query_row("SELECT (NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL)) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED'))",[operation],|r|r.get(0))?)
 }
 #[cfg(test)]
 pub(crate) fn record_readiness(
@@ -304,11 +301,11 @@ impl Store {
 
     pub fn funding_facts(&self, job: &str, operation: &str) -> Result<FundingFacts> {
         let (mut facts, flags) = self.db.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1),EXISTS(SELECT 1 FROM outgoing x WHERE x.id=j.operation_id AND x.state='PREPARED') FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
+            "SELECT f.readiness_requirement IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1),EXISTS(SELECT 1 FROM outgoing x WHERE x.id=j.operation_id AND x.state='PREPARED'),EXISTS(SELECT 1 FROM operation_network n WHERE n.operation_id=j.operation_id AND n.preparation IS NOT NULL) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
             params![job,operation], |r| Ok((FundingFacts {
                 initial_credit_recorded:r.get(0)?, accepted_quote:r.get(1)?, archived:r.get(2)?, source_closed: false,
                 provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
-                source_submission:r.get(7)?, source_attempts:r.get(8)?,enabled:r.get(9)?, source_pending:r.get(10)?,
+                source_submission:r.get(7)?, source_attempts:r.get(8)?,enabled:r.get(9)?, source_pending:r.get(10)?,preparation_accepted:r.get(11)?,
             }, provider_flags(r, 3))),
         ).context("funding operation binding changed")?;
         (
@@ -317,6 +314,11 @@ impl Store {
             facts.provider_refunded,
             facts.provider_incomplete,
         ) = flags.context(super::scheduling::FundingDecodeFailure)?;
+        facts.enabled = facts.enabled
+            && facts.source_attempts == 0
+            && !facts.initial_credit_recorded
+            && self.funding_restriction == super::super::restriction::FundingRestriction::Ordinary
+            && capacity::funding_claim_present(&self.db, job)?;
         facts.source_closed = facts.archived && source_attempt_closed(&self.db, operation)?;
         Ok(facts)
     }
@@ -465,32 +467,8 @@ impl Store {
     }
 
     pub fn funding_source_ready(&self, _now: u64) -> Result<bool> {
-        let pending: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
-            [],
-            |r| r.get(0),
-        )?;
-        if pending {
-            return Ok(false);
-        }
-        let observation: Option<String> = self
-            .db
-            .query_row(
-                "SELECT observation FROM treasury_sync WHERE singleton=1",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let Some(observation) = observation else {
-            return Ok(false);
-        };
-        let observation: SyncObservation = serde_json::from_str(&observation)?;
-        let revision: i64 = self.db.query_row(
-            "SELECT revision FROM snapshots ORDER BY revision DESC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )?;
-        Ok(observation.phase == SyncPhase::Ready && observation.snapshot_revision == revision)
+        let pending:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",[],|r|r.get(0))?;
+        Ok(!pending)
     }
 
     pub(crate) fn funding_preparation_context(&self) -> Result<(String, i64, SyncObservation)> {
@@ -523,7 +501,7 @@ impl Store {
             amount(target)? > U256::ZERO && amount(ceiling)? >= amount(target)?,
             "invalid funding quote terms"
         );
-        let changed=self.db.execute("UPDATE funding_progress SET quote_target=?3,quote_ceiling=?4 WHERE job_id=?1 AND operation_id=?2 AND phase='\"ALLOCATED\"' AND quote IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?2) AND EXISTS(SELECT 1 FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND f.state='QUEUED' AND f.readiness_requirement IS NULL AND w.role='ALLOCATED' AND p.enabled=1)",params![job,operation,target,ceiling])?;
+        let changed=self.db.execute("UPDATE funding_progress SET quote_target=?3,quote_ceiling=?4 WHERE job_id=?1 AND operation_id=?2 AND phase='\"ALLOCATED\"' AND quote IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?2) AND NOT EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?2 AND preparation IS NOT NULL) AND EXISTS(SELECT 1 FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id WHERE f.id=?1 AND f.state='QUEUED' AND f.readiness_requirement IS NULL AND w.role='ALLOCATED' AND p.enabled=1)",params![job,operation,target,ceiling])?;
         ensure!(changed == 1, "funding quote boundary changed");
         Ok(())
     }
@@ -623,26 +601,6 @@ impl Store {
     }
 }
 
-fn source_accounted(db: &Connection, operation: &str) -> Result<bool> {
-    let facts:Option<(String,i64,i64,String)>=db.query_row("SELECT o.facts,b.consumed,b.reserved,x.state FROM treasury_operations o JOIN budget_entries b ON b.id=o.id JOIN outgoing x ON x.id=o.id WHERE o.id=?1 AND o.submission='CONFIRMED'",[operation],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
-    let Some((facts, consumed, reserved, state)) = facts else {
-        return Ok(false);
-    };
-    if consumed == 0 {
-        return Ok(false);
-    }
-    let facts: crate::rotation::transaction::TransactionFacts = serde_json::from_str(&facts)?;
-    let gross = facts
-        .amount_zatoshis
-        .checked_add(facts.fee_zatoshis)
-        .context("source gross expenditure overflow")?;
-    ensure!(
-        u64::try_from(consumed)? == gross && reserved == 0 && state == "RESOLVED",
-        "funding source accounting integrity conflict"
-    );
-    Ok(true)
-}
-
 type ProviderFlags = (bool, bool, bool, bool);
 
 fn provider_flags(row: &rusqlite::Row<'_>, start: usize) -> rusqlite::Result<ProviderFlags> {
@@ -655,9 +613,9 @@ fn provider_flags(row: &rusqlite::Row<'_>, start: usize) -> rusqlite::Result<Pro
 }
 
 pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> Result<bool> {
-    let (ready, correlation, quote, flags, confirmed, gross):
-            (bool, Option<String>, bool, rusqlite::Result<ProviderFlags>, bool, bool) = tx.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id AND b.consumed>0 AND b.reserved=0) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,provider_flags(r,3),r.get(7)?,r.get(8)?)))?;
+    let (ready, correlation, quote, flags, confirmed):
+            (bool, Option<String>, bool, rusqlite::Result<ProviderFlags>, bool) = tx.query_row(
+            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED') FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,provider_flags(r,3),r.get(7)?)))?;
     let (success, failed, refunded, incomplete) =
         flags.context(super::scheduling::FundingDecodeFailure)?;
     let wallet: String = tx.query_row(
@@ -690,8 +648,6 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
         && !refunded
         && !incomplete
         && confirmed
-        && gross
-        && source_accounted(tx, operation)?
     {
         Some("SUCCESS")
     } else {
@@ -729,7 +685,7 @@ fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result
     )?;
     ensure!(matched, "funding operation correlation mismatch");
     db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_integrity_conflict; contradictory completed provider outcome' WHERE job_id=?1 AND operation_id=?2 AND (provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1))) AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state='COMPLETE')",params![job,operation])?;
-    db.execute("UPDATE funding_progress SET phase=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN '\"RECOVERY_REQUIRED\"' WHEN provider_failed=1 OR provider_refunded=1 THEN '\"REFUND_PENDING\"' WHEN provider_success=1 THEN '\"VERIFYING_CREDIT\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.submission='CONFIRMED') THEN '\"SWAPPING\"' WHEN phase='\"PREPARED\"' AND EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.attempts>0) THEN '\"DEPOSIT_PENDING\"' ELSE phase END WHERE job_id=?1 AND operation_id=?2 AND phase NOT IN ('\"RECOVERY_REQUIRED\"','\"COMPLETE\"')", params![job,operation])?;
+    db.execute("UPDATE funding_progress SET phase=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN '\"RECOVERY_REQUIRED\"' WHEN provider_failed=1 OR provider_refunded=1 THEN '\"REFUND_PENDING\"' WHEN provider_success=1 THEN '\"VERIFYING_CREDIT\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.submission='CONFIRMED') THEN '\"SWAPPING\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o JOIN outgoing x ON x.id=o.id WHERE o.id=operation_id AND o.attempts>0 AND x.state='PREPARED') THEN '\"DEPOSIT_PENDING\"' ELSE phase END WHERE job_id=?1 AND operation_id=?2 AND phase NOT IN ('\"RECOVERY_REQUIRED\"','\"COMPLETE\"')", params![job,operation])?;
     Ok(())
 }
 
@@ -885,7 +841,7 @@ impl Store {
             serde_json::from_str::<FundingPhase>(&phase)? == FundingPhase::Preparing,
             "preparation is not pending"
         );
-        let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)", [&operation], |r| r.get(0))?;
+        let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL)", [&operation], |r| r.get(0))?;
         ensure!(
             !touched,
             "preparation has durable effects; recovery required"
@@ -934,12 +890,9 @@ impl Store {
             );
             return Ok(());
         }
-        let phase: FundingPhase = serde_json::from_str(&phase)?;
-        ensure!(
-            matches!(phase, FundingPhase::Allocated | FundingPhase::Quoted),
-            "preparation outcome unknown"
-        );
-        let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",[&operation],|r|r.get(0))?;
+        // Only accepted calculation/bytes prove work started; phase is diagnostic.
+        let _ = phase;
+        let touched: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) OR EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL)",[&operation],|r|r.get(0))?;
         ensure!(!touched, "unprepared closure has source effects");
         tx.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund,provider_success,provider_failed,provider_refunded,provider_incomplete,provider_observed_at,quote_target,quote_ceiling,accepted_output,accepted_recipient) SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.provider_observed_at,j.quote_target,j.quote_ceiling,j.accepted_output,j.accepted_recipient FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1",[job])?;
         tx.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_attempt_closed; current authority required for another attempt' WHERE job_id=?1",[job])?;
@@ -1030,7 +983,7 @@ impl Store {
         )?;
         ensure!(!signed, "recovery refused: operation has signed bytes");
         let reserved: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",
+            "SELECT EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL)",
             [&operation],
             |r| r.get(0),
         )?;
@@ -1163,7 +1116,7 @@ impl Store {
                 "quote target mismatch"
             );
             let (_wallet, address, enabled, ready, pending): (String,String,bool,bool,bool) = tx.query_row(
-                "SELECT w.id,w.address,p.enabled,f.readiness_requirement IS NOT NULL,EXISTS(SELECT 1 FROM outgoing o WHERE o.id=j.operation_id) OR EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id) FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND f.state='QUEUED' AND w.role='ALLOCATED'", [id],
+                "SELECT w.id,w.address,p.enabled,f.readiness_requirement IS NOT NULL,EXISTS(SELECT 1 FROM outgoing o WHERE o.id=j.operation_id) OR EXISTS(SELECT 1 FROM operation_network n WHERE n.operation_id=j.operation_id AND n.preparation IS NOT NULL) FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND f.state='QUEUED' AND w.role='ALLOCATED'", [id],
                 |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
             ensure!(
                 enabled && !ready && !pending,
@@ -1281,10 +1234,6 @@ impl Store {
     ) -> Result<()> {
         self.db.execute("INSERT INTO funding_health(job_id,timed_out) SELECT ?1,1 WHERE EXISTS(SELECT 1 FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id WHERE j.job_id=?1 AND j.operation_id=?2 AND f.state!='COMPLETE') ON CONFLICT(job_id) DO UPDATE SET timed_out=1",params![id,operation])?;
         Ok(())
-    }
-    /// Check before advancing to PREPARING; the owner still rechecks at reserve.
-    pub fn check_funding_capacity(&self, instant: u64, input: u64) -> Result<()> {
-        self.require_spend_ready(instant, input)
     }
     pub fn defer_funding(
         &mut self,
@@ -1637,6 +1586,9 @@ mod completion_tests {
                 store
                     .begin_funding_preparation(&job.operation_id, Some(&authority))
                     .unwrap();
+                store
+                    .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                    .unwrap();
             }
             store
                 .record_destination_readiness(&job.id, &job.target, "credit", 1)
@@ -1647,7 +1599,7 @@ mod completion_tests {
                         .begin_funding_preparation(&job.operation_id, Some(&authority))
                         .is_err()
                 );
-                let effects:bool=store.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing) OR EXISTS(SELECT 1 FROM budget_entries)",[],|r|r.get(0)).unwrap();
+                let effects:bool=store.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing) OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",[],|r|r.get(0)).unwrap();
                 assert!(!effects);
                 store
                     .close_unprepared_funding_for_operation(&job.id, &job.operation_id)
@@ -1666,9 +1618,7 @@ mod completion_tests {
                         [&job.wallet_id],
                     )
                     .unwrap();
-                store
-                    .reserve(&job.operation_id, Some(&job.pool_id), 1, 100)
-                    .unwrap();
+
                 let revision = store.snapshot().unwrap().0;
                 store
                     .prepare_with_facts(
@@ -1681,7 +1631,7 @@ mod completion_tests {
                             expiry_height: 100,
                             amount_zatoshis: 50,
                             fee_zatoshis: 10,
-                            deadline: u64::MAX,
+                            deadline: Some(u64::MAX),
                         }),
                     )
                     .unwrap();
@@ -1795,7 +1745,7 @@ mod completion_tests {
         let effects: bool = store
             .db
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM outgoing) OR EXISTS(SELECT 1 FROM budget_entries)",
+                "SELECT EXISTS(SELECT 1 FROM outgoing) OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",
                 [],
                 |r| r.get(0),
             )
@@ -2089,7 +2039,7 @@ mod completion_tests {
 
     #[cfg(feature = "zcash")]
     #[test]
-    fn success_requires_source_accounting_and_keeps_original_credit_after_spending() {
+    fn success_requires_original_source_confirmation_and_keeps_original_credit_after_spending() {
         use crate::rotation::near::SwapStatus;
         let (_dir, mut store, job) = fixture();
         store
@@ -2102,6 +2052,19 @@ mod completion_tests {
             )
             .unwrap();
         store
+            .accept_preparation(&job.operation_id, Some(&job.pool_id), 100, None)
+            .unwrap();
+        let facts = TransactionFacts {
+            txid: "source".into(),
+            expiry_height: 100,
+            amount_zatoshis: 90,
+            fee_zatoshis: 10,
+            deadline: Some(u64::MAX),
+        };
+        store
+            .prepare_with_facts(&job.operation_id, 1, b"snapshot", b"source", Some(facts))
+            .unwrap();
+        store
             .record_destination_readiness(&job.id, "10", "block", 1)
             .unwrap();
         store
@@ -2112,29 +2075,7 @@ mod completion_tests {
                 .finish_funding_if_proven(&job.id, &job.operation_id)
                 .unwrap()
         );
-        store.db.execute("INSERT INTO budget_entries(id,pool_id,day,original_day,requested,reserved,consumed) VALUES(?1,?2,0,0,100,100,0)",params![job.operation_id,job.pool_id]).unwrap();
-        store
-            .db
-            .execute(
-                "INSERT INTO outgoing(id,state,raw,revision) VALUES(?1,'PREPARED',X'00',1)",
-                [&job.operation_id],
-            )
-            .unwrap();
-        let facts = crate::rotation::transaction::TransactionFacts {
-            txid: "source".into(),
-            expiry_height: 100,
-            amount_zatoshis: 90,
-            fee_zatoshis: 10,
-            deadline: u64::MAX,
-        };
-        store.db.execute("INSERT INTO treasury_operations(id,facts,submission,attempts) VALUES(?1,?2,'CONFIRMED',1)",params![job.operation_id,serde_json::to_string(&facts).unwrap()]).unwrap();
-        // A confirmation label alone cannot bypass gross expenditure accounting.
-        assert!(
-            !store
-                .finish_funding_if_proven(&job.id, &job.operation_id)
-                .unwrap()
-        );
-        store.confirm_spend(&job.operation_id, 100, 0).unwrap();
+        store.confirm_spend(&job.operation_id).unwrap();
         store
             .db
             .execute(
@@ -2176,7 +2117,7 @@ mod completion_tests {
             )
             .unwrap();
         store
-            .reserve(&job.operation_id, Some(&job.pool_id), 1, 100)
+            .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
             .unwrap();
         let revision = store.snapshot().unwrap().0;
         store
@@ -2190,7 +2131,7 @@ mod completion_tests {
                     expiry_height: 100,
                     amount_zatoshis: 50,
                     fee_zatoshis: 10,
-                    deadline: u64::MAX,
+                    deadline: Some(u64::MAX),
                 }),
             )
             .unwrap();
@@ -2336,6 +2277,7 @@ mod recovery_classification_tests {
         )?;
         let jobs = store.funding_jobs()?;
         let unknown = &jobs[0];
+        store.accept_preparation(&unknown.operation_id, Some(&unknown.pool_id), 10, None)?;
         store.advance_funding(
             &unknown.id,
             FundingPhase::Allocated,
@@ -2383,7 +2325,24 @@ mod recovery_classification_tests {
                 .funding_facts(&job.id, &job.operation_id)?
                 .source_closed
         );
-        store.db.execute("INSERT INTO budget_entries(id,pool_id,day,original_day,requested,reserved,consumed) VALUES (?1,?2,1,1,10,10,0)", params![job.operation_id, job.pool_id])?;
+        let bytes = seal(
+            &store.key,
+            &format!(
+                "v1:{}:{}:preparation:{}",
+                store.id,
+                store.network.name(),
+                job.operation_id
+            ),
+            &serde_json::to_vec(&super::preparation::PreparationIntent {
+                pool: Some(job.pool_id.clone()),
+                cost_zatoshis: 10,
+                calculation: None,
+            })?,
+        )?;
+        store.db.execute(
+            "UPDATE operation_network SET operation_id=?1,preparation=?2 WHERE operation_id=?3",
+            params![job.operation_id, bytes, unknown.operation_id],
+        )?;
         assert!(
             !store
                 .funding_facts(&job.id, &job.operation_id)?
@@ -2396,7 +2355,7 @@ mod recovery_classification_tests {
             job.operation_id
         );
         store.db.execute(
-            "DELETE FROM budget_entries WHERE id=?1",
+            "DELETE FROM operation_network WHERE operation_id=?1",
             [&job.operation_id],
         )?;
         store.deny_new_funding();

@@ -78,7 +78,7 @@ impl TransactionSubmission for GrpcSubmission {
     async fn preflight(
         &mut self,
         transaction: &PreparedTransaction,
-        rebroadcast: bool,
+        _rebroadcast: bool,
     ) -> Result<()> {
         self.ready = None;
         let raw = decode(transaction.bytes())?;
@@ -97,22 +97,7 @@ impl TransactionSubmission for GrpcSubmission {
             .get_latest_block(request_timeout())
             .await
             .map_err(|_| anyhow::anyhow!("treasury tip unavailable"))?;
-        ensure!(
-            tip.height < u64::from(facts.expiry_height),
-            "transaction_expired"
-        );
-        ensure!(
-            facts
-                .deadline
-                .checked_sub(crate::rotation::base::now()?)
-                .is_some_and(|remaining| remaining
-                    >= if rebroadcast {
-                        1
-                    } else {
-                        crate::rotation::transaction::MIN_QUOTE_VALIDITY_SECONDS
-                    }),
-            "funding_deadline_expired"
-        );
+        facts.require_protocol_validity(crate::rotation::base::now()?, tip.height)?;
         self.ready = Some((transaction.operation_id().to_owned(), client, tip.height));
         Ok(())
     }
@@ -140,22 +125,8 @@ impl TransactionSubmission for GrpcSubmission {
                 self.preflight(transaction, !first_attempt).await?;
             }
             let (_, mut client, tip) = self.ready.take().context("submission preflight missing")?;
-            ensure!(tip < u64::from(facts.expiry_height), "transaction_expired");
-            // Network readiness completed before durable intent. A second unsigned
-            // tip read here could strand a never-sent operation as UNKNOWN.
-            // Retain immediate local expiry checks without new I/O.
-            ensure!(
-                facts
-                    .deadline
-                    .checked_sub(crate::rotation::base::now()?)
-                    .is_some_and(|remaining| remaining
-                        >= if first_attempt {
-                            crate::rotation::transaction::MIN_QUOTE_VALIDITY_SECONDS
-                        } else {
-                            1
-                        }),
-                "funding_deadline_expired"
-            );
+            // The existing protocol check covers the async preflight/intent gap.
+            facts.require_protocol_validity(crate::rotation::base::now()?, tip)?;
             client
                 .send_transaction(
                     RawTransaction {

@@ -71,7 +71,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
         .advance_funding(&pending.id, FundingPhase::Quoted, FundingPhase::Preparing)
         .unwrap();
     store
-        .reserve(&pending.operation_id, Some(&pool), 1, 100)
+        .accept_preparation(&pending.operation_id, Some(&pool), 100, None)
         .unwrap();
     store
         .prepare(

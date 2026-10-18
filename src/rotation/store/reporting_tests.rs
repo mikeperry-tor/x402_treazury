@@ -56,7 +56,7 @@ fn historical_status_projects_available_fields_without_mutating_journals() {
         let report =
             read_status(&db).unwrap_or_else(|error| panic!("version {version}: {error:#}"));
         assert_eq!(report.state_schema_version, version);
-        assert_eq!(report.schema_version, 4);
+        assert_eq!(report.schema_version, 5);
         assert_eq!(report.treasury_id, "fixture");
         assert_eq!(report.birthday, 123);
         assert_eq!(report.snapshot_revision, 1);
@@ -93,7 +93,10 @@ fn historical_status_projects_available_fields_without_mutating_journals() {
             assert!(wallet.runtime_balance_evidence.is_none());
         }
         assert_eq!(report.funding_jobs.len(), usize::from(version >= 4));
-        assert_eq!(report.refunds.len(), usize::from(version >= 7));
+        assert_eq!(
+            report.legacy_refunds.as_ref().map_or(0, Vec::len),
+            usize::from(version >= 7)
+        );
         assert_eq!(report.treasury_operations.len(), usize::from(version >= 3));
         if version >= 3 {
             let operation = &report.treasury_operations[0];
@@ -116,8 +119,11 @@ fn historical_status_projects_available_fields_without_mutating_journals() {
             assert_eq!(saved, "BROADCAST_REQUESTED", "expiry is projection only");
         }
         if version >= 7 {
-            assert_eq!(report.refunds[0].amount, 3);
-            assert_eq!(report.refunds[0].operation_id, "operation");
+            assert_eq!(report.legacy_refunds.as_ref().unwrap()[0].amount, 3);
+            assert_eq!(
+                report.legacy_refunds.as_ref().unwrap()[0].operation_id,
+                "operation"
+            );
         }
         assert_eq!(
             serde_json::to_value(read_status(&db).unwrap()).unwrap(),

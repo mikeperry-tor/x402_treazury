@@ -34,7 +34,7 @@ async fn rpc(Json(v): Json<Value>) -> Json<Value> {
             json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
         }
         "eth_call" => {
-            assert_eq!(v["params"][1]["requireCanonical"], true);
+            assert!(v["params"][1] == "latest" || v["params"][1]["requireCanonical"] == true);
             let balance = v["params"][0]["data"]
                 .as_str()
                 .unwrap()
@@ -114,6 +114,17 @@ async fn base_service(fault: &str, relay_enabled: bool) {
         .unwrap()
         .unwrap();
     let jobs = store.funding_jobs().unwrap();
+    for job in &jobs {
+        store
+            .record_funding_balance(
+                &job.id,
+                &job.operation_id,
+                &job.wallet_id,
+                &job.recipient,
+                alloy_primitives::U256::from(5_000_000),
+            )
+            .unwrap();
+    }
     let f = Fixture {
         signed: Arc::default(),
         signer: jobs[0].recipient.clone(),
@@ -139,7 +150,7 @@ async fn base_service(fault: &str, relay_enabled: bool) {
         .replace("http://127.0.0.1:1", &origin);
     config = match fault {
         "credential" => config.replace("[funding]", "[funding]\nnear_api_key_env='NEAR'"),
-        "quote" => config.replace("[funding]", "[funding]\nquote_deadline_seconds=1"),
+        "quote" => config.replace("[funding]", "[funding]\nquote_deadline_seconds=0"),
         "fee" => config.replace(
             "[treasury]",
             "[treasury]\nmax_funding_transaction_fee_zec='invalid'",
@@ -177,11 +188,8 @@ async fn base_service(fault: &str, relay_enabled: bool) {
         body: None,
     };
     assert_eq!(payer.execute(route()).await.unwrap(), "paid");
-    assert!(
-        payer.execute(route()).await.is_err(),
-        "unresolved exposure must prevent second payment"
-    );
-    assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(payer.execute(route()).await.unwrap(), "paid");
+    assert_eq!(f.signed.load(Ordering::SeqCst), 2);
     let status = store.call(|s| s.status()).await.unwrap();
     assert_eq!(status.funding_jobs.len(), jobs.len());
     assert_eq!(
@@ -197,7 +205,7 @@ async fn base_service(fault: &str, relay_enabled: bool) {
     // Reconciliation retains the unresolved authorization; absence of a seller
     // receipt is never release authority.
     pool.reconcile().await.unwrap();
-    assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(f.signed.load(Ordering::SeqCst), 2);
     drop(payer);
     drop(pool);
     drop(store);

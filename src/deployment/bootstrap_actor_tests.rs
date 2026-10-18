@@ -125,11 +125,11 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
         .call(move |s| {
             s.save_funding_quote(&original.id, &original_quote)?;
             s.advance_funding(&original.id, FundingPhase::Quoted, FundingPhase::Preparing)?;
-            s.reserve(
+            s.accept_preparation(
                 &original.operation_id,
                 Some(&original.pool_id),
-                u32::try_from(instant / 86400)?,
                 110_000,
+                None,
             )?;
             let (revision, snapshot) = s.snapshot()?;
             s.prepare_with_facts(
@@ -142,7 +142,7 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
                     expiry_height: 3_000_000,
                     amount_zatoshis: 100_000,
                     fee_zatoshis: 10_000,
-                    deadline: instant + 7200,
+                    deadline: Some(instant + 7200),
                 }),
             )?;
             let attempt = s.request_broadcast(&original.operation_id, instant, 2_000_000, false)?;
@@ -253,17 +253,10 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
         .await
         .unwrap();
     let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
-    let accounting: (i64, i64) = db
-        .query_row(
-            "SELECT reserved,consumed FROM budget_entries WHERE id=?1",
-            [&first.operation_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-    assert_eq!(
-        accounting,
-        (110_000, 0),
-        "destination/provider progress cannot release source reservation"
+    let pending: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='PREPARED' AND preparation IS NOT NULL)",[&first.operation_id],|r|r.get(0)).unwrap();
+    assert!(
+        pending,
+        "destination/provider progress cannot release original source ownership"
     );
     drop(db);
     stop.cancel();

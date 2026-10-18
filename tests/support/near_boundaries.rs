@@ -21,7 +21,7 @@ fn asset_and_quote_boundaries_fail_closed() {
     let (request, response, mut limits) = fixture(false);
     limits.max_input = 110000;
     assert!(validate_quote(request.clone(), response.clone(), &limits, 2_000_000_700).is_ok());
-    assert!(validate_quote(request.clone(), response.clone(), &limits, 2_000_000_701).is_err());
+    assert!(validate_quote(request.clone(), response.clone(), &limits, 2_000_001_000).is_err());
     limits.max_input = 109999;
     assert!(validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000).is_err());
     limits.max_input = u64::MAX;

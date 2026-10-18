@@ -310,7 +310,7 @@ Session issuance/refresh and authenticated access still require qualification.
 The coordinator persists a unique transparent refund address and wallet derivation
 range before obtaining a quote. Unsigned quote failures use per-pass backoff,
 without consuming `max_attempts` for transaction recovery. A quote refresh must
-prove no outgoing or budget record exists; it archives its old bindings, records
+prove no accepted calculation or outgoing record exists; it archives its old bindings, records
 a durable refresh marker and allocates a fresh operation/refund identity.
 Historical unclassified recovery records still count. Signed operations never refresh. Insufficient shielded
 spendable funds leave the job unprepared; another attempt still needs current authority.
@@ -325,10 +325,9 @@ reset the error streak. Status errors contain fixed actionable categories, never
 remote bodies, credentials or deposit addresses. It resumes phases without repeating ambiguous
 submissions, reconciles source confirmation, polls the same deposit, and independently
 checks Base credit. Partial deposits enter `recovery_required`; failed/refunded swaps
-stay `refund_pending`. Confirmed refund outputs reduce the originating operation's
-consumed exposure once, capped at its principal; source and shielding fees remain
-consumed. Reorgs of credited refunds fail treasury readiness closed. API refund
-status alone never credits funds.
+stay `refund_pending`. The SDK owns incoming returns and current spendable inputs. Local refund credits,
+principal caps and historical refund revalidation are removed; provider status alone
+never proves an on-chain return or authorizes a new deposit.
 
 With serving stopped, prepare shielding for exactly one refund address:
 
@@ -339,7 +338,7 @@ target/debug/x402_treazury wallet shield-refunds \
 
 This calculates and journals one transaction without broadcasting. Submit its
 operation ID with `wallet reconcile --config servers.toml --operation-id UUID
---rebroadcast`. The command enforces `max_refund_shielding_fee_zec` and current source reservations/readiness;
+--rebroadcast`. The command enforces `max_refund_shielding_fee_zec` and actual pending input ownership;
 only the fee counts as new expense. Each proposal selects one address, never
 combining unrelated swaps. Both calculation and submission use the existing
 restart-safe outgoing journal. Refund principal becomes shielded spendable only
@@ -347,12 +346,11 @@ after the shielding transaction confirms. Expired funding deposits use automatic
 recovery or `wallet recover --config servers.toml`. For an individual shielding
 operation, the advanced `wallet recover-expired --config servers.toml --operation-id UUID`
 remains available with serving stopped. Expiry recovery requires a fresh tip beyond expiry by the configured confirmation
-count, no positive indexer inclusion, synced invalidation, and confirmed unspent inputs
-matched against the immutable preparation snapshot. It then releases the reservation
-and resets any unfinished funding job with a new operation ID. Signed bytes and
+count, no positive indexer inclusion, and every originally selected confirmed unspent input
+matched against the immutable preparation snapshot. It closes the original input owner. A replacement funding attempt needs separately
+revalidated current authority. Signed bytes and
 recovery evidence remain archived; the old operation cannot be broadcast again.
-Missing or conflicting evidence keeps the reservation. A later contradictory reorg
-fails treasury readiness closed.
+Missing or conflicting evidence keeps the original ownership.
 
 `treasury/send.rs` implements explicit deposit preparation through zingolib's
 calculate-only API. It accepts one mainnet transparent recipient, uses account 0's
@@ -361,18 +359,17 @@ recipient, amount, actual fee and bounded expiry. The caller supplies the pool,
 operation UUID, source/fee safeguards and quote deadline.
 `funding.quote_deadline_seconds` requests a 7,200-second window by default;
 the returned quote can be shorter and remains authoritative. Preparation and the
-first submission still require at least 300 seconds of quote validity, consolidated
-in one policy constant. Its removal awaits the chain-specific 1Click deadline
-and route contract; broadcast alone does not establish timely delivery. Authority
-checks use a fresh clock reading after awaited work.
+first submission require an unexpired returned deadline, without an extra local
+margin. The requested window is a preference. The chain-specific 1Click watcher
+arrival/confirmation and late-refund contract remains unresolved; local broadcast
+acceptance does not establish timely delivery. See [transport/contract limits](network-egress.md#remaining-timers-and-budgets).
 The funding worker supplies these from validated configuration/quotes,
 never from MCP tool arguments.
 
-Preparation first performs read-only readiness checks, then calculates a proposal,
-checks the actual fee and reserves exact principal plus fee before creating signed
-bytes. It marks readiness `preparing` and atomically commits the encrypted wallet
-and signed bytes with transaction ID, expiry, amount and fee. Proposal mutation
-already poisons the in-memory owner on error/cancellation; close and reopen it
+Preparation selects SDK inputs, checks actual fee/output and permission, journals
+exact selected inputs, then calculates signed bytes. Known proposal insufficiency
+defers safely; uncertainty after accepted calculation retains ownership and requires
+owner teardown/reopen. Completed bytes and snapshots commit idempotently.
 before further preparation. Network/chain/expiry preflight precedes durable broadcast
 intent, so failure there consumes no submission attempt. The preflighted send path
 performs only local expiry checks before sending the saved bytes, without another
@@ -452,12 +449,9 @@ wrong heights, malformed hashes and failed rechecks. These synthetic tests do no
 establish consensus acceptance or recovery after a mined transaction is reorged.
 The separate [regtest suite](../tests/REGTEST.md) uses pinned Zebra/Zaino containers
 and mined shielded funds to exercise submission, confirmation, restart and competing
-branches. It verifies reservation retention before confirmation depth, explicit
-rebroadcast of identical bytes, and quarantine after a previously accounted spend
-is orphaned. Sync rechecks accounted source spends; loss of confirmation depth
-sets `treasury_confirmed_spend_reorg`, retains consumed budget and blocks new
-preparation until the original transaction regains sufficient depth. There is no
-automatic replacement transaction or repair command for this condition.
+branches. It exercises retained input ownership, exact-byte rebroadcast and canonical input
+proofs. These tests do not qualify external bridge settlement. Historical accounting
+revalidation no longer gates ordinary sync; the SDK owns chain corrections.
 
 The regtest network variant exists only in the unit-test binary under
 `zcash-regtest`; production constructors remain mainnet-only, including all-feature
@@ -489,7 +483,7 @@ across days. One pending prepared outgoing operation gates new preparation, and 
 bytes plus its wallet snapshot commit together.
 
 A sync failure before the transaction preparer is invoked leaves the same quote
-eligible for a later attempt. Interrupted calculation or durable transaction/budget
+eligible for a later attempt. Interrupted calculation or durable accepted-calculation/transaction
 effects still require recovery; absence of signed bytes alone never permits retry.
 Recovery status retains its preceding failure instead of clearing it.
 
@@ -525,13 +519,15 @@ addresses, endpoint credentials or upstream response bodies. Funding status reta
 RPC rejection codes. NEAR quote failures identify the asset-catalog or quote stage
 and a sanitized HTTP, transport or validation category. Confirmed destination
 credit clears obsolete quote/credit errors; source-reconciliation failures remain
-visible until resolved. Late credit checks leave an already-completed job's newer
-balances and roles unchanged. Credit-persistence messages distinguish insufficient
-confirmed credit and local state failures from RPC access failures.
-An empty treasury pauses refill before preparation and
-reports how to fund/sync it, while existing funded wallets remain usable. Background reconciliation backs off after failures from 30
+visible until resolved. Initial positive partial credit consumes the claim and
+publishes an advisory estimate; later credit observations cannot reopen it.
+Credit-persistence messages distinguish missing credit and local state failures
+from RPC access failures.
+An SDK proposal rejected for insufficient funds defers initial funding, while
+existing Base wallets remain usable. Background reconciliation backs off after failures from 30
 seconds up to five minutes; successful polls return to the normal five-second
-interval. Failed checks never release reservations or authorize payments.
+interval. Failed checks retain pending ownership. Saved estimates never grant payment
+authority or prohibit an otherwise authorized signing attempt.
 
 Unsigned `eth_chainId`, `eth_getBlockByNumber` and `eth_call` requests may retry
 once after a transport interruption, with a 200 ms delay inside the original
@@ -569,8 +565,8 @@ configured Tor-only network policy remain unchanged.
 
 Each provider uses connection and response read-inactivity settings, without a
 whole-view deadline. At most three providers are visited once per view, with finite
-unsigned transport retries. Caller cancellation remains supported; financial
-freshness and authorization expiry remain independent of progress. Logs identify
+unsigned transport retries. Caller cancellation remains supported; signed authorization expiry remains
+independent of progress. Logs identify
 provider indices, fixed failure categories and fallback success without URLs or
 credentials. Each new view
 starts with the primary; there is no global circuit cycling or cross-wallet
@@ -584,10 +580,8 @@ overlapping fallback attempts without identifying wallets. Failed views log `ver
 `stage_elapsed_ms`, `completed_rpc_calls`, `expected_rpc_calls`, `wallet_count`
 and `pending_count`. Counts are logical RPC calls, not transport retry attempts.
 Few completed calls and a long current stage indicate a slow individual check;
-many completed calls and a short current stage suggest accumulated latency
-exhausted the shared view budget. These are observations, not proof of an endpoint
-or local-network fault. A per-RPC deadline additionally distinguishes awaiting
-headers (including connection setup) from reading the body. Fallback success logs
+many completed calls show accumulated independent RPC latency. These are observations, not proof of an endpoint
+or local-network fault. Configured connection and per-response read-inactivity limits remain distinct. Fallback success logs
 elapsed time and completed calls. No endpoint URL, wallet address or nonce is logged.
 
 Treasury tip-check failures retain sanitized gRPC codes and identify `starting_tip`
@@ -667,57 +661,24 @@ requires those references; endpoints require HTTPS, with HTTP allowed only for
 loopback fixtures. Zcash/NEAR endpoint settings are reserved for the funding
 worker and are not contacted by this implementation.
 
-Managed payments accept only v2 `exact` EIP-3009 on Base with canonical USDC,
-the `USD Coin`/`2` signing domain, and an amount within both the cap and current
-deposit target. Selection preserves the first compatible offer, even if earlier
-offers are unsupported. Permit2, `upto`, v1, non-authorization flows, nested
-extensions and unknown extra/offer fields are rejected. Top-level extension maps
-are removed before signing, with DEBUG diagnostics for `bazaar` discovery metadata
-and WARN diagnostics for other extensions, naming extensions but never logging
-their values. Managed payments attempt one ordinary payment without
-extension behavior or attribution echoing. Providers requiring extension echoes
-may reject it; failed submitted requests report this omission and retain their
-reservation until chain reconciliation. Never automatically retry a signed
-payment. Malformed extension maps are rejected before admission. A seller or
-facilitator may still add its own on-chain attribution. Static payment support
-is unchanged. An ordinary non-402 response never enters admission.
+Managed payments accept Base USDC v2 exact EIP-3009 within the configured per-payment
+cap and signing domain. Balances and historical funding targets are advisory, and
+unresolved exposure is not subtracted from the estimate again. The signed journal
+commits payer/payee/nonce/amount/validity and ownership before disclosure, with one
+saturating estimate decrement per authorization. Selection consumes a READY claim
+atomically; it does not allocate or fund new wallets.
 
-The per-pool deadline includes waiting for its gate and chain verification;
-Tor applies the network request-timeout floor to this deadline. The gate is
-released after the signed authorization is durably journaled, before sending it
-to the provider. A slow signed response therefore does not block another call
-with sufficient unreserved balance in the same pool, or background reconciliation.
-Chain verification still holds the pool gate; unrelated pools remain independent.
-Readiness failures return immediately; funding runs asynchronously when enabled.
-Both bootstrap addresses must hold their original targets before the first paid
-call. RPC verification checks chain 8453, block freshness, and EIP-1898 canonical
-block-hash queries for USDC balances and `authorizationState`. The RPC must support
-these queries. Admission uses the lower of confirmed and latest balances minus
-unresolved authorizations. The default confirmation depth is 12 and maximum
-latest-block age is 120 seconds. Typed contradiction handling distinguishes a bad
-new acquisition from disputed historical readiness and invalidated financial-accounting
-support; an ordinary balance refresh cannot repair the latter.
+Only the pinned structured insufficient-funds encodings on HTTP 402 after a signed
+attempt permit traversal to another captured existing wallet. Each identity gets
+at most one attempt, with its own transport and fresh challenge and the original
+cloneable arguments (including POST). Every earlier authorization may still charge
+or execute. Other failures never grant paid replay, and process restart never
+replays the logical call. See [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
 
-During `serve`, maintenance can clear `chain_repair_required` for ACTIVE or
-RETAINED wallets only after reverifying every original admission balance, readiness
-balance and authorization resolution against its original configured RPC endpoint.
-It then acquires fresh balances and atomically checks that the journal is unchanged.
-The repair preserves original proofs and pending exposure, records a
-`wallet_evidence_repairs` audit row, and logs `wallet_evidence_revalidated`.
-Missing or contradictory support, disputed readiness, retirement records and
-incomplete/refunded funding remain blocked. This does not reset uncertain swaps,
-submit transactions or grant additional funding authority.
-
-Admission journals the exact payer's authorization and consumes a READY claim in
-one transaction. ACTIVE and RETAINED payers retain their roles, and selection creates
-no replacement job. Available capacity deducts every unresolved authorization;
-an affordable call can proceed concurrently without rotating a busy wallet merely
-because another payment is pending. Payer, payee, nonce, amount, validity,
-requirements hash and original attempt are journaled before the single signed HTTP
-attempt. Signatures are not persisted. A final 402, timeout, cancellation or HTTP
-success does not release its reservation. Canonical used/expired-unused proofs have
-separate historical anchors from fresh admission balances. Retained bounded
-maintenance completes these proofs without a whole-group scan deadline.
+Ordinary maintenance reads unsigned latest USDC estimates separately from payment
+admission. It retains low-balance failures for follow-up without delaying fallback.
+Canonical authorization/debit proofs remain a qualification observation, preserving
+all attempts and the existing case permit; seller success does not prove a debit.
 
 Pools can spend independently verified Base balances and consume funded reserves.
 Queued replacements are funded only with `funding.auto_fund = true`. Refund shielding
@@ -742,6 +703,12 @@ identity across template edits and scope changes. Local gRPC fixtures exercise
 real zingolib sync, wrong-network rejection, periodic checkpoints, cancellation,
 and encrypted restart/resume without real funds or external indexers.
 
+A restored backup must retain its exact accepted-work obligations and declared
+restoration restrictions. A rescan cannot reconstruct unpublished authorizations,
+uncertain source intent or consumed initial claims. Missing off-chain history does
+not authorize replacement deposits or top-ups. Undeclared filesystem rollback is
+not automatically detectable; a code rollback is not a state downgrade.
+
 ## Versioned capacity output
 
 Wallet status and bootstrap JSON use `schema_version: 2`. Status additionally
@@ -757,17 +724,16 @@ inventory can become incomplete again after a reserve is consumed.
 
 Status replaces the old pool `deposit_atomic` and `bootstrapped` fields with current
 payment authority, retirement tolerance, exact `reserve_claims` and readiness. Original wallet `target` and last saved
-`confirmed_balance` are descriptive history, not fresh available capacity. Signed
+`balance_estimate` are advisory history, not available-capacity authority. Signed
 exposure, financial repair blocks, destination discrepancies and retirement
 observations are reported separately. Null authority means unconfigured; explicit
 unlimited authority is represented by the maximum U256 atomic value.
 
-`runtime_balance_evidence` reports the current owner's cached exact confirmed/latest
-amounts, heights and hashes, original `valid_until`, and separate `fresh` and
-`compatible` flags. A fixed `unavailable_reason` explains expired or invalid support.
-Block timestamps are null because the certificate does not retain them. Offline
-status and uncached wallets report null evidence: current capacity is unknown, not
-zero. Status does no RPC and grants no admission authority.
+`runtime_balance_evidence` is an optional cached historical certificate with canonical
+compatibility; it has no host-age admission authority. Current saved wallet fields
+include `balance_estimate_atomic`, `low_balance` and fixed refresh error categories.
+Unknown balance is null, never zero. Treasury `sync_complete` denotes a completed
+unchanged snapshot, not financial freshness. Status performs no RPC.
 
 Per-pool `retirement_accounting` sums only exact confirmed amounts recorded at
 automatic retirement, with automatic/manual counts and historical unknowns separate.
@@ -780,10 +746,9 @@ Unsupported legacy provenance has null totals/counts rather than invented zeros.
 `wallet bootstrap --config FILE`. Declaration creates no allocation; the funding
 owner fills permitted vacancies under current auto-funding and qualification authority.
 
-Automatic retirement runs during ordinary reconciliation under the configured
-per-wallet tolerance, including with `auto_fund=false`. It preserves keys and funds;
-there is no manual retirement command. See [automatic retirement](wallet-rotation.md#automatic-retirement)
-for dual-balance evidence, pending-work exclusions and qualification restrictions.
+Historical automatic-retirement records remain readable with their original
+canonical evidence; advisory balance refresh does not manufacture retirement proofs.
+Low-balance traversal rotates payment selection without deleting keys or funds.
 
 The one-time [known-state preflight](operator-notes/privacy-local-schema12.md) is a
 separate Rust example, outside the production wallet command tree. It requires

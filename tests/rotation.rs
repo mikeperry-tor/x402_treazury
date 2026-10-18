@@ -122,7 +122,7 @@ fn groups_consume_reserves_independently_and_keep_allocation_targets() {
     assert_eq!(now.pools[0].addresses[1].target, "5000000");
     assert_eq!(now.pools[0].addresses[2].target, "7000000");
     assert_eq!(now.pools[1].addresses.len(), 2);
-    s.reserve("pending", Some(&a), 1, 10).unwrap();
+    s.accept_preparation("pending", Some(&a), 10, None).unwrap();
     s.disable_pool("a").unwrap();
     assert!(
         s.allocate_capacity_kind(
@@ -132,7 +132,7 @@ fn groups_consume_reserves_independently_and_keep_allocation_targets() {
         )
         .is_err()
     );
-    assert!(s.reserve("new", Some(&a), 1, 10).is_err());
+    assert!(s.accept_preparation("new", Some(&a), 10, None).is_err());
     assert!(s.prepare("pending", 1, b"snapshot", b"raw").is_err());
     assert_eq!(s.snapshot().unwrap().0, 1);
     let id = s.id().to_owned();
@@ -190,11 +190,14 @@ fn source_accounting_and_prepared_send_survive_restart_without_duplicate_work() 
         0
     )
     .unwrap();
-    s.reserve("op-a", Some(&a), 10, 60).unwrap();
-    s.reserve("op-a", Some(&a), 10, 60).unwrap();
-    assert!(s.reserve("op-a", Some(&b), 10, 60).is_err());
-    s.reserve("independent", Some(&b), 11, 50).unwrap();
-    s.reserve("op-b", Some(&b), 11, 40).unwrap();
+    s.accept_preparation("op-a", Some(&a), 60, None).unwrap();
+    s.accept_preparation("op-a", Some(&a), 60, None).unwrap();
+    assert!(s.accept_preparation("op-a", Some(&b), 60, None).is_err());
+    assert!(
+        s.accept_preparation("independent", Some(&b), 50, None)
+            .is_err()
+    );
+    assert!(s.accept_preparation("op-b", Some(&b), 40, None).is_err());
     assert_eq!(
         s.prepare("op-a", 1, b"post-calc", b"exact-transaction")
             .unwrap(),
@@ -217,12 +220,10 @@ fn source_accounting_and_prepared_send_survive_restart_without_duplicate_work() 
             .unwrap(),
         2
     );
-    assert!(s.confirm_spend("op-a", 61, 11).is_err());
-    s.confirm_spend("op-a", 55, 11).unwrap();
-    s.confirm_spend("op-a", 55, 11).unwrap();
-    assert!(s.confirm_spend("op-a", 54, 11).is_err());
-    s.reserve("op-a", Some(&a), 10, 60).unwrap();
-    s.reserve("another-operation", Some(&b), 11, 6).unwrap();
+    s.confirm_spend("op-a").unwrap();
+    s.confirm_spend("op-a").unwrap();
+    s.accept_preparation("op-a", Some(&a), 60, None).unwrap();
+    s.accept_preparation("op-b", Some(&b), 40, None).unwrap();
     assert_eq!(s.prepare("op-b", 2, b"post-second", b"tx-b").unwrap(), 3);
 }
 #[tokio::test]
@@ -267,10 +268,10 @@ async fn concurrent_pool_requests_and_source_reservations_serialize() {
         .await
         .unwrap();
     let (a, b) = tokio::join!(
-        handle.call(move |s| s.reserve("a", Some(&pool), 1, 60)),
-        h.call(move |s| s.reserve("b", Some(&other), 1, 60))
+        handle.call(move |s| s.accept_preparation("a", Some(&pool), 60, None)),
+        h.call(move |s| s.accept_preparation("b", Some(&other), 60, None))
     );
-    assert!(a.is_ok() && b.is_ok());
+    assert_ne!(a.is_ok(), b.is_ok(), "one SDK input owner starts");
     assert_eq!(
         handle.call(|s| s.status()).await.unwrap().pools[0]
             .addresses
@@ -382,7 +383,8 @@ fn committed_crash_child() {
         0
     )
     .unwrap();
-    s.reserve("saved", Some(&pool), 1, 100).unwrap();
+    s.accept_preparation("saved", Some(&pool), 100, None)
+        .unwrap();
     s.prepare(
         "saved",
         1,
@@ -430,7 +432,7 @@ fn committed_state_recovers_after_process_exit_without_destructors() {
         persisted.pools[0].id
     );
     assert_eq!(s.status().unwrap().pools[0].addresses.len(), 2);
-    s.reserve("duplicate", None, 2, 1).unwrap();
+    s.accept_preparation("duplicate", None, 1, None).unwrap();
     let revision = s.snapshot().unwrap().0;
     assert!(
         s.prepare(
@@ -448,7 +450,7 @@ fn committed_state_recovers_after_process_exit_without_destructors() {
 }
 
 #[test]
-fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
+fn sync_checkpoints_are_atomic_without_a_local_capacity_gate() {
     use x402_treazury::rotation::store::{SyncObservation, SyncPhase};
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
@@ -467,17 +469,15 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
         confirmed_shielded_zatoshis: 1_000,
         spendable_shielded_zatoshis: 500,
     };
-    assert!(s.require_spend_ready(100, 1).is_err());
+    assert!(s.require_preparation_available().is_ok());
     let revision = s
         .save_sync_snapshot(1, b"synced-wallet", Some(ready.clone()))
         .unwrap();
     assert_eq!(revision, 2);
-    s.require_spend_ready(110, 500).unwrap();
-    s.require_spend_ready(u64::MAX, 500).unwrap();
-    s.require_spend_ready(0, 500).unwrap();
-    for (now, amount) in [(100, 501), (100, 0)] {
-        assert!(s.require_spend_ready(now, amount).is_err());
-    }
+    s.require_preparation_available().unwrap();
+    s.require_preparation_available().unwrap();
+    s.require_preparation_available().unwrap();
+    assert!(s.require_preparation_available().is_ok());
     let mut stale = ready.clone();
     stale.phase = SyncPhase::Failed;
     assert!(
@@ -487,28 +487,28 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
     assert_eq!(s.snapshot().unwrap().1.as_slice(), b"synced-wallet");
     assert_eq!(s.status().unwrap().sync.unwrap().phase, SyncPhase::Ready);
     s.save_snapshot(2, b"derived-address").unwrap();
-    assert!(s.require_spend_ready(100, 1).is_err());
+    assert!(s.require_preparation_available().is_err());
     s.save_sync_snapshot(3, b"resynced", Some(ready.clone()))
         .unwrap();
-    s.reserve("outgoing", None, 1, 100).unwrap();
+    s.accept_preparation("outgoing", None, 100, None).unwrap();
     s.prepare("outgoing", 4, b"calculated", b"signed-transaction")
         .unwrap();
     s.save_sync_snapshot(5, b"still-pending", Some(ready))
         .unwrap();
     assert_eq!(
-        s.require_spend_ready(100, 1).unwrap_err().to_string(),
+        s.require_preparation_available().unwrap_err().to_string(),
         "treasury_send_pending"
     );
-    s.confirm_spend("outgoing", 100, 1).unwrap();
+    s.confirm_spend("outgoing").unwrap();
     s.set_sync_phase(SyncPhase::Offline).unwrap();
-    assert!(s.require_spend_ready(100, 1).is_err());
+    assert!(s.require_preparation_available().is_err());
     let snapshot = s.snapshot().unwrap();
     let id = s.id().to_owned();
     drop(s);
     let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     assert_eq!(s.snapshot().unwrap().0, snapshot.0);
     assert_eq!(s.snapshot().unwrap().1, snapshot.1);
-    assert!(s.require_spend_ready(100, 1).is_err());
+    assert!(s.require_preparation_available().is_err());
 }
 
 #[test]
@@ -568,7 +568,7 @@ fn submission_contract_only_accepts_durable_pending_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     assert!(PreparedTransaction::load(&s, "op").is_err());
-    s.reserve("op", None, 1, 100).unwrap();
+    s.accept_preparation("op", None, 100, None).unwrap();
     assert!(PreparedTransaction::load(&s, "op").is_err());
     s.prepare("op", 1, b"calculated", b"exact-bytes").unwrap();
     // Later sync checkpoints must preserve the snapshot referenced by this send.
@@ -583,7 +583,7 @@ fn submission_contract_only_accepts_durable_pending_bytes() {
     let durable = PreparedTransaction::load(&s, "op").unwrap();
     assert_eq!(durable.operation_id(), "op");
     assert_eq!(durable.bytes(), b"exact-bytes");
-    s.confirm_spend("op", 100, 1).unwrap();
+    s.confirm_spend("op").unwrap();
     assert!(PreparedTransaction::load(&s, "op").is_err());
 }
 
@@ -597,9 +597,9 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
         expiry_height: 500,
         amount_zatoshis: 50,
         fee_zatoshis: 10,
-        deadline: 1000,
+        deadline: Some(1000),
     };
-    s.reserve("op", None, 0, 100).unwrap();
+    s.accept_preparation("op", None, 60, None).unwrap();
     let mut too_large = facts.clone();
     too_large.fee_zatoshis = 60;
     assert!(
@@ -611,12 +611,11 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
     s.prepare_with_facts("op", 1, b"post-calculation", b"signed", Some(facts.clone()))
         .unwrap();
     assert_eq!(s.operation("op").unwrap().facts, facts);
-    // Preparation shrinks the conservative reservation to actual input plus fee.
-    s.reserve("other", None, 0, 40).unwrap();
+    assert!(s.accept_preparation("other", None, 40, None).is_err());
     assert!(s.abandon_unprepared("op").is_err());
     s.abandon_unprepared("other").unwrap();
     assert!(s.request_broadcast("op", 1000, 499, false).is_err());
-    assert!(s.request_broadcast("op", 701, 499, false).is_err());
+
     assert!(s.request_broadcast("op", 100, 500, false).is_err());
     assert_eq!(s.request_broadcast("op", 100, 499, false).unwrap(), 1);
     let id = s.id().to_owned();
@@ -635,7 +634,7 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
     s.broadcast_result("op", attempt, true).unwrap();
     assert_eq!(s.operation("op").unwrap().submission, "BROADCAST");
     assert!(s.operation_pending("op").unwrap()); // accepted is not confirmed
-    s.confirm_spend("op", 60, 0).unwrap();
+    s.confirm_spend("op").unwrap();
     assert_eq!(s.operation("op").unwrap().submission, "CONFIRMED");
     assert!(s.request_broadcast("op", 103, 499, true).is_err());
 }
@@ -736,7 +735,8 @@ fn complete_backup_restores_keys_quotes_and_pending_source_accounting() {
         &quote_fixture::bound(&jobs[0].target, &jobs[0].recipient, "bound-quote"),
     )
     .unwrap();
-    s.reserve("source", Some(&pool), 1, 100).unwrap();
+    s.accept_preparation("source", Some(&pool), 100, None)
+        .unwrap();
     s.prepare("source", 1, b"prepared-snapshot", b"durable-signed-bytes")
         .unwrap();
     let original = serde_json::to_value(s.status().unwrap()).unwrap();
@@ -801,7 +801,8 @@ fn unprepared_recovery_changes_operation_but_never_releases_signed_liability() {
     .unwrap();
     s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
         .unwrap();
-    s.reserve(&next.operation_id, Some(&pool), 1, 100).unwrap();
+    s.accept_preparation(&next.operation_id, Some(&pool), 100, None)
+        .unwrap();
     assert!(s.recover_unprepared_funding(&job.id).is_err());
     assert_eq!(s.funding_jobs().unwrap()[0].operation_id, next.operation_id);
     s.prepare(&next.operation_id, 1, b"next-snapshot", b"signed")
@@ -840,7 +841,8 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
     .unwrap();
     s.advance_funding(&job.id, FundingPhase::Quoted, FundingPhase::Preparing)
         .unwrap();
-    s.reserve(&job.operation_id, Some(&pool), 1, 100).unwrap();
+    s.accept_preparation(&job.operation_id, Some(&pool), 100, None)
+        .unwrap();
     s.prepare_with_facts(
         &job.operation_id,
         2,
@@ -851,7 +853,7 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
             expiry_height: 100,
             amount_zatoshis: 80,
             fee_zatoshis: 20,
-            deadline: 1000,
+            deadline: Some(1000),
         }),
     )
     .unwrap();
@@ -895,11 +897,6 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
         s.refund_address(&job.id).unwrap().as_deref(),
         Some("fixture-refund-address")
     );
-    assert!(
-        s.refund_bindings()
-            .unwrap()
-            .contains(&(job.operation_id.clone(), "fixture-refund-address".into()))
-    );
     assert_eq!(
         s.funding_quote(&job.id).unwrap().as_slice(),
         quote_fixture::bound(&job.target, &job.recipient, "immutable quote").as_slice()
@@ -907,84 +904,29 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
 }
 
 #[test]
-fn actual_spendable_capacity_and_journals_survive_gross_totals_rollover_and_restart() {
-    use x402_treazury::rotation::store::{SyncObservation, SyncPhase};
+fn accepted_calculation_survives_reopen_without_local_balance_or_day_policy() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let id = s.id().to_owned();
-    let fresh = |s: &mut Store, instant: u64| {
-        let revision = s.snapshot().unwrap().0;
-        s.save_sync_snapshot(
-            revision,
-            b"fresh",
-            Some(SyncObservation {
-                phase: SyncPhase::Ready,
-                last_error: None,
-                snapshot_revision: revision,
-                checked_at: Some(instant),
-                checkpoint_at: instant,
-                scanned_blocks: 1,
-                target_height: Some(1),
-                observed_tip_height: None,
-                height: Some(1),
-                confirmations: 1,
-                confirmed_pool_balances_zatoshis: None,
-                confirmed_shielded_zatoshis: 1000,
-                spendable_shielded_zatoshis: 1000,
-            }),
-        )
-        .unwrap();
-    };
-    fresh(&mut s, 86410);
-    s.reserve("pending", None, 1, 90).unwrap();
-    for day in [1u32, 2] {
-        let instant = u64::from(day) * 86400 + 10;
-        fresh(&mut s, instant);
-        assert!(s.check_funding_capacity(instant, 1000).is_ok());
-        assert!(s.check_funding_capacity(instant, 1001).is_err());
-    }
-    let revision = s.snapshot().unwrap().0;
-    s.prepare("pending", revision, b"prepared", b"signed")
-        .unwrap();
-    assert!(
-        s.check_funding_capacity(172810, 1).is_err(),
-        "unresolved outgoing still owns the treasury"
-    );
-    s.confirm_spend("pending", 80, 2).unwrap();
-    s.confirm_spend("pending", 80, 2).unwrap();
-    fresh(&mut s, 172810);
-    s.reserve("unprepared", None, 2, 20).unwrap();
-    assert!(s.check_funding_capacity(172810, 1000).is_ok());
+    assert!(s.require_preparation_available().is_ok());
+    s.accept_preparation("pending", None, 90, None).unwrap();
+    assert!(s.require_preparation_available().is_err());
+    assert!(s.abandon_unprepared("pending").is_err());
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
-    fresh(&mut s, 259210);
-    assert!(s.check_funding_capacity(259210, 1000).is_ok());
-    assert!(s.check_funding_capacity(259210, 1001).is_err());
+    assert!(s.status().unwrap().outgoing_pending);
+    assert!(s.accept_preparation("another", None, 1, None).is_err());
+    assert!(s.accept_preparation("pending", None, 91, None).is_err());
+    assert!(s.abandon_unprepared("pending").is_err());
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-    let accounted: (i64, i64, i64, i64) = db
-        .query_row(
-            "SELECT original_day,day,reserved,consumed FROM budget_entries WHERE id='pending'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )
-        .unwrap();
-    assert_eq!(
-        accounted,
-        (1, 2, 0, 80),
-        "gross source cost survives rollover and reopen"
-    );
     assert_eq!(
         db.query_row(
-            "SELECT reserved FROM budget_entries WHERE id='unprepared'",
+            "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('budget_entries','refund_outputs')",
             [],
             |r| r.get::<_, i64>(0)
         )
         .unwrap(),
-        20
-    );
-    assert!(
-        s.reserve("unprepared", None, 2, 21).is_err(),
-        "existing operation amount cannot expand"
+        0
     );
 }
 
@@ -1148,7 +1090,10 @@ async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
         .save_sync_snapshot(1, b"empty", Some(observation))
         .unwrap();
     assert_eq!(
-        store.require_spend_ready(100, 10).unwrap_err().to_string(),
+        store
+            .require_preparation_available()
+            .unwrap_err()
+            .to_string(),
         "treasury_insufficient_spendable_funds"
     );
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();

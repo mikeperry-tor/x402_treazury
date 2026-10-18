@@ -46,7 +46,7 @@ fn restriction_allows_declaration_but_denies_allocation_and_source_work() {
         s.record_credit(&wallet.id, "5000000", "block", 1).unwrap();
     }
     // A reservation inherited from an older process must not permit new calculation.
-    s.reserve("old", Some(&pool), 1, 100).unwrap();
+    s.accept_preparation("old", Some(&pool), 100, None).unwrap();
     let before_jobs = s.funding_jobs().unwrap().len();
     let logs = Logs::default();
     let sink = logs.clone();
@@ -77,29 +77,31 @@ fn restriction_allows_declaration_but_denies_allocation_and_source_work() {
             )
             .unwrap();
         denied(s.allocate_capacity_kind(&declared, AllocationKind::Small, true));
-        denied(s.reserve("new", Some(&pool), 1, 100));
-        denied(s.reserve("shield", None, 1, 100));
-        denied(s.require_spend_ready(10, 100));
-        denied(s.prepare("old", 1, b"next", b"new bytes"));
+        denied(s.accept_preparation("new", Some(&pool), 100, None));
+        denied(s.accept_preparation("shield", None, 100, None));
+        denied(s.require_preparation_available());
+        s.prepare("old", 1, b"next", b"new bytes").unwrap();
     });
     assert_eq!(before_jobs, s.funding_jobs().unwrap().len());
     assert_eq!(
-        s.db.query_row("SELECT COUNT(*) FROM budget_entries", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
-        1
+        s.db.query_row(
+            "SELECT COUNT(*) FROM operation_network WHERE preparation IS NOT NULL",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
     );
     assert_eq!(
         s.db.query_row("SELECT COUNT(*) FROM outgoing", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        0
+        1
     );
     let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     for stage in [
         "capacity_allocation",
-        "source_reservation",
+        "source_preparation_start",
         "treasury_preparation",
-        "source_preparation_commit",
     ] {
         assert!(
             logs.contains(stage),
@@ -113,21 +115,26 @@ fn restriction_allows_declaration_but_denies_allocation_and_source_work() {
 fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
     let (dir, mut s, pool) = fixture();
     let id = s.id().to_owned();
-    s.reserve("accepted", Some(&pool), 1, 100).unwrap();
+    s.accept_preparation("accepted", Some(&pool), 100, None)
+        .unwrap();
     let facts = TransactionFacts {
         txid: "existing".into(),
         expiry_height: 100,
         amount_zatoshis: 80,
         fee_zatoshis: 20,
-        deadline: 1000,
+        deadline: Some(1000),
     };
     s.prepare_with_facts("accepted", 1, b"saved", b"saved bytes", Some(facts.clone()))
         .unwrap();
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     s.deny_new_funding(); // Supervisor must do this on EVERY launch.
-    s.reserve("accepted", Some(&pool), 1, 100).unwrap(); // Idempotent, no increase.
-    assert!(s.reserve("accepted", Some(&pool), 1, 101).is_err());
+    s.accept_preparation("accepted", Some(&pool), 100, None)
+        .unwrap(); // Idempotent, no increase.
+    assert!(
+        s.accept_preparation("accepted", Some(&pool), 101, None)
+            .is_err()
+    );
     assert_eq!(
         s.prepare_with_facts("accepted", 1, b"saved", b"saved bytes", Some(facts))
             .unwrap(),
@@ -140,8 +147,8 @@ fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
     // Prepared bytes remain observable, but no first submission is authorized.
     denied(s.request_broadcast("accepted", 1, 1, false));
     assert!(s.request_broadcast("accepted", 1, 1, false).is_err());
-    s.confirm_spend("accepted", 100, 1).unwrap();
-    denied(s.reserve("replacement", Some(&pool), 1, 100));
+    s.confirm_spend("accepted").unwrap();
+    denied(s.accept_preparation("replacement", Some(&pool), 100, None));
     assert_eq!(s.snapshot().unwrap().0, 2);
 }
 
@@ -326,14 +333,18 @@ fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
     let jobs = s.funding_jobs().unwrap();
     assert_eq!(jobs.len(), 2);
     let job = &jobs[0];
-    denied(s.reserve(&job.operation_id, Some(&pool), 1, 101));
-    assert!(s.reserve("unbound", Some(&pool), 1, 1).is_err());
+    denied(s.accept_preparation(&job.operation_id, Some(&pool), 101, None));
+    assert!(
+        s.accept_preparation("unbound", Some(&pool), 1, None)
+            .is_err()
+    );
     s.save_funding_quote(
         &job.id,
         &quote_fixture::bound(&job.target, &job.recipient, "fixture quote"),
     )
     .unwrap();
-    s.reserve(&job.operation_id, Some(&pool), 1, 100).unwrap();
+    s.accept_preparation(&job.operation_id, Some(&pool), 100, None)
+        .unwrap();
     s.advance_funding(
         &job.id,
         funding::FundingPhase::Quoted,
@@ -407,7 +418,7 @@ fn uncertain_preparation_keeps_the_same_operation_and_permit_after_restart() {
     .unwrap();
     let job = store.funding_jobs().unwrap().remove(0);
     store
-        .reserve(&job.operation_id, Some(&pool), 1, 100)
+        .accept_preparation(&job.operation_id, Some(&pool), 100, None)
         .unwrap();
     assert!(store.recover_unprepared_funding(&job.id).is_err());
     let treasury = store.id().to_owned();

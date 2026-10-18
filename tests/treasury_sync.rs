@@ -1420,7 +1420,9 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
     let key = dir.path().join("key");
     let mut store = Store::open(&state, &key, &id).unwrap();
     let (revision, snapshot) = store.snapshot().unwrap();
-    store.reserve("jobless", None, 1, 100).unwrap();
+    store
+        .accept_preparation("jobless", None, 100, None)
+        .unwrap();
     store
         .prepare_with_facts(
             "jobless",
@@ -1432,7 +1434,7 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
                 expiry_height: TIP as u32 + 100,
                 amount_zatoshis: 80,
                 fee_zatoshis: 20,
-                deadline: u64::MAX,
+                deadline: Some(u64::MAX),
             }),
         )
         .unwrap();

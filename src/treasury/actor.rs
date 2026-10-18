@@ -76,12 +76,34 @@ impl Treasury {
         mut submission: impl TransactionSubmission,
         stop: CancellationToken,
     ) -> Result<()> {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+            super::publication::MAINTENANCE_SECONDS,
+        ));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut scheduled_sync = None;
         let mut observed_sync = None;
         schedule_after_sync(&mut interval, &mut scheduled_sync, self.last_completed_sync);
         loop {
+            if self.completed.is_some() {
+                tokio::select! {
+                    _=stop.cancelled()=>break,
+                    _=interval.tick()=>{
+                        if self.publish_completed().await.is_err() { Self::warn_publication_pending(); }
+                    }
+                }
+                if self.completed.is_some() {
+                    continue;
+                }
+                if !self.healthy {
+                    stop.cancel();
+                    commands.receiver.close();
+                    drop(commands);
+                    self.close().await?;
+                    anyhow::bail!(
+                        "completed invalid transaction retained; treasury requires review"
+                    );
+                }
+            }
             tokio::select! {
                 biased;
                 _ = stop.cancelled() => break,
@@ -142,7 +164,7 @@ impl Treasury {
             // Only an actual successfully persisted scan moves maintenance.
             // Reused evidence, failed scans and unrelated commands do not.
             schedule_after_sync(&mut interval, &mut scheduled_sync, self.last_completed_sync);
-            if !self.healthy {
+            if !self.healthy && self.completed.is_none() {
                 stop.cancel();
                 commands.receiver.close();
                 drop(commands);

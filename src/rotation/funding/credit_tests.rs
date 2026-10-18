@@ -139,9 +139,12 @@ async fn partial_credit_consumes_initial_claim_and_late_reads_never_reopen_it() 
         0
     );
     assert_eq!(
-        db.query_row("SELECT count(*) FROM budget_entries", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
+        db.query_row(
+            "SELECT count(*) FROM operation_network WHERE preparation IS NOT NULL",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
         0
     );
     drop(db);

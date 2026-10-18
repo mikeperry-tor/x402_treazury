@@ -149,7 +149,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         before,
         serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
     );
-    // Model a quote crossing its margin after the scheduler commits PREPARING.
+    // Model a quote crossing its returned deadline after the scheduler commits PREPARING.
     // The concrete adapter must prove no treasury command was dispatched, so the
     // store can defer and refresh without charging a transaction recovery attempt.
     let other = store
@@ -159,7 +159,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     let mut expired = quote.clone();
     expired.request["recipient"] = json!(other.recipient);
     expired.response["quoteRequest"] = expired.request.clone();
-    expired.deadline = now().unwrap() + 299;
+    expired.deadline = now().unwrap() - 1;
     expired.response["quote"]["deadline"] = json!(
         chrono::DateTime::from_timestamp(expired.deadline as i64, 0)
             .unwrap()
@@ -193,7 +193,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         .call(move |s| {
             s.save_funding_quote(&j.id, &bytes)?;
             s.advance_funding(&j.id, FundingPhase::Quoted, FundingPhase::Preparing)?;
-            s.reserve(&j.operation_id, Some(&j.pool_id), 1, 200000)?;
+            s.accept_preparation(&j.operation_id, Some(&j.pool_id), 110000, None)?;
             let revision = s.snapshot()?.0;
             s.prepare_with_facts(
                 &j.operation_id,
@@ -205,7 +205,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
                     expiry_height: 100,
                     amount_zatoshis: 100000,
                     fee_zatoshis: 10000,
-                    deadline: u64::MAX,
+                    deadline: Some(u64::MAX),
                 }),
             )?;
             Ok(())
@@ -380,10 +380,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         .unwrap()
         .into_inner();
     let id = job.operation_id.clone();
-    store
-        .call(move |s| s.confirm_spend(&id, 110000, 1))
-        .await
-        .unwrap();
+    store.call(move |s| s.confirm_spend(&id)).await.unwrap();
     assert!(backend.reconcile(&job).await.unwrap());
     assert!(commands.test_is_empty());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -737,9 +734,12 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     )
     .unwrap();
     assert_eq!(
-        db.query_row("SELECT COUNT(*) FROM budget_entries", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
+        db.query_row(
+            "SELECT COUNT(*) FROM operation_network WHERE preparation IS NOT NULL",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
         0
     );
     drop(db);

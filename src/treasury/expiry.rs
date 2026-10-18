@@ -15,6 +15,8 @@ pub(super) fn check_inputs<T: OutputInterface>(
     original: &LightWallet,
     current: &LightWallet,
     txid: &zcash_primitives::transaction::TxId,
+    selected: &[crate::rotation::store::preparation::OwnedInput],
+    pool: crate::rotation::store::preparation::InputPool,
     height: u64,
     depth: u32,
 ) -> Result<u64> {
@@ -22,16 +24,28 @@ pub(super) fn check_inputs<T: OutputInterface>(
         .wallet_transactions
         .get(txid)
         .context("prepared transaction missing from snapshot")?;
-    let inputs = T::transaction_inputs(record);
-    check_owned_outputs(
-        original
-            .wallet_outputs::<T>()
-            .into_iter()
-            .filter(|o| o.spend_link().is_some_and(|link| inputs.contains(&&link))),
-        current,
-        height,
-        depth,
-    )
+    let transaction_inputs = T::transaction_inputs(record);
+    let originals = original.wallet_outputs::<T>();
+    let mut outputs = Vec::new();
+    for input in selected.iter().filter(|input| input.pool == pool) {
+        let origin = zcash_primitives::transaction::TxId::from_hex(&input.txid)
+            .context("invalid original input identity")?;
+        let old = originals
+            .iter()
+            .copied()
+            .find(|output| {
+                output.output_id().txid() == origin
+                    && output.output_id().output_index() == input.output_index
+            })
+            .context(crate::rotation::transaction::RecoveryEvidenceError::InputMissing)?;
+        ensure!(
+            old.spend_link()
+                .is_some_and(|link| transaction_inputs.contains(&&link)),
+            crate::rotation::transaction::RecoveryEvidenceError::InputMismatch
+        );
+        outputs.push(old);
+    }
+    check_owned_outputs(outputs, current, height, depth)
 }
 fn check_owned_outputs<'a, T: OutputInterface + 'a>(
     outputs: impl IntoIterator<Item = &'a T>,
@@ -78,12 +92,13 @@ impl Treasury {
     ) -> Result<()> {
         self.sync_once(stop).await?;
         let lookup = id.clone();
-        let (prepared, original) = self
+        let (prepared, original, selected) = self
             .store
             .call(move |s| {
                 Ok((
                     PreparedTransaction::load(s, &lookup)?,
                     s.prepared_snapshot(&lookup)?,
+                    s.prepared_inputs(&lookup)?,
                 ))
             })
             .await?;
@@ -97,7 +112,8 @@ impl Treasury {
         );
         let facts = prepared.facts().context("operation facts missing")?;
         ensure!(
-            height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
+            facts.expiry_height > 0
+                && height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
             crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotBuried
         );
         ensure!(!stop.is_cancelled(), "expiry recovery cancelled");
@@ -119,6 +135,7 @@ impl Treasury {
         let height = sync.height.context("missing recovery height")?;
         ensure!(
             (sync.phase == SyncPhase::Ready && sync.snapshot_revision == status.snapshot_revision)
+                && facts.expiry_height > 0
                 && height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
             crate::rotation::transaction::RecoveryEvidenceError::ChainChanged
         );
@@ -138,24 +155,44 @@ impl Treasury {
             .await;
         let txid = zcash_primitives::transaction::TxId::from_hex(&facts.txid)
             .context("invalid transaction identity")?;
-        ensure!(
-            current
-                .wallet_transactions
-                .get(&txid)
-                .is_some_and(|r| r.status().is_failed()),
-            crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotInvalidated
-        );
+        use crate::rotation::store::preparation::InputPool;
         let input = [
             check_inputs::<TransparentCoin>(
                 &original,
                 &current,
                 &txid,
+                &selected,
+                InputPool::Transparent,
                 height,
                 sync.confirmations,
             )?,
-            check_inputs::<SaplingNote>(&original, &current, &txid, height, sync.confirmations)?,
-            check_inputs::<OrchardNote>(&original, &current, &txid, height, sync.confirmations)?,
-            check_inputs::<IronwoodNote>(&original, &current, &txid, height, sync.confirmations)?,
+            check_inputs::<SaplingNote>(
+                &original,
+                &current,
+                &txid,
+                &selected,
+                InputPool::Sapling,
+                height,
+                sync.confirmations,
+            )?,
+            check_inputs::<OrchardNote>(
+                &original,
+                &current,
+                &txid,
+                &selected,
+                InputPool::Orchard,
+                height,
+                sync.confirmations,
+            )?,
+            check_inputs::<IronwoodNote>(
+                &original,
+                &current,
+                &txid,
+                &selected,
+                InputPool::Ironwood,
+                height,
+                sync.confirmations,
+            )?,
         ]
         .into_iter()
         .try_fold(0u64, |a, b| a.checked_add(b))

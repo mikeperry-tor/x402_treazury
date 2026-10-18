@@ -583,14 +583,7 @@ fn validate_quote_on(
         timestamp(&q["deadline"])?
     };
     // The provider can keep the deposit address active longer than requested.
-    // Our authority to send always expires at the earlier local/provider deadline.
-    let deadline = deadline.min(timestamp(&request["deadline"])?);
-    ensure!(
-        deadline
-            .checked_sub(now)
-            .is_some_and(|s| s >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS),
-        QuoteWindowExpired
-    );
+    ensure!(deadline > now, QuoteWindowExpired);
     if let Some(fees) = response["quoteRequest"]["appFees"].as_array() {
         let total: u64 = fees
             .iter()
@@ -852,7 +845,7 @@ mod tests {
             let mut bad = response.clone();
             bad["quote"]["depositMemo"] = json!("1");
             assert!(validate_quote(request.clone(), bad, &limits, 2_000_000_000).is_err());
-            assert!(validate_quote(request, response, &limits, 2_000_000_701).is_err());
+            assert!(validate_quote(request, response, &limits, 2_000_001_000).is_err());
         }
     }
     #[test]
@@ -886,7 +879,11 @@ mod tests {
         };
         let quote =
             validate_quote(req.clone(), response.clone(), &limits, deadline - 1800).unwrap();
-        assert_eq!(quote.deadline, deadline); // Provider deadline is three days later.
+        assert_eq!(
+            quote.deadline,
+            timestamp(&response["quote"]["deadline"]).unwrap()
+        );
+        assert!(quote.deadline > deadline); // Returned preference may be longer.
         assert_eq!(quote.input, 369795);
         for (pointer, value) in [
             ("/quoteRequest/confidentiality", json!("basic")),

@@ -495,7 +495,7 @@ fn submitted(store: &mut Store, job: &FundingJob) {
         )
         .unwrap();
     store
-        .reserve(&job.operation_id, Some(&job.pool_id), 1, 100)
+        .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
         .unwrap();
     let revision = store.snapshot().unwrap().0;
     store
@@ -509,7 +509,7 @@ fn submitted(store: &mut Store, job: &FundingJob) {
                 expiry_height: 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
-                deadline: u64::MAX,
+                deadline: Some(u64::MAX),
             }),
         )
         .unwrap();
@@ -908,7 +908,7 @@ async fn reverse_status_completion_and_operation_backoff_survive_independent_sou
     submitted(&mut store, &jobs[0]);
     // Source ownership remains singleton: this first source is canonically
     // confirmed before another operation receives prepared bytes.
-    store.confirm_spend(&jobs[0].operation_id, 60, 1).unwrap();
+    store.confirm_spend(&jobs[0].operation_id).unwrap();
     submitted(&mut store, &jobs[1]);
     let (store, actor) = StoreHandle::spawn(store);
     let gates = Arc::new(
@@ -1536,7 +1536,7 @@ async fn captured_inventory_excludes_new_rows_until_a_continuous_pass() {
         .unwrap();
         let initial = raw.funding_jobs().unwrap();
         submitted(&mut raw, &initial[0]);
-        raw.confirm_spend(&initial[0].operation_id, 60, 1).unwrap();
+        raw.confirm_spend(&initial[0].operation_id).unwrap();
         let (store, actor) = StoreHandle::spawn(raw);
         let (statuses, mut status_events) = mpsc::unbounded_channel();
         let (started, mut source_events) = mpsc::unbounded_channel();
@@ -1592,7 +1592,7 @@ async fn captured_inventory_excludes_new_rows_until_a_continuous_pass() {
                     .collect();
                 for job in &added {
                     submitted(s, job);
-                    s.confirm_spend(&job.operation_id, 60, 1)?;
+                    s.confirm_spend(&job.operation_id)?;
                 }
                 Ok(added)
             })
@@ -1731,7 +1731,7 @@ async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drai
             for (index, job) in jobs.iter().enumerate() {
                 submitted(&mut raw, job);
                 if index + 1 < jobs.len() {
-                    raw.confirm_spend(&job.operation_id, 60, 1).unwrap();
+                    raw.confirm_spend(&job.operation_id).unwrap();
                 }
             }
             let bad = jobs[0].clone();
@@ -1869,7 +1869,7 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
             .unwrap();
             let jobs = raw.funding_jobs().unwrap();
             submitted(&mut raw, &jobs[0]);
-            raw.confirm_spend(&jobs[0].operation_id, 60, 1).unwrap();
+            raw.confirm_spend(&jobs[0].operation_id).unwrap();
             submitted(&mut raw, &jobs[1]);
             let treasury = raw.id().to_owned();
             raw.fail_next_inventory_read(read, rusqlite::ffi::SQLITE_LOCKED);

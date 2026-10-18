@@ -1955,14 +1955,14 @@ bearer_token_env="TOKEN"
                 let seen = seen.clone();
                 async move {
                     let result = match v["method"].as_str().unwrap() {
-                        "eth_chainId" => { seen.add_permits(1); json!("0x2105") },
+                        "eth_chainId" => json!("0x2105"),
                         "eth_getBlockByNumber" => {
                             let height = if v["params"][0] == "latest" {100} else {
                                 u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()
                             };
                             json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
                         },
-                        "eth_call" => json!(format!("0x{:064x}",5_000_000)),
+                        "eth_call" => { seen.add_permits(1); json!(format!("0x{:064x}",5_000_000)) },
                         _ => panic!("unexpected RPC"),
                     };
                     Json(json!({"jsonrpc":"2.0","id":v["id"],"result":result}))
@@ -1985,6 +1985,19 @@ bearer_token_env="TOKEN"
             0
         )
         .unwrap();
+        let job = store.funding_jobs().unwrap().remove(0);
+        store
+            .record_funding_balance(
+                &job.id,
+                &job.operation_id,
+                &job.wallet_id,
+                &job.recipient,
+                alloy_primitives::U256::from(5_000_000),
+            )
+            .unwrap();
+        store.low_balance(&pool, &job.wallet_id).unwrap();
+        let refresh_pool = pool.clone();
+        let refresh_wallet = job.wallet_id.clone();
         let (store, store_task) = crate::rotation::store::StoreHandle::spawn(store);
         running.managed_pools.push(Arc::new(
             crate::rotation::manager::ManagedPool::new(
@@ -2005,6 +2018,10 @@ bearer_token_env="TOKEN"
             .unwrap()
             .forget();
         failure.send(()).unwrap();
+        store
+            .call(move |s| s.low_balance(&refresh_pool, &refresh_wallet))
+            .await
+            .unwrap();
         // A second complete sweep must start after the funding stop. Cancelling
         // reconciliation along with funding would strand this wait.
         tokio::time::timeout(Duration::from_secs(10), reads.acquire())

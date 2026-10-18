@@ -292,6 +292,9 @@ fn retained_unprepared_job(db: &Connection, job: &Value, status: &Value) -> Resu
     Ok(known && bound)
 }
 fn validate_source(db: &Connection, old: &Value, current: &Value) -> Result<()> {
+    if current.get("source_preparations").is_some() || old.get("source_preparations").is_some() {
+        return validate_preparations(db, old, current);
+    }
     let before = index(array(old, "source_budget_entries")?, "id")?;
     let after = index(array(current, "source_budget_entries")?, "id")?;
     for (id, prior) in &before {
@@ -338,6 +341,84 @@ fn validate_source(db: &Connection, old: &Value, current: &Value) -> Result<()> 
     }
     Ok(())
 }
+// Current snapshots expose immutable ownership, never a parallel capital ledger.
+fn validate_preparations(db: &Connection, old: &Value, current: &Value) -> Result<()> {
+    let before = index(array(old, "source_preparations")?, "operation_id")?;
+    let after = index(array(current, "source_preparations")?, "operation_id")?;
+    let old_ops = index(
+        array(&old["lifecycle"], "source_operations")?,
+        "operation_id",
+    )?;
+    let operations = index(
+        array(&current["lifecycle"], "source_operations")?,
+        "operation_id",
+    )?;
+    for (id, prior) in &before {
+        ensure!(
+            after.get(id).is_some_and(|now| now["preparation_sha256"]
+                == prior["preparation_sha256"]
+                && now["job_id"] == prior["job_id"]
+                && now["pool_name"] == prior["pool_name"]
+                && (prior["prepared_record_sha256"].is_null()
+                    || now["prepared_record_sha256"] == prior["prepared_record_sha256"])),
+            "accepted source preparation changed or disappeared"
+        );
+    }
+    for (id, prior) in old_ops {
+        let now = operations
+            .get(id)
+            .context("prepared source operation disappeared")?;
+        ensure!(
+            now["facts"] == prior["facts"]
+                && now["prepared_record_sha256"] == prior["prepared_record_sha256"],
+            "prepared source facts or bytes changed"
+        );
+    }
+    for (id, entry) in after {
+        let digest = name(entry, "preparation_sha256")?;
+        ensure!(
+            digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()),
+            "invalid preparation digest"
+        );
+        if before.contains_key(id) {
+            continue;
+        }
+        let (bound, job, pool): (i64,String,String) = db.query_row("SELECT s.source_bound,s.job,p.pool FROM funding_source_attempts s JOIN funding_permits p ON p.job=s.job WHERE s.operation=?1 AND s.released=0", [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).context("source preparation outside registry baseline/permits")?;
+        ensure!(
+            array(&current["treasury_status"], "funding_jobs")?
+                .iter()
+                .any(|j| j["id"] == job
+                    && j["pool_name"] == pool
+                    && entry["job_id"] == job
+                    && entry["pool_name"] == pool),
+            "accepted source operation lacks its allocated funding job"
+        );
+        if let Some(op) = operations.get(id) {
+            let principal = op["facts"]["amount_zatoshis"]
+                .as_u64()
+                .context("source principal missing")?;
+            let fee = op["facts"]["fee_zatoshis"]
+                .as_u64()
+                .context("source fee missing")?;
+            ensure!(
+                principal
+                    .checked_add(fee)
+                    .is_some_and(|cost| bound > 0 && cost <= bound as u64),
+                "actual source cost exceeds permit"
+            );
+        }
+    }
+    ensure!(
+        operations.keys().all(|id| current["source_preparations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["operation_id"] == *id)),
+        "prepared source lacks accepted ownership"
+    );
+    Ok(())
+}
+
 fn validate_payments(db: &Connection, run: &str, old: &Value, current: &Value) -> Result<()> {
     let before = index(array(old, "payment_attempts")?, "id")?;
     let after = index(array(current, "payment_attempts")?, "id")?;
@@ -506,6 +587,49 @@ mod tests {
         .unwrap();
     }
 
+    #[test]
+    fn original_preparations_survive_replacement_and_reject_changed_or_unowned_work() {
+        let (_dir, guard, db, mut before) = fixture();
+        before["source_preparations"] = json!([]);
+        before["lifecycle"] = json!({"source_operations":[]});
+        let job = guard
+            .reserve_allocations("treasury", "pool", &[2])
+            .unwrap()
+            .remove(0);
+        guard
+            .reserve_preparation("treasury", &job, "expired", 30)
+            .unwrap();
+        guard
+            .reserve_preparation("treasury", &job, "replacement", 30)
+            .unwrap();
+        let mut current = before.clone();
+        current["treasury_status"]["funding_jobs"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id":job,"pool_name":"pool","operation_id":"replacement"}));
+        current["source_preparations"] = json!([{"operation_id":"expired","job_id":job,"pool_name":"pool","preparation_sha256":"a".repeat(64)}, {"operation_id":"replacement","job_id":job,"pool_name":"pool","preparation_sha256":"b".repeat(64)}]);
+        current["lifecycle"]["source_operations"] = json!([{"operation_id":"expired","submission":"EXPIRED","facts":{"amount_zatoshis":20,"fee_zatoshis":10},"prepared_record_sha256":"c".repeat(64)}]);
+        validate_source(&db, &before, &current).unwrap();
+        let accepted = current.clone();
+        validate_source(&db, &accepted, &current).unwrap();
+        current["source_preparations"][0]["preparation_sha256"] = json!("d".repeat(64));
+        assert!(validate_source(&db, &accepted, &current).is_err());
+        current = accepted.clone();
+        current["source_preparations"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        assert!(validate_source(&db, &accepted, &current).is_err());
+        current = accepted.clone();
+        current["source_preparations"][0]["job_id"] = json!("other");
+        assert!(validate_source(&db, &before, &current).is_err());
+        current = accepted.clone();
+        current["lifecycle"]["source_operations"][0]["facts"]["amount_zatoshis"] = json!(21);
+        assert!(validate_source(&db, &before, &current).is_err());
+        current = accepted;
+        current["source_preparations"][1]["operation_id"] = json!("unknown");
+        assert!(validate_source(&db, &before, &current).is_err());
+    }
     #[test]
     fn funded_start_accepts_ready_only_bootstrap_but_not_unfunded_roles() {
         let (_dir, guard, db, mut state) = fixture();

@@ -173,7 +173,7 @@ Message-size limits remain in force. Legacy library `grpc-timeout` metadata is
 removed at this transport boundary; application total-RPC wrappers and sync's
 complete-message timers are removed. No large substitute duration is used.
 Upstream constructors outside the injected application path keep their own policy.
-Quote and transaction expiry, confirmations, financial evidence freshness and
+Quote and transaction expiry, confirmations, canonical coverage and
 qualification authority remain independent of network progress. Submission failure
 still retains unknown outcome and exact saved bytes; no retry authority is added.
 
@@ -210,11 +210,9 @@ without joining blocking scan/proving workers; it does not release liabilities o
 run wallet cleanup. Library serving returns a typed `ForcedShutdown` error for
 its embedding process to handle. A signed-request timeout still leaves durable unresolved exposure.
 
-Managed pool gates protect evidence publication, admission, signing and durable
-journaling. Base RPC acquisition and signed HTTP submission run outside the gate.
-Publication rechecks each wallet's captured evidence and shared endpoint generation;
-a completed RPC alone cannot grant authority. A seller delay cannot serialize other
-requests sharing a wallet.
+Managed pool gates protect ownership, signing and durable journals. Advisory Base
+reads and signed HTTP submission run outside the gate. Balance publication never
+grants financial authority; slow seller responses do not serialize other calls.
 The existing 128 foreground-owner permits are acquired before retained MCP tasks
 are spawned and held through response-body conversion and result construction.
 Nested managed/static/directory workflows share the actual task-local permit;
@@ -222,7 +220,7 @@ a retained lifetime token alone never bypasses admission. Disconnecting a waiter
 does not release its permit. Excess work is rejected before provider I/O; after
 owned work finishes the same capacity is available again. This bounds process
 work and response memory, not spending or treasury capital.
-Exposure stays reserved until confirmed chain reconciliation.
+Every signed authorization remains chargeable until its canonical outcome is known.
 A separate reconciliation owner keeps bounded wallet and authorization reads moving
 independently; cancellation of a response waiter does not abandon its accepted pass.
 Help coalesces requests for the same document without blocking other resources.
@@ -421,23 +419,46 @@ financial or qualification authority.
 | Advisory maintenance: four balance reads per group | Five-second independent cadence, indexed 64-row keyset pages for pending and live wallets. A failed read retains the estimate/low-balance marker. A new failure during an active read schedules a follow-up. The retained owner survives waiter cancellation. Canonical pending authorization traversal is qualification-only and uses its own captured boundary/64-row pages; it cannot delay ordinary signing. |
 | Managed payer selection | Indexed saved hints select among existing eligible identities, without RPC or historical repair. Insufficient-funds traversal captures the existing inventory and visits each identity once; it never allocates or waits for funding. |
 | Runtime price hints: 300-second receipt lifetime, 512 entries | Bounded process memory for trusted operation/group/transport keys. Access and late validation never renew receipt age. Hints guide selection only; expiry or eviction triggers no HTTP, probe or authority renewal. |
-| Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours; the separate 300-second margin remains pending the provider contract. |
-| Refund shielding local 24-hour deadline | Persisted authorization lifetime of that prepared operation, alongside consensus block expiry; never renewed during recovery. |
+| Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. The chain-specific 1Click arrival/confirmation/late-refund contract remains unresolved; broadcast acceptance is not settlement. |
 | x402 authorization validity | Signed payment authority and canonical expiry recovery, independent of HTTP progress. |
 | Funding observation owner | Per store: four credit reads, four status reads, four prerequisite-complete unsigned quotes, one serialized source step and one pending quote prerequisite. Each of the four traversal lanes (credit, status, source and quote prerequisite) retains at most 64 acquired rows; independent cursors have no inventory-count cutoff. These bounds protect acquired work, not funding capital. |
 | Funding scheduling metadata: 256 records per observation kind | At most 1,024 runtime records retain exact operation/kind due times and failure streaks. Active work and unelapsed backoff cannot be evicted; due inactive records may be forgotten. Reopen reconstructs missing work from committed facts without resetting transaction recovery attempts. |
 | Explicit wallet bootstrap observation | One-second captured-claim polling and 60-second progress reporting; no total-work deadline. Ordinary serving has no bootstrap readiness poll or funded-payer startup gate. |
-| Funding polling/backoff and swap delay threshold | One-second wake cadence, independent per-kind backoff up to 300 seconds, and a 60-second polling floor after the health threshold. These govern scheduling only; no whole-job timeout or replacement-send authority. A success in one observation kind cannot reset another kind's failure backoff. Typed busy/locked inventory reads defer only their lane under the existing poll cadence, retaining its cursor and all active work; mutation/publication failures are not replayed. |
+| Funding polling/backoff and swap delay threshold | One-second wake cadence, independent per-kind backoff up to 300 seconds, and a 60-second polling floor after the health threshold. These govern scheduling only; no whole-job timeout or replacement-send authority. A success in one observation kind cannot reset another kind's failure backoff. Typed busy/locked inventory reads defer only their lane under the existing poll cadence, retaining its cursor and all active work; mutation/publication failures are not replayed by the inventory-read retry mechanism. Completed SDK results instead retain their existing owner, which retries identical local publication without recalculating or submitting. |
 | Import success retention 300 seconds / failure backoff one second | Applies after completion only; active coalesced fetches cannot age out. |
 | Relay attempt backoff one second / three attempts per scoped target | Bounds actual proven pre-submission request failures. Read-only missing-payer waits consume no attempts. Possibly submitted failures stop relay spending instead of retrying. |
 | Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Storage/resource/diagnostic contention policy; cache persistence failure does not invalidate a complete response. |
 | Optional cover episodes and three-second task cleanup | Bound optional unsigned work; cannot cut off the real paid call. |
 | Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. |
 | Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
-| Treasury background sync cadence | Existing half-max-age cadence (1–60 seconds) is scheduled from the last successfully persisted scan completion, including command-triggered scans. Reuse, failed/cancelled scans and unrelated commands do not reset it. Long post-scan command work cannot postpone an already-due tick. This scheduling clock never renews the original sync observation or financial authority. |
+| Treasury background sync cadence | Independent 60-second cadence is scheduled from the last successfully persisted scan completion, including command-triggered scans. Reuse, failed/cancelled scans and unrelated commands do not reset it. Long post-scan command work cannot postpone an already-due tick. This scheduling clock never renews the original sync observation or financial authority. |
 | Sync mempool drain window | Returns control while scan workers remain, not a whole-sync deadline. |
 
 Buffered response limits remain: default API 16 MiB, help 4 MiB and catalog 32 MiB,
 plus explicit MCP, NEAR JSON, protobuf, image and cache limits. They bound memory
 or stored data, not download duration. TLS/HTTP compatibility, authentication,
 canonical proofs, amount caps and signed-work no-replay rules remain enforced.
+
+### Source contract and upload limits
+
+The 1Click [quote request contract](https://docs.near-intents.org/api-reference/oneclick/request-a-swap-quote)
+and [returned Quote model](https://github.com/defuse-protocol/one-click-sdk-typescript/blob/main/src/models/Quote.ts)
+distinguish the requested window from the returned deposit deadline. The SDK's
+notification accelerates detection; notification or local broadcast acceptance
+proves neither required confirmations nor timely settlement. No inspected public
+contract establishes the `nep141:zec.omft.near` watcher's arrival event, compared
+timestamp, confirmation policy or late-deposit/refund behavior.
+
+Pinned investigation pointers remain Zodl iOS `6a7dc6b39cb8` (`Near1Click.swift` and
+swap coordinator), Android `9f4e719e3eee` (`NearSwapDataSource.kt` and swap/status
+use cases), Swift SDK `cf07eb228c1b`, Android SDK `ae538fc5b39f`, Near-One
+`bridge-sdk-rs` `d1361ac1c68f`, `omni-bridge` `3f0349044938`,
+`omni-bridge-services` `00ccb5d1dd89`, and
+[btc-bridge deposit verification](https://github.com/Near-One/btc-bridge/blob/7740fae0ed8dc56571adfe2aaf36bd4edee0d441/contracts/satoshi-bridge/src/btc_light_client/deposit.rs).
+Their UI heuristics and other bridge paths do not establish the deployed 1Click
+Zcash route contract. No live spending or settlement qualification follows.
+
+The gRPC response-header inactivity timer includes request upload because the
+transport exposes no supported per-request upload-consumption signal. A progressing
+upload may time out; sibling streams/keepalives cannot renew its timer. Uncertain
+source submission retains exact bytes and selected inputs, without a paid retry.

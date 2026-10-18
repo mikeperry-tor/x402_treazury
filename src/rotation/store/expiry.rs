@@ -12,10 +12,10 @@ impl Store {
     /// Evidence is checked by Treasury, never supplied by a CLI/MCP caller.
     pub(crate) fn resolve_expired(&mut self, id: &str, revision: i64, _instant: u64) -> Result<()> {
         let closed: Option<bool> = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0) FROM expired_operations WHERE id=?1",
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') FROM expired_operations WHERE id=?1",
             [id], |row| row.get(0)).optional()?;
         if let Some(closed) = closed {
-            ensure!(closed, "expired operation accounting conflict");
+            ensure!(closed, "expired operation ownership conflict");
             return Ok(());
         }
         let observation: String = self.db.query_row(
@@ -32,7 +32,7 @@ impl Store {
         ensure!(
             current_revision == revision
                 && (sync.phase == SyncPhase::Ready && sync.snapshot_revision == revision),
-            "expiry recovery requires fresh unchanged snapshot"
+            "expiry recovery requires completed unchanged snapshot"
         );
         ensure!(
             sync.at_observed_tip(),
@@ -41,7 +41,8 @@ impl Store {
         let op = self.operation(id)?;
         let height = sync.height.context("missing recovery height")?;
         ensure!(
-            height >= u64::from(op.facts.expiry_height) + u64::from(sync.confirmations),
+            op.facts.expiry_height > 0
+                && height >= u64::from(op.facts.expiry_height) + u64::from(sync.confirmations),
             crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotBuried
         );
         let tx = self.db.transaction()?;
@@ -51,13 +52,6 @@ impl Store {
                 [id]
             )? == 1,
             "operation is not pending"
-        );
-        ensure!(
-            tx.execute(
-                "UPDATE budget_entries SET reserved=0 WHERE id=?1 AND consumed=0",
-                [id]
-            )? == 1,
-            "operation already consumed"
         );
         tx.execute(
             "INSERT INTO expired_operations VALUES (?1,?2,?3)",
@@ -107,7 +101,7 @@ mod tests {
             funding::FundingPhase::Quoted,
             funding::FundingPhase::Preparing,
         )?;
-        s.reserve(&job.operation_id, Some(&pool), 1, 100)?;
+        s.accept_preparation(&job.operation_id, Some(&pool), 100, None)?;
         s.prepare_with_facts(
             &job.operation_id,
             1,
@@ -118,7 +112,7 @@ mod tests {
                 expiry_height: 20,
                 amount_zatoshis: 80,
                 fee_zatoshis: 20,
-                deadline: 1000,
+                deadline: Some(1000),
             }),
         )?;
         assert!(!s.funding_facts(&job.id, &job.operation_id)?.status_needed());
@@ -190,7 +184,7 @@ mod tests {
         assert_eq!(s.funding_recovery_count(&job.id)?, 1);
         s.resolve_expired(&job.operation_id, revision, 100)?;
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
-        assert!(s.confirm_spend(&job.operation_id, 100, 1).is_err());
+        assert!(s.confirm_spend(&job.operation_id).is_err());
         let treasury = s.id().to_owned();
         let recovery_revision = revision;
         let mut revision = s.snapshot()?.0;

@@ -40,16 +40,19 @@ fn docker(args: &[&str]) -> Result<String> {
     }
     Ok(text.trim().to_string())
 }
-fn budget(state: &Path, operation: &str) -> Result<(i64, i64)> {
+fn operation_cost(state: &Path, operation: &str) -> Result<(i64, i64)> {
     let db = rusqlite::Connection::open_with_flags(
         state.join("state.sqlite"),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )?;
-    Ok(db.query_row(
-        "SELECT reserved,consumed FROM budget_entries WHERE id=?1",
-        [operation],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?)
+    let (state,facts):(String,String)=db.query_row("SELECT CASE WHEN e.id IS NOT NULL THEN 'EXPIRED' ELSE t.submission END,t.facts FROM treasury_operations t LEFT JOIN expired_operations e ON e.id=t.id WHERE t.id=?1",[operation],|r|Ok((r.get(0)?,r.get(1)?)))?;
+    let facts: crate::rotation::transaction::TransactionFacts = serde_json::from_str(&facts)?;
+    let cost = i64::try_from(facts.amount_zatoshis + facts.fee_zatoshis)?;
+    Ok(match state.as_str() {
+        "CONFIRMED" => (0, cost),
+        "EXPIRED" => (0, 0),
+        _ => (cost, 0),
+    })
 }
 struct Chain {
     passed: bool,
@@ -373,7 +376,7 @@ async fn run() -> Result<()> {
         .await?;
     let facts = prepared.facts().unwrap();
     let cost = i64::try_from(facts.amount_zatoshis + facts.fee_zatoshis)?;
-    assert_eq!(budget(&state, &op)?, (cost, 0));
+    assert_eq!(operation_cost(&state, &op)?, (cost, 0));
     eprintln!("deposit prepared; checking durable restart");
     treasury.close().await?;
     assert!(
@@ -429,7 +432,7 @@ async fn run() -> Result<()> {
         })
         .await?;
     assert_eq!(recovered.bytes(), prepared.bytes());
-    assert_eq!(budget(&state, &op)?, (cost, 0));
+    assert_eq!(operation_cost(&state, &op)?, (cost, 0));
     assert_eq!(
         treasury
             .submit_prepared(op.clone(), &mut sender, true, &stop)
@@ -445,7 +448,7 @@ async fn run() -> Result<()> {
         TransactionPresence::Confirmed { .. }
     ));
     assert!(!treasury.status().await?.outgoing_pending);
-    assert_eq!(budget(&state, &op)?, (0, cost));
+    assert_eq!(operation_cost(&state, &op)?, (0, cost));
     eprintln!("deposit settled; testing a fork after accounting confirmation");
     Chain::mine(&chain.fork, 3).await?;
     Chain::copy(&chain.fork, &chain.rpc, 12, 14).await?;
@@ -458,7 +461,7 @@ async fn run() -> Result<()> {
     let status = treasury.status().await?;
     assert_eq!(status.sync.unwrap().phase, SyncPhase::Failed);
     assert_eq!(status.treasury_operations[0].submission, "CONFIRMED");
-    assert_eq!(budget(&state, &op)?, (0, cost));
+    assert_eq!(operation_cost(&state, &op)?, (0, cost));
     treasury.close().await?;
     let mut restored =
         Treasury::open_with_network(state, key, id, TreasuryNetwork::Regtest).await?;
@@ -601,7 +604,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
     .await?;
     treasury.configure_sync(settings.clone());
     treasury.sync_once(&stop).await?;
-    assert_eq!(treasury.status().await?.refunds.len(), 2);
+    assert!(treasury.status().await?.legacy_refunds.is_none());
     for fail_commit in [false, true] {
         let before = treasury.status().await?.treasury_operations.len();
         let mempool: Value = chain
@@ -640,7 +643,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
             mempool, after,
             "calculate-only failure broadcast a transaction"
         );
-        let abandoned: Vec<String> = db.prepare("SELECT id FROM budget_entries WHERE consumed=0 AND NOT EXISTS(SELECT 1 FROM outgoing WHERE outgoing.id=budget_entries.id)")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let abandoned: Vec<String> = db.prepare("SELECT operation_id FROM operation_network WHERE preparation IS NULL AND NOT EXISTS(SELECT 1 FROM outgoing WHERE outgoing.id=operation_network.operation_id)")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         drop(db);
         treasury.close().await?;
         treasury = Treasury::open_with_network(
@@ -773,10 +776,10 @@ async fn refunds_run(cli: bool) -> Result<()> {
                 .await?;
         }
         assert_eq!(
-            budget(&state, &op)?,
+            operation_cost(&state, &op)?,
             (0, i64::try_from(prepared.facts().unwrap().fee_zatoshis)?)
         );
-        assert_eq!(treasury.status().await?.refunds.len(), 2);
+        assert!(treasury.status().await?.legacy_refunds.is_none());
     }
     treasury.close().await?;
     chain.passed = true;
@@ -876,7 +879,7 @@ async fn expiry_run(cli: bool) -> Result<()> {
             .await?;
         treasury = cli_fixture.open().await?;
     }
-    assert!(budget(&state, &op)?.0 > 0);
+    assert!(operation_cost(&state, &op)?.0 > 0);
     treasury.close().await?;
     let target = u64::from(prepared.facts().unwrap().expiry_height) + 2;
     ensure!(target < 200, "unexpected regtest expiry");
@@ -891,9 +894,14 @@ async fn expiry_run(cli: bool) -> Result<()> {
     {
         use pepper_sync::wallet::{IronwoodNote, OrchardNote, SaplingNote, TransparentCoin};
         let operation = op.clone();
-        let bytes = treasury
+        let (bytes, selected) = treasury
             .store
-            .call(move |s| s.prepared_snapshot(&operation))
+            .call(move |s| {
+                Ok((
+                    s.prepared_snapshot(&operation)?,
+                    s.prepared_inputs(&operation)?,
+                ))
+            })
             .await?;
         let original = LightClient::from_reader(
             bytes.as_slice(),
@@ -908,10 +916,38 @@ async fn expiry_run(cli: bool) -> Result<()> {
         let txid = submission::decode(prepared.bytes())?.txid();
         let mut current = treasury.client.as_ref().unwrap().wallet().write().await;
         let checked = [
-            reject_missing_input::<TransparentCoin>(&original, &mut current, &txid, target)?,
-            reject_missing_input::<SaplingNote>(&original, &mut current, &txid, target)?,
-            reject_missing_input::<OrchardNote>(&original, &mut current, &txid, target)?,
-            reject_missing_input::<IronwoodNote>(&original, &mut current, &txid, target)?,
+            reject_missing_input::<TransparentCoin>(
+                &original,
+                &mut current,
+                &txid,
+                &selected,
+                crate::rotation::store::preparation::InputPool::Transparent,
+                target,
+            )?,
+            reject_missing_input::<SaplingNote>(
+                &original,
+                &mut current,
+                &txid,
+                &selected,
+                crate::rotation::store::preparation::InputPool::Sapling,
+                target,
+            )?,
+            reject_missing_input::<OrchardNote>(
+                &original,
+                &mut current,
+                &txid,
+                &selected,
+                crate::rotation::store::preparation::InputPool::Orchard,
+                target,
+            )?,
+            reject_missing_input::<IronwoodNote>(
+                &original,
+                &mut current,
+                &txid,
+                &selected,
+                crate::rotation::store::preparation::InputPool::Ironwood,
+                target,
+            )?,
         ];
         assert!(checked.into_iter().any(|checked| checked));
     }
@@ -927,7 +963,7 @@ async fn expiry_run(cli: bool) -> Result<()> {
             .recover_expired(op.clone(), &mut sender, &stop)
             .await?;
     }
-    assert_eq!(budget(&state, &op)?, (0, 0));
+    assert_eq!(operation_cost(&state, &op)?, (0, 0));
     assert_eq!(
         treasury.status().await?.treasury_operations[0].submission,
         "EXPIRED"
@@ -983,6 +1019,8 @@ fn reject_missing_input<T: pepper_sync::wallet::OutputInterface>(
     original: &zingolib::wallet::LightWallet,
     current: &mut zingolib::wallet::LightWallet,
     txid: &zcash_primitives::transaction::TxId,
+    selected: &[crate::rotation::store::preparation::OwnedInput],
+    pool: crate::rotation::store::preparation::InputPool,
     height: u64,
 ) -> Result<bool> {
     let inputs = T::transaction_inputs(original.wallet_transactions.get(txid).unwrap());
@@ -995,9 +1033,30 @@ fn reject_missing_input<T: pepper_sync::wallet::OutputInterface>(
         return Ok(false);
     };
     let removed = current.wallet_transactions.remove(&origin).unwrap();
-    assert!(super::expiry::check_inputs::<T>(original, current, txid, height, 2).is_err());
+    assert!(
+        super::expiry::check_inputs::<T>(
+            original,
+            current,
+            txid,
+            selected,
+            pool.clone(),
+            height,
+            2
+        )
+        .is_err()
+    );
     current.wallet_transactions.insert(origin, removed);
-    assert!(super::expiry::check_inputs::<T>(original, current, txid, height, 2)? > 0);
+    assert!(
+        super::expiry::check_inputs::<T>(
+            original,
+            current,
+            txid,
+            selected,
+            pool.clone(),
+            height,
+            2
+        )? > 0
+    );
     Ok(true)
 }
 

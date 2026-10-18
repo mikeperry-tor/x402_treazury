@@ -26,14 +26,19 @@ fn assert_consistent(store: &Store) {
     );
 }
 fn reservation(store: &Store, id: &str) -> i64 {
-    store
+    let resolved: bool = store
         .db
         .query_row(
-            "SELECT reserved FROM budget_entries WHERE id=?1",
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED')",
             [id],
             |r| r.get(0),
         )
-        .unwrap()
+        .unwrap();
+    if resolved {
+        0
+    } else {
+        store.preparation_intent(id).unwrap().cost_zatoshis as i64
+    }
 }
 
 #[test]
@@ -49,7 +54,9 @@ fn failed_wal_write_or_sync_never_partially_prepares_or_releases_reservation() {
         .unwrap();
         let id = store.id().to_owned();
         install(&mut store);
-        store.reserve("operation", None, 0, 100).unwrap();
+        store
+            .accept_preparation("operation", None, 100, None)
+            .unwrap();
         let before = store.snapshot().unwrap().0;
         let fault = arm(&dir.path().join("state/state.sqlite-wal"), kind);
         let error = store
@@ -122,7 +129,9 @@ fn failed_checkpoint_retains_committed_bytes_and_liability_after_reopen() {
             .db
             .execute_batch("PRAGMA wal_autocheckpoint=0")
             .unwrap();
-        store.reserve("operation", None, 0, 100).unwrap();
+        store
+            .accept_preparation("operation", None, 100, None)
+            .unwrap();
         store
             .prepare("operation", 1, b"prepared-wallet", b"exact-signed-bytes")
             .unwrap();
@@ -158,7 +167,9 @@ fn sqlite_full_rolls_back_preparation_without_releasing_existing_funds() {
     )
     .unwrap();
     let id = store.id().to_owned();
-    store.reserve("operation", None, 0, 100).unwrap();
+    store
+        .accept_preparation("operation", None, 100, None)
+        .unwrap();
     let pages: i64 = store
         .db
         .query_row("PRAGMA page_count", [], |r| r.get(0))

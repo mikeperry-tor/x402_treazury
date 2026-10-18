@@ -141,3 +141,37 @@ fn changed_nullifier_cannot_release_input() {
             .contains("input mismatch")
     );
 }
+
+#[test]
+fn every_original_input_is_required_even_when_remaining_value_covers_cost() {
+    let original = SyntheticWalletBuilder::new(SEED)
+        .orchard_note(1)
+        .orchard_note(1_000_000)
+        .build();
+    let mut current = SyntheticWalletBuilder::new(SEED)
+        .orchard_note(1)
+        .orchard_note(1_000_000)
+        .build();
+    let small = current
+        .wallet_outputs::<OrchardNote>()
+        .into_iter()
+        .find(|o| o.value() == 1)
+        .unwrap()
+        .output_id()
+        .txid();
+    current.wallet_transactions.remove(&small);
+    assert!(
+        current
+            .wallet_outputs::<OrchardNote>()
+            .iter()
+            .map(|o| o.value())
+            .sum::<u64>()
+            > 60_000
+    );
+    assert_eq!(
+        check_owned_outputs(original.wallet_outputs::<OrchardNote>(), &current, 20, 2)
+            .unwrap_err()
+            .downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>(),
+        Some(&crate::rotation::transaction::RecoveryEvidenceError::InputMissing)
+    );
+}

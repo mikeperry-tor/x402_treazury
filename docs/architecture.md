@@ -107,9 +107,16 @@ Clients must inspect this metadata; it does not imply a UI notification. Unsigne
 dependency waits add no timer or
 spending authority. Shutdown drains accepted relay work before financial owners.
 Local authored catalogs remain validated before serving; strict inspection and
-qualification still require complete discovery. Remaining recovery acceptance is
-tracked in the
-[best-effort wallet and recovery plan](plans/best_effort_wallet_balances.md#be06-source-recovery-and-accounting-removal).
+qualification still require complete discovery. Exact accepted calculations/inputs and prepared/submission journals outlive waiters.
+The SDK owns current Zcash funds and chain corrections; local refund credits and
+historical source monetary equality do not gate publication. Completed SDK bytes
+and their snapshot stay with the existing owner until identical local publication
+succeeds; cancelled close waiters do not abandon this drain. Irrecoverable storage
+failure or forced process death can lose unpublished bytes, leaving the accepted
+input claim uncertain. Unhealthy SDK mutation
+or an exited owner may require process restart while listeners and usable Base
+payers remain available. Automatic SDK/actor reconstruction (R01) and general
+owned-transparent shielding (R02) remain [unfinished](plans/treasury_owner_followups.md).
 
 ## MCP and output boundaries
 
@@ -157,7 +164,7 @@ success. Display limits and download limits are different controls. Durable
 
 Named wallet identity determines payer sharing. Two sources can share one wallet,
 and the same provider can be bound to different wallets through source aliases.
-A single embedded Zcash treasury can fund multiple independently accounted managed
+A single embedded SDK-owned Zcash treasury can fund multiple independently scoped managed
 pools. The [wallet architecture](wallet-rotation.md) explains admission, atomic
 promotion, background funding, encrypted persistence and recovery boundaries.
 

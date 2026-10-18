@@ -75,7 +75,8 @@ fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
     [
         !facts.initial_credit_recorded,
         facts.status_needed(),
-        facts.source_reconciliation_needed()
+        facts.source_pending
+            || facts.preparation_accepted
             || crate::treasury::recovery::needs_recovery(job)
             || matches!(job.phase, FundingPhase::Preparing | FundingPhase::Prepared)
             || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)

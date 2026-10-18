@@ -409,7 +409,7 @@ fn legacy_baseline_is_immutable_and_active_treasury_is_refused() {
         files::hash(b"historic ledger bytes")
     );
     assert!(baseline["payment_attempts"].is_array());
-    assert!(baseline["source_budget_entries"].is_array());
+    assert!(baseline["source_preparations"].is_array());
     let mut auth = f.auth.clone();
     auth.id = "next".into();
     drop(db);

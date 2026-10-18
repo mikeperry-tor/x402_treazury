@@ -160,12 +160,41 @@ impl<B: FundingBackend> FundingWorker<B> {
         use FundingPhase::*;
         // Recovery owns the ordinary submitted-source observation when eligible,
         // including its separate two-sync expiry proof. Do not sync/lookup twice.
-        let recovery =
-            if crate::treasury::recovery::needs_recovery(job) && job.phase != RefundPending {
-                self.backend.lock().await.recover(job).await?
-            } else {
-                None
-            };
+        let original = self.facts(job).await?;
+        let unsubmitted_expired = if original.source_pending
+            && original.source_attempts == 0
+            && original.source_submission.is_some()
+        {
+            let id = job.operation_id.clone();
+            let instant = clock.now();
+            self.store
+                .call(move |s| {
+                    let facts = s.operation(&id)?.facts;
+                    let height = s.treasury_sync_state()?.sync.and_then(|sync| sync.height);
+                    Ok(facts.deadline.is_some_and(|deadline| deadline <= instant)
+                        || (facts.expiry_height > 0
+                            && height
+                                .is_some_and(|height| height >= u64::from(facts.expiry_height))))
+                })
+                .await?
+        } else {
+            false
+        };
+        let recovery_needed = if original.source_pending && original.source_attempts == 0 {
+            !original.enabled
+                || unsubmitted_expired
+                || original.source_submission.is_none()
+                || original.provider_failed
+                || original.provider_refunded
+                || original.provider_incomplete
+        } else {
+            crate::treasury::recovery::needs_recovery(job)
+        };
+        let recovery = if original.preparation_accepted || recovery_needed {
+            self.backend.lock().await.recover(job).await?
+        } else {
+            None
+        };
         let source_observed = recovery
             .as_ref()
             .is_some_and(|result| result.source_observed);
@@ -213,6 +242,7 @@ impl<B: FundingBackend> FundingWorker<B> {
         );
         let facts = self.facts(&current).await?;
         if facts.initial_credit_recorded
+            && !facts.preparation_accepted
             && !facts.source_pending
             && matches!(current.phase, Allocated | Quoted)
         {
@@ -248,8 +278,10 @@ impl<B: FundingBackend> FundingWorker<B> {
             if facts.source_attempts == 0 && !facts.initial_credit_recorded && facts.enabled {
                 let id = current.operation_id.clone();
                 let operation = self.store.call(move |s| s.operation(&id)).await?;
-                if operation.facts.deadline.saturating_sub(clock.now())
-                    < super::transaction::MIN_QUOTE_VALIDITY_SECONDS
+                if operation
+                    .facts
+                    .deadline
+                    .is_some_and(|deadline| deadline <= clock.now())
                 {
                     let error = anyhow::anyhow!("prepared_quote_window_exhausted");
                     let diagnostic = safe_error(&error, &current.phase);
@@ -344,9 +376,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             }
         }
         self.backend.lock().await.ready(job, &quote).await?;
-        if quote.deadline.saturating_sub(clock.now())
-            < super::transaction::MIN_QUOTE_VALIDITY_SECONDS
-        {
+        if quote.deadline <= clock.now() {
             let id = job.id.clone();
             let operation = job.operation_id.clone();
             return self
@@ -498,23 +528,8 @@ impl FundingBackend for Backend {
             reserve < limits.max_input,
             super::error::FundingCondition::CostLimit
         );
-        let state = self.store.call(|s| s.treasury_sync_state()).await?;
-        // A still-fresh low balance can predate an operator's deposit. Scan
-        // before reporting insufficient capital again; pending bytes instead
-        // retain their ordinary reconciliation owner.
-        if !state.outgoing_pending
-            && state
-                .sync
-                .is_some_and(|sync| sync.spendable_shielded_zatoshis < reserve)
-        {
-            self.treasury.sync().await?;
-        }
         self.store
-            .call(move |s| {
-                s.check_job_permit(&job_id, reserve)?;
-                let instant = now()?;
-                s.check_funding_capacity(instant, reserve)
-            })
+            .call(move |s| s.check_job_permit(&job_id, reserve))
             .await
     }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<QuoteRequest> {
@@ -932,7 +947,7 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
                 return "treasury_insufficient_spendable_funds; refill paused before transaction preparation; fund and sync the shielded treasury; existing funded wallets remain usable";
             }
             "prepared_quote_window_exhausted" => {
-                return "prepared_quote_window_exhausted; fewer than 300 seconds remained before the swap quote deadline; no submission attempted; signed bytes retained; automatic recovery will wait for transaction expiry before retrying funding; wallet recover can inspect recovery";
+                return "prepared_quote_window_exhausted; the returned swap quote deadline expired; no submission attempted; signed bytes retained; automatic recovery will wait for transaction expiry before retrying funding; wallet recover can inspect recovery";
             }
             "quote_refresh_exhausted" => {
                 return "quote_refresh_exhausted; automatic recovery can retry within the durable recovery limit; use wallet recover for an assessment";
