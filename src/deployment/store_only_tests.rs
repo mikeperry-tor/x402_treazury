@@ -217,7 +217,11 @@ async fn base_service(fault: &str, relay_enabled: bool) {
         .1;
     let stop = CancellationToken::new();
     let task = tokio::spawn(running.serve(stop.clone()));
-    let response = reqwest::Client::new()
+    let http = crate::network::NetworkContext::new(Default::default())
+        .unwrap()
+        .discovery(&format!("http://{address}/mcp"), None)
+        .unwrap();
+    let response = http
         .post(format!("http://{address}/mcp"))
         .bearer_auth("fixture-token")
         .header("accept", "application/json, text/event-stream")
@@ -230,7 +234,7 @@ async fn base_service(fault: &str, relay_enabled: bool) {
         "{}",
         response.text().await.unwrap()
     );
-    let response = reqwest::Client::new().post(format!("http://{address}/mcp"))
+    let response = http.post(format!("http://{address}/mcp"))
         .bearer_auth("fixture-token").header("accept","application/json, text/event-stream")
         .json(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api_free","arguments":{}}}))
         .send().await.unwrap();
@@ -572,7 +576,8 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
         let stop = CancellationToken::new();
         let task = tokio::spawn(running.serve(stop.clone()));
         for (listener, expected) in [("one", "wallet_not_ready"), ("static", "static-ok")] {
-            let response = reqwest::Client::new().post(format!("http://{}/mcp",addresses[listener]))
+            let response = crate::network::NetworkContext::new(Default::default()).unwrap()
+                .discovery(&format!("http://{}/mcp", addresses[listener]), None).unwrap().post(format!("http://{}/mcp",addresses[listener]))
                 .bearer_auth("fixture-token").header("accept","application/json, text/event-stream")
                 .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api_read","arguments":{}}}))
                 .send().await.unwrap().text().await.unwrap();

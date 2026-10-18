@@ -81,10 +81,12 @@ fn metadata_preserves_tools_and_only_bound_sources_warn_once() {
 version = 1
 [sources.observed]
 spec = "spec.json"
+probe_pricing = false
 reliability_tags = ["upstream_timeout", "upstream_timeout"]
 reliability_note = "test observation"
 [sources.unused]
 spec = "spec.json"
+probe_pricing = false
 reliability_tags = ["catalog_http_403"]
 [wallets.default]
 mode = "static"
@@ -112,9 +114,16 @@ sources = ["observed"]
         assert!(result.status.success(), "{command:?}: {:?}", result);
         assert!(!String::from_utf8_lossy(&result.stderr).contains("Provider reliability"));
     }
-    let result = run(&path, true, &["serve"]);
-    assert!(!result.status.success()); // No credentials: never binds a listener.
+    let result = Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .args(["serve", "--config"])
+        .arg(&path)
+        .env_clear()
+        .env("MISSING_TEST_TOKEN", "fixture-token")
+        .output()
+        .unwrap();
+    assert!(!result.status.success()); // Missing payer key prevents serving.
     let err = String::from_utf8(result.stderr).unwrap();
+    assert!(err.contains("MISSING_TEST_KEY"), "{err}");
     assert_eq!(
         err.matches("Provider reliability observation:").count(),
         1,

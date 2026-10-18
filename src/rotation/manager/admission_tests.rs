@@ -22,7 +22,11 @@ impl Fixture {
         rusqlite::Connection::open(self.dir.path().join("state/state.sqlite")).unwrap()
     }
     async fn pay(&self) -> Result<(reqwest::Response, bool)> {
-        let http = reqwest::Client::new();
+        let http = crate::network::NetworkContext::new(Default::default())?.http(
+            &crate::network::IsolationId::evm(&self.payer.address)?,
+            &self.url,
+            None,
+        )?;
         let retry = http.get(&self.url).build()?;
         let challenge = http.execute(retry.try_clone().unwrap()).await?;
         self.pool
@@ -153,7 +157,14 @@ async fn qualification_canonical_loop_ignores_bad_historical_readiness_and_resol
         .call(move |s| s.record_credit(&wallet, "5000000", "fixture", 100))
         .await
         .unwrap();
-    let http = reqwest::Client::new();
+    let http = crate::network::NetworkContext::new(Default::default())
+        .unwrap()
+        .http(
+            &crate::network::IsolationId::evm(&other.address).unwrap(),
+            &f.url,
+            None,
+        )
+        .unwrap();
     let request = http.get(&f.url).build().unwrap();
     let challenge = http.execute(request.try_clone().unwrap()).await.unwrap();
     f.pool
