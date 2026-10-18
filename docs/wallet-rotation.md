@@ -109,7 +109,9 @@ attribution does not invalidate owned SDK funds. Enabled automatic funding also 
 outputs after a successful persisted sync, including unattributed returns. Each
 proposal uses one address and the actual standard fee under
 `max_refund_shielding_fee_zec`; the SDK determines confirmations, maturity and input
-availability. Uneconomic/empty addresses do not block independent addresses. No
+availability. Selected inputs must exceed the actual proposed fee before accepting
+input ownership: the pinned SDK permits fee-only proposals, which cannot recover
+capital. Uneconomic/empty addresses do not block independent addresses. No
 principal reservation, attribution requirement or funding-claim reopening is added.
 The explicit per-address command remains available.
 
@@ -431,6 +433,11 @@ jobless shielding. Explicit shielding remains available while serving is stopped
 with its original job recipient network binding. Unattributed automatic shielding
 uses a stable per-address/network/treasury identity. Both paths retain observed
 inputs, fee caps and exact prepared-byte recovery.
+The pinned SDK's `WalletWrite::store_transactions_to_be_sent` scans calculated
+transactions with the wallet's viewing keys. Validation requires the exact selected
+outpoints, no transparent outputs and decrypted account-zero shielded notes equal
+to inputs less actual fee. Check all supported shielded pools: the SDK may promote
+change from Orchard to Ironwood after an upgrade.
 The SDK owns return outputs, spent state, fees and chain corrections. There is no
 local refund credit, principal cap or historical refund/source revalidation gate.
 Source confirmation remains a distinct audit fact. A refund or stale workflow phase
@@ -559,10 +566,10 @@ every selected input and finite inclusive consensus expiry; a refund is never pr
 of non-submission. Earlier state schemas are rejected before mutation, without
 private-state conversion.
 
-R01 reconstructs failed SDK capabilities and replaces exited funding/reconciliation
-tasks through existing ownership. R02 automatically shields owned transparent capital per address under existing
-authority. The [follow-on review](plans/treasury_owner_followups.md) records both
-implementations and qualification limits.
+Failed SDK capabilities reconstruct and exited funding/reconciliation tasks resume
+through existing ownership. Automatic shielding recovers owned transparent capital
+per address under existing authority. Local tests cover these paths without live-funded,
+consensus or Tor qualification; see [testing](testing.md#qualification-status).
 Reopening never erases uncertain accepted work or recovers unpublished bytes lost
 with a process. An accepted shielding calculation blocks new calculation until its
 original transaction confirms or existing consensus-expiry recovery proves all

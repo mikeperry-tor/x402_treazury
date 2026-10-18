@@ -123,9 +123,10 @@ also attempts per-address shielding after successful persisted sync, including
 unattributed owned transparent returns. Pending inputs and bytes take priority;
 uncertain broadcasts never replay automatically. SDK-selected confirmed spendable
 inputs, actual fee safeguards and decrypted owned shielded outputs govern new
-calculation. Qualification job permits do not authorize jobless shielding. The
-[follow-up review](plans/treasury_owner_followups.md) records R01/R02 and their
-remaining qualification limits.
+calculation. A proposal must recover positive shielded value before accepting
+inputs; a fee-only proposal cannot strand an input owner. Qualification job permits
+do not authorize jobless shielding. These paths have local SDK fixture coverage,
+without live-funded, consensus or Tor qualification; see [testing](testing.md#qualification-status).
 
 ## MCP and output boundaries
 

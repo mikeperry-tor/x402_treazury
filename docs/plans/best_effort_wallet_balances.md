@@ -9,8 +9,9 @@ BE02–BE07 are implemented on branch `best_effort_wallet_balances`, starting at
 the combined BE02/BE03 payment gate, and the BE04/BE06 source-ownership gate passed.
 Default Zcash check components and focused fixup acceptance passed as recorded
 under BE07. Final integration review covers the unsquashed history and maintained
-documentation handoff. R01/R02 remain unfinished and explicitly separate from core
-delivery.
+documentation handoff. R01/R02 are also implemented on
+`best_effort_wallet_balances_and_treasury`, starting at `a9b57da`, with separate
+exact-commit and fixup reviews recorded below.
 
 Cross-wallet repetition after an insufficient-funds response is explicitly accepted,
 even when the first authorization remains chargeable and both attempts could charge
@@ -522,7 +523,8 @@ publication failures with the existing owner. Only identical local publication
 retries, on the existing maintenance cadence; a lost acknowledgement or cancelled
 close waiter cannot cause another calculation or submission. Irrecoverable storage
 failure/forced process death can lose unpublished bytes, leaving the durable input
-claim uncertain. SDK reconstruction remains R01.
+claim uncertain. SDK reconstruction was deferred at this core gate and is delivered
+under R01 below.
 
 Source work routing uses actual acceptance, pending bytes and original submission
 facts, including disabled/retired pools and stale COMPLETE/PREPARING display phases.
@@ -662,10 +664,10 @@ boundaries, not renamed balance certificates or another monetary ledger.
 Possible multiple USDC charges, inaccurate estimates, forced-death unpublished-byte
 loss with uncertain intent, incompatible-state rejection and restoration limits
 remain explicit. No private-state conversion, old-binary execution, live-funded,
-live Tor or Docker consensus qualification was performed. R01 SDK/task reconstruction,
-R02 general automatic transparent shielding, the external 1Click route contract and
-the gRPC progressing-upload limitation remain unfinished/unqualified; none is
-claimed as delivered recovery or settlement behavior.
+live Tor or Docker consensus qualification was performed. At this core gate, R01
+SDK/task reconstruction and R02 general automatic transparent shielding remained
+unfinished; their subsequent delivery is recorded below. The external 1Click route
+contract and gRPC progressing-upload limitation remain unresolved.
 
 **Maintained documentation:**
 
@@ -688,7 +690,7 @@ than reproducing competing normative versions:
 | `docs/configuration.md`, `docs/wallet-cli.md`, maintained deployment examples | **BE04–BE06/BE07:** reconcile removed fields/schema, estimate/status meanings, actual fee/permission safeguards, recovery/restoration behavior and no-top-up policy. Preserve user-owned local configurations. |
 | `docs/network-egress.md` timer inventory | **BE05/BE06:** record removed local age/margin/elapsed restrictions, actual remaining protocol deadlines and connection/read inactivity. Document the upload limitation and unresolved 1Click route contract where operators encounter them, with investigation provenance. |
 | `docs/testing.md`, `tests/live/INTEGRATION.md` | **BE03/BE07:** document per-attempt qualification charges and changed assertions, tested boundaries, remaining external/SDK limitations and what has not been qualified. Preserve separate run authority. |
-| `docs/README.md` and focused unfinished plans | **BE07:** index the maintained rules and explicitly unfinished R01/R02 work. Retain this review artifact until final review; later removal requires all enduring policies/limitations and investigation pointers to have maintained homes. |
+| `docs/README.md` and focused unfinished plans | **BE07:** index the maintained rules and follow-up status. Retain this review artifact until final review; later removal requires all enduring policies/limitations and investigation pointers to have maintained homes. |
 
 BE07 must verify links and reconcile contradictions across these destinations,
 not just add a rules section beside obsolete instructions. Keep documents
@@ -755,7 +757,8 @@ Scores below are inclusive CogC/CycC; nested rows are not additive.
 
 The increased coordinating scores are disclosed rather than split only for scoring.
 Independent reviews examine these full chains and verify deletion of the blocking
-predicates and accounting tables. R01/R02 remain explicitly unfinished.
+predicates and accounting tables. R01/R02 were unfinished at this core gate; their
+subsequent implementation and complexity review follow below.
 
 ## Required focused acceptance
 
@@ -812,33 +815,76 @@ predicates and accounting tables. R01/R02 remain explicitly unfinished.
 - Documentation and errors describe estimates/observations honestly. No saved value,
   provider success message or `COMPLETE` label mints new funding authority.
 
-## Deferred owner recovery and shielding
+## Delivered owner recovery and shielding follow-ups
 
-The maintained unfinished work is [treasury owner follow-ups](treasury_owner_followups.md).
+R01/R02 were deferred when core BE01–BE07 completed. They are now implemented on
+`best_effort_wallet_balances_and_treasury` from `a9b57da`. Their completed focused
+plan was removed after moving enduring rules into the maintained
+[wallet guide](../wallet-rotation.md), [architecture](../architecture.md),
+[network inventory](../network-egress.md) and [testing guide](../testing.md).
 
-Plan two follow-ons after the core BE01–BE07 simplification:
+**R01 — eligible SDK/task reconstruction (`dce952b`):** the retained treasury driver
+quiesces the old SDK and reconstructs from the latest committed authenticated
+snapshot through the same Store and exclusive owner. Interrupted commands never
+replay; queued commands, accepted input claims, restrictions and healthy Base
+handles remain owned. Completed unpublished bytes take precedence over
+reconstruction. Funding and reconciliation supervisors replace joined failed tasks
+through existing leases/gates and cadences; shutdown prevents replacement. Shared
+Store/authentication failure still requires operator repair. Forced process death
+cannot recover unpublished bytes.
 
-- **R01 — eligible SDK/task reconstruction:** justify each recoverable exit before
-  replacing an owner. Fence the old SDK owner, resolve accepted commands, preserve
-  one exclusive Store, and test reconstruction while healthy Base handles remain
-  open. Race shutdown so a replacement neither inherits a failed worker's stop
-  token nor survives process shutdown. Reuse existing supervision; no parallel
-  lifecycle framework. Until implemented, state the affected restart requirement.
-- **R02 — automatic recovery of owned transparent capital:** investigate the
-  smallest SDK shielding path for confirmed spendable owned transparent funds,
-  whether or not they can be attributed to a swap. Use the existing treasury owner,
-  auto-funding/run authority, actual proposed fee safeguard and selected-input
-  ownership; do not reserve/charge returned principal or add a refund ledger.
-  Preserve address/network privacy boundaries and exact prepared shielding bytes
-  across restart. Check the pinned SDK's actual selected inputs/output ownership,
-  not an assumed projection. Cover policy disablement, insufficient capital and
-  interrupted submission without preparing a duplicate spend. Returned funds never
-  reopen the initial-funding claim.
+Independent exact-commit review and architecture gate accepted `dce952b`. Focused
+tests cover failed derivation persistence, lost commit acknowledgment, accepted
+input claims/restrictions, shutdown during reconstruction, interrupted commands,
+cancelled driver waiters and completed publication retention. Distinct joined-task
+IDs establish actual funding/reconciliation replacement, rather than an existing
+owner retrying SQLite Busy/Locked.
 
-R01/R02 do not block core BE01–BE07 delivery. BE07 must explicitly report them
-unfinished and must not claim their automatic recovery behavior is complete.
-Update their status explicitly when implemented; retain only genuinely unfinished
-plans afterward.
+**R02 — automatic owned-transparent shielding (`095648c`, fixup `2e142e8`):** the
+existing owner attempts one address at a time after successful persisted sync under
+ordinary enabled auto-funding and the existing actual-fee safeguard. SDK-selected
+inputs include unattributed returns. Exact selected outpoints, no transparent
+outputs and decrypted account-zero shielded notes establish recovery into this
+treasury. Only the fee is cost; no principal reservation, refund ledger, top-up or
+initial-funding claim is added. The encrypted original input manifest supplies a
+stable per-address/network/treasury isolation identity; explicit EVM recipient
+bindings retain precedence. Qualification job permits cannot authorize jobless
+preparation or first submission.
+
+Pending bytes precede new selection. Current permission and zero prior attempts
+govern initial automatic submission; uncertain broadcasts remain observation-only.
+Release uses existing two fresh zero-lag scans, consensus expiry and original
+unspent-input proof. Cancellation, restart and disabled automatic funding retain
+accepted inputs and exact bytes. The pinned SDK can propose fee-only transactions;
+fixup `2e142e8` moves the existing positive-output invariant before input acceptance
+and reuses its actual net value for output ownership verification. A real SDK
+exact-fee regression failed before the fix and passes afterward, alongside recovery
+from independent addresses. No arbitrary dust threshold was added.
+
+Independent exact-commit financial/recovery review accepted `095648c` and
+`2e142e8`; independent source ownership review accepted the combined chain. The
+standard default-Zcash `scripts/check.sh` passed on frozen `095648c`, including all
+targets, synthetic SDK proving/lifecycle, all-feature Clippy and dependency
+compatibility. Both shielding lifecycle tests passed after `2e142e8`, with focused
+Clippy verification. Synthetic fixtures use public unfunded keys and actual SDK
+proofs/bytes; local results do not establish consensus, live-funded bridge, Tor or
+full funded-lifecycle qualification. No private-state conversion was performed.
+
+Final source-matched complexity artifact `20261018T071252Z-a5fad8c4` compares the
+follow-ups to `a9b57da` (325 files, zero exclusions). Scores are inclusive CogC/CycC;
+nested rows are not additive. The complete core baseline comparison remains
+`49566df`, also reviewed through the follow-up chain.
+
+| Responsibility | Before follow-ups → delivered | Disposition |
+| --- | --- | --- |
+| Command owner / reconstruction | command loop 15/22 → 12/21; owned driver 4/6; SDK reconstruction 2/9 | Retained receiver and cleanup owner survive waiter cancellation; interrupted commands never replay. |
+| Shielding calculation | explicit refund path 6/39 → shared per-address path 8/44; explicit wrapper 0/8 | Actual SDK proposal, selected-input ownership, read-only positive-output validity, calculation and exact-byte publication remain one operation. No score-driven extraction or balance ledger. |
+| Automatic shielding coordination | new 20/35 | Orders pending observation/expiry/first submission before independent address selection. |
+| Initialization / maintenance | 45/49 → 48/51; 41/50 → 42/51 | Existing auto-funding wiring and test-only replacement hook; no second lifecycle framework. |
+
+The shielding warning is retained and reviewed across the full operation. SDK
+ownership and pre-acceptance operation validity protect distinct concrete
+boundaries; generic balance, age and capital policy checks were not restored.
 
 ## External contract evidence and transport limitation
 

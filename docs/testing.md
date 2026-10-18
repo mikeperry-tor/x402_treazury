@@ -284,7 +284,8 @@ score is implied by coverage results.
 The R01/R02 owner follow-ups add focused default-build recovery tests and real
 SDK synthetic-chain shielding tests under `treasury::lifecycle_tests::shielding`.
 They cover same-Store reconstruction, actual task replacement, cancelled waiters,
-per-address ownership, fee-only cost, qualification denial, lost submission response
+per-address ownership, fee-only cost accounting, rejection of zero-net proposals
+before accepting inputs, qualification denial, lost submission response
 and restart without duplicate calculation. The pinned SDK may promote shielding
 change from Orchard to Ironwood after an upgrade; ownership checks use decrypted
 account-zero notes across supported shielded pools. These tests use public unfunded
