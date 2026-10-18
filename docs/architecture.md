@@ -127,7 +127,7 @@ search/call fallback tools for clients that cache their initial inventory.
 `src/payment.rs` owns the unsigned challenge and single signed attempt. Static
 profiles support Base USDC v1/v2 exact and v2 upto signing. Each call pins its
 static signer before unsigned I/O, so replacement affects subsequent calls. Managed profiles use
-v2 exact EIP-3009 admission and durable reservations. A paid timeout/body failure
+v2 exact EIP-3009 permission checks and durable authorization journals. A paid timeout/body failure
 can still have spent money; neither tool dispatch nor output conversion replays it.
 
 Direct Rust `PaidClient` calls retain accepted work through response conversion
@@ -189,7 +189,8 @@ smallest fit on every cold or inaccurately predicted call. Reuse is an opportuni
 not a guarantee of circuit lifetime or unlinkability. Preserve the shared
 [smallest-sufficient ordering](wallet-rotation.md#capacity-and-admission) before
 binding and sufficient-bound-payer stability afterward. Actual challenge terms and
-fresh financial evidence remain authoritative for admission; hints never authorize payment.
+actual pool/payer authority govern admission. Saved balances are advisory; see the
+[best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
 
 Late payer selection from the ordinary 402 response is technically feasible. Standard
 v2 exact EIP-3009 requirements do not require selecting the signer before that response;

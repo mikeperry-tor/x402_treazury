@@ -800,28 +800,6 @@ fn assert_atomic_counts(store: &Store, signed: i64, evidence: i64) {
         })
         .unwrap();
     assert_eq!(count, evidence);
-    let wallets = store
-        .db
-        .prepare("SELECT id,unresolved_exposure FROM wallets")
-        .unwrap()
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    for (wallet, aggregate) in wallets {
-        let journal = store
-            .db
-            .prepare("SELECT amount FROM payment_attempts WHERE wallet_id=?1 AND state!='RESOLVED'")
-            .unwrap()
-            .query_map([wallet], |row| row.get::<_, String>(0))
-            .unwrap()
-            .fold(U256::ZERO, |sum, value| {
-                sum.checked_add(amount(&value.unwrap()).unwrap()).unwrap()
-            });
-        assert_eq!(amount(&aggregate).unwrap(), journal);
-    }
 }
 
 #[test]
@@ -863,25 +841,16 @@ fn legacy_pool_generation_is_report_metadata_not_admission_authority() {
 
 #[test]
 fn atomic_payment_preparation_is_unreserved_and_commit_rechecks_authority() {
-    for failure in [
-        "none",
-        "evidence",
-        "expiry",
-        "signature_expiry",
-        "ownership",
-        "capacity",
-        "cap",
-    ] {
+    for failure in ["none", "evidence", "signature_expiry", "ownership", "cap"] {
         let dir = tempfile::tempdir().unwrap();
         let mut store = populated(dir.path());
-        let mut prepared = prepared_payment(&mut store);
+        let prepared = prepared_payment(&mut store);
         assert_atomic_counts(&store, 1, 0);
         store.chain_query(&prepared.pool).unwrap();
         store.payment_chain_query(&prepared.pool).unwrap();
         let mut auth = prepared_authorization(&prepared);
         match failure {
             "evidence" => store.db.execute_batch("CREATE TRIGGER fail_evidence BEFORE INSERT ON payment_admission_evidence BEGIN SELECT RAISE(ABORT,'injected support failure'); END;").unwrap(),
-            "expiry" => prepared.valid_until = 0,
             "signature_expiry" => auth.valid_before = 1,
             "ownership" => store.disable_pool("fixture").unwrap(),
             "capacity" => {
@@ -905,7 +874,7 @@ fn atomic_payment_preparation_is_unreserved_and_commit_rechecks_authority() {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!(saved, ("5000000".into(), "7".into()));
+            assert_eq!(saved, ("5000000".into(), "0".into()));
         } else {
             let error = result.unwrap_err();
             assert_eq!(

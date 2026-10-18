@@ -78,6 +78,7 @@ pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
     )?;
     amount(&value).map_err(|_| EvidenceFailure::MalformedExposure.into())
 }
+#[cfg(test)]
 pub(super) fn add_exposure(db: &Connection, wallet: &str, value: U256) -> Result<()> {
     let total = exposure(db, wallet)?
         .checked_add(value)

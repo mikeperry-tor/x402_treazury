@@ -254,9 +254,7 @@ async fn disputed_readiness_allows_fresh_capacity(conflict_height: u64) {
         .scoped_chain_query(&pool, vec![job.wallet_id.clone()], vec![])
         .unwrap();
     let view = rpc.view(query).await.unwrap();
-    store
-        .publish_candidate_evidence(&pool, &job.wallet_id, view)
-        .unwrap();
+    store.publish_scoped_evidence(&pool, view).unwrap();
     assert!(
         store
             .cached_payment_candidate(&pool, U256::from(4_000_000), None)
@@ -267,7 +265,7 @@ async fn disputed_readiness_allows_fresh_capacity(conflict_height: u64) {
         store
             .cached_payment_candidate(&pool, U256::from(4_000_001), None)
             .unwrap()
-            .is_none()
+            .is_some()
     );
     assert_eq!(
         exposure(&store.db, &job.wallet_id).unwrap(),
@@ -300,9 +298,9 @@ async fn disputed_readiness_allows_fresh_capacity(conflict_height: u64) {
     store.record_base_failure(&error).unwrap();
     assert!(
         store
-            .cached_payment_view(&pool, &job.wallet_id)
+            .cached_payment_candidate(&pool, U256::from(1), Some(&job.wallet_id))
             .unwrap()
-            .is_none()
+            .is_some()
     );
     let repair: String = store
         .db

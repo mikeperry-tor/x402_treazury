@@ -85,6 +85,14 @@ pub fn validate_admission_balance(payment: &Value) -> Result<()> {
             _ => anyhow::bail!("admission payer role is not payment eligible"),
         }
     }
+    if payment["balance_evidence"]["schema_version"] == 3 {
+        let cost: U256 = payment["amount"]
+            .as_str()
+            .context("admitted amount missing")?
+            .parse()?;
+        ensure!(cost > U256::ZERO, "zero payment amount");
+        return Ok(());
+    }
     let evidence = &payment["balance_evidence"];
     let amount = |value: &Value| -> Result<U256> {
         Ok(value

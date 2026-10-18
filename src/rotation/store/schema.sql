@@ -20,7 +20,7 @@ CREATE TABLE funding_health(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),
 CREATE TABLE operation_network(operation_id TEXT PRIMARY KEY,recipient TEXT NOT NULL);
 CREATE TABLE payment_resolutions(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),outcome TEXT NOT NULL CHECK(outcome IN ('USED','EXPIRED_UNUSED')),height INTEGER NOT NULL,hash TEXT NOT NULL,block_time INTEGER NOT NULL, support TEXT);
 CREATE TABLE funding_quote_refreshes(operation_id TEXT PRIMARY KEY REFERENCES funding_recovery(operation_id));
-CREATE TABLE payment_admission_evidence(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),block_height INTEGER NOT NULL,block_hash TEXT NOT NULL,balance TEXT NOT NULL,reserved_before TEXT NOT NULL,valid_until TEXT NOT NULL, support TEXT, latest_height INTEGER, latest_hash TEXT, endpoint TEXT, payer_role TEXT NOT NULL CHECK(payer_role IN ('ACTIVE','RETAINED','READY')), reserve_slot TEXT CHECK(reserve_slot IN ('small','large')), claim_generation INTEGER, CHECK((payer_role='READY' AND reserve_slot IS NOT NULL AND claim_generation IS NOT NULL AND claim_generation>=0) OR (payer_role!='READY' AND reserve_slot IS NULL AND claim_generation IS NULL)));
+CREATE TABLE payment_admission_evidence(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),block_height INTEGER,block_hash TEXT,balance TEXT,reserved_before TEXT,valid_until TEXT, support TEXT, latest_height INTEGER, latest_hash TEXT, endpoint TEXT, payer_role TEXT NOT NULL CHECK(payer_role IN ('ACTIVE','RETAINED','READY')), reserve_slot TEXT CHECK(reserve_slot IN ('small','large')), claim_generation INTEGER, CHECK((payer_role='READY' AND reserve_slot IS NOT NULL AND claim_generation IS NOT NULL AND claim_generation>=0) OR (payer_role!='READY' AND reserve_slot IS NULL AND claim_generation IS NULL)));
 CREATE TABLE reserve_claims(
  pool_id TEXT NOT NULL REFERENCES pools(id),
  slot TEXT NOT NULL CHECK(slot IN ('small','large')),
@@ -73,7 +73,7 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=16;
+PRAGMA user_version=17;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';

@@ -195,25 +195,10 @@ along with buried expiry and confirmed unspent inputs. Unknown historical tip
 evidence cannot satisfy that recovery check. Do not spend the treasury from an
 external wallet while relying on this policy.
 
-Base reconciliation resolves historical authorizations at their original confirmed
-anchor, revalidates that anchor, and then acquires a separate fresh balance view.
-Wallet reads run with bounded concurrency and preserve each wallet’s network
-identity. Balance acquisition runs once; completed canonical evidence is retained
-even if it ages out. The serialized store checks its original block-derived
-admission expiry before journaling a payment or consuming a reserve. Stale admission
-returns a readiness error and releases the pool gate; it does not restart the
-sweep indefinitely. Payment acquisition excludes retired-wallet balances while
-still resolving their historical authorizations. Old balances are never assigned
-a new block. Failover restarts the entire coherent view.
-
-For payment admission, an unavailable nonce read leaves its full liability
-reserved without requiring another endpoint to release it. Other valid canonical nonce
-proofs can be committed, and fresh balances minus all remaining liabilities may
-authorize a payment. Expiry without a successful nonce observation releases
-nothing. Invalid data, TLS failures, wrong chains, stale balances and changed
-anchors still fail closed. Required evidence failures retain the ordinary
-configured failover policy; views never mix endpoints. Background reconciliation remains strict and reports
-unavailable observations as failures with its normal backoff.
+Base observations and historical authorization resolution provide reporting facts.
+They do not certify affordability or grant signing permission. Unavailable balance
+or nonce reads do not prevent a permitted payment; existing attempt records remain
+owned even when their outcome is unknown.
 
 ## Capacity and admission
 
@@ -246,32 +231,10 @@ signing. Advertised extensions outside the managed payment contract are omitted
 with DEBUG diagnostics for `bazaar` discovery metadata and WARN diagnostics for
 other extensions; seller rejection remains possible.
 
-Fresh compatible balances minus unresolved signed exposure govern each wallet's
-available capacity. A recent actual-price hint can select the smallest sufficient
-cached wallet without RPC or a pricing probe. Without a usable hint, the existing
-active identity remains the default. Malformed readiness support excludes the affected
-wallet from default selection and serving readiness without blocking independent
-funded wallets. Selection preserves the diagnostic if no eligible identity remains;
-choosing a fallback does not consume a reserve or replace an existing active role.
-Once its actual challenge is known, a
-sufficient bound payer stays selected. Otherwise a bounded rolling pass considers
-eligible retained and ready wallets. Holdings are never summed to authorize one
-payment; unavailable evidence differs from a completed insufficient-capacity pass.
-The pass checks the completed cache initially, after acquisition completions, after
-each page-sized batch of evaluated wallets, before waiting on outstanding reads,
-and once before returning a negative result. Batch rechecks include independently
-published evidence and changed liabilities; each selection revalidates current
-capacity under the group gate. Candidate selection compares cached and caller-owned
-certificates by chain observation, using one captured time. It performs no writes
-or evidence acquisition; contradictory observations and database errors propagate
-instead of becoming a successful fallback.
-
-Each pass captures its inventory boundary before traversal; new wallets become
-eligible for a later pass. Priority identities are deduplicated against keyset
-pages. Cancelling the caller drops that pass's unsigned acquisitions while
-independent maintenance retains ownership and can publish evidence. Cancellation
-does not retract requests already received by an endpoint or undo accepted store
-jobs. The pass itself neither allocates funding nor changes wallet roles.
+Selection uses the saved wallet estimate as described in the
+[best-effort wallet rules](#best-effort-wallet-rules). It performs no balance RPC,
+nonce scan, historical readiness validation or certificate publication. Price hints
+can choose an existing identity before its own unsigned challenge is fetched.
 
 Runtime hints expire 300 seconds after the unsigned response was received and
 retain at most 512 fixed-size entries per process. Their trusted key includes
@@ -287,26 +250,20 @@ checked only against that fixed payer; it cannot trigger another search or hando
 Free, malformed, unsupported and redirect responses do not authorize a handoff.
 A signed response or output-conversion failure never authorizes replay.
 
-Signing produces private bytes. One transaction rechecks current role, exact
-reserve claim, cap, evidence, capacity and signed validity, then commits the
-possibly-submitted authorization, exposure and immutable admission support. A
-READY payer consumes its exact claim in this transaction: the former active
-becomes RETAINED, the payer becomes ACTIVE and the reserve generation advances
-with a vacant slot. No replacement allocation or retirement occurs in admission.
-Ordinary authorized funding fills the vacancy independently, including while old
-remainders remain. Pausing funding does not prevent spending existing capacity.
+Signing produces private bytes. The journal transaction rechecks current pool
+ownership, eligible role, actual reserve claim, amount cap, payer address and signed
+validity. It records the possibly submitted authorization and decrements the
+current advisory estimate once. Concurrent estimate replacement or READY-to-ACTIVE
+promotion does not invalidate another permitted authorization.
 
-One evidence-race refresh and one definitely rolled-back unpublished signature
-replacement are separate invocation allowances. They remain on the same payer
-and survive the unsigned handoff. Contradictory evidence, an unknown commit
-outcome or a missing acknowledgement grants no favorable retry. Fresh schema16
-preserves original payer role, consumed slot/generation and exact balance support;
-legacy state requires the separately reviewed stopped-service preflight.
+A READY payer consumes its exact reserve claim atomically: the former active
+becomes RETAINED, the payer becomes ACTIVE, and the reserve generation advances.
+Ordinary background funding can fill the vacancy. Admission never allocates or
+retires wallets. One definitely rolled-back expired private signature may be
+replaced on the same payer. An unknown journal outcome grants no replay.
 
-All handles for a store/group share one gate. Accepted store jobs keep that gate
-after waiter cancellation, and funding-credit publication uses the same owner.
-The pool gate releases before awaiting the signed HTTP response, allowing other
-admissible calls to progress without hiding the in-flight liability.
+The serialized Store owns commits after waiter cancellation. Signing and network
+I/O do not hold a group turn to stabilize advisory balances.
 
 ## Automatic retirement
 
@@ -351,24 +308,9 @@ canonical header checks are shared across captured wallet dependencies within on
 verification phase on one endpoint. Initial reads never replace post-state checks,
 and reuse neither renews evidence nor skips comparison against each expected hash.
 
-Historical liability release and fresh spending capacity have separate anchors.
-A confirmed USED proof requires a new balance observation at or beyond its debit
-block before that released amount can contribute to capacity. EXPIRED_UNUSED can
-recertify a compatible balance without renewing its original freshness. For example,
-a $10 observation with $4 unresolved exposure cannot admit $8: settlement needs a
-fresh post-debit balance, while canonical expiry without use can restore the
-unspent capacity only while the original observation remains fresh and compatible.
-
-Evidence is wallet- and endpoint-bound, with exact confirmed/latest amounts and
-anchors. Malformed acquisition alone does not invalidate earlier independent
-evidence. A demonstrated endpoint contradiction invalidates its affected support
-across groups. Historical readiness or retirement discrepancies remain separate
-from invalidated liability-release/accounting support: fresh observations cannot
-silently clear a durable financial repair block or reactivate a retiree. Once a
-historical balance is disputed, its anchors no longer gate independent fresh
-capacity; the original support and dispute remain durable. Current payment
-admission still subtracts all unresolved liabilities and verifies every actual
-financial checkpoint, including one at the same disputed historical anchor.
+Canonical historical proofs remain available for reporting. Their balance,
+exposure, age and repair fields do not gate current payment admission. Retired
+wallets remain retired; an advisory observation does not reactivate them.
 
 Maintenance may clear a wallet-level `chain_repair_required` block after complete
 canonical revalidation of original readiness, admission and resolution evidence,
@@ -607,3 +549,21 @@ without provider I/O. No Base reconciliation runs through that invalid configura
 unsigned catalog/help operations remain independent. Paid relay startup, explicit
 bootstrap, config checking and qualification remain strict. The store-only runtime
 does not run source/swap observers; their unresolved obligations remain durable.
+
+## Best-effort wallet rules
+
+Managed USDC balances are advisory estimates. Payment selection prefers an affordable
+bound payer, then other eligible affordable identities, then unknown or low estimates.
+Old or unavailable RPC observations and missing historical funding readiness do not
+prevent a permitted signature. Actual pool ownership, role, configured amount cap,
+asset/domain and caller authority still apply.
+
+Each new authorization is durably journaled before disclosure. That transaction
+subtracts its maximum amount once from the current estimate, saturating at zero.
+Unknown or malformed estimates stay unknown. Unresolved exposure is not subtracted
+a second time. Chain observations may replace estimates even while signatures
+remain chargeable; estimates are not a replica of canonical available capacity.
+
+At this implementation stage, a signed insufficient-funds response still ends the
+call. The planned traversal and no-top-up changes are described in the active
+[implementation plan](plans/best_effort_wallet_balances.md).

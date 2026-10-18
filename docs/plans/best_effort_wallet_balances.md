@@ -5,8 +5,8 @@
 
 Implement advisory USDC wallet selection and SDK-owned Zcash spending state on
 branch `best_effort_wallet_balances`, based on
-`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. Planning is complete; runtime
-implementation is pending.
+`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. Planning is complete; BE02 implementation is under independent review.
+BE03–BE07 remain pending.
 
 Cross-wallet repetition after an insufficient-funds response is explicitly accepted,
 even when the first authorization remains chargeable and both attempts could charge
@@ -232,6 +232,23 @@ new signing authority is needed. Update affected AGENTS.md rules in place alongs
 their actual behavior; do not silently leave old no-retry/fresh-balance instructions
 as the intended final contract. Existing runtime documentation remains descriptive
 until its implementation changes.
+
+BE02 review decisions: the independent design review identified qualification
+balance validation as another hidden admission gate. New records now carry an
+explicit advisory version; historical report validation remains available. Current
+role/claim eligibility is rechecked at commit without requiring an unchanged role
+snapshot. Schema 17 is the development target; schema 16 cannot be opened for
+mutation and no private conversion is included.
+
+The pinned analyzer comparison to `49566df` measured CogC/CycC for payment
+orchestration 18/58 → 10/35, candidate acquisition 15/28 → 0/2, preparation
+1/23 → 0/7 (plus the temporary test adapter 1/4), and journaling 1/25 → 2/19.
+Certificate merging, speculative acquisition lanes, cache-stabilization loops and
+balance-held group turns were deleted. Saved balance, unresolved exposure,
+historical readiness, block age and revision equality no longer govern signing.
+The reporting consumer gained scoped malformed-advisory handling (CycC 46 → 52);
+BE07 must examine that complete reporting chain rather than hide the increase.
+Focused acceptance and exact-commit review are required before the BE03 gate.
 
 ### BE03: Insufficient-funds traversal and refresh
 
