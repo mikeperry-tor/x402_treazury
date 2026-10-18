@@ -22,6 +22,8 @@ and CLI usage. Maintained implementation and operational explanations live here:
 The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
 describe advisory estimates, per-wallet attempts, no top-ups, SDK-owned Zcash
 funds, owner recovery and automatic owned-transparent shielding.
+The unfinished [unified polling policy plan](plans/unified_polling_policy.md)
+defines demand-driven USDC/ZEC observation and its permanent documentation handoff.
 The [live runbook](../tests/live/INTEGRATION.md) is the provider execution walkthrough;
 [testing](testing.md#qualification-status) states qualification limits.
 [Deferred plans](plans/deferred/) cover independent provider startup, polling,

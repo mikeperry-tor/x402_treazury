@@ -49,8 +49,12 @@ prove nothing happened. SDK/blockchain state owns current ZEC spendability.
 Automatic shielding can recover owned transparent funds without refund attribution;
 refunds do not authorize another funding deposit. Each wallet's initial funding
 claim is consumed by its first positive USDC observation; low estimates never
-reopen it or authorize top-ups. See the detailed wallet rules before changing
-payment, funding or recovery behavior.
+reopen it or authorize top-ups. Read the
+[best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules) before
+changing balance estimation, payment, funding or recovery behavior. The
+[unified polling policy plan](docs/plans/unified_polling_policy.md) specifies
+pending observation changes and their required permanent documentation handoff;
+maintained guides describe the current runtime until those changes land.
 
 All production outbound HTTP/gRPC constructors belong in `src/network.rs`.
 Preserve identity-bound transports, public-destination enforcement and Tor's remote
@@ -113,7 +117,7 @@ links other maintained guides.
 
 | Change area | Read first | Main implementation / tests |
 | --- | --- | --- |
-| Resource limits, cache lifetimes, readiness gates or polling | [Local resource limits](docs/local-resource-limits.md), [timer inventory](docs/network-egress.md#remaining-timers-and-budgets) | `src/limits.rs`, owning module |
+| Resource limits, cache lifetimes, readiness gates or polling | [Local resource limits](docs/local-resource-limits.md), [timer inventory](docs/network-egress.md#remaining-timers-and-budgets), [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules), [unified polling plan](docs/plans/unified_polling_policy.md) | `src/limits.rs`, owning module |
 | Payments, selection, funding or recovery | [Best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules), relevant sections of [wallet ownership](docs/wallet-rotation.md), [selection/isolation design](docs/architecture.md#wallet-selection-and-network-isolation) | `src/payment.rs`, `src/rotation/`, `src/treasury/`; `tests/LIFECYCLE.md` |
 | Wallet CLI, initialization, keys or state conversion | [Wallet administration](docs/wallet-cli.md), [configuration](docs/configuration.md) | `src/wallet_cli/`, `src/cli.rs` |
 | Network clients, HTTP/gRPC timeouts or Tor | [Network policy](docs/network-egress.md), [resource limits](docs/local-resource-limits.md) | `src/network.rs`, `tests/network_audit.rs`, `tests/TOR.md` |
