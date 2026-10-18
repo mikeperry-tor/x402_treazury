@@ -40,12 +40,11 @@ impl Store {
             if attempted.contains(wallet) {
                 return Ok(None);
             }
-            let Some(owner) = payment_ownership(&self.db, pool, wallet)? else {
-                return Ok(None);
-            };
-            if cost > owner.payment_limit {
+            if payment_ownership(&self.db, pool, wallet)?.is_none() {
                 return Ok(None);
             }
+            // Cost may be a historical price hint. It ranks estimates; only the
+            // current challenge and journal boundary enforce payment amount caps.
             let row:Option<(Option<String>,Option<String>,bool)>=self.db.query_row(
                 "SELECT address,balance,low_balance FROM wallets WHERE pool_id=?1 AND id=?2 AND sequence<=?3",
                 params![pool,wallet,through],|r|Ok((r.get_ref(0)?.as_str().ok().map(str::to_owned),r.get_ref(1)?.as_str().ok().map(str::to_owned),r.get(2)?))).optional()?;

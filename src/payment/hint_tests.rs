@@ -265,6 +265,61 @@ async fn invalid_unsupported_overcap_incomplete_and_free_responses_never_teach_o
 }
 
 #[tokio::test]
+async fn cached_price_above_a_changed_cap_does_not_veto_a_cheaper_current_offer() {
+    let f = fixture().await;
+    let key = f.key("/items/{id}");
+    assert!(
+        f.call(key, Reply::Challenge(challenge(&[7000])))
+            .await
+            .is_err()
+    );
+    assert_eq!(process_hints().get(key), Some(U256::from(7000)));
+    assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+    f.store
+        .call(|s| {
+            let pool = s
+                .status()?
+                .pools
+                .into_iter()
+                .find(|p| p.name == "hints")
+                .unwrap()
+                .id;
+            s.configure_capacity_group(
+                &pool,
+                Some(U256::from(5000)),
+                0,
+                &crate::rotation::test_capacity::two_reserves("0.01"),
+            )
+        })
+        .await
+        .unwrap();
+    let error = f
+        .call(key, Reply::Challenge(challenge(&[3000])))
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<HttpFailure>()
+            .is_some_and(|e| e.status == StatusCode::INTERNAL_SERVER_ERROR),
+        "{error:#}"
+    );
+    assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
+    assert_eq!(f.signed.load(Ordering::SeqCst), 2);
+    assert_eq!(process_hints().get(key), Some(U256::from(3000)));
+    // The actual current offer still has to satisfy the current journal cap.
+    assert!(
+        f.call(key, Reply::Challenge(challenge(&[6000])))
+            .await
+            .is_err()
+    );
+    assert_eq!(f.unsigned.load(Ordering::SeqCst), 3);
+    assert_eq!(f.signed.load(Ordering::SeqCst), 2);
+    assert_eq!(process_hints().get(key), Some(U256::from(3000)));
+    assert_eq!(f.rpc.load(Ordering::SeqCst), 0);
+    f.close().await;
+}
+
+#[tokio::test]
 async fn earlier_headers_with_late_body_cannot_overwrite_a_newer_lower_price() {
     let f = fixture().await;
     let key = f.key("/items/{id}");
