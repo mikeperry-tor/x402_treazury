@@ -222,8 +222,10 @@ the destination from automatic retirement until their original outcome is resolv
 A partial credit never releases those source inputs or permits another deposit.
 
 `rotation/manager.rs` admits supported Base USDC v2 exact EIP-3009 offers. It
-validates the envelope, domain, amount and explicit API cap before acquisition or
-signing. Advertised extensions outside the managed payment contract are omitted
+validates the envelope, domain, amount and configured challenge-policy cap before
+acquisition. Payment preparation checks the current Store cap before retrieving
+the signing key, and the authorization journal rechecks it before disclosure.
+Advertised extensions outside the managed payment contract are omitted
 with DEBUG diagnostics for `bazaar` discovery metadata and WARN diagnostics for
 other extensions; seller rejection remains possible.
 
@@ -245,6 +247,8 @@ source/revision, method/OpenAPI template, wallet group and transport scope; requ
 arguments cannot choose that scope. Receipt order controls updates, including lower
 prices. Restart, expiry and eviction lose only a selection estimate. They cause
 no probe, cached-challenge reuse or new payment authority.
+A valid observed offer can update a hint even when current Store authority refuses
+financial admission; that hint grants no permission to sign.
 
 The invocation captures its existing inventory boundary. It may hand off an unsigned
 challenge to an eligible payer suggested by the actual price, and may traverse on

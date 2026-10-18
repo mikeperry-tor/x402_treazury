@@ -279,11 +279,6 @@ impl ManagedPool {
         // The permit lives through the one signed dispatch and cannot cancel it.
         let _foreground = crate::payment::ownership::foreground()?;
         let (challenge, offer, omitted) = prepare_challenge(&response, &self.policy)?;
-        let pool = self.pool.clone();
-        let amount = offer.amount;
-        self.store
-            .call(move |s| s.validate_payment_price(&pool, amount))
-            .await?;
         // Learning follows complete envelope validation, before financial admission.
         // An insufficient balance does not erase a valid observed price.
         if let Some((key, receipt)) = hint {

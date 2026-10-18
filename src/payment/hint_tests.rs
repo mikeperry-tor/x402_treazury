@@ -293,6 +293,30 @@ async fn cached_price_above_a_changed_cap_does_not_veto_a_cheaper_current_offer(
         })
         .await
         .unwrap();
+    // A valid observed offer teaches a hint even when current Store authority
+    // refuses it. The hint cannot authorize signing or create a journal entry.
+    let error = f
+        .call(key, Reply::Challenge(challenge(&[6000])))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error.downcast_ref::<crate::rotation::error::AdmissionError>(),
+            Some(crate::rotation::error::AdmissionError::PriceLimit(_))
+        ),
+        "{error:#}"
+    );
+    assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
+    assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(process_hints().get(key), Some(U256::from(6000)));
+    let db = rusqlite::Connection::open(f._dir.path().join("state/state.sqlite")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(db);
     let error = f
         .call(key, Reply::Challenge(challenge(&[3000])))
         .await
@@ -302,15 +326,6 @@ async fn cached_price_above_a_changed_cap_does_not_veto_a_cheaper_current_offer(
             .downcast_ref::<HttpFailure>()
             .is_some_and(|e| e.status == StatusCode::INTERNAL_SERVER_ERROR),
         "{error:#}"
-    );
-    assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
-    assert_eq!(f.signed.load(Ordering::SeqCst), 2);
-    assert_eq!(process_hints().get(key), Some(U256::from(3000)));
-    // The actual current offer still has to satisfy the current journal cap.
-    assert!(
-        f.call(key, Reply::Challenge(challenge(&[6000])))
-            .await
-            .is_err()
     );
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 3);
     assert_eq!(f.signed.load(Ordering::SeqCst), 2);
