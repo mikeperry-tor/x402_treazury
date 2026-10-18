@@ -114,6 +114,12 @@ impl Treasury {
                 .iter()
                 .try_fold(0u64, |sum, i| sum.checked_add(i.txout().value().into_u64()))
                 .context("shielding input overflow")?;
+            // The SDK also permits fee-only proposals. They cannot recover any
+            // capital; reject them before accepting an input owner.
+            let shielded_value = input
+                .checked_sub(fee)
+                .filter(|value| *value > 0)
+                .context("shielding proposal has no shielded output")?;
             ensure!(
                 step.transparent_inputs()
                     .iter()
@@ -258,7 +264,7 @@ impl Treasury {
                     .try_fold(0u64, |sum, (_, value)| sum.checked_add(value))
                     .context("shielding output overflow")?;
                 ensure!(
-                    owned > 0 && input.checked_sub(fee) == Some(owned),
+                    owned == shielded_value,
                     "shielding output is not owned by treasury"
                 );
                 // Shielding moves principal within the treasury; only its fee is cost.

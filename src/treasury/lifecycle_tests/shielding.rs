@@ -55,11 +55,12 @@ fn selected_and_owned(tx: &PreparedTransaction, principal: u64) {
 async fn automatic_shielding_is_per_address_keeps_uncertain_bytes_and_recovers_unattributed_funds()
 {
     let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
-    let addresses = transparent_addresses(&mut owner, 3).await;
+    let addresses = transparent_addresses(&mut owner, 4).await;
     let funding = faucet_funding_transaction(vec![
         (&addresses[0], 5_000, None),
-        (&addresses[1], 1_000_000, None),
-        (&addresses[2], 2_000_000, None),
+        (&addresses[1], 10_000, None),
+        (&addresses[2], 1_000_000, None),
+        (&addresses[3], 2_000_000, None),
     ])
     .await;
     {
@@ -82,6 +83,16 @@ async fn automatic_shielding_is_per_address_keeps_uncertain_bytes_and_recovers_u
         .maintain_owned_transparent(&mut NoSubmission, &stop)
         .await
         .unwrap();
+    assert!(owner.status().await.unwrap().treasury_operations.is_empty());
+    // The SDK permits a proposal consuming exactly its standard fee. Reject it
+    // before accepting inputs, so it cannot block useful recovery elsewhere.
+    assert!(
+        owner
+            .shield_address(addresses[1].clone(), None, 30_000, &stop)
+            .await
+            .is_err()
+    );
+    assert!(owner.healthy);
     assert!(owner.status().await.unwrap().treasury_operations.is_empty());
     owner.configure_automatic_shielding(30_000);
     let mut sender = submission::GrpcSubmission::with_network(
