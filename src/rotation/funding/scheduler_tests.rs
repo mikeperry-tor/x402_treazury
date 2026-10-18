@@ -1996,3 +1996,87 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
         }
     }
 }
+
+struct ExitingSource {
+    reads: Reads,
+    owners: mpsc::UnboundedSender<tokio::task::Id>,
+    first: std::sync::atomic::AtomicBool,
+}
+impl FundingBackend for ExitingSource {
+    type Observations = Reads;
+    fn observations(&self) -> Reads {
+        self.owners.send(tokio::task::id()).unwrap();
+        assert!(
+            !self.first.swap(false, Ordering::SeqCst),
+            "fixture owner exit"
+        );
+        self.reads.clone()
+    }
+    fn max_attempts(&self, _: &FundingJob) -> u32 {
+        3
+    }
+    async fn quote_prerequisite(&mut self, _: &FundingJob) -> Result<Quote> {
+        panic!("unexpected quote")
+    }
+    async fn prepare(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
+        panic!("unexpected calculation")
+    }
+    async fn submit(&mut self, _: &FundingJob) -> Result<()> {
+        panic!("unexpected submission")
+    }
+    async fn reconcile(&mut self, _: &FundingJob) -> Result<bool> {
+        panic!("unexpected reconciliation")
+    }
+}
+#[tokio::test]
+async fn exited_funding_task_is_replaced_with_same_store_and_shutdown_stops_replacement() {
+    for stop_before_retry in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let (store, actor) = StoreHandle::spawn(state);
+        let (owners, mut tasks) = mpsc::unbounded_channel();
+        let (statuses, _) = mpsc::unbounded_channel();
+        let source = ExitingSource {
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(0)),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: false,
+                quotes: None,
+            },
+            owners,
+            first: std::sync::atomic::AtomicBool::new(true),
+        };
+        let worker = FundingWorker::new(store.clone(), source, 1);
+        let stop = CancellationToken::new();
+        let running = tokio::spawn(worker.run(stop.clone()));
+        let first = event(&mut tasks).await;
+        if !stop_before_retry {
+            let second = event(&mut tasks).await;
+            assert_ne!(
+                first, second,
+                "real task replacement, not retained future retry"
+            );
+        }
+        stop.cancel();
+        running.await.unwrap().unwrap();
+        assert!(tasks.try_recv().is_err());
+        store
+            .call(|s| {
+                assert!(s.status()?.treasury_operations.is_empty());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(store);
+        actor.await.unwrap();
+    }
+}

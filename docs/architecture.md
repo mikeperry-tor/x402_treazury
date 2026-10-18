@@ -113,10 +113,13 @@ historical source monetary equality do not gate publication. Completed SDK bytes
 and their snapshot stay with the existing owner until identical local publication
 succeeds; cancelled close waiters do not abandon this drain. Irrecoverable storage
 failure or forced process death can lose unpublished bytes, leaving the accepted
-input claim uncertain. Unhealthy SDK mutation
-or an exited owner may require process restart while listeners and usable Base
-payers remain available. Automatic SDK/actor reconstruction (R01) and general
-owned-transparent shielding (R02) remain [unfinished](plans/treasury_owner_followups.md).
+input claim uncertain. Unhealthy SDK capabilities are reconstructed from the latest committed snapshot
+through the same Store owner. Interrupted commands never replay; queued commands
+and accepted work remain owned across caller cancellation. Exited funding and
+reconciliation tasks reuse existing gates and retry cadences; shutdown stops replacement.
+Unavailable shared Store/authentication state may still require restart while
+listeners and usable Base payers remain available. General owned-transparent
+shielding (R02) remains [unfinished](plans/treasury_owner_followups.md).
 
 ## MCP and output boundaries
 

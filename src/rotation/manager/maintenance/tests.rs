@@ -380,3 +380,29 @@ async fn malformed_advisory_row_does_not_hide_independent_wallet_observations() 
     assert!(!f.status().await.low_balance);
     f.close().await;
 }
+
+#[tokio::test]
+async fn exited_reconciliation_task_reacquires_same_gate_and_stops_without_another_owner() {
+    let f = fixture(false, false).await;
+    let (entered, mut owners) = tokio::sync::mpsc::unbounded_channel();
+    let first = Arc::new(AtomicBool::new(true));
+    let mut pool = (*f.pool).clone();
+    pool.reconciliation_test_hook = Some(Arc::new(move || {
+        entered.send(tokio::task::id()).unwrap();
+        assert!(!first.swap(false, Ordering::SeqCst), "fixture owner exit");
+    }));
+    let stop = CancellationToken::new();
+    let stopped = stop.clone();
+    let running = tokio::spawn(async move { pool.run_reconciliation(stopped).await });
+    let original = owners.recv().await.unwrap();
+    let replacement = tokio::time::timeout(Duration::from_secs(10), owners.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(original, replacement);
+    stop.cancel();
+    running.await.unwrap().unwrap();
+    assert!(owners.try_recv().is_err());
+    assert!(f.pool.reconciliation.try_lock().is_ok());
+    f.close().await;
+}

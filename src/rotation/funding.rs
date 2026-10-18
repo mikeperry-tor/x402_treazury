@@ -118,7 +118,30 @@ impl<B: FundingBackend> FundingWorker<B> {
         }
     }
     pub async fn run(self, stop: CancellationToken) -> Result<()> {
-        self.schedule(now()?, stop, false).await
+        loop {
+            if stop.is_cancelled() {
+                return Ok(());
+            }
+            match self.schedule(now()?, stop.clone(), false).await {
+                result if stop.is_cancelled() => return result,
+                Err(error)
+                    if error.is::<tokio::task::JoinError>()
+                        || error.is::<scheduler::AlreadyOwned>() =>
+                {
+                    // schedule joins its owner. Accepted source tasks retain the
+                    // existing lease and backoff state until their own completion.
+                    tracing::warn!(
+                        category = "funding_owner_restart_pending",
+                        "funding owner exited or remains retained; retrying existing ownership without replay"
+                    );
+                }
+                result => return result,
+            }
+            tokio::select! {
+                _=stop.cancelled()=>return Ok(()),
+                _=tokio::time::sleep(std::time::Duration::from_secs(self.poll_seconds.max(1)))=>{},
+            }
+        }
     }
     pub async fn tick(&self, instant: u64) -> Result<()> {
         self.schedule(instant, CancellationToken::new(), true).await

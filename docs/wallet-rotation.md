@@ -124,15 +124,19 @@ no configuration value authorizes replay or bypasses a zero-new-funding restrict
 Positive funded qualification still requires an explicit `max_funding_spend_zec`
 to bound its native-asset permits.
 
-A stopped treasury owner or funding worker pauses funding until process restart.
-It does not stop MCP listeners or Base reconciliation. Existing confirmed assets
-remain usable under ordinary admission checks, with all reservations and unresolved
-liabilities retained. An SDK owner with an unhealthy calculation failure is closed, never reused in place. A completed calculation
-with failed local publication stays with its existing owner: only identical local
-publication repeats on the existing 60-second maintenance cadence. Shutdown retains
-that owner until publication succeeds, even if its caller disconnects. Irrecoverable
-storage failure or forced process death can lose unpublished bytes; the durable
-input claim still prevents a duplicate calculation.
+Treasury command and sync drivers retain their cleanup owner when callers disconnect.
+After an unhealthy SDK mutation, they discard that SDK and reconstruct it from the
+latest committed snapshot through the same serialized Store. Queued commands remain
+queued; an interrupted command is never replayed. Accepted input claims, funding
+restrictions and Base handles remain unchanged. Completed bytes take precedence:
+only identical local publication repeats on the existing 60-second cadence, including
+shutdown. SDK reconstruction also retries unavailable snapshots on that cadence.
+Exited funding and reconciliation tasks reacquire their existing Store/group gates
+on their ordinary polling cadence; retained source work keeps its existing lease
+and backoff state. Explicit shutdown never starts a replacement. An unavailable
+shared Store or authentication state can still require restart; listeners and usable
+Base payers remain independent. Forced process death or irrecoverable storage can
+lose unpublished bytes; the durable input claim still prevents duplicate calculation.
 
 ## Treasury sync coverage
 
@@ -545,13 +549,11 @@ every selected input and finite inclusive consensus expiry; a refund is never pr
 of non-submission. Earlier state schemas are rejected before mutation, without
 private-state conversion.
 
-R01 (SDK/actor reconstruction after unhealthy mutation or exited owner) and R02
-(general automatic recovery of owned transparent capital) remain unfinished in the
-[follow-on plan](plans/treasury_owner_followups.md).
-Local publication retries retain completed bytes within the existing owner; this
-does not reconstruct a failed SDK or replace an exited task. Other affected funding
-may require process restart; listeners and usable Base
-payers remain independent. Reopening does not erase uncertain accepted work.
+R01 reconstructs failed SDK capabilities and replaces exited funding/reconciliation
+tasks through existing ownership. R02 (general automatic recovery of owned transparent
+capital) remains unfinished in the [follow-on plan](plans/treasury_owner_followups.md).
+Reopening never erases uncertain accepted work or recovers unpublished bytes lost
+with a process.
 
 Multiple charges after the accepted USDC failure category and incomplete external
 settlement proof are accepted limitations. The [network guide](network-egress.md#remaining-timers-and-budgets)
