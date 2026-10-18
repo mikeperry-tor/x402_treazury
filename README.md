@@ -76,7 +76,7 @@ descriptions and schemas as needed. The server's `instructions_text` mentions
 the available networks and explains the discovery workflow to help the agent
 find the tools without loading every definition into context.
 
-### 1. Build and start Tor
+### 1. Build x402_treazury and start Tor
 
 Run these commands from the repository checkout directory:
 
@@ -92,14 +92,9 @@ See [build reproducibility](docs/reproducible-builds.md) for toolchain setup.
 The cargo download dependencies and Zcash proving parameters are downloaded
 outside of Tor routing by default.
 
-> **NOTE: Incremental Builds**
->
-> `scripts/zcash.sh build` defaults to an optimized release build with incremental
-> compiler caches disabled, including for the protoc helper. The executable is
-> `target/release/x402_treazury`. Use `scripts/zcash.sh build --developer` for an
-> incremental development build at `target/debug/x402_treazury`, with file/line
-> backtraces and reduced debug information. See
-> [build storage options](docs/development.md#build-storage-options) for tradeoffs.
+The build produces `target/release/x402_treazury`. For incremental development
+builds, use `scripts/zcash.sh build --developer`; see
+[build storage options](docs/development.md#build-storage-options).
 
 Start Tor Browser, or use an installed Tor daemon. Tor is not bundled or started by
 the application. The [example privacy conf file](examples/deployments/privacy.toml)
@@ -119,129 +114,74 @@ target/release/x402_treazury wallet init \
   --config examples/deployments/privacy.local.toml
 ```
 
-Initialization creates the wallet directory specified by the config file (`./state/privacy`). It then generates a seed and discovers its birthday through Tor.
+Initialization creates the configured wallet directory (`./state/privacy`),
+generates a seed, and discovers its birthday through Tor. It prints the treasury's
+shielded ZEC receive address.
 
-The default encryption key is `wallet.key` inside the wallet directory. No
-password or OS-keychain protection is provided at this time, but the keyfile
-design is amenable to this protection in the future.
+The default encryption key is `wallet.key` inside the wallet directory, with no
+password or OS-keychain protection. Anyone obtaining that directory obtains both
+state and decryption material.
 
-Anyone obtaining the wallet directory obtains both state and decryption material.
+### 3. Start the MCP server
 
-### 3. Fund and bootstrap the wallets
-
-Display the treasury’s receive addresses:
-
-```sh
-target/release/x402_treazury wallet addresses \
-  --config examples/deployments/privacy.local.toml
-```
-
-Send $5 worth of ZEC to the treasury's **shielded receive address**.
-
-The privacy example conf defines two wallet groups, each starting with one small reserve: **2 x $2 = $4 USDC before fees**.
-
-Individual API payments are capped at **0.05 USDC for web** and **0.10 USDC
-for social/company**, so even a $5 initial funding should get you at least 40
-web search+page fetch calls, but more likely closer to 100. The social+company
-calls tend to be a bit more expensive, but you will still have at least 20 of
-those.
-
-You can send additional ZEC to your treasury address at any time.
-
-> **NOTE: All wallets are auto-funded**
->
-> Every declared managed wallet pool initializes, even when no server uses it: removing MCP server definitions associated with a wallet pool does
-> not eliminate that pool's funding setup. To reduce initial testing expense, **remove one of the `[wallets.NAME]` definitions**, then remove or rebind any servers/sources referencing them.
-
-After sending ZEC, sync the treasury and check its confirmed spendable balance:
+Set `TREAZURY_MCP_TOKEN` to a secret bearer token, then launch:
 
 ```sh
-target/release/x402_treazury wallet sync \
-  --config examples/deployments/privacy.local.toml
-
-target/release/x402_treazury wallet status \
-  --config examples/deployments/privacy.local.toml
-```
-
-Once `wallet status` shows sufficient confirmed spendable ZEC, fund the
-configured reserve wallets with USDC via bootstap:
-
-```sh
-target/release/x402_treazury wallet bootstrap \
-  --config examples/deployments/privacy.local.toml
-```
-
-Bootstrap uses ZEC treasury funds and waits for confirmed USDC credit to each wallet.
-
-Once bootstrap completes successfully, the wallets are ready for paid API calls.
-
-Repeating the bootstrap command displays current configured inventory and
-resumes any unfinished funding work, including automatic recovery for any
-failed USDC swap transactions.
-
-### 4. Optionally warm the catalogs
-
-To speed up the MCP server launch, you can pre-warm the API catalog and
-pricing cache before serving. The optional `--direct` flag bypasses Tor
-for these requests, if Tor is configured.
-
-```sh
-target/release/x402_treazury catalog warm --discover-pricing \
-  --config examples/deployments/privacy.local.toml
-```
-
-**Non-Tor warming with `--direct` reveals your IP address to providers; treasury traffic and
-paid API calls still use Tor**.
-
-> **NOTE: Tor 403/429/503 fallback relay**
->
-> The privacy example conf automatically uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
-> when API catalog or pricing requests are blocked, rate limited, or time out over Tor.
-> This relay service is also contacted over Tor. Relayed requests cost $0.01
-> each, paid by the wallet that is attached to the provider that it
-> is contacting. The requests to this relay service use Tor circuit isolation derived from that
-> same target wallet. If multiple wallets are assigned to a provider through
-> multiple MCP servers (such as with the Exa provider in the privacy example conf),
-> one wallet is always chosen deterministically for relayed API catalog requests.
-
-### 5. Start serving
-
-Review the wallet bindings and spending settings before starting the server:
-
-```sh
-target/release/x402_treazury config show \
-  --config examples/deployments/privacy.local.toml
-```
-
-Set `TREAZURY_MCP_TOKEN` with secret bearer token, then launch:
-
-```sh
+export TREAZURY_MCP_TOKEN="treazury_bearer_auth_key_here"
 target/release/x402_treazury serve \
   --config examples/deployments/privacy.local.toml
 ```
 
+`serve` synchronizes the treasury, discovers API catalogs and prices, and funds
+USDC wallets in the background after listeners bind. With no or insufficient
+spendable ZEC, it keeps monitoring and retries funding automatically. You can
+deposit ZEC before starting it or at any time afterward.
+
 > **NOTE: Single Instance Only**
 >
-> Do not run multiple instances of x402_treazury from the same Zcash wallet file: cross-instance Zcash transactions will not be synchronized and USDC wallet rotation may fail. See the [wallet reference](docs/wallet-cli.md) for more details about wallet commands.
+> Run only one `serve` process per treasury directory. `wallet status` is safe to
+> run alongside it. See the [wallet reference](docs/wallet-cli.md) for other commands.
 
-Serving handles API catalog download and price discovery and wallet replacement funding automatically.
+API payments are capped at
+**0.05 USDC for web** and **0.10 USDC for social/company**.
 
-If you skipped funding bootstrap, `serve` starts ZEC-to-USDC funding in the
-background after listeners bind. Available tools remain accessible; managed paid
-calls require confirmed capacity. Relay-dependent catalogs appear when their payer
-becomes usable.
+### 4. Fund the treasury and connect
+
+In another terminal, display the shielded receive address, saved balances and sync
+progress using the same deployment file:
+
+```sh
+target/release/x402_treazury wallet status \
+  --config examples/deployments/privacy.local.toml
+```
+
+Send ZEC to that **shielded receive address**. The example's two wallet groups each request a $2 USDC reserve: **$4 USDC total before fees and accepted bridge-minimum increases**. Allow additional ZEC for those costs and future wallet replacements.
+
+> **NOTE: All declared managed wallets are auto-funded**
+>
+> Removing an MCP server definition entry does not remove its wallet pool's funding setup. To reduce
+> initial funding, remove an unused `[wallets.NAME]` definition and remove or
+> rebind servers and sources that reference it before starting `serve`.
+
+Once the ZEC is confirmed and
+spendable, `serve` funds the managed USDC wallets automatically.
+Available tools remain accessible while funding is pending; managed paid
+calls require confirmed USDC capacity. Logs report funding progress, and you can
+rerun `wallet status` at any time.
+
+The privacy example conf uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
+over Tor when catalog or pricing requests are blocked, rate limited or time out.
+Relayed requests cost $0.01 each; relay-dependent catalogs appear when their payer
+wallet becomes usable.
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
 `Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.
 
-`wallet status` reports persisted progress.
-
-Stop with **only one** Ctrl-C **once** and allow the announced
-transaction-safety drain to finish.
+To stop, press Ctrl-C once and allow the announced transaction-safety drain to finish.
 
 > **NOTE: Advanced Wallet Commands**
 >
-> For funding failures, refunds, backup restoration and RPC configuration, use the
+> For manual wallet bootstrapping, funding failures, refunds, backup restoration and RPC configuration, use the
 > [wallet reference](docs/wallet-cli.md) and [rotation guide](docs/wallet-rotation.md).
 > For bounded paid test runs, use the [live integration runbook](tests/live/INTEGRATION.md).
 
