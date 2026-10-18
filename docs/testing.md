@@ -281,6 +281,15 @@ in tests solely to raise a number. The small
 [mutation pilot](plans/deferred/mutation_testing.md) remains deferred; no mutation
 score is implied by coverage results.
 
+The R01/R02 owner follow-ups add focused default-build recovery tests and real
+SDK synthetic-chain shielding tests under `treasury::lifecycle_tests::shielding`.
+They cover same-Store reconstruction, actual task replacement, cancelled waiters,
+per-address ownership, fee-only cost, qualification denial, lost submission response
+and restart without duplicate calculation. The pinned SDK may promote shielding
+change from Orchard to Ironwood after an upgrade; ownership checks use decrypted
+account-zero notes across supported shielded pools. These tests use public unfunded
+keys and do not establish consensus or live-funded settlement qualification.
+
 ## Optional proving, consensus and live work
 
 - [LIFECYCLE.md](../tests/LIFECYCLE.md) covers synthetic-note proof and exact-byte

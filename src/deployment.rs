@@ -898,6 +898,11 @@ impl Deployment {
                 };
                 if let (Some(owner), Some(source)) = (&mut owner, &source) {
                     owner.configure_sync(source.sync_settings.clone());
+                    if f.auto_fund {
+                        owner.configure_automatic_shielding(crate::rotation::config::zatoshis(
+                            &t.max_refund_shielding_fee_zec,
+                        )? as u64);
+                    }
                 }
                 let store = match &owner {
                     Some(owner) => owner.store_handle(),

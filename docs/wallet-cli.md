@@ -329,7 +329,13 @@ stay `refund_pending`. The SDK owns incoming returns and current spendable input
 principal caps and historical refund revalidation are removed; provider status alone
 never proves an on-chain return or authorizes a new deposit.
 
-With serving stopped, prepare shielding for exactly one refund address:
+With `funding.auto_fund=true`, serving and bootstrap attempt shielding of confirmed
+spendable owned transparent funds after persisted sync, one address per transaction,
+including returns without job attribution. Paused funding and qualification permits
+do not authorize new automatic shielding. Pending exact bytes remain observable;
+uncertain submissions are never automatically replayed.
+
+With serving stopped, explicitly prepare shielding for exactly one refund address:
 
 ```sh
 target/debug/x402_treazury wallet shield-refunds \
@@ -681,8 +687,9 @@ Canonical authorization/debit proofs remain a qualification observation, preserv
 all attempts and the existing case permit; seller success does not prove a debit.
 
 Pools use existing eligible Base wallets and consume initially funded reserves.
-Queued replacements are funded only with `funding.auto_fund = true`. Refund shielding
-requires explicit operator handling. Eligible source-expiry recovery runs automatically
+Queued replacements and automatic per-address shielding require
+`funding.auto_fund = true`. Explicit refund shielding remains available with serving
+stopped. Eligible source-expiry recovery runs automatically
 with funding, or through `wallet recover` while serving is stopped.
 
 The [lifecycle qualification matrix](../tests/LIFECYCLE.md) maps each recovery and

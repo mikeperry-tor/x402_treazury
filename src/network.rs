@@ -139,6 +139,30 @@ impl IsolationId {
     pub fn treasury(id: &str) -> Self {
         Self::fields("treasury", &[id.as_bytes()])
     }
+    /// Owned transparent shielding has no EVM recipient. Keep each address in
+    /// its own stable network/treasury scope, including after journal reload.
+    #[cfg(feature = "zcash")]
+    pub(crate) fn transparent_treasury(
+        network: crate::rotation::store::TreasuryNetwork,
+        treasury: &str,
+        address: &str,
+    ) -> Result<Self> {
+        let chain = network.chain();
+        let Some(zcash_keys::address::Address::Transparent(receiver)) =
+            zcash_keys::address::Address::decode(&chain, address)
+        else {
+            anyhow::bail!("invalid transparent network identity")
+        };
+        let canonical = zcash_keys::address::Address::Transparent(receiver).encode(&chain);
+        Ok(Self::fields(
+            "zcash-transparent",
+            &[
+                network.name().as_bytes(),
+                treasury.as_bytes(),
+                canonical.as_bytes(),
+            ],
+        ))
+    }
     pub fn bootstrap() -> Self {
         Self::fields("bootstrap", &[uuid::Uuid::new_v4().as_bytes()])
     }

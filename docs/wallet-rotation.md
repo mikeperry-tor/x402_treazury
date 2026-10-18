@@ -105,9 +105,13 @@ max_refund_shielding_fee_zec = "0.0003"
 Immutable transaction facts report confirmed principal and actual fees. Shielding
 records principal zero and charges only its fee. There is no mutable gross/net cost,
 returned-principal credit or historical monetary equality gate. Missing swap
-attribution does not invalidate owned SDK funds. General automatic transparent
-shielding remains unfinished; the explicit per-address command retains privacy and
-selected-input ownership.
+attribution does not invalidate owned SDK funds. Enabled automatic funding also shields confirmed spendable owned transparent
+outputs after a successful persisted sync, including unattributed returns. Each
+proposal uses one address and the actual standard fee under
+`max_refund_shielding_fee_zec`; the SDK determines confirmations, maturity and input
+availability. Uneconomic/empty addresses do not block independent addresses. No
+principal reservation, attribution requirement or funding-claim reopening is added.
+The explicit per-address command remains available.
 
 Zingolib selects inputs and calculates standard network fees. The application
 checks the actual proposal against configured per-operation fee/spend safeguards,
@@ -419,8 +423,14 @@ identities and the remaining upstream timeout boundaries.
 
 Each swap uses a persisted unique high-index transparent refund address derived
 from the treasury. Refund visibility does not make funds automatically spendable
-for another deposit. Refund shielding is an explicit operation with observed
-inputs, fee caps, prepared-byte recovery and its original recipient network binding.
+for another deposit. Serving and bootstrap with enabled automatic funding attempt per-address shielding
+through the existing treasury owner. `auto_fund=false` and qualification restrictions
+prevent new shielding; existing prepared bytes remain observable. Positive
+qualification funding permits authorize jobs only and do not authorize automatic
+jobless shielding. Explicit shielding remains available while serving is stopped,
+with its original job recipient network binding. Unattributed automatic shielding
+uses a stable per-address/network/treasury identity. Both paths retain observed
+inputs, fee caps and exact prepared-byte recovery.
 The SDK owns return outputs, spent state, fees and chain corrections. There is no
 local refund credit, principal cap or historical refund/source revalidation gate.
 Source confirmation remains a distinct audit fact. A refund or stale workflow phase
@@ -550,10 +560,15 @@ of non-submission. Earlier state schemas are rejected before mutation, without
 private-state conversion.
 
 R01 reconstructs failed SDK capabilities and replaces exited funding/reconciliation
-tasks through existing ownership. R02 (general automatic recovery of owned transparent
-capital) remains unfinished in the [follow-on plan](plans/treasury_owner_followups.md).
+tasks through existing ownership. R02 automatically shields owned transparent capital per address under existing
+authority. The [follow-on review](plans/treasury_owner_followups.md) records both
+implementations and qualification limits.
 Reopening never erases uncertain accepted work or recovers unpublished bytes lost
-with a process.
+with a process. An accepted shielding calculation blocks new calculation until its
+original transaction confirms or existing consensus-expiry recovery proves all
+original inputs remain unspent. Automatic initial submission requires current
+authority and zero prior attempts; uncertain broadcasts are never automatically
+replayed. Missing prepared bytes retain their uncertain accepted input claim.
 
 Multiple charges after the accepted USDC failure category and incomplete external
 settlement proof are accepted limitations. The [network guide](network-egress.md#remaining-timers-and-budgets)

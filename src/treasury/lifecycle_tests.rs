@@ -1,5 +1,6 @@
 //! Local synthetic-chain coverage of the real treasury owner and signed journal.
 //! Real proofs/bytes and scans, but no consensus validation or live bridge settlement.
+mod shielding;
 mod worker;
 use super::*;
 use crate::rotation::{

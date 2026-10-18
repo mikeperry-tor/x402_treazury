@@ -658,8 +658,7 @@ impl Store {
     pub fn require_preparation_available(&self) -> Result<()> {
         self.funding_restriction
             .require_new_funding("treasury_preparation")?;
-        let pending:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",[],|r|r.get(0))?;
-        ensure!(!pending, "treasury_send_pending");
+        ensure!(!self.preparation_pending()?, "treasury_send_pending");
         Ok(())
     }
     pub fn disable_pool(&mut self, name: &str) -> Result<()> {
@@ -1665,6 +1664,10 @@ impl Store {
                     "initial funding claim consumed or disabled"
                 );
             } else {
+                ensure!(
+                    self.funding_permits.is_none(),
+                    "qualification_funding_denied: operation lacks a current funding job"
+                );
                 if let Some(pool) = self.preparation_intent(id)?.pool {
                     let enabled: bool = self.db.query_row(
                         "SELECT enabled FROM pools WHERE id=?1",

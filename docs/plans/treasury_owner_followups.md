@@ -1,7 +1,8 @@
 # Treasury owner follow-ups
 
-Core best-effort balance simplification does not deliver these follow-ons. They
-require separate implementation and review, with no live spending authorization.
+These follow-ons extend the core best-effort balance simplification. Their local
+implementation and review do not authorize live spending or establish external
+settlement qualification.
 
 ## R01: SDK and actor reconstruction
 
@@ -30,6 +31,7 @@ cadences; explicit shutdown prevents replacements. Shared Store/authentication l
 still requires operator repair. Independent listeners and usable Base payers remain
 available. Restart retains an accepted calculation even without outgoing bytes.
 
+Independent exact-commit review and architecture gate accepted R01 `dce952b`.
 Focused tests cover failed derivation publication, lost commit acknowledgment,
 uncertain selected inputs and restrictions, shutdown during reconstruction,
 interrupted command/driver waiter cancellation, actual worker task replacement and
@@ -46,5 +48,25 @@ bytes through cancellation and restart. Prove selected inputs/output ownership f
 the pinned SDK. Cover disablement, insufficient inputs and uncertain submission
 without preparing a duplicate spend.
 
-Current explicit per-address shielding remains available. General automatic
-shielding remains unfinished.
+Implemented R02 uses the existing owner after persisted sync. Each proposal selects
+one owned account-zero transparent address, including unattributed outputs. The
+pinned SDK selects confirmed spendable inputs and scans calculated bytes with the
+wallet UFVKs; validation requires exact selected outpoints, no transparent outputs
+and owned shielded notes equal to inputs less actual fee. Only the fee is cost.
+Automatic work requires enabled ordinary funding and the configured shielding fee
+safeguard. Job-scoped qualification permits cannot authorize jobless shielding.
+Original encrypted input manifests provide stable per-address network isolation,
+without another table, ledger or schema change. Existing explicit job recipient
+bindings retain precedence.
+
+Pending bytes precede new selection. Initial automatic submission requires zero
+prior attempts and current permission/fee policy; uncertain submission is observation
+only. Existing two-scan zero-lag expiry and original-unspent-input proof release a
+resolved owner. Restart, caller cancellation and disabled automatic funding retain
+accepted inputs and exact bytes. Current explicit per-address shielding remains
+available. See the maintained [wallet rules](../wallet-rotation.md) and
+[network identity rules](../network-egress.md).
+
+Local synthetic-chain tests use public unfunded keys, actual SDK proofs/bytes,
+transparent detection and shielded confirmation. They do not provide consensus,
+live bridge, Tor route or funded lifecycle qualification.

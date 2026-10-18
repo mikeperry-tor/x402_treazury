@@ -50,17 +50,22 @@ renew another response's inactivity timer or signed authority.
 | `rotation/near.rs` | Metadata by origin; quote and status by immutable request recipient |
 | `treasury/birthday.rs` | Mainnet tip and capability lookup, per-invocation bootstrap identity |
 | `treasury/mod.rs`, `server.rs`, `send.rs` | Scan, witnesses, proposal and capability checks, treasury UUID |
-| `treasury/submission.rs` | Deposit/shielding broadcast and transaction lookup, durable destination EVM identity |
-| `treasury/expiry.rs`, `refunds.rs` | Shared scans use treasury identity; job-specific lookup/submission uses durable recipient |
+| `treasury/submission.rs` | Deposit/shielding broadcast and lookup, durable EVM recipient or owned transparent address scope |
+| `treasury/expiry.rs`, `refunds.rs` | Shared scans use treasury identity; per-operation lookup/submission uses durable recipient/address scope |
 | `wallet_cli.rs` | Same configured adapters as serving; local inspection stays offline |
 | `examples/snapshot_spec.rs`, `quote_near.rs` | Same factory; both accept `--network-config` |
 
 `PreparedTransaction` resolves its recipient from funding job/recovery records or
 an immutable `operation_network` binding. Refund shielding records its job's recipient
-before calculation. Missing/conflicting identities cannot reach submission or lookup.
-Schema version 10 adds that binding table; it does not rewrite wallet keys or signed
-bytes. Pending shielding operations created without a recoverable recipient binding
-fail closed and require operator investigation; do not guess from current pool roles.
+before calculation. Automatic shielding without a job uses the encrypted original
+preparation manifest: a jobless transparent input set, zero outgoing principal,
+fee-only cost and no wall deadline derive a `zcash-transparent` isolation domain
+from network, treasury UUID and canonical source address. It is stable across
+restart and separate for each address. Existing EVM bindings retain precedence;
+shared SDK scans still use the treasury identity. No new identity table or schema
+conversion is needed. Missing/conflicting identities cannot reach submission or
+lookup; invalid completed facts can still retain exact local bytes. Do not guess
+identity from current pool roles.
 
 ## Paid discovery relay
 
@@ -414,10 +419,10 @@ financial or qualification authority.
 | Startup/drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. Sync launch uses an owned acknowledgement; scan retirement drains without a cutoff. |
 | MCP SSE keepalive cadence: two seconds | Sends connection-liveness comments while awaiting the result; never renews remote-read inactivity, financial authority, or client whole-tool deadlines. |
 | MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
-| Treasury maintenance: 60 seconds | Independent polling cadence. Ordinary Base/receipt block age, host-future skew, treasury elapsed-age and three-block lag gates are removed. Completed scans retain their original time; same-owner reuse verifies exact tip height/hash and snapshot revision. Expiry/non-inclusion still requires actual scanned coverage, and signed protocol expiry remains authoritative. |
+| Treasury maintenance: 60 seconds | Independent polling, interrupted SDK reconstruction and identical completed-publication retry cadence, never a whole-work cutoff. Successful persisted sync also attempts one per-address shielding calculation under current authority; wallet count supplies no deadline. Ordinary Base/receipt block age, host-future skew, treasury elapsed-age and three-block lag gates are removed. Completed scans retain their original time; same-owner reuse verifies exact tip height/hash and snapshot revision. Expiry/non-inclusion still requires actual scanned coverage, and signed protocol expiry remains authoritative. |
 | Base resource ownership: 64 query owners, 32 active RPCs, 128 RPC callers | Bounds acquired query memory, active transports, and RPC work including callers awaiting transport capacity. Saturation rejects unsigned acquisition; no whole-work timeout or spending limit. Production owners acquire wallet and authorization pages of at most 64 rows each. Identical in-flight background balance reads share one retained query owner under these same bounds; completed results are not retained by that sharing layer and no local age policy is applied. |
 | Managed payment owners: 128 | Bounds completed financial observations and private signing work retained while waiting for the group gate or signed dispatch. Saturation cannot sign or create a liability. |
-| Advisory maintenance: four balance reads per group | Five-second independent cadence, indexed 64-row keyset pages for pending and live wallets. A failed read retains the estimate/low-balance marker. A new failure during an active read schedules a follow-up. The retained owner survives waiter cancellation. Canonical pending authorization traversal is qualification-only and uses its own captured boundary/64-row pages; it cannot delay ordinary signing. |
+| Advisory maintenance: four balance reads per group | Five-second independent cadence, indexed 64-row keyset pages for pending and live wallets. A failed read retains the estimate/low-balance marker. A new failure during an active read schedules a follow-up. The retained owner survives waiter cancellation; a joined failed task reacquires the same gate on this cadence. Canonical pending authorization traversal is qualification-only and uses its own captured boundary/64-row pages; it cannot delay ordinary signing. |
 | Managed payer selection | Indexed saved hints select among existing eligible identities, without RPC or historical repair. Insufficient-funds traversal captures the existing inventory and visits each identity once; it never allocates or waits for funding. |
 | Runtime price hints: 300-second receipt lifetime, 512 entries | Bounded process memory for trusted operation/group/transport keys. Access and late validation never renew receipt age. Hints guide selection only; expiry or eviction triggers no HTTP, probe or authority renewal. |
 | Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. The chain-specific 1Click arrival/confirmation/late-refund contract remains unresolved; broadcast acceptance is not settlement. |
@@ -425,7 +430,7 @@ financial or qualification authority.
 | Funding observation owner | Per store: four credit reads, four status reads, four prerequisite-complete unsigned quotes, one serialized source step and one pending quote prerequisite. Each of the four traversal lanes (credit, status, source and quote prerequisite) retains at most 64 acquired rows; independent cursors have no inventory-count cutoff. These bounds protect acquired work, not funding capital. |
 | Funding scheduling metadata: 256 records per observation kind | At most 1,024 runtime records retain exact operation/kind due times and failure streaks. Active work and unelapsed backoff cannot be evicted; due inactive records may be forgotten. Reopen reconstructs missing work from committed facts without resetting transaction recovery attempts. |
 | Explicit wallet bootstrap observation | One-second captured-claim polling and 60-second progress reporting; no total-work deadline. Ordinary serving has no bootstrap readiness poll or funded-payer startup gate. |
-| Funding polling/backoff and swap delay threshold | One-second wake cadence, independent per-kind backoff up to 300 seconds, and a 60-second polling floor after the health threshold. These govern scheduling only; no whole-job timeout or replacement-send authority. A success in one observation kind cannot reset another kind's failure backoff. Typed busy/locked inventory reads defer only their lane under the existing poll cadence, retaining its cursor and all active work; mutation/publication failures are not replayed by the inventory-read retry mechanism. Completed SDK results instead retain their existing owner, which retries identical local publication without recalculating or submitting. |
+| Funding polling/backoff and swap delay threshold | One-second wake cadence, independent per-kind backoff up to 300 seconds, and a 60-second polling floor after the health threshold. These govern scheduling only; no whole-job timeout or replacement-send authority. A success in one observation kind cannot reset another kind's failure backoff. A joined failed scheduler retries through its existing Store lease on the configured polling cadence; accepted source work retains that lease until it drains. Typed busy/locked inventory reads defer only their lane under the existing poll cadence, retaining its cursor and all active work; mutation/publication failures are not replayed by the inventory-read retry mechanism. Completed SDK results instead retain their existing owner, which retries identical local publication without recalculating or submitting. |
 | Import success retention 300 seconds / failure backoff one second | Applies after completion only; active coalesced fetches cannot age out. |
 | Relay attempt backoff one second / three attempts per scoped target | Bounds actual proven pre-submission request failures. Read-only missing-payer waits consume no attempts. Possibly submitted failures stop relay spending instead of retrying. |
 | Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Storage/resource/diagnostic contention policy; cache persistence failure does not invalidate a complete response. |
