@@ -1438,7 +1438,7 @@ async fn ordinary_balance_refresh_preserves_unresolved_authorizations() {
             .iter()
             .find(|w| w.address == payer)
             .unwrap()
-            .balance,
+            .confirmed_balance,
         "0"
     );
     h.f.reorg.store(true, Ordering::SeqCst);

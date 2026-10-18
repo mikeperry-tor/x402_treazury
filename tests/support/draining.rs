@@ -118,6 +118,38 @@ async fn retained_inventory_setup(two: bool, paused: bool) -> Harness {
     h
 }
 
+pub(super) async fn reopen(h: Harness) -> Harness {
+    let Harness {
+        dir,
+        f,
+        store,
+        worker,
+        pool,
+        client,
+        url,
+        base,
+        server,
+    } = h;
+    let id = store.call(|s| Ok(s.id().to_owned())).await.unwrap();
+    drop(client);
+    drop(store);
+    worker.await.unwrap();
+    let mut state = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    state.pause_new_funding();
+    let (store, worker) = StoreHandle::spawn(state);
+    let client = make_client(store.clone(), pool.clone(), &base);
+    Harness {
+        dir,
+        f,
+        store,
+        worker,
+        pool,
+        client,
+        url,
+        base,
+        server,
+    }
+}
 async fn cold_retained(method: &str) {
     let h = retained_inventory(false).await;
     let before = group(&h).await;

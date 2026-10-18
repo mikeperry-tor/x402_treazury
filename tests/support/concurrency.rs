@@ -130,6 +130,10 @@ async fn mcp_burst_across_listeners_retains_every_journal_and_isolates_pools() {
     .await;
     assert_eq!(successes, [12, 12]);
     assert_liabilities(&h, 24, 24_000_000);
+    let db = rusqlite::Connection::open(&h.f.db).unwrap();
+    let per_pool: Vec<(String, i64)> = db.prepare("SELECT g.name,COUNT(*) FROM payment_attempts p JOIN pools g ON g.id=p.pool_id GROUP BY g.id ORDER BY g.name").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+    assert_eq!(per_pool, [("other".into(), 12), ("research".into(), 12)]);
+    drop(db);
     let signed = h.f.signed.lock().unwrap().clone();
     let mut counts = BTreeMap::new();
     for p in signed {
@@ -294,8 +298,9 @@ async fn cancelled_waiters_preserve_journals_and_other_pool_progress() {
     submitted.abort();
     assert!(submitted.await.unwrap_err().is_cancelled());
     h.f.release.notify_one();
-    h.client.drain().await;
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    h.client.drain().await;
+    assert!(h.client.execute(h.route()).await.is_err());
     assert_liabilities(&h, 6, 18_000_000);
     assert_eq!(h.f.signed.lock().unwrap().len(), 6);
     drop(other);
