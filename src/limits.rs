@@ -4,6 +4,7 @@ pub const MCP_REQUEST_BYTES: usize = 4 * 1024 * 1024;
 pub const RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 pub const HELP_BYTES: usize = 4 * 1024 * 1024;
 pub const SPEC_BYTES: usize = 32 * 1024 * 1024;
+pub(crate) const API_CACHE_TTL_SECONDS: u64 = 24 * 60 * 60;
 pub fn response_default() -> usize {
     RESPONSE_BYTES
 }

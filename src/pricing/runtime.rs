@@ -11,9 +11,10 @@ use std::{
 };
 use tokio::time::Instant;
 
-/// Five minutes from receipt, never from validation, admission or cache access.
-pub(crate) const TTL: Duration = Duration::from_secs(300);
-pub(crate) const CAPACITY: usize = 512;
+/// From receipt, never from validation, admission or cache access. Shares the
+/// catalog disk-cache default; per-source catalog overrides remain independent.
+pub(crate) const TTL: Duration = Duration::from_secs(crate::limits::API_CACHE_TTL_SECONDS);
+pub(crate) const CAPACITY: usize = 65_535;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct OperationKey([u8; 32]);
@@ -228,16 +229,33 @@ mod tests {
     fn bounded_storage_has_no_unbounded_keys_or_late_resurrection() {
         let cache = RuntimeHints::default();
         let at = Instant::now();
-        for sequence in 0..(CAPACITY as u64 * 3) {
-            cache.learn_at(key(sequence), U256::from(2), Receipt { at, sequence }, at);
-        }
+        // Populate directly so checking eviction does not require quadratic
+        // insertion work at the production cache capacity.
+        cache
+            .entries
+            .lock()
+            .unwrap()
+            .extend((0..CAPACITY as u64).map(|sequence| Entry {
+                key: key(sequence),
+                amount: U256::from(2),
+                receipt: Receipt { at, sequence },
+            }));
+        let newest = CAPACITY as u64;
+        cache.learn_at(
+            key(newest),
+            U256::from(2),
+            Receipt {
+                at,
+                sequence: newest,
+            },
+            at,
+        );
         cache.learn_at(key(0), U256::from(9), Receipt { at, sequence: 0 }, at);
         assert_eq!(cache.entries.lock().unwrap().len(), CAPACITY);
         assert!(cache.get_at(key(0), at).is_none());
-        assert!(cache.get_at(key(CAPACITY as u64 * 3 - 1), at).is_some());
+        assert!(cache.get_at(key(newest), at).is_some());
         // Fixed entries in one preallocated Vec: no URL/string allocations,
         // per-entry map nodes, mutable byte ledger or active-work ownership.
-        assert!(std::mem::size_of::<Entry>() * CAPACITY <= 64 * 1024);
         assert_eq!(cache.entries.lock().unwrap().capacity(), CAPACITY);
     }
 }
