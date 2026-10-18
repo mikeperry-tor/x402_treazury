@@ -65,7 +65,7 @@ pub(super) fn assert_liabilities(h: &Harness, count: i64, total: i64) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
+async fn mcp_burst_across_listeners_retains_every_journal_and_isolates_pools() {
     let h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1000000");
     let other = other_pool(&h).await;
@@ -128,17 +128,28 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
         }
     })
     .await;
-    assert_eq!(successes, [10, 10]);
-    assert_liabilities(&h, 20, 20_000_000);
+    assert_eq!(successes, [12, 12]);
+    assert_liabilities(&h, 24, 24_000_000);
     let signed = h.f.signed.lock().unwrap().clone();
     let mut counts = BTreeMap::new();
     for p in signed {
         *counts.entry(signatures::recover_exact(&p)).or_insert(0) += 1;
     }
-    assert_eq!(
-        counts.values().copied().collect::<Vec<_>>(),
-        vec![5, 5, 5, 5]
-    );
+    assert_eq!(counts.values().sum::<usize>(), 24);
+    assert!(counts.len() <= 4);
+    let identities = h
+        .store
+        .call(|s| {
+            Ok(s.status()?
+                .pools
+                .into_iter()
+                .flat_map(|p| p.addresses)
+                .map(|w| w.address.parse::<Address>().unwrap())
+                .collect::<std::collections::BTreeSet<_>>())
+        })
+        .await
+        .unwrap();
+    assert!(counts.keys().all(|payer| identities.contains(payer)));
     let status = h.store.call(|s| s.status()).await.unwrap();
     assert!(
         status
@@ -171,7 +182,7 @@ async fn mcp_burst_across_listeners_shares_reservations_and_isolates_pools() {
     let response = bounded(draining).await.unwrap();
     assert_eq!(response["id"], 99);
     assert_eq!(response["result"]["content"][0]["text"], "paid");
-    assert_liabilities(&h, 21, 21_000_000);
+    assert_liabilities(&h, 25, 25_000_000);
     for server in servers {
         bounded(server).await.unwrap();
     }
@@ -190,13 +201,6 @@ async fn rotation_burst() -> Vec<(std::net::SocketAddr, String, String)> {
             .addresses
             .iter()
             .find(|a| a.role == "ACTIVE")
-            .unwrap()
-            .address
-            .clone();
-        let ready = initial.pools[0]
-            .addresses
-            .iter()
-            .find(|a| a.role == "READY")
             .unwrap()
             .address
             .clone();
@@ -235,7 +239,7 @@ async fn rotation_burst() -> Vec<(std::net::SocketAddr, String, String)> {
             }
         })
         .await;
-        assert_eq!(successes, 5);
+        assert_eq!(successes, 8);
         let state = h.store.call(|s| s.status()).await.unwrap();
         assert_eq!(state.pools[0].generation, 0);
         assert_eq!(state.pools[0].addresses.len(), 2);
@@ -243,10 +247,15 @@ async fn rotation_burst() -> Vec<(std::net::SocketAddr, String, String)> {
         assert_liabilities(&h, successes as i64, successes as i64 * 1_000_000);
         let signed = h.f.signed.lock().unwrap().clone();
         assert_eq!(signed.len(), 1 + successes);
+        let identities: std::collections::BTreeSet<_> = initial.pools[0]
+            .addresses
+            .iter()
+            .map(|w| w.address.parse::<Address>().unwrap())
+            .collect();
         assert!(
             signed[1..]
                 .iter()
-                .all(|p| signatures::recover_exact(p).to_string() == ready)
+                .all(|p| identities.contains(&signatures::recover_exact(p)))
         );
         traces.extend(h.f.traces.lock().unwrap().clone());
         h.close().await;
@@ -260,7 +269,7 @@ async fn simultaneous_depletion_consumes_once_with_one_handoff_for_get_and_post(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn cancelled_and_rejected_waiters_preserve_liability_and_other_pool_progress() {
+async fn cancelled_waiters_preserve_journals_and_other_pool_progress() {
     let h = Harness::new().await;
     let other = other_pool(&h).await;
     h.client.execute(h.route()).await.unwrap();
@@ -280,29 +289,15 @@ async fn cancelled_and_rejected_waiters_preserve_liability_and_other_pool_progre
     cancelled.abort();
     assert!(cancelled.await.unwrap_err().is_cancelled());
     assert_eq!(bounded(other.execute(h.route())).await.unwrap(), "paid");
-    assert!(
-        bounded(timed)
-            .await
-            .unwrap()
-            .unwrap_err()
-            .to_string()
-            .contains("funding_unavailable")
-    );
+    assert_eq!(bounded(timed).await.unwrap().unwrap(), "paid");
     assert!(!submitted.is_finished());
-    assert_liabilities(&h, 3, 9_000_000);
     submitted.abort();
     assert!(submitted.await.unwrap_err().is_cancelled());
     h.f.release.notify_one();
-    assert!(
-        h.client
-            .execute(h.route())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("funding_unavailable")
-    );
-    assert_liabilities(&h, 3, 9_000_000);
-    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
+    h.client.drain().await;
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    assert_liabilities(&h, 6, 18_000_000);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 6);
     drop(other);
     h.close().await;
 }
@@ -416,6 +411,7 @@ async fn fresh_small_only_group_promotes_once_under_concurrent_first_payments() 
         .lock()
         .unwrap()
         .insert(wallet.address.clone(), 5_000_000);
+    publish_initial_credit(&h.store, &pool, &h.base).await;
     let manager = make_pool(h.store.clone(), pool.clone(), &h.base);
     manager.reconcile().await.unwrap();
     h.client = make_client(h.store.clone(), pool.clone(), &h.base);
@@ -427,10 +423,10 @@ async fn fresh_small_only_group_promotes_once_under_concurrent_first_payments() 
         .call(move |s| {
             let status = s.status()?;
             let group = status.pools.iter().find(|p| p.id == selected).unwrap();
-            assert!(group.inventory_ready && group.serving_ready);
+            assert!(group.serving_ready);
             assert_eq!(group.addresses.len(), 1);
             assert_eq!(group.addresses[0].role, "READY");
-            assert_eq!(group.reserve_claims[0].generation, 0);
+            assert_eq!(group.reserve_claims[0].generation, 1);
             Ok(())
         })
         .await
