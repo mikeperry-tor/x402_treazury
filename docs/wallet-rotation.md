@@ -312,33 +312,9 @@ Canonical historical proofs remain available for reporting. Their balance,
 exposure, age and repair fields do not gate current payment admission. Retired
 wallets remain retired; an advisory observation does not reactivate them.
 
-Maintenance may clear a wallet-level `chain_repair_required` block after complete
-canonical revalidation of original readiness, admission and resolution evidence,
-followed by fresh balance acquisition. Only ACTIVE/RETAINED wallets with completed,
-undisputed funding and no retirement records qualify. Keyset pages bound memory
-without limiting total historical work. A journal fingerprint and evidence
-generations reject concurrent changes; flag removal and its audit row commit
-together. Historical proof bytes, anchors and pending liabilities remain unchanged.
-Cancellation before commit leaves the block intact; accepted store jobs retain
-commit ownership. Genuine contradictions and uncertain funding still need review.
-
-Chain-view publication applies canonical resolutions, exposure release and balance,
-readiness and retirement updates in the caller's single transaction. A late failure
-rolls back those updates together. Scoped publication leaves unobserved wallets
-unchanged; complete publication requires balances for every non-retired wallet.
-
-The configured RPC policy defaults to PublicNode, dRPC and Base. Availability
-failure can restart an entire bounded view at another configured endpoint; it
-cannot combine one endpoint's header with another's balance/nonce evidence. Each
-new view begins at the primary, with the same wallet isolation identity. This is
-availability failover, not a quorum or protection from internally consistent
-fabricated data. Endpoint policy, timeouts and overrides are in the README.
-
-Full seller-receipt capture/accounting is not implemented. The current payment
-journal and chain reconciliation must not be described as per-request receipt
-verification. HTTP/MCP success also does not establish useful provider data:
-AgentFund, for example, has returned nested errors inside successful responses.
-Remaining work is scoped in [managed wallet follow-ups](plans/deferred/managed_wallet_followups.md).
+Historical capacity repair has been removed. Incomplete historical support does
+not require repair before new payment work. Ordinary reconciliation is being
+simplified at the BE03 gate. Original attempt and canonical proof records remain.
 
 ## Funding and source safety
 

@@ -251,7 +251,6 @@ mod tests {
         assert_eq!(first[0].1.as_ref().unwrap().id, "attempt-00004095");
         let tx = store.db.transaction().unwrap();
         tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE pool_id=?1 AND reconciliation_sequence=65",[&pool]).unwrap();
-        evidence::subtract_exposure(&tx, &wallet, U256::from(1)).unwrap();
         tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,nonce,valid_before,reconciliation_sequence) VALUES('aaa-late-commit',?1,?2,0,'1','fixture','POSSIBLY_SUBMITTED','payer','late',999999,2049)",params![pool,wallet]).unwrap();
         evidence::add_exposure(&tx, &wallet, U256::from(1)).unwrap();
         tx.commit().unwrap();

@@ -39,14 +39,71 @@ impl Store {
 }
 pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> {
     let mut payment: Value = db.query_row("SELECT a.id,a.pool_id,p.name,a.wallet_id,a.generation,a.amount,a.requirements_hash,w.address,e.balance,e.block_height,e.block_hash,e.reserved_before,e.valid_until,e.support,e.payer_role,e.reserve_slot,e.claim_generation FROM payment_attempts a JOIN pools p ON p.id=a.pool_id JOIN wallets w ON w.id=a.wallet_id JOIN payment_admission_evidence e ON e.attempt_id=a.id WHERE a.id=?1 AND a.state='POSSIBLY_SUBMITTED'", [attempt], |r| Ok(json!({"attempt_id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"pool_name":r.get::<_,String>(2)?,"wallet":r.get::<_,String>(3)?,"generation":r.get::<_,i64>(4)?,"amount":r.get::<_,String>(5)?,"requirements_hash":r.get::<_,String>(6)?,"address":r.get::<_,String>(7)?,"balance_evidence":{"confirmed_balance_atomic":r.get::<_,Option<String>>(8)?,"block_height":r.get::<_,Option<i64>>(9)?,"block_hash":r.get::<_,Option<String>>(10)?,"reserved_before_atomic":r.get::<_,Option<String>>(11)?,"valid_until":r.get::<_,Option<String>>(12)?,"support":r.get::<_,Option<String>>(13)?},"payer_role":r.get::<_,String>(14)?,"reserve_slot":r.get::<_,Option<String>>(15)?,"claim_generation":r.get::<_,Option<i64>>(16)?})))?;
-    // New admissions record only an advisory estimate, never a solvency proof.
-    let estimate = payment["balance_evidence"]["confirmed_balance_atomic"]
-        .as_str()
-        .and_then(|value| amount(value).ok())
-        .map(|value| value.to_string());
-    payment["balance_evidence"] = json!({"schema_version":3,"estimate_atomic":estimate});
-    payment["ownership_evidence_version"] = json!(1);
-    crate::qualification::validate_admission_balance(&payment)?;
+    if payment["balance_evidence"]["valid_until"].is_null() {
+        // New admissions record only an advisory estimate, never a solvency proof.
+        let estimate = payment["balance_evidence"]["confirmed_balance_atomic"]
+            .as_str()
+            .and_then(|value| amount(value).ok())
+            .map(|value| value.to_string());
+        payment["balance_evidence"] = json!({"schema_version":3,"estimate_atomic":estimate});
+        payment["ownership_evidence_version"] = json!(1);
+        crate::qualification::validate_admission_balance(&payment)?;
+    } else {
+        // The journal captured these exact values under the same group gate. Reading
+        // its keyed record never scans historical liabilities or substitutes a newer
+        // mutable wallet snapshot for the original admission support.
+        let cost = amount(
+            payment["amount"]
+                .as_str()
+                .context("admitted amount missing")?,
+        )?;
+        let evidence = &mut payment["balance_evidence"];
+        let before = amount(
+            evidence["reserved_before_atomic"]
+                .as_str()
+                .context("admitted prior exposure missing")?,
+        )?;
+        let after = before
+            .checked_add(cost)
+            .context("admission accounting reservation overflow")?;
+        let balance = amount(
+            evidence["confirmed_balance_atomic"]
+                .as_str()
+                .context("admitted balance missing")?,
+        )?;
+        evidence["reserved_after_atomic"] = json!(after.to_string());
+        evidence["available_after_atomic"] = json!(
+            balance
+                .checked_sub(after)
+                .context("admission accounting exceeds observed balance")?
+                .to_string()
+        );
+        if let Some(encoded) = evidence["support"].as_str() {
+            let support: super::evidence::BalanceSupport =
+                serde_json::from_str(encoded).context("malformed exact admission support")?;
+            support.observation.validate()?;
+            ensure!(
+                balance == support.observation.available()
+                    && evidence["block_height"].as_u64()
+                        == Some(support.observation.confirmed.anchor.height)
+                    && evidence["block_hash"].as_str()
+                        == Some(support.observation.confirmed.anchor.hash.as_str()),
+                "admission balance disagrees with exact support"
+            );
+            evidence
+                .as_object_mut()
+                .context("admission evidence missing")?
+                .extend(
+                    crate::qualification::observed_balance(&support.observation)
+                        .as_object()
+                        .expect("balance evidence object")
+                        .clone(),
+                );
+            evidence["support"] = serde_json::to_value(support)?;
+        }
+        payment["ownership_evidence_version"] = json!(1);
+        crate::qualification::validate_admission_balance(&payment)?;
+    }
     payment["lifecycle"] = read_status(db)
         .and_then(|status| lifecycle(db, &status))
         .unwrap_or_else(|_| json!({"available":false,"reason":"status_observation_unavailable"}));

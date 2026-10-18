@@ -248,7 +248,13 @@ balance-held group turns were deleted. Saved balance, unresolved exposure,
 historical readiness, block age and revision equality no longer govern signing.
 The reporting consumer gained scoped malformed-advisory handling (CycC 46 → 52);
 BE07 must examine that complete reporting chain rather than hide the increase.
-Focused acceptance and exact-commit review are required before the BE03 gate.
+Exact-commit review found the obsolete exposure decrement still active in canonical
+resolution, an unsatisfiable historical repair lane, and malformed-to-zero refresh
+failure. The BE02 fixup removes those responsibilities rather than restoring a
+reservation. It also preserves old qualification proof records, updates the renamed
+estimate consumers, and represents an unobserved estimate as unavailable. New
+focused coverage follows a real signed authorization through canonical resolution.
+Focused acceptance and independent fixup review are required before the BE03 gate.
 
 ### BE03: Insufficient-funds traversal and refresh
 

@@ -551,11 +551,9 @@ fn expired_admission_evidence_preserves_prior_balance_without_role_change_or_res
         released: vec![],
         resolutions: Default::default(),
     };
-    let error = store
+    store
         .admit_for(&pool, U256::from(1), "offer", view, Some(&candidate))
-        .err()
         .unwrap();
-    assert!(error.to_string().contains("fresh Base balances required"));
     drop(store);
     let mut store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     let after = store.payment_candidate(&pool).unwrap();
@@ -866,7 +864,7 @@ fn atomic_payment_preparation_is_unreserved_and_commit_rechecks_authority() {
         if failure == "none" {
             result.unwrap();
             assert_atomic_counts(&store, 2, 1);
-            let saved: (String, String) = store
+            let saved: (String, Option<String>) = store
                 .db
                 .query_row(
                     "SELECT balance,reserved_before FROM payment_admission_evidence",
@@ -874,7 +872,7 @@ fn atomic_payment_preparation_is_unreserved_and_commit_rechecks_authority() {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!(saved, ("5000000".into(), "0".into()));
+            assert_eq!(saved, ("5000000".into(), None));
         } else {
             let error = result.unwrap_err();
             assert_eq!(

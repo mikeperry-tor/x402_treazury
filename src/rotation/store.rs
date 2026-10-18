@@ -15,7 +15,6 @@ mod treasury_reads;
 pub use capacity::AllocationKind;
 mod evidence;
 pub use evidence::BalanceSupport;
-pub(crate) use evidence::repair::repair_wallet;
 pub(crate) mod bootstrap;
 #[cfg(feature = "zcash")]
 mod expiry;
@@ -314,6 +313,10 @@ fn configure(db: &Connection) -> Result<()> {
     Ok(())
 }
 fn amount(s: &str) -> Result<U256> {
+    ensure!(
+        !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()),
+        "invalid atomic amount"
+    );
     U256::from_str_radix(s, 10).context("invalid atomic amount")
 }
 fn seal(key: &[u8; 32], aad: &str, bytes: &[u8]) -> Result<Vec<u8>> {
@@ -392,7 +395,6 @@ impl Store {
             "network='mainnet'",
             &format!("network='{}'", network.name()),
         ))?;
-        tx.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
         tx.execute(
             "INSERT INTO instance VALUES (?1,1,?2,?3,0)",
             params![id, birthday, network.name()],
@@ -1288,7 +1290,6 @@ fn admission_schema(db: &Connection) -> Result<()> {
         version == 17,
         "unsupported state schema; use the separately reviewed stopped-service conversion utility"
     );
-    db.execute_batch(include_str!("store/evidence/repair_schema.sql"))?;
     // Additive lookup optimization for existing schema16 stores; financial
     // records and the state format are unchanged.
     db.execute_batch(
@@ -1940,12 +1941,11 @@ fn apply_chain_resolutions(
         }
         let changed = tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
         if changed == 1 {
-            let (wallet, cost): (String, String) = tx.query_row(
-                "SELECT wallet_id,amount FROM payment_attempts WHERE id=?1",
+            let wallet: String = tx.query_row(
+                "SELECT wallet_id FROM payment_attempts WHERE id=?1",
                 [id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )?;
-            evidence::subtract_exposure(tx, &wallet, amount(&cost)?)?;
             tx.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time,support) VALUES(?1,?2,?3,?4,?5,?6)",
                 params![id,outcome,i64::try_from(anchor.height)?,anchor.hash,i64::try_from(resolution.block_time)?,support])?;
             if support.is_some() {
@@ -1974,7 +1974,11 @@ fn publish_chain_balances(
             tx.query_row("SELECT balance FROM wallets WHERE id=?1", [id], |r| {
                 r.get(0)
             })?;
-        if *balance == U256::ZERO && amount(&previous)? > U256::ZERO {
+        if *balance == U256::ZERO
+            && amount(&previous)
+                .ok()
+                .is_some_and(|value| value > U256::ZERO)
+        {
             depleted.depleted.push(id.clone());
         }
         tx.execute(

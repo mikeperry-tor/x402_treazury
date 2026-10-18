@@ -64,7 +64,7 @@ pub(crate) fn refill_ready(state: &Value, pool: &str, job: &str, generation: u64
             .parse::<U256>()?;
         ensure!(
             target > U256::ZERO
-                && wallet["confirmed_balance"]
+                && wallet["balance_estimate_atomic"]
                     .as_str()
                     .context("refill balance missing")?
                     .parse::<U256>()?

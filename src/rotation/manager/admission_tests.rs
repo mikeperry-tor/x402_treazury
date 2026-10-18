@@ -1,10 +1,10 @@
 //! Real signing and HTTP dispatch with advisory data unavailable.
 use super::*;
 use axum::{
-    Router,
+    Json, Router,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -88,6 +88,22 @@ async fn fixture() -> Fixture {
             let challenge = serde_json::json!({"x402Version":2,"resource":{"url":"https://example.com/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"7","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
             (StatusCode::PAYMENT_REQUIRED,[("payment-required",STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
         }
+    }));
+    let app = app.route("/rpc", post(|Json(request): Json<Value>| async move {
+        let result = match request["method"].as_str().unwrap() {
+            "eth_chainId" => serde_json::json!("0x2105"),
+            "eth_getBlockByNumber" => {
+                let tag = request["params"][0].as_str().unwrap();
+                let height = if tag == "latest" { 100 } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
+                serde_json::json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+            },
+            "eth_call" => {
+                let value = if request["params"][0]["data"].as_str().unwrap().starts_with("0x70a08231") { 0 } else { 1 };
+                serde_json::json!(format!("0x{value:064x}"))
+            },
+            method => panic!("unexpected fixture method {method}"),
+        };
+        Json(serde_json::json!({"jsonrpc":"2.0","id":request["id"],"result":result}))
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/pay", listener.local_addr().unwrap());
@@ -241,5 +257,23 @@ async fn revoked_authority_at_commit_still_prevents_disclosure() {
             .unwrap(),
         0
     );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn new_advisory_authorization_can_resolve_and_unknown_estimate_refreshes_to_zero() {
+    let mut f = fixture().await;
+    f.db()
+        .execute(
+            "UPDATE wallets SET balance='' WHERE id=?1",
+            [&f.payer.wallet],
+        )
+        .unwrap();
+    assert!(f.pay().await.unwrap().0.status().is_success());
+    let endpoint = f.url.replace("/pay", "/rpc");
+    f.pool.base = BaseRpc::new(&endpoint, 12, 120).unwrap();
+    f.pool.reconcile().await.unwrap();
+    let (balance, pending, resolutions): (String,i64,i64) = f.db().query_row("SELECT balance,(SELECT count(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'),(SELECT count(*) FROM payment_resolutions) FROM wallets WHERE id=?1",[&f.payer.wallet],|r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert_eq!((balance.as_str(), pending, resolutions), ("0", 0, 1));
     f.close().await;
 }
