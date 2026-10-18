@@ -33,6 +33,9 @@ owner manages zingolib sync, preparation and submission; a bounded blocking stor
 worker owns SQLite operations. Financial transactions do not hold a database
 transaction across remote calls. Accepted actor/store work survives cancellation
 of its caller. Independent EVM pools share source funds, not payment reservations.
+Encrypted wallet snapshots and outgoing operations commit atomically; snapshot
+revision compare-and-swap prevents stale saves. Do not use upstream plaintext
+wallet saves or SDK quick-send helpers to bypass this owner and journal path.
 
 ## Funding limits and fees
 

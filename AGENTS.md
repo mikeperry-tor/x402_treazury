@@ -1,731 +1,145 @@
 # AGENTS.md
 
-Guidance for code agents working on **x402_treazury**, a Rust application with
-executable **x402_treazury** and library crate **x402_treazury**.
+Guidance for code agents working on **x402_treazury**, a Rust executable and library.
+The server exposes x402-paid HTTP APIs as ordinary MCP tools, owns payment
+credentials and handles challenge/sign/retry. TOML providers compose into sources
+and authenticated listeners. An embedded Zcash treasury can fund rotating Base
+USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
 
-## Purpose and layout
+## Engineering preferences
 
-Expose x402-paid HTTP APIs as plain MCP tools. The server owns payment credentials
-and handles challenge/sign/retry; agents receive ordinary tool results. Reusable
-TOML providers compose into sources and multiple authenticated HTTP listeners.
-A single Zcash treasury can fund rotating Base USDC wallet pools through NEAR
-Intents. Optional Tor uses the same network/state machinery as direct mode.
-
-- `src/main.rs`, `src/cli.rs`, `src/wallet_cli.rs`: executable command tree and treasury commands.
-- `src/output.rs`: bounded typed image/text results and explicit JSON image mappings.
-- `src/catalog.rs`, `config.rs`, `pricing.rs`: OpenAPI tools, TOML composition,
-  startup-only pricing discovery.
-- `src/server.rs`, `deployment.rs`, `payment.rs`: MCP transports, multi-listener
-  lifecycle, payment signing and identity-bound admission.
-- `src/network.rs`: all production outbound HTTP/gRPC constructors and isolation.
-- `src/cover/`: optional bounded unsigned ranges, request padding, sampling and scoped evidence.
-- `src/rotation/`: pool assignment, durable SQLite state, Base/NEAR adapters and funding.
-- `src/treasury/`: embedded Zingolib, serialized commands, sync, proving and recovery.
-- `providers/`: 27 TOML definitions; curated OpenAPI catalogs in provider subdirectories.
-- `examples/`: deployment, public-demo and Tor configurations; Rust development utilities.
-- `tests/`: offline Rust suites, local protocol fixtures and pinned provider contracts.
-- `vendor/`: reviewed Alloy/Zingo patches and provenance verification.
-- `compat/`: independent dependency compatibility and Cargo-managed protoc workspaces.
-- `docs/`: network inventory, funded-test runbook and architecture plans.
-
-## Progress and failure-policy rules
-
-Let valid work finish while it makes progress. Before adding or tightening a timer,
-budget, readiness gate or failure switch, identify its owning layer and the concrete
-resource, external contract or correctness invariant it protects. Check existing
-guards first; do not stack whole-work deadlines or replace removed deadlines with
-enormous durations. Keep the [remaining timer inventory](docs/network-egress.md#remaining-timers-and-budgets)
-current when policy changes.
-
-Avoid creating additional local resource limits or network timeouts. Arbitrary
-limits are largely reliability hazards, not default safeguards. Before changing
-caps, queues, cache lifetimes, readiness checks, polling or transport timeouts, read
-[local resource limits](docs/local-resource-limits.md) and the
-[network timeout policy](docs/network-egress.md#timeout-budgets-and-concurrency).
-These inventories help diagnose unexpected failures; existing limits are not
-precedent for another limit or proof that retaining one is necessary.
-
-- Needless double-enforcement is forbidden. When an operator-controlled resource or
-  existing authority already supplies the intended limit, do not add, preserve or
-  recommend a second policy ceiling for the same purpose. Each additional limit must
-  protect a distinct concrete resource, authority boundary or correctness invariant;
-  generic caution and hypothetical users are not justification. Remove redundant
-  policy instead of adding configuration, counters, recovery paths or scheduling to
-  work around it. Checks at separate trust or concurrency boundaries remain necessary
-  when they prevent stale admission or races; share their calculation rather than
-  confusing repeated validation with an independent spending ceiling.
-- Funding the treasury expresses the operator's intended funding-capital limit.
-  Under ordinary enabled auto-funding, actual spendable treasury funds are the limit;
-  adding funds supplies additional capacity without another budget-setting step.
-  Do not require, retain or reintroduce daily/cumulative USDC allocation budgets or
-  daily treasury ZEC spending budgets to double-enforce that choice. Their removal is
-  settled repository policy, not an unresolved authority-expansion question to reopen
-  in feature reviews. Preserve actual reservations/liabilities, confirmation and
-  exact pending-work ownership, per-payment authority, per-operation cost/fee safeguards, explicit
-  auto-funding controls and separately authorized qualification-run limits: these
-  protect distinct invariants. Displayed total balance is not spendable capacity.
-- Avoid preventable agent-call delays and blocking by default. Prefer simple bounded
-  preparation and maintenance ahead of demand when existing authority permits it.
-  Straightforward optimizations need focused correctness, race and side-effect tests,
-  not an extensive benchmark study to justify their inclusion. Reserve broader
-  measurements for tuning resource limits, evaluating complex scheduling or making
-  quantitative performance claims; never weaken financial safeguards for latency.
-- Separate connection establishment, per-response read inactivity, evidence freshness,
-  signed authority expiry and health/polling cadence. Unrelated streams, keepalives
-  or merely finishing work cannot renew another response's timer or financial authority.
-- USDC estimates and historical readiness are advisory, never signing permission.
-  Select within actual pool/payer authority and journal before disclosure; decrement
-  the current estimate once per journaled authorization. Prefer best-effort attempts
-  on other existing wallets after recognized insufficient funds while blockchain
-  balance reconciliation runs independently; do not wait for local solvency proofs.
-  See the [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules).
-- Prefer blockchain/SDK spendability and reconciliation over parallel local monetary
-  tracking. Local financial journals must protect concrete ownership, signed authority
-  or off-chain uncertainty the blockchain cannot reconstruct. Remove responsibilities
+- Favor simplicity and best-effort execution. Prefer blockchain/SDK spendability
+  and reconciliation over parallel local monetary tracking. Remove responsibilities
   before adding counters, certificates, recovery ledgers or workflow frameworks.
-- Necessary read-only preflight checks precede mutation, reservation and broadcast
-  intent; this ordering does not justify inventing readiness gates. After uncertain
-  mutation or intent, preserve ownership, exact bytes and liabilities; absence of a
-  result is not proof that nothing happened.
-- Scope failures to the affected operation unless typed evidence justifies a wider
-  stop. Unsigned outages must not consume transaction recovery attempts. Preserve
-  finite retry/backoff, optional-source status and required/qualification completeness.
-- Keep active work ownership separate from waiter lifetime and cache retention.
-  Disconnect, cancellation or eviction must not silently orphan financial work,
-  duplicate active I/O, or report forced abandonment as success.
-- Distinguish actual cost from configured ceilings, payment authority from funding
-  preferences, and authority fields from opaque annotations. Preserve explicit caps,
-  byte/storage bounds and existing deployments' effective spending authority, subject
-  to explicitly approved policy removals above. This preservation rule must not be
-  used to perpetuate redundant limits or relitigate their approved removal.
-- For policy changes, test slow progress beyond the old bound alongside true stalls,
-  unrelated concurrent progress, cancellation and restart where applicable. Assert
-  forbidden side effects stay absent. Test-harness deadlines are not runtime policy;
-  local fixtures do not establish an external settlement contract or live qualification.
+- Avoid additional local resource limits and network timeouts. Arbitrary limits
+  are largely reliability hazards. Before adding or tightening a cap, queue,
+  readiness gate, timer or failure switch, identify its concrete resource, external
+  contract or correctness invariant and check existing guards. Generic caution is
+  insufficient. Existing limits are not precedent or proof of necessity.
+- Needless double-enforcement is forbidden. Treasury funding expresses the
+  operator's capital limit: actual spendable funds govern ordinary enabled
+  auto-funding. Do not reintroduce daily/cumulative allocation or ZEC spending
+  budgets. Per-payment authority, actual operation/fee safeguards, accepted-work
+  ownership and separately authorized qualification limits protect distinct things.
+- Let valid work finish while it makes progress. Do not stack whole-work deadlines
+  or replace removed timers with enormous durations. Connection establishment,
+  response inactivity, signed expiry and polling cadence have separate meanings.
+  Sibling traffic and keepalives cannot renew another response or financial authority.
+- Avoid preventable agent-call delays. Prepare ahead of demand under existing
+  authority where simple. Focused correctness, race and side-effect tests suffice
+  for straightforward improvements; broader measurements belong to resource tuning,
+  complex scheduling or quantitative performance claims.
+- Scope failures to affected operations. Unsigned outages do not consume transaction
+  recovery attempts. Disconnect, cancellation or cache eviction must not orphan
+  accepted financial work, duplicate active I/O or report abandonment as success.
 
-## Live integration runner
+## Financial and execution boundaries
 
-`examples/live_integration.rs` and `tests/integration_preparation.rs` share
-`examples/live_integration/driver.rs`; do not duplicate CLI/module wiring. The
-[runbook](tests/live/INTEGRATION.md) describes supported commands, evidence bounds
-and scenario assertions; [testing](docs/testing.md#qualification-status) states
-qualification limits. Full automated lifecycle and combined cover/payment remain [deferred](docs/plans/deferred/live_integration_acceptance.md).
-Retained evidence never grants spending authority or permission to replay cases.
+Ordinary USDC payment selection treats balances and price hints as advisory;
+current payer ownership and amount authority govern signing. After recognized
+structured insufficient funds, try each existing
+eligible wallet once with its own challenge while balance reconciliation proceeds
+independently. Drop the unused error body. Each authorization remains potentially
+chargeable. Other uncertainty grants no automatic replay; never allocate wallets
+or wait for funding during this traversal.
 
-- Use production wallet commands for init/addresses/sync/backup. `plan` is offline;
-  `prepare` freezes complete catalogs and validates exact listener/source/tool
-  arguments; `run` selects direct/external/owned Tor from the manifest. Keep exact
-  executable/config/catalog pins during execution. Read-only evidence inspection
-  and wallet administration must not require an unchanged development checkout.
-- Started or reserved runs are observation-only, including `report --eligibility`. New reviewed
-  runs use the same registry and retain cumulative API/source/job charges. Never
-  replay attempted/uncertain work, reset deadlines/budgets, adopt unknown liabilities
-  or transfer old permits. Preserve explicit source/pool/listener scope on selection.
-- Production admission and durable funding permits remain authoritative. Zero-new-
-  funding is installed before pool setup and every supervised reopen; it permits
-  safe use/reconciliation of existing assets, never allocation or preparation.
-  Prepared bytes retain ordinary recovery obligations. Positive funding needs
-  explicit run authority, `--allow-funding` and production auto-funding policy.
-- A unique durable case claim precedes provider I/O. Only reviewed arguments and
-  current authority can start work. Completion after expiry records already
-  accepted work; it grants no new start. Bound private child output and drain by
-  owned process handle on cancellation/parent EOF. Preserve an in-progress drain
-  across cancelled waiters; never replace it with a PID-based kill/restart.
-- MCP success, provider semantics, seller receipts, canonical authorization
-  resolution, canonical debit proofs and saved balances are distinct facts. Nested
-  `isError:true` fails provider semantics; arbitrary `error` properties do not.
-  Missing assertions/proofs remain incomplete. Do not infer zero fees or readiness.
-- Concurrency assertions use one application clock, exact wallet bindings and unique
-  authorizations. Saved balances are advisory. Correlate every attempted authorization,
-  receipt and debit by attempt ID; an earlier unknown outcome remains incomplete.
-  Promotion, pending-refill service, confirmed replacement credit and restart are separate gates.
-  Only structurally verified untouched depletion suffixes can be skipped without
-  charge. Every attempted case retains its reservation.
-- Catalog/help/pricing instrumentation observes real production paths; no extra
-  probes or additional signed retries beyond the managed insufficient-funds policy.
-  Preserve typed catalog failure stages and HTTP codes.
-  Continue independent qualification catalog loads within the normal rolling bound;
-  aliases share failures without retries. No partial executable inventory. Complete
-  catalog snapshots have a shared 128 MiB bound; ordinary evidence is 16 MiB.
-- Observe the actual help OnceCell initializer: fetch/hit/shared are distinct and
-  failures stay uncached. Pricing remains one-shot startup discovery. Frozen reload
-  inventories must match; reconstruct price descriptions only from that session's
-  recorded production prices. Do not loosen schema assertions or trim documentation.
-- Owned Tor uses installed software and dedicated persistent state, separate from
-  Tor Browser. Preparation and execution have separate confined process/control
-  evidence. Required payer streams must reach provider origins; RPC-only traffic
-  cannot qualify them. Unknown credentials, changed destinations, local DNS, circuit
-  sharing or incomplete capture invalidate isolation evidence. Never derive traffic
-  authority from observed tokens. External SOCKS alone cannot qualify isolation.
-- Outage qualification is a separate keyless deployment with no declared managed
-  wallets, funding or source management. Keep the same keyless process/cache across
-  stopped SOCKS: listing/cached help succeeds, fresh help has typed connection
-  failure. A stopped listener does not qualify stalled in-flight timeouts.
-- Keep historical private evidence immutable/readable. SQLite events mix plain
-  text and JSON: guard extraction with `json_valid` inside the expression, not only
-  WHERE clauses; malformed relevant financial events fail explicitly. Read-only
-  receipt recovery imports only exact original canonical correlations, never new
-  execution authority. Saved accounting/attribution uses exclusive ownership and
-  clean process evidence; refund shielding consumes its fee, not the returned
-  output twice. Retired funds are not active capacity.
-- The versioned report summary joins validated observations, preserving failures,
-  unknowns and unattempted stages. JSON is private; Markdown omits raw identifiers,
-  credentials, provider prose and paths. Tor-only outcomes do not identify causation.
-  Preserve explicit qualification limits in maintained guides.
+Journal before disclosure. Preserve exact accepted inputs, signed bytes, original
+identities and liabilities through cancellation/restart; missing results do not
+prove nothing happened. SDK/blockchain state owns current ZEC spendability.
+Automatic shielding can recover owned transparent funds without refund attribution;
+refunds do not authorize another funding deposit. Each wallet's initial funding
+claim is consumed by its first positive USDC observation; low estimates never
+reopen it or authorize top-ups. See the detailed wallet rules before changing
+payment, funding or recovery behavior.
 
-Treasury sync retains completed scan work without host-age or ordinary tip-lag
-permission gates, identically for direct and Tor. Persist final `observed_tip_height`
-separately from scanned `height`; confirmations use the latter. SDK input selection
-owns confirmation, witness, spend-link and scan-coverage requirements. Preserve
-same-owner snapshot revisions and actual scan completion across cancellation.
-Expiry recovery requires coverage through both observed tips and every original
-owned input before releasing exact prepared ownership. Maintenance runs on an
-independent cadence; elapsed time and wallet count cannot abandon valid work.
+All production outbound HTTP/gRPC constructors belong in `src/network.rs`.
+Preserve identity-bound transports, public-destination enforcement and Tor's remote
+DNS/no-direct-fallback policy. Do not introduce a vendor-specific bypass. Listener
+identity is the authenticated source-management principal; agent/session fields
+cannot select owners. Registration never allocates or funds a wallet.
 
-## Configuration and wallet workflow
+Ordinary serving binds listeners before funding and exposes usable tools while
+managed funding/discovery is pending or degraded. Strict inspection and separately
+authorized qualification retain their completeness and authority requirements.
 
-`serve --config FILE` starts a deployment; `--meta-config` is its compatibility alias.
-`serve --provider FILE` starts standalone serving. `catalog tools`, `catalog tags`,
-and `catalog route` inspect tools; routing previews accept standalone providers only.
-`config show` is offline file inspection; `config check` fetches and validates
-catalogs for deployments or standalone providers. No command means help, never
-serving. Keep these modes in the shared Clap tree; only `serve` accepts listener,
-authentication and supervised funding options. Wallet commands
-accept the same deployment file without loading catalogs or requiring listener
-tokens. `wallet bootstrap` also consumes wallet assignments/funding settings and
-funds the captured enabled reserve claims; other wallet administration never starts funding
-workers. `wallet recover --config FILE` performs one recovery pass without new
-allocations or submissions. Bootstrap/automatic funding share its eligibility logic:
-known unprepared failures or canonically expired signed operations only; uncertain
-preparation, refunds and unresolved confirmed swaps require review before restarting
-or replacing funding. Owned-output discovery and shielding can continue under
-current authority without refund attribution. Recovery reset limits use durable
-`funding_recovery` history and profile `max_attempts`, never a
-process-local counter. Unsigned quote outages use per-pass backoff without consuming
-transaction recovery attempts. New refreshes need proof of no accepted calculation or outgoing
-record and a durable refresh marker; historical unclassified records still count.
-The requested quote window defaults to 7200 seconds; the returned deadline governs.
-The returned external deadline is authoritative; no local five-minute margin is imposed.
-The chain-specific 1Click arrival/confirmation contract remains unqualified. swap_timeout_seconds is a health threshold with a
-60-second polling floor, never an abort or replacement authority.
-Do not combine deployment configuration with standalone location/network overrides.
-User-facing deployment examples live in `examples/deployments/`; network-only examples in
-`examples/network/`. Preserve user-owned local copies when changing layouts.
+## Read the relevant guide before editing
 
-An omitted treasury ID resolves from existing state at runtime; a supplied ID is
-an assertion, never permission to adopt another wallet. Offline `config show`
-reports that resolution policy without opening state. An omitted key path resolves
-to `wallet.key` inside the owner-only state directory; the whole directory contains
-sufficient decryption material. External key paths remain supported. Never replace
-existing state on init. Endpoint defaults are shared with birthday lookup; explicit
-missing environment references fail, and submission otherwise follows the indexer.
-Birthday discovery uses the older valid information/tip observation minus the
-scan rewind; ordinary advancement between independent reads is not a failure.
+Load the documents for the area being changed; the detailed contracts and defaults
+belong there rather than in another copy of this file. The [documentation index](docs/README.md)
+links other maintained guides.
 
-Managed serving binds listeners before starting initial or replacement funding and
-does not wait for a funded payer before exposing available tools. It defaults to
-automatic funding, using actual spendable treasury funds under ZEC/fee
-safeguards. `auto_fund=false` pauses it; build features, inspection,
-wallet initialization and sync never authorize automatic funding. Qualification
-restrictions remain authoritative, and bounded live demos retain explicit opt-outs.
+| Change area | Read first | Main implementation / tests |
+| --- | --- | --- |
+| Resource limits, cache lifetimes, readiness gates or polling | [Local resource limits](docs/local-resource-limits.md), [timer inventory](docs/network-egress.md#remaining-timers-and-budgets) | `src/limits.rs`, owning module |
+| Payments, selection, funding or recovery | [Best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules), relevant sections of [wallet ownership](docs/wallet-rotation.md), [selection/isolation design](docs/architecture.md#wallet-selection-and-network-isolation) | `src/payment.rs`, `src/rotation/`, `src/treasury/`; `tests/LIFECYCLE.md` |
+| Wallet CLI, initialization, keys or state conversion | [Wallet administration](docs/wallet-cli.md), [configuration](docs/configuration.md) | `src/wallet_cli/`, `src/cli.rs` |
+| Network clients, HTTP/gRPC timeouts or Tor | [Network policy](docs/network-egress.md), [resource limits](docs/local-resource-limits.md) | `src/network.rs`, `tests/network_audit.rs`, `tests/TOR.md` |
+| Deployment startup, catalog publication or shutdown | [Runtime architecture](docs/architecture.md), [configuration](docs/configuration.md), [startup tests](tests/STARTUP.md) | `src/deployment/`, `src/server/`, `src/catalog_state.rs` |
+| Dynamic sources, directory tools or raw calls | [Agent source management](docs/agent-sources.md) | `src/discovery/`, `src/catalog_state.rs` |
+| Provider TOML, OpenAPI schemas, pricing, caching or relay | [Configuration](docs/configuration.md), [catalog architecture](docs/architecture.md#catalog-configuration-and-execution), [provider caveats](providers/CAVEATS.md) | `src/catalog.rs`, `src/config.rs`, `src/pricing/`, `src/http_cache.rs`, `src/discovery_relay.rs`; provider snapshots |
+| MCP images, binary output or truncation | [Output boundaries](docs/architecture.md#mcp-and-output-boundaries), [download/display limits](docs/configuration.md#download-and-display-limits) | `src/output.rs`, `src/server.rs`, `tests/media.rs` |
+| Optional cover traffic | [Cover policy](docs/cover-traffic.md) | `src/cover/` |
+| Live integration, financial evidence or qualification reports | [Runbook](tests/live/INTEGRATION.md), [technical reference](tests/live/INTEGRATION_REFERENCE.md), [qualification status](docs/testing.md#qualification-status) | `examples/live_integration/driver.rs`, `tests/integration_preparation.rs` |
+| Builds, dependencies, test infrastructure or release tooling | [Development](docs/development.md), [testing](docs/testing.md), [scripts](scripts/README.md), relevant [vendor provenance](vendor/README.md) / [Zingo patch](vendor/ZINGO.md) | `scripts/`, `compat/`, `vendor/`; [reproducible builds](docs/reproducible-builds.md) |
 
-## Commands and test discipline
+When changing policy, update its owning guide and affected references. Resource
+policy changes must keep both inventories current. Do not infer a runtime deadline,
+external settlement contract or live qualification from a fixture timeout.
 
-HTTP listeners require bearer authentication by default. Host validation is independent: `allowed_hosts` replaces loopback defaults;
-`disable_host_check=true` or an empty list disables the allowlist with a startup
-warning. Reject an explicit list combined with the disable flag. Standalone HTTP
-uses `--allowed-hosts` or `--disable-host-check`; both may accompany `--no-auth`.
-Explicit `servers.NAME.auth=false`
-omits `bearer_token_env`; standalone HTTP uses `--no-auth`. Warn at startup when
-disabled. Never log authentication headers or token values. Auth failure warnings
-are bounded per listener/category, with explicit suppression notice/counts; HTTP
-401 bodies distinguish missing, malformed and incorrect-token failures. Live
-qualification must reject unauthenticated listeners.
+## Commands and test exceptions
 
-`scripts/check.sh` validates only the default Zcash build, including all-feature
-Clippy, dependency compatibility and the local synthetic-chain treasury lifecycle
-with `zcash-testutils`. It also runs source complexity qualification
-and advisory regression warnings (CogC > 20 or CycC > 40) against the merge base
-with `main`; use `COMPLEXITY_BASE_REF` for another review target. Scores never fail
-the check, but incomplete analysis does. See `scripts/README.md` for optional vector
-regeneration. Individual commands:
+Run commands from the repository root. The default build includes Zcash; static
+wallet deployments simply omit treasury configuration. Use the wrapper for pinned
+Cargo and Cargo-managed protoc. `build` defaults to release without incremental
+caches; `build --developer` opts into an incremental development build.
 
 ```sh
 scripts/zcash.sh build
 scripts/zcash.sh test --all-targets -- --test-threads=1
 scripts/zcash.sh clippy --all-targets -- -D warnings
 cargo fmt --check
-python3 vendor/verify.py
-python3 vendor/verify_zingo.py
-python3 scripts/check_compat.py
 ```
 
-Run commands from the repository root. `scripts/zcash.sh build` (or no command) defaults
-to release with incremental caches disabled, including the protoc helper.
-`build --developer` enables an incremental development build; it cannot accompany
-`--release` or `--profile`. Explicit build profiles disable incremental caches.
-Tests, checks and Clippy retain normal Cargo profiles and inherited environment. `rust-toolchain.toml` pins the development
-compiler; the Zcash/check wrappers enforce it for non-rustup installations too.
-Run `sh scripts/check_toolchain.sh` before plain Homebrew Cargo commands.
-Release reproducibility uses `python3 scripts/reproducible.py` on the version-checked
-macOS profile; see `docs/reproducible-builds.md`. It builds committed HEAD only,
-requires prefetched dependencies/parameters and blocks build-time network access.
-Do not weaken the sandbox or silently update toolchain/profile pins to make a run pass.
+- Prefer focused tests for a change. Do not repeat full suites after a localized
+  fix unless new changes or unresolved concerns justify it. `scripts/check.sh` is
+  the full default-Zcash check, including Clippy, vendor/compatibility verification,
+  complexity analysis and the synthetic-chain treasury lifecycle.
+- Do not run no-default-feature builds, tests or Clippy without an explicit user
+  request. Run requested feature configurations sequentially: CLI tests share an
+  executable path. Keep sources/executables frozen during their validation.
+- Tests use temporary state, public unfunded deterministic keys and localhost
+  fixtures. Never load real wallet secrets. Live-funded qualification requires
+  separate operator authorization; consensus tests require Docker and an explicit
+  ignored-test invocation. Offline fixtures do not qualify live settlement or Tor.
+- Verify changed financial tests are actually wired into their modules and execute;
+  a filtered command can pass with zero tests. Assert forbidden side effects stay
+  absent. Cover slow progress versus true stalls, cancellation/restart and unrelated
+  concurrent progress when changing failure policy. Do not loosen contracts or trim
+  documentation to make tests pass.
+- Run `sh scripts/check_toolchain.sh` before plain Homebrew Cargo commands. Do not
+  change toolchain/profile pins or weaken the reproducible-build sandbox to pass a
+  check. Patch dependencies in reviewed `vendor/` sources, never Cargo caches or
+  reference checkouts. Python is development tooling, never a runtime dependency.
 
-`target/release/x402_treazury serve --help` lists serving
-options; `x402_treazury wallet --help` lists treasury commands. Default builds include
-the embedded Zcash wallet; `--no-default-features` disables it. Plain Cargo builds
-require protoc; the Zcash wrapper supplies Cargo-managed protoc and respects
-`--no-default-features`. `scripts/coverage.sh` measures default-build application
-coverage with matching LLVM tools and writes HTML/JSON/text under `target/coverage`. First builds
-may fetch public proving parameters; Cargo/build traffic is outside runtime Tor policy.
+## Local files, logs and documentation
 
-Tests use temporary state and public unfunded deterministic keys. Never load real
-wallet keys or seeds into default tests. Local fixtures require localhost binding.
-Do not run no-default-feature builds, tests or Clippy unless the user explicitly requests
-that configuration. Zcash is included in the standard build; static-wallet deployments
-simply do not configure a treasury. Use focused tests for changes and avoid repeating
-full suites after a localized fix. If explicitly requested, run feature suites
-sequentially because their CLI tests share the same executable path.
-`tests/stdio.rs` tests the real process; provider snapshots test full tool contracts.
-Python is optional development tooling, never an application/runtime dependency.
-Consensus tests need Docker and explicit ignored-test invocation; see `tests/REGTEST.md`.
-Live-funded qualification is a separate operator-authorized step.
+Keep `.env`, `state/`, `secrets/`, local example overrides and reference checkouts
+untracked. Preserve unrelated user files, including `TODO`, `run_servers.sh`,
+`FUCK.md` and editor files. Do not inspect or print secret values unnecessarily.
+Do not use the TODO tool. Do not routinely delete `target/`: it may hold private
+qualification evidence and pinned executables as well as disposable build caches.
 
-Keep `.env`, `state/`, `secrets/`, local example overrides, and reference checkouts
-untracked. Do not inspect or print secret values unnecessarily. User-owned `TODO`,
-`run_servers.sh`, `FUCK.md` and editor files are not part of automatic cleanup.
-All logs go to stderr: stdout is the MCP wire or the requested CLI JSON output.
-Process `RUST_LOG` overrides the default `warn,x402_treazury=info` filter for all
-commands. Info reports catalog/pricing completion, listener startup and funding
-progress; download/parse/protocol details and accepted tip lag are debug. Warnings
-indicate failures, degraded operation or actionable configuration issues. Sync
-failures log fixed categories and typed reasons, plus numeric gRPC codes and fixed
-status names when available. Shard-tree errors retain fixed pool and operation
-labels from the pinned Pepper Sync diagnostic patch. Sanitize Zingolib errors before persistence or logging;
-never retain upstream prose, metadata, wallet identifiers or credentials.
-Keep ordinary CLI errors legible even with backtrace environment variables enabled.
+All logs go to stderr; stdout is the MCP wire or requested CLI JSON. Never persist
+or log credential-bearing upstream prose. Follow the [logging contract](docs/development.md#logging-and-diagnostics)
+when changing diagnostics. Limits that reject or truncate content must be visible
+to the affected consumer; never present a partial document as complete. Visibility
+requirements do not justify adding a limit; see [resource-limit behavior](docs/local-resource-limits.md#rejection-and-truncation).
 
-## Agent source management
-
-`src/catalog_state.rs` holds immutable deployment-wide snapshots; `src/discovery/`
-implements optional meta-config-only registration, imports, permissions, SQLite
-persistence and management tool definitions. See [docs/agent-sources.md](docs/agent-sources.md)
-and [the runtime architecture](docs/architecture.md).
-
-- One named `source_management.wallet` serves all dynamic sources by default. Only
-  explicit listener overrides split wallet sharing. Never run automatic per-source
-  pool assignment or trigger allocation/funding from registration. The README's
-  arrangement table describes deployment, listener and group sharing; preserve this
-  boundary if adding higher-level agent privacy defaults.
-- Listener ID through bearer-authenticated routing is the principal. Agent/session
-  fields never select an owner. `source_management=true` enables endpoint-local
-  registration only; static TOML sources are immutable. Registry configuration, not
-  agent arguments, controls persistence. Explicit listener `wallet` overrides the
-  shared dynamic wallet.
-- Mutation tools are separately authorized under `x402_treazury_`; API filters cannot
-  remove them. Dynamic names contain the full UUID under `dyn_`. Both prefixes are
-  reserved in participating deployments. Every direct/fallback call captures one
-  snapshot. Fallback validates an opaque endpoint/process/revision-bound tool reference before HTTP.
-- Optional listener `discover_on_demand=true` advertises only search/call wrappers
-  (all eight wrappers when source management is enabled), hiding API definitions
-  from tools/list. Search retains full schemas/descriptions and defaults to five
-  results in this mode. It grants no registration permissions and preserves full
-  startup/qualification inventories, filters and bound payment clients. Default
-  eager listing and direct invocation remain supported.
-- HTTP is stateless: expose stable search/call tools, without advertising list-change
-  notifications. Standalone stdio has no dynamic management. Cursors bind to process
-  catalog instance, generation and caller/query. The eight tools are sources_search,
-  source_details, source_url_info, source_add, raw_get, raw_post, tools_search and tool_call under `x402_treazury_`.
-  Directory search (browse or best mode) and details use embedded reviewed x402 List
-  schemas and the endpoint's source-management wallet through normal payment
-  admission and network policy.
-  They require no static directory source or selector, do no startup catalog I/O,
-  and expose only the management wrappers. Reject mixed-mode search arguments before
-  I/O; dispatch once to /services or /best and use a directory slug for details.
-  Keep their schemas aligned with the pinned directory contract, except that built-in search
-  hides `network` and always sends `BSE`; agent-supplied network arguments fail before I/O.
-  Tool descriptions route specification discovery through source_url_info and pass
-  returned or published URLs directly to source_add for server-side fetching and
-  validation. Never instruct agents to fetch/read/verify large OpenAPI documents
-  or full API directory JSON themselves; tools_search retrieves relevant schemas. Importing sources
-  never grants a directory transport bypass.
-- `source_url_info` takes exactly one directory slug or public HTTPS base URL. Slugs
-  use ordinary directory payment policy; provider document probes are always unsigned.
-  Pin an existing resolved source-management wallet identity for the probe batch;
-  managed selection is read-only and never promotes, allocates or funds wallets.
-  Probe the fixed API-base/origin/website-root candidate set with at most four
-  concurrent requests. HEAD success or 405/501 permits a bounded GET; never pay 402s
-  or follow redirects. Enforce allowed origins, public destinations and existing
-  spec/help byte/read limits. Structural OpenAPI checks are not full import validation;
-  directory JSON and documentation remain untrusted leads. Preserve per-URL failures.
-- Direct `raw_get`/`raw_post` are source-management-only tools and use the same resolved
-  wallet as added sources. Accept only public HTTPS URLs, scalar/repeated query values
-  and a JSON body for POST; reject headers, credentials and payment/wallet overrides.
-  Apply source-management allowed origins and byte/read limits through the production
-  PaidClient with public destinations and typed output; retain payment ownership on
-  cancellation. Direct calls register nothing. Tool instructions require documented
-  request arguments and prohibit automatic retries after uncertain paid outcomes.
-- Agent imports require public HTTPS and bounded bytes/reference expansion. Direct
-  DNS validation happens in the network factory's resolver; Tor preserves remote DNS
-  and depends on Tor's internal-address rejection. Dynamic paid clients must retain
-  `public_destinations()`. No pricing probes on registration or refresh.
-- Durable mutations commit before publishing all listener views. A cancelled waiter
-  does not undo an accepted blocking-worker job. Add deduplicates canonical spec URLs
-  per endpoint, including races and restart. Revalidate endpoint enablement, local
-  scope, quotas and format on restart; disable invalid records and retain tombstones.
-  Registry, ownership sidecar and SQLite sidecars must not alias config/treasury paths.
-- Source removal never retires wallets or deletes payment/funding/refund journals.
-  `config show` never opens the registry; `sources inspect` is read-only and cannot
-  create a missing registry. `sources refresh/remove` require exclusive registry ownership
-  while serving is stopped; refresh fetches and validates without wallet credentials.
-  Persistent metadata/specs can still reveal user interests.
-- Import aliases share active fetches without consuming duplicate permits. Never evict
-  active fetches by age/capacity churn. Success retention starts at completion
-  (300 seconds); transient failure backoff is one second. Retain bounded caches.
-- Tests in `src/discovery/tests.rs` inject public-URL documents/local fixtures only
-  under `cfg(test)`; no production loopback bypass is permitted. Tests use unfunded
-  keys/temporary state and cover actual HTTP management, caps, concurrency and recovery.
-- `include_operations = ["GET /path", ...]` is an exact provider-level method/path
-  allowlist, intersected with other filters. Keep the x402-list curated read surface
-  closed to newly added upstream endpoints. It does not affect generated names.
-
-## Payment and catalog invariants
-
-- Base USDC is the supported asset. Disabling the amount cap retains the allowlist.
-  Static Permit2/upto needs an externally provisioned allowance; do not auto-approve.
-- v2 uses PAYMENT-REQUIRED / PAYMENT-SIGNATURE / PAYMENT-RESPONSE; v1 remains
-  supported in static mode. Sanitize challenge resource descriptions to 500 chars
-  before signing because facilitators reject longer echoed descriptions.
-- A journaled signature remains potentially chargeable. Managed `PaidClient` calls
-  may repeat reviewed arguments on each existing eligible wallet once only after
-  recognized structured insufficient funds. Each new payer obtains its own challenge.
-  Recognized headers suffice; drop the unused error body. Its size, truncation or
-  inactivity cannot veto fallback. Every attempt remains journaled.
-  Other uncertain outcomes grant no replay; see the best-effort wallet rules.
-- Preserve vendor descriptions whole by default. Any text limit must be explicit
-  (`max_description_chars`, `--max-response-chars`). Authored overrides apply last.
-- Provider/source `include_tools` and `exclude_tools` use the same case-sensitive
-  `*`/`?` patterns as listeners, after path/operation/tag selection and collision
-  naming. They also select help tools; unknown exact names fail, unmatched patterns
-  warn, and empty inventories fail. Listener filters can only narrow source tools.
-- Path filters respect segment boundaries; query/body collisions rename the exposed
-  body argument and restore its original body key on the wire. Header parameters
-  are not agent-settable. Normalize OpenAPI boolean exclusive bounds to numeric ones.
-- Startup pricing is unsigned GET-only, bounded and cached including failures;
-  skip tools with required arguments because probes send bare GETs. Record these
-  exclusions as skipped_arguments; never invent inputs or invoke paid fallback for them.
-  Expiration never triggers refresh. `catalog tools --discover-pricing` explicitly
-  reuses that path without signers, wallet access or listeners; ordinary inspection
-  never probes. Respect source probe opt-outs. Distinguish advertised estimates,
-  observed probe prices, metered maximums and unknown prices in descriptions.
-  Help is lazy and cached after success.
-- Optional provider `credit_pricing` converts structured credit tariffs into per-tool
-  USDC display estimates using an explicit decimal rate. Preserve original billing
-  prose and estimate provenance; unsupported metadata must remain visibly unknown.
-  Conversion never changes payment authority. Instruction overrides and tag filters
-  retain estimates; authored tool description overrides still apply last.
-- `src/http_cache.rs` persists remote catalogs and header-supported derived
-  pricing estimates under existing treasury `state_dir/http-cache/`. Respect
-  `http_cache_enabled=false`, network/transport scope and validators;
-  never persist payment challenges or serve stale data on origin failures. Catalogs
-  use provider/source `catalog_cache_ttl_seconds` (default 86400, zero disables
-  catalog persistence) regardless of origin freshness/no-store/no-cache. Log
-  local_override, TTL and fixed origin policy at INFO. Expired snapshots use
-  validators when available. Pricing retains HTTP freshness and storage rules. Private and
-  cookie-bearing responses are cacheable without storing cookies. Ordinary Vary
-  uses a versioned, fixed unsigned request-header profile; Vary:* and conditional
-  variants are excluded. Relay Vary is excluded because target request headers are
-  unknown. Pricing has no heuristic lifetime. Cache setup must not create treasury state. Qualification bypasses disk persistence.
-  `catalog warm --config FILE --source ID --direct` is a dedicated unsigned-only
-  process: direct-warm entries retain separate provenance and the target configured
-  network policy. Normal loading accepts them only while fresh, warns on reuse,
-  never sends their validators over Tor and never refreshes them directly. Warming
-  opens no wallet with `--direct` and cannot run during qualification.
-- Optional deployment `[discovery_relay]` names a local Curl bootstrap provider and
-  optional wallet override, enabled separately for serve/warm. Otherwise choose
-  one effective assigned profile per source by deterministic SHA-256 rendezvous
-  selection; config show exposes discovery_wallets. Keep the discovery-wallet-v1
-  selection domain stable. Shared sources do not multiply paid discovery across
-  listeners; different wallet scopes cannot coalesce relay requests or relay cache data.
-  A monotonic submission marker confines proven pre-submission failures
-  to bounded target attempts/backoff. Possibly submitted failures
-  disable the shared relay across all wallets; absence of receipts proves nothing.
-  Attributed target failures are cached without disabling other targets. Target discovery stays
-  unsigned GET-only; only relay payment uses PaidClient. Reuse existing wallet caps
-  and byte/time limits. Serialize calls, coalesce successful targets, and disable
-  the relay for the run on possibly submitted failure before any retry can spend. Waiter cancellation retains
-  serialized ownership through terminal outcome publication.
-  Outer max_response_bytes must fit the JSON envelope/escaping as well as decoded
-  target limits; neither size failure authorizes a paid retry.
-  Successful 2xx pricing probes leave prices unknown without invoking the relay.
-  Every failed remote catalog fetch or failed HTTP/challenge pricing probe can use the
-  configured relay once; no origin-error allowlist. Log source, discovery stage,
-  fixed failure category and available HTTP status without URLs or upstream prose.
-  Relay cache entries retain separate provenance, local catalog TTL and
-  origin-derived pricing freshness; shared responses cannot renew lifetimes;
-  never revalidate through Curl, use outer relay headers or persist challenges.
-  Serving initializes wallets before relay catalog I/O; warming denies funding and
-  opens only resolved wallets for selected sources. Ordinary managed serving starts
-  dormant funding owners after binding; deferred relay catalogs wait on existing
-  capacity notifications without allocation or attempt consumption. Explicit
-  `wallet bootstrap` retains captured-claim completeness; qualification restrictions
-  preserve their existing lifecycle.
-  Ordinary inspection remains unsigned; qualification cannot invoke paid relays.
-- HTTP MCP is stateless and uses SSE responses with two-second keepalive comments,
-  with bearer auth enabled by default. Keepalives report connection liveness only;
-  they never renew provider progress or payment authority.
-  Disabling the gate requires the explicit configured or standalone opt-out.
-- Typed results flow through `PaidClient::execute_response`, `BoundTool::invoke_output`
-  and `Server::invoke_output`, including dynamic fallback. PNG/JPEG/WebP bytes and
-  explicit method/path JSON base64/data-URI mappings produce MCP image blocks.
-  Preserve metadata with visible attachment markers; never lossy-decode binary
-  API success bodies, silently truncate base64, fetch media URLs, or retry paid output
-  conversion failures. `image_limits` bound decoded bytes/count in addition to
-  the HTTP response-byte limit. Text-only convenience methods reject attachments.
-  Format signatures are checked, not complete image decoding. See `tests/media.rs`.
-- Provider caveats and intentional exclusions live in `providers/CAVEATS.md`.
-  Use TOML providers instead of adding provider-specific server implementations.
-
-Provider reliability metadata lives in authored TOML `reliability_tags` and
-`reliability_note`, independently of OpenAPI selection tags. Keep warning categories tied to observed behavior; do not infer Tor causation from Tor-only tests.
-`src/provider_status.rs` defines accepted tags and stderr warnings. CLI serving
-warns before catalog I/O, once per listener-bound source/tag; inspection is quiet.
-Metadata never filters tools or changes payment/retry policy. Preserve these
-properties when adding tags or changing startup. `slow_pricing` identifies slow
-unsigned pricing discovery, independently of catalog or paid-call performance;
-its note must not assert Tor causation. Live performance benchmarks can explicitly exclude all authored
-issue tags and must record the exclusions; this does not change runtime selection.
-
-## Configuration, treasury and financial ownership
-
-Managed profiles require explicit `max_api_payment_usdc`, `reserves.small` and
-optional `reserves.large`; each reserve has a target and optional maximum output.
-An omitted maximum permits no increase above target. Targets do not cap payments.
-`max_retirement_remainder_usdc` defaults to zero; eligible retirement is independent
-of new-funding permission. Consult [configuration](docs/configuration.md),
-[wallet lifecycle](docs/wallet-rotation.md) and [wallet recovery](docs/wallet-cli.md)
-for exact claim ownership, evidence, completion and stopped-service repair contracts.
-The removed `wallet pool` command grants no allocation authority. The narrow known-
-source migration preflight rejects missing immutable readiness support before mutation;
-ordinary recovery does not convert state or adopt unexplained obligations.
-
-Before proposing late payer selection, per-invocation network isolation or cached-
-challenge reuse, consult [Wallet selection and network isolation](docs/architecture.md#wallet-selection-and-network-isolation).
-Connection pooling, cover-state reuse and isolated Tor reuse are chosen priorities.
-Runtime hints predict amounts only; fresh challenges and final durable admission
-remain authoritative. Opaque offer annotations cannot change signed authority.
-
-Funding capital is actual spendable treasury funds after confirmations,
-reservations/liabilities and fees. `daily_funding_limit_usdc`,
-`total_funding_limit_usdc` and `daily_treasury_spend_limit_zec` are removed and
-rejected with migration guidance. Do not reintroduce equivalent aggregate limits.
-Preserve original authenticated quotes, exact input ownership, accepted calculations,
-prepared bytes and submission journals. The SDK owns current Zcash funds; do not
-restore a parallel principal/fee/refund capital ledger or historical monetary gate.
-Automatic shielding uses SDK-owned transparent outputs without provider status or
-refund attribution. Remaining derived refund-address records serve routing and
-explicit administration, not balance accounting or permission to reopen funding.
-Native safeguards are `max_funding_spend_zec` (optional per wallet transfer),
-`max_funding_transaction_fee_zec` and `max_refund_shielding_fee_zec` (both default
-0.0003 ZEC). Network-fee settings reject proposals; they never override standard
-wallet fee calculation. Current TOML rejects obsolete option names; historical
-qualification evidence remains readable without gaining new authority.
-
-See [wallet rotation](docs/wallet-rotation.md), [architecture](docs/architecture.md)
-and README wallet-sharing tables for implementation details. TOML source wallet
-bindings override server defaults, followed by automatic assignment. Named profiles
-control sharing. Generated `auto_v1_` pool names are persistent contracts; renaming
-scope/identifiers can create new pools. Inspect without opening state or secrets.
-All declared managed pools initialize, including those unused by selected tools.
-
-- Treasury commands serialize under exclusive ownership. Persist encrypted wallet
-  snapshots and outgoing operations atomically; revision CAS prevents stale saves.
-  Never use upstream plaintext saves or quick-send helpers. Failed/cancelled
-  preparation or persistence requires owner teardown/reopen, not reuse.
-- Proposal selection uses SDK input availability, confirmations and witnesses. Check
-  exact recipient/amount/fee and current operation/run permission before accepting
-  calculation; persist the exact selected-input owner before signed bytes can exist.
-  Known proposal failures can defer without poisoning. Cancellation/uncertainty after
-  calculation acceptance preserves ownership and may require SDK teardown/reopen.
-- Commit completed snapshots/bytes idempotently even if policy changes after accepted
-  calculation. Read-only submission preflight precedes durable intent; first broadcast
-  separately checks current permission. Post-intent failures remain unknown.
-- Expiry recovery proves finite consensus expiry, complete canonical coverage,
-  non-inclusion and every originally selected input confirmed/unspent. Height N is
-  still valid through N; zero means no consensus expiry. Missing bytes/prose/phase
-  cannot establish safety. Refunds never authorize another funding deposit.
-- [Best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules) own
-  advisory payment estimates, per-wallet attempts and first-positive no-top-up claims.
-  Keep exact journals and original identities through cancellation and restart.
-- Base failover restarts a read-only view without mixing providers. Balance refresh
-  is independent of historical authorization reconciliation; failed refresh retains
-  the prior hint and low-balance marker. Integrity failures affect their actual scope.
-- Logs/status expose bounded fixed failure categories and numeric codes, never
-  upstream credential-bearing prose. Drain deliberately for transaction safety;
-  tell operators promptly why shutdown is waiting. Accepted MCP calls are owned
-  independently of response delivery, including client disconnect and stdio EOF.
-  Close admission first, drain calls while financial prerequisites remain alive,
-  then stop workers. Eligible SDK and scheduler failures recover through retained
-  ownership on the existing maintenance/polling cadence, without stopping listeners
-  or Base reconciliation. Preserve exact pending work; recovery never grants replay
-  or replacement funding authority.
-  A second signal returns typed `ForcedShutdown` from serving, wallet or bootstrap drains;
-  the executable exits immediately without joining blocking workers or releasing
-  liabilities. Library embedders own their process-level force behavior.
-
-Catalog loading uses rolling scoped futures, deterministic output and a load-scoped
-alias cache keyed by URL, timeout, limit, transport and discovery identity. Required
-failures or cancellation cannot publish a partial inventory. Explicit source
-optional_startup permits whole-source remote failure isolation during serving,
-with unavailable inventory/MCP status; local errors (including authored selectors
-and filters), inspection and qualification remain strict. It does not implement
-background publication or retry. Unresolved exact listener selectors may be
-deferred only when their names belong exclusively to unavailable resolved prefix
-namespaces; overlapping ready namespaces and unrelated names remain errors.
-Pricing is process-cached
-startup-only discovery with independent request limits. See [startup](tests/STARTUP.md).
-Provider TOML composition is one-level; omitted inherits, present values replace,
-empty clears. Relative paths belong to their declaring file. Unknown fields and
-bindings fail. Preserve exact operation/tag filters and request schemas. Provider
-defaults omit diagnostic/account/fund-moving routes and use lazy help when useful.
-
-## Rust network policy
-
-`src/network.rs` is the only production egress factory. A process
-uses one immutable policy: direct by default or strict authenticated Tor SOCKS5.
-The explicit unsigned-only `catalog warm --direct` process is the cache-warming
-exception described above; it cannot return a serving deployment.
-Meta-config accepts `[network]`; standalone/wallet/example commands accept
-`--network-config FILE`. They cannot override a meta-config's policy. No isolation
-key file is used. Canonical typed identities produce deterministic SHA-256 tokens;
-see `docs/network-egress.md` and `examples/network/tor.toml`.
-
-HTTP uses renewable `read_timeout_seconds` in both direct and Tor modes, default
-60 seconds. Every successful response read resets it; catalogs, help, pricing,
-imports, relay and paid API bodies have no total HTTP download deadline. Optional
-provider/source and source-management overrides use the same name and replace the
-network default. Connection establishment remains separate (15 seconds direct,
-120 seconds Tor by default); both network settings work in either mode. Treasury gRPC uses the same connection/read-inactivity settings with per-response
-DATA progress below protobuf decoding. Injected transport removes legacy
-`grpc-timeout`; no application total-RPC or complete-message deadlines apply.
-Header inactivity also includes request upload; it can reject a slow progressing
-upload, as documented in the network policy. Do not add another timer to compensate.
-A separate dispatch-readiness guard uses the read-inactivity setting for
-channel-buffer/HTTP/2 stream-capacity waits;
-connector attempts retain their full connection allowance plus a readiness window
-until dispatch proves establishment. Sibling traffic cannot renew this guard,
-which ends at dispatch and never caps an active response.
-Silent headers/stalled bodies retain fixed diagnostics and unknown submission
-obligations. Cancelled/timed-out queued RPCs cannot upload their request bodies
-when peer stream capacity returns. Sync start uses an explicit first-poll acknowledgement; scanner and
-loader retirement drains with periodic progress instead of a timed abort. Base
-read RPCs, chain views and receipt verification use connection/read-inactivity
-timeouts without per-RPC or whole-view deadlines. Managed admission has no total
-timeout, including pool-gate waits; legacy wait_seconds is ignored with a warning
-and omitted from effective configuration. Preserve cancellation and durable
-reservations. Retain finite unsigned retries,
-canonical checks for actual receipt decisions; balance age never supplies payment permission.
-HTTP inactivity never renews financial
-or qualification authority. Historical timeout spellings remain readable through
-compatibility aliases; authored configs use the canonical read-timeout name.
-
-Provider HTTPS requires HTTP/2 and TLS 1.3. `Config.allow_http1` and
-`allow_tls12` default false and independently permit older versions. Propagate
-`Config::transport()` through catalogs, pricing, help and paid bindings; include
-it in HTTP pool, catalog-download and pricing-cache keys. Agent imports and
-agent-added tools use strict defaults. Existing cleartext HTTP and treasury/RPC/
-gRPC policies are unchanged. Keep HTTP/2 explicit in reqwest features. Log actual
-response HTTP versions with stage only; never claim TLS version was observed from
-reqwest's response metadata. Test TLS-over-SOCKS multiplexing with concurrent
-blocked streams, distinct wallets/discovery and strict/compatible pool separation.
-
-Both modes use identity-bound HTTP pools and gRPC channels. Keys include the owning
-Tokio runtime; sync releases channels before destroying its private runtime. Never
-construct reqwest clients, tonic channels or SDK RPC providers outside the factory.
-`tests/network_audit.rs` guards this boundary. Tor uses remote DNS, mandatory SOCKS
-username/password negotiation, normal TLS validation, no direct fallback, no ambient
-proxy/NO_PROXY influence, and no automatic transport-wide HTTP retries or redirects. The Base adapter alone
-allows one bounded retry of unsigned read RPC transport failures on the same
-client/identity/payload; paid traversal follows the explicit wallet rules. Local MCP
-listeners remain inbound-only. `config show` exposes policy, never derived tokens.
-
-`PaidClient` owns payer state and source timeout, not arbitrary HTTP clients. Managed
-calls capture existing eligible wallets before the unsigned request. A structured
-insufficient-funds response after a signed attempt may try each captured wallet
-once with its own fresh challenge, transport and original cloneable arguments.
-Every authorization remains chargeable; no new wallet allocation or logical-call
-replay is implied. Static replacement preserves in-flight signer/transport.
-Base address reads and NEAR quote/status use the actual immutable EVM identity;
-shared scans use the treasury UUID; catalog/help/pricing use discovery origins.
-
-Schema version 10 adds immutable `operation_network` recipient bindings for refund
-shielding. Funding operations resolve identity through original job/recovery records,
-not current pool roles. Missing/conflicting identities fail closed before outbound
-lookup/submission. Vendored zingolib/netutils expose only channel/indexer injection;
-verify with `python3 vendor/verify_zingo.py`. Do not modify reference
-checkouts or Cargo caches. Build-time Sapling acquisition is not runtime traffic.
-The opt-in `tor_consensus_lifecycle` test runs alone because it installs Tor policy.
-
-## Optional cover traffic
-
-See [docs/cover-traffic.md](docs/cover-traffic.md). The process switch defaults on
-for Tor, off for direct; explicit false wins. Authored providers/sources can opt out
-with top-level `cover_traffic_enabled=false`. Static sources without a profile use
-a same-origin HTTPS catalog/help candidate; no path is guessed. Explicit profiles
-can set one same-origin fallback URL. Agent registration never grants cover. Retain actual
-attempt identity, exact origin, timeout and transport in owner/pool keys. Cover is
-unsigned and cannot enter payment/funding paths. Real requests preempt cover until
-final headers. Failures cannot replay signed requests. HPACK padding is sensitive /
-never-indexed; HTTP/1-compatible profiles skip it explicitly. Initial qualification failure can try the configured fallback once within existing
-budgets, except rate limits/deadlines/protocol failure/cancellation. Selected
-resource and negative results persist for owner lifetime. Cover diagnostics go to stderr,
-with listener/source attribution and explicit limits/refusals; never add diagnostic
-MCP tools or cover advisories to API results. Optional-task shutdown precedes financial drain;
-aggregate stderr evidence follows it. Pool reuse is best-effort, not a same-channel
-or privacy guarantee. `cover_fixture` and the ignored distribution matrix provide
-zero-spend qualification; see `tests/live/INTEGRATION.md`.
-
-## Visible resource limits
-
-Consult [local resource limits](docs/local-resource-limits.md) before changing
-enforcement. The visibility rules below do not require adding a bound.
-
-Buffer bounding and output truncation must never be silent. When a bound rejects,
-truncates or discards input/output, emit a clear log/output message and give the
-relevant consumer explicit evidence: an agent-facing tool error or truncation
-marker, an HTTP error, or a CLI error. Identify the affected resource, configured
-limit and adjustment setting where applicable. Never return an incomplete document
-as if it were complete. Do not log content, credentials or sensitive URLs merely
-to explain a limit. Tests must verify both the consumer-visible evidence and logs.
-Display truncation is separate from a download/memory bound. Oversized paid
-responses may already have settled; do not retry them automatically.
-
-## Documentation and repository changes
-
-README.md is the user entry point and documents wallet-sharing arrangements.
-`docs/README.md` indexes maintained architecture, wallet, network, agent-source and
-testing guides. `docs/plans/` describes unfinished work only. When a plan is
-implemented, migrate useful explanations to those guides, preserve concrete
-remaining work in a focused plan, fix incoming links and remove the completed
-plan. Do not add an implemented-plan archive; Git retains tracked design history.
-Write generated reports, metrics and audit inventories under ignored `target/` or
-private external storage. Commit durable findings as code, configuration, tests or
-maintained guides, never dated journals, handoffs or report copies. Keep private
-financial ledgers and failure evidence; Git cleanup never grants replay authority.
-AGENTS.md describes current layout, commands and invariants; update affected sections
-in place, without changelog entries or append-only migration notes. Preserve stable
-state formats, generated pool names and Tor token domain separators when renaming
-files or product labels. The `x402_treazury-tor-isolation-v1` domain and `X402_*` environment
-variables are intentional compatibility contracts, not stale product branding.
-
-Do not change reference checkouts or Cargo caches to implement dependency patches.
-Do not use the TODO tool. Prefer targeted offline tests; never make live paid calls
-as a substitute for missing fixture coverage.
-
-Managed funding consumes each wallet's unique initial claim on its first positive
-USDC observation, including partial credit. Estimates and old readiness annotations
-never reopen it; low balances do not authorize top-ups. Reconcile actual prepared
-source operations despite stale phases, disabled pools or retired destinations.
-Check current funding permission before first submission; observation of accepted
-work needs no new funding authority. Bootstrap schema 3 reports advisory estimates.
+Maintain current rules in place. Keep detailed contracts in their owning guides,
+not appended migration notes or duplicate checklists. Follow the [documentation
+policy](docs/README.md): generated metrics/reports go under ignored `target/` or
+private external storage, and completed plans yield maintained guidance plus
+focused unfinished work. Do not add implemented-plan archives or dated handoffs.
+Documentation/Git cleanup never erases financial evidence or grants replay authority.
+Preserve stable state formats, generated `auto_v1_` pool names, Tor token domains
+and `X402_*` environment contracts when renaming files or product labels.

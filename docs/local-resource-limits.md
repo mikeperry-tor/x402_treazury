@@ -38,3 +38,16 @@ can exhaust the read allowance. For gRPC, waiting for stream capacity is separat
 bounded by that setting. See the [transport limitations](network-egress.md#timeout-budgets-and-concurrency)
 for details. A timeout never proves that a signed action did not execute and never
 grants automatic replay authority.
+
+## Rejection and truncation
+
+A limit that rejects, truncates or discards input/output must produce a clear
+log and explicit evidence for the affected consumer: a tool error or truncation
+marker, HTTP error or CLI error. Identify the resource, limit and adjustment
+setting where applicable. Do not log private content, credentials or sensitive
+URLs to explain it. Tests verify consumer-visible evidence and logs.
+
+Never present an incomplete document as complete. Display truncation is separate
+from a download/memory bound. An oversized paid response may already have settled
+and grants no automatic retry. These visibility requirements do not justify adding
+another bound.

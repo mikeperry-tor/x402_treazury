@@ -5,6 +5,11 @@ runs for the integration boundaries they actually exercise. A coverage percentag
 or successful HTTP response does not substitute for financial, permission or
 network-isolation assertions.
 
+When changing tests, preserve full schema/description contracts and meaningful
+assertions; do not trim documentation or loosen expectations to obtain a pass.
+Discovery tests inject public-URL documents and localhost fixtures only under
+`cfg(test)`. Never add a production loopback bypass for fixture convenience.
+
 ## Default development checks
 
 The default build includes Zcash. `scripts/zcash.sh` supplies the pinned Cargo

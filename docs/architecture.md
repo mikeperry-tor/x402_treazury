@@ -40,7 +40,9 @@ OpenAPI operation conversion remain separate; conversion retains operation-level
 parameters and the existing reference-resolution rules. Input construction collects
 parameters before merging body properties; renamed body arguments retain their
 original wire keys, and presence-only alternatives follow those renamed arguments.
-Final sanitization applies to the assembled schema. Header parameters do not grant
+Final sanitization applies to the assembled schema. Path filters respect segment
+boundaries; OpenAPI boolean exclusive bounds normalize to numeric bounds.
+Header parameters do not grant
 agents control over payment headers. Schema conversion is not a general-purpose OpenAPI implementation;
 for example, file uploads and asynchronous job orchestration are unsupported.
 
@@ -64,8 +66,8 @@ and simultaneous requests for the same resource coalesce. These caches are
 independent of fresh payment challenges.
 
 `src/http_cache.rs` adds disposable HTTP-aware persistence under an existing
-treasury state directory. Complete remote catalogs use explicit freshness or
-conditional GET validators; pricing stores only explicitly fresh derived estimates,
+treasury state directory. Complete remote catalogs use the configured local lifetime
+and conditional GET validators after expiry; pricing stores only explicitly fresh derived estimates,
 never challenges. It partitions network/transport identities, bounds storage and
 bypasses qualification. See [discovery disk caching](configuration.md#automatic-discovery-disk-cache).
 
@@ -135,7 +137,9 @@ bearer-authenticated and stateless; stdio reserves stdout for protocol messages.
 Accepted calls live in `server/work.rs` independently of response-delivery futures.
 Disconnect and stdio EOF cannot abandon them. Graceful shutdown closes admission,
 drains accepted calls with periodic progress, then stops financial workers; a second
-signal explicitly forces exit without clearing liabilities. Stdio input uses a
+signal returns typed `ForcedShutdown` from serving, wallet or bootstrap drains.
+The executable exits immediately without joining blocking workers or releasing
+liabilities; library embedders own their process-level force behavior. Stdio input uses a
 bounded dedicated reader so an open parent pipe cannot hold Tokio runtime shutdown
 after accepted work drains. Logs go to stderr. Current HTTP operation does not promise a server-to-client
 list-changed notification channel. Dynamic deployments expose listener-scoped
@@ -166,7 +170,11 @@ rendering happens later and cannot retry payment.
 `src/output.rs` preserves response bytes and MIME, handles ordinary text/JSON,
 small supported inline images and configured base64/data-URI mappings. A bounded
 or unsupported response produces explicit evidence, never a silently truncated
-success. Display limits and download limits are different controls. Durable
+success. Typed results flow through `PaidClient::execute_response`,
+`BoundTool::invoke_output` and `Server::invoke_output`, including dynamic fallback.
+Text-only Rust convenience methods reject attachments. Image mapping and validation
+contracts are in the [provider guide](../providers/README.md).
+Display limits and download limits are different controls. Durable
 [artifact storage](plans/artifact_storage.md) and
 [polling workflows](plans/deferred/polling_tool_support.md) remain future work.
 
