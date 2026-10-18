@@ -543,11 +543,18 @@ fn assert_balance_observation_outcome(result: anyhow::Result<()>) {
     }
 }
 async fn reconcile_complete_history(h: &Harness) {
-    assert_balance_observation_outcome(
-        make_pool(h.store.clone(), h.pool.clone(), &h.base)
-            .reconcile()
-            .await,
-    );
+    let pool = h.pool.clone();
+    let query = h.store.call(move |s| s.chain_query(&pool)).await.unwrap();
+    let view = BaseRpc::new(&format!("{}/rpc", h.base), 12)
+        .unwrap()
+        .view(query)
+        .await
+        .unwrap();
+    let pool = h.pool.clone();
+    h.store
+        .call(move |s| s.reconcile_pool(&pool, view))
+        .await
+        .unwrap();
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
     let remaining: i64 = db
         .query_row(
@@ -558,7 +565,7 @@ async fn reconcile_complete_history(h: &Harness) {
         .unwrap();
     assert_eq!(
         remaining, 0,
-        "canonical history must finish even if a concurrent balance needs recertification"
+        "explicit canonical history must resolve the original attempts"
     );
 }
 fn make_pool(store: StoreHandle, pool: String, base: &str) -> Arc<ManagedPool> {
