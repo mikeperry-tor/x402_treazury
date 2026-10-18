@@ -56,14 +56,15 @@ shows help. See the [command reference](docs/configuration.md).
 ## Quickstart: Zcash and Tor
 
 The [privacy example conf file](examples/deployments/privacy.toml)
-provides three MCP endpoints backed by two rotating wallet pools. Social and
-company share a wallet and Tor payer identity; web uses a separate wallet:
+provides four MCP endpoints backed by two rotating wallet pools. Social, company
+and toolbox share a wallet and Tor payer identity; web uses a separate wallet:
 
 | Research context | Selected APIs | MCP endpoint |
 | --- | --- | --- |
 | Web | Exa, SocialFetch web/community tools, Google Trends | `http://127.0.0.1:6337/mcp` |
 | Social | SocialFetch social platforms, PDL people tools | `http://127.0.0.1:6338/mcp` |
 | Company | Exa, PDL company search, Otto financials/news, Claw402 startup/investor data, Deepline profiles/ads, x402stock disclosures, GenuineGood grants | `http://127.0.0.1:6339/mcp` |
+| Toolbox | API discovery, direct calls and persistent agent-added tools | `http://127.0.0.1:6340/mcp` |
 
 SocialFetch's overlapping Reddit tools use different wallets on the web and social
 endpoints; Exa likewise uses separate wallets on web and company. Company tools
@@ -75,6 +76,11 @@ initially advertises search/call wrapper tools; agents retrieve full tool
 descriptions and schemas as needed. The server's `instructions_text` mentions
 the available networks and explains the discovery workflow to help the agent
 find the tools without loading every definition into context.
+
+The toolbox endpoint enables
+[Agent API Auto-Discovery and Tool Addition](#agent-api-auto-discovery-and-tool-addition)
+using the company wallet. Added APIs are saved in `state/privacy-sources.sqlite` and
+restored after restart; their tools are available only on the toolbox endpoint.
 
 ### 1. Build x402_treazury and start Tor
 

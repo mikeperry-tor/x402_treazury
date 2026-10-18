@@ -5,8 +5,8 @@
 # Partial allocations cannot pay until full readiness; accepted insufficient work stays owned.
 # Startup accepts any funded eligible payer; explicit bootstrap waits its captured slot jobs.
 # Partial credited allocations retain their claims until full readiness; accepted work stays owned.
-# Three research contexts share one Zcash treasury and two rotating wallet pools.
-# Social and company share a payer wallet and Tor identity; web stays separate.
+# Three research contexts and a toolbox share one Zcash treasury and two rotating wallet pools.
+# Social, company and toolbox share a payer wallet and Tor identity; web stays separate.
 # Copy this file to privacy.local.toml before editing.
 # Run each agent against the MCP listener for its research context.
 # Separate wallets/circuits do not hide identifying terms in API request content.
@@ -66,7 +66,7 @@ max_conversion_overhead_percent = 5
 funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
 
-# Social and company research share this pool, reserve and Tor payer identities.
+# Social, company and toolbox share this pool, reserve and Tor payer identities.
 # $0.10 permits single-company enrichment; larger PDL batches may exceed the cap.
 [wallets.company]
 mode = "zcash_rotation"
@@ -78,6 +78,12 @@ max_conversion_overhead_percent = 5
 [wallets.company.reserves.small]
 funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
+
+# Toolbox agents can discover APIs and save added tools across restarts.
+# The registry is separate from the encrypted treasury; additions stay toolbox-local.
+[source_management]
+wallet = "company"
+registry_file = "../../state/privacy-sources.sqlite"
 
 # Source instructions_text is agent-facing guidance. Each MCP server listener
 # combines instructions from sources with selected tools into the MCP server's
@@ -215,7 +221,7 @@ extends = "../../providers/genuinegood.toml"
 include_tools = ["genuinegood_search_post", "genuinegood_detail_post"]
 instructions_text = "US federal grant research: search Grants.gov opportunities, then request detail by opportunityId. Verify eligibility, deadlines and awards against the linked official notice. Only search and detail are exposed; Treazury handles x402 payment."
 
-# MCP endpoints expose separate toolsets; social and company share payment identity.
+# MCP endpoints expose separate toolsets; social, company and toolbox share payment identity.
 # Sources inherit each listener wallet unless a source explicitly overrides it.
 [servers.web]
 # discover_on_demand = true # advertise search/call wrappers; fetch schemas as needed
@@ -241,3 +247,11 @@ listen = "127.0.0.1:6339"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
 sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich"]
+
+# Start with discovery tools; agent-added APIs are persisted in the registry above.
+[servers.toolbox]
+listen = "127.0.0.1:6340"
+bearer_token_env = "TREAZURY_MCP_TOKEN"
+wallet = "company"
+source_management = true
+sources = []
