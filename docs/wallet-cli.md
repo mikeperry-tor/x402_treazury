@@ -89,9 +89,9 @@ operator review; cancellation drains
 accepted financial work and preserves journals. Treasury ZEC funding and Base
 confirmation can take time. The command introduces no new spending limits.
 While waiting, it logs unfinished jobs and their sync/submission state once a
-minute. A completed swap's retained timeout does not block bootstrap: confirmed
-USDC credit satisfies that job, while pending source accounting retains its
-reservations and continues reconciling during serving.
+minute. The first positive USDC observation satisfies the captured destination
+claim even when retained timeout diagnostics remain; exact pending source work
+stays owned and continues reconciling during serving.
 
 Ordinary managed `serve` binds listeners and exposes available tools before starting
 initial or replacement funding. Remote catalog/pricing discovery and pending paid
