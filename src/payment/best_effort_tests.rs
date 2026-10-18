@@ -36,10 +36,11 @@ enum Wire {
     Expired,
     QualifiedThree,
 }
+type CapturedRequest = (SocketAddr, Method, String, Vec<u8>);
 #[derive(Clone)]
 struct Fixture {
     signed: Arc<Mutex<Vec<(String, String)>>>,
-    requests: Arc<Mutex<Vec<(SocketAddr, Method, String, Vec<u8>)>>>,
+    requests: Arc<Mutex<Vec<CapturedRequest>>>,
     rejects: usize,
     wire: Wire,
     db: std::path::PathBuf,
@@ -185,12 +186,7 @@ async fn run(
     method: &str,
     wire: Wire,
     rejects: usize,
-) -> (
-    bool,
-    Vec<(String, String)>,
-    Vec<(SocketAddr, Method, String, Vec<u8>)>,
-    String,
-) {
+) -> (bool, Vec<(String, String)>, Vec<CapturedRequest>, String) {
     let dir = tempfile::tempdir().unwrap();
     let mut state = Store::create(
         &dir.path().join("state"),
