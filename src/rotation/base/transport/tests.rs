@@ -88,6 +88,7 @@ async fn persistent_transport_failure_is_bounded_and_redacted() {
     let logs = super::super::tests::Logs::default();
     let writer = logs.clone();
     let subscriber = tracing_subscriber::fmt()
+        .with_env_filter("warn,x402_treazury::rotation::base=debug")
         .without_time()
         .with_ansi(false)
         .with_writer(move || writer.clone())
@@ -103,6 +104,10 @@ async fn persistent_transport_failure_is_bounded_and_redacted() {
     let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     assert!(
         logged.contains("retry=true") && logged.contains("retry=false"),
+        "{logged}"
+    );
+    assert!(
+        logged.contains("DEBUG") && !logged.contains("WARN"),
         "{logged}"
     );
     let text = format!(
@@ -328,6 +333,7 @@ async fn oversized_responses_reject_before_decoding_without_retry_and_allow_fall
         let logs = super::super::tests::Logs::default();
         let writer = logs.clone();
         let subscriber = tracing_subscriber::fmt()
+            .with_env_filter("warn,x402_treazury::rotation::base=debug")
             .without_time()
             .with_ansi(false)
             .with_writer(move || writer.clone())

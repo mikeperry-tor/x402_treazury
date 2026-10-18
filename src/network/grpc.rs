@@ -274,6 +274,28 @@ impl HttpBody for ProgressBody {
     }
 }
 
+/// Fixed connection details survive library boundaries without retaining the cause.
+#[derive(Debug)]
+pub(crate) struct ConnectionDiagnostic {
+    pub(crate) category: &'static str,
+    pub(crate) reason: &'static str,
+}
+impl ConnectionDiagnostic {
+    pub(crate) fn route(&self) -> &'static str {
+        if self.category == "tor_grpc_connection_failed" {
+            "tor"
+        } else {
+            "direct"
+        }
+    }
+}
+impl std::fmt::Display for ConnectionDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: reason={}", self.category, self.reason)
+    }
+}
+impl std::error::Error for ConnectionDiagnostic {}
+
 /// Preserve typed causes without retaining transport prose, URLs or credentials.
 pub(super) fn connection_failure(
     error: &(dyn std::error::Error + 'static),
@@ -298,7 +320,7 @@ pub(super) fn connection_failure(
         }
         current = error.source();
     }
-    anyhow::anyhow!("{category}: reason={reason}")
+    ConnectionDiagnostic { category, reason }.into()
 }
 
 #[cfg(test)]
@@ -312,6 +334,15 @@ fn connection_diagnostic_omits_upstream_secrets() {
     assert_eq!(
         format!("{safe:#}"),
         "grpc_connection_failed: reason=connection_refused"
+    );
+    let diagnostic = safe.downcast_ref::<ConnectionDiagnostic>().unwrap();
+    assert_eq!(diagnostic.reason, "connection_refused");
+    assert_eq!(diagnostic.route(), "direct");
+    assert_eq!(safe.chain().count(), 1);
+    let tor = connection_failure(&error, "tor_grpc_connection_failed");
+    assert_eq!(
+        tor.downcast_ref::<ConnectionDiagnostic>().unwrap().route(),
+        "tor"
     );
     let tls = rustls::Error::General("secret certificate details".into());
     assert_eq!(

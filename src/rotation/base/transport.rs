@@ -251,9 +251,9 @@ pub(super) async fn rpc(
             Err(failure) => failure,
         };
         let retry = number == 1 && failure.retryable;
-        tracing::warn!(category = %failure.public, attempt = number, retry,
+        tracing::debug!(category = %failure.public, attempt = number, retry,
             elapsed_ms = started.elapsed().as_millis() as u64,
-            "Read-only Base RPC attempt failed; payment is not retried");
+            "Read-only Base RPC request failed");
         if !retry {
             return Err(failure.public.into());
         }

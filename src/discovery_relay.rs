@@ -701,7 +701,7 @@ fn decode(
     })
 }
 pub(crate) fn log_fallback(cfg: &Config, stage: &str, reason: &str, http_status: Option<u16>) {
-    tracing::warn!(
+    tracing::info!(
         source = cfg
             .discovery_source
             .as_deref()
@@ -717,7 +717,7 @@ pub(crate) fn log_fallback(cfg: &Config, stage: &str, reason: &str, http_status:
                     .map(std::time::Duration::from_secs_f64)
             )
             .as_secs_f64(),
-        "Discovery fetch failed; trying configured paid Curl relay once"
+        "Discovery fetch unavailable; configured paid relay fallback selected; payer readiness is checked before any paid request"
     );
 }
 pub(crate) fn log_failure(cfg: &Config, stage: &str, error: &anyhow::Error) {
@@ -1075,6 +1075,44 @@ pub(crate) mod tests {
                 RelayFailure::from_error(&error).to_string(),
                 "discovery relay request failed: reason=price_limit"
             );
+        }
+    }
+
+    #[test]
+    fn fallback_selection_is_info_and_does_not_claim_a_paid_request_started() {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let cfg = Config {
+            spec: "https://private-token@example.invalid/private-path".into(),
+            discovery_source: Some("fixture".into()),
+            ..Default::default()
+        };
+        tracing::subscriber::with_default(subscriber, || {
+            log_fallback(&cfg, "catalog", "read_inactivity", None);
+        });
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        for expected in [
+            "INFO",
+            "fixture",
+            "catalog",
+            "read_inactivity",
+            "configured paid relay fallback selected",
+            "payer readiness is checked before any paid request",
+        ] {
+            assert!(logs.contains(expected), "missing {expected}: {logs}");
+        }
+        for excluded in [
+            "WARN",
+            "trying",
+            "private-token",
+            "example.invalid",
+            "private-path",
+        ] {
+            assert!(!logs.contains(excluded), "{logs}");
         }
     }
 

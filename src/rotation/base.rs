@@ -344,7 +344,9 @@ impl BaseRpc {
         let address: Address = address.parse()?;
         let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
         let mut failure = None;
-        for endpoint in std::iter::once(self).chain(&self.fallbacks) {
+        let provider_count = self.fallbacks.len() + 1;
+        for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
+            let started = std::time::Instant::now();
             let scoped = endpoint.for_address(&address.to_string())?;
             let result = async {
                 let value = scoped
@@ -359,8 +361,23 @@ impl BaseRpc {
             }
             .await;
             match result {
-                Ok(value) => return Ok(value),
-                Err(error) => failure = Some(error),
+                Ok(value) => {
+                    tracing::debug!(
+                        provider_index = index + 1,
+                        provider_count,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "Base balance read succeeded on configured provider"
+                    );
+                    return Ok(value);
+                }
+                Err(error) => {
+                    tracing::debug!(provider_index = index + 1, provider_count,
+                        failover = index + 1 < provider_count,
+                        category = %safe_diagnostic(&error),
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "Base balance RPC provider unavailable");
+                    failure = Some(error);
+                }
             }
         }
         Err(failure.context("Base RPC endpoint unavailable")?)
@@ -394,7 +411,7 @@ impl BaseRpc {
             match result {
                 Ok(view) => {
                     if index > 0 {
-                        tracing::warn!(
+                        tracing::debug!(
                             view_sequence,
                             provider_index = index + 1,
                             provider_count = count,
@@ -412,10 +429,17 @@ impl BaseRpc {
                             .is_some_and(RpcFailure::can_failover);
                     let (verification_stage, stage_elapsed_ms, completed_rpc_calls) =
                         progress.snapshot();
-                    tracing::warn!(view_sequence, verification_stage, stage_elapsed_ms, completed_rpc_calls, expected_rpc_calls,
-                        wallet_count, pending_count, category = %safe_diagnostic(&error), provider_index = index + 1, provider_count = count,
-                        failover, elapsed_ms = started.elapsed().as_millis() as u64,
-                        "Base credit/payment chain verification failed; partial view discarded; only configured read-only fallback permitted");
+                    if failover {
+                        tracing::debug!(view_sequence, verification_stage, stage_elapsed_ms, completed_rpc_calls, expected_rpc_calls,
+                            wallet_count, pending_count, category = %safe_diagnostic(&error), provider_index = index + 1, provider_count = count,
+                            failover, elapsed_ms = started.elapsed().as_millis() as u64,
+                            "Base verification provider failed; trying configured fallback with a fresh view");
+                    } else {
+                        tracing::warn!(view_sequence, verification_stage, stage_elapsed_ms, completed_rpc_calls, expected_rpc_calls,
+                            wallet_count, pending_count, category = %safe_diagnostic(&error), provider_index = index + 1, provider_count = count,
+                            failover, elapsed_ms = started.elapsed().as_millis() as u64,
+                            "Base credit/payment chain verification failed; no usable configured fallback");
+                    }
                     if !failover {
                         return Err(error);
                     }

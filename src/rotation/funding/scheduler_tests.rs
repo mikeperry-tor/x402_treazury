@@ -2332,3 +2332,6 @@ async fn exited_funding_task_is_replaced_with_same_store_and_shutdown_stops_repl
 
 #[path = "credit_polling_tests.rs"]
 mod credit_polling;
+
+#[path = "diagnostic_tests.rs"]
+mod diagnostics;

@@ -1,4 +1,6 @@
 //! RPC-level coverage of balance acquisition and independent historical anchors.
+#[path = "logging_tests.rs"]
+mod logging;
 use super::*;
 use axum::{Json, Router, routing::post};
 use std::sync::{Arc, Mutex};

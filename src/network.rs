@@ -1,6 +1,8 @@
 //! All runtime egress is constructed here. Policy is immutable after startup.
 #[cfg(feature = "zcash")]
 mod grpc;
+#[cfg(feature = "zcash")]
+pub(crate) use grpc::ConnectionDiagnostic;
 #[cfg(test)]
 #[path = "network/http_queue_tests.rs"]
 mod http_queue_tests;

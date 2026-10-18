@@ -96,6 +96,32 @@ fn report_decode_failure(fault: &MalformedFunding) {
     tracing::debug!(job=%fault.id, operation=%fault.operation, "malformed funding ownership");
 }
 
+/// Log expected waiting without changing its persisted condition or retry backoff.
+fn report_observation_failure(
+    job: &FundingJob,
+    wallet_type: &str,
+    kind: Kind,
+    phase: &FundingPhase,
+    error: &anyhow::Error,
+) -> String {
+    let category = safe_error(error, phase);
+    if funding_condition(error) == Some(super::super::error::FundingCondition::InsufficientFunds) {
+        tracing::info!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,category,
+            "Wallet funding is waiting for confirmed spendable ZEC");
+    } else if error.is::<super::super::transaction::PreparationDeferred>()
+        && crate::treasury::diagnostics::sync_detail(error).is_some()
+    {
+        tracing::info!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,category,
+            "Wallet funding deferred until treasury synchronization succeeds");
+    } else {
+        tracing::warn!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,category,
+            "Wallet funding observation unavailable; existing work retained and checks will retry");
+    }
+    tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,kind=?kind,category,
+        "Funding observation failure correlation");
+    category
+}
+
 struct Pending {
     job: FundingJob,
     // Quote inventory contains source-owned prerequisites, not quote HTTP reads.
@@ -702,15 +728,20 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,phase=?phase,reason,"funding awaiting chain confirmation; polling automatically");
         }
         let condition = failure.as_ref().and_then(funding_condition);
-        let error = failure
-            .filter(|_| wait.is_none())
-            .map(|error| safe_error(&error, &phase));
-        if let Some(category) = &error {
-            let id = job.id.clone();
-            let wallet_type = self.store.call(move |s| s.funding_wallet_type(&id)).await?;
-            tracing::warn!(wallet=%job.pool_name,size=%wallet_type,phase=?phase,category,"Funding observation failed; existing work retained and observation will retry");
-            tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,kind=?kind,category,"Funding observation failure correlation");
-        }
+        let error = match failure.filter(|_| wait.is_none()) {
+            Some(error) => {
+                let id = job.id.clone();
+                let wallet_type = self.store.call(move |s| s.funding_wallet_type(&id)).await?;
+                Some(report_observation_failure(
+                    &job,
+                    &wallet_type,
+                    kind,
+                    &phase,
+                    &error,
+                ))
+            }
+            None => None,
+        };
         let (next, streak, health, condition) = {
             let mut state = lease.state.lock().expect("funding schedule lock");
             state.complete(&job, kind, instant, self.poll_seconds, error, condition);

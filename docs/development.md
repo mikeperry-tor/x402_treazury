@@ -137,6 +137,14 @@ every command. Info reports catalog/pricing completion, listener startup and
 funding progress. Download, parse and protocol details belong at debug; warnings
 identify failures, degraded operation or actionable configuration problems.
 
+Waiting for confirmed spendable ZEC and funding deferred by a reported treasury
+sync failure are info events; their retry backoff and stored failure conditions
+remain intact. Treasury sync failures stay warnings with safe connection reasons
+and direct/Tor route details when available. Base RPC attempts and successful
+provider failover are debug events with provider ordinals; an exhausted complete
+verification remains a warning. Selecting a configured discovery relay fallback
+is info; the actual paid relay attempt retains its warning.
+
 Sanitize Zingolib errors before logging or persistence. Retain fixed categories
 and typed reasons, numeric gRPC codes and fixed status names when available, never
 upstream prose, metadata, wallet identifiers or credentials. Shard-tree diagnostics

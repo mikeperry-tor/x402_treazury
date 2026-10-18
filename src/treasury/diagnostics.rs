@@ -232,6 +232,7 @@ fn wallet_reason(error: &WalletError, diagnostic: &mut SyncDiagnostic) -> &'stat
 /// Both background owner loops share the same bounded, credential-free fields.
 pub(crate) fn warn_sync_failure(error: &anyhow::Error) {
     let diagnostic = error.downcast_ref::<SyncDiagnostic>();
+    let connection = error.downcast_ref::<crate::network::ConnectionDiagnostic>();
     let progress = error.downcast_ref::<SyncProgress>();
     tracing::warn!(
         phase = progress.map(|p| p.phase),
@@ -239,20 +240,32 @@ pub(crate) fn warn_sync_failure(error: &anyhow::Error) {
         target_height = progress.map(|p| p.target_height),
         scanned_blocks = progress.map(|p| p.scanned_blocks),
         category = sync_failure(error),
-        reason = diagnostic.map(|d| d.reason),
+        reason = diagnostic
+            .map(|d| d.reason)
+            .or_else(|| connection.map(|d| d.reason)),
         pool = diagnostic.and_then(|d| d.pool),
-        operation = diagnostic.and_then(|d| d.operation),
+        operation = diagnostic
+            .and_then(|d| d.operation)
+            .or(connection.map(|_| "connect")),
+        route = connection.map(|d| d.route()),
         grpc_code = diagnostic.and_then(|d| d.grpc_code).map(|c| c as i32),
         grpc_status = diagnostic
             .and_then(|d| d.grpc_code)
             .map(|c| format!("{c:?}")),
-        "treasury sync unavailable"
+        "Treasury sync unavailable; recoverable failures retry automatically; funding needs successful sync; existing Base service remains available"
     );
 }
 
 pub(crate) fn sync_detail(error: &anyhow::Error) -> Option<String> {
     if let Some(diagnostic) = error.downcast_ref::<SyncDiagnostic>() {
         return Some(diagnostic.to_string());
+    }
+    if let Some(connection) = error.downcast_ref::<crate::network::ConnectionDiagnostic>() {
+        return Some(format!(
+            "indexer_connection_failed: reason={} operation=connect route={}",
+            connection.reason,
+            connection.route()
+        ));
     }
     let category = sync_failure(error);
     (category != "sync_internal_or_storage_failure").then(|| category.to_owned())
@@ -261,6 +274,9 @@ pub(crate) fn sync_detail(error: &anyhow::Error) -> Option<String> {
 pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
     if let Some(diagnostic) = error.downcast_ref::<SyncDiagnostic>() {
         return diagnostic.category;
+    }
+    if error.is::<crate::network::ConnectionDiagnostic>() {
+        return "indexer_connection_failed";
     }
 
     for cause in error.chain() {
@@ -302,6 +318,51 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_details_survive_sync_context_without_logging_private_prose() {
+        for (category, route, reason) in [
+            ("grpc_connection_failed", "direct", "connection_refused"),
+            ("tor_grpc_connection_failed", "tor", "connection_timeout"),
+            ("tor_grpc_connection_failed", "tor", "tls_error"),
+        ] {
+            let error =
+                anyhow::Error::new(crate::network::ConnectionDiagnostic { category, reason })
+                    .context("indexer connection failed")
+                    .context("https://private-token@example.invalid/private-path");
+            assert_eq!(sync_failure(&error), "indexer_connection_failed");
+            let detail = sync_detail(&error).unwrap();
+            assert_eq!(
+                detail,
+                format!(
+                    "indexer_connection_failed: reason={reason} operation=connect route={route}"
+                )
+            );
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            tracing::subscriber::with_default(subscriber, || warn_sync_failure(&error));
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            for expected in [
+                "WARN",
+                "indexer_connection_failed",
+                reason,
+                route,
+                "connect",
+                "recoverable failures retry automatically",
+                "funding needs successful sync",
+            ] {
+                assert!(logs.contains(expected), "missing {expected}: {logs}");
+            }
+            for private in ["private-token", "private-path", "example.invalid"] {
+                assert!(!detail.contains(private), "{detail}");
+                assert!(!logs.contains(private), "{logs}");
+            }
+        }
+    }
 
     #[test]
     fn tip_status_and_scan_progress_are_preserved_without_upstream_prose() {

@@ -653,7 +653,12 @@ mod relay_tests {
                     assert_eq!(fixture.signed.load(Ordering::SeqCst), 0);
                     let logs = std::fs::read_to_string(log.path()).unwrap();
                     assert!(logs.contains("price remains unknown"), "{logs}");
-                    assert!(!logs.contains("trying configured paid Curl"), "{logs}");
+                    assert!(
+                        !logs.contains(
+                            "Discovery fetch unavailable; configured paid relay fallback selected"
+                        ),
+                        "{logs}"
+                    );
                     let mut evidence = Evidence {
                         enabled: true,
                         selected_tools: 1,
