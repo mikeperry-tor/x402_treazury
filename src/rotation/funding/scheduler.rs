@@ -73,16 +73,16 @@ struct Completion<Q> {
 // step includes quote prerequisites; the Quote kind is the subsequent HTTP read.
 fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
     [
-        !facts.readiness_recorded || facts.readiness_disputed,
+        !facts.initial_credit_recorded,
         facts.status_needed(),
         facts.source_reconciliation_needed()
             || crate::treasury::recovery::needs_recovery(job)
             || matches!(job.phase, FundingPhase::Preparing | FundingPhase::Prepared)
             || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
-                && (facts.enabled || (facts.readiness_recorded && !facts.readiness_disputed))),
+                && (facts.enabled || facts.initial_credit_recorded)),
         job.phase == FundingPhase::Allocated
             && facts.enabled
-            && !facts.readiness_recorded
+            && !facts.initial_credit_recorded
             && !facts.accepted_quote,
     ]
 }

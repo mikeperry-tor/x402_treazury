@@ -25,6 +25,114 @@ fn allocate(store: &mut Store, name: &str) {
 }
 
 #[test]
+fn jobless_prepared_owner_stays_observable_when_new_submission_is_disabled() {
+    let (_dir, mut store) = fixture();
+    let id = uuid::Uuid::new_v4().to_string();
+    store.reserve(&id, None, 0, 100).unwrap();
+    store
+        .bind_operation_recipient(&id, &format!("0x{:040x}", 1))
+        .unwrap();
+    let revision = store.snapshot().unwrap().0;
+    store
+        .prepare_with_facts(
+            &id,
+            revision,
+            b"next",
+            b"original bytes",
+            Some(TransactionFacts {
+                txid: "fixture".into(),
+                expiry_height: 100,
+                amount_zatoshis: 50,
+                fee_zatoshis: 10,
+                deadline: 10000,
+            }),
+        )
+        .unwrap();
+    for restriction in [
+        super::super::super::restriction::FundingRestriction::Paused,
+        super::super::super::restriction::FundingRestriction::DenyNewFunding,
+    ] {
+        store.funding_restriction = restriction;
+        assert!(store.request_broadcast(&id, 1, 1, false).is_err());
+        assert_eq!(
+            store.jobless_pending_operation().unwrap().as_deref(),
+            Some(id.as_str())
+        );
+        assert_eq!(
+            store.prepared_bytes(&id).unwrap().as_slice(),
+            b"original bytes"
+        );
+        assert_eq!(store.operation(&id).unwrap().attempts, 0);
+    }
+}
+
+#[test]
+fn partial_credit_after_preparation_forbids_first_deposit_and_retains_incoming_owner() {
+    let (_dir, mut store) = fixture();
+    allocate(&mut store, "initial");
+    let job = store.funding_jobs().unwrap().remove(0);
+    store
+        .save_funding_quote(
+            &job.id,
+            &serde_json::to_vec(
+                &serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    store
+        .begin_funding_preparation(
+            &job.operation_id,
+            Some(&crate::rotation::transaction::ManagedFundingAuthority {
+                job_id: job.id.clone(),
+                auto_fund: true,
+                max_attempts: 3,
+            }),
+        )
+        .unwrap();
+    store
+        .reserve(&job.operation_id, Some(&job.pool_id), 0, 100)
+        .unwrap();
+    let revision = store.snapshot().unwrap().0;
+    store
+        .prepare_with_facts(
+            &job.operation_id,
+            revision,
+            b"next",
+            b"initial bytes",
+            Some(TransactionFacts {
+                txid: "fixture".into(),
+                expiry_height: 100,
+                amount_zatoshis: 50,
+                fee_zatoshis: 10,
+                deadline: 10000,
+            }),
+        )
+        .unwrap();
+    store
+        .record_funding_balance(
+            &job.id,
+            &job.operation_id,
+            &job.wallet_id,
+            &job.recipient,
+            U256::from(7),
+        )
+        .unwrap();
+    assert!(
+        store
+            .request_broadcast(&job.operation_id, 1, 1, false)
+            .is_err()
+    );
+    assert!(funding::destination_obligation_pending(&store.db, &job.wallet_id).unwrap());
+    assert!(store.operation_pending(&job.operation_id).unwrap());
+    assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 0);
+    assert_eq!(
+        store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
+        b"initial bytes"
+    );
+}
+
+#[test]
 fn pages_keep_bounds_order_and_matching_facts_without_mutation() {
     let (_dir, mut store) = fixture();
     for i in 0..35 {
@@ -57,7 +165,7 @@ fn pages_keep_bounds_order_and_matching_facts_without_mutation() {
             assert_eq!(job.phase, funding::FundingPhase::Allocated);
             assert!(facts.enabled);
             assert!(!facts.accepted_quote);
-            assert!(!facts.readiness_recorded);
+            assert!(!facts.initial_credit_recorded);
             assert!(!facts.archived);
             assert!(facts.source_submission.is_none());
             assert_eq!(facts.source_attempts, 0);

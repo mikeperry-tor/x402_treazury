@@ -53,7 +53,7 @@ impl Store {
     pub(crate) fn funding_work_page(&self, after: &str, through: i64) -> Result<Vec<FundingEntry>> {
         #[cfg(test)]
         self.inventory_read_fault(super::inventory::Read::FundingPage)?;
-        let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_actionable_inventory WHERE (state!='COMPLETE' OR readiness_disputed IS NOT NULL) AND id>?1 AND rowid<=?2 ORDER BY id LIMIT ?3")?
+        let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_unfinished_jobs WHERE state!='COMPLETE' AND id>?1 AND rowid<=?2 UNION SELECT f.id FROM outgoing x JOIN funding_progress j ON j.operation_id=x.id JOIN funding_jobs f ON f.id=j.job_id WHERE x.state='PREPARED' AND f.id>?1 AND f.rowid<=?2 ORDER BY id LIMIT ?3")?
             .query_map(params![after,through,PAGE_SIZE as i64], |r| r.get::<_,String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut jobs = Vec::with_capacity(ids.len());

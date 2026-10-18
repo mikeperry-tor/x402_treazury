@@ -137,8 +137,8 @@ fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
         s.prepared_bytes("accepted").unwrap().as_slice(),
         b"saved bytes"
     );
-    // Existing accepted bytes retain ordinary deadline/broadcast guards.
-    s.request_broadcast("accepted", 1, 1, false).unwrap();
+    // Prepared bytes remain observable, but no first submission is authorized.
+    denied(s.request_broadcast("accepted", 1, 1, false));
     assert!(s.request_broadcast("accepted", 1, 1, false).is_err());
     s.confirm_spend("accepted", 100, 1).unwrap();
     denied(s.reserve("replacement", Some(&pool), 1, 100));

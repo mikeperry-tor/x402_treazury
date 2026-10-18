@@ -212,8 +212,8 @@ impl<B: FundingBackend> FundingWorker<B> {
             "funding operation binding changed"
         );
         let facts = self.facts(&current).await?;
-        if facts.readiness_recorded
-            && !facts.readiness_disputed
+        if facts.initial_credit_recorded
+            && !facts.source_pending
             && matches!(current.phase, Allocated | Quoted)
         {
             let id = current.id.clone();
@@ -244,26 +244,8 @@ impl<B: FundingBackend> FundingWorker<B> {
             }
             None => {}
         }
-        match current.phase {
-            Allocated if !facts.readiness_recorded && facts.enabled => {
-                return self
-                    .backend
-                    .lock()
-                    .await
-                    .quote_prerequisite(&current)
-                    .await
-                    .map(Some);
-            }
-            Quoted if !facts.readiness_recorded && facts.enabled => {
-                self.prepare_quoted(&current, clock).await?
-            }
-            Preparing => {
-                let id = current.operation_id.clone();
-                let prepared = self.store.call(move |s| s.operation_pending(&id)).await?;
-                self.transition(&current, if prepared { Prepared } else { RecoveryRequired })
-                    .await?;
-            }
-            Prepared if facts.source_attempts == 0 => {
+        if facts.source_pending {
+            if facts.source_attempts == 0 && !facts.initial_credit_recorded && facts.enabled {
                 let id = current.operation_id.clone();
                 let operation = self.store.call(move |s| s.operation(&id)).await?;
                 if operation.facts.deadline.saturating_sub(clock.now())
@@ -292,6 +274,27 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .call(move |s| s.reconcile_funding_phase(&id, &operation))
                     .await?;
                 result?;
+            }
+            return observation_error.map_or(Ok(None), Err);
+        }
+        match current.phase {
+            Allocated if !facts.initial_credit_recorded && facts.enabled => {
+                return self
+                    .backend
+                    .lock()
+                    .await
+                    .quote_prerequisite(&current)
+                    .await
+                    .map(Some);
+            }
+            Quoted if !facts.initial_credit_recorded && facts.enabled => {
+                self.prepare_quoted(&current, clock).await?
+            }
+            Preparing => {
+                let id = current.operation_id.clone();
+                let prepared = self.store.call(move |s| s.operation_pending(&id)).await?;
+                self.transition(&current, if prepared { Prepared } else { RecoveryRequired })
+                    .await?;
             }
             _ => {}
         }
@@ -653,7 +656,9 @@ impl FundingBackend for Backend {
         let id = job.operation_id.clone();
         if self
             .store
-            .call(move |s| Ok(s.operation(&id)?.submission == "CONFIRMED"))
+            .call(move |s| {
+                Ok(!s.operation_pending(&id)? && s.operation(&id)?.submission == "CONFIRMED")
+            })
             .await?
         {
             return Ok(true);
@@ -707,7 +712,7 @@ impl FundingObservations for Observations {
                     current.operation_id == operation
                         && current.phase == FundingPhase::Allocated
                         && facts.enabled
-                        && !facts.readiness_recorded
+                        && !facts.initial_credit_recorded
                         && !facts.accepted_quote
                         && !facts.archived
                         && facts.source_submission.is_none(),
@@ -743,84 +748,18 @@ impl FundingObservations for Observations {
         self.near.status(&quote).await
     }
     async fn credit(&self, job: FundingJob) -> Result<()> {
-        let pool = job.pool_id.clone();
-        let candidate = job.wallet_id.clone();
-        let gate = self.store.group_gate(&job.pool_id)?;
-        let capture_guard = std::sync::Arc::new(gate.clone().lock_owned().await);
-        let id = job.id.clone();
-        let operation = job.operation_id.clone();
-        let historical = self
-            .store
-            .call_with_guard(capture_guard, move |s| {
-                s.funding_readiness_reverification(&id, &operation)
-            })
-            .await?;
-        if let Some(request) = historical {
-            let certificate = match self.base.verify_historical_balance(request).await {
-                Ok(certificate) => certificate,
-                Err(error) => {
-                    let guard = std::sync::Arc::new(gate.clone().lock_owned().await);
-                    return self
-                        .store
-                        .call_with_guard(guard, move |s| {
-                            s.record_base_failure(&error)?;
-                            Err(error)
-                        })
-                        .await;
-                }
-            };
-            let id = job.id.clone();
-            let operation = job.operation_id.clone();
-            let guard = std::sync::Arc::new(gate.lock_owned().await);
-            return self
-                .store
-                .call_with_guard(guard, move |s| {
-                    s.restore_funding_readiness_support(&id, &operation, certificate)
-                })
-                .await;
-        }
-        let capture_guard = std::sync::Arc::new(gate.clone().lock_owned().await);
-        let query = self
-            .store
-            .call_with_guard(capture_guard, move |s| {
-                s.scoped_chain_query(&pool, vec![candidate], vec![])
-            })
-            .await
-            .context(super::base::VerificationStage("funding credit query"))?;
-        let view = match self
-            .base
-            .shared_balance_view(query, self.store.clone())
-            .await
-        {
-            Ok(view) => view,
-            Err(error) => {
-                let guard = std::sync::Arc::new(gate.clone().lock_owned().await);
-                return self
-                    .store
-                    .call_with_guard(guard, move |s| {
-                        s.record_base_failure(&error)?;
-                        Err(error)
-                    })
-                    .await;
-            }
-        };
-        ensure!(
-            view.balances.contains_key(&job.wallet_id),
-            "missing candidate balance"
-        );
-        let wallet = job.wallet_id.clone();
-        let job_id = job.id.clone();
-        let operation = job.operation_id.clone();
-        // Acquisition remains unsigned and independent; publication shares the
-        // payment owner's gate through the accepted store job's completion.
-        let guard = std::sync::Arc::new(gate.lock_owned().await);
+        let balance = self.base.current_balance(&job.recipient).await?;
         self.store
-            .call_with_guard(guard, move |s| {
-                s.record_verified_funding_credit(&wallet, Some((&job_id, &operation)), view)
-                    .map(|_| ())
+            .call(move |s| {
+                s.record_funding_balance(
+                    &job.id,
+                    &job.operation_id,
+                    &job.wallet_id,
+                    &job.recipient,
+                    balance,
+                )
             })
             .await
-            .context(super::base::VerificationStage("funding credit persistence"))
     }
 }
 
@@ -1027,3 +966,7 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
 #[cfg(test)]
 #[path = "../../tests/support/funding_backend.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "funding/credit_tests.rs"]
+mod credit_tests;

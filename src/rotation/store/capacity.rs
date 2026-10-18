@@ -759,23 +759,12 @@ mod tests {
         assert!(!retire_with_support(&db, "pool", &retired, &one, 100).unwrap());
         db.execute("UPDATE pools SET retirement_tolerance='1'", [])
             .unwrap();
-        db.execute(
-            "UPDATE funding_progress SET quote=x'00' WHERE job_id=?1",
-            [&prior],
-        )
-        .unwrap();
-        assert!(!retire_with_support(&db, "pool", &retired, &one, 100).unwrap());
-        db.execute("UPDATE funding_jobs SET readiness_operation=(SELECT operation_id FROM funding_progress WHERE job_id=?1) WHERE id=?1",[&prior]).unwrap();
-        db.execute(
-            "UPDATE funding_progress SET provider_success=1,accepted_output='2000000',accepted_recipient=(SELECT address FROM wallets WHERE id=?2) WHERE job_id=?1",
-            params![prior,retired],
-        )
-        .unwrap();
+        // Provider annotations do not establish an incoming source obligation.
         pending_payment(&db, "pending", &retired);
         assert!(!retire_with_support(&db, "pool", &retired, &one, 100).unwrap());
         db.execute("UPDATE payment_attempts SET state='RESOLVED'", [])
             .unwrap();
-        // Success closes destination while source work remains scheduled.
+        // Real unresolved authorizations protect retirement; workflow labels do not.
         let tx = db.transaction().unwrap();
         assert!(retire_with_support(&tx, "pool", &retired, &one, 100).unwrap());
         tx.commit().unwrap();
@@ -997,10 +986,11 @@ mod tests {
         let large_wallet = wallet(&db, &large);
         db.execute("UPDATE pools SET enabled=0", []).unwrap();
         let partial = support(&db, &large, 1, 1);
-        assert!(!funding::record_readiness(&db, &large_wallet, &partial).unwrap());
+        assert!(funding::record_readiness(&db, &large_wallet, &partial).unwrap());
+        publish_funded_role(&db, &large).unwrap();
         funded(&db, &small);
         assert_eq!(role(&db, &small), "RETAINED");
-        assert_eq!(role(&db, &large), "ALLOCATED");
+        assert_eq!(role(&db, &large), "RETAINED");
         assert_eq!(
             db.query_row(
                 "SELECT generation FROM reserve_claims WHERE slot='small'",
@@ -1010,57 +1000,32 @@ mod tests {
             .unwrap(),
             1
         );
-        assert_eq!(
+        assert!(
             db.query_row(
-                "SELECT wallet_id FROM reserve_claims WHERE slot='large'",
+                "SELECT wallet_id IS NULL FROM reserve_claims WHERE slot='large'",
                 [],
-                |r| r.get::<_, String>(0)
+                |r| r.get::<_, bool>(0)
             )
-            .unwrap(),
-            large_wallet
+            .unwrap()
         );
         assert!(current_funding_claim(&db, &large).unwrap().is_none());
         db.execute("UPDATE pools SET enabled=1", []).unwrap();
-        assert_eq!(
-            current_funding_claim(&db, &large).unwrap().unwrap().target,
-            U256::from(10_000_000)
-        );
+        assert!(current_funding_claim(&db, &large).unwrap().is_none());
         assert_eq!(role(&db, &small), "RETAINED");
     }
 
     #[test]
-    fn retirement_rejects_exposure_disputed_readiness_and_corrupted_support() {
+    fn retirement_ignores_obsolete_readiness_annotations() {
         let db = database();
         let job = active(&db);
         funded(&db, &job);
         let wallet = wallet(&db, &job);
-        db.execute(
-            "UPDATE wallets SET role='RETAINED',unresolved_exposure='1' WHERE id=?1",
-            [&wallet],
-        )
-        .unwrap();
+        db.execute("UPDATE wallets SET role='RETAINED' WHERE id=?1", [&wallet])
+            .unwrap();
+        db.execute("UPDATE funding_jobs SET readiness_disputed='fixture',readiness_support='malformed' WHERE id=?1", [&job]).unwrap();
         let zero = support(&db, &job, 0, 0);
-        assert!(!retire_with_support(&db, "pool", &wallet, &zero, 100).unwrap());
-        db.execute(
-            "UPDATE wallets SET unresolved_exposure='0' WHERE id=?1",
-            [&wallet],
-        )
-        .unwrap();
-        db.execute(
-            "UPDATE funding_jobs SET readiness_disputed='fixture' WHERE id=?1",
-            [&job],
-        )
-        .unwrap();
-        assert!(!retire_with_support(&db, "pool", &wallet, &zero, 100).unwrap());
-        db.execute("UPDATE funding_jobs SET readiness_disputed=NULL,readiness_support='malformed' WHERE id=?1", [&job]).unwrap();
-        assert!(retire_with_support(&db, "pool", &wallet, &zero, 100).is_err());
-        assert_eq!(role(&db, &job), "RETAINED");
-        assert_eq!(
-            db.query_row("SELECT COUNT(*) FROM wallet_retirements", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
+        assert!(retire_with_support(&db, "pool", &wallet, &zero, 100).unwrap());
+        assert_eq!(role(&db, &job), "RETIRED");
     }
 
     #[test]

@@ -86,6 +86,7 @@ impl Treasury {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(delay));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut scheduled_sync = None;
+        let mut observed_sync = None;
         schedule_after_sync(&mut interval, &mut scheduled_sync, self.last_completed_sync);
         loop {
             tokio::select! {
@@ -116,6 +117,33 @@ impl Treasury {
                         && !stop.is_cancelled() {
                             super::diagnostics::warn_sync_failure(&error);
                     }
+                }
+            }
+            if self.healthy
+                && self.last_completed_sync.is_some()
+                && self.last_completed_sync != observed_sync
+            {
+                observed_sync = self.last_completed_sync;
+                let pending = self.store.call(|s| s.jobless_pending_operation()).await;
+                match pending {
+                    Ok(Some(id)) => {
+                        if self
+                            .reconcile_prepared(id, &mut submission, &stop)
+                            .await
+                            .is_err()
+                            && !stop.is_cancelled()
+                        {
+                            tracing::warn!(
+                                category = "pending_shielding_observation_unavailable",
+                                "accepted shielding retained for later observation"
+                            );
+                        }
+                    }
+                    Err(_) => tracing::warn!(
+                        category = "pending_shielding_inventory_unavailable",
+                        "accepted shielding retained; independent treasury commands remain available"
+                    ),
+                    Ok(None) => {}
                 }
             }
             // Only an actual successfully persisted scan moves maintenance.

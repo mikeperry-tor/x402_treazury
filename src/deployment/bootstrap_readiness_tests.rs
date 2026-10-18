@@ -355,12 +355,12 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
         summary.inventory_ready_groups,
         summary.captured_completed_groups
     );
-    assert_eq!(summary.confirmed_balances.len(), names.len() * 2);
+    assert_eq!(summary.balance_estimates.len(), names.len() * 2);
     assert!(
         summary
-            .confirmed_balances
+            .balance_estimates
             .iter()
-            .all(|b| b.confirmed_balance_usdc == "5.000000")
+            .all(|b| b.balance_estimate_usdc == "5.000000")
     );
     let expected = serde_json::to_value(summary).unwrap();
     let before = store.call(|s| Ok(s.funding_jobs()?.len())).await.unwrap();

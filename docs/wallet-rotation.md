@@ -216,14 +216,15 @@ operation, and configuration changes govern new work. Actual spendable treasury
 funds, outstanding liabilities, per-operation safeguards and explicit qualification
 permits govern funding. Reserve targets do not cap individual API payments.
 
-Sub-target external credits stay on the original allocation: for example, $3 sent
-into a $10 allocation cannot pay through ordinary selection until full destination
-readiness is recorded. This is a limitation of the allocation/readiness model,
-not a separate per-payment spending cap. Disabling and re-enabling the group or
-slot preserves that wallet, job, claim and recovery history; independent balance
-observation and safe recovery continue while disabled. No partial credit releases
-the claim, creates a successor or resets an attempt. Partial detachment and use
-before full readiness remain deferred to reviewed follow-up work.
+Each wallet has one initial funding claim. Its first positive observed Base USDC
+balance consumes that claim, even below the target; later zero or insufficient
+balances never reopen it or authorize a top-up. The saved scalar is an advisory
+estimate, without historical block certificates. Existing claim generation and
+operation bindings publish the wallet role atomically with the first credit.
+Disablement preserves observation of accepted work and detaches a fulfilled reserve
+into RETAINED inventory; it forbids a new deposit. Known prepared source bytes keep
+the destination from automatic retirement until their original outcome is resolved.
+A partial credit never releases those source inputs or permits another deposit.
 
 `rotation/manager.rs` admits supported Base USDC v2 exact EIP-3009 offers. It
 validates the envelope, domain, amount and explicit API cap before acquisition or
@@ -376,19 +377,17 @@ cannot mark a candidate spendable, and Base credit alone cannot prove source
 confirmation. Concurrent credit observers cannot overwrite a completed job with
 an obsolete persistence warning; genuine source-reconciliation errors remain visible.
 
-Successful financial completion combines three independent facts: the operation's
-applicable immutable destination-readiness proof, canonical source confirmation,
-and validated provider fulfillment. Destination readiness alone publishes the funded
+Successful financial completion combines three independent facts: the wallet's first positive credit, canonical source confirmation,
+and validated provider fulfillment. Initial credit alone publishes the funded
 wallet role and may permit payments before the other facts arrive. Consumption does
-not erase that historical proof or require rebuilding the original funding balance.
+not erase that consumed claim or require rebuilding the original funding balance.
 Conflicting terminal outcomes preserve review-required work; provider fulfillment
 is not canonical source or return evidence.
 
 One retained funding owner schedules independent status, credit and prerequisite-
 complete unsigned quote observations in bounded lanes, alongside serialized treasury
 commands. Per-operation/kind backoff cannot stall another group's observations.
-Malformed destination-readiness support retains an operation-local integrity
-diagnostic and cannot stop independent funding. Completion storage failures still
+Advisory reads cannot restore a consumed initial claim. Completion storage failures still
 stop the shared owner; rejected proofs never release liabilities or authorize retries.
 Historical work uses captured boundaries and keyset pages, not full reporting
 snapshots; wallet count is not a deadline. Read-only readiness and quote prerequisites

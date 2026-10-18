@@ -215,7 +215,7 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
                 .call(move |s| s.funding_facts(&job, &operation))
                 .await
                 .unwrap();
-            if facts.readiness_recorded && facts.provider_success {
+            if facts.initial_credit_recorded && facts.provider_success {
                 break;
             }
             tokio::task::yield_now().await;

@@ -443,7 +443,7 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                     assert_eq!(current.phase, FundingPhase::Quoted);
                     let facts = s.funding_facts(&current.id, &current.operation_id)?;
                     assert!(facts.accepted_quote);
-                    assert!(!facts.provider_success && !facts.readiness_recorded);
+                    assert!(!facts.provider_success && !facts.initial_credit_recorded);
                     assert!(facts.source_submission.is_none());
                     assert_eq!(facts.source_attempts, 0);
                     assert_eq!(s.funding_recovery_count(&current.id)?, u64::from(!refresh));
@@ -519,6 +519,86 @@ fn submitted(store: &mut Store, job: &FundingJob) {
     store
         .reconcile_funding_phase(&job.id, &job.operation_id)
         .unwrap();
+}
+
+#[tokio::test]
+async fn accepted_source_is_observed_despite_complete_phase_disabled_pool_and_retired_wallet() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    let key = dir.path().join("key");
+    let mut state = Store::create(&path, &key, 1, b"fixture").unwrap();
+    crate::rotation::test_capacity::declare_and_allocate!(
+        state,
+        "stale",
+        crate::rotation::test_capacity::two_reserves("5"),
+        Some(alloy_primitives::U256::from(100)),
+        0
+    )
+    .unwrap();
+    let job = state.funding_jobs().unwrap().remove(0);
+    submitted(&mut state, &job);
+    state.disable_pool("stale").unwrap();
+    let db = rusqlite::Connection::open(path.join("state.sqlite")).unwrap();
+    db.execute(
+        "UPDATE funding_jobs SET state='COMPLETE' WHERE id=?1",
+        [&job.id],
+    )
+    .unwrap();
+    db.execute("UPDATE funding_progress SET phase='\"COMPLETE\"',provider_success=1,provider_refunded=1 WHERE job_id=?1",[&job.id]).unwrap();
+    db.execute(
+        "UPDATE wallets SET role='RETIRED' WHERE id=?1",
+        [&job.wallet_id],
+    )
+    .unwrap();
+    let (store, owner) = StoreHandle::spawn(state);
+    let (started, mut observations) = mpsc::unbounded_channel();
+    let (statuses, _) = mpsc::unbounded_channel();
+    let backend = Source {
+        store: store.clone(),
+        gate: Arc::new(Semaphore::new(1)),
+        started,
+        reads: Reads {
+            credits: Arc::new(Semaphore::new(100)),
+            credit_calls: Arc::default(),
+            statuses,
+            status_gates: Arc::default(),
+            failed_job: Arc::default(),
+            processing: true,
+            quotes: None,
+        },
+    };
+    let worker = FundingWorker::new(store.clone(), backend, 60);
+    worker.tick(now().unwrap()).await.unwrap();
+    assert_eq!(observations.try_recv().unwrap(), job.id);
+    assert!(observations.try_recv().is_err());
+    assert_eq!(
+        db.query_row(
+            "SELECT attempts FROM treasury_operations WHERE id=?1",
+            [&job.operation_id],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM outgoing WHERE state='PREPARED'",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM funding_jobs", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    drop(db);
+    drop(worker);
+    drop(store);
+    owner.await.unwrap();
 }
 
 #[tokio::test]
@@ -960,7 +1040,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
         .unwrap();
     assert!(facts.provider_success);
     assert_eq!(facts.source_attempts, 1);
-    assert!(!facts.readiness_recorded);
+    assert!(!facts.initial_credit_recorded);
     drop(worker);
     drop(store);
     actor.await.unwrap();
@@ -1126,7 +1206,7 @@ async fn reverse_status_completion_and_operation_backoff_survive_independent_sou
             .unwrap();
         assert!(facts.provider_success);
         assert_eq!(facts.source_attempts, 1);
-        assert!(!facts.readiness_recorded);
+        assert!(!facts.initial_credit_recorded);
     }
     assert!(credits.load(Ordering::SeqCst) >= 4);
     drop(worker);
@@ -1208,7 +1288,7 @@ async fn continuous_status_cadence_keeps_rolling_while_other_lanes_stay_owned() 
         .unwrap();
     assert_eq!(facts.source_attempts, 1);
     assert!(!facts.provider_success);
-    assert!(!facts.readiness_recorded);
+    assert!(!facts.initial_credit_recorded);
     drop(store);
     actor.await.unwrap();
 }

@@ -88,8 +88,8 @@ pub struct FundingJob {
 #[derive(Debug)]
 pub struct FundingFacts {
     pub enabled: bool,
-    pub readiness_recorded: bool,
-    pub readiness_disputed: bool,
+    pub source_pending: bool,
+    pub initial_credit_recorded: bool,
     pub accepted_quote: bool,
     pub archived: bool,
     /// Exact operation/job archive plus zero remaining source liability.
@@ -114,11 +114,7 @@ impl FundingFacts {
             && !self.provider_refunded
     }
     pub fn source_reconciliation_needed(&self) -> bool {
-        self.source_attempts > 0
-            && self
-                .source_submission
-                .as_deref()
-                .is_some_and(|state| !matches!(state, "CONFIRMED" | "EXPIRED"))
+        self.source_pending
     }
 }
 
@@ -224,72 +220,62 @@ pub fn applicable_requirement(db: &Connection, job: &str) -> Result<DestinationR
     }
 }
 
-/// Shared credit fact for the funding worker and background reconciler. The
-/// caller verifies the opaque Base certificate and holds its publication guard;
-/// this transaction records the original support without changing later balances.
+/// The wallet's unique initial claim is consumed by its first positive observed
+/// credit. It is never reopened by spending, reorgs, refunds or provider flags.
+/// Existing readiness columns retain this fact; they no longer certify a target.
+pub(crate) fn record_initial_credit(db: &Connection, wallet: &str, balance: U256) -> Result<bool> {
+    if balance > U256::ZERO {
+        db.execute("UPDATE funding_jobs SET readiness_operation=(SELECT operation_id FROM funding_progress WHERE job_id=funding_jobs.id),readiness_requirement=?2,readiness_capacity=?2 WHERE wallet_id=?1 AND readiness_requirement IS NULL",params![wallet,balance.to_string()])?;
+    }
+    initial_credit_recorded(db, wallet)
+}
+pub(crate) fn initial_credit_recorded(db: &Connection, wallet: &str) -> Result<bool> {
+    Ok(db.query_row(
+        "SELECT readiness_requirement IS NOT NULL FROM funding_jobs WHERE wallet_id=?1",
+        [wallet],
+        |r| r.get(0),
+    )?)
+}
+fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
+    Ok(db.query_row(r#"SELECT (NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1) AND (EXISTS(SELECT 1 FROM funding_recovery WHERE operation_id=?1) OR EXISTS(SELECT 1 FROM funding_progress WHERE operation_id=?1 AND phase IN ('"ALLOCATED"','"QUOTED"')))) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0))"#,[operation],|r|r.get(0))?)
+}
+#[cfg(test)]
 pub(crate) fn record_readiness(
     db: &Connection,
     wallet: &str,
     support: &super::evidence::BalanceSupport,
 ) -> Result<bool> {
-    support.observation.validate()?;
-    let (job,address):(String,String)=db.query_row(
-        "SELECT f.id,w.address FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE f.wallet_id=?1",
-        [wallet],|r|Ok((r.get(0)?,r.get(1)?)))?;
-    ensure!(
-        support.observation.wallet == wallet
-            && support
-                .observation
-                .address
-                .parse::<alloy_primitives::Address>()?
-                == address.parse::<alloy_primitives::Address>()?,
-        "readiness support wallet mismatch"
-    );
-    let requirement = applicable_requirement(db, &job)?;
-    if requirement.recorded {
-        return Ok(!db.query_row(
-            "SELECT readiness_disputed IS NOT NULL FROM funding_jobs WHERE id=?1",
-            [&job],
-            |r| r.get::<_, bool>(0),
-        )?);
-    }
-    let capacity = support.observation.available();
-    if capacity < amount(&requirement.amount)? {
-        return Ok(false);
-    }
-    ensure!(db.execute("UPDATE funding_jobs SET readiness_operation=?2,readiness_requirement=?3,readiness_capacity=?4,readiness_hash=?5,readiness_height=?6,readiness_support=?7,readiness_latest_hash=?8,readiness_endpoint=?9,readiness_checkpoint_hash=?10 WHERE id=?1 AND readiness_requirement IS NULL",
-        params![job,requirement.operation_id,requirement.amount,capacity.to_string(),support.observation.confirmed.anchor.hash,i64::try_from(support.observation.confirmed.anchor.height)?,serde_json::to_string(support)?,support.observation.latest.anchor.hash,support.observation.endpoint,support.checkpoint.as_ref().map(|anchor|anchor.hash.as_str())])?==1,"funding readiness conflict");
-    Ok(true)
-}
-
-/// Keep the historical observation readable while preventing disputed support
-/// from proving completion or destination closure. Call in the evidence owner's
-/// existing transaction; source liabilities and operation identity are untouched.
-pub fn dispute_support(db: &Connection, wallet: &str, hash: &str, reason: &str) -> Result<()> {
-    ensure!(
-        matches!(reason, "chain_repair_required" | "evidence_repair_required"),
-        "invalid readiness dispute reason"
-    );
-    db.execute(
-        "UPDATE funding_jobs SET readiness_disputed=?3 WHERE wallet_id=?1 AND (readiness_hash=?2 OR readiness_latest_hash=?2 OR readiness_checkpoint_hash=?2)",
-        params![wallet, hash, reason],
-    )?;
-    Ok(())
-}
-
-pub fn dispute_endpoint_support(db: &Connection, endpoint: &str) -> Result<()> {
-    db.execute(
-        "UPDATE funding_jobs SET readiness_disputed=COALESCE(readiness_disputed,'endpoint_reverification_required') WHERE readiness_endpoint=?1",
-        [endpoint],
-    )?;
-    Ok(())
-}
-
-fn source_attempt_closed(db: &Connection, operation: &str) -> Result<bool> {
-    Ok(db.query_row("SELECT (NOT EXISTS(SELECT 1 FROM outgoing WHERE id=?1) AND NOT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)) OR (EXISTS(SELECT 1 FROM expired_operations WHERE id=?1) AND EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0))",[operation],|r|r.get(0))?)
+    record_initial_credit(db, wallet, support.observation.available())
 }
 
 impl Store {
+    /// Persist a current advisory read against the captured initial operation.
+    /// A positive credit consumes that wallet's unique claim, including partial credit.
+    pub(crate) fn record_funding_balance(
+        &mut self,
+        job: &str,
+        operation: &str,
+        wallet: &str,
+        recipient: &str,
+        balance: U256,
+    ) -> Result<()> {
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let (pool,address):(String,String)=tx.query_row("SELECT w.pool_id,w.address FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2 AND w.id=?3",params![job,operation,wallet],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        ensure!(
+            address.parse::<alloy_primitives::Address>()?
+                == recipient.parse::<alloy_primitives::Address>()?,
+            "initial credit recipient changed"
+        );
+        tx.execute("UPDATE wallets SET balance=?2,low_balance=refresh_pending,balance_refresh_error=NULL WHERE id=?1",params![wallet,balance.to_string()])?;
+        if record_initial_credit(&tx, wallet, balance)? {
+            publish_initial_credit(&tx, wallet)?;
+        }
+        tx.commit()?;
+        self.notify_capacity_changed(&pool);
+        Ok(())
+    }
     /// One configured group, two independent vacancy commits. Failure in one
     /// slot never rolls back another or changes an existing operation.
     pub(crate) fn fill_funding_vacancies(&mut self, name: &str) -> Result<()> {
@@ -318,12 +304,12 @@ impl Store {
 
     pub fn funding_facts(&self, job: &str, operation: &str) -> Result<FundingFacts> {
         let (mut facts, flags) = self.db.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_disputed IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
+            "SELECT f.readiness_requirement IS NOT NULL,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id AND r.job_id=j.job_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=j.operation_id) THEN 'EXPIRED' ELSE o.submission END,COALESCE(o.attempts,0),EXISTS(SELECT 1 FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=f.wallet_id AND p.enabled=1),EXISTS(SELECT 1 FROM outgoing x WHERE x.id=j.operation_id AND x.state='PREPARED') FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN treasury_operations o ON o.id=j.operation_id WHERE f.id=?1 AND j.operation_id=?2",
             params![job,operation], |r| Ok((FundingFacts {
-                readiness_recorded:r.get(0)?, readiness_disputed:r.get(1)?, accepted_quote:r.get(2)?, archived:r.get(3)?, source_closed: false,
+                initial_credit_recorded:r.get(0)?, accepted_quote:r.get(1)?, archived:r.get(2)?, source_closed: false,
                 provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
-                source_submission:r.get(8)?, source_attempts:r.get(9)?,enabled:r.get(10)?,
-            }, provider_flags(r, 4))),
+                source_submission:r.get(7)?, source_attempts:r.get(8)?,enabled:r.get(9)?, source_pending:r.get(10)?,
+            }, provider_flags(r, 3))),
         ).context("funding operation binding changed")?;
         (
             facts.provider_success,
@@ -672,7 +658,7 @@ fn provider_flags(row: &rusqlite::Row<'_>, start: usize) -> rusqlite::Result<Pro
 pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> Result<bool> {
     let (ready, correlation, quote, flags, confirmed, gross):
             (bool, Option<String>, bool, rusqlite::Result<ProviderFlags>, bool, bool) = tx.query_row(
-            "SELECT f.readiness_requirement IS NOT NULL AND f.readiness_support IS NOT NULL AND f.readiness_disputed IS NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id AND b.consumed>0 AND b.reserved=0) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,provider_flags(r,3),r.get(7)?,r.get(8)?)))?;
+            "SELECT f.readiness_requirement IS NOT NULL,f.readiness_operation,j.quote IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=j.operation_id AND o.submission='CONFIRMED'),EXISTS(SELECT 1 FROM budget_entries b WHERE b.id=j.operation_id AND b.consumed>0 AND b.reserved=0) FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1 AND j.operation_id=?2", params![job,operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,provider_flags(r,3),r.get(7)?,r.get(8)?)))?;
     let (success, failed, refunded, incomplete) =
         flags.context(super::scheduling::FundingDecodeFailure)?;
     let wallet: String = tx.query_row(
@@ -680,7 +666,7 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
         [job],
         |r| r.get(0),
     )?;
-    let ready = ready && !destination_obligation_pending(tx, &wallet)?;
+    let ready = ready && initial_credit_recorded(tx, &wallet)?;
     let outcome = if ready
         && !quote
         && !failed
@@ -724,16 +710,15 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
 
 /// Publication is driven by destination readiness, never financial completion.
 /// Exact configured claims govern publication of funded roles.
-pub(crate) fn publish_destination_readiness(db: &Connection, wallet: &str) -> Result<()> {
-    let (job, operation): (String,String) = db.query_row(
-        "SELECT f.id,j.operation_id FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1 AND f.readiness_requirement IS NOT NULL AND f.readiness_disputed IS NULL",
-        [wallet], |r| Ok((r.get(0)?,r.get(1)?)))?;
-    ensure!(
-        readiness_supported(db, wallet)?,
-        "destination_readiness_missing"
-    );
+pub(crate) fn publish_initial_credit(db: &Connection, wallet: &str) -> Result<()> {
+    let job: String = db.query_row(
+        "SELECT id FROM funding_jobs WHERE wallet_id=?1 AND readiness_requirement IS NOT NULL",
+        [wallet],
+        |r| r.get(0),
+    )?;
     super::capacity::publish_funded_role(db, &job)?;
-    finish_if_proven(db, &job, &operation)?;
+    // Source completion is observed separately; it cannot roll back an initial
+    // credit or leave that consumed claim available for a second deposit.
     Ok(())
 }
 
@@ -749,22 +734,16 @@ fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result
     Ok(())
 }
 
-/// Historical D is immutable evidence, not a current balance requirement. Every
-/// financial consumer validates its full tuple and persisted correlation indexes.
-pub(crate) fn readiness_supported(db: &Connection, wallet: &str) -> Result<bool> {
-    if !readiness_recorded_valid(db, wallet)? {
-        return Ok(false);
-    }
-    Ok(db.query_row(
-        "SELECT readiness_disputed IS NULL FROM funding_jobs WHERE wallet_id=?1",
-        [wallet],
-        |r| r.get(0),
-    )?)
-}
-
 /// Structural historical D validity is distinct from whether its original support
 /// remains undisputed. Fresh payment evidence can establish current capacity.
 pub(crate) fn readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<bool> {
+    let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if version >= 19 {
+        return initial_credit_recorded(db, wallet);
+    }
+    legacy_readiness_recorded_valid(db, wallet)
+}
+fn legacy_readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<bool> {
     type Saved = (
         String,
         String,
@@ -857,39 +836,12 @@ pub(crate) fn readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<
 /// successful original operation may still owe source reconciliation after its
 /// destination is closed; an uncertain/failed attempt cannot use that exception.
 pub fn destination_obligation_pending(db: &Connection, wallet: &str) -> Result<bool> {
-    type DispositionRow = (
-        bool,
-        Option<String>,
-        bool,
-        Option<String>,
-        String,
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-        bool,
-    );
-    let (ready, support, disputed, correlation, operation, accepted, archived, success, failed, refunded, incomplete):
-        DispositionRow = db.query_row(
-        "SELECT f.readiness_requirement IS NOT NULL,f.readiness_support,f.readiness_disputed IS NOT NULL,f.readiness_operation,j.operation_id,j.quote IS NOT NULL,EXISTS(SELECT 1 FROM funding_recovery r WHERE r.operation_id=j.operation_id),j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1",[wallet],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?)))?;
-    if !ready || support.is_none() || disputed || failed || refunded || incomplete {
+    if !initial_credit_recorded(db, wallet)? {
         return Ok(true);
     }
-    if !readiness_supported(db, wallet)? {
-        return Ok(true);
-    }
-    ensure!(
-        correlation.as_deref().is_none_or(|id| id == operation),
-        "readiness operation correlation mismatch"
-    );
-    if success && correlation.as_deref() == Some(operation.as_str()) {
-        return Ok(false);
-    }
-    if accepted && !archived {
-        return Ok(true);
-    }
-    Ok(!source_attempt_closed(db, &operation)?)
+    // Irreversible retirement must retain this known incoming source work. It
+    // neither constrains signing nor recreates a consumed initial funding claim.
+    Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN outgoing x ON x.id=j.operation_id WHERE f.wallet_id=?1 AND x.state='PREPARED') OR EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_recovery r ON r.job_id=f.id JOIN outgoing x ON x.id=r.operation_id WHERE f.wallet_id=?1 AND x.state='PREPARED')",[wallet],|r|r.get(0))?)
 }
 
 fn completed_error(error: Option<&str>) -> Option<&str> {
@@ -1630,7 +1582,7 @@ mod completion_tests {
     }
 
     #[test]
-    fn malformed_or_inconsistent_historical_readiness_never_proves_completion() {
+    fn obsolete_historical_readiness_annotations_do_not_veto_initial_credit() {
         for corruption in [
             "UPDATE funding_jobs SET readiness_support='not json' WHERE id=?1",
             "UPDATE funding_jobs SET readiness_capacity='99' WHERE id=?1",
@@ -1644,7 +1596,7 @@ mod completion_tests {
             assert!(
                 store
                     .finish_funding_if_proven(&job.id, &job.operation_id)
-                    .is_err()
+                    .unwrap()
             );
             let state: String = store
                 .db
@@ -1654,7 +1606,7 @@ mod completion_tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert_eq!(state, "QUEUED");
+            assert_eq!(state, "COMPLETE");
             store
                 .close_unprepared_funding_for_operation(&job.id, &job.operation_id)
                 .unwrap();
@@ -1741,10 +1693,16 @@ mod completion_tests {
                     store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
                     b"exact signed bytes"
                 );
-                store
-                    .request_broadcast(&job.operation_id, 1, 1, false)
-                    .unwrap();
-                assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
+                assert!(
+                    store
+                        .request_broadcast(&job.operation_id, 1, 1, false)
+                        .is_err()
+                );
+                assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 0);
+                assert_eq!(
+                    store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
+                    b"exact signed bytes"
+                );
             }
         }
     }
@@ -1897,86 +1855,25 @@ mod completion_tests {
         );
     }
 
-    #[cfg(feature = "zcash")]
     #[test]
-    fn destination_closure_does_not_wait_for_source_accounting_but_requires_undisputed_support() {
-        use crate::rotation::base::{
-            Anchor,
-            evidence::{BalanceObservation, BalancePoint},
-        };
+    fn initial_credit_is_independent_of_source_accounting_and_historical_support() {
         let (_dir, mut store, job) = fixture();
         let quote = serde_json::to_vec(
             &serde_json::json!({"request":{"amount":"10","recipient":job.recipient}}),
         )
         .unwrap();
         store.save_funding_quote(&job.id, &quote).unwrap();
-        store.db.execute("UPDATE funding_progress SET accepted_output='10',accepted_recipient=?2 WHERE job_id=?1",params![job.id,job.recipient]).unwrap();
-        store
-            .record_provider_outcome(
-                &job.id,
-                &job.operation_id,
-                &crate::rotation::near::SwapStatus::Success,
-                1,
-            )
-            .unwrap();
         assert!(destination_obligation_pending(&store.db, &job.wallet_id).unwrap());
-        let support = super::super::evidence::BalanceSupport {
-            checkpoint: None,
-            observation: BalanceObservation {
-                wallet: job.wallet_id.clone(),
-                address: job.recipient.clone(),
-                network: "eip155:8453".into(),
-                asset: crate::payment::USDC.into(),
-                endpoint: "a".repeat(64),
-                confirmations: 1,
-                confirmed: BalancePoint {
-                    anchor: Anchor {
-                        height: 1,
-                        hash: format!("0x{:064x}", 1),
-                    },
-                    amount: U256::from(10),
-                },
-                latest: BalancePoint {
-                    anchor: Anchor {
-                        height: 2,
-                        hash: format!("0x{:064x}", 2),
-                    },
-                    amount: U256::from(10),
-                },
-                valid_until: 100,
-            },
-        };
-        let mut insufficient = support.clone();
-        insufficient.observation.latest.amount = U256::from(9);
-        assert!(!record_readiness(&store.db, &job.wallet_id, &insufficient).unwrap());
-        assert!(record_readiness(&store.db, &job.wallet_id, &support).unwrap());
-        let mut spent = support.clone();
-        spent.observation.latest.amount = U256::ZERO;
-        assert!(record_readiness(&store.db, &job.wallet_id, &spent).unwrap());
-        let saved: String = store
-            .db
-            .query_row(
-                "SELECT readiness_capacity FROM funding_jobs WHERE id=?1",
-                [&job.id],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(saved, "10");
+        assert!(record_initial_credit(&store.db, &job.wallet_id, U256::from(9)).unwrap());
+        store.db.execute("UPDATE funding_jobs SET readiness_support='malformed',readiness_disputed='old' WHERE id=?1",[&job.id]).unwrap();
         assert!(!destination_obligation_pending(&store.db, &job.wallet_id).unwrap());
+        assert!(record_initial_credit(&store.db, &job.wallet_id, U256::ZERO).unwrap());
+        assert_eq!(store.destination_requirement(&job.id).unwrap().amount, "9");
         assert!(
             !store
                 .finish_funding_if_proven(&job.id, &job.operation_id)
                 .unwrap()
         );
-        dispute_support(
-            &store.db,
-            &job.wallet_id,
-            &support.observation.confirmed.anchor.hash,
-            "chain_repair_required",
-        )
-        .unwrap();
-        assert!(destination_obligation_pending(&store.db, &job.wallet_id).unwrap());
-        assert!(store.destination_requirement(&job.id).unwrap().recorded);
         assert_eq!(
             store.funding_job(&job.id).unwrap().unwrap().operation_id,
             job.operation_id
@@ -1997,7 +1894,7 @@ mod completion_tests {
         .unwrap();
         store.save_funding_quote(&job.id, &quote).unwrap();
         assert!(
-            !store
+            store
                 .record_destination_readiness(&job.id, "10", "block", 1)
                 .unwrap()
         );
@@ -2012,7 +1909,7 @@ mod completion_tests {
                 .unwrap()
         );
         let requirement = store.destination_requirement(&job.id).unwrap();
-        assert_eq!(requirement.amount, "20");
+        assert_eq!(requirement.amount, "10");
         assert_eq!(
             requirement.operation_id.as_deref(),
             Some(job.operation_id.as_str())

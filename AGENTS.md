@@ -719,3 +719,10 @@ variables are intentional compatibility contracts, not stale product branding.
 Do not change reference checkouts or Cargo caches to implement dependency patches.
 Do not use the TODO tool. Prefer targeted offline tests; never make live paid calls
 as a substitute for missing fixture coverage.
+
+Managed funding consumes each wallet's unique initial claim on its first positive
+USDC observation, including partial credit. Estimates and old readiness annotations
+never reopen it; low balances do not authorize top-ups. Reconcile actual prepared
+source operations despite stale phases, disabled pools or retired destinations.
+Check current funding permission before first submission; observation of accepted
+work needs no new funding authority. Bootstrap schema 3 reports advisory estimates.

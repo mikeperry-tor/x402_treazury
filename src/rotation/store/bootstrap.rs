@@ -37,7 +37,6 @@ pub(crate) struct StartupPath {
     /// Existing exact support, including binding checks. Independent of phase/S/P.
     pub destination_ready: bool,
     pub recovery_count: u64,
-    pub readiness_dispute: Option<String>,
     pub condition: Option<super::super::error::FundingCondition>,
 }
 
@@ -59,14 +58,6 @@ impl StartupPath {
         use StartupDisposition::*;
         if self.destination_ready {
             return DestinationReady;
-        }
-        if self.facts.readiness_disputed {
-            return if self.readiness_dispute.as_deref() == Some("endpoint_reverification_required")
-            {
-                Waiting
-            } else {
-                Obstructed("destination_support_requires_review")
-            };
         }
         if self.facts.provider_review_required()
             || self.facts.provider_failed
@@ -248,7 +239,7 @@ impl Store {
         Ok((!blocked.is_empty()).then_some(blocked))
     }
 
-    /// Read the saved confirmed balance of each captured claim, never its target.
+    /// Read the saved advisory estimate of each captured claim, never its target.
     pub(crate) fn startup_claim_balances(
         &self,
         pool: &str,
@@ -256,13 +247,12 @@ impl Store {
     ) -> Result<Vec<(String, String)>> {
         ensure!(claims.len() <= 2, "startup claim inventory too large");
         claims.iter().map(|claim| {
-            let (balance, height, hash): (String, Option<i64>, Option<String>) = self.db.query_row(
-                "SELECT w.balance,w.block_height,w.block_hash FROM funding_jobs j JOIN wallets w ON w.id=j.wallet_id AND w.pool_id=j.pool_id WHERE j.pool_id=?1 AND j.allocation_kind=?2 AND j.claim_generation=?3",
+            let balance: String = self.db.query_row(
+                "SELECT w.balance FROM funding_jobs j JOIN wallets w ON w.id=j.wallet_id AND w.pool_id=j.pool_id WHERE j.pool_id=?1 AND j.allocation_kind=?2 AND j.claim_generation=?3",
                 params![pool, claim.slot, claim.generation],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            ).context("bootstrap confirmed wallet balance unavailable")?;
-            let observed = height.is_some() && hash.is_some();
-            let display = amount(&balance).ok().filter(|_| observed)
+                |row| row.get(0),
+            ).context("bootstrap wallet estimate unavailable")?;
+            let display = amount(&balance).ok()
                 .map(|value| alloy_primitives::utils::format_units(value, 6))
                 .transpose()?.unwrap_or_else(|| "unknown".into());
             Ok((claim.slot.clone(), display))
@@ -295,7 +285,7 @@ impl Store {
     fn startup_path(&self, id: &str) -> Result<StartupPath> {
         let (job, operation) = self.funding_recovery_context(id)?;
         let facts = self.funding_facts(id, &job.operation_id)?;
-        let destination_ready = funding::readiness_supported(&self.db, &job.wallet_id)?;
+        let destination_ready = funding::initial_credit_recorded(&self.db, &job.wallet_id)?;
         Ok(StartupPath {
             condition: match self.funding_restriction {
                 super::super::restriction::FundingRestriction::Paused => {
@@ -316,11 +306,6 @@ impl Store {
             operation,
             destination_ready,
             recovery_count: self.funding_recovery_count(id)?,
-            readiness_dispute: self.db.query_row(
-                "SELECT readiness_disputed FROM funding_jobs WHERE id=?1",
-                [id],
-                |r| r.get(0),
-            )?,
         })
     }
 }
@@ -333,7 +318,7 @@ mod tests {
         let (_dir, store, _pool) = fixture();
         let value = serde_json::to_value(store.status().unwrap()).unwrap();
         assert_eq!(value["schema_version"], 3);
-        assert_eq!(value["state_schema_version"], 18);
+        assert_eq!(value["state_schema_version"], 19);
         let keys: Vec<_> = value["pools"][0]
             .as_object()
             .unwrap()
@@ -406,7 +391,7 @@ mod tests {
         assert!(
             paths
                 .iter()
-                .all(|path| path.destination_ready && path.facts.readiness_recorded)
+                .all(|path| path.destination_ready && path.facts.initial_credit_recorded)
         );
         assert!(
             paths
@@ -472,26 +457,18 @@ mod tests {
         let paths = store
             .startup_claim_paths(&group.pool, &group.claims)
             .unwrap();
-        assert!(
-            !paths
-                .iter()
-                .find(|path| path.job.id == jobs[0].id)
-                .unwrap()
-                .destination_ready
-        );
+        assert!(paths.iter().all(|path| path.destination_ready));
         assert!(
             store
                 .startup_obstruction("configured", 3, None)
                 .unwrap()
                 .is_none()
         );
-        let blocked = store
-            .startup_obstruction("configured", 3, Some(&group.claims))
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            blocked,
-            vec![(jobs[0].id.clone(), "destination_support_requires_review")]
+        assert!(
+            store
+                .startup_obstruction("configured", 3, Some(&group.claims))
+                .unwrap()
+                .is_none()
         );
         store
             .db
