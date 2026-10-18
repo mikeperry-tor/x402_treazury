@@ -81,7 +81,6 @@ impl StartupPath {
         }
         if self.job.phase == funding::FundingPhase::RecoveryRequired
             && !crate::rotation::store::funding::can_recover_facts(
-                &self.job,
                 self.operation.as_ref(),
                 &self.facts,
             )
@@ -178,19 +177,11 @@ impl Store {
             for claim in &claims {
                 let wallet:Option<String> = self.db.query_row("SELECT wallet_id FROM reserve_claims WHERE pool_id=?1 AND slot=?2 AND generation=?3 AND enabled=1",params![pool,claim.slot,claim.generation],|r|r.get(0))?;
                 let ready = if let Some(wallet) = wallet {
-                    match capacity::payment_ownership(&self.db, &pool, &wallet) {
-                        Ok(owner) => owner.is_some_and(|owner| {
-                            owner.role == "READY"
-                                && owner.slot.as_deref() == Some(claim.slot.as_str())
-                                && owner.claim_generation == Some(claim.generation)
-                        }),
-                        Err(error) if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
-                            == Some(&super::super::base::evidence::EvidenceFailure::MalformedSupport) => {
-                                tracing::warn!(category = "malformed_durable_evidence_support", "Reserve readiness rejected; serving eligibility uses independent funded identities");
-                                false
-                            },
-                        Err(error) => return Err(error),
-                    }
+                    capacity::payment_ownership(&self.db, &pool, &wallet)?.is_some_and(|owner| {
+                        owner.role == "READY"
+                            && owner.slot.as_deref() == Some(claim.slot.as_str())
+                            && owner.claim_generation == Some(claim.generation)
+                    })
                 } else {
                     false
                 };

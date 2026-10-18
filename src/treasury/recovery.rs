@@ -35,9 +35,7 @@ fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {
     use crate::rotation::transaction::RecoveryEvidenceError as Evidence;
     Some(match error.downcast_ref::<Evidence>()? {
         Evidence::ConfirmationPending => RecoveryOutcome::Waiting("zcash_confirmations_pending"),
-        Evidence::ExpiryNotBuried | Evidence::ExpiryNotInvalidated => {
-            RecoveryOutcome::Waiting("waiting_for_transaction_expiry")
-        }
+        Evidence::ExpiryNotBuried => RecoveryOutcome::Waiting("waiting_for_transaction_expiry"),
         Evidence::TipLag | Evidence::StaleSync | Evidence::ChainChanged => {
             RecoveryOutcome::Waiting("waiting_for_fresh_canonical_sync")
         }
@@ -161,22 +159,27 @@ impl Treasury {
         let terminal = job.phase == FundingPhase::RecoveryRequired;
         let operation_id = operation.operation_id.clone();
         let expiry = u64::from(operation.facts.expiry_height);
-        if let Some(outcome) = self
-            .observe_recovery_source(operation, terminal, sender, stop, source_observed)
-            .await?
-        {
-            return Ok(outcome);
+        if operation.attempts > 0 {
+            if let Some(outcome) = self
+                .observe_recovery_source(operation, terminal, sender, stop, source_observed)
+                .await?
+            {
+                return Ok(outcome);
+            }
+            let sync = self.store.call(|s| s.funding_sync_observation()).await?;
+            if expiry > 0
+                && sync.height.is_none_or(|height| {
+                    height < expiry.saturating_add(u64::from(sync.confirmations))
+                })
+            {
+                return Ok(Waiting("waiting_for_transaction_expiry"));
+            }
         }
-        let sync = self.store.call(|s| s.funding_sync_observation()).await?;
         if expiry == 0 {
             return Ok(OperatorRequired("transaction_has_no_consensus_expiry"));
         }
-        if sync
-            .height
-            .is_none_or(|height| height < expiry.saturating_add(u64::from(sync.confirmations)))
-        {
-            return Ok(Waiting("waiting_for_transaction_expiry"));
-        }
+        // Never-submitted work goes straight to the proof's own fresh scans.
+        // A preliminary scan only to forecast expiry repeats the same work.
         self.recover_expired(operation_id, sender, stop).await?;
         let id = job.id.clone();
         let operation = job.operation_id.clone();
@@ -203,7 +206,7 @@ impl Treasury {
             .store
             .call(move |s| s.funding_facts(&id, &operation))
             .await?;
-        if !safely_unprepared(job, &facts) {
+        if !safely_unprepared(&facts) {
             return Ok(OperatorRequired("preparation_outcome_unknown"));
         }
         let id = job.id.clone();
@@ -268,35 +271,29 @@ impl Treasury {
         let operation_id = operation.operation_id.clone();
         // Submitted/ambiguous work is observed, never resubmitted. Even expired
         // operations still require the caller's independent two-sync input proof.
-        if operation.attempts > 0 {
-            *source_observed = true;
-            if let Err(error) = self
-                .reconcile_prepared(operation_id.clone(), sender, stop)
-                .await
+        *source_observed = true;
+        if let Err(error) = self
+            .reconcile_prepared(operation_id.clone(), sender, stop)
+            .await
+        {
+            if error.downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>()
+                == Some(&crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending)
             {
-                if error.downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>()
-                    == Some(
-                        &crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending,
-                    )
-                {
-                    return Ok(Some(Waiting("zcash_confirmations_pending")));
-                }
-                return Err(error);
+                return Ok(Some(Waiting("zcash_confirmations_pending")));
             }
-            let id = operation_id.clone();
-            if self
-                .store
-                .call(move |s| Ok(s.operation(&id)?.submission == "CONFIRMED"))
-                .await?
-            {
-                return Ok(Some(if terminal {
-                    OperatorRequired("source_confirmed_check_swap_outcome")
-                } else {
-                    Waiting("source_confirmed_waiting_for_swap")
-                }));
-            }
-        } else {
-            self.sync_once(stop).await?;
+            return Err(error);
+        }
+        let id = operation_id.clone();
+        if self
+            .store
+            .call(move |s| Ok(s.operation(&id)?.submission == "CONFIRMED"))
+            .await?
+        {
+            return Ok(Some(if terminal {
+                OperatorRequired("source_confirmed_check_swap_outcome")
+            } else {
+                Waiting("source_confirmed_waiting_for_swap")
+            }));
         }
         Ok(None)
     }
@@ -350,7 +347,6 @@ mod tests {
         use crate::rotation::transaction::RecoveryEvidenceError as Evidence;
         for evidence in [
             Evidence::ExpiryNotBuried,
-            Evidence::ExpiryNotInvalidated,
             Evidence::TipLag,
             Evidence::StaleSync,
             Evidence::ChainChanged,

@@ -153,6 +153,100 @@ async fn funded_fixture_amount(
 }
 
 #[tokio::test]
+async fn unsubmitted_funding_expiry_uses_only_its_two_proof_scans() {
+    struct ReadOnly(submission::GrpcSubmission);
+    impl TransactionSubmission for ReadOnly {
+        async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
+            panic!("recovery must not submit");
+        }
+        async fn lookup(&mut self, tx: &PreparedTransaction) -> Result<TransactionPresence> {
+            self.0.lookup(tx).await
+        }
+    }
+    let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
+    let pool = owner
+        .ensure_capacity_group(
+            "expiry".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let jobs = owner.store.call(|s| s.funding_jobs()).await.unwrap();
+    let job = jobs[0].clone();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&owner.store, jobs, deadline).await;
+    let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+    let expiry = prepared.facts().unwrap().expiry_height;
+    {
+        let mut chain = net.chain.write().await;
+        let blocks = expiry + 2 - chain.tip();
+        chain.mine_empty_blocks(blocks);
+    }
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE fixture_completed_scans(observation TEXT NOT NULL);
+        CREATE TRIGGER record_completed_scan AFTER INSERT ON treasury_sync
+        WHEN json_extract(NEW.observation,'$.phase')='ready'
+        BEGIN INSERT INTO fixture_completed_scans VALUES(NEW.observation); END;",
+    )
+    .unwrap();
+    let mut sender = ReadOnly(
+        submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        owner
+            .recover_funding_job(
+                job.id.clone(),
+                3,
+                false,
+                &mut sender,
+                &CancellationToken::new()
+            )
+            .await
+            .unwrap(),
+        recovery::RecoveryOutcome::OperatorRequired("funding_disabled")
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM fixture_completed_scans", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        2,
+        "do not scan just to decide whether to run the two-scan proof"
+    );
+    owner
+        .store
+        .call(move |s| {
+            assert_eq!(
+                s.funding_job(&job.id)?.unwrap().operation_id,
+                job.operation_id
+            );
+            assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
+            assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
+            assert_eq!(
+                s.prepared_bytes(&job.operation_id)?.as_slice(),
+                prepared.bytes()
+            );
+            assert!(!s.status()?.outgoing_pending);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    owner.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_after_restart() {
     let (dir, net, owner, endpoint) = funded_fixture(2).await;
     let state = dir.path().join("state");

@@ -11,7 +11,6 @@ use zeroize::Zeroizing;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryEvidenceError {
     ExpiryNotBuried,
-    ExpiryNotInvalidated,
     TipLag,
     StaleSync,
     ChainChanged,
@@ -28,7 +27,6 @@ impl std::fmt::Display for RecoveryEvidenceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::ExpiryNotBuried => "transaction expiry not buried",
-            Self::ExpiryNotInvalidated => "sync has not invalidated expired transaction",
             Self::TipLag => "expiry recovery requires zero observed tip lag; synchronize again before releasing reservations",
             Self::StaleSync => "expiry recovery sync stale",
             Self::ChainChanged => "expiry recovery chain changed",

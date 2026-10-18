@@ -5,20 +5,19 @@ pub(super) const RECOVERY_COUNT_SQL: &str = "SELECT COUNT(*) FROM funding_recove
 use super::*;
 // The current schema journals acceptance before any SDK calculation. A missing
 // accepted intent AND outgoing journal proves that this code never calculated.
-pub(crate) fn safely_unprepared(_job: &FundingJob, facts: &FundingFacts) -> bool {
+pub(crate) fn safely_unprepared(facts: &FundingFacts) -> bool {
     facts.source_closed
         || (!facts.preparation_accepted
             && !facts.source_pending
             && facts.source_submission.is_none())
 }
 pub(crate) fn can_recover_facts(
-    job: &FundingJob,
     operation: Option<&crate::rotation::transaction::OperationStatus>,
     facts: &FundingFacts,
 ) -> bool {
     operation
         .map(|op| op.submission != "CONFIRMED")
-        .unwrap_or_else(|| safely_unprepared(job, facts))
+        .unwrap_or_else(|| safely_unprepared(facts))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -468,8 +467,7 @@ impl Store {
     }
 
     pub fn funding_source_ready(&self) -> Result<bool> {
-        let pending:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",[],|r|r.get(0))?;
-        Ok(!pending)
+        Ok(!self.preparation_pending()?)
     }
 
     pub(crate) fn funding_preparation_context(&self) -> Result<(String, i64, SyncObservation)> {
@@ -2293,7 +2291,7 @@ mod recovery_classification_tests {
             store.defer_funding(&unknown.id, 0, diagnostic, false)?;
             let job = store.funding_job(&unknown.id)?.unwrap();
             let facts = store.funding_facts(&job.id, &job.operation_id)?;
-            assert!(!can_recover_facts(&job, None, &facts));
+            assert!(!can_recover_facts(None, &facts));
             assert!(store.close_unprepared_funding(&job.id).is_err());
             assert_eq!(store.funding_recovery_count(&job.id)?, 0);
             assert_eq!(
@@ -2314,7 +2312,7 @@ mod recovery_classification_tests {
             )?;
             let job = store.funding_job(&closed.id)?.unwrap();
             let facts = store.funding_facts(&job.id, &job.operation_id)?;
-            assert!(facts.source_closed && can_recover_facts(&job, None, &facts));
+            assert!(facts.source_closed && can_recover_facts(None, &facts));
             store.close_unprepared_funding(&job.id)?;
             assert_eq!(store.funding_recovery_count(&job.id)?, 1);
         }
