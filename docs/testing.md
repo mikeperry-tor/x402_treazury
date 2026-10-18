@@ -126,15 +126,15 @@ scoped observation/backoff, cancellation and restart. Qualification charges each
 accepted attempt under its original case allowance; a later success erases none.
 
 Managed payment crash fixtures use SIGKILL on an owned signing subprocess at
-private-signature, journal-acknowledgement and provider-receipt boundaries. They
-reopen the real SQLite state, retain committed nonce/exposure records without
+private-signature, journal-acknowledgement and signed-dispatch boundaries. They
+reopen the real SQLite state, retain exact committed authorizations and their one estimate debit without
 replay, and verify independent peer-pool service. These use unfunded temporary
 wallets and loopback providers; they do not establish live settlement outcomes.
 
 SQLite fault fixtures install a non-default test VFS on temporary stores to fail
 real WAL writes/fsyncs and database checkpoint writes/fsyncs. They also exercise
 `SQLITE_FULL` using SQLite's page limit. Reopen checks require atomic preparation,
-retained reservations/exposure, exact committed bytes, database integrity and no
+retained input claims/payment journals, atomic estimate updates, exact committed bytes, database integrity and no
 provider dispatch after a failed payment journal acknowledgement. A sync error is
 allowed to leave an entire recoverable commit; it never proves no work occurred.
 
@@ -293,6 +293,10 @@ revisions also count intermediate checkpoints. Manifest tests use actual SDK
 transactions and selected inputs, including a missing small input when the
 remaining value covers the fee. Diagnostic prose, workflow phases and aggregate
 balances alone do not prove these properties.
+Verify that a changed financial test is reachable through its module declarations
+and actually runs with the intended feature/platform gates. A successful filtered
+Cargo command can run zero tests; a complete complexity report can analyze a file
+the compiler never reaches. Source metrics do not establish test execution.
 
 The R01/R02 owner follow-ups add focused default-build recovery tests and real
 SDK synthetic-chain shielding tests under `treasury::lifecycle_tests::shielding`.

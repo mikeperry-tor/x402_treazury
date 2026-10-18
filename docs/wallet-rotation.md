@@ -226,6 +226,11 @@ Selection uses the saved wallet estimate as described in the
 [best-effort wallet rules](#best-effort-wallet-rules). It performs no balance RPC,
 nonce scan, historical readiness validation or certificate publication. Price hints
 can choose an existing identity before its own unsigned challenge is fetched.
+Unsigned selection is read-only: it neither promotes a retained wallet nor consumes
+a reserve claim, and it does not acquire the payment gate. `selection_amount` is
+only a ranking input. Actual challenge amounts and current ownership/caps are
+checked by payment preparation and the authorization journal; balances are not
+spending permission. No additional hint or authority state is maintained.
 
 Runtime hints expire 300 seconds after the unsigned response was received and
 retain at most 512 fixed-size entries per process. Their trusted key includes
@@ -398,7 +403,9 @@ Bootstrap and the serving funding worker recover eligible jobs automatically.
 The operator can run `wallet recover --config FILE` with serving stopped for one
 pass through the same classifier, without starting funding or submitting transactions.
 Reports distinguish recovered, waiting, failed checks and operator-required cases.
-Unknown preparation outcomes, refunds and unresolved confirmed swaps require review.
+Unknown preparation outcomes, refunds and unresolved confirmed swaps require review
+before restarting or replacing the funding attempt. Ordinary discovery and shielding
+of owned outputs can continue under the current funding authority.
 
 A prepared deposit retains its exact bytes and input owner when its external quote
 deadline expires. Recovery requires finite consensus expiry, complete coverage on
@@ -433,6 +440,12 @@ jobless shielding. Explicit shielding remains available while serving is stopped
 with its original job recipient network binding. Unattributed automatic shielding
 uses a stable per-address/network/treasury identity. Both paths retain observed
 inputs, fee caps and exact prepared-byte recovery.
+The remaining `funding_refunds` records store previously derived addresses for
+quote routing and explicit per-job administration. They store no returned amount
+or spendability. Automatic shielding does not consult refund attribution or
+provider status: the SDK discovers owned coins and determines when they become
+spendable. A return does not reopen an initial funding claim, since it cannot prove
+the swap will not also deliver USDC.
 The pinned SDK's `WalletWrite::store_transactions_to_be_sent` scans calculated
 transactions with the wallet's viewing keys. Validation requires the exact selected
 outpoints, no transparent outputs and decrypted account-zero shielded notes equal
