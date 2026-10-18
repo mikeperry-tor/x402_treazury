@@ -32,6 +32,13 @@ impl Store {
             let Some((Some(address), estimate, low)) = row else {
                 return Ok(None);
             };
+            if address.parse::<alloy_primitives::Address>().is_err() {
+                tracing::warn!(
+                    category = "malformed_advisory_wallet_address",
+                    "wallet identity unavailable; advancing to independent payment identity"
+                );
+                return Ok(None);
+            }
             let candidate = PaymentCandidateHandle {
                 wallet: wallet.to_owned(),
                 address,

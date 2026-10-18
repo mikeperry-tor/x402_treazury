@@ -233,7 +233,9 @@ Selection uses the saved wallet estimate as described in the
 [best-effort wallet rules](#best-effort-wallet-rules). It performs no balance RPC,
 nonce scan, historical readiness validation or certificate publication. Price hints
 can choose an existing identity before its own unsigned challenge is fetched.
-Unsigned selection is read-only: it neither promotes a retained wallet nor consumes
+Wallets with malformed stored EVM addresses are skipped before transport construction;
+healthy sibling identities remain eligible. Unsigned selection is read-only: it
+neither promotes a retained wallet nor consumes
 a reserve claim, and it does not acquire the payment gate. `selection_amount` is
 only a ranking input. Actual challenge amounts and current ownership/caps are
 checked by payment preparation and the authorization journal; balances are not

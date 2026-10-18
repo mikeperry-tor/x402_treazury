@@ -27,7 +27,10 @@ priced inventories through synchronous loading. The `deployment::deferred::tests
 unit tests cover ordinary deployment serving: listeners bind before slow remote
 catalogs or pricing finish, available tools remain callable, and a required remote
 failure becomes unavailable while strict inspection still rejects it. Pricing
-publication preserves tool order and existing callable snapshots.
+publication preserves tool order and existing callable snapshots. Deferred collision
+regressions cover opposite completion orders, three owners, exact selectors,
+unique tools, listener isolation and captured bindings; strict loading still rejects
+duplicate names.
 
 ## Reproducible measurement
 

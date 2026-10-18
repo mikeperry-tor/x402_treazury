@@ -214,6 +214,75 @@ async fn qualification_canonical_loop_ignores_bad_historical_readiness_and_resol
     f.close().await;
 }
 #[tokio::test]
+async fn malformed_text_address_hands_off_without_signing_to_a_healthy_sibling() {
+    for estimate in ["100", "0"] {
+        let mut f = fixture().await;
+        let other: PaymentCandidateHandle = f
+            .db()
+            .query_row(
+                "SELECT id,address FROM wallets WHERE id!=?1",
+                [&f.payer.wallet],
+                |r| {
+                    Ok(PaymentCandidateHandle {
+                        wallet: r.get(0)?,
+                        address: r.get(1)?,
+                    })
+                },
+            )
+            .unwrap();
+        let healthy = other.wallet.clone();
+        f.pool
+            .store
+            .call(move |s| s.record_credit(&healthy, "5000000", "fixture", 100))
+            .await
+            .unwrap();
+        f.db()
+            .execute("UPDATE wallets SET balance=?1", [estimate])
+            .unwrap();
+        f.db()
+            .execute(
+                "UPDATE wallets SET address='invalid EVM address' WHERE id=?1",
+                [&f.payer.wallet],
+            )
+            .unwrap();
+        let initial = f
+            .pool
+            .next_candidate(U256::ZERO, i64::MAX, &[])
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(initial.wallet, other.wallet);
+        assert_eq!(initial.address, other.address);
+        let error = f.pay().await.err().unwrap();
+        let selected = error.downcast_ref::<PayerHandoff>().unwrap().0.clone();
+        assert_eq!(selected.wallet, other.wallet);
+        assert_eq!(selected.address, other.address);
+        assert_eq!(f.signed.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            f.db()
+                .query_row("SELECT count(*) FROM payment_attempts", [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        f.payer = selected;
+        assert!(f.pay().await.unwrap().0.status().is_success());
+        assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+        let attempted: Vec<String> = f
+            .db()
+            .prepare("SELECT wallet_id FROM payment_attempts")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(attempted, vec![other.wallet]);
+        f.close().await;
+    }
+}
+
+#[tokio::test]
 async fn old_low_missing_and_malformed_estimates_and_readiness_do_not_gate_signing() {
     let f = fixture().await;
     for estimate in ["100", "2", "", "malformed"] {

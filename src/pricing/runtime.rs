@@ -3,6 +3,7 @@
 use alloy_primitives::U256;
 use sha2::{Digest, Sha256};
 use std::{
+    collections::{BTreeSet, HashMap},
     sync::{
         Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
@@ -16,7 +17,7 @@ use tokio::time::Instant;
 pub(crate) const TTL: Duration = Duration::from_secs(crate::limits::API_CACHE_TTL_SECONDS);
 pub(crate) const CAPACITY: usize = 65_535;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct OperationKey([u8; 32]);
 impl OperationKey {
     /// All inputs come from the captured trusted runtime binding. In particular,
@@ -70,17 +71,21 @@ pub(crate) fn received() -> Option<Receipt> {
 }
 
 struct Entry {
-    key: OperationKey,
     amount: U256,
     receipt: Receipt,
 }
+#[derive(Default)]
+struct Entries {
+    by_key: HashMap<OperationKey, Entry>,
+    by_receipt: BTreeSet<(Receipt, OperationKey)>,
+}
 pub(crate) struct RuntimeHints {
-    entries: Mutex<Vec<Entry>>,
+    entries: Mutex<Entries>,
 }
 impl Default for RuntimeHints {
     fn default() -> Self {
         Self {
-            entries: Mutex::new(Vec::with_capacity(CAPACITY)),
+            entries: Mutex::new(Entries::default()),
         }
     }
 }
@@ -94,8 +99,8 @@ impl RuntimeHints {
         self.entries
             .lock()
             .expect("runtime hints lock poisoned")
-            .iter()
-            .find(|entry| entry.key == key)
+            .by_key
+            .get(&key)
             .map(|entry| entry.receipt)
     }
     pub(crate) fn get(&self, key: OperationKey) -> Option<U256> {
@@ -105,8 +110,9 @@ impl RuntimeHints {
         self.entries
             .lock()
             .expect("runtime hints lock poisoned")
-            .iter()
-            .find(|entry| entry.key == key && now.saturating_duration_since(entry.receipt.at) < TTL)
+            .by_key
+            .get(&key)
+            .filter(|entry| now.saturating_duration_since(entry.receipt.at) < TTL)
             .map(|entry| entry.amount)
     }
     /// Called only after selection and full validation of the actual unsigned
@@ -119,40 +125,28 @@ impl RuntimeHints {
             return;
         }
         let mut entries = self.entries.lock().expect("runtime hints lock poisoned");
-        if let Some(entry) = entries.iter_mut().find(|entry| entry.key == key) {
-            if receipt > entry.receipt {
-                *entry = Entry {
-                    key,
-                    amount,
-                    receipt,
-                };
+        if let Some(previous) = entries.by_key.get(&key).map(|entry| entry.receipt) {
+            if receipt <= previous {
+                return;
             }
-            return;
-        }
-        if entries.len() == CAPACITY {
-            let oldest = entries
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, entry)| entry.receipt)
-                .map(|(index, _)| index)
+            entries.by_receipt.remove(&(previous, key));
+        } else if entries.by_key.len() == CAPACITY {
+            let &(oldest, oldest_key) = entries
+                .by_receipt
+                .first()
                 .expect("nonempty bounded hint cache");
             // Keep the newest receipts, including when old validation finishes
             // after eviction. No per-key tombstones or second retention bound.
-            if receipt <= entries[oldest].receipt {
+            if receipt <= oldest {
                 return;
             }
-            entries[oldest] = Entry {
-                key,
-                amount,
-                receipt,
-            };
-        } else {
-            entries.push(Entry {
-                key,
-                amount,
-                receipt,
-            });
+            entries.by_receipt.remove(&(oldest, oldest_key));
+            entries.by_key.remove(&oldest_key);
         }
+        // Both indexes change under the same lock. Each key has exactly one
+        // receipt entry, including after replacement or capacity eviction.
+        entries.by_key.insert(key, Entry { amount, receipt });
+        entries.by_receipt.insert((receipt, key));
     }
 }
 
@@ -229,17 +223,9 @@ mod tests {
     fn bounded_storage_has_no_unbounded_keys_or_late_resurrection() {
         let cache = RuntimeHints::default();
         let at = Instant::now();
-        // Populate directly so checking eviction does not require quadratic
-        // insertion work at the production cache capacity.
-        cache
-            .entries
-            .lock()
-            .unwrap()
-            .extend((0..CAPACITY as u64).map(|sequence| Entry {
-                key: key(sequence),
-                amount: U256::from(2),
-                receipt: Receipt { at, sequence },
-            }));
+        for sequence in 0..CAPACITY as u64 {
+            cache.learn_at(key(sequence), U256::from(2), Receipt { at, sequence }, at);
+        }
         let newest = CAPACITY as u64;
         cache.learn_at(
             key(newest),
@@ -251,11 +237,56 @@ mod tests {
             at,
         );
         cache.learn_at(key(0), U256::from(9), Receipt { at, sequence: 0 }, at);
-        assert_eq!(cache.entries.lock().unwrap().len(), CAPACITY);
         assert!(cache.get_at(key(0), at).is_none());
         assert!(cache.get_at(key(newest), at).is_some());
-        // Fixed entries in one preallocated Vec: no URL/string allocations,
-        // per-entry map nodes, mutable byte ledger or active-work ownership.
-        assert_eq!(cache.entries.lock().unwrap().capacity(), CAPACITY);
+        // Updating the oldest surviving key must move its eviction position,
+        // without leaving an older receipt behind or increasing cache size.
+        let updated = Receipt {
+            at,
+            sequence: newest + 1,
+        };
+        cache.learn_at(key(1), U256::from(3), updated, at);
+        cache.learn_at(key(1), U256::from(9), updated, at);
+        cache.learn_at(key(1), U256::from(9), Receipt { at, sequence: 1 }, at);
+        assert_eq!(cache.get_at(key(1), at), Some(U256::from(3)));
+        cache.learn_at(
+            key(newest + 1),
+            U256::from(4),
+            Receipt {
+                at,
+                sequence: newest + 2,
+            },
+            at,
+        );
+        assert_eq!(cache.get_at(key(1), at), Some(U256::from(3)));
+        assert!(cache.get_at(key(2), at).is_none());
+        // A different key at exactly the oldest receipt cannot displace it.
+        cache.learn_at(key(2), U256::from(9), Receipt { at, sequence: 3 }, at);
+        assert!(cache.get_at(key(2), at).is_none());
+        assert_eq!(cache.get_at(key(3), at), Some(U256::from(2)));
+        let entries = cache.entries.lock().unwrap();
+        assert_eq!(entries.by_key.len(), CAPACITY);
+        assert_eq!(entries.by_receipt.len(), CAPACITY);
+        for (key, entry) in &entries.by_key {
+            assert!(entries.by_receipt.contains(&(entry.receipt, *key)));
+        }
+    }
+
+    #[test]
+    fn equal_receipts_for_distinct_keys_survive_independent_replacement() {
+        let cache = RuntimeHints::default();
+        let at = Instant::now();
+        let original = Receipt { at, sequence: 1 };
+        cache.learn_at(key(1), U256::from(2), original, at);
+        cache.learn_at(key(2), U256::from(3), original, at);
+        let newer = Receipt { at, sequence: 2 };
+        cache.learn_at(key(1), U256::from(1), newer, at);
+        assert_eq!(cache.get_at(key(1), at), Some(U256::from(1)));
+        assert_eq!(cache.get_at(key(2), at), Some(U256::from(3)));
+        let entries = cache.entries.lock().unwrap();
+        assert_eq!(entries.by_key.len(), 2);
+        assert_eq!(entries.by_receipt.len(), 2);
+        assert!(entries.by_receipt.contains(&(newer, key(1))));
+        assert!(entries.by_receipt.contains(&(original, key(2))));
     }
 }

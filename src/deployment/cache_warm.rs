@@ -106,6 +106,7 @@ pub async fn warm_cache(
             initialized: None,
             sources: BTreeMap::new(),
             selected: BTreeMap::new(),
+            conflicting_tools: BTreeMap::new(),
             config_path: path.to_owned(),
         };
         let bindings = crate::discovery_relay::resolve_wallets(

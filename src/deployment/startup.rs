@@ -79,24 +79,12 @@ impl std::fmt::Debug for DeferredDocument {
         f.write_str("deferred remote catalog")
     }
 }
-impl std::fmt::Display for DeferredDocument {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self, f)
-    }
-}
-impl std::error::Error for DeferredDocument {}
 #[derive(Clone, Debug)]
 pub(super) struct PendingSource {
     pub config: catalog::Config,
     pub operator_required: bool,
     document: DeferredDocument,
 }
-impl std::fmt::Display for PendingSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("source awaiting remote catalog")
-    }
-}
-impl std::error::Error for PendingSource {}
 impl PendingSource {
     pub async fn resume(
         &self,
@@ -126,7 +114,16 @@ impl std::error::Error for SharedFailure {
         Some(self.0.as_ref().as_ref())
     }
 }
-type DownloadResult = std::result::Result<Document, SharedFailure>;
+#[derive(Clone, Debug)]
+enum Download {
+    Ready(Document),
+    Deferred(DeferredDocument),
+}
+enum SourceLoad {
+    Ready(Source),
+    Pending(PendingSource),
+}
+type DownloadResult = std::result::Result<Download, SharedFailure>;
 
 /// One deployment load, one immutable network policy/runtime. Retain parsed remote
 /// documents only for this load; aliases still generate/filter/bind independently.
@@ -144,11 +141,11 @@ impl Downloads {
         id: &str,
         cfg: &catalog::Config,
         http: &reqwest::Client,
-    ) -> Result<Document> {
+    ) -> Result<Download> {
         if !(cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://")) {
-            return Ok(Arc::new(
+            return Ok(Download::Ready(Arc::new(
                 catalog::load_json_with_limit(&cfg.spec, http, cfg.max_spec_bytes).await?,
-            ));
+            )));
         }
         // Exact URL (including query), requested timeout and byte limit are deliberately
         // conservative. Never let a permissive alias bypass another alias's policy.
@@ -173,19 +170,20 @@ impl Downloads {
         };
         // No detached tasks: cancellation drops the initializer and its HTTP request.
         cell.get_or_init(|| async {
-            let result = if self.defer {
-                Err(DeferredDocument(Arc::new(DeferredLoad {
-                    config: cfg.clone(),
-                    http: http.clone(),
-                    prepared: OnceCell::new(),
-                }))
-                .into())
+            if self.defer {
+                Ok(Download::Deferred(DeferredDocument(Arc::new(
+                    DeferredLoad {
+                        config: cfg.clone(),
+                        http: http.clone(),
+                        prepared: OnceCell::new(),
+                    },
+                ))))
             } else {
-                catalog::load_json_discovery(cfg, http).await
-            };
-            result
-                .map(Arc::new)
-                .map_err(|error| SharedFailure(Arc::new(error)))
+                catalog::load_json_discovery(cfg, http)
+                    .await
+                    .map(|document| Download::Ready(Arc::new(document)))
+                    .map_err(|error| SharedFailure(Arc::new(error)))
+            }
         })
         .await
         .clone()
@@ -299,9 +297,8 @@ pub(super) async fn load(
         tokio::select! {
             result = pending.next() => match result {
                 Some((source_id, result)) => {
-                    let (id, source) = match result {
-                        Err(error) if error.is::<PendingSource>() => {
-                            let source = error.downcast::<PendingSource>().expect("typed pending source");
+                    let source = match result {
+                        Ok(SourceLoad::Pending(source)) => {
                             unavailable.insert(source_id.clone(), source.config.prefix.clone().expect("resolved prefix"));
                             deferred.insert(source_id.clone(), source);
                             tracing::info!(source=source_id, state="pending", "Catalog relay continuation retained for serving");
@@ -314,7 +311,7 @@ pub(super) async fn load(
                             tracing::warn!(source = source_id, state = "unavailable", "Optional source unavailable; required inventory remains complete");
                             continue;
                         }
-                        Ok(source) => source,
+                        Ok(SourceLoad::Ready(source)) => source,
                         Err(error) if collect_failures => {
                             failures += 1;
                             if first_error.is_none() { first_error = Some(error); }
@@ -322,8 +319,8 @@ pub(super) async fn load(
                         }
                         Err(error) => return Err(error),
                     };
-                    sources.insert(id.clone(), source);
-                    tracing::info!(target: "x402_treazury::startup", source = id, completed = sources.len(), total,
+                    sources.insert(source_id.clone(), source);
+                    tracing::info!(target: "x402_treazury::startup", source = source_id, completed = sources.len(), total,
                         elapsed_ms = started.elapsed().as_millis() as u64, "Catalog ready");
                 }
                 None => break,
@@ -348,7 +345,7 @@ async fn load_one(
     path: &Path,
     warn: bool,
     downloads: &Downloads,
-) -> Result<(String, Source)> {
+) -> Result<SourceLoad> {
     let mut progress = Progress {
         source: id,
         phase: "configuration",
@@ -359,9 +356,6 @@ async fn load_one(
     let result = Source::load(id, source, path, warn, &mut progress, downloads).await;
     progress.finished = true;
     if let Err(error) = &result {
-        if error.is::<PendingSource>() {
-            return result.map(|source| (id.to_owned(), source));
-        }
         let error = error
             .downcast_ref::<SharedFailure>()
             .map(|shared| shared.0.as_ref())
@@ -385,10 +379,10 @@ async fn load_one(
             elapsed_ms = progress.started.elapsed().as_millis() as u64,
             collecting_independent_results = catalog_evidence::collecting(),
             "Catalog load failed; complete inventory unavailable");
-    } else {
+    } else if matches!(result, Ok(SourceLoad::Ready(_))) {
         catalog_evidence::record(id, State::Completed, "generation", None);
     }
-    result.map(|source| (id.to_owned(), source))
+    result
 }
 
 impl Source {
@@ -399,7 +393,7 @@ impl Source {
         warn: bool,
         progress: &mut Progress<'_>,
         downloads: &Downloads,
-    ) -> Result<Self> {
+    ) -> Result<SourceLoad> {
         let mut cfg = crate::config::resolve(source.provider.clone(), path)
             .await
             .with_context(|| format!("source {id}"))?
@@ -430,17 +424,6 @@ impl Source {
         let document = downloads.load(id, &cfg, &http)
             .instrument(tracing::debug_span!(target: "x402_treazury::startup", "catalog_download", source = id))
             .await;
-        if let Err(error) = &document
-            && let Some(shared) = error.downcast_ref::<SharedFailure>()
-            && let Some(pending) = shared.0.downcast_ref::<DeferredDocument>()
-        {
-            return Err(PendingSource {
-                config: cfg,
-                operator_required: false,
-                document: pending.clone(),
-            }
-            .into());
-        }
         let document = document
             .map_err(|e| {
                 if cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://") {
@@ -452,10 +435,20 @@ impl Source {
                 }
             })
             .with_context(|| format!("source {id}: loading spec"))?;
+        let document = match document {
+            Download::Ready(document) => document,
+            Download::Deferred(document) => {
+                return Ok(SourceLoad::Pending(PendingSource {
+                    config: cfg,
+                    operator_required: false,
+                    document,
+                }));
+            }
+        };
         tracing::debug!(target: "x402_treazury::startup", source = id,
             elapsed_ms = fetch_started.elapsed().as_millis() as u64, "Catalog fetch/parse finished");
         progress.phase = "generation";
-        Self::from_document(id, cfg, document)
+        Self::from_document(id, cfg, document).map(SourceLoad::Ready)
     }
     pub(super) fn from_document(
         id: &str,
@@ -667,7 +660,11 @@ pub(super) async fn warm(
     };
     let pricing = crate::pricing::PricingCache::default();
     let mut pending = stream::iter(selected.iter().map(|id| async {
-        let (_, source) = load_one(id, &config.sources[id], path, false, &downloads).await?;
+        let SourceLoad::Ready(source) =
+            load_one(id, &config.sources[id], path, false, &downloads).await?
+        else {
+            anyhow::bail!("cache warming cannot defer catalog discovery");
+        };
         let catalog_cache = catalog_cache_status(&source.config).await;
         let (evidence, fresh_pricing_entries) = if discover_pricing {
             let (evidence, fresh_entries) =
@@ -716,17 +713,12 @@ mod deferred_tests {
             .unwrap()
             .discovery(&cfg.spec, None)
             .unwrap();
-        let pending = |error: anyhow::Error| {
-            error
-                .downcast_ref::<SharedFailure>()
-                .unwrap()
-                .0
-                .downcast_ref::<DeferredDocument>()
-                .unwrap()
-                .clone()
+        let Download::Deferred(first) = downloads.load("a", &cfg, &http).await.unwrap() else {
+            panic!("remote catalog must defer before serving");
         };
-        let first = pending(downloads.load("a", &cfg, &http).await.unwrap_err());
-        let second = pending(downloads.load("b", &cfg, &http).await.unwrap_err());
+        let Download::Deferred(second) = downloads.load("b", &cfg, &http).await.unwrap() else {
+            panic!("remote alias must share deferred catalog");
+        };
         assert!(Arc::ptr_eq(&first.0, &second.0));
         assert!(
             tokio::time::timeout(Duration::from_millis(20), listener.accept())

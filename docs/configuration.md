@@ -78,7 +78,14 @@ unfinished loads. Ordinary deployment serving publishes remote catalogs and pric
 descriptions as they finish. Failed sources are not retried during the run;
 restart to retry them. A source that keeps downloading occupies its normal slot
 until completion. Tool ordering and wallet bindings do not depend on completion
-order. `config check`, `catalog tools` and `catalog tags` use strict loading;
+order for unambiguous names. If loaded catalogs define the same tool name on a
+listener after tag selection, ordinary serving omits every binding of that name
+and reports the ambiguity in MCP instructions. Unique tools and other listeners
+remain usable. A previously published name is withdrawn when a later catalog
+reveals its ambiguity; calls that already captured a binding finish with that
+original provider and wallet. Exact selectors still recognize ambiguous names.
+Strict inspection rejects duplicate names. `config check`, `catalog tools` and
+`catalog tags` use strict loading;
 `config show` remains offline and reports the effective limit. Progress, source
 fetch/parse and generation timings, and pricing timings go to stderr; a ten-second
 waiting message identifies remaining work. No response content or source URL is
@@ -385,9 +392,11 @@ strict price-class separation.
 A $10 wallet settles two $4 calls and retains $2; two $3.34 calls retain $3.32.
 A later smaller call can use retained capacity, but fragmented balances cannot be
 summed to authorize one payment. Cold selection uses the default payer before
-learning prices. Valid learned hints can select the smallest sufficient wallet
-before binding; a bound payer that already suffices remains stable. Missing hints
-or observations may therefore keep cheap calls on a large-funded active wallet.
+learning prices. A sufficient bound payer remains stable. Otherwise, selection
+uses the first estimated-affordable existing wallet in ACTIVE, RETAINED, READY
+order, with creation order within each role. Unknown or low estimates remain
+fallbacks. It does not sort wallets by balance; cheap calls can keep using a
+large-funded active wallet.
 
 With small $2 and large $10, fresh requested inventory is $12. Repeated $6
 calls can leave $4 at each large-funded address: after nine settled calls and

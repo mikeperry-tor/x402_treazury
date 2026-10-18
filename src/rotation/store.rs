@@ -1409,22 +1409,6 @@ impl Store {
         }
         Ok(address.map(|a| a.to_string()))
     }
-    pub(crate) fn validate_payment_price(&self, pool: &str, cost: U256) -> Result<()> {
-        let (enabled, limit): (bool, Option<String>) = self.db.query_row(
-            "SELECT enabled,payment_limit FROM pools WHERE id=?1",
-            [pool],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        ensure!(enabled, AdmissionError::WalletNotReady("pool disabled"));
-        let limit = limit.context(AdmissionError::WalletNotReady(
-            "payment authority unavailable",
-        ))?;
-        ensure!(
-            cost > U256::ZERO && cost <= amount(&limit)?,
-            AdmissionError::PriceLimit("payment exceeds configured API payment ceiling")
-        );
-        Ok(())
-    }
     pub(crate) fn payment_candidate(
         &self,
         pool: &str,
@@ -1481,10 +1465,13 @@ impl Store {
         requirements_hash: &str,
         expected: &super::manager::PaymentCandidateHandle,
     ) -> Result<PreparedPayment> {
-        self.validate_payment_price(pool, cost)?;
-        capacity::payment_ownership(&self.db, pool, &expected.wallet)?.context(
+        let ownership = capacity::payment_ownership(&self.db, pool, &expected.wallet)?.context(
             AdmissionError::WalletNotReady("payment wallet no longer eligible"),
         )?;
+        ensure!(
+            cost > U256::ZERO && cost <= ownership.payment_limit,
+            AdmissionError::PriceLimit("payment exceeds configured API payment ceiling")
+        );
         let address: String = self.db.query_row(
             "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",
             params![expected.wallet, pool],

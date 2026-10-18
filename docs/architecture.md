@@ -55,7 +55,13 @@ pricing are pending; failed remote sources remain unavailable with status in MCP
 instructions. Strict inspection/qualification wait for complete catalogs. The
 synchronous unsigned-serving loader cancels unfinished loads on required failure
 and can omit an explicitly `optional_startup` remote failure. Source
-completion order cannot change the final sorted inventory. All declared sources
+completion order cannot change the final sorted inventory for valid configurations.
+Ordinary deferred
+serving retains completed catalogs and omits all owners of a tool name that collides
+on a listener after tag selection, before tool-name filters. MCP instructions list
+ambiguous names; unique tools and other listeners remain usable. A late collision
+withdraws the earlier binding from new calls while captured calls finish with their
+original provider and payer. Strict loading rejects duplicates. All declared sources
 are loaded, including those unused by listeners. Remote aliases share fetching
 and immutable parsed JSON within a load only for the same exact URL, requested
 timeout, byte limit, transport policy and discovery identity. Filters, overrides, base URLs and

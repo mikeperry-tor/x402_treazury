@@ -145,16 +145,23 @@ impl Runtime {
             .map(|(name, server)| {
                 Ok((
                     name.clone(),
-                    select_listener_tools(
+                    listener_tool_inventory(
                         name,
                         server,
                         &self.deployment.sources,
                         &self.deployment.unavailable_sources,
+                        true,
                     )?,
                 ))
             })
             .collect();
-        let selected = selected.and_then(|selected| {
+        let selected = selected.and_then(|inventories| {
+            let (selected, conflicts): (BTreeMap<_, _>, BTreeMap<_, _>) = inventories
+                .into_iter()
+                .map(|(name, inventory)| {
+                    ((name.clone(), inventory.tools), (name, inventory.conflicts))
+                })
+                .unzip();
             for (name, tools) in &selected {
                 if self.deployment.config.source_management.is_some()
                     || self.deployment.config.servers[name].discover_on_demand
@@ -171,10 +178,10 @@ impl Runtime {
                 &self.deployment.sources,
                 &selected,
             )?;
-            Ok(selected)
+            Ok((selected, conflicts))
         });
         match selected {
-            Ok(mut selected) => {
+            Ok((mut selected, conflicts)) => {
                 for (listener, tools) in &mut selected {
                     for (source, tool) in tools {
                         if source != id
@@ -189,6 +196,7 @@ impl Runtime {
                     }
                 }
                 self.deployment.selected = selected;
+                self.deployment.conflicting_tools = conflicts;
                 Ok(())
             }
             Err(error) => {
@@ -326,6 +334,181 @@ mod tests {
     use axum::{Router, routing::get};
     use serde_json::json;
     use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn conflicting_catalogs_withdraw_all_owners_in_either_completion_order() {
+        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", origin.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            axum::serve(
+                origin,
+                Router::new().fallback(|uri: axum::http::Uri| async move { uri.path().to_owned() }),
+            )
+            .await
+            .unwrap();
+        });
+        let mut final_views = Vec::new();
+        for order in [["a", "b", "c"], ["c", "b", "a"]] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("deployment.toml");
+            let mut config =
+                String::from("version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='KEY'\n");
+            for id in ["a", "b", "c"] {
+                std::fs::write(
+                    dir.path().join(format!("{id}.json")),
+                    json!({"operations":[
+                        {"method":"GET","path":"/shared"},
+                        {"method":"GET","path":format!("/unique_{id}")}
+                    ]})
+                    .to_string(),
+                )
+                .unwrap();
+                config.push_str(&format!("[sources.{id}]\nspec='{id}.json'\nbase_url='{base}/{id}'\nprobe_pricing=false\n"));
+            }
+            for (name, sources) in [
+                ("combined", "['a','b','c']"),
+                ("isolated", "['a']"),
+                ("exact", "['a','b','c']"),
+            ] {
+                config.push_str(&format!("[servers.{name}]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='payer'\nsources={sources}\n"));
+            }
+            std::fs::write(&path, config).unwrap();
+            let mut deployment = Deployment::load(&path).await.unwrap();
+            let completed: BTreeMap<_, _> = std::mem::take(&mut deployment.sources)
+                .into_iter()
+                .map(|(id, source)| {
+                    let mut cfg = source.config;
+                    cfg.prefix = Some("common".into());
+                    let source = Source::from_document(&id, cfg, source.document).unwrap();
+                    (id, source)
+                })
+                .collect();
+            let shared = completed["a"]
+                .tools
+                .iter()
+                .find(|tool| tool.path == "/shared")
+                .unwrap()
+                .name
+                .clone();
+            deployment
+                .config
+                .servers
+                .get_mut("exact")
+                .unwrap()
+                .include_tools = vec![shared.clone()];
+            assert!(
+                select_listener_tools(
+                    "combined",
+                    &deployment.config.servers["combined"],
+                    &completed,
+                    &BTreeMap::new()
+                )
+                .is_err()
+            );
+            deployment.unavailable_sources = completed
+                .keys()
+                .map(|id| (id.clone(), "common".into()))
+                .collect();
+            for (name, server) in &deployment.config.servers {
+                deployment.selected.insert(
+                    name.clone(),
+                    select_listener_tools(
+                        name,
+                        server,
+                        &deployment.sources,
+                        &deployment.unavailable_sources,
+                    )
+                    .unwrap(),
+                );
+            }
+            let catalog = Arc::new(crate::catalog_state::CatalogState::new(
+                crate::catalog_state::CatalogSnapshot {
+                    views: deployment
+                        .config
+                        .servers
+                        .keys()
+                        .map(|name| (name.clone(), Vec::new()))
+                        .collect(),
+                    ..Default::default()
+                },
+            ));
+            let payer = PaidClient::new(
+                Payer::new(&format!("{:064x}", 2), SpendPolicy::dollars("1").unwrap()).unwrap(),
+            );
+            let mut runtime = Runtime::new(
+                deployment,
+                BTreeMap::from([("payer".into(), payer)]),
+                catalog.clone(),
+                None,
+                false,
+            );
+            runtime
+                .accept_source(order[0], completed[order[0]].clone())
+                .unwrap();
+            runtime.publish().await.unwrap();
+            let captured = catalog.read().views["combined"]
+                .iter()
+                .find(|bound| bound.tool.name == shared)
+                .unwrap()
+                .clone();
+            for id in &order[1..] {
+                runtime.accept_source(id, completed[*id].clone()).unwrap();
+                runtime.publish().await.unwrap();
+                assert!(
+                    !catalog.read().views["combined"]
+                        .iter()
+                        .any(|bound| bound.tool.name == shared)
+                );
+            }
+            let snapshot = catalog.read();
+            assert_eq!(snapshot.views["combined"].len(), 3);
+            assert!(snapshot.views["exact"].is_empty());
+            assert!(
+                snapshot.views["isolated"]
+                    .iter()
+                    .any(|bound| bound.tool.name == shared)
+            );
+            assert!(
+                snapshot.instructions["combined"]
+                    .as_ref()
+                    .unwrap()
+                    .contains(&format!("UNAVAILABLE ambiguous tool names: {shared}"))
+            );
+            assert!(
+                snapshot.instructions["exact"]
+                    .as_ref()
+                    .unwrap()
+                    .contains(&shared)
+            );
+            assert!(
+                !snapshot.instructions["isolated"]
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("ambiguous")
+            );
+            assert_eq!(
+                captured.invoke(&serde_json::Map::new()).await.unwrap(),
+                format!("/{}/shared", order[0])
+            );
+            final_views.push(
+                snapshot
+                    .views
+                    .iter()
+                    .map(|(name, tools)| {
+                        (
+                            name.clone(),
+                            tools
+                                .iter()
+                                .map(|bound| (bound.tool.name.clone(), bound.base.clone()))
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>(),
+            );
+        }
+        assert_eq!(final_views[0], final_views[1]);
+        task.abort();
+    }
 
     async fn prepared(
         stall: bool,

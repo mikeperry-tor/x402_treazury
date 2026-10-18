@@ -133,6 +133,7 @@ pub struct Deployment {
     config: MetaConfig,
     sources: BTreeMap<String, Source>,
     selected: BTreeMap<String, Vec<(String, ToolSpec)>>,
+    conflicting_tools: BTreeMap<String, Vec<String>>,
     wallet_resolution: Resolution,
     config_path: std::path::PathBuf,
 }
@@ -547,6 +548,7 @@ impl Deployment {
             wallet_resolution,
             sources: BTreeMap::new(),
             selected: BTreeMap::new(),
+            conflicting_tools: BTreeMap::new(),
             config_path: path.to_owned(),
         };
         if let Some((env, _)) = relay_env
@@ -577,15 +579,25 @@ impl Deployment {
             let (sources, unavailable_sources, pending_sources) =
                 startup::load(config, path, warn, relay, deployment.defer_discovery).await?;
             let mut selected = BTreeMap::new();
+            let mut conflicts = BTreeMap::new();
             for (name, server) in &config.servers {
-                let tools = select_listener_tools(name, server, &sources, &unavailable_sources)?;
-                selected.insert(name.clone(), tools);
+                let inventory = if deployment.defer_discovery {
+                    listener_tool_inventory(name, server, &sources, &unavailable_sources, true)?
+                } else {
+                    ListenerInventory {
+                        tools: select_listener_tools(name, server, &sources, &unavailable_sources)?,
+                        conflicts: Vec::new(),
+                    }
+                };
+                selected.insert(name.clone(), inventory.tools);
+                conflicts.insert(name.clone(), inventory.conflicts);
             }
             validate_selected_cover(wallet_resolution, &sources, &selected)?;
             deployment.unavailable_sources = unavailable_sources;
             deployment.pending_sources = pending_sources;
             deployment.sources = sources;
             deployment.selected = selected;
+            deployment.conflicting_tools = conflicts;
             Ok(())
         }
         .await;
@@ -1122,6 +1134,13 @@ impl Deployment {
                     }
                 }
             }
+            if let Some(conflicts) = self
+                .conflicting_tools
+                .get(name)
+                .filter(|names| !names.is_empty())
+            {
+                instructions.push_str(&format!("\n\nUNAVAILABLE ambiguous tool names: {}. Multiple configured sources define these names; all conflicting bindings are omitted. Configure distinct prefixes or source selections and restart.", conflicts.join(", ")));
+            }
             let mut server = Server::from_bindings(
                 bindings,
                 (!instructions.is_empty()).then_some(instructions),
@@ -1451,6 +1470,24 @@ fn select_listener_tools(
     sources: &BTreeMap<String, Source>,
     unavailable: &BTreeMap<String, String>,
 ) -> Result<Vec<(String, ToolSpec)>> {
+    listener_tool_inventory(name, server, sources, unavailable, false)
+        .map(|inventory| inventory.tools)
+}
+
+struct ListenerInventory {
+    tools: Vec<(String, ToolSpec)>,
+    conflicts: Vec<String>,
+}
+
+// Keep ambiguous names in the inventory until selectors have been validated.
+// Serving omits every owner, so completion order cannot select a provider/payer.
+fn listener_tool_inventory(
+    name: &str,
+    server: &ListenerConfig,
+    sources: &BTreeMap<String, Source>,
+    unavailable: &BTreeMap<String, String>,
+    omit_conflicts: bool,
+) -> Result<ListenerInventory> {
     let mut available = BTreeMap::new();
     let incomplete = server.sources.iter().any(|id| unavailable.contains_key(id));
     for source in &server.sources {
@@ -1468,13 +1505,19 @@ fn select_listener_tools(
                 continue;
             }
 
-            ensure!(
-                available
-                    .insert(tool.name.clone(), (source.clone(), tool.clone()))
-                    .is_none(),
-                "server {name}: duplicate tool {}",
-                tool.name
-            );
+            match available.entry(tool.name.clone()) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(Some((source.clone(), tool.clone())));
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    ensure!(
+                        omit_conflicts,
+                        "server {name}: duplicate tool {}",
+                        tool.name
+                    );
+                    entry.insert(None);
+                }
+            }
         }
     }
     let compile = |selectors: &[String]| -> Result<Vec<Regex>> {
@@ -1501,19 +1544,24 @@ fn select_listener_tools(
     };
     let include = compile(&server.include_tools)?;
     let exclude = compile(&server.exclude_tools)?;
+    let conflicts: Vec<_> = available
+        .iter()
+        .filter(|(_, binding)| binding.is_none())
+        .map(|(name, _)| name.clone())
+        .collect();
     let tools: Vec<_> = available
         .into_iter()
         .filter(|(n, _)| {
             (include.is_empty() || include.iter().any(|p| p.is_match(n)))
                 && !exclude.iter().any(|p| p.is_match(n))
         })
-        .map(|(_, t)| t)
+        .filter_map(|(_, t)| t)
         .collect();
     ensure!(
-        !tools.is_empty() || server.source_management || incomplete,
+        !tools.is_empty() || server.source_management || incomplete || !conflicts.is_empty(),
         "server {name}: no tools selected"
     );
-    Ok(tools)
+    Ok(ListenerInventory { tools, conflicts })
 }
 
 fn selector_has_unavailable_owner(

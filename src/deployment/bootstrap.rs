@@ -93,6 +93,7 @@ pub async fn bootstrap_wallets(path: &Path) -> Result<BootstrapSummary> {
         initialized: None,
         sources: BTreeMap::new(),
         selected: BTreeMap::new(),
+        conflicting_tools: BTreeMap::new(),
         config_path: path.to_owned(),
     };
     deployment.bootstrap(&std::env::vars().collect()).await
