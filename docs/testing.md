@@ -281,6 +281,19 @@ in tests solely to raise a number. The small
 [mutation pilot](plans/deferred/mutation_testing.md) remains deferred; no mutation
 score is implied by coverage results.
 
+Policy-removal regressions should exercise remaining authority boundaries through
+normal application paths. Change advisory estimates or cached prices independently
+of current caps and actual offers; assert permitted work proceeds and actual
+over-cap work still cannot sign. Multi-attempt tests retain every original journal
+entry and distinguish ambiguous protocol records from the exact retry category.
+Owner-replacement tests interrupt a scheduler while accepted child work still
+holds its lease, then check exclusion, release, restart, shutdown and retained
+backoff. Count completed scans directly when proving two-scan recovery; snapshot
+revisions also count intermediate checkpoints. Manifest tests use actual SDK
+transactions and selected inputs, including a missing small input when the
+remaining value covers the fee. Diagnostic prose, workflow phases and aggregate
+balances alone do not prove these properties.
+
 The R01/R02 owner follow-ups add focused default-build recovery tests and real
 SDK synthetic-chain shielding tests under `treasury::lifecycle_tests::shielding`.
 They cover same-Store reconstruction, actual task replacement, cancelled waiters,

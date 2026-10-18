@@ -526,6 +526,9 @@ bound payer, then other eligible affordable identities, then unknown or low esti
 Old or unavailable RPC observations and missing historical funding readiness do not
 prevent a permitted signature. Actual pool ownership, role, configured amount cap,
 asset/domain and caller authority still apply.
+Historical price hints rank estimates without excluding an otherwise authorized
+payer, including after a cap change. The current challenge and serialized journal
+enforce the actual payment amount against current authority.
 
 Each new authorization is durably journaled before disclosure. That transaction
 subtracts its maximum amount once from the current estimate, saturating at zero.
@@ -538,6 +541,9 @@ A signed attempt's HTTP 402 can earn another wallet attempt only through the
 `PAYMENT-REQUIRED` with exact `error: insufficient_funds`, or a failed
 `PAYMENT-RESPONSE` with that exact `errorReason`. An unsigned challenge, arbitrary
 prose, a bare 402, allowance failure and malformed/truncated replies cannot earn it.
+Duplicate protocol headers cannot grant another attempt. When `PAYMENT-RESPONSE`
+is present, its settlement record governs classification: a simultaneous challenge
+cannot override a successful settlement, another failure or an unreadable receipt.
 The existing response-byte and read-inactivity limits still apply.
 
 Each recognized failure marks its wallet low balance and queues an advisory
