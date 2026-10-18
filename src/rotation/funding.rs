@@ -41,12 +41,6 @@ pub trait FundingBackend: Send + 'static {
     fn swap_timeout_seconds(&self) -> u64 {
         1800
     }
-    /// Read-only source refresh before preparation admission. Implementations
-    /// without an owned treasury can leave refresh to their existing observer.
-    fn refresh_source(&mut self) -> impl Future<Output = Result<()>> + Send {
-        async { Ok(()) }
-    }
-
     fn ready(
         &mut self,
         _job: &FundingJob,
@@ -357,23 +351,8 @@ impl<B: FundingBackend> FundingWorker<B> {
                 .call(move |s| s.refresh_unprepared_quote_for_operation(&id, &operation))
                 .await;
         }
-        let instant = now()?;
-        if !self
-            .store
-            .call(move |s| s.funding_source_ready(instant))
-            .await?
-        {
-            // Refund-address derivation advances the wallet revision. Waiting for
-            // periodic maintenance here would strand otherwise-ready quotes.
-            self.backend.lock().await.refresh_source().await?;
-            let instant = now()?;
-            if !self
-                .store
-                .call(move |s| s.funding_source_ready(instant))
-                .await?
-            {
-                return Ok(());
-            }
+        if !self.store.call(|s| s.funding_source_ready()).await? {
+            return Ok(());
         }
         self.backend.lock().await.ready(job, &quote).await?;
         if quote.deadline <= clock.now() {
@@ -502,21 +481,6 @@ impl FundingBackend for Backend {
 
     fn swap_timeout_seconds(&self) -> u64 {
         self.funding.swap_timeout_seconds
-    }
-    async fn refresh_source(&mut self) -> Result<()> {
-        self.require_auto_funding()?;
-        let state = self.store.call(|s| s.treasury_sync_state()).await?;
-        // Pending source bytes retain ownership. Their normal reconciliation
-        // drives confirmation; another waiting quote must not duplicate scans.
-        if !state.outgoing_pending
-            && state.sync.is_none_or(|sync| {
-                sync.phase != crate::rotation::store::SyncPhase::Ready
-                    || sync.snapshot_revision != state.snapshot_revision
-            })
-        {
-            self.treasury.sync().await?;
-        }
-        Ok(())
     }
     async fn ready(&mut self, job: &FundingJob, quote: &Quote) -> Result<()> {
         self.require_auto_funding()?;

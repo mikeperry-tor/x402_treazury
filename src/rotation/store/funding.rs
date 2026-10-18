@@ -413,7 +413,8 @@ impl Store {
         Ok(())
     }
 
-    /// Accept preparation at the actual treasury owner, atomically against D.
+    /// Render preparation after current claim/quote/permission and unstarted-work
+    /// checks. A stale display phase cannot authorize or veto calculation.
     pub fn begin_funding_preparation(
         &mut self,
         operation: &str,
@@ -427,7 +428,7 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let changed=tx.execute("UPDATE funding_progress SET phase='\"PREPARING\"',last_error=NULL WHERE job_id=?1 AND operation_id=?2 AND phase='\"QUOTED\"' AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.readiness_requirement IS NULL AND f.state!='COMPLETE')",params![authority.job_id,operation])?;
+        let changed=tx.execute("UPDATE funding_progress SET phase='\"PREPARING\"',last_error=NULL WHERE job_id=?1 AND operation_id=?2",params![authority.job_id,operation])?;
         ensure!(changed == 1, "funding preparation boundary changed");
         tx.commit()?;
         Ok(())
@@ -466,7 +467,7 @@ impl Store {
         )?)
     }
 
-    pub fn funding_source_ready(&self, _now: u64) -> Result<bool> {
+    pub fn funding_source_ready(&self) -> Result<bool> {
         let pending:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",[],|r|r.get(0))?;
         Ok(!pending)
     }

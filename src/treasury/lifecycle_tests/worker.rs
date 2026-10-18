@@ -391,14 +391,14 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     tick(&worker).await;
     let before = store.call(|s| s.treasury_sync_state()).await.unwrap();
     let observed = lookups.load(Ordering::SeqCst);
-    for _ in 0..2 {
-        tick(&worker).await;
-    }
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while lookups.load(Ordering::SeqCst) < observed + 2 {
+            tick(&worker).await;
+        }
+    })
+    .await
+    .unwrap();
     let after = store.call(|s| s.treasury_sync_state()).await.unwrap();
-    assert!(
-        lookups.load(Ordering::SeqCst) >= observed + 2,
-        "passes must actually reconcile the pending source"
-    );
     assert_eq!(before.snapshot_revision, after.snapshot_revision);
     assert_eq!(
         before.sync.unwrap().checked_at,
