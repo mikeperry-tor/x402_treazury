@@ -8,14 +8,14 @@ chains. None spends mainnet funds or contacts NEAR's production API.
 | Bootstrap → payment → promotion → pending refill → restart → ready replacement | `managed::lifecycle::bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation` | Real payment admission, EVM signing, durable journals and Base RPC adapter. Deterministic funding backend; proves five distinct sends for two bootstrapped pools plus one refill, with stable operation identity across restart. |
 | Refund status and pool isolation | `managed::lifecycle::failed_swap_keeps_source_expense_while_another_pool_serves` | API refund status cannot manufacture treasury credit; another funded pool keeps paying. |
 | Quote refresh, empty treasury, timeouts and backoff | `tests/funding.rs` | Unprepared-only bounded refresh, independent persisted status-error streaks, sanitized diagnostics, degraded timeout with continued reconciliation and no repeated send. |
-| Payment ambiguity and admission | `tests/managed.rs` | One signed attempt, durable liabilities across restart/cancellation, canonical balance checks, nonce reconciliation, pool isolation and atomic promotion. |
-| Concurrent source funding and scan reuse | `treasury::lifecycle_tests` | Two managed recipients share the real treasury actor; real proving, submission and scans on a synthetic local chain. Covers deferred competing preparation, exact quote/pool and auto-funding checks, unchanged observation age/revision, confirmation depth, pending-byte restart, dropped submission waiter and lost send response without replay. Also covers a funded same-height fork, blocked pending submission/preparation, exact retained signed bytes and preserved reserved/consumed costs. Bridge quotes in this test are fixture inputs; the chain does not validate consensus. |
-| Full concurrent funding worker | `treasury::lifecycle_tests::worker` | Real scheduler, production Backend, refund derivation, overlapping local HTTP quotes, signed source transactions, canonical Base observations and actual payment admission. Two groups bootstrap after reopening historical insufficient-funds failures, pending-source passes reuse scans, and consuming a reserve triggers exactly one funded replacement while the prior payment liability remains. A client-scoped test-only bridge codec supports synthetic-chain addresses; production stays mainnet-only. |
-| Deposit after insufficient funds | `treasury::lifecycle_tests::worker::production_readiness_scans_new_deposit_before_repeating_shortage` | Real synthetic deposit and scan through production preparation readiness; a still-fresh low balance cannot reject the deposit without rescanning. No transaction or reservation is created by this preflight. |
-| Tip-only fork and canonical return | `treasury::lifecycle_tests::same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_canonical_return` | A one-block same-height fork invalidates a previously confirmed deposit; source admission fails closed and consumed cost remains. Re-mining the exact transaction restores readiness without another submission or charge. |
+| Payment ambiguity and admission | `tests/managed.rs` | Typed insufficient-funds traversal retains every signed attempt; other uncertainty grants no paid replay. Advisory balance hints, durable liabilities, qualification nonce proofs, pool isolation and atomic promotion. |
+| Concurrent source funding and scan reuse | `treasury::lifecycle_tests` | Two managed recipients share the real treasury actor; real proving, submission and scans on a synthetic local chain. Covers deferred competing preparation, exact quote/pool and auto-funding checks, unchanged observation age/revision, confirmation depth, pending-byte restart, dropped submission waiter and lost send response without replay. Also covers a funded same-height fork, blocked pending submission/preparation, exact retained signed bytes and immutable original transaction facts. Historical source reorgs update SDK state without a monetary-history gate. Bridge quotes in this test are fixture inputs; the chain does not validate consensus. |
+| Full concurrent funding worker | `treasury::lifecycle_tests::worker` | Real scheduler, production Backend, refund derivation, overlapping local HTTP quotes, signed source transactions, unsigned current Base balance observations and actual payment admission. Two groups bootstrap after reopening historical insufficient-funds failures, pending-source passes reuse scans, and consuming a reserve triggers exactly one funded replacement while the prior payment liability remains. A client-scoped test-only bridge codec supports synthetic-chain addresses; production stays mainnet-only. |
+| Deposit after insufficient funds | `treasury::lifecycle_tests::worker::production_preparation_scans_new_deposit_without_a_readiness_balance_gate` | Readiness accepts a stale low estimate without SDK I/O or input claims. Actual actor preparation scans a newly confirmed synthetic deposit, calculates with SDK-selected funds and retains signed bytes without broadcasting. |
+| Tip-only fork and canonical return | `treasury::lifecycle_tests::same_height_tip_only_reorg_updates_sdk_without_historical_source_gate` | A one-block same-height fork triggers an SDK scan while original confirmation records/bytes remain immutable. No historical source-balance veto or automatic rebroadcast is introduced. Re-mining the exact transaction updates SDK state. |
 | Replacement credit with unresolved old payments | `managed::replacement_credit_survives_restart_without_releasing_old_authorizations` | Concurrent refill allocates one generation; local Base credit survives restart and promotes the replacement while all older signed liabilities remain. |
 | Multi-group bootstrap completion | `deployment::bootstrap::readiness_tests` | Concurrent destination credits across a group-page boundary, incomplete final-page claims, selected-group scope, stable summaries after reopen and captured claims across generation advancement. Both bootstrap and serving ignore historical capital shortages until the current worker reproduces them; stale callbacks cannot block startup. |
-| Refund accounting and expiry journal | Store unit tests and `tests/rotation.rs` | Idempotent capped refund credit, fees retained, snapshot revision guards, operation replacement, backup/restore and crash recovery. |
+| Exact preparation ownership and expiry journal | Store unit tests and `tests/rotation.rs` | No refund-credit ledger; accepted input ownership, retained publication, snapshot revision guards, expiry-proved operation replacement, backup/restore and crash recovery. |
 | Deposit settlement and reorgs | `treasury::regtest::deposit_settlement_and_reorg_recovery` | Actual proofs, configured confirmation depth, same-byte rebroadcast and fail-closed reorg handling against pinned Zebra/Zaino. |
 | High-index refunds and shielding | `treasury::regtest::high_index_refunds_and_separate_shielding` | Derives 32 distinct refund addresses, restores the encrypted wallet, discovers the two high-index funded addresses and shields each independently. |
 | Expired ambiguous source operation | `treasury::regtest::expired_ambiguous_deposit_releases_only_after_chain_proof` | Crashes after send intent, rejects early release and missing inputs, then recovers from synced unspent inputs beyond expiry. Old bytes cannot be broadcast again. |
@@ -32,20 +32,25 @@ Fast synthetic wallet checks use the test-utilities feature without proving or D
 
 ```sh
 scripts/zcash.sh test --offline --features zcash-testutils --lib treasury::expiry
-scripts/zcash.sh test --offline --features zcash-testutils --lib refund_observations
 ```
 
 These check output evidence for transparent, Sapling, Orchard and Ironwood inputs,
-plus refund confirmation/reorg recognition. Actual prepared-transaction input
-selection and chain-based release remain the expiry consensus scenario. The
+including a missing small original input even when the remaining value is sufficient.
+Actual transaction selection and dummy actions are covered by synthetic proving;
+consensus-valid chain release remains the separate expiry consensus scenario. The
 shielding consensus scenario also injects fee-cap and preparation-commit failures,
-checks unchanged mempool/outgoing state and reopens before retrying. Compilation
+checks unchanged mempool and retention of the same completed bytes through local
+publication and reopen, without another calculation. Compilation
 alone does not qualify those Docker-dependent assertions.
 
-Synthetic proving also checks a calculated transaction whose journal commit fails:
-no outgoing transaction becomes durable, further preparation requires reopen, and
-the pre-calculation input state is recovered. See [COVERAGE.md](COVERAGE.md) for
-the exact proving command and recorded qualification results.
+Synthetic proving also checks a calculated transaction whose journal publication
+fails. The existing owner retains completed bytes and the durable accepted-input
+claim; after local publication succeeds, reopen preserves those identical bytes.
+No second calculation or broadcast occurs. Run it with:
+
+```sh
+scripts/zcash.sh test --offline --features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1
+```
 
 `scripts/check.sh` includes the synthetic-chain source lifecycle. Run it separately
 without Docker or external services:

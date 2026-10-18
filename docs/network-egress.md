@@ -210,8 +210,8 @@ without joining blocking scan/proving workers; it does not release liabilities o
 run wallet cleanup. Library serving returns a typed `ForcedShutdown` error for
 its embedding process to handle. A signed-request timeout still leaves durable unresolved exposure.
 
-Managed pool gates protect ownership, signing and durable journals. Advisory Base
-reads and signed HTTP submission run outside the gate. Balance publication never
+The serialized Store protects payer ownership and journal-before-disclosure.
+Advisory Base reads and signed HTTP submission run outside that Store worker. Balance publication never
 grants financial authority; slow seller responses do not serialize other calls.
 The existing 128 foreground-owner permits are acquired before retained MCP tasks
 are spawned and held through response-body conversion and result construction.
@@ -221,8 +221,9 @@ does not release its permit. Excess work is rejected before provider I/O; after
 owned work finishes the same capacity is available again. This bounds process
 work and response memory, not spending or treasury capital.
 Every signed authorization remains chargeable until its canonical outcome is known.
-A separate reconciliation owner keeps bounded wallet and authorization reads moving
-independently; cancellation of a response waiter does not abandon its accepted pass.
+A separate reconciliation owner keeps bounded advisory wallet reads moving
+independently; historical authorization reads are qualification-only. Cancellation
+of a response waiter does not abandon its accepted pass.
 Help coalesces requests for the same document without blocking other resources.
 Required catalogs must succeed; explicitly optional remote failures are reported
 as unavailable during serving. The rolling catalog-load limit defaults to 2
@@ -431,7 +432,7 @@ financial or qualification authority.
 | Optional cover episodes and three-second task cleanup | Bound optional unsigned work; cannot cut off the real paid call. |
 | Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. |
 | Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
-| Treasury background sync cadence | Independent 60-second cadence is scheduled from the last successfully persisted scan completion, including command-triggered scans. Reuse, failed/cancelled scans and unrelated commands do not reset it. Long post-scan command work cannot postpone an already-due tick. This scheduling clock never renews the original sync observation or financial authority. |
+| Treasury background sync and completed publication cadence | Completed SDK results retry identical local publication on the existing 60-second cadence; owned shutdown retains that retry without another calculation or submission. Independent 60-second sync cadence is scheduled from the last successfully persisted scan completion, including command-triggered scans. Reuse, failed/cancelled scans and unrelated commands do not reset it. Long post-scan command work cannot postpone an already-due tick. This scheduling clock never renews the original sync observation or financial authority. |
 | Sync mempool drain window | Returns control while scan workers remain, not a whole-sync deadline. |
 
 Buffered response limits remain: default API 16 MiB, help 4 MiB and catalog 32 MiB,

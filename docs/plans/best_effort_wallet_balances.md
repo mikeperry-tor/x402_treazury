@@ -8,7 +8,9 @@ branch `best_effort_wallet_balances`, based on
 `49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. BE02 (`798b211`, fixup `0951464`) and BE03 (`879d712`, fixup `59f8317`)
 passed independent exact-commit and combined payment-transition review. BE04 (`fb4667a`, fixups `fb7cc7d` and `46092e7`) passed exact independent review
 and focused acceptance. BE05 and its exact fixup have passed review and focused
-acceptance; BE06 is in progress and BE07 remains pending.
+acceptance. BE06 (`ce62463` with independently reviewed fixups through `58bdf7a`)
+passed focused acceptance and the combined BE04/BE06 architecture gate. BE07
+integration/documentation is implemented; standard checks and final review remain pending.
 
 Cross-wallet repetition after an insufficient-funds response is explicitly accepted,
 even when the first authorization remains chargeable and both attempts could charge
@@ -538,6 +540,36 @@ each attempt under its original job/pool permit; missing facts stay unknown. Mod
 reports mark removed monetary projections unavailable and retain historical report
 readers. Advisory estimate damage and stale phases cannot become signing gates.
 
+BE06 exact review accepted `ce62463` and fixup `ad15ed4`. The fixup removes
+remaining unconditional wall-clock reads from deadline-free shielding/expiry release
+and preserves exact historical report shapes. The clock boundary test rejects an
+unavailable clock only when an external deadline needs it. Focused historical/current
+accounting, original-permit attribution and corrected live-preset tests pass.
+BE05 fixup `3538bba` removes the deleted setting from two tracked live examples;
+BE02 fixup `6a890c2` corrects the retained funding-stop diagnostic. Both passed
+independent exact review. BE03 fixup `89997d9` preserves typed empty-payer
+unavailability before I/O so deferred catalog/relay work can wait without consuming
+an attempt; its independent exact review passed. No new policy guard was added.
+
+BE06 follow-up review accepted fixture fixups `12dde67` and `afb100b`, then
+runtime fixup `decc376`. The real SDK lifecycle exposed a known proposal rejection
+leaving PREPARING: the old QUOTED-only check wrongly vetoed a later permitted,
+unstarted attempt. Current claim/quote/permission and actual accepted/outgoing
+ownership now determine that boundary, with no phase/state authority. The redundant
+pending-source refresh/recheck and its unused clock reads are deleted; actual actor
+preparation still owns SDK synchronization. Lifecycle fixtures admit ordinary scalar
+latest reads, wait for real poll progress and distinguish read-only readiness from
+SDK calculation. No new runtime timer, balance check or spending ceiling was added.
+
+BE06 final acceptance and combined architecture gate passed at `58bdf7a`:
+rotation 18 passed/one subprocess helper ignored, submission one passed, real SDK
+proving one passed (three funding/publication scenarios), synthetic SDK/production
+worker lifecycle four passed, Store funding 19 passed and funding library 25 passed.
+Earlier focused qualification, treasury publication, report/accounting and preset
+checks passed. The unused pending projection/query was deleted in reviewed fixup
+`58bdf7a`. Fresh complexity artifact `20261018T033519Z-163a9c12` is complete.
+No Docker, live funding or private-state conversion was performed.
+
 ### BE07: Integration and documentation
 
 Reconcile call sites, configuration and status output; run the standard default-build
@@ -639,6 +671,26 @@ transition, BE04/BE06 source ownership and accounting removal, and BE07 integrat
 Include complexity measurements and the relevant acceptance below at each gate.
 The final fixup analysis must distinguish deleted responsibilities from complexity
 merely moved into other helpers.
+
+BE07 complete-chain complexity review uses source-matched artifact
+`20261018T033519Z-163a9c12` (322 files, 6,446 callable spaces), against `49566df`.
+Scores below are inclusive CogC/CycC; nested rows are not additive.
+
+| Responsibility | Baseline → current | Disposition |
+| --- | --- | --- |
+| `collect_refunds` | 20/21 → deleted | Refund credits, historical return revalidation and monetary repair are removed. Explicit SDK shielding remains 6/39. |
+| Source orchestration | 22/57 → 40/81 | Coordinates original accepted calculation, valid first submission, actual protocol expiry and observation; no second publisher/repair engine. |
+| Quoted preparation | 5/20 → 3/14 | Removed redundant refresh/recheck and unused clocks; the actual actor owns SDK synchronization. |
+| Funding inventory / dispatch | 31/31 → 31/31; 22/28 → 22/28 | Retained paged lane ownership, scoped errors and independent work; monetary closure consumers deleted. |
+| Maintenance / per-wallet read | 29/37 → 41/50; 14/29 → 1/9 | Advisory latest balance reads, post-failure follow-up and retained concurrent owners replace canonical history/readiness repair. Qualification history remains separately authorized. |
+| Payment dispatch | 17/30 → 28/44 | Each captured eligible payer once, identity-bound challenge/signature, accepted possible multiple charges and monotonic submission progress. |
+| SDK preparation / local Store publication | 3/61 → 8/55; 6/38 → 4/25 | SDK selects funds; original-input ownership replaces monetary reservation. Completed-result retention adds 3/7, identical publication 2/10 and owned close 4/6, a real failure/cancellation responsibility. |
+| Initialization / serving / deferred runtime | 45/49 → 45/49; 24/41 → 24/41; 22/24 → 22/24 | Existing capability containment, listener binding and single cleanup owner retained; no replacement lifecycle framework. |
+| Report baseline continuity | 14/21 → 27/29 | Both historical read-only reports and current immutable preparation/transaction identity remain; deleted projections are unavailable. |
+
+The increased coordinating scores are disclosed rather than split only for scoring.
+Independent reviews examine these full chains and verify deletion of the blocking
+predicates and accounting tables. R01/R02 remain explicitly unfinished.
 
 ## Required focused acceptance
 

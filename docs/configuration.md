@@ -328,7 +328,8 @@ power for less observation work; it does not bound cumulative stranded capital.
 Funding capital comes from actual spendable treasury funds after confirmations,
 reservations, liabilities and fees. Displayed total balance is not spendable
 capacity. Adding spendable ZEC restores capacity without another aggregate-budget
-setting. `auto_fund=false` pauses new funding, not eligible retirement. Keep group
+setting. `auto_fund=false` pauses new funding. Ordinary scalar maintenance does
+not invoke permanent retirement. Keep group
 payment caps, per-operation ZEC/output/fee safeguards, explicit funding controls
 and separately authorized qualification-run limits.
 
@@ -403,7 +404,7 @@ payment authorizations can cause earlier reserve consumption.
 
 Ordinary enabled serving binds available tools before starting funding;
 small and large reserve funding may finish in either order. An empty managed pool
-returns typed unavailability until confirmed capacity exists. No ACTIVE wallet is
+returns typed unavailability until an eligible funded payer exists. No ACTIVE wallet is
 required: a funded READY reserve can serve immediately. Unsigned requests do not
 promote wallets or create replacement vacancies. `wallet bootstrap` instead
 captures the enabled slot generations and waits for those original
@@ -704,8 +705,8 @@ seconds Tor. Both settings work in either mode; there is no Tor read-timeout flo
 Read timeout accepts 1..86400 seconds at network/source-management level and
 positive fractional seconds at provider level. Connection timeout accepts 1..300.
 Base RPCs, chain views and receipt verification have no separate total deadline;
-they use these connection and read-inactivity limits. Chain freshness checks,
-transaction expiry and qualification deadlines remain independent. Managed payment
+they use these connection and read-inactivity limits. Protocol transaction expiry
+and qualification deadlines remain independent. Managed payment
 admission has no total timeout; legacy wallet `wait_seconds` is ignored with a
 warning and omitted from effective configuration.
 

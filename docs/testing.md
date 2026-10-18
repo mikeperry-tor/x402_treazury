@@ -108,8 +108,9 @@ concurrent quote acquisition, refund derivation, bootstrap completion and signed
 payment-triggered replacement funding, with scan-reuse and no-replay assertions.
 Reopened insufficient-funds diagnostics cannot block bootstrap or serving before
 the current worker rechecks them. A synthetic deposit regression verifies that
-a preparation scan discovers a newly confirmed deposit despite a previously saved
-low estimate, without creating a transaction or input claim.
+readiness accepts a previously saved low estimate without a balance gate. Actual
+actor preparation then scans a newly confirmed deposit and calculates with SDK
+inputs without broadcasting.
 Default fixtures cover concurrent
 replacement allocation/credit with retained old payment liabilities and paged,
 scoped bootstrap completion after reopen; see [LIFECYCLE.md](../tests/LIFECYCLE.md).
