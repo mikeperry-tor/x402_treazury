@@ -1607,9 +1607,6 @@ mod completion_tests {
                 )
                 .unwrap();
             assert_eq!(state, "COMPLETE");
-            store
-                .close_unprepared_funding_for_operation(&job.id, &job.operation_id)
-                .unwrap();
             assert!(
                 store
                     .reauthorize_closed_funding_for_operation(&job.id, &job.operation_id, 1)

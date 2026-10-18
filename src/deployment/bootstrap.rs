@@ -358,7 +358,7 @@ fn assess_startup_paths(
             {
                 "another treasury transaction to confirm"
             } else {
-                "confirmed USDC funding"
+                "initial USDC credit"
             };
             tracing::info!(wallet=%group.name,size=%path.wallet_type,status=?path.job.phase,waiting_for,"Bootstrap funding in progress");
             tracing::debug!(wallet=%group.name,job_id=%path.job.id,phase=?path.job.phase,disposition=?disposition,source_submission=path.operation.as_ref().map(|o|o.submission.as_str()),"Bootstrap funding observation details");
@@ -480,7 +480,7 @@ mod tests {
             balance_estimates: vec![],
         };
         let expected: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/capacity/bootstrap-output-v2.json"
+            "../../tests/fixtures/capacity/bootstrap-output-v3.json"
         ))
         .unwrap();
         assert_eq!(serde_json::to_value(summary).unwrap(), expected);

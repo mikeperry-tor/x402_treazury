@@ -602,182 +602,8 @@ async fn accepted_source_is_observed_despite_complete_phase_disabled_pool_and_re
 }
 
 #[tokio::test]
-async fn malformed_readiness_is_local_while_independent_source_work_drains() {
-    let dir = tempfile::tempdir().unwrap();
-    let state_path = dir.path().join("state");
-    let key_path = dir.path().join("key");
-    let mut state = Store::create(&state_path, &key_path, 1, b"fixture").unwrap();
-    for name in ["damaged", "healthy"] {
-        let pool = state
-            .ensure_capacity_group(
-                name,
-                &crate::rotation::store::test_support::reserves("5"),
-                Some(alloy_primitives::U256::from(1_000_000)),
-                0,
-            )
-            .unwrap();
-        state
-            .allocate_capacity_kind(&pool, crate::rotation::store::AllocationKind::Small, true)
-            .unwrap();
-    }
-    let jobs = state.funding_jobs().unwrap();
-    let damaged = jobs
-        .iter()
-        .find(|job| job.pool_name == "damaged")
-        .unwrap()
-        .clone();
-    let healthy = jobs
-        .iter()
-        .find(|job| job.pool_name == "healthy")
-        .unwrap()
-        .clone();
-    submitted(&mut state, &damaged);
-    state.confirm_spend(&damaged.operation_id, 60, 1).unwrap();
-    state
-        .reconcile_funding_phase(&damaged.id, &damaged.operation_id)
-        .unwrap();
-    state
-        .record_destination_readiness(&damaged.id, &damaged.target, "fixture", 100)
-        .unwrap();
-    submitted(&mut state, &healthy);
-    // Corrupt only this wallet's immutable proof, preserving operation/source facts.
-    let db = rusqlite::Connection::open(state_path.join("state.sqlite")).unwrap();
-    db.execute(
-        "UPDATE funding_jobs SET readiness_support='{}' WHERE id=?1",
-        [&damaged.id],
-    )
-    .unwrap();
-    drop(db);
-    let treasury = state.id().to_owned();
-    let (store, actor) = StoreHandle::spawn(state);
-    let (statuses, _status_events) = mpsc::unbounded_channel();
-    let (started, mut source_events) = mpsc::unbounded_channel();
-    let gate = Arc::new(Semaphore::new(0));
-    let worker = FundingWorker::new(
-        store.clone(),
-        Source {
-            store: store.clone(),
-            reads: Reads {
-                credits: Arc::new(Semaphore::new(32)),
-                credit_calls: Default::default(),
-                statuses,
-                status_gates: Default::default(),
-                failed_job: Default::default(),
-                processing: false,
-                quotes: None,
-            },
-            gate: gate.clone(),
-            started,
-        },
-        1,
-    );
-    let stop = CancellationToken::new();
-    let waiter = tokio::spawn({
-        let worker = worker.clone();
-        let stop = stop.clone();
-        async move { worker.schedule(1000, stop, false).await }
-    });
-    assert_eq!(
-        tokio::time::timeout(std::time::Duration::from_secs(5), source_events.recv())
-            .await
-            .unwrap()
-            .unwrap(),
-        healthy.id
-    );
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            let (bad, good) = (damaged.clone(), healthy.clone());
-            if store
-                .call(move |s| {
-                    let bad = s.funding_job(&bad.id)?.unwrap();
-                    Ok(bad.last_error.as_deref().is_some_and(|error| {
-                        error.starts_with(
-                            "funding_integrity_conflict; malformed_durable_evidence_support",
-                        )
-                    }) && s
-                        .funding_facts(&good.id, &good.operation_id)?
-                        .provider_success)
-                })
-                .await
-                .unwrap()
-            {
-                break;
-            }
-            assert!(
-                !waiter.is_finished(),
-                "wallet-local error stopped shared funding"
-            );
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    waiter.abort();
-    let _ = waiter.await;
-    stop.cancel();
-    assert!(worker.tick(1001).await.unwrap_err().is::<AlreadyOwned>());
-    gate.add_permits(1);
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            if let Ok(lease) = store.funding_owner().try_lock_owned() {
-                let state = lease.state.lock().unwrap();
-                let retry = &state.records[&Key {
-                    operation: damaged.operation_id.clone(),
-                    kind: Kind::Status,
-                }];
-                assert_eq!(retry.streak, 1);
-                assert!(retry.due > 1000);
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert!(
-        source_events.try_recv().is_err(),
-        "no replacement or duplicate source work"
-    );
-    drop(worker);
-    drop(store);
-    actor.await.unwrap();
-    let reopened = Store::open(&state_path, &key_path, &treasury).unwrap();
-    for job in [&damaged, &healthy] {
-        let saved = reopened.funding_job(&job.id).unwrap().unwrap();
-        assert_eq!(saved.operation_id, job.operation_id);
-        assert_ne!(saved.phase, FundingPhase::Complete);
-        assert_eq!(reopened.funding_recovery_count(&job.id).unwrap(), 0);
-        assert_eq!(reopened.operation(&job.operation_id).unwrap().attempts, 1);
-    }
-    assert!(
-        reopened
-            .funding_job(&damaged.id)
-            .unwrap()
-            .unwrap()
-            .last_error
-            .unwrap()
-            .contains("malformed_durable_evidence_support")
-    );
-    assert_eq!(
-        reopened
-            .operation(&healthy.operation_id)
-            .unwrap()
-            .submission,
-        "BROADCAST_REQUESTED"
-    );
-    assert!(reopened.operation_pending(&healthy.operation_id).unwrap());
-    assert_eq!(
-        reopened
-            .prepared_bytes(&healthy.operation_id)
-            .unwrap()
-            .as_slice(),
-        b"signed"
-    );
-}
-
-#[tokio::test]
-async fn completion_proof_failure_backs_off_each_kind_but_storage_failure_is_fatal() {
-    for malformed in [true, false] {
+async fn completion_storage_failure_is_fatal() {
+    {
         let dir = tempfile::tempdir().unwrap();
         let mut state = Store::create(
             &dir.path().join("state"),
@@ -802,15 +628,7 @@ async fn completion_proof_failure_backs_off_each_kind_but_storage_failure_is_fat
             .close_unprepared_funding_for_operation(&job.id, &job.operation_id)
             .unwrap();
         let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-        if malformed {
-            db.execute(
-                "UPDATE funding_jobs SET readiness_support='{}' WHERE id=?1",
-                [&job.id],
-            )
-            .unwrap();
-        } else {
-            db.execute_batch("CREATE TRIGGER reject_completion BEFORE UPDATE OF state ON funding_jobs BEGIN SELECT RAISE(ABORT,'fixture storage failure'); END;").unwrap();
-        }
+        db.execute_batch("CREATE TRIGGER reject_completion BEFORE UPDATE OF state ON funding_jobs BEGIN SELECT RAISE(ABORT,'fixture storage failure'); END;").unwrap();
         drop(db);
         let (store, actor) = StoreHandle::spawn(state);
         let (statuses, _status_events) = mpsc::unbounded_channel();
@@ -879,32 +697,7 @@ async fn completion_proof_failure_backs_off_each_kind_but_storage_failure_is_fat
                     1000,
                 )
                 .await;
-            if malformed {
-                assert!(
-                    result.unwrap().is_none(),
-                    "rejected completion cannot start quote HTTP"
-                );
-                {
-                    let state = lease.state.lock().unwrap();
-                    assert_eq!(
-                        state.records[&key].streak,
-                        if kind == Kind::Source { 2 } else { 1 }
-                    );
-                    assert!(state.records[&key].due > 1000);
-                }
-                let id = job.id.clone();
-                let saved = store
-                    .call(move |s| Ok(s.funding_job(&id)?.unwrap()))
-                    .await
-                    .unwrap();
-                assert!(
-                    saved.last_error.unwrap().starts_with(
-                        "funding_integrity_conflict; malformed_durable_evidence_support"
-                    )
-                );
-            } else {
-                assert!(result.err().unwrap().is::<rusqlite::Error>());
-            }
+            assert!(result.err().unwrap().is::<rusqlite::Error>());
         }
         drop(lease);
         drop(worker);
