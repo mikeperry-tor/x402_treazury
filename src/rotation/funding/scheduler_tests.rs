@@ -429,10 +429,13 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                 .unwrap()
                 .unwrap();
             assert_eq!(status_events.try_recv().unwrap(), sibling.id);
-            assert!(credits.load(Ordering::SeqCst) >= 2);
+            // Only the accepted sibling can receive credit; neither the old
+            // unprepared quote nor its replacement has disclosed source work.
+            assert_eq!(credits.load(Ordering::SeqCst), 1);
             // Reuse the actual owner after the raced pass. Any new work must
             // bind to the replacement; captured stale work cannot prepare/send.
             worker.tick(2000).await.unwrap();
+            assert_eq!(credits.load(Ordering::SeqCst), 2);
             let old_check = old.clone();
             let sibling_check = sibling.clone();
             let expected = replacement.clone();
@@ -735,11 +738,38 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
         )
         .unwrap();
     }
-    let mut jobs = store.funding_jobs().unwrap();
+    let unsubmitted = store.funding_jobs().unwrap();
+    assert!(unsubmitted.len() > RECORDS);
+    // Credit inventory must represent accepted work. Keep a separate equally
+    // large unprepared inventory to exercise uncapped serialized quote progress.
+    for i in 0..(RECORDS / 2 + 2) {
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut store,
+            &format!("accepted{i}"),
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+    }
+    let mut jobs: Vec<_> = store
+        .funding_jobs()
+        .unwrap()
+        .into_iter()
+        .filter(|job| job.pool_name.starts_with("accepted"))
+        .collect();
     jobs.sort_by(|a, b| a.id.cmp(&b.id));
     assert!(jobs.len() > RECORDS);
     let target = jobs.last().unwrap().clone();
-    submitted(&mut store, &target);
+    for job in &jobs {
+        submitted(&mut store, job);
+        if job.id != target.id {
+            store.confirm_spend(&job.operation_id).unwrap();
+            store
+                .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Success, 900)
+                .unwrap();
+        }
+    }
     let store_id = store.id().to_owned();
     let (store, actor) = StoreHandle::spawn(store);
     let (status_tx, mut status_rx) = mpsc::unbounded_channel();
@@ -802,9 +832,13 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
     let error = worker.tick(1001).await.unwrap_err();
     assert!(error.is::<AlreadyOwned>());
     assert_eq!(credit_calls.load(Ordering::SeqCst), 4);
-    source_gate.add_permits(jobs.len());
+    source_gate.add_permits(unsubmitted.len() + 1);
     credits.add_permits(jobs.len());
-    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    // More than RECORDS accepted credits must cross a minute cadence before
+    // completed scheduling records can be evicted. This is a fixture allowance
+    // for cache rollover, never a deadline for accepted runtime work.
+    let rollover_allowance = std::time::Duration::from_secs(CREDIT_POLL_SECONDS + 15);
+    tokio::time::timeout(rollover_allowance, async {
         loop {
             if let Ok(lease) = store.funding_owner().try_lock_owned() {
                 drop(lease);
@@ -822,7 +856,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
     }
     assert_eq!(
         source_steps,
-        jobs.len(),
+        unsubmitted.len() + 1,
         "a finite pass must not cap total serialized source progress"
     );
     let id = target.id.clone();
@@ -871,7 +905,10 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
         },
         1,
     );
-    reopened_worker.tick(1001).await.unwrap();
+    tokio::time::timeout(rollover_allowance, reopened_worker.tick(1001))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), jobs.len());
     assert!(observed_status.try_recv().is_err());
     let facts = store
@@ -1066,7 +1103,8 @@ async fn continuous_status_cadence_keeps_rolling_while_other_lanes_stay_owned() 
             jobs[1].id
         );
     }
-    assert_eq!(credit_calls.load(Ordering::SeqCst), 2);
+    // The unprepared sibling owns source work but has no credit work yet.
+    assert_eq!(credit_calls.load(Ordering::SeqCst), 1);
     stop.cancel();
     source_gate.add_permits(1);
     tokio::time::timeout(std::time::Duration::from_secs(5), task)
@@ -1157,7 +1195,8 @@ async fn quote_saturation_releases_failed_slot_and_single_pass_drains_all_reads(
         pending.push(event(&mut quote_events).await);
     }
     assert_eq!(event(&mut status_events).await, submitted_job.id);
-    wait_until(|| credit_calls.load(Ordering::SeqCst) == jobs.len()).await;
+    // Unsigned quote work must not create destination balance polling.
+    wait_until(|| credit_calls.load(Ordering::SeqCst) == 1).await;
     assert!(
         !task.is_finished(),
         "once must retain outstanding quote reads"
@@ -1610,7 +1649,7 @@ async fn captured_inventory_excludes_new_rows_until_a_continuous_pass() {
                 assert!(observed.insert(id));
             }
             assert_eq!(observed, BTreeSet::from([initial[0].id.clone()]));
-            assert_eq!(credits.load(Ordering::SeqCst), initial.len());
+            assert_eq!(credits.load(Ordering::SeqCst), 1);
             let mut sources = BTreeSet::new();
             while let Ok(id) = source_events.try_recv() {
                 assert!(sources.insert(id));
@@ -1942,9 +1981,11 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
                 })
                 .await
                 .unwrap();
-                wait_until(|| credits.load(Ordering::SeqCst) >= before + 2).await;
+                // The fast status lane resumes after the inventory outage,
+                // while credit keeps its independent minute cadence.
                 let observed = event(&mut status_events).await;
                 assert!(jobs.iter().any(|job| job.id == observed));
+                assert_eq!(credits.load(Ordering::SeqCst), before);
                 assert!(worker.tick(1001).await.unwrap_err().is::<AlreadyOwned>());
                 assert!(source_events.try_recv().is_err());
                 stop.cancel();
@@ -2288,3 +2329,6 @@ async fn exited_funding_task_is_replaced_with_same_store_and_shutdown_stops_repl
         actor.await.unwrap();
     }
 }
+
+#[path = "credit_polling_tests.rs"]
+mod credit_polling;

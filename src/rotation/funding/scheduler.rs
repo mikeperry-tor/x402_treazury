@@ -14,6 +14,9 @@ use std::{
 const CREDIT_READS: usize = 4;
 const STATUS_READS: usize = 4;
 const QUOTE_READS: usize = 4;
+// Destination settlement is asynchronous; repeat Base credit reads at most once
+// a minute per accepted operation, independently of source/provider progress.
+const CREDIT_POLL_SECONDS: u64 = 60;
 // Bounds only cached scheduling metadata. Expired, inactive records can be
 // forgotten; in-flight ownership and an unelapsed backoff cannot be evicted.
 const RECORDS: usize = 256;
@@ -73,7 +76,7 @@ struct Completion<Q> {
 // step includes quote prerequisites; the Quote kind is the subsequent HTTP read.
 fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
     [
-        !facts.initial_credit_recorded,
+        facts.credit_needed(),
         facts.status_needed(),
         facts.source_pending
             || facts.preparation_accepted
@@ -850,7 +853,13 @@ impl State {
         let delay = poll
             .saturating_mul(1u64 << record.streak.min(6))
             .min(300)
-            .max(if job.timed_out { 60 } else { 1 });
+            .max(if kind == Kind::Credit {
+                CREDIT_POLL_SECONDS
+            } else if job.timed_out {
+                60
+            } else {
+                1
+            });
         let jitter = job.id.bytes().map(u64::from).sum::<u64>() % poll.saturating_add(1).max(1);
         record.due = now.saturating_add(delay).saturating_add(jitter);
         record.error = error;

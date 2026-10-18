@@ -599,6 +599,15 @@ The first positive initial credit permanently consumes that funding claim, even
 below target. No later debit, partial return, disablement or restart grants a top-up.
 Source observation continues independently using exact original ownership.
 
+Initial-credit polling begins only after durable source acceptance, not for fresh
+allocations or unsigned quotes awaiting spendable ZEC. Accepted preparation and
+signed or previously submitted work remain observable across restart even when
+their current phase is stale or their source is already confirmed. Base credit
+reads start immediately for that work and repeat no sooner than 60 seconds after
+completion, plus existing jitter/backoff; unrelated source or provider-status
+progress cannot shorten this interval. This does not change the first-positive
+credit rule or grant authority for another deposit.
+
 Accepted calculations, exact selected inputs, signed bytes and submission intent
 survive cancellation and failed local acknowledgment. Source expiry recovery checks
 every selected input and finite inclusive consensus expiry; a refund is never proof

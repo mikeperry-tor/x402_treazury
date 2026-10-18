@@ -100,6 +100,15 @@ pub struct FundingFacts {
     pub source_attempts: u32,
 }
 impl FundingFacts {
+    /// Fresh allocations cannot receive swap credit before source work is accepted.
+    /// Keep uncertain, completed and recovered source attempts observable across restart.
+    pub(crate) fn credit_needed(&self) -> bool {
+        !self.initial_credit_recorded
+            && (self.preparation_accepted
+                || self.source_pending
+                || self.source_submission.is_some()
+                || self.source_attempts > 0)
+    }
     pub fn provider_review_required(&self) -> bool {
         self.provider_incomplete
             || (self.provider_success && (self.provider_failed || self.provider_refunded))

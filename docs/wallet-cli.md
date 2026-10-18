@@ -328,6 +328,15 @@ a durable refresh marker and allocates a fresh operation/refund identity.
 Historical unclassified recovery records still count. Signed operations never refresh. Insufficient shielded
 spendable funds leave the job unprepared; another attempt still needs current authority.
 
+Fresh allocations and unsigned funding quotes do not poll Base for USDC credit.
+The first credit check runs when durable source work has been accepted, including
+uncertain preparation and signed or previously submitted transactions restored
+after restart. Further Base credit checks wait at least 60 seconds after the
+previous read completes, plus the existing per-job jitter (up to five seconds with
+the default polling setting). Source reconciliation and NEAR status checks keep
+their independent cadence. This observation interval is not an expected settlement
+time or a deadline, and it never stops observation of accepted financial work.
+
 `swap_timeout_seconds` is a health-warning threshold, default 1,800 seconds from
 the first durable broadcast intent, not an abort deadline. When exceeded,
 status shows `timed_out` and pool `funding_degraded`; reconciliation continues at
@@ -543,9 +552,11 @@ publishes an advisory estimate; later credit observations cannot reopen it.
 Credit-persistence messages distinguish missing credit and local state failures
 from RPC access failures.
 An SDK proposal rejected for insufficient funds defers initial funding, while
-existing Base wallets remain usable. Background reconciliation backs off after failures from 30
-seconds up to five minutes; successful polls return to the normal five-second
-interval. Failed checks retain pending ownership. Saved estimates never grant payment
+existing Base wallets remain usable. Background funding observations retain independent
+failure backoff up to five minutes, plus per-job jitter. Successful observations
+reset only their own error streak: source and provider-status checks use the
+configured polling cadence (five seconds by default), while Base initial-credit
+checks retain their one-minute floor. Failed checks retain pending ownership. Saved estimates never grant payment
 authority or prohibit an otherwise authorized signing attempt.
 
 Unsigned `eth_chainId`, `eth_getBlockByNumber` and `eth_call` requests may retry
