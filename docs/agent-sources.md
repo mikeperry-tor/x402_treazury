@@ -14,8 +14,9 @@ search defaults to five results per page; `query`, `limit` (1–100), and `curso
 support targeted discovery and pagination. A broad search can still return large
 schemas. Provider instructions remain available in the initialization response.
 
-This setting changes tool advertising, not loading or access: startup still loads
-the complete catalog, filters and wallet bindings still apply, and existing direct
+This setting changes tool advertising, not loading or access: all configured
+catalogs still load, with remote catalogs published after listeners bind during
+ordinary deployment serving. Filters and wallet bindings still apply, and existing direct
 tool calls remain supported. It grants no source registration permissions and
 requires no source-management wallet or registry for static listeners. References
 are bound to the listener and process, and dynamic references also bind the source

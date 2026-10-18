@@ -47,11 +47,14 @@ agents control over payment headers. Schema conversion is not a general-purpose 
 for example, file uploads and asynchronous job orchestration are unsupported.
 
 `src/deployment.rs` validates listeners, filters and wallet references and resolves
-source overrides, listener defaults and optional automatic assignment. Static
-sources load before serving through a rolling queue, defaulting to 2 active loads
-(`startup.catalog_concurrency`, 1..64). Required failures cancel unfinished loads;
-serving can omit an explicitly `optional_startup` remote failure with unavailable
-status in inventory and MCP instructions. Inspection/qualification remain strict. Source
+source overrides, listener defaults and optional automatic assignment. Local
+catalogs load before ordinary deployment serving. Remote catalogs use a
+rolling queue, defaulting to 2 active loads (`startup.catalog_concurrency`, 1..64),
+after listeners bind. Available tools remain callable while remote catalogs and
+pricing are pending; failed remote sources remain unavailable with status in MCP
+instructions. Strict inspection/qualification wait for complete catalogs. The
+synchronous unsigned-serving loader cancels unfinished loads on required failure
+and can omit an explicitly `optional_startup` remote failure. Source
 completion order cannot change the final sorted inventory. All declared sources
 are loaded, including those unused by listeners. Remote aliases share fetching
 and immutable parsed JSON within a load only for the same exact URL, requested

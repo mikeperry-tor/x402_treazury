@@ -574,6 +574,207 @@ sources=['healthy','late']
         api.abort();
     }
 
+    #[tokio::test]
+    async fn required_remote_failure_and_pending_pricing_do_not_block_ordinary_serving() {
+        use axum::{
+            http::{HeaderMap, StatusCode},
+            response::IntoResponse,
+        };
+        use base64::Engine;
+        use std::sync::atomic::AtomicUsize;
+
+        let dir = tempfile::tempdir().unwrap();
+        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", origin.local_addr().unwrap());
+        let entered = CancellationToken::new();
+        let release = CancellationToken::new();
+        let probes = Arc::new(AtomicUsize::new(0));
+        let catalogs = Arc::new(AtomicUsize::new(0));
+        let api = Router::new()
+            .route("/read", get(|headers: HeaderMap| async move {
+                assert!(!headers.contains_key("payment-signature"));
+                assert!(!headers.contains_key("x-payment"));
+                "healthy"
+            }))
+            .route("/probe", get({
+                let entered = entered.clone();
+                let release = release.clone();
+                let probes = probes.clone();
+                move |headers: HeaderMap| {
+                    let entered = entered.clone();
+                    let release = release.clone();
+                    let probes = probes.clone();
+                    async move {
+                        assert!(!headers.contains_key("payment-signature"));
+                        assert!(!headers.contains_key("x-payment"));
+                        probes.fetch_add(1, Ordering::SeqCst);
+                        entered.cancel();
+                        release.cancelled().await;
+                        (StatusCode::PAYMENT_REQUIRED, [("payment-required",
+                            base64::engine::general_purpose::STANDARD.encode(json!({
+                                "accepts":[{"scheme":"exact","amount":"14000","asset":"USDC","network":"eip155:8453"}]
+                            }).to_string()))]).into_response()
+                    }
+                }
+            }))
+            .route("/spec", get({
+                let catalogs = catalogs.clone();
+                move |headers: HeaderMap| {
+                    let catalogs = catalogs.clone();
+                    async move {
+                        assert!(!headers.contains_key("payment-signature"));
+                        assert!(!headers.contains_key("x-payment"));
+                        catalogs.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::SERVICE_UNAVAILABLE
+                    }
+                }
+            }));
+        let api = tokio::spawn(async move { axum::serve(origin, api).await.unwrap() });
+        for (file, route) in [("healthy.json", "/read"), ("priced.json", "/probe")] {
+            std::fs::write(
+                dir.path().join(file),
+                json!({"operations":[{"method":"GET","path":route}]}).to_string(),
+            )
+            .unwrap();
+        }
+        let path = dir.path().join("deployment.toml");
+        std::fs::write(
+            &path,
+            format!(
+                r#"
+version=1
+[wallets.selected]
+mode='static'
+private_key_env='KEY'
+[sources.healthy]
+spec='healthy.json'
+base_url='{base}'
+probe_pricing=false
+[sources.priced]
+spec='priced.json'
+base_url='{base}'
+probe_pricing=true
+[sources.failed]
+spec='{base}/spec'
+base_url='{base}'
+probe_pricing=false
+[servers.one]
+listen='127.0.0.1:0'
+bearer_token_env='TOKEN'
+wallet='selected'
+sources=['healthy','priced','failed']
+"#
+            ),
+        )
+        .unwrap();
+        let env = BTreeMap::from([
+            ("KEY".into(), format!("{:064x}", 2)),
+            ("TOKEN".into(), "fixture".into()),
+        ]);
+        let deployment = tokio::time::timeout(
+            Duration::from_secs(5),
+            Deployment::load_for_serving_with_relay(&path, &env, Default::default()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(!deployment.config.sources["failed"].optional_startup);
+        assert_eq!(deployment.sources.len(), 2);
+        assert_eq!(deployment.pending_sources.len(), 1);
+        let running = deployment.bind(&env).await.unwrap();
+        assert_ne!(running.addresses()[0].1.port(), 0);
+        let catalog = running.deferred.as_ref().unwrap().catalog.clone();
+        let stop = CancellationToken::new();
+        let serving = tokio::spawn(running.serve(stop.clone()));
+        tokio::time::timeout(Duration::from_secs(5), entered.cancelled())
+            .await
+            .unwrap();
+        let initial = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let snapshot = catalog.read();
+                if snapshot.instructions["one"].as_ref().is_some_and(|s| {
+                    s.contains("Source failed: UNAVAILABLE") && !s.contains("PENDING")
+                }) {
+                    break snapshot;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!catalog.publication_failed());
+        assert_eq!(initial.views["one"].len(), 2);
+        let healthy = initial.views["one"]
+            .iter()
+            .find(|t| t.tool.name.starts_with("healthy_"))
+            .unwrap()
+            .clone();
+        assert_eq!(
+            healthy.invoke(&Default::default()).await.unwrap(),
+            "healthy"
+        );
+        assert!(!release.is_cancelled());
+        assert_eq!(probes.load(Ordering::SeqCst), 1);
+        assert_eq!(catalogs.load(Ordering::SeqCst), 1);
+        let error = tokio::time::timeout(Duration::from_secs(5), Deployment::load(&path))
+            .await
+            .unwrap()
+            .err()
+            .expect("strict inspection must reject required remote failure");
+        assert!(
+            format!("{error:#}").contains("source failed: loading spec"),
+            "{error:#}"
+        );
+        assert_eq!(catalogs.load(Ordering::SeqCst), 2);
+        assert_eq!(probes.load(Ordering::SeqCst), 1);
+        release.cancel();
+        let priced = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let snapshot = catalog.read();
+                if snapshot.views["one"].iter().any(|t| {
+                    t.tool.name.starts_with("priced_") && t.tool.description.contains("$0.014")
+                }) {
+                    break snapshot;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(priced.generation > initial.generation);
+        assert_eq!(
+            initial.views["one"]
+                .iter()
+                .map(|t| &t.tool.name)
+                .collect::<Vec<_>>(),
+            priced.views["one"]
+                .iter()
+                .map(|t| &t.tool.name)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            priced.instructions["one"]
+                .as_ref()
+                .unwrap()
+                .contains("Source failed: UNAVAILABLE")
+        );
+        assert_eq!(
+            healthy.invoke(&Default::default()).await.unwrap(),
+            "healthy"
+        );
+        assert_eq!(probes.load(Ordering::SeqCst), 1);
+        assert_eq!(catalogs.load(Ordering::SeqCst), 2);
+        assert!(!catalog.publication_failed());
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        api.abort();
+        let _ = api.await;
+    }
+
     #[cfg(feature = "zcash")]
     #[tokio::test]
     async fn canonical_capacity_wakes_deferred_publication_in_same_serving_process() {

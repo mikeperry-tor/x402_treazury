@@ -60,22 +60,25 @@ simultaneous large downloads leave headroom when Tor’s prebuilt Conflux capaci
 is unavailable. Current measurements do not establish that mechanism or an optimal
 limit; see [startup qualification](../tests/STARTUP.md). Pricing concurrency is separate.
 
-A free slot starts the next source immediately. Serving waits for catalog loading
-and startup pricing discovery. Sources are required by default: a failure aborts
-startup and cancels unfinished loads. Set `sources.NAME.optional_startup = true`
-to let serving continue after that source’s remote catalog fetch, parse or tool
-generation fails. Stderr and MCP instructions identify the unavailable source;
-its tools are omitted as a complete unit. Local configuration errors remain fatal,
-including unknown exact tool selectors and authored filters selecting no tools
-from a nonempty remote catalog.
+A free slot starts the next source immediately. Ordinary deployment serving loads
+local catalogs, binds listeners and exposes available tools while remote catalogs
+and pricing discovery run in the background. Stderr and MCP instructions identify
+pending or unavailable sources; a failed remote source's tools are omitted as a
+complete unit, including when `optional_startup` is false (the default). Local
+configuration errors remain fatal. Errors discovered when a remote catalog arrives,
+including parsing, tool generation or filter selection, leave that source unavailable.
 An unresolved exact listener selector is deferred only if its name falls
-exclusively under unavailable sources' resolved prefixes (including inherited
+exclusively under pending or unavailable sources' resolved prefixes (including inherited
 prefixes). Unknown namespaces and names also attributable to a ready source
-remain errors; an optional outage cannot hide a required-source typo.
-Inspection, frozen inventories and qualification remain strict. There is no
-background publication or retry; restart to retry unavailable sources. An optional
-source that keeps downloading still occupies its normal slot until completion. Tool ordering and wallet bindings do not depend on
-completion order. `config check`, `catalog tools` and `catalog tags` use the same loader;
+remain errors; an unavailable source cannot hide a ready-source typo.
+Inspection, frozen inventories and qualification wait for complete catalogs and
+remain strict. The synchronous unsigned-serving loader can omit remote failures
+only with `sources.NAME.optional_startup = true`; required failures cancel its
+unfinished loads. Ordinary deployment serving publishes remote catalogs and price
+descriptions as they finish. Failed sources are not retried during the run;
+restart to retry them. A source that keeps downloading occupies its normal slot
+until completion. Tool ordering and wallet bindings do not depend on completion
+order. `config check`, `catalog tools` and `catalog tags` use strict loading;
 `config show` remains offline and reports the effective limit. Progress, source
 fetch/parse and generation timings, and pricing timings go to stderr; a ten-second
 waiting message identifies remaining work. No response content or source URL is
@@ -867,8 +870,10 @@ are sorted by path/method and capped per source. TOML controls are
 `read_timeout_seconds` as the source's other HTTP requests. `probe_methods` accepts GET only. Process-wide concurrency is
 capped at 16, even when sources request a higher limit. Up to 16 sources discover
 prices concurrently; each source uses rolling slots at its own configured limit.
-Completed slots are reused without waiting for a batch. All pricing completes
-before serving, and descriptions are applied without changing inventory order.
+Completed slots are reused without waiting for a batch. Ordinary deployment
+serving publishes price descriptions as discovery completes, without changing
+inventory order. Standalone provider serving and explicit priced inventories wait
+for pricing discovery.
 Sources with no discovered prices reuse their original tool definitions, preserving
 vendor prose and overrides. Kronos disables startup probing by default because
 of its observed slow pricing discovery; a source can explicitly re-enable it.
@@ -1077,7 +1082,7 @@ With `funding.auto_fund=true`, ordinary managed serving starts funding only afte
 listeners bind. Relay-dependent catalogs wait for an existing eligible payer using
 capacity notifications; they consume no relay attempts while waiting and never
 allocate funds themselves. Independent available tools remain callable. Initial
-unsigned catalog loading still precedes serving.
+unsigned remote catalogs and pricing also load after listeners bind.
 Static wallets require external funding. For paid warming, first use
 `wallet bootstrap --config FILE`; warming opens only the wallets resolved for its selected
 sources (including treasury ownership for managed wallets), denies new funding
@@ -1099,8 +1104,9 @@ usable; subsequent requests for that scoped target have at most three attempts
 with a one-second backoff. Once signed submission may have begun, failure
 or an invalid/unattributable envelope disables relay spending across
 all wallets for the run. No uncertain signed request is replayed. A new explicit command or
-process restart starts a new run and can spend again. Required catalog failure
-still aborts startup; pricing failures remain unknown estimates. Existing successful results and
+process restart starts a new run and can spend again. Ordinary deployment serving
+marks a failed remote catalog unavailable; strict inspection and qualification
+still reject incomplete catalogs. Pricing failures remain unknown estimates. Existing successful results and
 fresh cache entries remain usable.
 
 Relay responses must match the target URL and GET method and contain complete JSON

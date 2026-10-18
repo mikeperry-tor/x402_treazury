@@ -5,8 +5,9 @@ failure and caller cancellation closing active requests, untouched queued source
 serial/parallel inventory equality, compatible alias sharing (concurrent and queued),
 strict-limit/timeout separation, shared-download cancellation and fresh loads,
 per-alias overrides/filters/wallets, strict configuration, and JSON stdout with
-progress on stderr. Optional remote failures allow serving with explicit unavailable
-status, while required sources, inspection and qualification stay strict. Its isolated SOCKS subprocess verifies that concurrent
+progress on stderr. The synchronous unsigned-serving loader can omit optional
+remote failures with explicit unavailable status; required sources, inspection and
+qualification stay strict in these synchronous tests. Its isolated SOCKS subprocess verifies that concurrent
 catalog and pricing requests retain origin-based discovery identities: same-origin paths
 share credentials, different origins do not. It does not require real Tor.
 
@@ -22,7 +23,11 @@ The ignored SOCKS child is exercised by its parent. Pricing barriers additionall
 assert a shared 16-request cap, lower per-source limits, rolling progress past a
 stalled endpoint, duplicate-URL coalescing, and cancellation releasing permits.
 The deployment suite verifies concurrent source discovery and complete, ordered
-priced inventories before serving.
+priced inventories through synchronous loading. The `deployment::deferred::tests`
+unit tests cover ordinary deployment serving: listeners bind before slow remote
+catalogs or pricing finish, available tools remain callable, and a required remote
+failure becomes unavailable while strict inspection still rejects it. Pricing
+publication preserves tool order and existing callable snapshots.
 
 ## Reproducible measurement
 
