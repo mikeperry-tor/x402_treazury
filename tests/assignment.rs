@@ -286,11 +286,7 @@ async fn seed_managed_inventory(
             .unwrap();
         if let Some(rpc) = rpc {
             let query = store.chain_query(&pool).unwrap();
-            let view = BaseRpc::new(rpc, 12, 120)
-                .unwrap()
-                .view(query)
-                .await
-                .unwrap();
+            let view = BaseRpc::new(rpc, 12).unwrap().view(query).await.unwrap();
             store.reconcile_pool(&pool, view).unwrap();
         }
     }

@@ -83,7 +83,7 @@ impl Fixture {
             ManagedPool::new(
                 store.clone(),
                 group.clone(),
-                BaseRpc::new(&format!("{endpoint}/rpc"), 12, 120).unwrap(),
+                BaseRpc::new(&format!("{endpoint}/rpc"), 12).unwrap(),
                 crate::payment::SpendPolicy {
                     max_atomic: Some(U256::from(100)),
                 },
@@ -174,7 +174,7 @@ async fn fixture(blocked: bool, fail: bool) -> Fixture {
         ManagedPool::new(
             store.clone(),
             group.clone(),
-            BaseRpc::new(&format!("{endpoint}/rpc"), 12, 120).unwrap(),
+            BaseRpc::new(&format!("{endpoint}/rpc"), 12).unwrap(),
             crate::payment::SpendPolicy {
                 max_atomic: Some(U256::from(100)),
             },

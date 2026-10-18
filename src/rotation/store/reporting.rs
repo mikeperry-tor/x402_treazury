@@ -5,12 +5,10 @@ use super::*;
 pub struct RuntimeBalanceEvidence {
     pub confirmed: BalancePointStatus,
     pub latest: BalancePointStatus,
-    pub valid_until: u64,
     pub network: String,
     pub asset: String,
     pub endpoint: String,
     pub confirmations: u64,
-    pub fresh: bool,
     pub compatible: bool,
     pub unavailable_reason: Option<String>,
 }
@@ -65,17 +63,16 @@ impl RetirementAccounting {
     }
 }
 
-pub(super) fn runtime_status(store: &Store, checked_at: u64) -> Result<Status> {
+pub(super) fn runtime_status(store: &Store) -> Result<Status> {
     let mut status = read_status(&store.db)?;
     for wallet in status.pools.iter_mut().flat_map(|pool| &mut pool.addresses) {
         let Some((_, certificate)) = store.evidence_cache.get(&wallet.id) else {
             continue;
         };
         let observation = certificate.observation();
-        let fresh = checked_at <= observation.valid_until;
         let (compatible, unavailable_reason) =
             match evidence::check_balance(&store.db, store.evidence_namespace, certificate) {
-                Ok(_) => (true, (!fresh).then(|| "evidence_expired".into())),
+                Ok(_) => (true, None),
                 Err(error) => {
                     match error.downcast_ref::<super::super::base::evidence::EvidenceFailure>() {
                         Some(reason) => (false, Some(reason.to_string())),
@@ -86,12 +83,10 @@ pub(super) fn runtime_status(store: &Store, checked_at: u64) -> Result<Status> {
         wallet.runtime_balance_evidence = Some(RuntimeBalanceEvidence {
             confirmed: (&observation.confirmed).into(),
             latest: (&observation.latest).into(),
-            valid_until: observation.valid_until,
             network: observation.network.clone(),
             asset: observation.asset.clone(),
             endpoint: observation.endpoint.clone(),
             confirmations: observation.confirmations,
-            fresh,
             compatible,
             unavailable_reason,
         });

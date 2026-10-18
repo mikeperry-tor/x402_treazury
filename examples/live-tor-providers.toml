@@ -20,7 +20,6 @@ indexer_url_env = "ZCASH_INDEXER_URL"
 submission_url_env = "ZCASH_SUBMISSION_URL"
 max_refund_shielding_fee_zec = "0.0003"
 confirmations = 3
-max_sync_age_seconds = 300
 [funding]
 auto_fund = false
 confidentiality = "public"

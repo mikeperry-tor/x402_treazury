@@ -12,14 +12,12 @@ state_dir = "../../state/public-demo"
 # Zcash endpoints use the built-in default unless explicitly overridden.
 max_refund_shielding_fee_zec = "0.0003"
 confirmations = 3
-max_sync_age_seconds = 300
 
 [funding]
 auto_fund = false # Change only after explicitly approving the funded test.
 confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
 base_confirmations = 12
-base_max_block_age_seconds = 120
 slippage_bps = 100
 poll_seconds = 5
 swap_timeout_seconds = 1800

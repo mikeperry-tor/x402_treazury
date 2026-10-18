@@ -1159,3 +1159,8 @@ recognized USDC uses six decimal places. Authored
 description overrides apply last, and description limits remain explicit.
 Cached prices are informational: each paid invocation still obtains a fresh
 challenge and enforces its spend cap before signing.
+
+`treasury.max_sync_age_seconds` and `funding.base_max_block_age_seconds` were removed.
+Remove these keys even if their old values were zero. Balances are advisory; SDK
+input selection and protocol deadlines govern spending. Treasury maintenance uses
+an independent 60-second cadence, without a replacement age setting.

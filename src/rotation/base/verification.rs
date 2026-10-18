@@ -66,10 +66,6 @@ impl BalanceCertificate {
     pub(crate) fn endpoint_generation(&self) -> u64 {
         self.endpoint_generation
     }
-    /// Reducing validity cannot create authority; equivalent state cannot renew age.
-    pub(crate) fn restrict_validity(&mut self, valid_until: u64) {
-        self.observation.valid_until = self.observation.valid_until.min(valid_until);
-    }
     pub(crate) fn compatible(&self, checkpoint: Option<&Anchor>) -> bool {
         checkpoint == Some(&self.verified_resolution_anchor)
             || compatible(

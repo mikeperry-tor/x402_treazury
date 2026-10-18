@@ -478,11 +478,11 @@ impl FundingBackend for Backend {
         let state = self.store.call(|s| s.treasury_sync_state()).await?;
         // Pending source bytes retain ownership. Their normal reconciliation
         // drives confirmation; another waiting quote must not duplicate scans.
-        let instant = now()?;
         if !state.outgoing_pending
-            && state
-                .sync
-                .is_none_or(|sync| !sync.fresh(instant, state.snapshot_revision))
+            && state.sync.is_none_or(|sync| {
+                sync.phase != crate::rotation::store::SyncPhase::Ready
+                    || sync.snapshot_revision != state.snapshot_revision
+            })
         {
             self.treasury.sync().await?;
         }

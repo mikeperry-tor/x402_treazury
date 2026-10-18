@@ -372,7 +372,6 @@ mod tests {
                     },
                     amount: U256::from(100),
                 },
-                valid_until: 1000,
             },
             checkpoint: None,
         };
@@ -500,7 +499,7 @@ mod tests {
             observations: Default::default(),
             balance_certificates: Default::default(),
             resolution_certificates: Default::default(),
-            admission_valid_until: u64::MAX,
+
             anchor: Anchor {
                 height: 10,
                 hash: "block".into(),

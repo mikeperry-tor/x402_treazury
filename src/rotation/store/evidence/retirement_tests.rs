@@ -62,12 +62,7 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let rpc = BaseRpc::new(
-        &format!("http://{}/", listener.local_addr().unwrap()),
-        12,
-        120,
-    )
-    .unwrap();
+    let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::create(

@@ -464,7 +464,7 @@ impl Store {
         )?)
     }
 
-    pub fn funding_source_ready(&self, now: u64) -> Result<bool> {
+    pub fn funding_source_ready(&self, _now: u64) -> Result<bool> {
         let pending: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
             [],
@@ -490,7 +490,7 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
-        Ok(observation.fresh(now, revision))
+        Ok(observation.phase == SyncPhase::Ready && observation.snapshot_revision == revision)
     }
 
     pub(crate) fn funding_preparation_context(&self) -> Result<(String, i64, SyncObservation)> {
@@ -571,7 +571,6 @@ impl Store {
                     amount: point.amount,
                 },
                 confirmations: 1,
-                valid_until: u64::MAX,
             },
         };
         record_readiness(&self.db, &wallet, &support)

@@ -402,7 +402,6 @@ async fn store_only_binding_rollback_and_cancelled_serving_release_owner() {
 async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_fatal() {
     let cases = [
         ("[treasury]", "confirmations=0", true),
-        ("[treasury]", "max_sync_age_seconds=0", true),
         (
             "[treasury]",
             "max_funding_transaction_fee_zec='invalid'",
@@ -418,7 +417,6 @@ async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_f
         ("[funding]", "swap_timeout_seconds=0", true),
         ("[funding]", "quote_deadline_seconds=1", true),
         ("[funding]", "base_confirmations=0", false),
-        ("[funding]", "base_max_block_age_seconds=0", false),
     ];
     for (section, declaration, scoped) in cases {
         let dir = tempfile::tempdir().unwrap();

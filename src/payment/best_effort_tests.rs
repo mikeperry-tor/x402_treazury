@@ -370,7 +370,7 @@ async fn run(
         ManagedPool::new(
             store.clone(),
             pool.clone(),
-            BaseRpc::new(&format!("{origin}/rpc"), 12, 120).unwrap(),
+            BaseRpc::new(&format!("{origin}/rpc"), 12).unwrap(),
             SpendPolicy {
                 max_atomic: Some(U256::from(1_000_000)),
             },

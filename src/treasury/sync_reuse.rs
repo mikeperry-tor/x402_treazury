@@ -6,7 +6,7 @@ impl Treasury {
         ensure!(!stop.is_cancelled(), "treasury sync cancelled");
         if self.can_reuse_sync(stop).await? {
             tracing::debug!(
-                "treasury sync: reusing unchanged scan; original observation age retained"
+                "treasury sync: reusing unchanged scan; same owner and canonical block anchor"
             );
             return Ok(());
         }
@@ -21,7 +21,9 @@ impl Treasury {
         let Some(sync) = saved.sync else {
             return Ok(false);
         };
-        if saved.snapshot_revision != self.revision || !sync.fresh(now()?, self.revision) {
+        if saved.snapshot_revision != self.revision
+            || !(sync.phase == SyncPhase::Ready && sync.snapshot_revision == self.revision)
+        {
             return Ok(false);
         }
         let Some(height) = sync.height.and_then(|h| u32::try_from(h).ok()) else {
@@ -75,7 +77,7 @@ impl Treasury {
             Ok(tip.height == u64::from(height)
                 && tip.hash.as_slice() == anchor.0.as_slice()
                 && sync.observed_tip_height == Some(u64::from(height))
-                && sync.fresh(now()?, self.revision))
+                && (sync.phase == SyncPhase::Ready && sync.snapshot_revision == self.revision))
         };
         // This probe runs on the long-lived owner runtime. Keep its bounded,
         // identity-scoped channel cached for later probes and preparation.

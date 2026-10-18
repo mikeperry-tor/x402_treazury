@@ -1,5 +1,5 @@
 //! One retained owner for equivalent in-flight background balance acquisitions.
-//! No completed-result cache: immutable chain timestamps retain their original age.
+//! No completed-result cache; advisory observations carry no age permission.
 use super::*;
 use futures_util::FutureExt;
 use std::sync::{Arc, Mutex};
@@ -11,7 +11,6 @@ struct Key {
     query: ChainQuery,
     endpoints: Vec<String>,
     confirmations: u64,
-    max_age: u64,
 }
 struct Active {
     key: Key,
@@ -98,7 +97,6 @@ impl BaseRpc {
                 .map(Self::endpoint_id)
                 .collect(),
             confirmations: self.confirmations,
-            max_age: self.max_age,
         };
         let mut receiver = {
             let mut active = ACTIVE.lock().expect("Base acquisition owners");
@@ -218,7 +216,7 @@ mod tests {
                     invalid.captures.get_mut(&job.wallet_id).unwrap().namespace = uuid::Uuid::nil()
                 }
             }
-            let error = BaseRpc::new(&url, 12, 120)
+            let error = BaseRpc::new(&url, 12)
                 .unwrap()
                 .shared_balance_view(invalid, store.clone())
                 .await
@@ -232,7 +230,7 @@ mod tests {
         assert_eq!(chains.load(Ordering::SeqCst), 0);
         let launch = |query: ChainQuery| {
             let store = store.clone();
-            let rpc = BaseRpc::new(&url, 12, 120).unwrap();
+            let rpc = BaseRpc::new(&url, 12).unwrap();
             tokio::spawn(async move { rpc.shared_balance_view(query, store).await })
         };
         let first = launch(query.clone());
@@ -263,8 +261,7 @@ mod tests {
         release.notify_waiters();
         let joined = joined.await.unwrap().unwrap();
         let independent = independent.await.unwrap().unwrap();
-        assert_eq!(joined.admission_valid_until, timestamp + 120);
-        assert_eq!(independent.admission_valid_until, timestamp + 120);
+
         assert_eq!(joined.observations, independent.observations);
         drop(store);
         owner.await.unwrap();
@@ -289,7 +286,6 @@ mod tests {
                     },
                     endpoints: vec![],
                     confirmations: 1,
-                    max_age: 1,
                 },
                 result: channel.clone(),
             });

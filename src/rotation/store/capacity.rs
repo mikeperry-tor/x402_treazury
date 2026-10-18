@@ -422,9 +422,6 @@ pub(super) fn retire_with_support(
         "retirement_evidence_binding_mismatch"
     );
     observation.validate()?;
-    if now > observation.valid_until {
-        return Ok(false);
-    }
     let (enabled,role,tolerance):(bool,String,Option<String>)=db.query_row("SELECT p.enabled,w.role,p.retirement_tolerance FROM wallets w JOIN pools p ON p.id=w.pool_id WHERE w.id=?1 AND p.id=?2",params![wallet,pool],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
     let Some(tolerance) = tolerance else {
         return Ok(false);
@@ -616,7 +613,6 @@ mod tests {
                     },
                     amount: U256::from(latest),
                 },
-                valid_until: 200,
             },
             checkpoint: None,
         }
@@ -794,7 +790,7 @@ mod tests {
         assert_eq!(role(&db, &prior), "RETIRED");
     }
     #[test]
-    fn retirement_rechecks_role_enablement_freshness_and_both_exact_amounts() {
+    fn retirement_rechecks_role_enablement_and_both_exact_amounts() {
         for (confirmed, latest, tolerance, role, enabled, now, expected) in [
             (0, 0, 0, "RETAINED", true, 100, true),
             (0, 1, 0, "RETAINED", true, 100, false),
@@ -805,7 +801,7 @@ mod tests {
             (0, 0, 0, "ACTIVE", true, 100, false),
             (0, 0, 0, "READY", true, 100, false),
             (0, 0, 0, "RETAINED", false, 100, false),
-            (0, 0, 0, "RETAINED", true, 201, false),
+            (0, 0, 0, "RETAINED", true, 201, true),
         ] {
             let mut db = database();
             let job = active(&db);

@@ -316,7 +316,7 @@ async fn wrong_network_and_cancellation_persist_failure_without_sending() {
     let dir = tempfile::tempdir().unwrap();
     let mut treasury = wallet(dir.path()).await;
     let (endpoint, calls, server, _) = mock("test").await;
-    treasury.configure_sync(SyncSettings::new(endpoint, 7, 300).unwrap());
+    treasury.configure_sync(SyncSettings::new(endpoint, 7).unwrap());
     let error = treasury
         .sync_once(&CancellationToken::new())
         .await
@@ -340,7 +340,7 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
     let dir = tempfile::tempdir().unwrap();
     let (endpoint, calls, server, _) = mock("main").await;
     let mut treasury = wallet(dir.path()).await;
-    let settings = SyncSettings::new(endpoint.clone(), 7, 300).unwrap();
+    let settings = SyncSettings::new(endpoint.clone(), 7).unwrap();
     treasury.configure_sync(settings.clone());
     let stop = CancellationToken::new();
     let timeout = stop.clone();
@@ -508,7 +508,7 @@ spec="nonexistent.json"
     assert!(!logs.contains(SEED));
     let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(output["state"]["sync"]["phase"], "ready");
-    assert_eq!(output["state"]["sync_fresh"], true);
+    assert_eq!(output["state"]["sync_complete"], true);
     let context =
         x402_treazury::network::NetworkContext::new(x402_treazury::network::NetworkPolicy {
             mode: x402_treazury::network::Mode::Tor,
@@ -538,7 +538,7 @@ async fn interrupted_sync_checkpoints_can_resume_and_stop_network_tasks() {
     stalled.store(true, Ordering::SeqCst);
     let mut treasury = wallet(dir.path()).await;
     let id = treasury.status().await.unwrap().treasury_id;
-    let settings = SyncSettings::new(endpoint, 3, 300).unwrap();
+    let settings = SyncSettings::new(endpoint, 3).unwrap();
     treasury.configure_sync(settings.clone());
     let stop = CancellationToken::new();
     let cancel = stop.clone();
@@ -597,7 +597,7 @@ async fn treasury_command_owner_serializes_and_releases_exclusive_lock() {
     let (endpoint, calls, server, _) = mock("main").await;
     let mut treasury = wallet(dir.path()).await;
     let id = treasury.status().await.unwrap().treasury_id;
-    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3, 300).unwrap());
+    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3).unwrap());
     let submission = GrpcSubmission::new(endpoint.clone(), endpoint).unwrap();
     let (handle, commands) = actor::channel();
     let stop = CancellationToken::new();
@@ -815,7 +815,7 @@ async fn post_activation_indexer_must_supply_ironwood_before_sync_or_init() {
             assert!(result.unwrap_err().to_string().contains("missing Ironwood"));
             let dir = tempfile::tempdir().unwrap();
             let mut treasury = wallet(dir.path()).await;
-            treasury.configure_sync(SyncSettings::new(endpoint, 7, 300).unwrap());
+            treasury.configure_sync(SyncSettings::new(endpoint, 7).unwrap());
             let error = treasury
                 .sync_once(&CancellationToken::new())
                 .await
@@ -823,7 +823,7 @@ async fn post_activation_indexer_must_supply_ironwood_before_sync_or_init() {
             assert!(error.to_string().contains("missing Ironwood"), "{error}");
             let status = treasury.status().await.unwrap();
             assert_eq!(status.sync.unwrap().phase, SyncPhase::Failed);
-            assert!(!status.sync_fresh);
+            assert!(!status.sync_complete);
             assert!(!calls.lock().unwrap().iter().any(|m| m == "GetBlockRange"));
             treasury.close().await.unwrap();
         } else {
@@ -854,7 +854,7 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
     let (endpoint, calls, server, _) = mock("main").await;
     let mut treasury = wallet(dir.path()).await;
     let id = treasury.status().await.unwrap().treasury_id;
-    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3, 300).unwrap());
+    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3).unwrap());
     let (handle, commands) = actor::channel();
     let stop = CancellationToken::new();
     let owner = tokio::spawn(treasury.run_commands(
@@ -1010,7 +1010,7 @@ spec="nonexistent.json"
         SyncPhase::Offline
     );
     stalled.store(false, Ordering::SeqCst);
-    reopened.configure_sync(SyncSettings::new(endpoint, 3, 300).unwrap());
+    reopened.configure_sync(SyncSettings::new(endpoint, 3).unwrap());
     reopened.sync_once(&CancellationToken::new()).await.unwrap();
     assert_eq!(
         reopened.status().await.unwrap().sync.unwrap().phase,
@@ -1021,37 +1021,27 @@ spec="nonexistent.json"
 }
 
 #[tokio::test]
-async fn moving_tip_accepts_bounded_lag_and_rejects_excess_or_regression() {
-    for (delta, accepted) in [(1i64, true), (3, true), (4, false), (-1, false)] {
+async fn moving_tip_accepts_progress_beyond_old_lag_and_rejects_regression() {
+    for (delta, accepted) in [(1i64, true), (3, true), (4, true), (-1, false)] {
         let dir = tempfile::tempdir().unwrap();
         let tip = TIP.checked_add_signed(delta).unwrap();
         let (endpoint, calls, server, _) =
             mock_with_tip_change("main", TIP, b"000000", Some(tip)).await;
         let mut treasury = wallet(dir.path()).await;
-        treasury.configure_sync(SyncSettings::new(endpoint, 7, 300).unwrap());
+        treasury.configure_sync(SyncSettings::new(endpoint, 7).unwrap());
         let before = x402_treazury::rotation::base::now().unwrap();
         let result = treasury.sync_once(&CancellationToken::new()).await;
         assert_eq!(result.is_ok(), accepted, "delta={delta}: {result:?}");
         let status = treasury.status().await.unwrap();
-        assert_eq!(status.sync_fresh, accepted);
+        assert_eq!(status.sync_complete, accepted);
         let observation = status.sync.unwrap();
         assert_eq!(observation.observed_tip_height, Some(tip));
-        assert_eq!(
-            observation.target_height,
-            Some(if delta > 3 { tip } else { TIP })
-        );
+        assert_eq!(observation.target_height, Some(TIP));
         if accepted {
             assert_eq!(observation.height, Some(TIP));
             assert_eq!(observation.confirmations, 7);
             assert!(observation.checked_at.unwrap() >= before);
-            assert!(observation.fresh(
-                observation.checked_at.unwrap() + 300,
-                status.snapshot_revision
-            ));
-            assert!(!observation.fresh(
-                observation.checked_at.unwrap() + 301,
-                status.snapshot_revision
-            ));
+            assert_eq!(observation.snapshot_revision, status.snapshot_revision);
         } else {
             assert_eq!(observation.phase, SyncPhase::Failed);
             assert!(observation.last_error.is_some());
@@ -1091,11 +1081,11 @@ async fn birthday_uses_older_observation_when_tip_moves_between_reads() {
 }
 
 #[tokio::test]
-async fn slow_initial_scan_retains_work_and_acquires_new_freshness() {
+async fn slow_initial_scan_finishes_without_an_age_restart() {
     let dir = tempfile::tempdir().unwrap();
     let (endpoint, calls, server, _) = mock_with_delay("main", TIP, b"000000", None, true).await;
     let mut treasury = wallet(dir.path()).await;
-    treasury.configure_sync(SyncSettings::new(endpoint, 7, 5).unwrap());
+    treasury.configure_sync(SyncSettings::new(endpoint, 7).unwrap());
     let before = x402_treazury::rotation::base::now().unwrap();
     tokio::time::timeout(
         std::time::Duration::from_secs(30),
@@ -1105,15 +1095,15 @@ async fn slow_initial_scan_retains_work_and_acquires_new_freshness() {
     .unwrap()
     .unwrap();
     let status = treasury.status().await.unwrap();
-    assert!(status.sync_fresh);
+    assert!(status.sync_complete);
     let observation = status.sync.unwrap();
     assert_eq!(observation.height, Some(TIP));
     assert!(
-        observation.checked_at.unwrap() >= before + 5,
-        "freshness must come from a new observation"
+        observation.checked_at.unwrap() <= before + 1,
+        "slow work retains its original observation"
     );
     let requests = calls.lock().unwrap().clone();
-    assert!(requests.iter().filter(|m| *m == "GetLightdInfo").count() >= 4);
+    assert_eq!(requests.iter().filter(|m| *m == "GetLightdInfo").count(), 2);
     assert!(!requests.iter().any(|m| m == "SendTransaction"));
     treasury.close().await.unwrap();
     server.abort();
@@ -1158,7 +1148,8 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
 }
 
 #[tokio::test]
-async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_chain_change() {
+async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_restart_or_chain_change()
+ {
     use x402_treazury::treasury::submission::GrpcSubmission;
     let dir = tempfile::tempdir().unwrap();
     let calls = Arc::new(Mutex::new(vec![]));
@@ -1200,7 +1191,7 @@ async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_
     });
     let mut treasury = wallet(dir.path()).await;
     let id = treasury.status().await.unwrap().treasury_id;
-    let settings = SyncSettings::new(endpoint.clone(), 3, 300).unwrap();
+    let settings = SyncSettings::new(endpoint.clone(), 3).unwrap();
     treasury.configure_sync(settings.clone());
     let stop = CancellationToken::new();
     treasury.sync_once(&stop).await.unwrap();
@@ -1276,7 +1267,7 @@ async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_
     }
     // A slow, progressing tip read cannot renew the starting observation.
     *probe.hash.lock().unwrap() = hash(TIP + 1);
-    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3, 5).unwrap());
+    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3).unwrap());
     treasury.sync_once(&stop).await.unwrap();
     let before = treasury.status().await.unwrap();
     probe.delay_once.store(true, Ordering::SeqCst);
@@ -1287,8 +1278,11 @@ async fn command_sync_reuse_preserves_age_and_rescans_after_mutation_restart_or_
             .is_err()
     );
     let after = treasury.status().await.unwrap();
-    assert!(after.snapshot_revision > before.snapshot_revision);
-    assert!(after.sync.unwrap().checked_at > before.sync.unwrap().checked_at);
+    assert_eq!(after.snapshot_revision, before.snapshot_revision);
+    assert_eq!(
+        after.sync.unwrap().checked_at,
+        before.sync.unwrap().checked_at
+    );
     treasury.configure_sync(settings);
     treasury.sync_once(&stop).await.unwrap();
     // A failed unsigned preflight must not publish a new observation or start a send.
@@ -1354,7 +1348,7 @@ async fn command_scan_defers_the_immediate_background_tick_without_extra_network
     let dir = tempfile::tempdir().unwrap();
     let (endpoint, calls, server, _) = mock("main").await;
     let mut treasury = wallet(dir.path()).await;
-    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3, 300).unwrap());
+    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3).unwrap());
     let submission = GrpcSubmission::new(endpoint.clone(), endpoint).unwrap();
     let (handle, commands) = actor::channel();
     let stop = CancellationToken::new();
@@ -1447,7 +1441,7 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
     let mut treasury = Treasury::open(state.clone(), key.clone(), id.clone())
         .await
         .unwrap();
-    treasury.configure_sync(SyncSettings::new(endpoint, 3, 300).unwrap());
+    treasury.configure_sync(SyncSettings::new(endpoint, 3).unwrap());
     let (seen, observed) = tokio::sync::oneshot::channel();
     let (finish, drained) = tokio::sync::oneshot::channel();
     let (handle, commands) = actor::channel();

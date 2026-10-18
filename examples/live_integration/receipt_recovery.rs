@@ -23,7 +23,7 @@ struct Task {
     policy: NetworkPolicy,
     urls: Vec<String>,
     confirmations: u64,
-    max_age: u64,
+
     snapshot: Value,
     candidates: Vec<Candidate>,
 }
@@ -125,7 +125,7 @@ pub async fn observe(path: &Path, digest: &str) -> Result<u8> {
         .map(|c| receipt_expectation(&c.payment, &c.receipt, &task.snapshot))
         .collect::<Result<Vec<_>>>()?;
     network::install(task.policy)?;
-    let rpc = BaseRpc::with_fallbacks(&task.urls, task.confirmations, task.max_age)?;
+    let rpc = BaseRpc::with_fallbacks(&task.urls, task.confirmations)?;
     let mut results = Vec::new();
     for (index, expected) in expected.iter().enumerate() {
         eprintln!(
@@ -244,7 +244,7 @@ pub async fn reconcile(state: &Path, run: &str, evidence: &Path) -> Result<u8> {
         policy: config.network,
         urls: funding.base_rpc_urls(|name| std::env::var(name).ok())?,
         confirmations: funding.base_confirmations,
-        max_age: funding.base_max_block_age_seconds,
+
         snapshot,
         candidates,
     };
@@ -414,7 +414,7 @@ mod tests {
             policy: NetworkPolicy::default(),
             urls: vec![],
             confirmations: 12,
-            max_age: 120,
+
             candidates: select(&report, &snapshot).unwrap(),
             snapshot,
         };

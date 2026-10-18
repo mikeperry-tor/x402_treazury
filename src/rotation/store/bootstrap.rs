@@ -317,8 +317,8 @@ mod tests {
     fn current_status_contract_has_explicit_authority_and_claims() {
         let (_dir, store, _pool) = fixture();
         let value = serde_json::to_value(store.status().unwrap()).unwrap();
-        assert_eq!(value["schema_version"], 3);
-        assert_eq!(value["state_schema_version"], 19);
+        assert_eq!(value["schema_version"], 4);
+        assert_eq!(value["state_schema_version"], 20);
         let keys: Vec<_> = value["pools"][0]
             .as_object()
             .unwrap()

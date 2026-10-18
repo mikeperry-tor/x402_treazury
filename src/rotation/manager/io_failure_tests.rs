@@ -56,7 +56,7 @@ async fn journal_io_failure_sends_no_signature_and_reopen_keeps_atomic_exposure(
         let mut manager = ManagedPool::new(
             store.clone(),
             pool,
-            BaseRpc::new(&format!("{base}/rpc"), 12, 120).unwrap(),
+            BaseRpc::new(&format!("{base}/rpc"), 12).unwrap(),
             SpendPolicy::dollars("5").unwrap(),
         )
         .unwrap();

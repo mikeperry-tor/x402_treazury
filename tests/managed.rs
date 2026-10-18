@@ -572,7 +572,7 @@ fn make_pool(store: StoreHandle, pool: String, base: &str) -> Arc<ManagedPool> {
     let manager = ManagedPool::new(
         store,
         pool,
-        BaseRpc::new(&format!("{base}/rpc"), 12, 120).unwrap(),
+        BaseRpc::new(&format!("{base}/rpc"), 12).unwrap(),
         SpendPolicy::dollars("none").unwrap(),
     )
     .unwrap();
@@ -1441,7 +1441,7 @@ async fn larger_target_does_not_churn_through_smaller_standby() {
         ManagedPool::new(
             h.store.clone(),
             h.pool.clone(),
-            BaseRpc::new(&format!("{}/rpc", h.base), 12, 120).unwrap(),
+            BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
             SpendPolicy::dollars("none").unwrap(),
         )
         .unwrap(),
@@ -1475,7 +1475,7 @@ async fn background_reconciliation_releases_confirmed_payment_without_rotating_o
     let manager = ManagedPool::new(
         h.store.clone(),
         h.pool.clone(),
-        BaseRpc::new(&format!("{}/rpc", h.base), 12, 120).unwrap(),
+        BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
         SpendPolicy::dollars("none").unwrap(),
     )
     .unwrap();
@@ -2038,7 +2038,7 @@ async fn explicit_api_cap_independent_of_funding_target_uses_confirmed_capacity(
     let manager = ManagedPool::new(
         h.store.clone(),
         h.pool.clone(),
-        BaseRpc::new(&format!("{}/rpc", h.base), 12, 120).unwrap(),
+        BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
         SpendPolicy::dollars("6").unwrap(),
     )
     .unwrap();
@@ -2062,7 +2062,7 @@ async fn foreground_admission_does_not_start_historical_authorization_sweep() {
     let manager = ManagedPool::new(
         h.store.clone(),
         h.pool.clone(),
-        BaseRpc::new(&format!("{}/rpc", h.base), 12, 1).unwrap(),
+        BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
         SpendPolicy::dollars("5").unwrap(),
     )
     .unwrap();
@@ -2093,7 +2093,7 @@ async fn nonce_outages_retain_liabilities_but_allow_remaining_capacity_across_re
         ManagedPool::new(
             h.store.clone(),
             h.pool.clone(),
-            BaseRpc::with_fallbacks(&[format!("{}/rpc", h.base), fallback_url], 12, 120).unwrap(),
+            BaseRpc::with_fallbacks(&[format!("{}/rpc", h.base), fallback_url], 12).unwrap(),
             SpendPolicy::dollars("none").unwrap(),
         )
         .unwrap(),
@@ -2212,7 +2212,7 @@ async fn slow_balance_collection_retains_resolution_without_signing_or_looping()
         ManagedPool::new(
             h.store.clone(),
             h.pool.clone(),
-            BaseRpc::new(&format!("{}/rpc", h.base), 12, 1).unwrap(),
+            BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
             SpendPolicy::dollars("5").unwrap(),
         )
         .unwrap(),

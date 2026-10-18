@@ -907,11 +907,7 @@ async fn configured(
     settings.validate()?;
     settings.resolve(path);
     let endpoint = settings.indexer_endpoint(|name| std::env::var(name).ok())?;
-    let sync = crate::treasury::SyncSettings::new(
-        endpoint,
-        settings.confirmations,
-        settings.max_sync_age_seconds,
-    )?;
+    let sync = crate::treasury::SyncSettings::new(endpoint, settings.confirmations)?;
     let mut treasury = crate::treasury::Treasury::open_with_network(
         settings.state_dir.clone(),
         settings.key_file.clone(),

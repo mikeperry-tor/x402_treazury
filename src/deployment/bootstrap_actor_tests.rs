@@ -183,10 +183,10 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
         .fallback(grpc)
         .with_state(f.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    owner.configure_sync(crate::treasury::SyncSettings::new(origin.clone(), 2, 300).unwrap());
+    owner.configure_sync(crate::treasury::SyncSettings::new(origin.clone(), 2).unwrap());
     let (handle, commands) = crate::treasury::actor::channel();
     let backend=Backend{
-        treasury:handle,store:store.clone(),near:NearClient::test_at(&origin).unwrap(),base:BaseRpc::new(&format!("{origin}/base"),12,120).unwrap(),
+        treasury:handle,store:store.clone(),near:NearClient::test_at(&origin).unwrap(),base:BaseRpc::new(&format!("{origin}/base"), 12).unwrap(),
         wallets:BTreeMap::from([("research".into(),serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())]),
         funding:serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),max_network_fee:30_000,
     };

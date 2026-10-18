@@ -72,7 +72,7 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=19;
+PRAGMA user_version=20;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';

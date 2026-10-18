@@ -89,10 +89,10 @@ impl Treasury {
             .await?;
         let status = self.store.call(|s| s.treasury_sync_state()).await?;
         let sync = status.sync.context("treasury not synced")?;
-        freshness::require_current_tip(&sync)?;
+        coverage::require_current_tip(&sync)?;
         let height = sync.height.context("missing sync height")?;
         ensure!(
-            sync.fresh(now()?, status.snapshot_revision),
+            (sync.phase == SyncPhase::Ready && sync.snapshot_revision == status.snapshot_revision),
             crate::rotation::transaction::RecoveryEvidenceError::StaleSync
         );
         let facts = prepared.facts().context("operation facts missing")?;
@@ -115,10 +115,10 @@ impl Treasury {
         self.sync_once(stop).await?;
         let status = self.store.call(|s| s.treasury_sync_state()).await?;
         let sync = status.sync.context("treasury not synced")?;
-        freshness::require_current_tip(&sync)?;
+        coverage::require_current_tip(&sync)?;
         let height = sync.height.context("missing recovery height")?;
         ensure!(
-            sync.fresh(now()?, status.snapshot_revision)
+            (sync.phase == SyncPhase::Ready && sync.snapshot_revision == status.snapshot_revision)
                 && height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
             crate::rotation::transaction::RecoveryEvidenceError::ChainChanged
         );

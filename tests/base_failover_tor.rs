@@ -29,7 +29,6 @@ async fn fallback_retains_payer_credentials_remote_dns_and_no_direct_egress() {
             "http://localhost:2/ok".into(),
         ],
         12,
-        120,
     )
     .unwrap();
     // Neither origin port exists: success proves requests traversed the SOCKS fixture.

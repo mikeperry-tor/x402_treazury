@@ -463,7 +463,6 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
         observed_tip_height: None,
         height: Some(2_000_000),
         confirmations: 3,
-        max_age_seconds: 10,
         confirmed_pool_balances_zatoshis: None,
         confirmed_shielded_zatoshis: 1_000,
         spendable_shielded_zatoshis: 500,
@@ -474,7 +473,9 @@ fn sync_checkpoints_are_atomic_and_readiness_is_revision_and_time_bound() {
         .unwrap();
     assert_eq!(revision, 2);
     s.require_spend_ready(110, 500).unwrap();
-    for (now, amount) in [(111, 1), (99, 1), (100, 501), (100, 0)] {
+    s.require_spend_ready(u64::MAX, 500).unwrap();
+    s.require_spend_ready(0, 500).unwrap();
+    for (now, amount) in [(100, 501), (100, 0)] {
         assert!(s.require_spend_ready(now, amount).is_err());
     }
     let mut stale = ready.clone();
@@ -927,7 +928,6 @@ fn actual_spendable_capacity_and_journals_survive_gross_totals_rollover_and_rest
                 observed_tip_height: None,
                 height: Some(1),
                 confirmations: 1,
-                max_age_seconds: 300,
                 confirmed_pool_balances_zatoshis: None,
                 confirmed_shielded_zatoshis: 1000,
                 spendable_shielded_zatoshis: 1000,
@@ -1140,7 +1140,6 @@ async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
         observed_tip_height: None,
         height: Some(2_000_000),
         confirmations: 3,
-        max_age_seconds: 10,
         confirmed_pool_balances_zatoshis: None,
         confirmed_shielded_zatoshis: 0,
         spendable_shielded_zatoshis: 0,
@@ -1148,11 +1147,6 @@ async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
     store
         .save_sync_snapshot(1, b"empty", Some(observation))
         .unwrap();
-    assert_eq!(
-        store.require_spend_ready(111, 1).unwrap_err().to_string(),
-        "treasury_sync_stale"
-    );
-    assert!(capture.0.lock().unwrap().is_empty());
     assert_eq!(
         store.require_spend_ready(100, 10).unwrap_err().to_string(),
         "treasury_insufficient_spendable_funds"

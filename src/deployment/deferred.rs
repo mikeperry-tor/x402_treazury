@@ -619,7 +619,7 @@ sources=['healthy','late']
                 ManagedPool::new(
                     store.clone(),
                     pool.clone(),
-                    BaseRpc::new(&base, 12, 120).unwrap(),
+                    BaseRpc::new(&base, 12).unwrap(),
                     crate::payment::SpendPolicy::dollars("1").unwrap(),
                 )
                 .unwrap(),

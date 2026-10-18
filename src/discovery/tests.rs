@@ -931,7 +931,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
         ManagedPool::new(
             store.clone(),
             pool,
-            BaseRpc::new("http://127.0.0.1:1/rpc", 12, 120).unwrap(),
+            BaseRpc::new("http://127.0.0.1:1/rpc", 12).unwrap(),
             SpendPolicy::dollars("0.01").unwrap(),
         )
         .unwrap(),

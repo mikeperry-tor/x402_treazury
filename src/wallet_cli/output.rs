@@ -40,8 +40,8 @@ pub(super) fn status(status: &Status) -> String {
         writeln!(text, "\nSync state: {phase}").unwrap();
         writeln!(
             text,
-            "Sync observation fresh: {}",
-            if status.sync_fresh { "yes" } else { "no" }
+            "Scan complete for current snapshot: {}",
+            if status.sync_complete { "yes" } else { "no" }
         )
         .unwrap();
         writeln!(text, "Scanned height: {}", height(sync.height)).unwrap();

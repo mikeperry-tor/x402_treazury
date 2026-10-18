@@ -56,13 +56,13 @@ fn historical_status_projects_available_fields_without_mutating_journals() {
         let report =
             read_status(&db).unwrap_or_else(|error| panic!("version {version}: {error:#}"));
         assert_eq!(report.state_schema_version, version);
-        assert_eq!(report.schema_version, 3);
+        assert_eq!(report.schema_version, 4);
         assert_eq!(report.treasury_id, "fixture");
         assert_eq!(report.birthday, 123);
         assert_eq!(report.snapshot_revision, 1);
         assert!(report.outgoing_pending);
         assert!(report.sync.is_none());
-        assert!(!report.sync_fresh);
+        assert!(!report.sync_complete);
         assert_eq!(
             report
                 .pools

@@ -142,9 +142,6 @@ pub struct AuthorizationResolution {
 }
 #[derive(Clone)]
 pub struct ChainView {
-    /// Admission authority expires independently of retained canonical evidence.
-    /// Derived from the balance block timestamp, never from completion time.
-    pub admission_valid_until: u64,
     pub anchor: Anchor,
     pub balances: BTreeMap<String, U256>,
     /// Complete exact reads, retained separately from the conservative balance.
@@ -159,7 +156,6 @@ pub struct BaseRpc {
     http: reqwest::Client,
     url: reqwest::Url,
     confirmations: u64,
-    max_age: u64,
     fallbacks: Vec<BaseRpc>,
 }
 pub fn now() -> Result<u64> {
@@ -180,7 +176,6 @@ pub fn secure_endpoint(text: &str) -> Result<reqwest::Url> {
 }
 struct ViewHeaders {
     latest: Anchor,
-    timestamp: u64,
     confirmed: Anchor,
     confirmed_time: u64,
 }
@@ -191,18 +186,17 @@ struct ResolvedHistory {
 }
 
 impl BaseRpc {
-    pub fn new(url: &str, confirmations: u64, max_age: u64) -> Result<Self> {
-        ensure!(confirmations > 0 && max_age > 0, "invalid Base RPC limits");
+    pub fn new(url: &str, confirmations: u64) -> Result<Self> {
+        ensure!(confirmations > 0, "invalid Base RPC limits");
         Ok(Self {
             http: crate::network::discovery(url, None)?,
             url: secure_endpoint(url)?,
             confirmations,
-            max_age,
             fallbacks: vec![],
         })
     }
     /// Only operator-selected endpoints; every attempt constructs a whole chain view.
-    pub fn with_fallbacks(urls: &[String], confirmations: u64, max_age: u64) -> Result<Self> {
+    pub fn with_fallbacks(urls: &[String], confirmations: u64) -> Result<Self> {
         ensure!(
             !urls.is_empty() && urls.len() <= 3,
             "configure one to three Base RPC endpoints; list is never truncated"
@@ -216,7 +210,7 @@ impl BaseRpc {
         }
         let mut endpoints = urls
             .iter()
-            .map(|url| Self::new(url, confirmations, max_age))
+            .map(|url| Self::new(url, confirmations))
             .collect::<Result<Vec<_>>>()?;
         let mut primary = endpoints.remove(0);
         primary.fallbacks = endpoints;
@@ -231,7 +225,6 @@ impl BaseRpc {
             )?,
             url: self.url.clone(),
             confirmations: self.confirmations,
-            max_age: self.max_age,
             fallbacks: vec![],
         })
     }
@@ -306,126 +299,6 @@ impl BaseRpc {
         }
         Ok(())
     }
-    /// Header-only compatibility verification preserves the original facts and
-    /// validity. It never falls back by copying amounts between endpoints.
-    pub(crate) async fn recheck_balance(
-        &self,
-        certificate: BalanceCertificate,
-        mut capture: EvidenceCapture,
-    ) -> Result<BalanceCertificate> {
-        let _owner = resources::query()?;
-        let observation = certificate.observation();
-        ensure!(
-            capture.namespace == certificate.capture().namespace
-                && capture.wallet == observation.wallet
-                && capture.generation == certificate.capture().generation,
-            evidence::EvidenceFailure::Invalidated
-        );
-        let endpoint = self.original_endpoint(&observation.endpoint)?;
-        ensure!(
-            capture
-                .endpoint_generations
-                .get(&observation.endpoint)
-                .copied()
-                .unwrap_or(0)
-                == certificate.endpoint_generation(),
-            evidence::EvidenceFailure::Invalidated
-        );
-        capture.previous = Some(observation.clone());
-        capture.previous_confirmed_covered = false;
-        let endpoint = endpoint.for_address(&observation.address)?;
-        endpoint
-            .verify_recheck(&capture, &observation.endpoint)
-            .await?;
-        Ok(BalanceCertificate::verified(
-            capture,
-            observation.clone(),
-            observation.confirmed.anchor.clone(),
-        ))
-    }
-
-    /// A historical immutable nonce fact may survive replaceable-balance
-    /// invalidation, but never endpoint trust invalidation or process reopen.
-    pub(crate) async fn recheck_resolution(
-        &self,
-        certificate: ResolutionCertificate,
-        mut capture: EvidenceCapture,
-    ) -> Result<ResolutionCertificate> {
-        let _owner = resources::query()?;
-        ensure!(
-            capture.namespace == certificate.capture().namespace
-                && capture.wallet == certificate.authorization().wallet
-                && capture
-                    .endpoint_generations
-                    .get(certificate.endpoint())
-                    .copied()
-                    .unwrap_or(0)
-                    == certificate.endpoint_generation(),
-            evidence::EvidenceFailure::Invalidated
-        );
-        let endpoint = self
-            .original_endpoint(certificate.endpoint())?
-            .for_address(&certificate.authorization().payer)?;
-        // Only the compact checkpoint and immutable proof anchor are required.
-        // A replaced ordinary balance cannot destroy useful completed history.
-        capture.previous = None;
-        let mut rechecked = endpoint
-            .verify_recheck(&capture, certificate.endpoint())
-            .await?;
-        let canonical = endpoint
-            .recheck_anchor(
-                certificate.anchor().height,
-                &mut rechecked,
-                &ViewProgress::new(),
-                "history_anchor_recheck",
-            )
-            .await?;
-        ensure!(
-            canonical == *certificate.anchor(),
-            EvidenceConflict {
-                wallet: capture.wallet.clone(),
-                endpoint: certificate.endpoint().into(),
-                anchor: certificate.anchor().clone(),
-                latest_only: false,
-                financial_checkpoint: capture.checkpoint.as_ref() == Some(certificate.anchor())
-            }
-        );
-        Ok(ResolutionCertificate::verified(
-            capture,
-            certificate.endpoint().into(),
-            certificate.authorization().clone(),
-            certificate.anchor().clone(),
-            certificate.outcome().clone(),
-            certificate.block_time(),
-        ))
-    }
-
-    fn original_endpoint(&self, identity: &str) -> Result<&Self> {
-        std::iter::once(self)
-            .chain(&self.fallbacks)
-            .find(|endpoint| endpoint.endpoint_id() == identity)
-            .context("original evidence endpoint unavailable")
-    }
-
-    async fn verify_recheck(
-        &self,
-        capture: &EvidenceCapture,
-        endpoint: &str,
-    ) -> Result<BTreeMap<u64, Anchor>> {
-        ensure!(
-            quantity(&self.rpc("eth_chainId", json!([])).await?)
-                .map_err(|_| RpcFailure::malformed("eth_chainId"))?
-                == 8453,
-            EndpointMismatch {
-                endpoint: endpoint.into()
-            }
-        );
-        let mut rechecked = BTreeMap::new();
-        self.verify_capture(capture, endpoint, &ViewProgress::new(), &mut rechecked)
-            .await?;
-        Ok(rechecked)
-    }
-
     async fn rpc(&self, method: &'static str, params: Value) -> Result<Value> {
         transport::rpc(&self.http, &self.url, method, params).await
     }
@@ -588,7 +461,7 @@ impl BaseRpc {
             }
             return Ok(ChainView {
                 anchor: resolution_anchor,
-                admission_valid_until: headers.timestamp.saturating_add(self.max_age),
+
                 balances: BTreeMap::new(),
                 observations: BTreeMap::new(),
                 balance_certificates: BTreeMap::new(),
@@ -641,7 +514,6 @@ impl BaseRpc {
         // admission window. The store checks that window before new authority;
         // retrying this entire sweep here could hold the pool gate forever.
         Ok(ChainView {
-            admission_valid_until: headers.timestamp.saturating_add(self.max_age),
             anchor: headers.confirmed,
             balances: observations
                 .iter()
@@ -687,15 +559,6 @@ impl BaseRpc {
             .step("latest_block", self.block("latest"))
             .await
             .context(VerificationStage("latest block"))?;
-        let clock = now()?;
-        if !query.wallets.is_empty() {
-            validate_timestamp(timestamp, clock, self.max_age)?;
-        } else {
-            ensure!(
-                timestamp <= clock.saturating_add(30),
-                "Base block is in the future"
-            );
-        }
         let height = latest
             .height
             .checked_sub(self.confirmations)
@@ -712,7 +575,6 @@ impl BaseRpc {
         );
         Ok(ViewHeaders {
             latest,
-            timestamp,
             confirmed,
             confirmed_time,
         })
@@ -823,7 +685,6 @@ impl BaseRpc {
         let (latest, timestamp) = progress
             .step("admission_latest_block", self.block("latest"))
             .await?;
-        validate_timestamp(timestamp, now()?, self.max_age)?;
         let height = latest
             .height
             .checked_sub(self.confirmations)
@@ -842,7 +703,6 @@ impl BaseRpc {
         );
         Ok(ViewHeaders {
             latest,
-            timestamp,
             confirmed,
             confirmed_time,
         })
@@ -888,7 +748,6 @@ impl BaseRpc {
                             anchor: latest,
                             amount: current,
                         },
-                        valid_until: headers.timestamp.saturating_add(rpc.max_age),
                     };
                     observation.validate()?;
                     Ok::<_, anyhow::Error>((id, observation))
@@ -952,13 +811,6 @@ fn quantity(v: &Value) -> Result<u64> {
     )?)
 }
 
-fn validate_timestamp(timestamp: u64, clock: u64, max_age: u64) -> Result<()> {
-    ensure!(
-        timestamp <= clock.saturating_add(30) && clock.saturating_sub(timestamp) <= max_age,
-        "stale Base block"
-    );
-    Ok(())
-}
 #[cfg(test)]
 mod tests {
     #[derive(Clone, Default)]
@@ -1006,7 +858,7 @@ mod tests {
             let logs = Logs::default();
             let writer = logs.clone();
             let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false).with_writer(move ||writer.clone()).finish();
-            let rpc = BaseRpc::new(&url,12,120).unwrap();
+            let rpc = BaseRpc::new(&url, 12).unwrap();
             let error = rpc.view(ChainQuery{wallets:vec![],pending:vec![],anchor:None,captures:Default::default()}).with_subscriber(subscriber).await.err().unwrap();
             let public = safe_diagnostic(&error);
             let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
@@ -1016,18 +868,6 @@ mod tests {
             }
             assert!(logged.contains("Base credit/payment chain verification failed"));
             server.abort();
-        }
-    }
-    #[test]
-    fn timestamp_boundaries_are_exact() {
-        for (stamp, allowed) in [
-            (1030, true),
-            (1031, false),
-            (880, true),
-            (879, false),
-            (1000, true),
-        ] {
-            assert_eq!(super::validate_timestamp(stamp, 1000, 120).is_ok(), allowed);
         }
     }
 }

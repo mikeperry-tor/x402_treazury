@@ -61,7 +61,6 @@ pub struct BalanceObservation {
     pub confirmations: u64,
     pub confirmed: BalancePoint,
     pub latest: BalancePoint,
-    pub valid_until: u64,
 }
 impl BalanceObservation {
     pub fn available(&self) -> U256 {
@@ -156,7 +155,6 @@ mod tests {
                 },
                 amount: U256::from(latest),
             },
-            valid_until: 120,
         }
     }
     #[test]
@@ -198,11 +196,10 @@ mod tests {
         );
     }
     #[test]
-    fn lower_newer_balance_is_usable_and_never_extends_its_lifetime() {
+    fn lower_newer_balance_is_usable() {
         let original = observation(20, 8, 3);
         let newer = observation(21, 2, 1);
         assert_eq!(newer.compare(&original), Ok(std::cmp::Ordering::Greater));
         assert_eq!(newer.available(), U256::from(1));
-        assert_eq!(newer.valid_until, 120);
     }
 }

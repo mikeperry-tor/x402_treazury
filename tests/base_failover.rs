@@ -21,7 +21,6 @@ async fn availability_failure_discards_partial_evidence_and_restarts_the_entire_
                 format!("http://{address}/ok"),
             ],
             12,
-            120,
         )
         .unwrap();
         let view = rpc.view(fixture::query()).await.unwrap();
@@ -60,7 +59,6 @@ async fn invalid_evidence_never_shops_for_a_more_favorable_provider() {
                 format!("http://{address}/ok"),
             ],
             12,
-            120,
         )
         .unwrap();
         let mut query = fixture::query();
@@ -78,7 +76,6 @@ async fn invalid_evidence_never_shops_for_a_more_favorable_provider() {
             format!("http://{address}/conflict"),
         ],
         12,
-        120,
     )
     .unwrap();
     let mut query = fixture::query();
@@ -99,12 +96,8 @@ fn endpoint_lists_are_validated_without_silent_limits() {
         vec!["https://one.invalid", "https://one.invalid/"],
     ] {
         assert!(
-            BaseRpc::with_fallbacks(
-                &urls.into_iter().map(String::from).collect::<Vec<_>>(),
-                12,
-                120
-            )
-            .is_err()
+            BaseRpc::with_fallbacks(&urls.into_iter().map(String::from).collect::<Vec<_>>(), 12)
+                .is_err()
         );
     }
 }
@@ -113,7 +106,7 @@ fn endpoint_lists_are_validated_without_silent_limits() {
 async fn exhaustion_and_cancellation_do_not_loop_or_contact_later_providers() {
     let (address, logs, server) = fixture::fixture().await;
     let urls = ["403", "429", "503"].map(|mode| format!("http://{address}/{mode}"));
-    let error = BaseRpc::with_fallbacks(&urls, 12, 120)
+    let error = BaseRpc::with_fallbacks(&urls, 12)
         .unwrap()
         .view(fixture::query())
         .await
@@ -140,7 +133,6 @@ async fn exhaustion_and_cancellation_do_not_loop_or_contact_later_providers() {
             format!("http://{address}/ok"),
         ],
         12,
-        120,
     )
     .unwrap();
     assert!(
@@ -164,7 +156,6 @@ async fn progressing_complete_view_survives_former_deadline_without_fallback() {
             format!("http://{address}/ok"),
         ],
         12,
-        120,
     )
     .unwrap();
     let started = std::time::Instant::now();
@@ -189,7 +180,7 @@ async fn progressing_complete_view_survives_former_deadline_without_fallback() {
 async fn exact_balance_evidence_preserves_both_anchors_amounts_and_original_lifetime() {
     use alloy_primitives::U256;
     let (address, _, server) = fixture::fixture().await;
-    let view = BaseRpc::new(&format!("http://{address}/exact"), 12, 120)
+    let view = BaseRpc::new(&format!("http://{address}/exact"), 12)
         .unwrap()
         .view(fixture::query())
         .await
@@ -204,7 +195,7 @@ async fn exact_balance_evidence_preserves_both_anchors_amounts_and_original_life
         assert_eq!(observation.available(), U256::from(4));
         assert_eq!(observation.remainder(), U256::from(9));
         assert_eq!(view.balances[wallet], observation.available());
-        assert_eq!(observation.valid_until, view.admission_valid_until);
+
         assert_eq!(observation.endpoint.len(), 64);
         assert!(!observation.endpoint.contains(&address.to_string()));
     }
@@ -225,7 +216,7 @@ async fn history_uses_its_original_proof_without_requiring_a_fresh_balance_tip()
         nonce: format!("0x{:064x}", 1),
         valid_before: now().unwrap() - 2000,
     });
-    let view = BaseRpc::new(&format!("http://{address}/history-stale"), 12, 120)
+    let view = BaseRpc::new(&format!("http://{address}/history-stale"), 12)
         .unwrap()
         .view(query.clone())
         .await
@@ -248,7 +239,6 @@ async fn history_uses_its_original_proof_without_requiring_a_fresh_balance_tip()
             format!("http://{address}/ok"),
         ],
         12,
-        120,
     )
     .unwrap();
     assert_eq!(rpc.view(query).await.unwrap().released, vec!["history"]);

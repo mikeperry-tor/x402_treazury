@@ -268,7 +268,7 @@ async fn run_case(
         ManagedPool::new(
             store.clone(),
             pool,
-            BaseRpc::new(&format!("{origin}/rpc"), 12, 120).unwrap(),
+            BaseRpc::new(&format!("{origin}/rpc"), 12).unwrap(),
             SpendPolicy::dollars("none").unwrap(),
         )
         .unwrap(),

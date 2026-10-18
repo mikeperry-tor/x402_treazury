@@ -78,7 +78,6 @@ async fn qualify_preparation(fail_commit: bool) {
             observed_tip_height: Some(TIP.into()),
             height: Some(TIP.into()),
             confirmations: 1,
-            max_age_seconds: 300,
             confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 100_000,
             spendable_shielded_zatoshis: 100_000,
@@ -114,7 +113,7 @@ async fn qualify_preparation(fail_commit: bool) {
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     treasury.configure_sync(
-        SyncSettings::new(format!("http://{}", listener.local_addr().unwrap()), 1, 300).unwrap(),
+        SyncSettings::new(format!("http://{}", listener.local_addr().unwrap()), 1).unwrap(),
     );
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
