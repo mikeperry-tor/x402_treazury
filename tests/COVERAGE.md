@@ -11,7 +11,7 @@ Stable regions do not establish branch or mutation coverage.
 | --- | --- |
 | TLS, DNS/rebinding, SOCKS authentication, pool/runtime identities | `src/network.rs` boundary tests, `tests/network.rs`, `tests/network_audit.rs` |
 | Grants, source scope, immutable invocation snapshots, concurrent mutations | `src/discovery/tests.rs`, `tests/deployment.rs`, `tests/assignment.rs` |
-| EIP-3009/Permit2 signatures, exact payload and no paid replay | `tests/payments.rs`, `tests/managed.rs` |
+| EIP-3009/Permit2 signatures, exact payload, typed insufficient-funds traversal and retained liabilities | `tests/payments.rs`, `tests/managed.rs` |
 | Canonical balances/nonces, credit, quote binding and funding transitions | `tests/base.rs`, `src/rotation/` tests |
 | Encryption, migrations, ownership, unsafe links and atomic backup failures | Treasury/store integrity and filesystem tests, `tests/cli_contracts.rs` |
 | MCP auth, routes, fallback, pagination, process shutdown | `tests/server.rs`, `tests/stdio.rs`, `tests/shutdown.rs`, `tests/supervision.rs` |

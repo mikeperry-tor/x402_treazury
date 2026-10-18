@@ -712,7 +712,10 @@ mod deferred_tests {
             defer: true,
             ..Default::default()
         };
-        let http = reqwest::Client::new();
+        let http = crate::network::NetworkContext::new(Default::default())
+            .unwrap()
+            .discovery(&cfg.spec, None)
+            .unwrap();
         let pending = |error: anyhow::Error| {
             error
                 .downcast_ref::<SharedFailure>()

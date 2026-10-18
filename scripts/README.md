@@ -28,9 +28,10 @@ Its complexity audit warns above CogC 20 or CycC 40 for new/unmatched or worseni
 callables; scores never fail tests. Missing baseline history or incomplete analysis
 fails the audit. Set `COMPLEXITY_BASE_REF` for another review target; CI must fetch
 that ref and its merge-base history. See [audit details](../tests/COMPLEXITY.md).
-It also runs the feature-gated `treasury::refunds::tests` with `zcash-testutils`
-after the default suite, exercising return attribution and canonical credit
-revalidation through local sync fixtures.
+It also runs the feature-gated `treasury::send::proving_tests` with `zcash-testutils`
+after the default suite, exercising actual SDK input selection, proving, typed
+insufficient funds and retained identical publication after local storage failure.
+The synthetic-chain lifecycle separately covers real actor scans and submission.
 All default checks use local fixtures and public test keys; none reads `.env` or
 performs funded transactions. Local socket tests require permission to bind localhost.
 Cargo and Zingolib may download dependencies/public proving parameters on first build.

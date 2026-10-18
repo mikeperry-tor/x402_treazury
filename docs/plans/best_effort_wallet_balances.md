@@ -3,12 +3,14 @@
 
 ## Status and scope
 
-Implement advisory USDC wallet selection and SDK-owned Zcash spending state on
-branch `best_effort_wallet_balances`, based on
-`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. BE02 (`798b211`, fixup `0951464`) and BE03 (`879d712`, fixup `59f8317`)
-passed independent exact-commit and combined payment-transition review. BE04 (`fb4667a`, fixups `fb7cc7d` and `46092e7`) passed exact independent review
-and focused acceptance. BE05 and its exact fixup have passed review and focused
-acceptance; BE06 is in progress and BE07 remains pending.
+BE02–BE07 are implemented on branch `best_effort_wallet_balances`, starting at
+`e004c74`. Complexity comparisons retain the planned baseline
+`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. Independent exact-commit/fixup reviews,
+the combined BE02/BE03 payment gate, and the BE04/BE06 source-ownership gate passed.
+Default Zcash check components and focused fixup acceptance passed as recorded
+under BE07. Final integration review covers the unsquashed history and maintained
+documentation handoff. R01/R02 remain unfinished and explicitly separate from core
+delivery.
 
 Cross-wallet repetition after an insufficient-funds response is explicitly accepted,
 even when the first authorization remains chargeable and both attempts could charge
@@ -538,6 +540,36 @@ each attempt under its original job/pool permit; missing facts stay unknown. Mod
 reports mark removed monetary projections unavailable and retain historical report
 readers. Advisory estimate damage and stale phases cannot become signing gates.
 
+BE06 exact review accepted `ce62463` and fixup `ad15ed4`. The fixup removes
+remaining unconditional wall-clock reads from deadline-free shielding/expiry release
+and preserves exact historical report shapes. The clock boundary test rejects an
+unavailable clock only when an external deadline needs it. Focused historical/current
+accounting, original-permit attribution and corrected live-preset tests pass.
+BE05 fixup `3538bba` removes the deleted setting from two tracked live examples;
+BE02 fixup `6a890c2` corrects the retained funding-stop diagnostic. Both passed
+independent exact review. BE03 fixup `89997d9` preserves typed empty-payer
+unavailability before I/O so deferred catalog/relay work can wait without consuming
+an attempt; its independent exact review passed. No new policy guard was added.
+
+BE06 follow-up review accepted fixture fixups `12dde67` and `afb100b`, then
+runtime fixup `decc376`. The real SDK lifecycle exposed a known proposal rejection
+leaving PREPARING: the old QUOTED-only check wrongly vetoed a later permitted,
+unstarted attempt. Current claim/quote/permission and actual accepted/outgoing
+ownership now determine that boundary, with no phase/state authority. The redundant
+pending-source refresh/recheck and its unused clock reads are deleted; actual actor
+preparation still owns SDK synchronization. Lifecycle fixtures admit ordinary scalar
+latest reads, wait for real poll progress and distinguish read-only readiness from
+SDK calculation. No new runtime timer, balance check or spending ceiling was added.
+
+BE06 final acceptance and combined architecture gate passed at `58bdf7a`:
+rotation 18 passed/one subprocess helper ignored, submission one passed, real SDK
+proving one passed (three funding/publication scenarios), synthetic SDK/production
+worker lifecycle four passed, Store funding 19 passed and funding library 25 passed.
+Earlier focused qualification, treasury publication, report/accounting and preset
+checks passed. The unused pending projection/query was deleted in reviewed fixup
+`58bdf7a`. Fresh complexity artifact `20261018T033519Z-163a9c12` is complete.
+No Docker, live funding or private-state conversion was performed.
+
 ### BE07: Integration and documentation
 
 Reconcile call sites, configuration and status output; run the standard default-build
@@ -569,6 +601,71 @@ history is missing. A chain rescan cannot reconstruct unpublished authorizations
 uncertain source submission or consumed initial claims; never claim automatic
 detection of an undeclared filesystem rollback. The accepted USDC retry risk does
 not authorize recreating lost source intent or topping up an already funded wallet.
+
+
+**Completed acceptance and final fixup analysis:**
+
+The standard default-build check was started with `COMPLEXITY_BASE_REF=49566df`.
+Sources/executables stayed frozen during each run. After a failing target, completed
+suites were retained and remaining targets resumed; localized fixes used focused
+checks. This is component-complete acceptance, not a claim that the original
+`scripts/check.sh` invocation exited successfully.
+
+- Formatting, tooling/complexity tests, both vendor verifiers and complete source
+  complexity analysis passed (`target/be07-standard-check.log`). The default library
+  passed 518 tests with eight intentional helper/optional tests ignored.
+- Default integration targets completed across `target/be07-standard-check.log`,
+  `target/be07-standard-remaining2.log`, `target/be07-standard-final-targets.log` and
+  focused corrections. Integration preparation passed 250 tests with six helpers
+  ignored; revised managed acceptance passed 42 with three helpers ignored, and
+  static payment acceptance passed 15 (`target/be07-managed-payment5.log`).
+- Final constructor audit, provider status and startup checks passed in
+  `target/be07-final-fixup-tests.log`; the remaining sync fixture passed in
+  `target/be07-empty-sync-final3.log`. Earlier failures in these logs are retained
+  honestly, not relabeled as successful suites.
+- SDK proving plus affected network/admission fixtures passed 16 tests, actual
+  synthetic-chain lifecycle passed four, and address-codec scoping passed one
+  (`target/be07-feature-checks.log`). That run subsequently found a test tuple-type
+  Clippy warning; alias-only fixup `71642d4` passed exact review and final all-target
+  `zcash-regtest` Clippy with warnings denied (`target/be07-clippy-final.log`).
+  Independent dependency compatibility passed (`target/be07-compat-final.log`).
+
+Late fixups expose removed-policy consumers rather than justify replacement gates.
+Managed fixtures now explicitly establish initial credit through its funding owner;
+ordinary maintenance does not activate allocated wallets or sweep historical nonces.
+Canonical-proof tests request the actual production query/view/publication path.
+Obsolete solvency, precise smallest-sufficient selection, gross accounting and
+retirement-model oracles were deleted, preserving focused claim correlation,
+concurrent journal ownership, cancellation, pool and transport isolation, and
+retained-wallet GET/POST coverage. This test deletion is reported separately from
+runtime responsibility deletion. Initial source-credit consumption and reserve
+promotion remain distinct; their generation and immutable journal assertions survive.
+
+Other fixups correct pre-existing provider snapshots, startup message/auth-fixture
+ordering and six test-only network constructors without relaxing strict equality,
+preflight authority or the constructor tripwire. Empty-wallet indexer mocks prove
+typed safe deferral, one actual network-identity read, unchanged snapshots, no
+accepted operation and no broadcast; real SDK proving separately establishes typed
+insufficient funds. Review also caught a call placed after drain closed admission,
+a weakened per-pool test assertion and a mistaken RPC recorder representation.
+Unsquashed corrections restore those real ownership/isolation checks. Warning prose
+now describes advisory estimates and potentially chargeable authorizations honestly.
+
+The final hazard review distinguishes deletion from movement: ordinary solvency,
+readiness/history/freshness gates, top-up authority and source/refund monetary repair
+are removed. Finite payer traversal and scalar refresh replace the USDC machinery;
+the SDK owns Zcash funds. Higher orchestration scores remain visible because exact
+accepted inputs/bytes, same-owner publication retry, scoped concurrent work and
+original qualification evidence still need owners. These are actual off-chain
+boundaries, not renamed balance certificates or another monetary ledger.
+
+Possible multiple USDC charges, inaccurate estimates, forced-death unpublished-byte
+loss with uncertain intent, incompatible-state rejection and restoration limits
+remain explicit. No private-state conversion, old-binary execution, live-funded,
+live Tor or Docker consensus qualification was performed. R01 SDK/task reconstruction,
+R02 general automatic transparent shielding, the external 1Click route contract and
+the gRPC progressing-upload limitation remain unfinished/unqualified; none is
+claimed as delivered recovery or settlement behavior.
 
 **Maintained documentation:**
 
@@ -639,6 +736,26 @@ transition, BE04/BE06 source ownership and accounting removal, and BE07 integrat
 Include complexity measurements and the relevant acceptance below at each gate.
 The final fixup analysis must distinguish deleted responsibilities from complexity
 merely moved into other helpers.
+
+BE07 complete-chain complexity review uses source-matched artifact
+`20261018T045854Z-c305cd65` (322 files, 6,356 callable spaces), against `49566df`.
+Scores below are inclusive CogC/CycC; nested rows are not additive.
+
+| Responsibility | Baseline → current | Disposition |
+| --- | --- | --- |
+| `collect_refunds` | 20/21 → deleted | Refund credits, historical return revalidation and monetary repair are removed. Explicit SDK shielding remains 6/39. |
+| Source orchestration | 22/57 → 40/81 | Coordinates original accepted calculation, valid first submission, actual protocol expiry and observation; no second publisher/repair engine. |
+| Quoted preparation | 5/20 → 3/14 | Removed redundant refresh/recheck and unused clocks; the actual actor owns SDK synchronization. |
+| Funding inventory / dispatch | 31/31 → 31/31; 22/28 → 22/28 | Retained paged lane ownership, scoped errors and independent work; monetary closure consumers deleted. |
+| Maintenance / per-wallet read | 29/37 → 41/50; 14/29 → 1/9 | Advisory latest balance reads, post-failure follow-up and retained concurrent owners replace canonical history/readiness repair. Qualification history remains separately authorized. |
+| Payment dispatch | 17/30 → 28/44 | Each captured eligible payer once, identity-bound challenge/signature, accepted possible multiple charges and monotonic submission progress. |
+| SDK preparation / local Store publication | 3/61 → 8/55; 6/38 → 4/25 | SDK selects funds; original-input ownership replaces monetary reservation. Completed-result retention adds 3/7, identical publication 2/10 and owned close 4/6, a real failure/cancellation responsibility. |
+| Initialization / serving / deferred runtime | 45/49 → 45/49; 24/41 → 24/41; 22/24 → 22/24 | Existing capability containment, listener binding and single cleanup owner retained; no replacement lifecycle framework. |
+| Report baseline continuity | 14/21 → 27/29 | Both historical read-only reports and current immutable preparation/transaction identity remain; deleted projections are unavailable. |
+
+The increased coordinating scores are disclosed rather than split only for scoring.
+Independent reviews examine these full chains and verify deletion of the blocking
+predicates and accounting tables. R01/R02 remain explicitly unfinished.
 
 ## Required focused acceptance
 

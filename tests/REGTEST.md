@@ -34,10 +34,11 @@ The scenario exercises the shared treasury, journal and submission code:
    to the first. Sync and reconcile the orphaned deposit without freeing its
    reservation or recalculating it.
 5. Explicitly rebroadcast the same saved bytes and mine sufficient confirmations.
-   Resolve the operation and account its original amount plus fee.
-6. Replace that confirmed history with another longer branch. Sync must fail
-   closed with `treasury_confirmed_spend_reorg`, including after reopening. The
-   consumed budget must not become available just because the spend was orphaned.
+   Resolve the operation and retain its original amount/fee facts.
+6. Replace that confirmed history with another longer branch. SDK sync updates
+   current spendable state, including after reopening, while exact original bytes
+   and recorded transaction facts remain. No historical monetary equality gate
+   or automatic replacement/rebroadcast is introduced.
 
 The harness has a fifteen-minute outer deadline. It removes its UUID-named
 containers and dedicated bridge on normal return, error, panic or timeout. A hard
@@ -48,9 +49,8 @@ is disposable. Cached images remain available for subsequent tests.
 
 The deposit scenario does not qualify NEAR swaps, refunds, deep finalized-chain rollback,
 or automatic repair of source spends invalidated after accounting confirmation.
-Such spends retain their consumed budget and block new treasury preparation until
-the original transaction regains the configured confirmation depth. No replacement
-transaction or automatic rebroadcast is created as a recovery shortcut.
+Original facts remain historical observations; the SDK owns current spendability.
+No replacement transaction or automatic rebroadcast is created as a recovery shortcut.
 
 ## Additional isolated scenarios
 
@@ -87,7 +87,7 @@ Clap flags, stdout/error conventions and mainnet wallet identity checks.
 Each child reads relative state/key paths from a TOML profile containing an unused,
 missing API spec, proving recovery does not load API sources. Read-only commands
 receive no submission environment variable. The parent checks no shielding or
-read-only broadcast, identical prepared bytes, confirmed budgets, one submission
+read-only broadcast, identical prepared bytes, immutable transaction facts, one submission
 attempt after refusing reconciliation of an already confirmed operation, and release only after
 expiry proof. Early expiry fails legibly with backtraces enabled; reopening proves
 ownership release after both successful and failed commands. The unit-test runner's

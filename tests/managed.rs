@@ -582,34 +582,28 @@ fn make_client(store: StoreHandle, pool: String, base: &str) -> PaidClient {
     PaidClient::managed(make_pool(store, pool, base))
 }
 #[tokio::test]
-async fn concurrent_calls_reserve_before_send_and_consume_ready_once() {
+async fn concurrent_calls_journal_unique_attempts_without_a_local_balance_ceiling() {
     let h = Harness::new().await;
-    let other = h.client.clone();
-    let (a, b) = tokio::join!(h.client.execute(h.route()), other.execute(h.route()));
-    assert!(a.is_ok() && b.is_ok(), "{a:?} {b:?}");
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
-    let status = h.store.call(|s| s.status()).await.unwrap();
-    assert_eq!(status.pools[0].generation, 0);
-    assert_eq!(status.pools[0].addresses.len(), 2);
+    let before = h.store.call(|s| s.status()).await.unwrap();
+    let (a, b) = tokio::join!(h.client.execute(h.route()), h.client.execute(h.route()));
+    assert_eq!(a.unwrap(), "paid");
+    assert_eq!(b.unwrap(), "paid");
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    concurrency::assert_liabilities(&h, 3, 9_000_000);
+    let signed = h.f.signed.lock().unwrap().clone();
+    assert_eq!(signed.len(), 3);
+    let nonces: std::collections::BTreeSet<_> = signed
+        .iter()
+        .map(|p| p["payload"]["authorization"]["nonce"].as_str().unwrap())
+        .collect();
+    assert_eq!(nonces.len(), 3);
+    let after = h.store.call(|s| s.status()).await.unwrap();
     assert_eq!(
-        status.pools[0]
-            .addresses
-            .iter()
-            .filter(|w| w.role == "ACTIVE")
-            .count(),
-        1
+        after.pools[0].addresses.len(),
+        before.pools[0].addresses.len()
     );
-    assert_eq!(
-        status.pools[0]
-            .addresses
-            .iter()
-            .filter(|w| w.role == "RETAINED")
-            .count(),
-        1
-    );
-    assert!(h.client.execute(h.route()).await.is_err());
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
-    drop(other);
+    assert_eq!(after.funding_jobs.len(), before.funding_jobs.len());
+    assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), 0);
     h.close().await;
 }
 #[tokio::test]
@@ -686,6 +680,7 @@ async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization(
         .without_time()
         .with_ansi(false)
         .with_writer(move || sink.clone())
+        .with_max_level(tracing::Level::DEBUG)
         .finish();
     async {
         for captured in [false, true] {
@@ -905,9 +900,8 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
     h.close().await;
 }
 #[tokio::test]
-async fn rejected_payment_remains_reserved_across_restart_and_is_not_replayed() {
-    let mut h = Harness::new().await;
-    exhaust_ready(&h).await;
+async fn rejected_payment_stays_journaled_across_restart_without_automatic_replay() {
+    let h = Harness::new().await;
     h.f.reject.store(true, Ordering::SeqCst);
     h.f.challenge.lock().unwrap()["extensions"] = json!({"unknown": {"secret": "not logged"}});
     let error = h.client.execute(h.route()).await.unwrap_err();
@@ -916,87 +910,65 @@ async fn rejected_payment_remains_reserved_across_restart_and_is_not_replayed() 
         message.contains("omitted advertised x402 extensions"),
         "{message}"
     );
-    assert!(message.contains("remains reserved"), "{message}");
-    assert!(message.contains("Do not automatically retry"), "{message}");
+    assert!(message.contains("may still charge"), "{message}");
+    assert!(message.contains("do not automatically repeat"), "{message}");
     assert!(message.contains("402"), "{message}");
+    let original = h.f.signed.lock().unwrap().clone();
+    assert_eq!(original.len(), 1);
     assert!(
-        h.f.signed.lock().unwrap()[0]["extensions"]
+        original[0]["extensions"]
             .as_object()
             .is_none_or(|m| m.is_empty())
     );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
-    let id = h.store.call(|s| Ok(s.id().to_owned())).await.unwrap();
-    drop(h.client);
-    drop(h.store);
-    h.worker.await.unwrap();
-    let store = Store::open(&h.dir.path().join("state"), &h.dir.path().join("key"), &id).unwrap();
-    (h.store, h.worker) = StoreHandle::spawn(store);
-    h.client = make_client(h.store.clone(), h.pool.clone(), &h.base);
-    assert!(
-        h.client
-            .execute(h.route())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("funding_unavailable")
+    let h = restart(h).await;
+    assert_eq!(
+        *h.f.signed.lock().unwrap(),
+        original,
+        "reopen never sends a request"
     );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    concurrency::assert_liabilities(&h, 1, 3_000_000);
+    h.f.reject.store(false, Ordering::SeqCst);
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    concurrency::assert_liabilities(&h, 2, 6_000_000);
+    assert_eq!(h.f.signed.lock().unwrap()[0], original[0]);
     h.close().await;
 }
 #[tokio::test]
-async fn stale_wrong_chain_and_reorg_evidence_never_authorize_or_rotate() {
+async fn foreground_signing_does_not_fetch_stale_wrong_chain_or_reorg_evidence() {
     let h = restart(Harness::new().await).await;
-    h.f.stale.store(true, Ordering::SeqCst);
-    assert!(h.client.execute(h.route()).await.is_err());
-    h.f.stale.store(false, Ordering::SeqCst);
-    h.f.wrong_chain.store(true, Ordering::SeqCst);
-    assert!(h.client.execute(h.route()).await.is_err());
-    h.f.wrong_chain.store(false, Ordering::SeqCst);
-    h.client.execute(h.route()).await.unwrap();
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
-    h.close().await;
-
-    // An undisputed historical anchor must detect its first replacement. The
-    // wrong-chain case above already disputes readiness and intentionally permits
-    // independent fresh capacity without clearing that historical dispute.
-    let h = Harness::new().await;
-    h.client.execute(h.route()).await.unwrap();
-    h.f.reorg.store(true, Ordering::SeqCst);
-    let h = restart(h).await;
-    assert!(
-        h.client
-            .execute(h.route())
+    for flag in [&h.f.stale, &h.f.wrong_chain, &h.f.reorg] {
+        flag.store(true, Ordering::SeqCst);
+        assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+        flag.store(false, Ordering::SeqCst);
+    }
+    assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), 0);
+    concurrency::assert_liabilities(&h, 3, 9_000_000);
+    assert_eq!(
+        h.store
+            .call(|s| Ok(s.status()?.funding_jobs.len()))
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("anchor_replacement")
+            .unwrap(),
+        2
     );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
     h.close().await;
 }
 #[tokio::test]
 async fn cancellation_after_submission_retains_liability() {
     let h = Harness::new().await;
-    exhaust_ready(&h).await;
     h.f.hold.store(true, Ordering::SeqCst);
     let client = h.client.clone();
     let route = h.route();
     let task = tokio::spawn(async move { client.execute(route).await });
-    tokio::time::timeout(std::time::Duration::from_secs(10), h.f.arrived.notified())
-        .await
-        .unwrap();
+    concurrency::bounded(h.f.arrived.notified()).await;
+    let original = h.f.signed.lock().unwrap()[0].clone();
     task.abort();
-    let _ = task.await;
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
     h.f.release.notify_one();
-    assert!(
-        h.client
-            .execute(h.route())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("funding_unavailable")
-    );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    h.client.drain().await;
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    assert_eq!(h.f.signed.lock().unwrap()[0], original);
+    concurrency::assert_liabilities(&h, 2, 6_000_000);
     h.close().await;
 }
 #[tokio::test]
@@ -1331,42 +1303,35 @@ async fn free_calls_do_not_touch_admission_and_funded_active_serves_independentl
     h.close().await;
 }
 #[tokio::test]
-async fn unused_expired_authorization_requires_fresh_chain_evidence_to_release() {
+async fn unused_expired_authorization_requires_explicit_canonical_resolution() {
     let h = Harness::new().await;
-    exhaust_ready(&h).await;
-    // Leave more time than the client's three-second request timeout for signing.
-    // A one-second lifetime can expire at a wall-clock boundary before submission.
     h.f.challenge.lock().unwrap()["accepts"][0]["maxTimeoutSeconds"] = json!(5);
     h.f.reject.store(true, Ordering::SeqCst);
     assert!(h.client.execute(h.route()).await.is_err());
-    let expiry = {
-        let signed = h.f.signed.lock().unwrap();
-        assert_eq!(signed.len(), 1, "test must reach signed submission");
-        signed[0]["payload"]["authorization"]["validBefore"]
-            .as_str()
-            .unwrap()
-            .parse::<u64>()
-            .unwrap()
-    };
+    let expiry = h.f.signed.lock().unwrap()[0]["payload"]["authorization"]["validBefore"]
+        .as_str()
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
     while now().unwrap() <= expiry {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     h.f.stale.store(true, Ordering::SeqCst);
-    assert!(h.client.execute(h.route()).await.is_err());
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    make_pool(h.store.clone(), h.pool.clone(), &h.base)
+        .reconcile()
+        .await
+        .unwrap();
+    concurrency::assert_liabilities(&h, 1, 3_000_000);
     h.f.stale.store(false, Ordering::SeqCst);
-    h.f.reject.store(false, Ordering::SeqCst);
     reconcile_complete_history(&h).await;
-    h.client.execute(h.route()).await.unwrap();
+    concurrency::assert_liabilities(&h, 0, 0);
+    h.f.reject.store(false, Ordering::SeqCst);
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
     assert_eq!(h.f.signed.lock().unwrap().len(), 2);
-    assert_eq!(
-        h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
-        0
-    );
     h.close().await;
 }
 #[tokio::test]
-async fn pending_exposure_rejects_promptly_while_other_pools_continue() {
+async fn pending_exposure_does_not_block_independent_permitted_calls() {
     let h = Harness::new().await;
     exhaust_ready(&h).await;
     let other_id = h
@@ -1405,9 +1370,9 @@ async fn pending_exposure_rejects_promptly_while_other_pools_continue() {
     let task = tokio::spawn(async move { client.execute(route).await });
     h.f.arrived.notified().await;
     other.execute(h.route()).await.unwrap();
-    let error = h.client.execute(h.route()).await.unwrap_err().to_string();
-    assert!(error.contains("funding_unavailable"), "{error}");
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
+    concurrency::assert_liabilities(&h, 3, 9_000_000);
     task.abort();
     let _ = task.await;
     h.f.release.notify_one();
@@ -1415,7 +1380,7 @@ async fn pending_exposure_rejects_promptly_while_other_pools_continue() {
     h.close().await;
 }
 #[tokio::test]
-async fn larger_target_does_not_churn_through_smaller_standby() {
+async fn configured_payment_cap_allows_attempts_above_estimated_funded_capacity() {
     let h = Harness::new().await;
     h.client.execute(h.route()).await.unwrap();
     let active = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
@@ -1446,56 +1411,40 @@ async fn larger_target_does_not_churn_through_smaller_standby() {
         )
         .unwrap(),
     ));
-    assert!(
-        client
-            .execute(h.route())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("funding_unavailable")
-    );
+    assert_eq!(client.execute(h.route()).await.unwrap(), "paid");
     assert_eq!(
         h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
         0
     );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
     drop(client);
     h.close().await;
 }
 
 #[tokio::test]
-async fn background_reconciliation_releases_confirmed_payment_without_rotating_or_signing() {
+async fn ordinary_balance_refresh_preserves_unresolved_authorizations() {
     let h = Harness::new().await;
     h.client.execute(h.route()).await.unwrap();
-    let address = h.store.call(|s| s.status()).await.unwrap().pools[0].addresses[0]
-        .address
-        .clone();
+    let payer = signatures::recover_exact(&h.f.signed.lock().unwrap()[0]).to_string();
     h.f.used.store(true, Ordering::SeqCst);
-    h.f.balances.lock().unwrap().insert(address, 0);
-    let manager = ManagedPool::new(
-        h.store.clone(),
-        h.pool.clone(),
-        BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
-        SpendPolicy::dollars("none").unwrap(),
-    )
-    .unwrap();
-    assert_balance_observation_outcome(manager.reconcile().await);
+    h.f.balances.lock().unwrap().insert(payer.clone(), 0);
+    let manager = make_pool(h.store.clone(), h.pool.clone(), &h.base);
+    manager.reconcile().await.unwrap();
+    concurrency::assert_liabilities(&h, 1, 3_000_000);
     let state = h.store.call(|s| s.status()).await.unwrap();
-    assert_eq!(state.pools[0].generation, 0);
-    assert_eq!(state.pools[0].addresses.len(), 2);
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
-    let db = rusqlite::Connection::open(&h.f.db).unwrap();
-    let unresolved: i64 = db
-        .query_row(
-            "SELECT COUNT(*) FROM payment_attempts WHERE state!='RESOLVED'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(unresolved, 0);
+    assert_eq!(
+        state.pools[0]
+            .addresses
+            .iter()
+            .find(|w| w.address == payer)
+            .unwrap()
+            .confirmed_balance,
+        "0"
+    );
     h.f.reorg.store(true, Ordering::SeqCst);
-    assert!(manager.reconcile().await.is_err());
-    drop(db);
+    manager.reconcile().await.unwrap();
+    concurrency::assert_liabilities(&h, 1, 3_000_000);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
     drop(manager);
     h.close().await;
 }
@@ -1552,10 +1501,10 @@ fn tor_managed_child() {
     })
     .unwrap();
     confirmed_depletion_consumes_ready_independently_of_failed_refill();
-    concurrent_calls_reserve_before_send_and_consume_ready_once();
+    concurrent_calls_journal_unique_attempts_without_a_local_balance_ceiling();
     unsupported_and_over_target_offers_have_no_admission_side_effects();
     managed_extensions_are_stripped_logged_and_do_not_change_authorization();
-    rejected_payment_remains_reserved_across_restart_and_is_not_replayed();
+    rejected_payment_stays_journaled_across_restart_without_automatic_replay();
     free_calls_do_not_touch_admission_and_funded_active_serves_independently();
     post_handoff_gets_one_new_challenge_and_signs_once();
 }
@@ -1706,26 +1655,37 @@ async fn malformed_base_evidence_never_applies_a_partial_view() {
         "height",
         "quantity",
         "oversized_quantity",
-        "future",
         "word_short",
         "word_long",
         "word_invalid",
         "final_hash",
     ] {
-        let h = restart(Harness::new().await).await;
+        let h = Harness::new().await;
         h.client.execute(h.route()).await.unwrap();
-        let count = h.f.signed.lock().unwrap().len();
         *h.f.rpc_fault.lock().unwrap() = Some(fault.into());
-        h.f.used.store(true, Ordering::SeqCst); // Earlier nonce evidence alone must not release.
-        let h = restart(h).await; // Force a new acquisition rather than reuse valid evidence.
+        h.f.used.store(true, Ordering::SeqCst);
         let before = serde_json::to_value(h.store.call(|s| s.status()).await.unwrap()).unwrap();
-        assert!(h.client.execute(h.route()).await.is_err(), "{fault}");
-        assert_eq!(h.f.signed.lock().unwrap().len(), count, "{fault}");
+        let pool = h.pool.clone();
+        let query = h.store.call(move |s| s.chain_query(&pool)).await.unwrap();
+        assert!(
+            BaseRpc::new(&format!("{}/rpc", h.base), 12)
+                .unwrap()
+                .view(query)
+                .await
+                .is_err(),
+            "{fault}"
+        );
         assert_eq!(
             before,
             serde_json::to_value(h.store.call(|s| s.status()).await.unwrap()).unwrap(),
             "{fault}"
         );
+        assert_eq!(
+            h.client.execute(h.route()).await.unwrap(),
+            "paid",
+            "{fault}"
+        );
+        concurrency::assert_liabilities(&h, 2, 6_000_000);
         h.close().await;
     }
 }
@@ -1754,22 +1714,19 @@ async fn slow_signed_response_does_not_block_shared_pool_or_reconciliation() {
     concurrency::bounded(pool.reconcile()).await.unwrap();
     assert!(!first.is_finished());
     concurrency::assert_liabilities(&h, 2, 2_000_000);
-    // The first request is still unresolved. Neither a second success nor
-    // background reconciliation makes its reserved balance spendable.
     *h.f.challenge.lock().unwrap() = challenge("4000000");
-    assert!(
+    assert_eq!(
         concurrency::bounded(client.execute(h.route()))
             .await
-            .unwrap_err()
-            .to_string()
-            .contains("funding_unavailable")
+            .unwrap(),
+        "paid"
     );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
     first.abort();
     assert!(first.await.unwrap_err().is_cancelled());
     h.f.release.notify_one();
     concurrency::bounded(pool.reconcile()).await.unwrap();
-    concurrency::assert_liabilities(&h, 2, 2_000_000);
+    concurrency::assert_liabilities(&h, 3, 6_000_000);
     assert_eq!(
         h.store.call(|s| s.status()).await.unwrap().pools[0].generation,
         0
@@ -1884,8 +1841,8 @@ async fn qualification_guard_allows_existing_ready_consumption_but_denies_refill
     h.f.used.store(true, Ordering::SeqCst);
     reconcile_complete_history(&h).await;
     let (a, b) = tokio::join!(h.client.execute(h.route()), h.client.execute(h.route()));
-    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 2);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
     let after = h.store.call(|s| s.status()).await.unwrap();
     assert_eq!(after.funding_jobs.len(), before.funding_jobs.len());
     assert_eq!(after.pools[0].generation, 0);
@@ -1913,7 +1870,7 @@ async fn qualification_guard_allows_existing_ready_consumption_but_denies_refill
     assert!(error.to_string().contains("qualification_funding_denied"));
     *h.f.challenge.lock().unwrap() = challenge("1000000");
     assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
-    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
+    assert_eq!(h.f.signed.lock().unwrap().len(), 4);
     h.close().await;
 }
 
@@ -2077,200 +2034,58 @@ async fn foreground_admission_does_not_start_historical_authorization_sweep() {
 }
 
 #[tokio::test]
-async fn nonce_outages_retain_liabilities_but_allow_remaining_capacity_across_restart() {
-    let mut h = Harness::new().await;
-    exhaust_ready(&h).await;
-    let fallback = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let fallback_url = format!("http://{}", fallback.local_addr().unwrap());
-    let fallback_calls = Arc::new(AtomicUsize::new(0));
-    let calls = fallback_calls.clone();
-    let app = Router::new().fallback(move || {
-        calls.fetch_add(1, Ordering::SeqCst);
-        async { StatusCode::SERVICE_UNAVAILABLE }
-    });
-    let fallback_server = tokio::spawn(async move { axum::serve(fallback, app).await.unwrap() });
-    h.client = PaidClient::managed(Arc::new(
-        ManagedPool::new(
-            h.store.clone(),
-            h.pool.clone(),
-            BaseRpc::with_fallbacks(&[format!("{}/rpc", h.base), fallback_url], 12).unwrap(),
-            SpendPolicy::dollars("none").unwrap(),
-        )
-        .unwrap(),
-    ));
+async fn nonce_outages_retain_journals_without_vetoing_signing_across_restart() {
+    let h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1000000");
     h.client.execute(h.route()).await.unwrap();
     *h.f.rpc_fault.lock().unwrap() = Some("nonce_unavailable".into());
-    // A failed observation cannot consume the remaining four USDC.
     h.client.execute(h.route()).await.unwrap();
-    let db = rusqlite::Connection::open(&h.f.db).unwrap();
-    let pending = || {
-        db.query_row(
-            "SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .unwrap()
-    };
-    assert_eq!(pending(), 2);
-    // Malformed historical evidence fails that reconciliation operation. Paid
-    // admission independently reads balances and never sweeps old nonces.
-    *h.f.rpc_fault.lock().unwrap() = Some("nonce".into());
+    make_pool(h.store.clone(), h.pool.clone(), &h.base)
+        .reconcile()
+        .await
+        .unwrap();
+    concurrency::assert_liabilities(&h, 2, 2_000_000);
+    let pool = h.pool.clone();
+    let query = h.store.call(move |s| s.chain_query(&pool)).await.unwrap();
     assert!(
-        make_pool(h.store.clone(), h.pool.clone(), &h.base)
-            .reconcile()
+        BaseRpc::new(&format!("{}/rpc", h.base), 12)
+            .unwrap()
+            .view(query)
             .await
             .is_err()
     );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
-    *h.f.rpc_fault.lock().unwrap() = Some("nonce_unavailable".into());
     *h.f.challenge.lock().unwrap() = challenge("4000000");
-    assert!(
-        h.client
-            .execute(h.route())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("funding_unavailable")
-    );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
-    // Reconciliation remains an explicitly failed operation while observations
-    // are unavailable; it cannot report completed recovery or release anything.
-    assert!(
-        make_pool(h.store.clone(), h.pool.clone(), &h.base)
-            .reconcile()
-            .await
-            .is_err()
-    );
-    assert_eq!(pending(), 2);
-    // Retain one failed nonce while committing another's actual canonical proof.
-    *h.f.rpc_fault.lock().unwrap() = Some("first_nonce_unavailable".into());
-    h.f.used.store(true, Ordering::SeqCst);
-    assert!(
-        make_pool(h.store.clone(), h.pool.clone(), &h.base)
-            .reconcile()
-            .await
-            .is_err()
-    );
-    h.client.execute(h.route()).await.unwrap();
-    assert_eq!(pending(), 2);
-    assert_eq!(
-        db.query_row("SELECT COUNT(*) FROM payment_resolutions", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
-        1
-    );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
-    assert_eq!(
-        h.store
-            .call(|s| Ok(s.status()?.pools[0].generation))
-            .await
-            .unwrap(),
-        0
-    );
-    drop(db);
-    let id = h.store.call(|s| Ok(s.id().to_owned())).await.unwrap();
-    drop(h.client);
-    drop(h.store);
-    h.worker.await.unwrap();
-    let store = Store::open(&h.dir.path().join("state"), &h.dir.path().join("key"), &id).unwrap();
-    (h.store, h.worker) = StoreHandle::spawn(store);
-    h.client = make_client(h.store.clone(), h.pool.clone(), &h.base);
-    *h.f.rpc_fault.lock().unwrap() = Some("nonce_unavailable".into());
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    let original = h.f.signed.lock().unwrap().clone();
+    let h = restart(h).await;
+    assert_eq!(*h.f.signed.lock().unwrap(), original);
     *h.f.challenge.lock().unwrap() = challenge("1");
-    assert!(
-        h.client
-            .execute(h.route())
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("funding_unavailable")
-    );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
-    *h.f.rpc_fault.lock().unwrap() = None;
-    reconcile_complete_history(&h).await;
-    h.client.execute(h.route()).await.unwrap();
-    assert_eq!(h.f.signed.lock().unwrap().len(), 4);
-    assert_eq!(
-        fallback_calls.load(Ordering::SeqCst),
-        0,
-        "an optional nonce outage must not require another provider to authorize remaining capacity"
-    );
-    fallback_server.abort();
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    concurrency::assert_liabilities(&h, 4, 6_000_001);
     h.close().await;
 }
 
 #[tokio::test]
-async fn slow_balance_collection_retains_resolution_without_signing_or_looping() {
-    let mut h = Harness::new().await;
+async fn held_balance_refresh_does_not_gate_signing_or_resolve_history() {
+    let h = Harness::new().await;
     *h.f.challenge.lock().unwrap() = challenge("1");
-    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    h.client.execute(h.route()).await.unwrap();
     h.f.used.store(true, Ordering::SeqCst);
-    h.f.balance_delay.store(true, Ordering::SeqCst);
-    h = restart(h).await;
-    let manager = Arc::new(
-        ManagedPool::new(
-            h.store.clone(),
-            h.pool.clone(),
-            BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
-            SpendPolicy::dollars("5").unwrap(),
-        )
-        .unwrap(),
-    );
-    h.client = PaidClient::managed(manager.clone());
-    let error = tokio::time::timeout(
-        std::time::Duration::from_secs(8),
-        h.client.execute(h.route()),
-    )
-    .await
-    .expect("completed balance work must return, not restart")
-    .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("candidate evidence acquisition incomplete"),
-        "{error:#}"
-    );
-    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
-    let db = rusqlite::Connection::open(&h.f.db).unwrap();
-    let resolved: i64 = db
-        .query_row(
-            "SELECT COUNT(*) FROM payment_attempts WHERE state='RESOLVED'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
+    h.f.rpc_hold.store(true, Ordering::SeqCst);
+    let manager = make_pool(h.store.clone(), h.pool.clone(), &h.base);
+    let background = tokio::spawn(async move { manager.reconcile().await });
+    concurrency::bounded(h.f.arrived.notified()).await;
     assert_eq!(
-        resolved, 0,
-        "foreground admission never sweeps unrelated historical nonces"
-    );
-    let attempts: i64 = db
-        .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(attempts, 1, "stale balances grant no new reservation");
-    // Independently owned historical reconciliation can commit the canonical
-    // resolution even while the balance owner obtains stale admission evidence.
-    assert_balance_observation_outcome(
-        tokio::time::timeout(std::time::Duration::from_secs(8), manager.reconcile())
+        concurrency::bounded(h.client.execute(h.route()))
             .await
             .unwrap(),
+        "paid"
     );
-    let resolved: i64 = db
-        .query_row(
-            "SELECT COUNT(*) FROM payment_attempts WHERE state='RESOLVED'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(
-        resolved, 1,
-        "canonical resolution survives independently stale balances"
-    );
-    h.f.balance_delay.store(false, Ordering::SeqCst);
-    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
-    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
-    drop(db);
-    drop(manager);
+    assert!(!background.is_finished());
+    concurrency::assert_liabilities(&h, 2, 2);
+    h.f.release.notify_one();
+    concurrency::bounded(background).await.unwrap().unwrap();
+    concurrency::assert_liabilities(&h, 2, 2);
     h.close().await;
 }
 
@@ -2322,42 +2137,39 @@ async fn replacement_credit_survives_restart_without_releasing_old_authorization
         .call(move |s| Ok(s.funding_job(&job)?.unwrap()))
         .await
         .unwrap();
-    assert!(
-        h.client.execute(h.route()).await.is_err(),
-        "unfunded replacement must not sign"
+    assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
+    assert_ne!(
+        signatures::recover_exact(h.f.signed.lock().unwrap().last().unwrap()),
+        replacement.recipient.parse::<Address>().unwrap()
     );
     h.f.balances
         .lock()
         .unwrap()
         .insert(replacement.recipient.clone(), 5_000_000);
-    make_pool(h.store.clone(), h.pool.clone(), &h.base)
-        .reconcile()
+    publish_initial_credit(&h.store, &h.pool, &h.base).await;
+    let jobs = h
+        .store
+        .call(|s| Ok(s.status()?.funding_jobs.len()))
         .await
         .unwrap();
     let h = restart(h).await;
-    let pool = h.pool.clone();
-    assert!(
+    assert_eq!(
         h.store
-            .call(move |s| s.allocate_capacity_kind(
-                &pool,
-                x402_treazury::rotation::store::AllocationKind::Small,
-                true,
-            ))
+            .call(|s| Ok(s.status()?.funding_jobs.len()))
             .await
-            .unwrap()
-            .is_none(),
-        "restart must not duplicate a funded replacement"
+            .unwrap(),
+        jobs
     );
     h.client.execute(h.route()).await.unwrap();
     let signed = h.f.signed.lock().unwrap().clone();
-    assert_eq!(signed.len(), 3);
+    assert_eq!(signed.len(), 4);
     assert_eq!(
         &signed[..2],
         original.as_slice(),
         "old authorizations must not be replayed or replaced"
     );
     assert_eq!(
-        signed[2]["payload"]["authorization"]["from"]
+        signed[3]["payload"]["authorization"]["from"]
             .as_str()
             .unwrap()
             .parse::<Address>()
@@ -2373,7 +2185,7 @@ async fn replacement_credit_survives_restart_without_releasing_old_authorization
         )
         .unwrap();
     assert_eq!(
-        unresolved, 3,
+        unresolved, 4,
         "replacement credit must retain all unresolved payment liabilities"
     );
     let state = h.store.call(|s| s.status()).await.unwrap();

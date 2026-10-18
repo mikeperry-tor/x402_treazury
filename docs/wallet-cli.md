@@ -646,7 +646,7 @@ positive `funding_amount_usdc`. Optional `reserves.large` must be at least as la
 Each reserve has its own optional `max_funding_amount_usdc`; omission allows no
 increase above target. `max_funding_spend_zec` caps one transfer including its fee.
 The group payment cap is independent of reserve size; a price above a funding
-target can be paid when one eligible wallet covers it after liabilities.
+target can be attempted by an eligible wallet under that payment cap.
 
 `max_retirement_remainder_usdc` defaults to `"0"`; `max_attempts` defaults to 3.
 See [configuration](configuration.md) for exact syntax, rejected aggregate settings,
@@ -680,7 +680,7 @@ admission. It retains low-balance failures for follow-up without delaying fallba
 Canonical authorization/debit proofs remain a qualification observation, preserving
 all attempts and the existing case permit; seller success does not prove a debit.
 
-Pools can spend independently verified Base balances and consume funded reserves.
+Pools use existing eligible Base wallets and consume initially funded reserves.
 Queued replacements are funded only with `funding.auto_fund = true`. Refund shielding
 requires explicit operator handling. Eligible source-expiry recovery runs automatically
 with funding, or through `wallet recover` while serving is stopped.
@@ -691,8 +691,8 @@ uses real payment signing and the Base RPC adapter with a deterministic funding
 backend; regtest separately verifies Zcash proofs and settlement.
 
 Store tests cover encrypted recovery, ownership, snapshot/generation
-conflicts, multi-pool targets, budget contention, failed-write rollback, cancelled
-waiters, sync checkpoint atomicity/freshness, durable submission records, and recovery
+conflicts, multi-pool targets, exact input ownership, failed-write rollback, cancelled
+waiters, sync checkpoint publication, durable submission records, and recovery
 after a child exits without destructors. The child helper
 is marked ignored in normal enumeration and run explicitly by its parent test.
 The managed tests cover offer filtering, journal failures, deadlines, independent
@@ -711,7 +711,7 @@ not automatically detectable; a code rollback is not a state downgrade.
 
 ## Versioned capacity output
 
-Wallet status and bootstrap JSON use `schema_version: 2`. Status additionally
+Wallet status JSON uses `schema_version: 5`; bootstrap uses `schema_version: 3`. Status additionally
 reports `state_schema_version`. Historical qualification report files retain their
 original interpretation; none of these observations grants payment or retry authority.
 
@@ -724,7 +724,7 @@ inventory can become incomplete again after a reserve is consumed.
 
 Status replaces the old pool `deposit_atomic` and `bootstrapped` fields with current
 payment authority, retirement tolerance, exact `reserve_claims` and readiness. Original wallet `target` and last saved
-`balance_estimate` are advisory history, not available-capacity authority. Signed
+`balance_estimate_atomic` are advisory history, not available-capacity authority. Signed
 exposure, financial repair blocks, destination discrepancies and retirement
 observations are reported separately. Null authority means unconfigured; explicit
 unlimited authority is represented by the maximum U256 atomic value.

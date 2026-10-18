@@ -31,7 +31,7 @@ by their parent tests differ from ignored optional live tests.
 | --- | --- |
 | Catalog/config/providers | Generated schemas, selected operations, routing, pricing descriptions, composition and pinned local catalogs. |
 | MCP/deployment/discovery | Auth, scope and grants, immutable invocation snapshots, update/remove races, persistent idempotency, cancellation, pagination, shutdown and ownership release. |
-| Payments/managed rotation | Real local signing, cap/asset validation, reserve-before-send, no paid replay, concurrent admission, exact reserve-claim consumption, independent refill allocation, retained-wallet selection, and canonical liability release. |
+| Payments/managed rotation | Real local signing, cap/asset validation, journal-before-disclosure, captured-wallet traversal only after typed insufficient funds, retained chargeable attempts, concurrent admission, exact reserve promotion, independent initial funding, and separately requested canonical resolution. |
 | Treasury/store/funding | Encrypted persistence, explicit conversion preflight, snapshot ordering, reservations and qualification limits, uncertain source sends, refund/expiry rules, backups and filesystem protections. |
 | Network | Production HTTP/gRPC through authenticated fixture SOCKS, remote hostnames, identity/pool boundaries, proxy failure, TLS, redirects and public-destination enforcement. |
 | Output/resource limits | Exact/over-bound behavior, visible errors and logs, no partial cache success, no retry of paid oversized responses, typed inline image/mapping behavior. |
@@ -108,8 +108,9 @@ concurrent quote acquisition, refund derivation, bootstrap completion and signed
 payment-triggered replacement funding, with scan-reuse and no-replay assertions.
 Reopened insufficient-funds diagnostics cannot block bootstrap or serving before
 the current worker rechecks them. A synthetic deposit regression verifies that
-a preparation scan discovers a newly confirmed deposit despite a previously saved
-low estimate, without creating a transaction or input claim.
+readiness accepts a previously saved low estimate without a balance gate. Actual
+actor preparation then scans a newly confirmed deposit and calculates with SDK
+inputs without broadcasting.
 Default fixtures cover concurrent
 replacement allocation/credit with retained old payment liabilities and paged,
 scoped bootstrap completion after reopen; see [LIFECYCLE.md](../tests/LIFECYCLE.md).
@@ -321,7 +322,7 @@ remaining lifecycle and cover gates.
 | Every provider is selected or explicitly excluded | `tests/provider_catalogs.rs::live_provider_scope_accounts_for_every_bundled_definition` |
 | Qualification schema rejection order, recursion/node boundaries and shared alternative work limits | `examples/live_integration/schema.rs` tests through public `validate` |
 | Exact reviewed requests, caps, schemas and wallet arrangements | `examples/live_integration/presets.rs` and independent request fixtures |
-| Authenticated MCP signs exactly once | `tests/server.rs::authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result`, `tests/payments.rs` |
+| Authenticated MCP single-attempt fixtures sign exactly once | `tests/server.rs::authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result`, `tests/payments.rs` |
 | Crash/failure cannot replay or refund a charged attempt | Runner registry tests and `tests/integration_preparation.rs` real-process tests |
 | Prior permits and liabilities survive new runs | `src/qualification/funding/registry_state.rs` and immutable-baseline tests |
 | Complete frozen inventories, typed loading failures and exact snapshot byte boundary including newline | `tests/startup.rs`, `tests/integration_preparation.rs`, `tests/snapshot_boundary.rs` |

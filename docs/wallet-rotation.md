@@ -283,21 +283,12 @@ or an expired authorization proven unused can release its reservation through th
 store's canonical reconciliation transaction. An unused but still-valid signature
 remains a liability. Reorg contradictions cannot silently reset accounting.
 
-Balance-only acquisition reads one fresh latest/confirmed header pair, pins both
-balance calls to those hashes, and rechecks their canonical anchors. A view that
-also scans historical authorizations acquires a new header pair after that scan;
-finishing the scan never renews the earlier observation's timestamp. Identical
-canonical header checks are shared across captured wallet dependencies within one
-verification phase on one endpoint. Initial reads never replace post-state checks,
-and reuse neither renews evidence nor skips comparison against each expected hash.
-
-Canonical historical proofs remain available for reporting. Their balance,
-exposure, age and repair fields do not gate current payment admission. Retired
-wallets remain retired; an advisory observation does not reactivate them.
-
-Historical capacity repair has been removed. Incomplete historical support does
-not require repair before new payment work. Ordinary reconciliation is being
-simplified at the BE03 gate. Original attempt and canonical proof records remain.
+Ordinary maintenance performs scalar unsigned latest `balanceOf` reads. It does
+not acquire confirmed/latest proof pairs or scan historical authorizations.
+Canonical historical proofs remain available for separately authorized qualification
+and reports; their balance, exposure and repair fields do not gate current signing.
+Retired wallets remain retired. Original attempts and canonical proof records stay
+readable without a historical capacity-repair pass.
 
 ## Funding and source safety
 
