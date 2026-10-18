@@ -85,12 +85,15 @@ mechanisms whose only justification is maintaining that stronger guarantee.
    payment request. The HTTP response need not itself be cryptographically signed.
    Do not classify
    by arbitrary provider prose, HTTP 402 alone, an initial unsigned challenge,
-   insufficient allowance, generic settlement failure or body truncation. Retain
-   the existing response-byte bounds. Pin actual supported wire forms in fixtures;
+   insufficient allowance, generic settlement failure or body truncation alone.
+   Recognized protocol headers suffice; drop the unused error body without reading
+   it. Retain existing response-byte bounds for returned content. Pin supported
+   wire forms in fixtures;
    the baseline SDK names the category `insufficient_funds`, but seller encoding
    must be established rather than invented.
-9. **Keep the exception narrow.** Transport loss, malformed replies, cancellation,
-   unrelated HTTP failures and successful paid responses do not earn this retry.
+9. **Keep the exception narrow.** Transport loss before recognized failure headers,
+   malformed protocol headers, cancellation, unrelated HTTP failures and successful
+   paid responses do not earn this retry.
    Do not retry a case automatically after process restart. Submission progress
    remains monotonic across attempts; never reset it to make a relay/caller believe
    no signature was disclosed. Existing paid management/relay callers share this
@@ -281,7 +284,7 @@ BE03 review decisions: structured verification/settlement fixtures are pinned to
 x402 seller commit `faa1c694c66a3732aaabbce93bdae140e521a67d` (source SHA-256
 `9b4f144143a7c7b8f514e835ac04e83d01f41e876c445eaa5b843561ee5d22cb`).
 Classification requires the signed attempt's actual 402 response and exact code;
-2xx error headers, allowance errors, prose and malformed/truncated responses earn
+2xx error headers, allowance errors, prose and malformed protocol headers earn
 no retry. Every captured identity is visited at most once, each with its own
 challenge/transport, original request and journal. No retry allocation or balance
 RPC is added to the foreground path.
@@ -778,7 +781,7 @@ subsequent implementation and complexity review follow below.
   the newer failure. A later call can use a refreshed low-balance wallet when its
   estimate suggests affordability, without retrying it within the original call.
 - Initial unsigned challenges, arbitrary prose, generic 402, allowance failure,
-  malformed/error bodies, response truncation and transport uncertainty do not
+  malformed protocol headers, arbitrary error bodies and transport uncertainty do not
   masquerade as the typed retry category. A later successful attempt does not erase
   earlier possible charges or reset submission progress.
 - Journal failure sends no signature. Concurrent calls use unique authorization

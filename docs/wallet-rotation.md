@@ -232,8 +232,10 @@ only a ranking input. Actual challenge amounts and current ownership/caps are
 checked by payment preparation and the authorization journal; balances are not
 spending permission. No additional hint or authority state is maintained.
 
-Runtime hints expire 300 seconds after the unsigned response was received and
-retain at most 512 fixed-size entries per process. Their trusted key includes
+Runtime hints expire 24 hours after the unsigned response was received and
+retain at most 65,535 fixed-size entries per process. Their lifetime shares the
+API catalog disk-cache default; per-source catalog overrides remain independent.
+See [local resource limits](local-resource-limits.md). Their trusted key includes
 source/revision, method/OpenAPI template, wallet group and transport scope; request
 arguments cannot choose that scope. Receipt order controls updates, including lower
 prices. Restart, expiry and eviction lose only a selection estimate. They cause
@@ -553,11 +555,13 @@ A signed attempt's HTTP 402 can earn another wallet attempt only through the
 [pinned x402 seller encodings](../tests/fixtures/x402/insufficient-funds.json):
 `PAYMENT-REQUIRED` with exact `error: insufficient_funds`, or a failed
 `PAYMENT-RESPONSE` with that exact `errorReason`. An unsigned challenge, arbitrary
-prose, a bare 402, allowance failure and malformed/truncated replies cannot earn it.
+prose, a bare 402, allowance failure and malformed protocol headers cannot earn it.
 Duplicate protocol headers cannot grant another attempt. When `PAYMENT-RESPONSE`
 is present, its settlement record governs classification: a simultaneous challenge
 cannot override a successful settlement, another failure or an unreadable receipt.
-The existing response-byte and read-inactivity limits still apply.
+The unused error body is dropped immediately: truncation, size and read inactivity
+cannot delay or prevent fallback after recognized headers. Ordinary returned
+responses retain their response-byte and read-inactivity limits.
 
 Each recognized failure marks its wallet low balance and queues an advisory
 `balanceOf(..., latest)` read through the existing maintenance owner. Payment

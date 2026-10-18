@@ -892,6 +892,10 @@ Catalogs are local snapshots, using a provider/source setting:
 catalog_cache_ttl_seconds = 86400 # default: 24 hours; 0 disables catalog disk caching
 ```
 
+This default shares a constant with the runtime API price-hint lifetime. A catalog
+override does not change that process-wide hint lifetime; see
+[local resource limits](local-resource-limits.md).
+
 A deployment source can override its provider's value. Any positive integer sets
 local retention regardless of upstream `Cache-Control` or `Expires`, including
 `no-store`, `no-cache` and `max-age=0`. INFO logs record
