@@ -237,6 +237,10 @@ request earns cross-wallet repetition. Each attempt retains its own authorizatio
 possible charge and canonical outcome, even if a later one succeeds. A successful
 response, transport uncertainty or generic error earns no repetition. Schedule an
 ordinary advisory balance read after insufficiency without delaying fallback.
+The [wallet observation policy](wallet-rotation.md#wallet-observation-policy)
+owns finite startup discovery and requested refresh scheduling; ordinary serving
+does not sweep idle managed USDC wallets. Shared scalar acquisition ownership is
+separate from payment authorization and canonical qualification.
 Qualification retains its existing run permits and charges every attempt.
 
 Keep three caches/flows distinct. Catalog/help discovery retains its existing caching

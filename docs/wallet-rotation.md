@@ -550,7 +550,42 @@ unsigned catalog/help operations remain independent. Paid relay startup, explici
 bootstrap, config checking and qualification remain strict. The store-only runtime
 does not run source/swap observers; their unresolved obligations remain durable.
 
+## Wallet observation policy
+
+Managed USDC discovery on fresh serving startup is one finite background pass
+across existing eligible wallets and outstanding initial-funding recipients.
+Listeners are bound first, and new allocations do not extend that pass. Startup
+failure reports an unavailable observation without creating a recurring watcher.
+Ordinary serving does not sweep idle ACTIVE, READY or RETAINED wallets.
+
+Recognized signed-payment insufficient funds requests an asynchronous scalar
+refresh. Multiple requests before a read coalesce; a request arriving during a
+read remains pending for a later read. Success, including zero, finishes the
+captured request. Failed requested reads retain their previous estimate, explicit
+failure and pending request across restart. Successful scalar reads consume any
+unused initial-funding claim on first positive credit, without reopening consumed
+claims or authorizing top-ups. Retired identities are excluded from discovery.
+
+A shared Store/wallet owner serializes maintenance scalar acquisitions and retains
+them through waiter cancellation. Each recurring requested read waits at least
+60 seconds after its prior acquisition completes; independent failures back off
+up to 300 seconds. New requests cannot shorten the cooldown. Startup and explicit
+one-pass inspection can reuse the owner's completed result during its cooldown;
+reuse does not clear a refresh requested after that acquisition began. Accepted
+initial-funding credit checks retain their separate operation scheduler. Payment
+responses and successful payments alone request no observation. Explicit canonical
+qualification keeps its separate inspection and authority contracts.
+
+Scalar acquisitions lazily discard unused default metadata and expired successful
+results when no acquisition or waiter owns them. Failed observations retain their
+consecutive backoff while the wallet remains live; retired-wallet failures can be
+discarded after their existing cooldown. Cleanup never drops active ownership or
+changes durable claims, estimates or financial journals.
+
 ## Best-effort wallet rules
+
+Read the [wallet observation policy](#wallet-observation-policy) when changing
+balance estimation, refresh scheduling, funding or recovery.
 
 Managed USDC balances are advisory estimates. Payment selection prefers an affordable
 bound payer, then other eligible affordable identities, then unknown or low estimates.

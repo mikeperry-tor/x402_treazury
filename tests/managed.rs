@@ -409,10 +409,6 @@ impl Harness {
             .unwrap()
         });
         publish_initial_credit(&store, &pool, &base).await;
-        make_pool(store.clone(), pool.clone(), &base)
-            .reconcile()
-            .await
-            .unwrap();
         f.rpc_calls.store(0, Ordering::SeqCst);
         f.confirmed_reads.store(0, Ordering::SeqCst);
         f.traces.lock().unwrap().clear();

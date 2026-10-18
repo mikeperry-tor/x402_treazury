@@ -3,7 +3,7 @@ use super::*;
 use crate::rotation::store::{history::PAGE_SIZE, inventory::read_result};
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeSet, VecDeque},
     time::Duration,
 };
 use tokio::time::Instant;
@@ -69,152 +69,109 @@ impl ManagedPool {
             .store
             .call(move |s| Ok(s.capacity_changes(&pool)))
             .await?;
+        // Capture once: new allocations never extend this startup/inspection pass.
+        let pool = self.pool.clone();
+        let mut first_error = None;
+        let boundary = read_result(
+            self.store.call(move |s| s.wallet_boundary(&pool)).await,
+            &mut first_error,
+        )?
+        .unwrap_or(-1);
         let mut cursor = -1;
         let mut pending_cursor = -1;
-        let mut through = None;
         let mut page = VecDeque::<(i64, Option<String>)>::new();
+        let mut startup_complete = boundary < 0;
         let mut active = BTreeSet::new();
-        let mut retry_at = BTreeMap::<String, Instant>::new();
         let mut reads = FuturesUnordered::<BoxFuture<'_, Completion>>::new();
-        let mut complete = false;
-        let mut due = Instant::now();
         let mut qualification_due = Instant::now();
         let mut qualification_active = false;
-        let mut first_error = None;
         loop {
             if stop.is_cancelled() {
                 break;
             }
-            retry_at.retain(|_, at| *at > Instant::now());
             let changed = changes.notified();
             tokio::pin!(changed);
             changed.as_mut().enable();
-            let pool = self.pool.clone();
-            let pending = read_result(
-                self.store
-                    .call(move |s| s.pending_balances(&pool, pending_cursor))
-                    .await,
-                &mut first_error,
-            )?
-            .unwrap_or_default();
-            let pending_wrapped = pending.is_empty() && pending_cursor >= 0;
-            let more_pending = pending.len() == PAGE_SIZE;
-            if pending.is_empty() {
-                pending_cursor = -1;
-            }
-            for (sequence, id) in pending {
-                if active.len() == BALANCE_READS {
-                    break;
-                }
-                pending_cursor = sequence;
-                let Some(id) = id else {
-                    if first_error.is_none() {
-                        tracing::warn!(
-                            category = "malformed_advisory_wallet_row",
-                            "wallet observation unavailable; advancing to independent work"
-                        );
-                    }
-                    first_error.get_or_insert_with(|| {
-                        crate::rotation::store::balances::AdvisoryIdentityUnavailable.into()
-                    });
-                    continue;
-                };
-                if !active.contains(&id) && retry_at.get(&id).is_none_or(|at| *at <= Instant::now())
-                {
-                    active.insert(id.clone());
-                    reads.push(self.read_balance(id).boxed());
-                }
-            }
-            while active.len() < BALANCE_READS && Instant::now() >= due && !(one_pass && complete) {
+            let mut wake = Instant::now() + CADENCE;
+            // The finite pass is independent of recurring requested work. Its
+            // failed reads report failure; only explicit requests retain retries.
+            while !startup_complete && active.len() < BALANCE_READS {
                 if let Some((sequence, id)) = page.pop_front() {
                     cursor = sequence;
-                    let Some(id) = id else {
-                        if first_error.is_none() {
-                            tracing::warn!(
-                                category = "malformed_advisory_wallet_row",
-                                "wallet observation unavailable; advancing to independent work"
-                            );
-                        }
-                        first_error.get_or_insert_with(|| {
-                            crate::rotation::store::balances::AdvisoryIdentityUnavailable.into()
-                        });
-                        continue;
-                    };
-                    if !active.contains(&id)
-                        && retry_at.get(&id).is_none_or(|at| *at <= Instant::now())
-                    {
-                        active.insert(id.clone());
-                        reads.push(self.read_balance(id).boxed());
-                    }
+                    self.schedule_balance(id, &mut active, &mut reads, &mut first_error);
                     continue;
                 }
                 let pool = self.pool.clone();
-                if through.is_none() {
-                    through = read_result(
-                        self.store.call(move |s| s.wallet_boundary(&pool)).await,
-                        &mut first_error,
-                    )?;
-                    cursor = -1;
-                    if through.is_none() {
-                        due = Instant::now() + CADENCE;
-                        complete = true;
-                        break;
-                    }
-                }
-                let pool = self.pool.clone();
-                let boundary = through.unwrap();
+                let upper = boundary;
                 let rows = read_result(
                     self.store
-                        .call(move |s| s.advisory_wallet_page(&pool, cursor, boundary))
+                        .call(move |s| s.advisory_wallet_page(&pool, cursor, upper))
                         .await,
                     &mut first_error,
                 )?;
                 match rows {
                     Some(rows) if !rows.is_empty() => page = rows.into(),
-                    _ => {
-                        complete = true;
-                        through = None;
-                        due = Instant::now() + CADENCE;
+                    _ => startup_complete = true,
+                }
+            }
+            if !one_pass {
+                let pool = self.pool.clone();
+                let pending = read_result(
+                    self.store
+                        .call(move |s| s.pending_balances(&pool, pending_cursor))
+                        .await,
+                    &mut first_error,
+                )?
+                .unwrap_or_default();
+                let more = pending.len() == PAGE_SIZE;
+                if pending.is_empty() {
+                    pending_cursor = -1;
+                }
+                for (sequence, id) in pending {
+                    if active.len() == BALANCE_READS {
                         break;
                     }
-                }
-            }
-            if !qualification_active && Instant::now() >= qualification_due && !one_pass {
-                qualification_active = true;
-                reads.push(
-                    async {
-                        Completion {
-                            id: None,
-                            result: self
-                                .qualification_observation(crate::qualification::active())
-                                .await,
+                    pending_cursor = sequence;
+                    if let Some(wallet) = &id {
+                        if active.contains(wallet) {
+                            continue;
+                        }
+                        let due = self.store.balance_due(wallet).await;
+                        if due > Instant::now() {
+                            wake = wake.min(due);
+                            continue;
                         }
                     }
-                    .boxed(),
-                );
-            }
-            if one_pass && complete && reads.is_empty() {
-                if pending_wrapped {
-                    continue;
+                    self.schedule_balance(id, &mut active, &mut reads, &mut first_error);
                 }
+                if more && active.len() < BALANCE_READS {
+                    wake = Instant::now();
+                }
+                if !qualification_active && Instant::now() >= qualification_due {
+                    qualification_active = true;
+                    reads.push(
+                        async {
+                            Completion {
+                                id: None,
+                                result: self
+                                    .qualification_observation(crate::qualification::active())
+                                    .await,
+                            }
+                        }
+                        .boxed(),
+                    );
+                }
+            }
+            if one_pass && startup_complete && reads.is_empty() {
                 return first_error.map_or(Ok(()), Err);
             }
-            let wake = if more_pending && active.len() < BALANCE_READS {
-                Instant::now()
-            } else {
-                Instant::now() + CADENCE
-            };
             tokio::select! {
                 _=stop.cancelled()=>break,
                 _=&mut changed=>{},
                 Some(done)=reads.next(),if !reads.is_empty()=>{
-                    if let Some(id)=done.id {
-                        active.remove(&id);
-                        if done.result.is_err() { retry_at.insert(id,Instant::now()+CADENCE); } else { retry_at.remove(&id); }
-                    } else {qualification_active=false;qualification_due=Instant::now()+CADENCE;}
+                    if let Some(id)=done.id { active.remove(&id); }
+                    else { qualification_active=false; qualification_due=Instant::now()+CADENCE; }
                     if let Err(error)=done.result {
-                        // Shared Store ownership/corruption cannot be bypassed by a
-                        // second owner. RPC/address failures concern this observation.
                         if error.downcast_ref::<rusqlite::Error>().is_some() && !crate::rotation::store::inventory::transient_read(&error) { return Err(error); }
                         tracing::warn!(category=%super::super::base::safe_diagnostic(&error),"advisory balance observation unavailable; independent payment service continues");
                         first_error.get_or_insert(error);
@@ -223,34 +180,35 @@ impl ManagedPool {
                 _=tokio::time::sleep_until(wake)=>{},
             }
         }
-        // Unsigned reads may stop; already accepted Store writes retain ownership.
         Ok(())
     }
-    async fn read_balance(&self, id: String) -> Completion {
-        let result = async {
-            let (pool, wallet) = (self.pool.clone(), id.clone());
-            let address = self
-                .store
-                .call(move |s| s.begin_balance(&pool, &wallet))
-                .await;
-            let result = match address {
-                Ok(address) => self.base.current_balance(&address).await,
-                Err(error)
-                    if error
-                        .is::<crate::rotation::store::balances::AdvisoryIdentityUnavailable>() =>
-                {
-                    Err(error)
-                }
-                Err(error) => return Err(error),
-            };
-            let value = result.as_ref().ok().copied();
-            let (pool, wallet) = (self.pool.clone(), id.clone());
-            self.store
-                .call(move |s| s.finish_balance(&pool, &wallet, value))
-                .await?;
-            result.map(|_| ())
+    fn schedule_balance<'a>(
+        &'a self,
+        id: Option<String>,
+        active: &mut BTreeSet<String>,
+        reads: &mut FuturesUnordered<BoxFuture<'a, Completion>>,
+        first_error: &mut Option<anyhow::Error>,
+    ) {
+        let Some(id) = id else {
+            tracing::warn!(
+                category = "malformed_advisory_wallet_row",
+                "wallet observation unavailable; advancing to independent work"
+            );
+            first_error.get_or_insert_with(|| {
+                crate::rotation::store::balances::AdvisoryIdentityUnavailable.into()
+            });
+            return;
+        };
+        if active.insert(id.clone()) {
+            reads.push(self.read_balance(id).boxed());
         }
-        .await;
+    }
+    async fn read_balance(&self, id: String) -> Completion {
+        let result = self
+            .store
+            .observe_balance(self.pool.clone(), id.clone(), self.base.clone())
+            .await
+            .map(|_| ());
         Completion {
             id: Some(id),
             result,

@@ -155,7 +155,11 @@ impl Inventory {
 async fn recurrent_pending_failures_reach_later_pages_without_duplicate_active_reads() {
     let f = Inventory::new(true, true, false).await;
     let mut previous = BTreeMap::<String, usize>::new();
-    for _ in 0..2 {
+    for pass in 0..2 {
+        if pass > 0 {
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(60)).await;
+        }
         tokio::time::timeout(Duration::from_secs(15), f.fixture.pool.reconcile())
             .await
             .unwrap()
@@ -184,7 +188,9 @@ async fn recurrent_pending_failures_reach_later_pages_without_duplicate_active_r
 async fn held_pending_read_allows_full_live_inventory_and_retains_a_new_failure() {
     let mut f = Inventory::new(false, false, true).await;
     let pool = f.fixture.pool.clone();
-    let running = tokio::spawn(async move { pool.reconcile().await });
+    let stop = CancellationToken::new();
+    let stopped = stop.clone();
+    let running = tokio::spawn(async move { pool.run_reconciliation(stopped).await });
     tokio::time::timeout(Duration::from_secs(15), async {
         let mut observed = std::collections::BTreeSet::new();
         while observed.len() < WALLETS {
@@ -207,11 +213,40 @@ async fn held_pending_read_allows_full_live_inventory_and_retains_a_new_failure(
     assert!(!running.is_finished());
     assert_eq!(f.rpc.reads.lock().unwrap().calls[&f.rpc.first_address], 1);
     f.rpc.release.add_permits(1);
-    tokio::time::timeout(Duration::from_secs(15), running)
-        .await
+    while f
+        .rpc
+        .reads
+        .lock()
         .unwrap()
+        .active
+        .values()
+        .any(|active| *active > 0)
+    {
+        tokio::task::yield_now().await;
+    }
+    f.fixture.wait_completion().await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(60)).await;
+    loop {
+        let address = f.events.recv().await.unwrap();
+        if address == f.rpc.first_address {
+            break;
+        }
+    }
+    while f
+        .rpc
+        .reads
+        .lock()
         .unwrap()
-        .unwrap();
+        .active
+        .values()
+        .any(|active| *active > 0)
+    {
+        tokio::task::yield_now().await;
+    }
+    f.fixture.wait_completion().await;
+    stop.cancel();
+    running.await.unwrap().unwrap();
     f.assert_calls(2, 1);
     // These observation-only synthetic rows deliberately have no funding jobs;
     // full financial status requires that unrelated provenance for every wallet.

@@ -15,6 +15,7 @@ struct Rpc {
     address: String,
     calls: Arc<AtomicUsize>,
     blocked: Arc<AtomicBool>,
+    zero: Arc<AtomicBool>,
     fail: Arc<AtomicBool>,
     started: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
@@ -34,6 +35,11 @@ struct Fixture {
     rpc: Rpc,
 }
 impl Fixture {
+    async fn wait_completion(&self) {
+        while self.store.balance_due(&self.wallet).await <= Instant::now() {
+            tokio::task::yield_now().await;
+        }
+    }
     async fn status(&self) -> crate::rotation::store::AddressStatus {
         let wallet = self.wallet.clone();
         self.store
@@ -106,6 +112,9 @@ impl Fixture {
     }
 }
 async fn fixture(blocked: bool, fail: bool) -> Fixture {
+    fixture_with_credit(blocked, fail, true).await
+}
+async fn fixture_with_credit(blocked: bool, fail: bool, credited: bool) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let mut state = crate::rotation::store::Store::create(
         &dir.path().join("state"),
@@ -123,18 +132,23 @@ async fn fixture(blocked: bool, fail: bool) -> Fixture {
         0
     )
     .unwrap();
-    for job in state.funding_jobs().unwrap() {
-        state
-            .record_credit(&job.wallet_id, "5000000", "fixture", 100)
-            .unwrap();
+    if credited {
+        for job in state.funding_jobs().unwrap() {
+            state
+                .record_credit(&job.wallet_id, "5000000", "fixture", 100)
+                .unwrap();
+        }
     }
     let first = state.status().unwrap().pools.remove(0).addresses.remove(0);
     let wallet = first.id;
-    state.low_balance(&group, &wallet).unwrap();
+    if credited {
+        state.low_balance(&group, &wallet).unwrap();
+    }
     let rpc = Rpc {
         address: first.address,
         calls: Arc::default(),
         blocked: Arc::new(AtomicBool::new(blocked)),
+        zero: Arc::default(),
         fail: Arc::new(AtomicBool::new(fail)),
         started: Arc::default(),
         release: Arc::default(),
@@ -152,7 +166,7 @@ async fn fixture(blocked: bool, fail: bool) -> Fixture {
             if rpc.blocked.load(Ordering::SeqCst){released.await;}
         }
         if ours && rpc.fail.load(Ordering::SeqCst){return Json(json!({"jsonrpc":"2.0","id":v["id"],"error":{"code":-32000,"message":"fixture unavailable"}}));}
-        let balance=if ours && count>1{33}else{17};
+        let balance=if rpc.zero.load(Ordering::SeqCst){0}else if ours && count>1{33}else{17};
         Json(json!({"jsonrpc":"2.0","id":v["id"],"result":format!("0x{balance:064x}")}))
     })).route("/pay",get(|State(rpc):State<Rpc>,headers:HeaderMap|async move {
         if let Some(value)=headers.get("payment-signature") {
@@ -228,7 +242,9 @@ async fn qualification_history_pages_keep_bad_rows_scoped_and_include_retired_at
 async fn cancelled_waiter_keeps_owned_read_and_new_failure_requires_follow_up() {
     let f = fixture(true, false).await;
     let pool = f.pool.clone();
-    let waiter = tokio::spawn(async move { pool.reconcile().await });
+    let stop = CancellationToken::new();
+    let stopped = stop.clone();
+    let waiter = tokio::spawn(async move { pool.run_reconciliation(stopped).await });
     tokio::time::timeout(Duration::from_secs(10), f.rpc.started.notified())
         .await
         .unwrap();
@@ -244,31 +260,49 @@ async fn cancelled_waiter_keeps_owned_read_and_new_failure_requires_follow_up() 
     );
     f.rpc.blocked.store(false, Ordering::SeqCst);
     f.rpc.release.notify_waiters();
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            if !f.status().await.low_balance {
-                break;
-            }
-            tokio::task::yield_now().await;
+    while f.status().await.confirmed_balance != "17" {
+        tokio::task::yield_now().await;
+    }
+    f.wait_completion().await;
+    assert!(f.status().await.low_balance);
+    assert_eq!(f.rpc.calls.load(Ordering::SeqCst), 1);
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(59)).await;
+    for _ in 0..3 {
+        f.pool.note_insufficient(f.wallet.clone()).await.unwrap();
+    }
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        f.rpc.calls.load(Ordering::SeqCst),
+        1,
+        "notification bursts cannot shorten the minute floor"
+    );
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert!(
+        f.store.balance_due(&f.wallet).await <= Instant::now(),
+        "notification bursts cannot renew the original cooldown"
+    );
+    // The existing local scheduler can wrap its pending cursor on a notification
+    // before the wallet is due. Allow its next tick without requiring dispatch
+    // at the earliest permitted instant.
+    tokio::time::advance(CADENCE).await;
+    for _ in 0..1000 {
+        if !f.status().await.low_balance {
+            break;
         }
-    })
-    .await
-    .unwrap();
+        tokio::task::yield_now().await;
+    }
     let status = f.status().await;
     assert_eq!(status.confirmed_balance, "33");
+    assert!(!status.low_balance);
     assert!(status.balance_refresh_error.is_none());
-    assert!(f.rpc.calls.load(Ordering::SeqCst) >= 2);
-    // Wait for the retained pass to finish before closing its Store owner.
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            if f.pool.reconciliation.try_lock().is_ok() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
+    assert_eq!(f.rpc.calls.load(Ordering::SeqCst), 2);
+    stop.cancel();
+    while f.pool.reconciliation.try_lock().is_err() {
+        tokio::task::yield_now().await;
+    }
     f.close().await;
 }
 #[tokio::test]
@@ -377,6 +411,8 @@ async fn malformed_advisory_row_does_not_hide_independent_wallet_observations() 
     )
     .unwrap();
     drop(db);
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(60)).await;
     f.pool.reconcile().await.unwrap();
     assert!(!f.status().await.low_balance);
     f.close().await;
@@ -405,5 +441,248 @@ async fn exited_reconciliation_task_reacquires_same_gate_and_stops_without_anoth
     running.await.unwrap().unwrap();
     assert!(owners.try_recv().is_err());
     assert!(f.pool.reconciliation.try_lock().is_ok());
+    f.close().await;
+}
+
+#[tokio::test]
+async fn zero_refresh_completes_and_idle_wallet_has_no_recurring_reads() {
+    let f = fixture(false, false).await;
+    f.rpc.zero.store(true, Ordering::SeqCst);
+    let stop = CancellationToken::new();
+    let stopped = stop.clone();
+    let pool = f.pool.clone();
+    let worker = tokio::spawn(async move { pool.run_reconciliation(stopped).await });
+    while f.status().await.confirmed_balance != "0" {
+        tokio::task::yield_now().await;
+    }
+    f.wait_completion().await;
+    assert!(!f.status().await.low_balance);
+    let calls = f.rpc.calls.load(Ordering::SeqCst);
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(600)).await;
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(f.rpc.calls.load(Ordering::SeqCst), calls);
+    stop.cancel();
+    worker.await.unwrap().unwrap();
+    f.close().await;
+}
+
+#[tokio::test]
+async fn cancelled_requested_read_is_pending_after_restart() {
+    let f = fixture(false, true).await;
+    let (pool, wallet) = (f.group.clone(), f.wallet.clone());
+    f.store
+        .call(move |s| {
+            s.begin_balance(&pool, &wallet)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let f = f.reopen().await;
+    let group = f.group.clone();
+    assert_eq!(
+        f.store
+            .call(move |s| s.pending_balances(&group, -1))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(f.pool.reconcile().await.is_err());
+    assert!(f.status().await.low_balance);
+    let group = f.group.clone();
+    assert_eq!(
+        f.store
+            .call(move |s| s.pending_balances(&group, -1))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let f = f.reopen().await;
+    f.rpc.fail.store(false, Ordering::SeqCst);
+    f.pool.reconcile().await.unwrap();
+    assert!(!f.status().await.low_balance);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn retired_requested_wallet_is_not_discovered_or_reactivated() {
+    let f = fixture(false, false).await;
+    let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+    db.execute("UPDATE wallets SET role='RETIRED' WHERE id=?1", [&f.wallet])
+        .unwrap();
+    let group = f.group.clone();
+    assert!(
+        f.store
+            .call(move |s| s.pending_balances(&group, -1))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    f.pool.reconcile().await.unwrap();
+    assert_eq!(f.rpc.calls.load(Ordering::SeqCst), 0);
+    // A read accepted before retirement can publish its scalar result, while the
+    // existing role owner still prevents that result from reviving the signer.
+    let (pool, wallet) = (f.group.clone(), f.wallet.clone());
+    f.store
+        .call(move |s| s.finish_balance(&pool, &wallet, Some(U256::from(1))))
+        .await
+        .unwrap();
+    let role: String = db
+        .query_row("SELECT role FROM wallets WHERE id=?1", [&f.wallet], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(role, "RETIRED");
+    drop(db);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn failed_startup_pass_reports_failure_without_requesting_a_watcher() {
+    let f = fixture(false, true).await;
+    let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+    db.execute("UPDATE wallets SET low_balance=0,refresh_pending=0", [])
+        .unwrap();
+    drop(db);
+    let stop = CancellationToken::new();
+    let stopped = stop.clone();
+    let pool = f.pool.clone();
+    let running = tokio::spawn(async move { pool.run_reconciliation(stopped).await });
+    f.wait_completion().await;
+    assert_eq!(
+        f.status().await.balance_refresh_error.as_deref(),
+        Some("observation_unavailable")
+    );
+    let group = f.group.clone();
+    assert!(
+        f.store
+            .call(move |s| s.pending_balances(&group, -1))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(600)).await;
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(f.rpc.calls.load(Ordering::SeqCst), 1);
+    stop.cancel();
+    running.await.unwrap().unwrap();
+    f.close().await;
+}
+
+#[tokio::test]
+async fn busy_startup_boundary_does_not_stop_later_requested_refresh() {
+    use crate::rotation::store::inventory::Read;
+    let f = fixture(false, false).await;
+    f.store
+        .call(|s| {
+            s.fail_next_inventory_read(Read::WalletBoundary, rusqlite::ffi::SQLITE_BUSY);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        f.pool.reconcile().await.is_err(),
+        "one-pass inspection reports unavailable boundary"
+    );
+    assert_eq!(f.rpc.calls.load(Ordering::SeqCst), 0);
+    let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+    db.execute("UPDATE wallets SET low_balance=0,refresh_pending=0", [])
+        .unwrap();
+    drop(db);
+    f.store
+        .call(|s| {
+            s.fail_next_inventory_read(Read::WalletBoundary, rusqlite::ffi::SQLITE_BUSY);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let stop = CancellationToken::new();
+    let stopped = stop.clone();
+    let pool = f.pool.clone();
+    let running = tokio::spawn(async move { pool.run_reconciliation(stopped).await });
+    while f
+        .store
+        .call(|s| Ok(s.inventory_fault_pending()))
+        .await
+        .unwrap()
+    {
+        tokio::task::yield_now().await;
+    }
+    f.pool.note_insufficient(f.wallet.clone()).await.unwrap();
+    f.wait_completion().await;
+    assert_eq!(f.rpc.calls.load(Ordering::SeqCst), 1);
+    assert!(!f.status().await.low_balance);
+    stop.cancel();
+    running.await.unwrap().unwrap();
+    f.close().await;
+}
+
+#[tokio::test]
+async fn startup_positive_unfunded_destination_consumes_claim_without_source_work() {
+    let f = fixture_with_credit(false, false, false).await;
+    let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
+    let before: (String, bool) = db.query_row("SELECT w.role,f.readiness_requirement IS NULL FROM wallets w JOIN funding_jobs f ON f.wallet_id=w.id WHERE w.id=?1", [&f.wallet], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(before, ("ALLOCATED".into(), true));
+    f.pool.reconcile().await.unwrap();
+    assert_eq!(f.rpc.calls.load(Ordering::SeqCst), 1);
+    let observed: (String, String) = db.query_row("SELECT w.role,f.readiness_requirement FROM wallets w JOIN funding_jobs f ON f.wallet_id=w.id WHERE w.id=?1", [&f.wallet], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(
+        observed,
+        ("READY".into(), "17".into()),
+        "partial unsolicited credit consumes the initial claim"
+    );
+    for balance in [U256::ZERO, U256::from(1)] {
+        let (pool, wallet) = (f.group.clone(), f.wallet.clone());
+        f.store
+            .call(move |s| s.finish_balance(&pool, &wallet, Some(balance)))
+            .await
+            .unwrap();
+    }
+    let wallet = f.wallet.clone();
+    f.store
+        .call(move |s| {
+            let job = s
+                .funding_jobs()?
+                .into_iter()
+                .find(|job| job.wallet_id == wallet)
+                .unwrap();
+            assert!(s.current_funding_claim(&job.id).is_err());
+            assert!(
+                s.accept_preparation(&job.operation_id, Some(&job.pool_id), 1, None)
+                    .is_err()
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let readiness: String = db
+        .query_row(
+            "SELECT readiness_requirement FROM funding_jobs WHERE wallet_id=?1",
+            [&f.wallet],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(readiness, "17");
+    for table in [
+        "outgoing",
+        "treasury_operations",
+        "operation_network",
+        "funding_recovery",
+    ] {
+        let count: i64 = db
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "observation created {table} work");
+    }
+    let (jobs, quotes): (i64, i64) = db.query_row("SELECT (SELECT count(*) FROM funding_jobs),(SELECT count(*) FROM funding_progress WHERE quote IS NOT NULL)", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((jobs, quotes), (2, 0));
+    drop(db);
     f.close().await;
 }

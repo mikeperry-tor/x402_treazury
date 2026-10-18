@@ -4,6 +4,7 @@ pub(crate) mod balances;
 mod capacity;
 #[cfg(test)]
 mod io_failure_tests;
+pub(crate) mod observation;
 mod preflight;
 #[cfg(test)]
 mod query_tests;
@@ -1129,6 +1130,7 @@ pub struct StoreHandle {
     evidence_namespace: Uuid,
     sender: tokio::sync::mpsc::Sender<Work>,
     group_gates: GroupGates,
+    balance_observers: observation::Observers,
     #[cfg(feature = "zcash")]
     funding_owner: std::sync::Arc<tokio::sync::Mutex<super::funding::scheduler::Owner>>,
 }
@@ -1148,6 +1150,7 @@ impl StoreHandle {
                 evidence_namespace,
                 sender,
                 group_gates,
+                balance_observers: Default::default(),
                 #[cfg(feature = "zcash")]
                 funding_owner: Default::default(),
             },

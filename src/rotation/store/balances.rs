@@ -10,7 +10,13 @@ impl std::fmt::Display for AdvisoryIdentityUnavailable {
 impl std::error::Error for AdvisoryIdentityUnavailable {}
 impl Store {
     pub(crate) fn low_balance(&mut self, pool: &str, wallet: &str) -> Result<()> {
-        ensure!(self.db.execute("UPDATE wallets SET low_balance=1,refresh_pending=1,balance_refresh_error=NULL WHERE pool_id=?1 AND id=?2",params![pool,wallet])? == 1,"missing payment wallet");
+        ensure!(
+            self.db.execute(
+                "UPDATE wallets SET low_balance=1,refresh_pending=1 WHERE pool_id=?1 AND id=?2",
+                params![pool, wallet]
+            )? == 1,
+            "missing payment wallet"
+        );
         self.notify_capacity_changed(pool);
         Ok(())
     }
@@ -19,7 +25,7 @@ impl Store {
         pool: &str,
         after: i64,
     ) -> Result<Vec<(i64, Option<String>)>> {
-        let mut query = self.db.prepare("SELECT sequence,id FROM wallets WHERE pool_id=?1 AND (refresh_pending=1 OR low_balance=1) AND sequence>?2 ORDER BY sequence LIMIT 64")?;
+        let mut query = self.db.prepare("SELECT sequence,id FROM wallets WHERE pool_id=?1 AND role!='RETIRED' AND (refresh_pending=1 OR low_balance=1) AND sequence>?2 ORDER BY sequence LIMIT 64")?;
         Ok(query
             .query_map(params![pool, after], |row| {
                 Ok((
@@ -39,7 +45,7 @@ impl Store {
     ) -> Result<Vec<(i64, Option<String>)>> {
         #[cfg(test)]
         self.inventory_read_fault(super::inventory::Read::WalletPage)?;
-        let mut query=self.db.prepare("SELECT sequence,id FROM wallets WHERE pool_id=?1 AND role IN ('ACTIVE','RETAINED','READY') AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4")?;
+        let mut query=self.db.prepare("SELECT sequence,id FROM wallets WHERE pool_id=?1 AND (role IN ('ACTIVE','RETAINED','READY') OR (role='ALLOCATED' AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.wallet_id=wallets.id AND f.readiness_requirement IS NULL))) AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4")?;
         Ok(query
             .query_map(
                 params![pool, after, through, super::history::PAGE_SIZE as i64],
@@ -79,10 +85,24 @@ impl Store {
         wallet: &str,
         result: Option<U256>,
     ) -> Result<()> {
+        let tx = self.db.transaction()?;
         match result {
-            Some(value) => self.db.execute("UPDATE wallets SET balance=?3,low_balance=refresh_pending,balance_refresh_error=NULL WHERE pool_id=?1 AND id=?2",params![pool,wallet,value.to_string()])?,
-            None => self.db.execute("UPDATE wallets SET balance_refresh_error='observation_unavailable' WHERE pool_id=?1 AND id=?2",params![pool,wallet])?,
-        };
+            Some(value) => {
+                tx.execute("UPDATE wallets SET balance=?3,low_balance=refresh_pending,balance_refresh_error=NULL WHERE pool_id=?1 AND id=?2",params![pool,wallet,value.to_string()])?;
+                let initial_claim: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM funding_jobs WHERE wallet_id=?1)",
+                    [wallet],
+                    |r| r.get(0),
+                )?;
+                if initial_claim && super::funding::record_initial_credit(&tx, wallet, value)? {
+                    super::funding::publish_initial_credit(&tx, wallet)?;
+                }
+            }
+            None => {
+                tx.execute("UPDATE wallets SET balance_refresh_error='observation_unavailable' WHERE pool_id=?1 AND id=?2",params![pool,wallet])?;
+            }
+        }
+        tx.commit()?;
         self.notify_capacity_changed(pool);
         Ok(())
     }

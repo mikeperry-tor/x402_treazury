@@ -131,7 +131,8 @@ async fn fixture() -> Fixture {
         SpendPolicy::dollars("0.01").unwrap(),
     )
     .unwrap();
-    manager.reconcile().await.unwrap();
+    // Initial credit already established the positive estimate and claim. The
+    // first scalar observation below establishes this fixture's zero estimates.
     balance.store(0, Ordering::SeqCst);
     manager.reconcile().await.unwrap();
     rpc.store(0, Ordering::SeqCst);

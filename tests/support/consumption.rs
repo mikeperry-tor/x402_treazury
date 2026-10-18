@@ -125,11 +125,6 @@ pub(super) async fn settle_last(h: &Harness, amount: u64) {
             .expect("one actual wallet pays the full amount");
     }
     h.f.used.store(true, Ordering::SeqCst);
+    // Canonical reconciliation publishes the current balance as well as history.
     reconcile_complete_history(h).await;
-    // Refresh current balances after the independently committed debit checkpoint.
-    assert_balance_observation_outcome(
-        make_pool(h.store.clone(), h.pool.clone(), &h.base)
-            .reconcile()
-            .await,
-    );
 }

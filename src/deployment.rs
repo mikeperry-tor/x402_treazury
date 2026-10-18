@@ -2075,7 +2075,7 @@ bearer_token_env="TOKEN"
         let pool = crate::rotation::test_capacity::declare_and_allocate!(
             store,
             "test",
-            crate::rotation::test_capacity::two_reserves("5"),
+            crate::rotation::test_capacity::small_reserve("5"),
             Some(alloy_primitives::U256::from(1_000_000u64)),
             0
         )
@@ -2117,9 +2117,10 @@ bearer_token_env="TOKEN"
             .call(move |s| s.low_balance(&refresh_pool, &refresh_wallet))
             .await
             .unwrap();
-        // A second complete sweep must start after the funding stop. Cancelling
-        // reconciliation along with funding would strand this wait.
-        tokio::time::timeout(Duration::from_secs(10), reads.acquire())
+        // The requested follow-up survives the funding stop and shared wallet
+        // cooldown. This allowance covers the minute floor and local wake tick;
+        // cancelling reconciliation with funding would strand the request.
+        tokio::time::timeout(Duration::from_secs(75), reads.acquire())
             .await
             .unwrap()
             .unwrap()
@@ -2147,7 +2148,7 @@ bearer_token_env="TOKEN"
                 .call(|s| Ok(s.status()?.funding_jobs.len()))
                 .await
                 .unwrap(),
-            2
+            1
         );
         stop.cancel();
         tokio::time::timeout(Duration::from_secs(5), task)
