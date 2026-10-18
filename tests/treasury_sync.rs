@@ -878,9 +878,11 @@ async fn actor_dispatches_prepare_submit_and_reconcile_without_funding_empty_wal
         .await
         .err()
         .unwrap();
+    // This indexer mock cannot supply real proposal input/witness coverage.
+    // Typed SDK insufficient-funds selection is covered by the proving fixture.
     assert!(
-        format!("{error:#}").contains("insufficient_spendable"),
-        "{error}"
+        error.is::<x402_treazury::rotation::transaction::PreparationDeferred>(),
+        "{error:#}"
     );
     assert!(
         handle
