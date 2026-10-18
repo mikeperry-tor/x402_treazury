@@ -332,8 +332,8 @@ mod tests {
     fn current_status_contract_has_explicit_authority_and_claims() {
         let (_dir, store, _pool) = fixture();
         let value = serde_json::to_value(store.status().unwrap()).unwrap();
-        assert_eq!(value["schema_version"], 2);
-        assert_eq!(value["state_schema_version"], 16);
+        assert_eq!(value["schema_version"], 3);
+        assert_eq!(value["state_schema_version"], 18);
         let keys: Vec<_> = value["pools"][0]
             .as_object()
             .unwrap()
@@ -351,7 +351,7 @@ mod tests {
         let wallet = &value["pools"][0]["addresses"][0];
         let keys: Vec<_> = wallet.as_object().unwrap().keys().cloned().collect();
         let expected: Vec<String> = serde_json::from_str(include_str!(
-            "../../../tests/fixtures/capacity/address-status-fields-v2.json"
+            "../../../tests/fixtures/capacity/address-status-fields-v3.json"
         ))
         .unwrap();
         assert_eq!(keys, expected);

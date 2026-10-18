@@ -56,10 +56,10 @@ impl RetirementAccounting {
             }
         }
         Ok(Self {
-            automatic_recorded_confirmed_atomic: (schema == 17).then(|| total.to_string()),
-            automatic_count: (schema == 17).then_some(automatic),
-            manual_recorded_confirmed_atomic: (schema == 17).then(|| "0".into()),
-            manual_count: (schema == 17).then_some(0),
+            automatic_recorded_confirmed_atomic: (schema >= 16).then(|| total.to_string()),
+            automatic_count: (schema >= 16).then_some(automatic),
+            manual_recorded_confirmed_atomic: (schema >= 16).then(|| "0".into()),
+            manual_count: (schema >= 16).then_some(0),
             historical_unknown_count: unknown,
         })
     }
@@ -124,7 +124,7 @@ pub(super) fn read_pools(db: &Connection, version: u32) -> Result<Vec<PoolStatus
     for row in rows {
         let mut pool = row?;
         pool.addresses = read_addresses(db, &pool.id)?;
-        if version == 17 {
+        if version >= 16 {
             populate_current_pool(db, &mut pool)?;
         }
         pool.retirement_accounting = RetirementAccounting::from_wallets(&pool.addresses, version)?;
@@ -141,7 +141,9 @@ fn read_addresses(db: &Connection, pool: &str) -> Result<Vec<AddressStatus>> {
             address: r.get(1)?,
             role: r.get(2)?,
             target: r.get(3)?,
-            confirmed_balance: r.get(4)?,
+            confirmed_balance: r.get_ref(4)?.as_str().ok().unwrap_or_default().to_owned(),
+            low_balance: false,
+            balance_refresh_error: None,
             confirmed_height: r.get(5)?,
             confirmed_hash: r.get(6)?,
             signed_exposure_atomic: None,
@@ -162,7 +164,15 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
         [&pool.id],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
+    let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
     for wallet in &mut pool.addresses {
+        if version >= 18 {
+            (wallet.low_balance, wallet.balance_refresh_error) = db.query_row(
+                "SELECT low_balance,balance_refresh_error FROM wallets WHERE id=?1",
+                [&wallet.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+        }
         wallet.signed_exposure_atomic = match evidence::exposure(db, &wallet.id) {
             Ok(value) => Some(value.to_string()),
             Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => None,
@@ -270,6 +280,8 @@ mod tests {
             role: "RETIRED".into(),
             target: "1".into(),
             confirmed_balance: "999".into(),
+            low_balance: false,
+            balance_refresh_error: None,
             confirmed_height: None,
             confirmed_hash: None,
             signed_exposure_atomic: Some("0".into()),

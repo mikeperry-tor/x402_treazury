@@ -467,6 +467,34 @@ impl BaseRpc {
         );
         U256::from_str_radix(&s[2..], 16).map_err(|_| RpcFailure::malformed("eth_call").into())
     }
+    /// One ordinary balanceOf read; an advisory result needs no historical proof,
+    /// confirmed/latest pair, host-clock check or canonical certificate.
+    pub(crate) async fn current_balance(&self, address: &str) -> Result<U256> {
+        let _owner = resources::query()?;
+        let address: Address = address.parse()?;
+        let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
+        let mut failure = None;
+        for endpoint in std::iter::once(self).chain(&self.fallbacks) {
+            let scoped = endpoint.for_address(&address.to_string())?;
+            let result = async {
+                let value = scoped
+                    .rpc("eth_call", json!([{"to":USDC,"data":data},"latest"]))
+                    .await?;
+                let value = value
+                    .as_str()
+                    .filter(|v| v.len() == 66 && v.starts_with("0x"))
+                    .ok_or_else(|| RpcFailure::malformed("eth_call"))?;
+                U256::from_str_radix(&value[2..], 16)
+                    .map_err(|_| RpcFailure::malformed("eth_call").into())
+            }
+            .await;
+            match result {
+                Ok(value) => return Ok(value),
+                Err(error) => failure = Some(error),
+            }
+        }
+        Err(failure.context("Base RPC endpoint unavailable")?)
+    }
     pub async fn view(&self, query: ChainQuery) -> Result<ChainView> {
         let owner = resources::query()?;
         self.view_with_owner(query, &owner).await

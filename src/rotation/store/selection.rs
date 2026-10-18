@@ -31,40 +31,68 @@ impl Store {
         through: i64,
         attempted: &[String],
     ) -> Result<Option<PaymentCandidateHandle>> {
-        let mut query = self.db.prepare("SELECT id,address,balance FROM wallets WHERE pool_id=?1 AND sequence<=?2 AND role IN ('ACTIVE','RETAINED','READY') ORDER BY CASE role WHEN 'ACTIVE' THEN 0 WHEN 'RETAINED' THEN 1 ELSE 2 END,sequence")?;
-        let mut best = None;
-        let mut best_rank = u8::MAX;
-        let mut rows = query.query(params![pool, through])?;
-        while let Some(row) = rows.next()? {
-            let wallet: String = row.get(0)?;
-            if attempted.contains(&wallet) {
-                continue;
+        let attempted: std::collections::BTreeSet<&str> =
+            attempted.iter().map(String::as_str).collect();
+        let mut fallback: Option<(u8, PaymentCandidateHandle)> = None;
+        let mut inspect = |wallet: &str,
+                           is_bound: bool|
+         -> Result<Option<PaymentCandidateHandle>> {
+            if attempted.contains(wallet) {
+                return Ok(None);
             }
-            let Some(owner) = payment_ownership(&self.db, pool, &wallet)? else {
-                continue;
+            let Some(owner) = payment_ownership(&self.db, pool, wallet)? else {
+                return Ok(None);
             };
             if cost > owner.payment_limit {
-                continue;
+                return Ok(None);
             }
-            let estimate: String = row.get(2)?;
-            let affordable = amount(&estimate)
-                .ok()
-                .is_some_and(|balance| balance >= cost);
-            let rank = match (affordable, bound == Some(wallet.as_str())) {
-                (true, true) => 0,
-                (true, false) => 1,
-                (false, true) => 2,
-                (false, false) => 3,
+            let row:Option<(Option<String>,Option<String>,bool)>=self.db.query_row(
+                "SELECT address,balance,low_balance FROM wallets WHERE pool_id=?1 AND id=?2 AND sequence<=?3",
+                params![pool,wallet,through],|r|Ok((r.get_ref(0)?.as_str().ok().map(str::to_owned),r.get_ref(1)?.as_str().ok().map(str::to_owned),r.get(2)?))).optional()?;
+            let Some((Some(address), estimate, low)) = row else {
+                return Ok(None);
             };
-            if rank < best_rank {
-                best_rank = rank;
-                best = Some(PaymentCandidateHandle {
-                    wallet,
-                    address: row.get(1)?,
-                });
+            let candidate = PaymentCandidateHandle {
+                wallet: wallet.to_owned(),
+                address,
+            };
+            let affordable = !low
+                && estimate
+                    .as_deref()
+                    .and_then(|v| amount(v).ok())
+                    .is_some_and(|balance| balance >= cost);
+            if affordable {
+                return Ok(Some(candidate));
+            }
+            let rank = u8::from(!is_bound) + 2 * u8::from(low);
+            if fallback.as_ref().is_none_or(|(old, _)| rank < *old) {
+                fallback = Some((rank, candidate));
+            }
+            Ok(None)
+        };
+        // A suitable bound payer requires only indexed identity reads, never a
+        // whole-inventory sort or proof pass. Role queries use wallet_role_sequence.
+        if let Some(wallet) = bound
+            && let Some(candidate) = inspect(wallet, true)?
+        {
+            return Ok(Some(candidate));
+        }
+        for role in ["ACTIVE", "RETAINED", "READY"] {
+            let mut query=self.db.prepare("SELECT id FROM wallets WHERE pool_id=?1 AND role=?2 AND sequence<=?3 ORDER BY sequence")?;
+            let mut rows = query.query(params![pool, role, through])?;
+            while let Some(row) = rows.next()? {
+                let Some(wallet) = row.get_ref(0)?.as_str().ok() else {
+                    continue;
+                };
+                if bound == Some(wallet) {
+                    continue;
+                }
+                if let Some(candidate) = inspect(wallet, false)? {
+                    return Ok(Some(candidate));
+                }
             }
         }
-        Ok(best)
+        Ok(fallback.map(|(_, candidate)| candidate))
     }
 }
 

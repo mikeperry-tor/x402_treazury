@@ -1,5 +1,6 @@
 //! Durable pool bookkeeping. No network, signing, or automatic funding occurs here.
 mod backup;
+pub(crate) mod balances;
 mod capacity;
 #[cfg(test)]
 mod io_failure_tests;
@@ -166,6 +167,8 @@ pub struct AddressStatus {
     /// Last saved confirmed observation, not fresh admission authority.
     #[serde(rename = "balance_estimate_atomic")]
     pub confirmed_balance: String,
+    pub low_balance: bool,
+    pub balance_refresh_error: Option<String>,
     pub confirmed_height: Option<i64>,
     pub confirmed_hash: Option<String>,
     pub signed_exposure_atomic: Option<String>,
@@ -445,7 +448,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 17,
+                version == 18,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -1079,7 +1082,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 17,
+        schema == 18,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1161,7 +1164,7 @@ fn read_status(db: &Connection) -> Result<Status> {
         });
     }
     Ok(Status {
-        schema_version: 2,
+        schema_version: 3,
         state_schema_version: version,
         refunds: if version >= 7 {
             refunds::read_refunds(db)?
@@ -1287,8 +1290,8 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 17,
-        "unsupported state schema; use the separately reviewed stopped-service conversion utility"
+        version == 18,
+        "unsupported state schema; private-state conversion requires separate authorization; a code rollback is not a state downgrade"
     );
     // Additive lookup optimization for existing schema16 stores; financial
     // records and the state format are unchanged.
@@ -1313,7 +1316,9 @@ pub(crate) struct PreparedPayment {
 pub(crate) struct AdmissionExpired;
 impl std::fmt::Display for AdmissionExpired {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("wallet_not_ready: payment evidence or unpublished authorization expired; no payment submitted")
+        f.write_str(
+            "wallet_not_ready: unpublished authorization expired; this signature was not submitted",
+        )
     }
 }
 impl std::error::Error for AdmissionExpired {}
@@ -1360,6 +1365,7 @@ impl Store {
     }
     /// Historical authorizations still reconcile, but retired balances cannot
     /// fund a payment and must not delay acquisition of active admission evidence.
+    #[cfg(test)]
     #[cfg(test)]
     pub(crate) fn payment_chain_query(&self, pool: &str) -> Result<super::base::ChainQuery> {
         self.chain_query_inner(pool, false)
@@ -1618,10 +1624,10 @@ impl Store {
             .context(AdmissionError::WalletNotReady(
                 "payment wallet no longer eligible",
             ))?;
-        let (address, estimate): (String, String) = tx.query_row(
+        let (address, estimate): (String, Option<String>) = tx.query_row(
             "SELECT address,balance FROM wallets WHERE id=?1 AND pool_id=?2",
             params![admission.wallet, admission.pool],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get_ref(1)?.as_str().ok().map(str::to_owned))),
         )?;
         ensure!(address == admission.address, AdmissionError::PayerChanged);
         ensure!(
@@ -1639,7 +1645,7 @@ impl Store {
         tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES (?1,?2,?3,(SELECT generation FROM pools WHERE id=?2),?4,?5,'POSSIBLY_SUBMITTED',?6,?7,?8,?9,?10,?11)",params![admission.id,admission.pool,admission.wallet,admission.cost.to_string(),admission.requirements_hash,auth.payer,auth.payee,auth.nonce,i64::try_from(auth.valid_after)?,i64::try_from(auth.valid_before)?,evidence::next_sequence(&tx)?])?;
         // Advisory data can change concurrently or be unavailable. Debit the
         // value present in this transaction exactly once, with the new journal row.
-        let estimate = amount(&estimate).ok();
+        let estimate = estimate.as_deref().and_then(|value| amount(value).ok());
         if let Some(balance) = estimate {
             tx.execute(
                 "UPDATE wallets SET balance=?2 WHERE id=?1",

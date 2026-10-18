@@ -160,6 +160,14 @@ async fn old_low_missing_and_malformed_estimates_and_readiness_do_not_gate_signi
         );
     }
     assert_eq!(f.signed.load(Ordering::SeqCst), 4);
+    f.db()
+        .execute(
+            "UPDATE wallets SET balance=x'ff' WHERE id=?1",
+            [&f.payer.wallet],
+        )
+        .unwrap();
+    assert!(f.pay().await.unwrap().0.status().is_success());
+    assert_eq!(f.signed.load(Ordering::SeqCst), 5);
     f.close().await;
 }
 
@@ -272,7 +280,20 @@ async fn new_advisory_authorization_can_resolve_and_unknown_estimate_refreshes_t
     assert!(f.pay().await.unwrap().0.status().is_success());
     let endpoint = f.url.replace("/pay", "/rpc");
     f.pool.base = BaseRpc::new(&endpoint, 12, 120).unwrap();
-    f.pool.reconcile().await.unwrap();
+    let pool = f.pool.pool.clone();
+    let query = f
+        .pool
+        .store
+        .call(move |s| s.chain_query(&pool))
+        .await
+        .unwrap();
+    let view = f.pool.base.view(query).await.unwrap();
+    let pool = f.pool.pool.clone();
+    f.pool
+        .store
+        .call(move |s| s.reconcile_pool(&pool, view))
+        .await
+        .unwrap();
     let (balance, pending, resolutions): (String,i64,i64) = f.db().query_row("SELECT balance,(SELECT count(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'),(SELECT count(*) FROM payment_resolutions) FROM wallets WHERE id=?1",[&f.payer.wallet],|r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!((balance.as_str(), pending, resolutions), ("0", 0, 1));
     f.close().await;

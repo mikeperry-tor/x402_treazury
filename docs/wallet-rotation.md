@@ -243,12 +243,11 @@ arguments cannot choose that scope. Receipt order controls updates, including lo
 prices. Restart, expiry and eviction lose only a selection estimate. They cause
 no probe, cached-challenge reuse or new payment authority.
 
-The invocation may make one unsigned handoff to an explicitly selected replacement,
-including for POST and other supported methods. It preserves the original request
-and obtains the replacement identity's own challenge. A changed second price is
-checked only against that fixed payer; it cannot trigger another search or handoff.
-Free, malformed, unsupported and redirect responses do not authorize a handoff.
-A signed response or output-conversion failure never authorizes replay.
+The invocation captures its existing inventory boundary. It may hand off an unsigned
+challenge to an eligible payer suggested by the actual price, and may traverse on
+the narrow insufficient-funds exception below. Each identity is visited at most
+once. Each handoff creates that payer's own isolated transport and unsigned
+challenge while preserving the original request bytes.
 
 Signing produces private bytes. The journal transaction rechecks current pool
 ownership, eligible role, actual reserve claim, amount cap, payer address and signed
@@ -259,8 +258,8 @@ promotion does not invalidate another permitted authorization.
 A READY payer consumes its exact reserve claim atomically: the former active
 becomes RETAINED, the payer becomes ACTIVE, and the reserve generation advances.
 Ordinary background funding can fill the vacancy. Admission never allocates or
-retires wallets. One definitely rolled-back expired private signature may be
-replaced on the same payer. An unknown journal outcome grants no replay.
+retires wallets. An expired unpublished signature fails before disclosure; no
+local evidence/signature recovery loop remains. Unknown journal outcomes grant no replay.
 
 The serialized Store owns commits after waiter cancellation. Signing and network
 I/O do not hold a group turn to stabilize advisory balances.
@@ -289,10 +288,12 @@ retirement and incident-specific repair remain [deferred](plans/deferred/managed
 
 ## Payment reconciliation
 
-A logical paid request has at most one signed submission. A final 402, upstream error,
-connection timeout or response-body loss does not authorize replay on another
-wallet. A missing response is not proof that settlement failed. Retired addresses
-remain under reconciliation and accept no new payments.
+Managed `PaidClient` calls may repeat an operation on another captured wallet only
+when the signed attempt receives a supported structured insufficient-funds failure.
+Both authorizations can charge or execute. Other HTTP failures, transport loss,
+malformed replies, successful responses and output conversion failures grant no
+retry. The low-level `ManagedPool::pay_with_cover` API dispatches an already-bound
+challenge/transport once; use `PaidClient::managed` for complete routed calls.
 
 `rotation/base.rs` verifies Base chain identity, confirmed anchors, freshness,
 block-pinned USDC balances and EIP-3009 authorization use. A used authorization
@@ -540,6 +541,28 @@ Unknown or malformed estimates stay unknown. Unresolved exposure is not subtract
 a second time. Chain observations may replace estimates even while signatures
 remain chargeable; estimates are not a replica of canonical available capacity.
 
-At this implementation stage, a signed insufficient-funds response still ends the
-call. The planned traversal and no-top-up changes are described in the active
+A signed attempt's HTTP 402 can earn another wallet attempt only through the
+[pinned x402 seller encodings](../tests/fixtures/x402/insufficient-funds.json):
+`PAYMENT-REQUIRED` with exact `error: insufficient_funds`, or a failed
+`PAYMENT-RESPONSE` with that exact `errorReason`. An unsigned challenge, arbitrary
+prose, a bare 402, allowance failure and malformed/truncated replies cannot earn it.
+The existing response-byte and read-inactivity limits still apply.
+
+Each recognized failure marks its wallet low balance and queues an advisory
+`balanceOf(..., latest)` read through the existing maintenance owner. Payment
+fallback never waits for that read and never allocates or funds a wallet. A failure
+during an active read leaves a pending follow-up. A successful read replaces the
+estimate; an unsuccessful read retains the previous estimate and reports
+`observation_unavailable`. Low balance is a selection classification, not permanent
+retirement. It survives restart until an ordinary successful observation clears it.
+
+Every captured eligible identity is visited at most once per logical call. New
+wallets do not extend that call. Exhaustion warns that earlier authorizations may
+still charge or execute. No interrupted logical call is automatically replayed on
+restart. The amount cap applies to each authorization, so one call can incur
+multiple charges. Qualification uses its existing case permit for the sum of all
+attempts, retains every receipt/proof, and checks current run authority before
+starting another unsigned attempt. A later success does not erase earlier unknowns.
+
+Initial-funding and SDK-owned treasury simplification continues in the active
 [implementation plan](plans/best_effort_wallet_balances.md).

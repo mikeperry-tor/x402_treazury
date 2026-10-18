@@ -1,22 +1,15 @@
-//! One resumable reconciliation owner per store/group. Runtime cursors enumerate
-//! committed work; only separately verified SQL commits resolve liabilities.
+//! One retained advisory refresh owner per Store/group. No payment-history repair.
 use super::*;
-use crate::rotation::store::inventory::read_result as inventory_result;
-use crate::rotation::{
-    base::PendingAuthorization,
-    store::history::{HistoryPayload, PAGE_SIZE},
-};
+use crate::rotation::store::{history::PAGE_SIZE, inventory::read_result};
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::time::Duration;
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    time::Duration,
+};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-
-// Bounds owned read futures and queued acquired rows, never financial capacity.
 const BALANCE_READS: usize = 4;
-const HISTORY_READS: usize = 4;
 const CADENCE: Duration = Duration::from_secs(5);
-
 #[derive(Debug)]
 pub(crate) struct ReconciliationInProgress;
 impl std::fmt::Display for ReconciliationInProgress {
@@ -25,121 +18,11 @@ impl std::fmt::Display for ReconciliationInProgress {
     }
 }
 impl std::error::Error for ReconciliationInProgress {}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Balance,
-    History,
-    Qualification,
-}
 struct Completion {
-    kind: Kind,
-    id: String,
+    id: Option<String>,
     result: Result<()>,
 }
-struct Pass<T> {
-    through: Option<i64>,
-    cursor: i64,
-    queued: VecDeque<(i64, T)>,
-    due: Instant,
-    completed: bool,
-    yielded: bool,
-    decode_failure: Option<crate::rotation::store::history::MalformedHistory>,
-}
-impl<T> Pass<T> {
-    fn new(cursor: i64) -> Self {
-        Self {
-            through: None,
-            cursor,
-            queued: VecDeque::new(),
-            due: Instant::now(),
-            completed: false,
-            yielded: false,
-            decode_failure: None,
-        }
-    }
-    fn defer_inventory(&mut self, one_pass: bool) {
-        self.due = Instant::now() + CADENCE;
-        if one_pass {
-            self.completed = true;
-        }
-    }
-    fn finish(&mut self, delay: Duration) {
-        self.through = None;
-        self.due = Instant::now() + delay;
-        self.completed = true;
-    }
-}
-fn history_delay(failures: u32) -> Duration {
-    Duration::from_secs(if failures == 0 {
-        5
-    } else {
-        15u64.saturating_mul(1u64 << failures.min(5)).min(300)
-    })
-}
-
-// Bounds retained retry metadata, independently of the four active RPC readers.
-// Never evict active work or an unelapsed backoff to admit another observation.
-const HISTORY_RETRIES: usize = HISTORY_READS * PAGE_SIZE;
-#[derive(Default)]
-struct HistoryRetries(BTreeMap<String, HistoryRetry>);
-struct HistoryRetry {
-    due: Instant,
-    failures: u32,
-}
-#[derive(Debug, PartialEq, Eq)]
-enum HistoryAdmission {
-    Ready,
-    Skip,
-    CapacityUnavailable,
-}
-impl HistoryRetries {
-    fn admit(&mut self, id: &str, now: Instant, active: &BTreeSet<String>) -> HistoryAdmission {
-        if active.contains(id) {
-            return HistoryAdmission::Skip;
-        }
-        if let Some(retry) = self.0.get(id) {
-            return if now >= retry.due {
-                HistoryAdmission::Ready
-            } else {
-                HistoryAdmission::Skip
-            };
-        }
-        if self.0.len() == HISTORY_RETRIES {
-            let expired = self
-                .0
-                .iter()
-                .filter(|(id, retry)| retry.due <= now && !active.contains(*id))
-                .min_by_key(|(_, retry)| retry.due)
-                .map(|(id, _)| id.clone());
-            let Some(expired) = expired else {
-                return HistoryAdmission::CapacityUnavailable;
-            };
-            self.0.remove(&expired);
-        }
-        self.0.insert(
-            id.to_owned(),
-            HistoryRetry {
-                due: now,
-                failures: 0,
-            },
-        );
-        HistoryAdmission::Ready
-    }
-    fn complete(&mut self, id: &str, failed: bool, now: Instant) {
-        if failed {
-            let retry = self.0.get_mut(id).expect("owned history retry record");
-            retry.failures = retry.failures.saturating_add(1);
-            retry.due = now + history_delay(retry.failures);
-        } else {
-            self.0.remove(id);
-        }
-    }
-}
-
 impl ManagedPool {
-    /// A direct caller is a response waiter, not the owner of accepted read work.
-    /// Dropping this waiter leaves its bounded pass running and publishing proofs.
     pub async fn reconcile(&self) -> Result<()> {
         let owner = self
             .reconciliation
@@ -154,377 +37,242 @@ impl ManagedPool {
         .await
         .context("reconciliation owner stopped")?
     }
-
-    /// Deployment shutdown owns cancellation; unsigned acquired work is reaped
-    /// while accepted store jobs retain their guards through commit acknowledgement.
     pub(crate) async fn run_reconciliation(&self, stop: CancellationToken) -> Result<()> {
-        let _owner = tokio::select! {
-            _=stop.cancelled()=>return Ok(()),
-            owner=self.reconciliation.clone().lock_owned()=>owner,
-        };
+        let _owner = tokio::select! { _=stop.cancelled()=>return Ok(()), owner=self.reconciliation.clone().lock_owned()=>owner };
         self.maintenance(stop, false).await
     }
-
     async fn maintenance(&self, stop: CancellationToken, one_pass: bool) -> Result<()> {
-        let mut balances = Pass::<String>::new(-1);
-        let mut history = Pass::<HistoryPayload>::new(0);
-        let mut priority = VecDeque::<String>::new();
-        let mut priority_ids = BTreeSet::new();
-        let mut priority_due = Instant::now();
+        let pool = self.pool.clone();
+        let changes = self
+            .store
+            .call(move |s| Ok(s.capacity_changes(&pool)))
+            .await?;
+        let mut cursor = -1;
+        let mut pending_cursor = -1;
+        let mut through = None;
+        let mut page = VecDeque::<(i64, Option<String>)>::new();
+        let mut active = BTreeSet::new();
+        let mut retry_at = BTreeMap::<String, Instant>::new();
+        let mut reads = FuturesUnordered::<BoxFuture<'_, Completion>>::new();
+        let mut complete = false;
+        let mut due = Instant::now();
         let mut qualification_due = Instant::now();
         let mut qualification_active = false;
-        let mut qualification_completed = false;
-        let mut priority_initialized = false;
-        let mut balance_active = BTreeSet::new();
-        let mut history_active = BTreeSet::new();
-        let mut history_retries = HistoryRetries::default();
-        let mut reads = FuturesUnordered::<BoxFuture<'_, Completion>>::new();
         let mut first_error = None;
         loop {
             if stop.is_cancelled() {
                 break;
             }
-            let instant = Instant::now();
-            if instant >= priority_due && (!one_pass || !priority_initialized) {
-                priority_initialized = true;
-                let pool = self.pool.clone();
-                let rows = self
-                    .store
-                    .call(move |s| {
-                        let upper = s.wallet_boundary(&pool)?;
-                        s.priority_wallets(&pool, upper)
-                    })
-                    .await;
-                if let Some(rows) = inventory_result(rows, &mut first_error)? {
-                    priority_ids = rows.iter().map(|(_, id, _)| id.clone()).collect();
-                    priority = rows.into_iter().map(|(_, id, _)| id).collect();
-                }
-                priority_due = instant + CADENCE;
+            retry_at.retain(|_, at| *at > Instant::now());
+            let changed = changes.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let pool = self.pool.clone();
+            let pending = read_result(
+                self.store
+                    .call(move |s| s.pending_balances(&pool, pending_cursor))
+                    .await,
+                &mut first_error,
+            )?
+            .unwrap_or_default();
+            let pending_wrapped = pending.is_empty() && pending_cursor >= 0;
+            let more_pending = pending.len() == PAGE_SIZE;
+            if pending.is_empty() {
+                pending_cursor = -1;
             }
-            // At most three preferred identities leave room for retained traversal.
-            while balance_active.len() < BALANCE_READS {
-                let next = if let Some(id) = priority.pop_front() {
-                    Some(id)
-                } else {
-                    match inventory_result(
-                        self.next_balance(&mut balances, one_pass, &priority_ids)
-                            .await,
-                        &mut first_error,
-                    )? {
-                        Some(next) => next,
-                        None => {
-                            balances.defer_inventory(one_pass);
-                            None
+            for (sequence, id) in pending {
+                if active.len() == BALANCE_READS {
+                    break;
+                }
+                pending_cursor = sequence;
+                let Some(id) = id else {
+                    if first_error.is_none() {
+                        tracing::warn!(
+                            category = "malformed_advisory_wallet_row",
+                            "wallet observation unavailable; advancing to independent work"
+                        );
+                    }
+                    first_error.get_or_insert_with(|| {
+                        crate::rotation::store::balances::AdvisoryIdentityUnavailable.into()
+                    });
+                    continue;
+                };
+                if !active.contains(&id) && retry_at.get(&id).is_none_or(|at| *at <= Instant::now())
+                {
+                    active.insert(id.clone());
+                    reads.push(self.read_balance(id).boxed());
+                }
+            }
+            while active.len() < BALANCE_READS && Instant::now() >= due && !(one_pass && complete) {
+                if let Some((sequence, id)) = page.pop_front() {
+                    cursor = sequence;
+                    let Some(id) = id else {
+                        if first_error.is_none() {
+                            tracing::warn!(
+                                category = "malformed_advisory_wallet_row",
+                                "wallet observation unavailable; advancing to independent work"
+                            );
                         }
+                        first_error.get_or_insert_with(|| {
+                            crate::rotation::store::balances::AdvisoryIdentityUnavailable.into()
+                        });
+                        continue;
+                    };
+                    if !active.contains(&id)
+                        && retry_at.get(&id).is_none_or(|at| *at <= Instant::now())
+                    {
+                        active.insert(id.clone());
+                        reads.push(self.read_balance(id).boxed());
                     }
-                };
-                let Some(id) = next else { break };
-                if balance_active.insert(id.clone()) {
-                    reads.push(self.read_one(Kind::Balance, id, None).boxed());
+                    continue;
+                }
+                let pool = self.pool.clone();
+                if through.is_none() {
+                    through = read_result(
+                        self.store.call(move |s| s.wallet_boundary(&pool)).await,
+                        &mut first_error,
+                    )?;
+                    cursor = -1;
+                    if through.is_none() {
+                        due = Instant::now() + CADENCE;
+                        complete = true;
+                        break;
+                    }
+                }
+                let pool = self.pool.clone();
+                let boundary = through.unwrap();
+                let rows = read_result(
+                    self.store
+                        .call(move |s| s.advisory_wallet_page(&pool, cursor, boundary))
+                        .await,
+                    &mut first_error,
+                )?;
+                match rows {
+                    Some(rows) if !rows.is_empty() => page = rows.into(),
+                    _ => {
+                        complete = true;
+                        through = None;
+                        due = Instant::now() + CADENCE;
+                        break;
+                    }
                 }
             }
-            while history_active.len() < HISTORY_READS {
-                let result = self
-                    .next_admitted_history(
-                        &mut history,
-                        one_pass,
-                        &mut history_retries,
-                        &history_active,
-                        Instant::now(),
-                    )
-                    .await;
-                let next = match inventory_result(result, &mut first_error)? {
-                    Some(next) => next,
-                    None => {
-                        history.defer_inventory(one_pass);
-                        None
-                    }
-                };
-                let Some(auth) = next else { break };
-                history_active.insert(auth.id.clone());
-                reads.push(
-                    self.read_one(Kind::History, auth.id.clone(), Some(auth))
-                        .boxed(),
-                );
-            }
-            if let Some(error) = history.decode_failure.take()
-                && first_error.is_none()
-            {
-                first_error = Some(error.into());
-            }
-            if !qualification_active
-                && instant >= qualification_due
-                && (!one_pass || !qualification_completed)
-            {
+            if !qualification_active && Instant::now() >= qualification_due && !one_pass {
                 qualification_active = true;
                 reads.push(
                     async {
                         Completion {
-                            kind: Kind::Qualification,
-                            id: String::new(),
+                            id: None,
                             result: self.qualification_observation().await,
                         }
                     }
                     .boxed(),
                 );
             }
-            if one_pass && balances.completed && history.completed && reads.is_empty() {
+            if one_pass && complete && reads.is_empty() {
+                if pending_wrapped {
+                    continue;
+                }
                 return first_error.map_or(Ok(()), Err);
             }
-            let wake = priority_due
-                .min(qualification_due)
-                .min(balances.due)
-                .min(history.due);
-            // Active passes may have an old due time. They are driven by
-            // completions; the cadence prevents an empty/all-owned busy loop.
-            let wake = if history.yielded {
+            let wake = if more_pending && active.len() < BALANCE_READS {
                 Instant::now()
-            } else if wake <= Instant::now() {
-                Instant::now() + CADENCE
             } else {
-                wake
+                Instant::now() + CADENCE
             };
             tokio::select! {
                 _=stop.cancelled()=>break,
+                _=&mut changed=>{},
                 Some(done)=reads.next(),if !reads.is_empty()=>{
-                    match done.kind {
-                        Kind::Balance=>{balance_active.remove(&done.id);},
-                        Kind::History=>{
-                            history_active.remove(&done.id);
-                            history_retries.complete(&done.id, done.result.is_err(), Instant::now());
-                        },
-                        Kind::Qualification=>{qualification_active=false;qualification_completed=true;qualification_due=Instant::now()+CADENCE;},
-                    }
+                    if let Some(id)=done.id {
+                        active.remove(&id);
+                        if done.result.is_err() { retry_at.insert(id,Instant::now()+CADENCE); } else { retry_at.remove(&id); }
+                    } else {qualification_active=false;qualification_due=Instant::now()+CADENCE;}
                     if let Err(error)=done.result {
-                        let kind=match done.kind {Kind::Balance=>"balance",Kind::History=>"authorization_history",Kind::Qualification=>"qualification"};
-                        tracing::warn!(kind,category=%super::super::base::safe_diagnostic(&error),"background observation unavailable; financial obligations remain owned");
-                        if first_error.is_none(){first_error=Some(error);}
+                        // Shared Store ownership/corruption cannot be bypassed by a
+                        // second owner. RPC/address failures concern this observation.
+                        if error.downcast_ref::<rusqlite::Error>().is_some() && !crate::rotation::store::inventory::transient_read(&error) { return Err(error); }
+                        tracing::warn!(category=%super::super::base::safe_diagnostic(&error),"advisory balance observation unavailable; independent payment service continues");
+                        first_error.get_or_insert(error);
                     }
                 },
                 _=tokio::time::sleep_until(wake)=>{},
             }
         }
-        // Dropping only unsigned query futures cannot release their liabilities.
-        // Accepted SQL closures retain their group guard in StoreHandle.
-        drop(reads);
+        // Unsigned reads may stop; already accepted Store writes retain ownership.
         Ok(())
     }
-
-    async fn next_balance(
-        &self,
-        pass: &mut Pass<String>,
-        one_pass: bool,
-        priority: &BTreeSet<String>,
-    ) -> Result<Option<String>> {
-        if (one_pass && pass.completed) || Instant::now() < pass.due {
-            return Ok(None);
-        }
-        loop {
-            if let Some((sequence, id)) = pass.queued.pop_front() {
-                pass.cursor = sequence;
-                if !priority.contains(&id) {
-                    return Ok(Some(id));
-                }
-                continue;
-            }
-            if pass.through.is_none() {
-                let pool = self.pool.clone();
-                pass.through = Some(self.store.call(move |s| s.wallet_boundary(&pool)).await?);
-                pass.cursor = -1;
-            }
-            let pool = self.pool.clone();
-            let (after, through) = (pass.cursor, pass.through.unwrap());
-            let page = self
-                .store
-                .call(move |s| s.wallet_page(&pool, after, through, PAGE_SIZE))
-                .await?;
-            if page.is_empty() {
-                pass.finish(CADENCE);
-                return Ok(None);
-            }
-            pass.queued = page
-                .into_iter()
-                .map(|(sequence, id, _)| (sequence, id))
-                .collect();
-        }
-    }
-    async fn next_admitted_history(
-        &self,
-        pass: &mut Pass<HistoryPayload>,
-        one_pass: bool,
-        retries: &mut HistoryRetries,
-        active: &BTreeSet<String>,
-        now: Instant,
-    ) -> Result<Option<PendingAuthorization>> {
-        pass.yielded = false;
-        // Bound acquisition work before polling already-owned reads/cancellation.
-        // Exhausting this slice resumes immediately, without resetting the pass.
-        for _ in 0..PAGE_SIZE {
-            let Some(payload) = self.next_history(pass, one_pass).await? else {
-                return Ok(None);
-            };
-            let auth = match payload {
-                Ok(auth) => auth,
-                Err(error) => {
-                    tracing::warn!(
-                        category = "malformed_authorization_history",
-                        "authorization history unavailable; original obligation retained"
-                    );
-                    tracing::debug!(attempt=%error.id, wallet=%error.wallet, "malformed history ownership");
-                    if pass.decode_failure.is_none() {
-                        pass.decode_failure = Some(error);
-                    }
-                    continue;
-                }
-            };
-            match retries.admit(&auth.id, now, active) {
-                HistoryAdmission::Ready => return Ok(Some(auth)),
-                HistoryAdmission::Skip => {}
-                HistoryAdmission::CapacityUnavailable => {
-                    // Retain this row in the existing bounded page. Restarting
-                    // traversal would let earlier failures renew every backoff
-                    // before this authorization could claim a retry record.
-                    pass.queued.push_front((pass.cursor, Ok(auth)));
-                    return Ok(None);
-                }
-            }
-        }
-        pass.yielded = true;
-        Ok(None)
-    }
-    async fn next_history(
-        &self,
-        pass: &mut Pass<HistoryPayload>,
-        one_pass: bool,
-    ) -> Result<Option<HistoryPayload>> {
-        if (one_pass && pass.completed) || Instant::now() < pass.due {
-            return Ok(None);
-        }
-        if let Some((sequence, auth)) = pass.queued.pop_front() {
-            pass.cursor = sequence;
-            return Ok(Some(auth));
-        }
-        if pass.through.is_none() {
-            let pool = self.pool.clone();
-            pass.through = Some(self.store.call(move |s| s.history_boundary(&pool)).await?);
-            pass.cursor = 0;
-        }
-        let pool = self.pool.clone();
-        let (after, through) = (pass.cursor, pass.through.unwrap());
-        let page = self
-            .store
-            .call(move |s| s.history_page(&pool, after, through, PAGE_SIZE))
-            .await?;
-        if page.is_empty() {
-            pass.finish(CADENCE);
-            return Ok(None);
-        }
-        pass.queued = page.into();
-        let (sequence, auth) = pass.queued.pop_front().expect("nonempty page");
-        pass.cursor = sequence;
-        Ok(Some(auth))
-    }
-
-    async fn read_one(
-        &self,
-        kind: Kind,
-        id: String,
-        auth: Option<PendingAuthorization>,
-    ) -> Completion {
+    async fn read_balance(&self, id: String) -> Completion {
         let result = async {
-            let guard = Arc::new(self.gate.clone().lock_owned().await);
-            let pool = self.pool.clone();
-            let wallets = if kind == Kind::Balance {
-                vec![id.clone()]
-            } else {
-                vec![]
-            };
-            let query = self
+            let (pool, wallet) = (self.pool.clone(), id.clone());
+            let address = self
                 .store
-                .call_with_guard(guard.clone(), move |s| {
-                    s.scoped_chain_query(&pool, wallets, auth.into_iter().collect())
-                })
-                .await?;
-            drop(guard);
-            if query.wallets.is_empty() && query.pending.is_empty() {
-                return Ok(());
-            }
-            let mut view = self.acquire_view(query, false).await?;
-            let guard = Arc::new(self.gate.clone().lock_owned().await);
-            let pool = self.pool.clone();
-            let completed = view.clone();
-            let result = self
-                .store
-                .call_with_guard(guard, move |s| s.publish_scoped_evidence(&pool, completed))
+                .call(move |s| s.begin_balance(&pool, &wallet))
                 .await;
-            let Err(error) = result else { return Ok(()) };
-            use crate::rotation::base::evidence::EvidenceFailure;
-            let recertified = match kind {
-                Kind::History
-                    if matches!(
-                        error.downcast_ref::<EvidenceFailure>(),
-                        Some(EvidenceFailure::CompatibilityRequired | EvidenceFailure::Invalidated)
-                    ) =>
+            let result = match address {
+                Ok(address) => self.base.current_balance(&address).await,
+                Err(error)
+                    if error
+                        .is::<crate::rotation::store::balances::AdvisoryIdentityUnavailable>() =>
                 {
-                    let Some(certificate) = view.resolution_certificates.get(&id).cloned() else {
-                        return Err(error);
-                    };
-                    let wallet = certificate.authorization().wallet.clone();
-                    let capture = self
-                        .store
-                        .call(move |s| s.capture_evidence(&wallet))
-                        .await?;
-                    self.base
-                        .recheck_resolution(certificate, capture)
-                        .await
-                        .map(|certificate| {
-                            view.resolution_certificates.insert(id.clone(), certificate);
-                        })
+                    Err(error)
                 }
-                Kind::Balance
-                    if error.downcast_ref::<EvidenceFailure>()
-                        == Some(&EvidenceFailure::CompatibilityRequired) =>
-                {
-                    let Some(certificate) = view.balance_certificates.get(&id).cloned() else {
-                        return Err(error);
-                    };
-                    let wallet = id.clone();
-                    let capture = self
-                        .store
-                        .call(move |s| s.capture_evidence(&wallet))
-                        .await?;
-                    self.base
-                        .recheck_balance(certificate, capture)
-                        .await
-                        .map(|certificate| {
-                            view.balance_certificates.insert(id.clone(), certificate);
-                        })
-                }
-                _ => return Err(error),
+                Err(error) => return Err(error),
             };
-            // One exact-anchor recertification, never a balance/nonce reread or
-            // lifetime renewal. Another race or a USED floor defers to normal work.
-            if let Err(error) = recertified {
-                let guard = Arc::new(self.gate.clone().lock_owned().await);
-                return self
-                    .store
-                    .call_with_guard(guard, move |s| {
-                        s.record_base_failure(&error)?;
-                        Err(error)
-                    })
-                    .await;
-            }
-            let guard = Arc::new(self.gate.clone().lock_owned().await);
-            let pool = self.pool.clone();
+            let value = result.as_ref().ok().copied();
+            let (pool, wallet) = (self.pool.clone(), id.clone());
             self.store
-                .call_with_guard(guard, move |s| s.publish_scoped_evidence(&pool, view))
-                .await
+                .call(move |s| s.finish_balance(&pool, &wallet, value))
+                .await?;
+            result.map(|_| ())
         }
         .await;
-        Completion { kind, id, result }
+        Completion {
+            id: Some(id),
+            result,
+        }
     }
-
     async fn qualification_observation(&self) -> Result<()> {
+        let mut malformed = false;
+        if crate::qualification::active() {
+            let pool = self.pool.clone();
+            let through = self
+                .store
+                .call(move |s| s.qualification_pending_boundary(&pool))
+                .await?;
+            let mut after = 0;
+            loop {
+                let pool = self.pool.clone();
+                let page = self
+                    .store
+                    .call(move |s| s.qualification_pending_page(&pool, after, through))
+                    .await?;
+                let Some((last, _)) = page.last() else { break };
+                after = *last;
+                let pending: Vec<_> = page.into_iter().filter_map(|(_, auth)| match auth {
+                    Ok(auth) => Some(auth),
+                    Err(_) => {
+                        malformed = true;
+                        tracing::warn!(category="malformed_qualification_authorization_row", "authorization retained; qualification incomplete; advancing independent observations");
+                        None
+                    }
+                }).collect();
+                if pending.is_empty() {
+                    continue;
+                }
+                let pool = self.pool.clone();
+                let query = self
+                    .store
+                    .call(move |s| s.scoped_chain_query(&pool, vec![], pending))
+                    .await?;
+                let view = self.acquire_view(query, false).await?;
+                let pool = self.pool.clone();
+                let guard = Arc::new(self.gate.clone().lock_owned().await);
+                self.store
+                    .call_with_guard(guard, move |s| s.publish_scoped_evidence(&pool, view))
+                    .await?;
+            }
+        }
         if let Some(observation) = crate::qualification::pool_observation(&self.pool).await {
             let pool = self.pool.clone();
             let through = self.store.call(move |s| s.wallet_boundary(&pool)).await?;
@@ -580,733 +328,11 @@ impl ManagedPool {
                 observation.record(s.qualification_lifecycle()?,evidence)
             }).await?;
         }
-        crate::qualification::reconcile_debit(&self.base, &self.store, &self.pool).await
+        crate::qualification::reconcile_debit(&self.base, &self.store, &self.pool).await?;
+        ensure!(!malformed, "malformed_qualification_authorization_row");
+        Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-    struct Fixture {
-        dir: tempfile::TempDir,
-        pool: Arc<ManagedPool>,
-        store: StoreHandle,
-        worker: tokio::task::JoinHandle<()>,
-        server: tokio::task::JoinHandle<()>,
-        release: Arc<tokio::sync::Notify>,
-        slow_started: Arc<tokio::sync::Notify>,
-        balance_reads: Arc<AtomicUsize>,
-        balance_payers: Arc<std::sync::Mutex<BTreeSet<String>>>,
-        nonce_reads: Arc<AtomicUsize>,
-        fail_nonces: Arc<AtomicBool>,
-        treasury: String,
-    }
-    async fn fixture(count: usize) -> Fixture {
-        use axum::{Json, Router, routing::post};
-        use serde_json::json;
-        let dir = tempfile::tempdir().unwrap();
-        let mut state = crate::rotation::store::Store::create(
-            &dir.path().join("state"),
-            &dir.path().join("key"),
-            1,
-            b"fixture",
-        )
-        .unwrap();
-        let treasury = state.id().to_owned();
-        let id = crate::rotation::test_capacity::declare_and_allocate!(
-            state,
-            "rolling",
-            crate::rotation::test_capacity::two_reserves("5"),
-            Some(crate::rotation::config::positive_usdc("5").unwrap()),
-            0
-        )
-        .unwrap();
-        for job in state.funding_jobs().unwrap() {
-            state
-                .record_credit(&job.wallet_id, "5000000", &format!("0x{:064x}", 88), 88)
-                .unwrap();
-        }
-        let wallet = state.status().unwrap().pools.remove(0).addresses.remove(0);
-        let mut db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-        let tx = db.transaction().unwrap();
-        for sequence in 1..=count {
-            tx.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,payee,nonce,valid_after,valid_before,reconciliation_sequence) VALUES (?1,?2,?3,0,'1','fixture','POSSIBLY_SUBMITTED',?4,?4,?5,0,?6,?7)",rusqlite::params![format!("attempt-{sequence}"),id,wallet.id,wallet.address,format!("0x{sequence:064x}"),i64::try_from(now().unwrap()+1000).unwrap(),sequence as i64]).unwrap();
-        }
-        tx.execute(
-            "UPDATE wallets SET unresolved_exposure=?2 WHERE id=?1",
-            rusqlite::params![wallet.id, count.to_string()],
-        )
-        .unwrap();
-        tx.commit().unwrap();
-        drop(db);
-        let release = Arc::new(tokio::sync::Notify::new());
-        let slow_started = Arc::new(tokio::sync::Notify::new());
-        let balance_reads = Arc::new(AtomicUsize::new(0));
-        let balance_payers = Arc::new(std::sync::Mutex::new(BTreeSet::new()));
-        let nonce_reads = Arc::new(AtomicUsize::new(0));
-        let fail_nonces = Arc::new(AtomicBool::new(false));
-        let app=Router::new().route("/",post({
-            let release=release.clone();let started=slow_started.clone();let balances=balance_reads.clone();let payers=balance_payers.clone();let nonces=nonce_reads.clone();let fail=fail_nonces.clone();
-            move |Json(request):Json<Value>| {
-                let release=release.clone();let started=started.clone();let balances=balances.clone();let payers=payers.clone();let nonces=nonces.clone();let fail=fail.clone();
-                async move {
-                    let result=match request["method"].as_str().unwrap() {
-                        "eth_chainId"=>json!("0x2105"),
-                        "eth_getBlockByNumber"=>{
-                            let tag=request["params"][0].as_str().unwrap();
-                            let height=if tag=="latest"{100}else{u64::from_str_radix(&tag[2..],16).unwrap()};
-                            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
-                        },
-                        "eth_call"=>{
-                            let data=request["params"][0]["data"].as_str().unwrap();
-                            let value=if data.starts_with("0x70a08231") {balances.fetch_add(1,Ordering::SeqCst);payers.lock().unwrap().insert(format!("0x{}",&data[data.len()-40..]));5_000_000}else{
-                                nonces.fetch_add(1,Ordering::SeqCst);
-                                let nonce=u64::from_str_radix(&data[data.len()-64..],16).unwrap();
-                                if nonce==1 {started.notify_one();}
-                                if nonce==1 && fail.load(Ordering::SeqCst) {tokio::time::sleep(Duration::from_millis(500)).await;return Json(json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32602,"message":"fixture"}}));}
-                                if nonce==1 {release.notified().await;}
-                                if nonce==2 && fail.load(Ordering::SeqCst) {0} else {1}
-                            };
-                            json!(format!("0x{value:064x}"))
-                        },
-                        method=>panic!("unexpected mutation or unsupported fixture RPC: {method}"),
-                    };
-                    Json(json!({"jsonrpc":"2.0","id":request["id"],"result":result}))
-                }
-            }
-        }));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base = BaseRpc::new(
-            &format!("http://{}/", listener.local_addr().unwrap()),
-            12,
-            120,
-        )
-        .unwrap();
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let (store, worker) = StoreHandle::spawn(state);
-        let pool = Arc::new(
-            ManagedPool::new(store.clone(), id, base, SpendPolicy::dollars("5").unwrap()).unwrap(),
-        );
-        Fixture {
-            dir,
-            pool,
-            store,
-            worker,
-            server,
-            release,
-            slow_started,
-            balance_reads,
-            balance_payers,
-            nonce_reads,
-            fail_nonces,
-            treasury,
-        }
-    }
-    async fn unfinished(f: &Fixture) -> usize {
-        let pool = f.pool.pool.clone();
-        f.store
-            .call(move |s| {
-                let through = s.history_boundary(&pool)?;
-                Ok(s.history_page(&pool, 0, through, PAGE_SIZE)?.len())
-            })
-            .await
-            .unwrap()
-    }
-    async fn wait_for(f: &Fixture, remaining: usize) {
-        tokio::time::timeout(Duration::from_secs(20), async {
-            while unfinished(f).await != remaining {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn transient_inventory_reads_keep_owner_and_independent_observations() {
-        use crate::rotation::store::inventory::Read;
-        for (index, read) in [
-            Read::Priority,
-            Read::WalletBoundary,
-            Read::WalletPage,
-            Read::HistoryBoundary,
-            Read::HistoryPage,
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let f = fixture(2).await;
-            let retained = "0x000000000000000000000000000000000000aaaa";
-            if read == Read::WalletPage {
-                let db =
-                    rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
-                db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role) VALUES('retained-observer',?1,99,?2,X'00','1','RETAINED')",rusqlite::params![f.pool.pool,retained]).unwrap();
-            }
-            let code = if index % 2 == 0 {
-                rusqlite::ffi::SQLITE_BUSY
-            } else {
-                rusqlite::ffi::SQLITE_LOCKED
-            };
-            f.store
-                .call(move |s| {
-                    s.fail_next_inventory_read(read, code);
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            let stop = CancellationToken::new();
-            let task = tokio::spawn({
-                let pool = f.pool.clone();
-                let stop = stop.clone();
-                async move { pool.run_reconciliation(stop).await }
-            });
-            // Balance reads are polled even while history acquisition is deferred.
-            tokio::time::timeout(Duration::from_secs(2), async {
-                while f.balance_reads.load(Ordering::SeqCst) == 0 {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-            tokio::time::timeout(Duration::from_secs(8), f.slow_started.notified())
-                .await
-                .unwrap();
-            wait_for(&f, 1).await;
-            if read == Read::WalletPage {
-                tokio::time::timeout(Duration::from_secs(8), async {
-                    while !f.balance_payers.lock().unwrap().contains(retained) {
-                        tokio::task::yield_now().await;
-                    }
-                })
-                .await
-                .unwrap();
-            }
-            assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 2);
-            assert!(
-                f.pool
-                    .reconcile()
-                    .await
-                    .unwrap_err()
-                    .is::<ReconciliationInProgress>()
-            );
-            stop.cancel();
-            task.await.unwrap().unwrap();
-            assert_eq!(unfinished(&f).await, 1);
-            assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 2);
-            drop(f.pool);
-            drop(f.store);
-            f.worker.await.unwrap();
-            f.server.abort();
-        }
-    }
-
-    #[tokio::test]
-    async fn inventory_failures_remain_incomplete_for_one_pass_and_corruption_is_not_retried() {
-        use crate::rotation::store::inventory::Read;
-        for read in [
-            Read::Priority,
-            Read::WalletBoundary,
-            Read::WalletPage,
-            Read::HistoryBoundary,
-            Read::HistoryPage,
-        ] {
-            let f = fixture(2).await;
-            f.release.notify_one();
-            f.store
-                .call(move |s| {
-                    s.fail_next_inventory_read(read, rusqlite::ffi::SQLITE_BUSY);
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            let error = tokio::time::timeout(Duration::from_secs(3), f.pool.reconcile())
-                .await
-                .unwrap()
-                .unwrap_err();
-            assert!(crate::rotation::store::inventory::transient_read(&error));
-            // A genuine corruption is an outer error, not a resumable inventory outage.
-            f.store
-                .call(|s| {
-                    s.fail_next_inventory_read(Read::Priority, rusqlite::ffi::SQLITE_CORRUPT);
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            let error = tokio::time::timeout(
-                Duration::from_secs(2),
-                f.pool.run_reconciliation(CancellationToken::new()),
-            )
-            .await
-            .unwrap()
-            .unwrap_err();
-            assert!(!crate::rotation::store::inventory::transient_read(&error));
-            drop(f.pool);
-            drop(f.store);
-            f.worker.await.unwrap();
-            f.server.abort();
-        }
-    }
-
-    #[tokio::test]
-    async fn malformed_history_page_retains_liabilities_and_drains_independent_work() {
-        let f = fixture(PAGE_SIZE * 4 + 7).await;
-        let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
-        db.execute(
-            "UPDATE payment_attempts SET valid_before=-1 WHERE reconciliation_sequence<=256",
-            [],
-        )
-        .unwrap();
-        let mut pass = Pass::new(0);
-        let mut retries = HistoryRetries::default();
-        assert!(
-            f.pool
-                .next_admitted_history(
-                    &mut pass,
-                    true,
-                    &mut retries,
-                    &BTreeSet::new(),
-                    Instant::now()
-                )
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert_eq!(pass.cursor, PAGE_SIZE as i64);
-        assert!(pass.yielded && !pass.completed);
-        assert!(retries.0.is_empty());
-        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 0);
-        let error = tokio::time::timeout(Duration::from_secs(3), f.pool.reconcile())
-            .await
-            .unwrap()
-            .unwrap_err();
-        assert!(
-            error
-                .downcast_ref::<crate::rotation::store::history::MalformedHistory>()
-                .is_some()
-        );
-        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 7);
-        assert!(f.balance_reads.load(Ordering::SeqCst) >= 2);
-        assert_eq!(unfinished(&f).await, PAGE_SIZE);
-        let exposure: String = db.query_row("SELECT unresolved_exposure FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [], |r| r.get(0)).unwrap();
-        assert_eq!(exposure, (PAGE_SIZE * 4).to_string());
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM payment_attempts WHERE valid_before=-1 AND state='POSSIBLY_SUBMITTED'", [], |r| r.get::<_, i64>(0)).unwrap(), (PAGE_SIZE * 4) as i64);
-        assert_eq!(
-            db.query_row("SELECT COUNT(*) FROM payment_resolutions", [], |r| r
-                .get::<_, i64>(0))
-                .unwrap(),
-            7
-        );
-        drop(db);
-        drop(f.pool);
-        drop(f.store);
-        f.worker.await.unwrap();
-        f.server.abort();
-    }
-
-    #[tokio::test]
-    async fn slow_history_keeps_rolling_across_pages_and_does_not_block_balance_cadence() {
-        let f = fixture(PAGE_SIZE + 7).await;
-        let stop = CancellationToken::new();
-        let task = tokio::spawn({
-            let pool = f.pool.clone();
-            let stop = stop.clone();
-            async move { pool.run_reconciliation(stop).await }
-        });
-        tokio::time::timeout(Duration::from_secs(5), f.slow_started.notified())
-            .await
-            .unwrap();
-        wait_for(&f, 1).await;
-        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), PAGE_SIZE + 7);
-        let before = f.balance_reads.load(Ordering::SeqCst);
-        tokio::time::timeout(Duration::from_secs(8), async {
-            while f.balance_reads.load(Ordering::SeqCst) <= before {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(unfinished(&f).await, 1);
-        assert_eq!(
-            f.nonce_reads.load(Ordering::SeqCst),
-            PAGE_SIZE + 7,
-            "slow in-flight nonce must not redispatch across pass boundaries"
-        );
-        stop.cancel();
-        task.await.unwrap().unwrap();
-        let id = f.pool.pool.clone();
-        drop(f.pool);
-        drop(f.store);
-        f.worker.await.unwrap();
-        f.server.abort();
-        let reopened = crate::rotation::store::Store::open(
-            &f.dir.path().join("state"),
-            &f.dir.path().join("key"),
-            &f.treasury,
-        )
-        .unwrap();
-        let remaining = reopened
-            .history_page(&id, 0, reopened.history_boundary(&id).unwrap(), PAGE_SIZE)
-            .unwrap();
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].1.as_ref().unwrap().id, "attempt-1");
-    }
-
-    #[tokio::test]
-    async fn history_failure_backoff_does_not_suppress_balance_owner() {
-        let f = fixture(1).await;
-        f.fail_nonces.store(true, Ordering::SeqCst);
-        let stop = CancellationToken::new();
-        let task = tokio::spawn({
-            let pool = f.pool.clone();
-            let stop = stop.clone();
-            async move { pool.run_reconciliation(stop).await }
-        });
-        tokio::time::timeout(Duration::from_secs(5), f.slow_started.notified())
-            .await
-            .unwrap();
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let nonces = f.nonce_reads.load(Ordering::SeqCst);
-        let balances = f.balance_reads.load(Ordering::SeqCst);
-        tokio::time::timeout(Duration::from_secs(8), async {
-            while f.balance_reads.load(Ordering::SeqCst) <= balances {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), nonces);
-        assert_eq!(unfinished(&f).await, 1);
-        stop.cancel();
-        task.await.unwrap().unwrap();
-        drop(f.pool);
-        drop(f.store);
-        f.worker.await.unwrap();
-        f.server.abort();
-    }
-
-    #[tokio::test]
-    async fn cancelled_response_waiter_preserves_owned_history_and_duplicate_is_explicit() {
-        let f = fixture(7).await;
-        let waiter = tokio::spawn({
-            let pool = f.pool.clone();
-            async move { pool.reconcile().await }
-        });
-        tokio::time::timeout(Duration::from_secs(5), f.slow_started.notified())
-            .await
-            .unwrap();
-        waiter.abort();
-        wait_for(&f, 1).await;
-        assert!(
-            f.pool
-                .reconcile()
-                .await
-                .unwrap_err()
-                .downcast_ref::<ReconciliationInProgress>()
-                .is_some()
-        );
-        f.release.notify_one();
-        wait_for(&f, 0).await;
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if f.pool.reconciliation.try_lock().is_ok() {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), 7);
-        drop(f.pool);
-        drop(f.store);
-        f.worker.await.unwrap();
-        f.server.abort();
-    }
-    #[tokio::test]
-    async fn failed_nonce_does_not_backoff_healthy_sibling() {
-        let f = fixture(2).await;
-        f.fail_nonces.store(true, Ordering::SeqCst);
-        let stop = CancellationToken::new();
-        let task = tokio::spawn({
-            let pool = f.pool.clone();
-            let stop = stop.clone();
-            async move { pool.run_reconciliation(stop).await }
-        });
-        tokio::time::timeout(Duration::from_secs(3), async {
-            while f.nonce_reads.load(Ordering::SeqCst) < 2 {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap();
-        // The failed first nonce completes after its healthy unused sibling.
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        assert_eq!(unfinished(&f).await, 2);
-        f.fail_nonces.store(false, Ordering::SeqCst);
-        let result = tokio::time::timeout(Duration::from_secs(8), async {
-            while unfinished(&f).await != 1 {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await;
-        // The healthy sibling is released; the failed observation keeps its own
-        // backoff and liability, even though its endpoint has recovered.
-        let reads = f.nonce_reads.load(Ordering::SeqCst);
-        stop.cancel();
-        task.await.unwrap().unwrap();
-        drop(f.pool);
-        drop(f.store);
-        f.worker.await.unwrap();
-        f.server.abort();
-        assert!(
-            result.is_ok(),
-            "failed nonce delayed healthy sibling reconciliation"
-        );
-        assert_eq!(
-            reads, 3,
-            "failed nonce retried before its own backoff elapsed"
-        );
-    }
-
-    #[test]
-    fn history_retry_deadlines_are_observation_scoped() {
-        let now = Instant::now();
-        for healthy_first in [false, true] {
-            let mut retries = HistoryRetries::default();
-            let active = BTreeSet::new();
-            assert_eq!(
-                retries.admit("failed", now, &active),
-                HistoryAdmission::Ready
-            );
-            assert_eq!(
-                retries.admit("healthy", now, &active),
-                HistoryAdmission::Ready
-            );
-            let completions = if healthy_first {
-                [("healthy", false), ("failed", true)]
-            } else {
-                [("failed", true), ("healthy", false)]
-            };
-            for (id, failed) in completions {
-                retries.complete(id, failed, now);
-            }
-            assert_eq!(
-                retries.admit("failed", now + CADENCE, &active),
-                HistoryAdmission::Skip
-            );
-            assert_eq!(
-                retries.admit("healthy", now + CADENCE, &active),
-                HistoryAdmission::Ready
-            );
-            assert_eq!(
-                retries.admit("failed", now + Duration::from_secs(30), &active),
-                HistoryAdmission::Ready
-            );
-            retries.complete("failed", true, now + Duration::from_secs(30));
-            assert_eq!(retries.0["failed"].failures, 2);
-            assert_eq!(retries.0["failed"].due, now + Duration::from_secs(90));
-        }
-    }
-
-    #[test]
-    fn history_retry_saturation_preserves_active_owners_and_unelapsed_backoff() {
-        let now = Instant::now();
-        let mut retries = HistoryRetries::default();
-        let mut active = BTreeSet::new();
-        for n in 0..HISTORY_RETRIES {
-            let id = n.to_string();
-            assert_eq!(retries.admit(&id, now, &active), HistoryAdmission::Ready);
-            if n == 0 {
-                active.insert(id);
-            } else {
-                retries.complete(&id, true, now);
-            }
-        }
-        assert_eq!(
-            retries.admit("new", now + CADENCE, &active),
-            HistoryAdmission::CapacityUnavailable
-        );
-        assert_eq!(
-            retries.admit("0", now + Duration::from_secs(300), &active),
-            HistoryAdmission::Skip
-        );
-        assert_eq!(
-            retries.admit("new", now + Duration::from_secs(30), &active),
-            HistoryAdmission::Ready
-        );
-        assert!(retries.0.contains_key("0"));
-        assert_eq!(retries.0.len(), HISTORY_RETRIES);
-        retries.complete("new", false, now + Duration::from_secs(30));
-        assert_eq!(
-            retries.admit("next", now + Duration::from_secs(30), &active),
-            HistoryAdmission::Ready
-        );
-    }
-
-    #[tokio::test]
-    async fn saturated_history_retains_cursor_until_later_authorization_can_progress() {
-        for one_pass in [false, true] {
-            let f = fixture(HISTORY_RETRIES + 1).await;
-            let mut pass = Pass::new(0);
-            let mut retries = HistoryRetries::default();
-            let active = BTreeSet::new();
-            let now = Instant::now();
-            // Fast failures in sequence order occupy every record before the
-            // next page's healthy authorization is reached.
-            for sequence in 1..=HISTORY_RETRIES {
-                let auth = f
-                    .pool
-                    .next_admitted_history(&mut pass, one_pass, &mut retries, &active, now)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(auth.id, format!("attempt-{sequence}"));
-                retries.complete(&auth.id, true, now);
-            }
-            for seconds in [0, 5, 15, 29] {
-                assert!(
-                    f.pool
-                        .next_admitted_history(
-                            &mut pass,
-                            one_pass,
-                            &mut retries,
-                            &active,
-                            now + Duration::from_secs(seconds)
-                        )
-                        .await
-                        .unwrap()
-                        .is_none()
-                );
-                assert_eq!(pass.cursor, (HISTORY_RETRIES + 1) as i64);
-                assert_eq!(pass.queued.len(), 1);
-                assert!(!pass.completed, "capacity wait is not a completed pass");
-                assert_eq!(retries.0.len(), HISTORY_RETRIES);
-            }
-            // The next admission must be the deferred row, before earlier
-            // failures can run again and renew their backoff records.
-            let auth = f
-                .pool
-                .next_admitted_history(
-                    &mut pass,
-                    one_pass,
-                    &mut retries,
-                    &active,
-                    now + Duration::from_secs(30),
-                )
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(auth.id, format!("attempt-{}", HISTORY_RETRIES + 1));
-            let done = f
-                .pool
-                .read_one(Kind::History, auth.id.clone(), Some(auth))
-                .await;
-            done.result.unwrap();
-            retries.complete(&done.id, false, now + Duration::from_secs(30));
-            assert!(
-                f.pool
-                    .next_admitted_history(
-                        &mut pass,
-                        one_pass,
-                        &mut retries,
-                        &active,
-                        now + Duration::from_secs(30)
-                    )
-                    .await
-                    .unwrap()
-                    .is_none()
-            );
-            assert!(pass.completed);
-            let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
-            assert_eq!(
-                db.query_row(
-                    "SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
-                    [],
-                    |r| r.get::<_, i64>(0)
-                )
-                .unwrap(),
-                HISTORY_RETRIES as i64
-            );
-            assert_eq!(
-                db.query_row("SELECT COUNT(*) FROM payment_resolutions", [], |r| r
-                    .get::<_, i64>(0))
-                    .unwrap(),
-                1
-            );
-            assert_eq!(db.query_row("SELECT unresolved_exposure FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [], |r| r.get::<_, String>(0)).unwrap(), HISTORY_RETRIES.to_string());
-            drop(db);
-            drop(f.pool);
-            drop(f.store);
-            f.worker.await.unwrap();
-            f.server.abort();
-        }
-    }
-
-    #[tokio::test]
-    async fn buffered_resolved_history_skips_rpc_and_preserves_liabilities() {
-        let f = fixture(2).await;
-        let group = f.pool.pool.clone();
-        let row = f
-            .store
-            .call(move |s| Ok(s.history_page(&group, 0, 2, PAGE_SIZE)?.remove(1)))
-            .await
-            .unwrap();
-        let mut pass = Pass::new(0);
-        pass.queued.push_back(row.clone());
-        // The earlier pass finishes while a later page still holds this row.
-        f.pool
-            .read_one(
-                Kind::History,
-                row.1.as_ref().unwrap().id.clone(),
-                Some(row.1.unwrap()),
-            )
-            .await
-            .result
-            .unwrap();
-        let reads = f.nonce_reads.load(Ordering::SeqCst);
-        let mut retries = HistoryRetries::default();
-        let auth = f
-            .pool
-            .next_admitted_history(
-                &mut pass,
-                true,
-                &mut retries,
-                &BTreeSet::new(),
-                Instant::now(),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        f.pool
-            .read_one(Kind::History, auth.id.clone(), Some(auth))
-            .await
-            .result
-            .unwrap();
-        assert_eq!(f.nonce_reads.load(Ordering::SeqCst), reads);
-        assert_eq!(unfinished(&f).await, 1);
-        let db = rusqlite::Connection::open(f.dir.path().join("state/state.sqlite")).unwrap();
-        let (exposure, repairs, proofs): (String, i64, i64) = db.query_row(
-            "SELECT unresolved_exposure,(SELECT COUNT(*) FROM wallets WHERE evidence_repair IS NOT NULL),(SELECT COUNT(*) FROM payment_resolutions) FROM wallets WHERE id=(SELECT wallet_id FROM payment_attempts LIMIT 1)", [],
-            |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
-        assert_eq!((exposure.as_str(), repairs, proofs), ("1", 0, 1));
-        drop(db);
-        drop(f.pool);
-        drop(f.store);
-        f.worker.await.unwrap();
-        f.server.abort();
-    }
-
-    #[test]
-    fn history_backoff_is_bounded_and_never_changes_balance_cadence() {
-        assert_eq!(
-            (0..7)
-                .map(|n| history_delay(n).as_secs())
-                .collect::<Vec<_>>(),
-            vec![5, 30, 60, 120, 240, 300, 300]
-        );
-        assert_eq!(history_delay(u32::MAX).as_secs(), 300);
-        assert_eq!(CADENCE.as_secs(), 5);
-    }
-}
+mod tests;

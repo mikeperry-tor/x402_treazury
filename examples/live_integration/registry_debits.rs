@@ -37,8 +37,8 @@ impl Registry {
             let event: Value = serde_json::from_str(&raw)?;
             let case = event["case"].as_str().context("debit proof case missing")?;
             let load = |kind: &str| -> Result<Value> {
-                let raw:String = self.db.query_row("SELECT detail FROM events WHERE run=?1 AND kind=?2 AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?3",
-                    params![run,kind,case], |r|r.get(0))?;
+                let raw:String = self.db.query_row("SELECT detail FROM events WHERE run=?1 AND kind=?2 AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?3 AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.attempt_id')=?4",
+                    params![run,kind,case,event["attempt_id"].as_str().context("debit attempt missing")?], |r|r.get(0))?;
                 Ok(serde_json::from_str(&raw)?)
             };
             let payment = load("application_payment")?;
@@ -93,10 +93,11 @@ impl Registry {
                 )),
                 "canonical payment attributed to more than one case"
             );
-            ensure!(
-                proofs.insert(case.to_owned(), proof.clone()).is_none(),
-                "duplicate canonical debit proof"
-            );
+            let summary=proofs.entry(case.to_owned()).or_insert_with(|| json!({"verified_total_atomic":"0","attempts":[]}));
+            let total:alloy_primitives::U256=summary["verified_total_atomic"].as_str().context("debit total missing")?.parse()?;
+            let amount:alloy_primitives::U256=proof["amount_atomic"].as_str().context("debit amount missing")?.parse()?;
+            summary["verified_total_atomic"]=json!(total.checked_add(amount).context("case debit total overflow")?.to_string());
+            summary["attempts"].as_array_mut().context("debit attempts missing")?.push(json!({"attempt_id":event["attempt_id"],"proof":proof}));
         }
         Ok(proofs)
     }

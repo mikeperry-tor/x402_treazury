@@ -28,6 +28,7 @@ mod lifecycle;
 mod observation;
 #[path = "registry_settlement.rs"]
 mod settlement;
+pub(crate) use settlement::attempt_outcome;
 #[cfg(test)]
 pub use cases::Outcome;
 
@@ -349,7 +350,7 @@ impl Registry {
     pub fn begin_execution(&mut self, run: &str, now: i64) -> Result<i64> {
         let m = self.manifest(run)?;
         self.db.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS application_claim_once ON events(run,json_extract(detail,'$.case')) WHERE kind='application_claim';
-        CREATE UNIQUE INDEX IF NOT EXISTS application_payment_case_once ON events(run,json_extract(detail,'$.case')) WHERE kind='application_payment';
+        DROP INDEX IF EXISTS application_payment_case_once;
         CREATE UNIQUE INDEX IF NOT EXISTS application_payment_attempt_once ON events(run,json_extract(detail,'$.attempt_id')) WHERE kind='application_payment';")?;
         let tx = self
             .db
@@ -545,7 +546,7 @@ impl Registry {
             crate::semantics::report(self, &self.manifest(run)?, report)?;
         report["canonical_api_debits"] = match self.verified_debits(run) {
             Ok(proofs) => {
-                json!({"status":"validated", "cases":proofs.into_iter().map(|(case, proof)| (case, proof["amount_atomic"].clone())).collect::<std::collections::BTreeMap<_,_>>() })
+                json!({"status":"validated", "cases":proofs.into_iter().map(|(case, proof)| (case, proof["verified_total_atomic"].clone())).collect::<std::collections::BTreeMap<_,_>>() })
             }
             Err(_) => json!({"status":"invalid_or_incomplete","cases":{}}),
         };

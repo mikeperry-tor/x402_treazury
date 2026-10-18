@@ -764,6 +764,33 @@ fn settlement_observation_requires_canonical_reason_or_drained_unsigned_evidence
 }
 
 #[test]
+fn later_success_never_hides_an_earlier_pending_authorization() {
+    for earlier in [None,Some("EXPIRED_UNUSED"),Some("USED")] {
+        let f=Fixture::new();
+        let mut r=f.open();
+        f.prepare(&mut r);
+        r.reserve_batch("test_run","batch", &["call".into()],10).unwrap();
+        r.dispatching("test_run","call").unwrap();
+        r.event("test_run","application_claim",&json!({"case":"call","session":"s","server":"main","source":"api","tool":"api_read","mode":"managed","started_micros":0}),10).unwrap();
+        r.event("test_run","application_finished",&json!({"case":"call","session":"s","is_error":false,"finished_micros":1}),10).unwrap();
+        let mut attempts=Vec::new();
+        let mut resolutions=Vec::new();
+        for (id,outcome) in [("a",earlier),("b",Some("USED"))] {
+            r.event("test_run","application_payment",&json!({"case":"call","session":"s","stage":"admitted_before_signing","amount":"1","attempt_id":id,"pool":"p","wallet":id,"generation":0}),10).unwrap();
+            attempts.push(json!({"id":id,"pool":"p","wallet":id,"generation":0,"amount":"1","state":if outcome.is_some(){"RESOLVED"}else{"POSSIBLY_SUBMITTED"}}));
+            if let Some(outcome)=outcome {resolutions.push(json!({"attempt_id":id,"outcome":outcome,"height":12,"hash":"block","block_time":100}));}
+        }
+        r.finish_managed("test_run","call",Some(b"{}"),true).unwrap();
+        let snapshot=json!({"treasury_status":{"treasury_id":f.manifest.treasury_id},"payment_attempts":attempts,"payment_resolutions":resolutions});
+        r.apply_settlement("test_run",&snapshot,true).unwrap();
+        let report=r.report(Some("test_run"),12).unwrap();
+        assert_eq!(report["cases"][0]["settlement"],if earlier.is_some(){"USED"}else{"PENDING"});
+        assert_eq!(reserved(&r),20000);
+        assert_eq!(report["application_evidence"]["payment_attempts_correlated"],2);
+        assert!(r.verified_debits("test_run").unwrap().is_empty());
+    }
+}
+#[test]
 fn seller_receipts_are_correlated_but_never_promoted_to_chain_evidence() {
     let f = Fixture::new();
     let mut r = f.open();

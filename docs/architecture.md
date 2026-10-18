@@ -124,11 +124,12 @@ after accepted work drains. Logs go to stderr. Current HTTP operation does not p
 list-changed notification channel. Dynamic deployments expose listener-scoped
 search/call fallback tools for clients that cache their initial inventory.
 
-`src/payment.rs` owns the unsigned challenge and single signed attempt. Static
+`src/payment.rs` owns each identity-bound unsigned challenge and signed attempt. Static
 profiles support Base USDC v1/v2 exact and v2 upto signing. Each call pins its
 static signer before unsigned I/O, so replacement affects subsequent calls. Managed profiles use
 v2 exact EIP-3009 permission checks and durable authorization journals. A paid timeout/body failure
-can still have spent money; neither tool dispatch nor output conversion replays it.
+can still have spent money. Only the narrow managed insufficient-funds traversal
+may repeat it; see the [wallet rules](wallet-rotation.md#best-effort-wallet-rules).
 
 Direct Rust `PaidClient` calls retain accepted work through response conversion
 when their waiter is canceled, and reuse an enclosing MCP owner when present.
@@ -182,44 +183,31 @@ reconciles existing work rather than inferring non-payment from a missing respon
 
 ## Wallet selection and network isolation
 
-Decision: retain runtime price hints with wallet-scoped HTTP pooling, cover ownership
-and Tor isolation. Prefer reuse of pooled connections, cover capability/episode state
-and Tor circuits within the configured isolation boundary over choosing the exact
-smallest fit on every cold or inaccurately predicted call. Reuse is an opportunity,
-not a guarantee of circuit lifetime or unlinkability. Preserve the shared
-[smallest-sufficient ordering](wallet-rotation.md#capacity-and-admission) before
-binding and sufficient-bound-payer stability afterward. Actual challenge terms and
-actual pool/payer authority govern admission. Saved balances are advisory; see the
-[best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
+Runtime price hints guide selection while wallet-scoped HTTP pooling, cover
+ownership and Tor isolation bind each attempt to its payer. Prefer a suitable bound
+payer, then existing eligible wallets whose estimates suggest affordability; unknown
+or low estimates remain fallbacks. Actual challenge terms and pool/payer authority
+govern admission. See the [best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
 
-Late payer selection from the ordinary 402 response is technically feasible. Standard
-v2 exact EIP-3009 requirements do not require selecting the signer before that response;
-the pinned x402 2.0.2 client parses requirements and then selects/signs. The current
-prebinding/re-challenge requirement belongs to this application's network ownership
-contract, not to a universal x402 rule. `src/payment.rs` binds the unsigned request's
-client and cover owner to the selected EVM address; `src/network.rs` uses that identity
-for connection pooling and SOCKS isolation. Do not describe the alternatives as
-protocol-impossible, or silently change those ownership boundaries in a future selector fix.
+`src/payment.rs` binds each unsigned request, signed request and cover owner to the
+same EVM address. `src/network.rs` uses that identity for connection pooling and
+SOCKS isolation. If selection changes after a challenge, obtain another unsigned
+challenge through the next payer's transport. The captured inventory and attempted
+identities bound traversal without a retry-count ceiling or new allocation.
 
-| Alternative | Benefit and request behavior | Decision and reason |
-| --- | --- | --- |
-| Selected: smallest-sufficient hints before binding, actual-price admission afterward | Normally one unsigned request and one signed submission; preserves wallet-scoped pooling, cover state and isolated Tor reuse. No dedicated price requests. | Keep. Missing/stale/inaccurate hints may produce a less suitable wallet or use the one affordability handoff. Accept that tradeoff without additional prediction machinery. |
-| Choose a different signer after the challenge on the original wallet's pooled connection | Exact-price selection with the same two ordinary requests. | Reject. A signature from wallet B on wallet A's reused connection/cover identity can associate B with A's prior activity and violates the wallet-isolation contract. |
-| Fresh invocation identity for both unsigned and signed requests; choose payer after the challenge | Exact-price selection with one unsigned request and one signed submission. Could remove runtime hints and affordability re-challenge logic while keeping one transport context for the negotiation. | Not selected. Loses cross-call wallet connection/circuit reuse and changes cover-owner lifetime, cache behavior and qualification evidence. The current bounded HTTP cache would churn; fresh cover owners would consume registry capacity and repeat capability qualification unless explicitly redesigned. Financial journal safeguards would still be required. |
-| Fresh unsigned identity, then the selected wallet's transport for the signed request | Exact-price selection with no additional API request; retains pooling for signed wallet traffic. | Not selected. Adds an unsigned transport/cover lifecycle and switches network context between challenge and submission. Core payment fields do not establish provider session or transport portability. A rejection after possible signed submission cannot authorize a fallback payment or replay. |
-| Hints plus a utilization-only handoff whenever the actual price reveals a smaller wallet | Improves fit after binding while keeping wallet-specific transports. | Reject. Adds unsigned provider requests merely to improve fit, increasing pressure on providers that rate-limit unsigned traffic. Keep the single affordability handoff only. |
-| Extra pricing probes, preflights or hint-refresh requests | Could improve prediction before binding. | Reject. Adds rate-limited traffic and a discovery/refresh lifecycle. Learn runtime hints from ordinary invocation traffic only. |
-| Skip the ordinary unsigned request using a cached estimate or previously observed challenge | Could reduce unsigned traffic below the ordinary one-per-invocation flow. | A display estimate is insufficient to sign. Reusable exact requirements would need a concrete provider contract covering terms, request/argument scope and validity; an old observed challenge alone supplies no such contract. This is separate future work, not a fallback here. It also removes the chance to discover a free response. No signed rejection permits automatic replacement or replay. |
+Only a recognized structured insufficient-funds response to a managed signed
+request earns cross-wallet repetition. Each attempt retains its own authorization,
+possible charge and canonical outcome, even if a later one succeeds. A successful
+response, transport uncertainty or generic error earns no repetition. Schedule an
+ordinary advisory balance read after insufficiency without delaying fallback.
+Qualification retains its existing run permits and charges every attempt.
 
 Keep three caches/flows distinct. Catalog/help discovery retains its existing caching
 and coalescing. Startup pricing remains one-shot and cached, with HTTP-supported disk
 freshness for derived display estimates; payment challenges are not persisted as reusable
 authority. Runtime hints learn from actual invocation challenges and only guide selection.
 The current invocation path still makes an ordinary unsigned request even when a display
-estimate is cached. Late selection would use that same response, not inherently add a
-pricing request or invalidate discovery caches, and could remove the affordability
-re-challenge. Its rejection here rests on transport/cover reuse and lifecycle cost.
-The selected design also creates new identities over time; its reuse objective depends
+estimate is cached. The selected design also creates new identities over time; its reuse objective depends
 on the HTTP and cover retention fixes in the [network retention contract](network-egress.md).
 Reclamation may require cover requalification and does not guarantee indefinite state retention.
 Conversely, a fresh-identity design must account for repeated cover qualification rather

@@ -14,6 +14,8 @@ pub mod funding;
 pub use debit::{receipt_expectation, reconcile_debit};
 mod payment;
 pub(crate) use payment::PaymentContext;
+#[cfg(test)]
+pub(crate) use payment::expiring_claim_fixture;
 pub(crate) use payment::{capture_case, inherit_case};
 mod pricing;
 mod receipt;
@@ -240,10 +242,10 @@ fn install_mode(path: &Path, config: &Path, managed: bool) -> Result<()> {
         "qualification registry lacks durable single-claim enforcement"
     );
     if managed {
-        let indexes: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('application_payment_case_once','application_payment_attempt_once')", [], |r| r.get(0))?;
+        let indexes: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='application_payment_attempt_once'", [], |r| r.get(0))?;
         ensure!(
-            indexes == 2,
-            "qualification registry lacks single-payment enforcement"
+            indexes == 1,
+            "qualification registry lacks per-attempt enforcement"
         );
     }
     ensure!(
