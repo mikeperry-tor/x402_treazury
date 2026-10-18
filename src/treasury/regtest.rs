@@ -449,31 +449,28 @@ async fn run() -> Result<()> {
     ));
     assert!(!treasury.status().await?.outgoing_pending);
     assert_eq!(operation_cost(&state, &op)?, (0, cost));
-    eprintln!("deposit settled; testing a fork after accounting confirmation");
+    eprintln!("deposit settled; testing a fork after recorded confirmation");
     Chain::mine(&chain.fork, 3).await?;
     Chain::copy(&chain.fork, &chain.rpc, 12, 14).await?;
     chain.indexer_ready(14).await?;
-    let error = treasury.sync_once(&stop).await.unwrap_err();
-    assert!(
-        error.to_string().contains("treasury_confirmed_spend_reorg"),
-        "{error}"
-    );
+    treasury.sync_once(&stop).await?;
     let status = treasury.status().await?;
-    assert_eq!(status.sync.unwrap().phase, SyncPhase::Failed);
+    assert_eq!(status.sync.unwrap().phase, SyncPhase::Ready);
     assert_eq!(status.treasury_operations[0].submission, "CONFIRMED");
     assert_eq!(operation_cost(&state, &op)?, (0, cost));
+    assert_eq!(
+        treasury
+            .store
+            .call(move |s| s.prepared_bytes(&op))
+            .await?
+            .as_slice(),
+        prepared.bytes()
+    );
     treasury.close().await?;
     let mut restored =
         Treasury::open_with_network(state, key, id, TreasuryNetwork::Regtest).await?;
     restored.configure_sync(settings);
-    assert!(
-        restored
-            .sync_once(&stop)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("treasury_confirmed_spend_reorg")
-    );
+    restored.sync_once(&stop).await?;
     restored.close().await?;
     chain.passed = true;
     Ok(())
@@ -605,6 +602,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
     treasury.configure_sync(settings.clone());
     treasury.sync_once(&stop).await?;
     assert!(treasury.status().await?.legacy_refunds.is_none());
+    let mut retained_shield = None;
     for fail_commit in [false, true] {
         let before = treasury.status().await?.treasury_operations.len();
         let mempool: Value = chain
@@ -632,9 +630,14 @@ async fn refunds_run(cli: bool) -> Result<()> {
         }
         if fail_commit {
             db.execute_batch("DROP TRIGGER reject_shield;")?;
+            assert!(treasury.completed.is_some());
+            retained_shield = Some(treasury.publish_completed().await?);
         }
-        assert_eq!(treasury.status().await?.treasury_operations.len(), before);
-        assert!(!treasury.status().await?.outgoing_pending);
+        assert_eq!(
+            treasury.status().await?.treasury_operations.len(),
+            before + usize::from(fail_commit)
+        );
+        assert_eq!(treasury.status().await?.outgoing_pending, fail_commit);
         let after: Value = chain
             .rpc
             .json_result_from_call("getrawmempool", "[]")
@@ -667,7 +670,19 @@ async fn refunds_run(cli: bool) -> Result<()> {
     // Both unrelated transparent addresses are funded. Each shield must consume
     // exactly its selected address, even when the helper's default would combine.
     for (n, height) in [(30usize, 14), (31usize, 16)] {
-        let prepared = if cli {
+        let prepared = if n == 30 {
+            let saved = retained_shield.take().context("retained shield missing")?;
+            let operation = saved.operation_id().to_owned();
+            assert_eq!(
+                treasury
+                    .store
+                    .call(move |s| s.prepared_bytes(&operation))
+                    .await?
+                    .as_slice(),
+                saved.bytes()
+            );
+            saved
+        } else if cli {
             let before: Value = chain
                 .rpc
                 .json_result_from_call("getrawmempool", "[]")

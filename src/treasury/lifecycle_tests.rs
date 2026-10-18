@@ -426,23 +426,21 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         chain.mine_empty_blocks(tip - 23);
         assert_eq!(chain.tip(), tip);
     }
-    let error = handle
-        .submit(pending_job.operation_id.clone(), false)
-        .await
-        .unwrap_err();
+    assert_eq!(
+        handle
+            .submit(pending_job.operation_id.clone(), false)
+            .await
+            .unwrap(),
+        SubmissionOutcome::Accepted
+    );
     let after = store.call(|s| s.treasury_sync_state()).await.unwrap();
     assert!(
         after.snapshot_revision > before.snapshot_revision,
-        "reorg must force a scan: {error:#}"
+        "reorg must force a scan"
     );
-    assert!(
-        format!("{error:#}").contains("treasury_confirmed_spend_reorg"),
-        "scan result: {error:#}; phase={:?}",
-        after.sync.as_ref().unwrap().phase
-    );
-    assert_eq!(after.sync.unwrap().phase, SyncPhase::Failed);
-    // New work cannot consume the resurrected source notes while historical
-    // confirmed expenses lack canonical support. No new proposal or send intent.
+    assert_eq!(after.sync.unwrap().phase, SyncPhase::Ready);
+    // Historical source facts do not gate a best-effort send. The exact pending
+    // transaction still owns its inputs and blocks another calculation.
     let third = store
         .call(|s| {
             let pool = s.ensure_capacity_group(
@@ -466,7 +464,7 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         .unwrap();
     assert!(error.is::<PreparationDeferred>(), "{error:#}");
     assert!(
-        format!("{error:#}").contains("treasury_confirmed_spend_reorg"),
+        format!("{error:#}").contains("treasury_send_pending"),
         "{error:#}"
     );
     let unstarted = third.operation_id;
@@ -492,8 +490,8 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         .call(move |s| {
             assert_eq!(
                 s.operation(&operation)?.attempts,
-                0,
-                "fork must block submission intent"
+                1,
+                "the unchanged pending bytes were submitted once"
             );
             Ok(())
         })
@@ -505,7 +503,7 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
 }
 
 #[tokio::test]
-async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_canonical_return() {
+async fn same_height_tip_only_reorg_updates_sdk_without_historical_source_gate() {
     let (dir, net, mut owner, endpoint) = funded_fixture(1).await;
     let pool = owner
         .ensure_capacity_group(
@@ -556,23 +554,23 @@ async fn same_height_tip_only_reorg_invalidates_confirmation_and_recovers_on_can
         assert_eq!(chain.reorg_to(23), vec![prepared.bytes().to_vec()]);
         chain.mine_empty_blocks(1);
     }
-    let error = owner.sync_for_command(&stop).await.unwrap_err();
-    assert!(
-        error.to_string().contains("treasury_confirmed_spend_reorg"),
-        "{error:#}"
+    owner.sync_for_command(&stop).await.unwrap();
+    assert_eq!(
+        owner.status().await.unwrap().sync.unwrap().phase,
+        SyncPhase::Ready
     );
     let id = job.operation_id.clone();
     store
         .call(move |s| {
             assert_eq!(s.operation(&id)?.attempts, 1);
-            assert!(s.require_preparation_available().is_err());
+            assert!(s.require_preparation_available().is_ok());
             Ok(())
         })
         .await
         .unwrap();
     accounting(&dir.path().join("state"), &prepared, true);
-    // Canonical reappearance can restore readiness without rebroadcasting or
-    // charging the already-consumed source cost again.
+    // Canonical reappearance updates SDK state without rebroadcasting or
+    // rewriting the original immutable transaction facts.
     {
         let mut chain = net.chain.write().await;
         chain.reorg_to(23);

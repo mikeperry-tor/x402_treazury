@@ -133,8 +133,9 @@ fn groups_consume_reserves_independently_and_keep_allocation_targets() {
         .is_err()
     );
     assert!(s.accept_preparation("new", Some(&a), 10, None).is_err());
-    assert!(s.prepare("pending", 1, b"snapshot", b"raw").is_err());
-    assert_eq!(s.snapshot().unwrap().0, 1);
+    s.prepare("pending", 1, b"snapshot", b"raw").unwrap();
+    assert_eq!(s.prepared_bytes("pending").unwrap().as_slice(), b"raw");
+    assert_eq!(s.snapshot().unwrap().0, 2);
     let id = s.id().to_owned();
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
@@ -432,7 +433,7 @@ fn committed_state_recovers_after_process_exit_without_destructors() {
         persisted.pools[0].id
     );
     assert_eq!(s.status().unwrap().pools[0].addresses.len(), 2);
-    s.accept_preparation("duplicate", None, 1, None).unwrap();
+    assert!(s.accept_preparation("duplicate", None, 1, None).is_err());
     let revision = s.snapshot().unwrap().0;
     assert!(
         s.prepare(
@@ -487,7 +488,7 @@ fn sync_checkpoints_are_atomic_without_a_local_capacity_gate() {
     assert_eq!(s.snapshot().unwrap().1.as_slice(), b"synced-wallet");
     assert_eq!(s.status().unwrap().sync.unwrap().phase, SyncPhase::Ready);
     s.save_snapshot(2, b"derived-address").unwrap();
-    assert!(s.require_preparation_available().is_err());
+    assert!(s.require_preparation_available().is_ok());
     s.save_sync_snapshot(3, b"resynced", Some(ready.clone()))
         .unwrap();
     s.accept_preparation("outgoing", None, 100, None).unwrap();
@@ -501,14 +502,14 @@ fn sync_checkpoints_are_atomic_without_a_local_capacity_gate() {
     );
     s.confirm_spend("outgoing").unwrap();
     s.set_sync_phase(SyncPhase::Offline).unwrap();
-    assert!(s.require_preparation_available().is_err());
+    assert!(s.require_preparation_available().is_ok());
     let snapshot = s.snapshot().unwrap();
     let id = s.id().to_owned();
     drop(s);
     let s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     assert_eq!(s.snapshot().unwrap().0, snapshot.0);
     assert_eq!(s.snapshot().unwrap().1, snapshot.1);
-    assert!(s.require_preparation_available().is_err());
+    assert!(s.require_preparation_available().is_ok());
 }
 
 #[test]
@@ -1026,7 +1027,7 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
 }
 
 #[tokio::test]
-async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
+async fn canonical_depletion_warns_without_an_sdk_balance_admission_gate() {
     // Isolate tracing's callsite interest cache from concurrent tests that emit
     // the same event without a subscriber.
     const CHILD: &str = "TREAZURY_TEST_TREASURY_WARNING_CHILD";
@@ -1034,7 +1035,7 @@ async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "exhaustion_warnings_require_fresh_durable_balance_evidence",
+                "canonical_depletion_warns_without_an_sdk_balance_admission_gate",
                 "--nocapture",
             ])
             .env(CHILD, "1")
@@ -1089,19 +1090,11 @@ async fn exhaustion_warnings_require_fresh_durable_balance_evidence() {
     store
         .save_sync_snapshot(1, b"empty", Some(observation))
         .unwrap();
-    assert_eq!(
-        store
-            .require_preparation_available()
-            .unwrap_err()
-            .to_string(),
-        "treasury_insufficient_spendable_funds"
+    assert!(store.require_preparation_available().is_ok());
+    assert!(
+        capture.0.lock().unwrap().is_empty(),
+        "saved SDK balances are diagnostic only"
     );
-    let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
-    assert!(logs.contains("WARN"));
-    assert!(logs.contains("treasury_insufficient_spendable_funds"));
-    assert!(logs.contains("required_zatoshis=10"));
-    assert!(logs.contains("spendable_zatoshis=0"));
-    assert!(logs.contains("existing funded EVM wallets remain usable"));
     assert!(store.status().unwrap().treasury_operations.is_empty());
     capture.0.lock().unwrap().clear();
     let pool = crate::capacity_fixture::declare_and_allocate!(
