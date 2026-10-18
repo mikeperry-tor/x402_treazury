@@ -118,9 +118,14 @@ async fn base(State(f): State<Bridge>, Json(v): Json<Value>) -> Json<Value> {
         }
         "eth_call" => {
             let data = v["params"][0]["data"].as_str().unwrap();
-            assert_eq!(v["params"][1]["requireCanonical"], true);
-            let hash = v["params"][1]["blockHash"].as_str().unwrap();
-            let height = u64::from_str_radix(hash.trim_start_matches("0x"), 16).unwrap();
+            let height = if let Some(tag) = v["params"][1].as_str() {
+                assert_eq!(tag, "latest");
+                chain.height
+            } else {
+                assert_eq!(v["params"][1]["requireCanonical"], true);
+                let hash = v["params"][1]["blockHash"].as_str().unwrap();
+                u64::from_str_radix(hash.trim_start_matches("0x"), 16).unwrap()
+            };
             let recipient = format!("0x{}", &data[data.len() - 40..]).to_ascii_lowercase();
             let amount = if data.starts_with("0x70a08231")
                 && chain
@@ -470,7 +475,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
 }
 
 #[tokio::test]
-async fn production_readiness_scans_new_deposit_before_repeating_shortage() {
+async fn production_preparation_scans_new_deposit_without_a_readiness_balance_gate() {
     use crate::rotation::funding::FundingBackend;
     let (_dir, net, owner, endpoint) = funded_fixture_amount(2, 10_000).await;
     let address = owner
@@ -524,39 +529,67 @@ async fn production_readiness_scans_new_deposit_before_repeating_shortage() {
         deposit: None,
     };
     let stop = CancellationToken::new();
-    let sender = submission::GrpcSubmission::with_network(
-        endpoint.clone(),
-        endpoint,
-        TreasuryNetwork::Synthetic,
-    )
-    .unwrap();
-    // Queue readiness before starting the actor so its initial maintenance tick
-    // cannot hide a missing explicit refresh.
-    let ready = tokio::spawn(async move { backend.ready(&job, &quote).await });
+    let sends = Arc::new(AtomicUsize::new(0));
+    let sender = CountedSender {
+        inner: submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap(),
+        sends: sends.clone(),
+        lookups: Arc::new(AtomicUsize::new(0)),
+    };
+    // Readiness has no balance/scan gate and creates no financial work.
+    backend.ready(&job, &quote).await.unwrap();
+    assert!(commands.test_is_empty());
+    assert_eq!(
+        store
+            .call(|s| Ok(s.status()?.sync.unwrap().spendable_shielded_zatoshis))
+            .await
+            .unwrap(),
+        10_000
+    );
+    assert!(
+        store
+            .call(|s| Ok(
+                s.status()?.treasury_operations.is_empty() && !s.status()?.outgoing_pending
+            ))
+            .await
+            .unwrap()
+    );
+    let deadline = quote.deadline;
+    save_quotes(&store, vec![job.clone()], deadline).await;
+    // Actual preparation owns SDK synchronization. Queue it before the actor's
+    // maintenance tick so an incidental background scan cannot satisfy the test.
+    let prepare_handle = handle.clone();
+    let prepare =
+        tokio::spawn(async move { prepare_handle.prepare(request(&job, deadline)).await });
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while commands.test_is_empty() {
-            assert!(
-                !ready.is_finished(),
-                "readiness must request a scan before rejecting a deposit"
-            );
+            assert!(!prepare.is_finished());
             tokio::task::yield_now().await;
         }
     })
     .await
     .unwrap();
     let task = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
-    ready.await.unwrap().unwrap();
+    let prepared = prepare.await.unwrap().unwrap();
+    assert_eq!(prepared.facts().unwrap().amount_zatoshis, 50_000);
     store
         .call(|s| {
             let status = s.status()?;
             assert_eq!(status.sync.unwrap().spendable_shielded_zatoshis, 1_010_000);
-            assert!(status.treasury_operations.is_empty());
-            assert!(!status.outgoing_pending);
+            assert_eq!(status.treasury_operations.len(), 1);
+            assert_eq!(status.treasury_operations[0].attempts, 0);
+            assert!(status.outgoing_pending);
             Ok(())
         })
         .await
         .unwrap();
+    assert_eq!(sends.load(Ordering::SeqCst), 0);
     stop.cancel();
+    drop(backend);
     drop(store);
     drop(handle);
     task.await.unwrap().unwrap();

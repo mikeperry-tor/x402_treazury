@@ -522,14 +522,15 @@ impl FundingBackend for Backend {
         self.require_auto_funding()?;
         let (limits, _) = self.policy(job)?;
         let job_id = job.id.clone();
-        // The exact fee is checked and reserved by the serialized owner before signing.
-        let reserve = quote.input;
+        // SDK selection checks the actual fee; the owner journals its exact
+        // inputs before calculation, without reserving a capital amount.
+        let principal = quote.input;
         ensure!(
-            reserve < limits.max_input,
+            principal < limits.max_input,
             super::error::FundingCondition::CostLimit
         );
         self.store
-            .call(move |s| s.check_job_permit(&job_id, reserve))
+            .call(move |s| s.check_job_permit(&job_id, principal))
             .await
     }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<QuoteRequest> {

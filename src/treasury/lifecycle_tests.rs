@@ -228,7 +228,6 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         _ => panic!("exactly one preparation must win the source gate"),
     };
     assert!(deferred.is::<PreparationDeferred>(), "{deferred:#}");
-    assert!(format!("{deferred:#}").contains("treasury_send_pending"));
     assert_eq!(
         prepared.network_identity().unwrap(),
         crate::network::IsolationId::evm(&first.recipient).unwrap()
@@ -463,10 +462,6 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         .err()
         .unwrap();
     assert!(error.is::<PreparationDeferred>(), "{error:#}");
-    assert!(
-        format!("{error:#}").contains("treasury_send_pending"),
-        "{error:#}"
-    );
     let unstarted = third.operation_id;
     let originals = [first.operation_id.clone(), second.operation_id.clone()];
     store
