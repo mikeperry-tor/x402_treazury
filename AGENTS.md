@@ -109,6 +109,36 @@ Resolve material findings before declaring completion. If subagent tooling is
 unavailable, disclose that limitation and perform the available checks without
 claiming an independent review occurred.
 
+### Implementation plan structure
+
+When creating or revising an implementation plan, make the independent workflows
+above concrete in the plan itself:
+
+- State the user intent, scope, starting baseline, preserved invariants and owning
+  guides. Distinguish proposed behavior from the current implementation.
+- Define explicit, ordered commit boundaries with stable identifiers, coherent
+  behavior, relevant consumers and acceptance evidence. Include applicable tests and
+  affected permanent documentation with each implementation commit. Do not split
+  removal of an existing behavior from its necessary replacement or recovery path.
+- Name wider review gates, place them at specified commit boundaries and state their
+  combined scope and exit criteria. Choose meaningful ownership/architecture
+  boundaries and a final integration gate; scale the structure to the work rather
+  than imposing a fixed number of commits, gates or reviewers.
+- Require each gate to examine all prior plan commits and fixups alongside complete
+  call chains. Analyze fixup causes, repeated assumptions, hazards and testing gaps;
+  decide whether they require a wider audit, regression coverage, simplification
+  or design change. Earlier per-commit approvals do not exempt code from this review.
+- Specify the evidence and ordering needed for the exact-SHA/fixup, complexity and
+  integration reviews above. Material later changes reopen affected gate concerns
+  and receive appropriate revalidation; do not build on unresolved material findings.
+- Identify permanent documentation destinations and required AGENTS.md links for
+  enduring rules. Verify that handoff before removing the completed plan; review
+  the exact cleanup SHA and final combined branch after removal as well. Do not
+  retain a completed-plan archive or defer all documentation to the final commit.
+
+These requirements govern plans when one is needed or requested; they do not
+require a new plan or redundant review stages for every small change.
+
 ## Read the relevant guide before editing
 
 Load the documents for the area being changed; the detailed contracts and defaults
