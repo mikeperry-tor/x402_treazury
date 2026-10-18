@@ -53,7 +53,7 @@ async fn base(State(f): State<Endpoints>, Json(v): Json<Value>) -> Json<Value> {
             json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",f.timestamp)})
         }
         "eth_call" => {
-            assert_eq!(v["params"][1]["requireCanonical"], true);
+            assert_eq!(v["params"][1], "latest");
             let data = v["params"][0]["data"].as_str().unwrap();
             let amount = if data.starts_with("0x70a08231")
                 && data
