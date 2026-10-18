@@ -599,6 +599,12 @@ The first positive initial credit permanently consumes that funding claim, even
 below target. No later debit, partial return, disablement or restart grants a top-up.
 Source observation continues independently using exact original ownership.
 
+Late initial funding or external transfers may update an estimate when observed,
+without reopening its consumed funding claim. These possibilities do not require
+incoming-transfer surveillance or a new enforcement layer to prove that wallets
+are never topped up operationally. A requested low-balance check can observe those
+funds through the same ordinary advisory read.
+
 Initial-credit polling begins only after durable source acceptance, not for fresh
 allocations or unsigned quotes awaiting spendable ZEC. Accepted preparation and
 signed or previously submitted work remain observable across restart even when

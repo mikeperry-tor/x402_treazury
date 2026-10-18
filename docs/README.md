@@ -20,9 +20,8 @@ and CLI usage. Maintained implementation and operational explanations live here:
 
 [Plans](plans/) describe unfinished work, including artifact storage.
 The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
-describe advisory estimates, per-wallet attempts, no top-ups and SDK-owned Zcash
-funds. The [implementation review](plans/best_effort_wallet_balances.md) retains
-review provenance, including completed R01/R02 ownership and shielding follow-ups.
+describe advisory estimates, per-wallet attempts, no top-ups, SDK-owned Zcash
+funds, owner recovery and automatic owned-transparent shielding.
 The [live runbook](../tests/live/INTEGRATION.md) is the provider execution walkthrough;
 [testing](testing.md#qualification-status) states qualification limits.
 [Deferred plans](plans/deferred/) cover independent provider startup, polling,
