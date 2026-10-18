@@ -717,6 +717,7 @@
     "allow_http1": false,
     "allow_tls12": false,
     "base_url": "https://api.socialfetch.dev",
+    "cover_traffic_enabled": false,
     "exclude": [
       "/v1/whoami",
       "/v1/balance",
