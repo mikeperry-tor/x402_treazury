@@ -203,7 +203,7 @@ impl Treasury {
         ensure!(!stop.is_cancelled(), "expiry recovery cancelled");
         let revision = self.revision;
         self.store
-            .call(move |s| s.resolve_expired(&id, revision, now()?))
+            .call(move |s| s.resolve_expired(&id, revision))
             .await
     }
 }

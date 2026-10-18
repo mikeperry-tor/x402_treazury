@@ -10,7 +10,7 @@ impl Store {
         )
     }
     /// Evidence is checked by Treasury, never supplied by a CLI/MCP caller.
-    pub(crate) fn resolve_expired(&mut self, id: &str, revision: i64, _instant: u64) -> Result<()> {
+    pub(crate) fn resolve_expired(&mut self, id: &str, revision: i64) -> Result<()> {
         let closed: Option<bool> = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') FROM expired_operations WHERE id=?1",
             [id], |row| row.get(0)).optional()?;
@@ -136,16 +136,14 @@ mod tests {
         let mut shallow = observation.clone();
         shallow.height = Some(21);
         s.save_sync_snapshot(2, b"shallow", Some(shallow))?;
-        assert!(s.resolve_expired(&job.operation_id, 3, 100).is_err());
+        assert!(s.resolve_expired(&job.operation_id, 3).is_err());
         assert!(s.operation_pending(&job.operation_id)?);
         let mut revision = 3;
         for tip in [None, Some(23)] {
             let mut lagged = observation.clone();
             lagged.observed_tip_height = tip;
             revision = s.save_sync_snapshot(revision, b"lagged", Some(lagged))?;
-            let error = s
-                .resolve_expired(&job.operation_id, revision, 100)
-                .unwrap_err();
+            let error = s.resolve_expired(&job.operation_id, revision).unwrap_err();
             assert_eq!(
                 error.downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>(),
                 Some(&crate::rotation::transaction::RecoveryEvidenceError::TipLag)
@@ -153,8 +151,8 @@ mod tests {
             assert!(s.operation_pending(&job.operation_id)?);
         }
         revision = s.save_sync_snapshot(revision, b"synced", Some(observation))?;
-        assert!(s.resolve_expired(&job.operation_id, 2, 100).is_err());
-        s.resolve_expired(&job.operation_id, revision, 401)?;
+        assert!(s.resolve_expired(&job.operation_id, 2).is_err());
+        s.resolve_expired(&job.operation_id, revision)?;
         assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
         let facts = s.funding_facts(&job.id, &job.operation_id)?;
         assert!(facts.archived && facts.accepted_quote && facts.source_attempts == 1);
@@ -182,7 +180,7 @@ mod tests {
             job.operation_id
         );
         assert_eq!(s.funding_recovery_count(&job.id)?, 1);
-        s.resolve_expired(&job.operation_id, revision, 100)?;
+        s.resolve_expired(&job.operation_id, revision)?;
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
         assert!(s.confirm_spend(&job.operation_id).is_err());
         let treasury = s.id().to_owned();

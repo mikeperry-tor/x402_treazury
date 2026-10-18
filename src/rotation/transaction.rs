@@ -209,11 +209,14 @@ pub struct OperationStatus {
 }
 
 impl TransactionFacts {
-    pub(crate) fn require_protocol_validity(&self, now: u64, tip: u64) -> Result<()> {
-        ensure!(
-            self.deadline.is_none_or(|deadline| now < deadline),
-            "funding_deadline_expired"
-        );
+    pub(crate) fn require_protocol_validity(
+        &self,
+        clock: impl FnOnce() -> Result<u64>,
+        tip: u64,
+    ) -> Result<()> {
+        if let Some(deadline) = self.deadline {
+            ensure!(clock()? < deadline, "funding_deadline_expired");
+        }
         // N is inclusive for mined transactions. At tip N the next block is N+1.
         // Zero is the consensus no-expiry value and never grants expiry release.
         ensure!(
@@ -236,12 +239,26 @@ mod validity_tests {
             fee_zatoshis: 1,
             deadline: Some(20),
         };
-        assert!(facts.require_protocol_validity(19, 9).is_ok());
-        assert!(facts.require_protocol_validity(20, 9).is_err());
-        assert!(facts.require_protocol_validity(19, 10).is_err());
+        assert!(facts.require_protocol_validity(|| Ok(19), 9).is_ok());
+        assert!(facts.require_protocol_validity(|| Ok(20), 9).is_err());
+        assert!(facts.require_protocol_validity(|| Ok(19), 10).is_err());
+        assert!(
+            facts
+                .require_protocol_validity(|| anyhow::bail!("clock unavailable"), 9)
+                .is_err()
+        );
         facts.deadline = None;
-        assert!(facts.require_protocol_validity(u64::MAX, 9).is_ok());
+        assert!(
+            facts
+                .require_protocol_validity(|| panic!("shielding does not need wall time"), 9)
+                .is_ok()
+        );
+        assert!(facts.require_protocol_validity(|| Ok(u64::MAX), 9).is_ok());
         facts.expiry_height = 0;
-        assert!(facts.require_protocol_validity(u64::MAX, u64::MAX).is_ok());
+        assert!(
+            facts
+                .require_protocol_validity(|| Ok(u64::MAX), u64::MAX)
+                .is_ok()
+        );
     }
 }

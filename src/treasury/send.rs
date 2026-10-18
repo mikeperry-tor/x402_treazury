@@ -291,14 +291,23 @@ impl Treasury {
             _ = stop.cancelled() => anyhow::bail!("treasury stopping before submission intent"),
             result = sender.preflight(&durable, rebroadcast) => result?,
         }
-        // Re-read time after awaited preflight. Only the store mints authority;
+        let deadline = durable.facts().context("operation facts missing")?.deadline;
+        // Re-read required time after awaited preflight. Only the store mints authority;
         // cancellation after that commit remains an unknown outcome.
         let operation = id.clone();
         let (prepared, attempt) = self
             .store
             .call(move |s| {
+                // Shielding has no wall deadline. Its timestamp is diagnostic only;
+                // source deposits still require a readable current clock.
+                let instant = now();
+                let instant = if deadline.is_some() {
+                    instant?
+                } else {
+                    instant.unwrap_or_default()
+                };
                 let prepared =
-                    BroadcastTransaction::request(s, &operation, now()?, height, rebroadcast)?;
+                    BroadcastTransaction::request(s, &operation, instant, height, rebroadcast)?;
                 let attempt = prepared.attempt();
                 Ok((prepared, attempt))
             })

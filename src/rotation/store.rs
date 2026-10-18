@@ -1633,7 +1633,9 @@ impl Store {
     ) -> Result<i64> {
         ensure!(self.operation_pending(id)?, "transaction is not pending");
         let operation = self.operation(id)?;
-        operation.facts.require_protocol_validity(now, height)?;
+        operation
+            .facts
+            .require_protocol_validity(|| Ok(now), height)?;
         ensure!(
             retry || operation.attempts == 0,
             "explicit_rebroadcast_required"

@@ -249,7 +249,7 @@ pub fn summarize(data: &Value) -> Result<Value> {
         "source_reserved_zatoshis":if current {None}else{Some(source.totals.reserved)},"recorded_consumed_zatoshis":source.totals.consumed,
         "recorded_principal_zatoshis":source.totals.principal,"recorded_fees_zatoshis":source.totals.fees,"recorded_refund_outputs_zatoshis":returned,
         "unresolved_payment_exposure_atomic":exposure.to_string(),"zec_observation":sync,
-        "wallet_roles":wallets.roles.into_iter().map(|(role,balance)|(role,json!({"wallets":balance.wallets,"observation_model":if current {"advisory_estimate"}else{"historical_anchor"},"anchored_observations":if current {Value::Null}else{json!(balance.anchored)},"available_estimates":if current {json!(balance.anchored)}else{Value::Null},"unobserved_wallets":balance.wallets-balance.anchored,"saved_balance_atomic":balance.saved_balance.to_string()}))).collect::<BTreeMap<_,_>>() }),
+        "wallet_roles":wallets.roles.into_iter().map(|(role,balance)|(role,if current {json!({"wallets":balance.wallets,"observation_model":"advisory_estimate","available_estimates":balance.anchored,"unobserved_wallets":balance.wallets-balance.anchored,"saved_balance_atomic":balance.saved_balance.to_string()})} else {json!({"wallets":balance.wallets,"anchored_observations":balance.anchored,"unobserved_wallets":balance.wallets-balance.anchored,"saved_balance_atomic":balance.saved_balance.to_string()})})).collect::<BTreeMap<_,_>>() }),
     )
 }
 

@@ -1220,7 +1220,7 @@ fn source_attribution_is_bound_to_run_and_frozen_at_capture() {
     let attributed = &report["treasury_accounting"]["observations"][0]["run_source_accounting"];
     assert_eq!(attributed["operation_count"], 1);
     assert_eq!(attributed["registry_unreleased_bounds_zatoshis"], 110);
-    assert_eq!(attributed["attempts_without_treasury_budget"], 1);
+    assert_eq!(attributed["attempts_without_transaction_facts"], 1);
     db.execute("UPDATE events SET detail=json_remove(detail,'$.source_attempts') WHERE kind='accounting_observed'",[]).unwrap();
     assert_eq!(
         r.report(Some(&run), 6).unwrap()["treasury_accounting"]["observations"][0]["run_source_accounting"]

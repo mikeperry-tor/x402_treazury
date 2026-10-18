@@ -97,7 +97,7 @@ impl TransactionSubmission for GrpcSubmission {
             .get_latest_block(request_timeout())
             .await
             .map_err(|_| anyhow::anyhow!("treasury tip unavailable"))?;
-        facts.require_protocol_validity(crate::rotation::base::now()?, tip.height)?;
+        facts.require_protocol_validity(crate::rotation::base::now, tip.height)?;
         self.ready = Some((transaction.operation_id().to_owned(), client, tip.height));
         Ok(())
     }
@@ -126,7 +126,7 @@ impl TransactionSubmission for GrpcSubmission {
             }
             let (_, mut client, tip) = self.ready.take().context("submission preflight missing")?;
             // The existing protocol check covers the async preflight/intent gap.
-            facts.require_protocol_validity(crate::rotation::base::now()?, tip)?;
+            facts.require_protocol_validity(crate::rotation::base::now, tip)?;
             client
                 .send_transaction(
                     RawTransaction {
