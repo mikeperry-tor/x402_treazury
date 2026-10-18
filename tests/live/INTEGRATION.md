@@ -38,7 +38,7 @@ paths, installed Tor binary, listener ports and finite UTC windows. Use absolute
 paths when moving templates and owner-only evidence directories. Review exact tools,
 arguments, response assertions and source/listener/wallet assignments.
 
-The baseline reserves **$4.40 across 22 paid attempts**, not a fee forecast. It
+The baseline reserves **$4.40 across 22 paid cases**, not a fee forecast. It
 permits zero new funding jobs/source exposure and disables automatic funding and
 startup pricing. Retain all declared pools, including those not used by the sweep.
 Extra routes/providers, funding and repeated calls need separate reviewed bounds.

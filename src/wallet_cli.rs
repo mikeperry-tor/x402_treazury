@@ -600,7 +600,8 @@ async fn recover_funding(
     let result = finish_on_shutdown("wallet_recovery", &stop, async {
         let status = treasury.status().await?;
         let mut reports = Vec::new();
-        for job in status.funding_jobs.iter().filter(|job| crate::treasury::recovery::needs_recovery(job) || job.last_error.is_some()) {
+        for job in &status.funding_jobs {
+            if !treasury.recovery_needed(job).await? { continue; }
             let (max_attempts, enabled) = match wallets.get(&job.pool_name) {
                 Some(crate::rotation::config::WalletConfig::ZcashRotation { max_attempts, .. }) => (*max_attempts, allow_new_attempt),
                 _ => (0, false),

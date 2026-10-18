@@ -33,7 +33,8 @@ fn populated(dir: &Path) -> Store {
             funding::FundingPhase::Preparing,
         )
         .unwrap();
-        s.reserve(&job.operation_id, Some(&pool), 1, 100).unwrap();
+        s.accept_preparation(&job.operation_id, Some(&pool), 100, None)
+            .unwrap();
         let revision = s.snapshot().unwrap().0;
         s.prepare_with_facts(
             &job.operation_id,
@@ -45,21 +46,13 @@ fn populated(dir: &Path) -> Store {
                 expiry_height: 100,
                 amount_zatoshis: 80,
                 fee_zatoshis: 20,
-                deadline: 1000,
+                deadline: Some(1000),
             }),
         )
         .unwrap();
         s.request_broadcast(&job.operation_id, 1, 1, false).unwrap();
         if i == 0 {
-            s.confirm_spend(&job.operation_id, 100, 1).unwrap();
-            s.record_refund(refunds::RefundStatus {
-                operation_id: job.operation_id.clone(),
-                txid: "refund-tx".into(),
-                output_index: 0,
-                amount: 10,
-                height: 10,
-            })
-            .unwrap();
+            s.confirm_spend(&job.operation_id).unwrap();
         }
         s.record_credit(&job.wallet_id, "5000000", "base-block", 100)
             .unwrap();
@@ -77,7 +70,7 @@ fn populated(dir: &Path) -> Store {
 // Frozen historical schemas still contain these fields. Populate them explicitly
 // in legacy donors instead of making current runtime schemas depend on them.
 fn add_obsolete_metadata(store: &Store) {
-    store.db.execute_batch("CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY,height INTEGER NOT NULL,hash TEXT NOT NULL); ALTER TABLE funding_progress ADD COLUMN turn INTEGER NOT NULL DEFAULT 0; CREATE INDEX funding_schedule_turn ON funding_progress(turn); INSERT INTO payment_anchors SELECT id,100,'base-block' FROM pools;").unwrap();
+    store.db.execute_batch("UPDATE operation_network SET recipient='0x0000000000000000000000000000000000000001' WHERE recipient IS NULL; CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT,day INTEGER,original_day INTEGER,requested INTEGER,reserved INTEGER,consumed INTEGER); INSERT INTO budget_entries SELECT n.operation_id,f.pool_id,0,0,100,CASE WHEN o.state='PREPARED' THEN 100 ELSE 0 END,CASE WHEN o.state='RESOLVED' THEN 100 ELSE 0 END FROM operation_network n JOIN funding_progress p ON p.operation_id=n.operation_id JOIN funding_jobs f ON f.id=p.job_id LEFT JOIN outgoing o ON o.id=n.operation_id; CREATE TABLE refund_outputs(txid TEXT,output_index INTEGER,operation_id TEXT,amount INTEGER,height INTEGER,credited INTEGER); CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY,height INTEGER NOT NULL,hash TEXT NOT NULL); ALTER TABLE funding_progress ADD COLUMN turn INTEGER NOT NULL DEFAULT 0; CREATE INDEX funding_schedule_turn ON funding_progress(turn); INSERT INTO payment_anchors SELECT id,100,'base-block' FROM pools;").unwrap();
 }
 
 #[test]
@@ -309,10 +302,9 @@ fn encrypted_record_damage_and_substitution_reject_at_real_store_boundaries() {
             };
             assert!(rejected, "{field} {mutation}");
             assert_eq!(
-                s.db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
-                    .get::<_, i64>(0))
+                s.db.query_row("SELECT COUNT(*) FROM outgoing WHERE state='PREPARED' AND preparation IS NOT NULL", [], |r| r.get::<_, i64>(0))
                     .unwrap(),
-                100
+                1
             );
         }
     }
@@ -406,19 +398,22 @@ fn future_schema_is_refused_and_referenced_snapshots_survive_repeated_saves() {
         999
     );
     assert_eq!(
-        db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
-        100
+        db.query_row(
+            "SELECT COUNT(*) FROM outgoing WHERE state='PREPARED' AND preparation IS NOT NULL",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
     );
 }
 
 #[test]
-fn preparation_and_refund_write_failures_roll_back_through_reopen() {
+fn preparation_write_failures_roll_back_through_reopen() {
     for statement in [
         "CREATE TRIGGER injected BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'injected'); END;",
         "CREATE TRIGGER injected BEFORE INSERT ON treasury_operations BEGIN SELECT RAISE(ABORT,'injected'); END;",
-        "CREATE TRIGGER injected BEFORE UPDATE ON budget_entries BEGIN SELECT RAISE(ABORT,'injected'); END;",
+        "CREATE TRIGGER injected BEFORE UPDATE OF preparation ON operation_network BEGIN SELECT RAISE(ABORT,'injected'); END;",
         "CREATE TRIGGER injected BEFORE UPDATE ON funding_progress BEGIN SELECT RAISE(ABORT,'injected'); END;",
     ] {
         let tmp = tempfile::tempdir().unwrap();
@@ -446,7 +441,8 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
             funding::FundingPhase::Preparing,
         )
         .unwrap();
-        s.reserve(&job.operation_id, Some(&pool), 1, 100).unwrap();
+        s.accept_preparation(&job.operation_id, Some(&pool), 90, None)
+            .unwrap();
         let original = serde_json::to_value(s.status().unwrap()).unwrap();
         s.db.execute_batch(statement).unwrap();
         assert!(
@@ -460,7 +456,7 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
                     expiry_height: 100,
                     amount_zatoshis: 70,
                     fee_zatoshis: 20,
-                    deadline: 1000
+                    deadline: Some(1000)
                 })
             )
             .is_err()
@@ -482,28 +478,12 @@ fn preparation_and_refund_write_failures_roll_back_through_reopen() {
                 expiry_height: 100,
                 amount_zatoshis: 70,
                 fee_zatoshis: 20,
-                deadline: 1000,
+                deadline: Some(1000),
             }),
         )
         .unwrap();
-        s.confirm_spend(&job.operation_id, 90, 1).unwrap();
-        let original = serde_json::to_value(s.status().unwrap()).unwrap();
-        s.db.execute_batch("CREATE TRIGGER injected AFTER INSERT ON refund_outputs BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
-        let refund = refunds::RefundStatus {
-            txid: "refund".into(),
-            output_index: 0,
-            operation_id: job.operation_id,
-            amount: 20,
-            height: 100,
-        };
-        assert!(s.record_refund(refund.clone()).is_err());
-        drop(s);
-        let mut s = Store::open(&dir, &key, &id).unwrap();
-        assert_eq!(serde_json::to_value(s.status().unwrap()).unwrap(), original);
-        s.db.execute_batch("DROP TRIGGER injected").unwrap();
-        s.record_refund(refund.clone()).unwrap();
-        s.record_refund(refund).unwrap();
-        assert_eq!(s.status().unwrap().refunds.len(), 1);
+        s.confirm_spend(&job.operation_id).unwrap();
+        assert!(s.status().unwrap().legacy_refunds.is_none());
     }
 }
 
@@ -1045,7 +1025,7 @@ fn obsolete_capacity_metadata_is_optional_and_never_rewritten() {
     store.publish_scoped_evidence(&pool, view()).unwrap();
     // Reproduce the old schema16 layout with retained metadata. Opening and
     // publishing new evidence must neither require nor rewrite these old fields.
-    store.db.execute_batch("CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY,height INTEGER NOT NULL,hash TEXT NOT NULL); ALTER TABLE funding_progress ADD COLUMN turn INTEGER NOT NULL DEFAULT 0; CREATE INDEX funding_schedule_turn ON funding_progress(turn); UPDATE funding_progress SET turn=7;").unwrap();
+    store.db.execute_batch("UPDATE operation_network SET recipient='0x0000000000000000000000000000000000000001' WHERE recipient IS NULL; CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT,day INTEGER,original_day INTEGER,requested INTEGER,reserved INTEGER,consumed INTEGER); INSERT INTO budget_entries SELECT n.operation_id,f.pool_id,0,0,100,CASE WHEN o.state='PREPARED' THEN 100 ELSE 0 END,CASE WHEN o.state='RESOLVED' THEN 100 ELSE 0 END FROM operation_network n JOIN funding_progress p ON p.operation_id=n.operation_id JOIN funding_jobs f ON f.id=p.job_id LEFT JOIN outgoing o ON o.id=n.operation_id; CREATE TABLE refund_outputs(txid TEXT,output_index INTEGER,operation_id TEXT,amount INTEGER,height INTEGER,credited INTEGER); CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY,height INTEGER NOT NULL,hash TEXT NOT NULL); ALTER TABLE funding_progress ADD COLUMN turn INTEGER NOT NULL DEFAULT 0; CREATE INDEX funding_schedule_turn ON funding_progress(turn); UPDATE funding_progress SET turn=7;").unwrap();
     store
         .db
         .execute(

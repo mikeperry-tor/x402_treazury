@@ -32,10 +32,15 @@ fn amount(v: &Value) -> Result<U256> {
 pub fn capture(snapshot: &Value) -> Result<Value> {
     let status = &snapshot["treasury_status"];
     let sync = &status["sync"];
-    let data = json!({"treasury_id":status["treasury_id"],"source_budget_entries":snapshot["source_budget_entries"],
+    let mut data = json!({"treasury_id":status["treasury_id"],"source_budget_entries":snapshot["source_budget_entries"],
         "operations":status["treasury_operations"],"wallets":snapshot["wallet_observations"],
         "refunds":status["refunds"],"payment_attempts":snapshot["payment_attempts"],
         "sync":if sync.is_null(){Value::Null}else{json!({"height":sync["height"],"checked_at":sync["checked_at"],"confirmed_shielded_zatoshis":sync["confirmed_shielded_zatoshis"],"spendable_shielded_zatoshis":sync["spendable_shielded_zatoshis"]})}});
+    if snapshot.get("source_preparations").is_some() {
+        data["schema_version"] = json!(2);
+        data["source_preparations"] = snapshot["source_preparations"].clone();
+        data["operations"] = snapshot["lifecycle"]["source_operations"].clone();
+    }
     summarize(&data)?;
     Ok(data)
 }
@@ -62,6 +67,26 @@ fn source_accounting(data: &Value) -> Result<SourceAccounting<'_>> {
         );
     }
     let mut totals = SourceTotals::default();
+    if data["schema_version"] == 2 {
+        let mut owners = BTreeSet::new();
+        for entry in rows(data, "source_preparations")? {
+            ensure!(owners.insert(id(&entry["operation_id"])?), "duplicate source preparation");
+            let digest = id(&entry["preparation_sha256"])?;
+            ensure!(digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()), "invalid preparation digest");
+        }
+        for (key, op) in &operations {
+            ensure!(owners.contains(key), "prepared operation lacks original calculation");
+            let principal = number(&op["facts"]["amount_zatoshis"])?;
+            let fee = number(&op["facts"]["fee_zatoshis"])?;
+            if op["submission"] == "CONFIRMED" {
+                plus(&mut totals.principal, principal)?;
+                plus(&mut totals.fees, fee)?;
+                plus(&mut totals.consumed, principal.checked_add(fee).context("source facts overflow")?)?;
+            }
+        }
+        return Ok(SourceAccounting { operations, totals });
+    }
+
     let mut entries = BTreeMap::new();
     for entry in rows(data, "source_budget_entries")? {
         let key = id(&entry["id"])?;
@@ -135,6 +160,13 @@ fn wallet_observations(data: &Value) -> Result<WalletObservations<'_>> {
         );
         let bucket = roles.entry(role.to_owned()).or_default();
         plus(&mut bucket.wallets, 1)?;
+        if data["schema_version"] == 2 {
+            if let Ok(estimate) = amount(&wallet["balance"]) {
+                plus(&mut bucket.anchored, 1)?;
+                bucket.saved_balance = bucket.saved_balance.checked_add(estimate).context("USDC balance sum overflow")?;
+            }
+            continue;
+        }
         let balance = amount(&wallet["balance"])?;
         match (wallet["height"].as_u64(), wallet["hash"].as_str()) {
             (Some(_), Some(hash)) if !hash.is_empty() => {
@@ -205,7 +237,8 @@ pub fn summarize(data: &Value) -> Result<Value> {
     let source = source_accounting(data)?;
     let wallets = wallet_observations(data)?;
     let exposure = payment_exposure(data, &wallets.identities)?;
-    let returned = refund_outputs(data, &source.operations)?;
+    let current = data["schema_version"] == 2;
+    let returned = if current { None } else { Some(refund_outputs(data, &source.operations)?) };
     let sync = &data["sync"];
     if !sync.is_null() {
         number(&sync["confirmed_shielded_zatoshis"])?;
@@ -213,10 +246,10 @@ pub fn summarize(data: &Value) -> Result<Value> {
     }
     Ok(
         json!({"scope":"treasury_wide_persisted","fresh_chain_read":false,
-        "source_reserved_zatoshis":source.totals.reserved,"recorded_consumed_zatoshis":source.totals.consumed,
+        "source_reserved_zatoshis":if current {None}else{Some(source.totals.reserved)},"recorded_consumed_zatoshis":source.totals.consumed,
         "recorded_principal_zatoshis":source.totals.principal,"recorded_fees_zatoshis":source.totals.fees,"recorded_refund_outputs_zatoshis":returned,
         "unresolved_payment_exposure_atomic":exposure.to_string(),"zec_observation":sync,
-        "wallet_roles":wallets.roles.into_iter().map(|(role,balance)|(role,json!({"wallets":balance.wallets,"anchored_observations":balance.anchored,"unobserved_wallets":balance.wallets-balance.anchored,"saved_balance_atomic":balance.saved_balance.to_string()}))).collect::<BTreeMap<_,_>>() }),
+        "wallet_roles":wallets.roles.into_iter().map(|(role,balance)|(role,if current {json!({"wallets":balance.wallets,"observation_model":"advisory_estimate","available_estimates":balance.anchored,"unobserved_wallets":balance.wallets-balance.anchored,"saved_balance_atomic":balance.saved_balance.to_string()})} else {json!({"wallets":balance.wallets,"anchored_observations":balance.anchored,"unobserved_wallets":balance.wallets-balance.anchored,"saved_balance_atomic":balance.saved_balance.to_string()})})).collect::<BTreeMap<_,_>>() }),
     )
 }
 
@@ -236,6 +269,23 @@ pub(crate) fn fixture() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sdk_fact_model_keeps_deleted_projections_unavailable_and_shield_fee_only() {
+        let mut data=fixture();
+        data["schema_version"]=json!(2);
+        data["source_budget_entries"]=Value::Null;
+        data["refunds"]=Value::Null;
+        data["operations"][1]["facts"]["amount_zatoshis"]=json!(0);
+        data["source_preparations"]=json!([{"operation_id":"deposit","preparation_sha256":"a".repeat(64)},{"operation_id":"shield","preparation_sha256":"b".repeat(64)},{"operation_id":"calculation-only","preparation_sha256":"c".repeat(64)}]);
+        let result=summarize(&data).unwrap();
+        assert_eq!(result["recorded_consumed_zatoshis"],108);
+        assert_eq!(result["recorded_principal_zatoshis"],100);
+        assert_eq!(result["recorded_fees_zatoshis"],8);
+        assert!(result["source_reserved_zatoshis"].is_null());
+        assert!(result["recorded_refund_outputs_zatoshis"].is_null());
+        data["operations"][0]["submission"]=json!("UNKNOWN");
+        assert_eq!(summarize(&data).unwrap()["recorded_consumed_zatoshis"],3);
+    }
     #[test]
     fn costs_refunds_exposure_and_observed_zero_are_not_conflated() {
         let result = summarize(&fixture()).unwrap();

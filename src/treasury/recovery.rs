@@ -52,18 +52,16 @@ fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {
     })
 }
 
-fn early_job_disposition(job: &FundingJob) -> Option<RecoveryOutcome> {
-    use RecoveryOutcome::*;
-    if !needs_recovery(job) {
-        return Some(Waiting("funding_in_progress"));
-    }
-    if job.phase == FundingPhase::RefundPending {
-        return Some(OperatorRequired("refund_requires_review"));
-    }
-    None
-}
-
 impl Treasury {
+    pub(crate) async fn recovery_needed(&self, job: &FundingJob) -> Result<bool> {
+        let (id, operation) = (job.id.clone(), job.operation_id.clone());
+        let facts = self
+            .store
+            .call(move |s| s.funding_facts(&id, &operation))
+            .await?;
+        Ok(facts.preparation_accepted || facts.source_pending || needs_recovery(job))
+    }
+
     pub async fn recover_funding_job(
         &mut self,
         job_id: String,
@@ -136,9 +134,6 @@ impl Treasury {
         {
             return Ok(Recovered);
         }
-        if let Some(outcome) = early_job_disposition(&job) {
-            return Ok(outcome);
-        }
         let id = job.id.clone();
         let count = self
             .store
@@ -150,7 +145,7 @@ impl Treasury {
                 .recover_unprepared_job(&job, max_attempts, allow_new_attempt)
                 .await;
         };
-        if operation.submission == "CONFIRMED" && job.phase != FundingPhase::RecoveryRequired {
+        if operation.submission == "CONFIRMED" {
             return Ok(Waiting("source_confirmed_waiting_for_swap"));
         }
         if operation.submission == "EXPIRED" {
@@ -163,9 +158,6 @@ impl Treasury {
                 )
                 .await;
         }
-        if operation.submission == "CONFIRMED" {
-            return Ok(OperatorRequired("swap_outcome_requires_review"));
-        }
         let terminal = job.phase == FundingPhase::RecoveryRequired;
         let operation_id = operation.operation_id.clone();
         let expiry = u64::from(operation.facts.expiry_height);
@@ -177,7 +169,7 @@ impl Treasury {
         }
         let sync = self.store.call(|s| s.funding_sync_observation()).await?;
         if expiry == 0 {
-            return Ok(OperatorRequired("transaction_expiry_missing"));
+            return Ok(OperatorRequired("transaction_has_no_consensus_expiry"));
         }
         if sync
             .height
@@ -394,6 +386,12 @@ mod tests {
         .await
         .unwrap();
         let job = owner.status().await.unwrap().funding_jobs.remove(0);
+        let (operation, pool) = (job.operation_id.clone(), job.pool_id.clone());
+        owner
+            .store
+            .call(move |s| s.accept_preparation(&operation, Some(&pool), 10, None))
+            .await
+            .unwrap();
         let id = job.id.clone();
         owner
             .store
@@ -560,7 +558,7 @@ mod tests {
         )
         .unwrap();
         let mut queries = vec![
-            "SELECT * FROM budget_entries ORDER BY id",
+            "SELECT * FROM operation_network ORDER BY operation_id",
             "SELECT * FROM outgoing ORDER BY id",
             "SELECT * FROM treasury_operations ORDER BY id",
             "SELECT * FROM payment_attempts ORDER BY id",
@@ -594,94 +592,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn early_recovery_dispositions_preserve_exact_journals_without_source_observation() {
+    async fn accepted_calculation_ownership_overrules_phase_and_diagnostic_text() {
         let (dir, mut owner, jobs) = unfunded_recovery_fixture().await;
-        let stop = CancellationToken::new();
-        for (reason, expected) in [
-            (None, RecoveryOutcome::Waiting("funding_in_progress")),
-            (
-                Some("unsigned_quote_temporarily_unavailable"),
-                RecoveryOutcome::Waiting("funding_in_progress"),
-            ),
-            (
-                Some("treasury_insufficient_spendable_funds; detail"),
-                RecoveryOutcome::Waiting("funding_in_progress"),
-            ),
-            (
-                Some("funding_cost_limit_exceeded; detail"),
-                RecoveryOutcome::Waiting("funding_in_progress"),
-            ),
-            (
-                Some("funding_amount_limit_exceeded; detail"),
-                RecoveryOutcome::Waiting("funding_in_progress"),
-            ),
-            (
-                Some("qualification_funding_denied; detail"),
-                RecoveryOutcome::Waiting("funding_in_progress"),
-            ),
-            (
-                Some("near_authentication_required; detail"),
-                RecoveryOutcome::Waiting("funding_in_progress"),
-            ),
-        ] {
-            let id = jobs[0].id.clone();
-            owner
-                .store
-                .call(move |store| store.defer_funding(&id, 0, reason, false))
-                .await
-                .unwrap();
-            let before = recovery_rows(dir.path(), false);
-            let observation = owner
-                .recover_funding_observed(jobs[0].id.clone(), 0, true, &mut NoNetwork, &stop)
-                .await
-                .unwrap();
-            assert_eq!(observation.outcome, expected, "{reason:?}");
-            assert!(!observation.source_observed);
-            assert_eq!(recovery_rows(dir.path(), false), before);
-        }
-        let conflict = jobs[0].id.clone();
-        owner.store.call(move |store| {
-            store.advance_funding(&conflict, FundingPhase::Allocated, FundingPhase::RecoveryRequired)?;
-            store.defer_funding(&conflict, 0, Some("funding_recovery_requires_operator; conflicting_transaction_or_input_evidence; retained"), false)
-        }).await.unwrap();
-        let refund = jobs[1].id.clone();
+        let job = &jobs[0];
+        let (id, pool) = (job.operation_id.clone(), job.pool_id.clone());
         owner
             .store
-            .call(move |store| {
-                // These are only synthetic workflow markers for an early refusal.
-                // No transaction, confirmation, credit or expiry proof is fabricated.
-                let phases = [
-                    FundingPhase::Allocated,
-                    FundingPhase::Quoted,
-                    FundingPhase::Preparing,
-                    FundingPhase::Prepared,
-                    FundingPhase::DepositPending,
-                    FundingPhase::RefundPending,
-                ];
-                for pair in phases.windows(2) {
-                    store.advance_funding(&refund, pair[0].clone(), pair[1].clone())?;
-                }
-                Ok(())
-            })
+            .call(move |s| s.accept_preparation(&id, Some(&pool), 10, None))
             .await
             .unwrap();
-        for (job, reason) in [
-            (&jobs[0], "preparation_outcome_unknown"),
-            (&jobs[1], "refund_requires_review"),
+        let stop = CancellationToken::new();
+        for reason in [
+            None,
+            Some("quote_refresh_exhausted; no preparation started"),
+            Some("arbitrary annotation"),
         ] {
+            let id = job.id.clone();
+            owner
+                .store
+                .call(move |s| s.defer_funding(&id, 0, reason, false))
+                .await
+                .unwrap();
             let before = recovery_rows(dir.path(), false);
-            let observation = owner
+            let result = owner
                 .recover_funding_observed(job.id.clone(), 0, true, &mut NoNetwork, &stop)
                 .await
                 .unwrap();
             assert_eq!(
-                observation.outcome,
-                RecoveryOutcome::OperatorRequired(reason)
+                result.outcome,
+                RecoveryOutcome::OperatorRequired("preparation_outcome_unknown")
             );
-            assert!(!observation.source_observed);
+            assert!(!result.source_observed);
             assert_eq!(recovery_rows(dir.path(), false), before);
         }
-        assert!(owner.status().await.unwrap().treasury_operations.is_empty());
         owner.close().await.unwrap();
     }
 

@@ -53,7 +53,7 @@ impl Store {
     pub(crate) fn funding_work_page(&self, after: &str, through: i64) -> Result<Vec<FundingEntry>> {
         #[cfg(test)]
         self.inventory_read_fault(super::inventory::Read::FundingPage)?;
-        let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_unfinished_jobs WHERE state!='COMPLETE' AND id>?1 AND rowid<=?2 UNION SELECT f.id FROM outgoing x JOIN funding_progress j ON j.operation_id=x.id JOIN funding_jobs f ON f.id=j.job_id WHERE x.state='PREPARED' AND f.id>?1 AND f.rowid<=?2 ORDER BY id LIMIT ?3")?
+        let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_unfinished_jobs WHERE state!='COMPLETE' AND id>?1 AND rowid<=?2 UNION SELECT f.id FROM outgoing x JOIN funding_progress j ON j.operation_id=x.id JOIN funding_jobs f ON f.id=j.job_id WHERE x.state='PREPARED' AND f.id>?1 AND f.rowid<=?2 UNION SELECT f.id FROM operation_network n JOIN funding_progress j ON j.operation_id=n.operation_id JOIN funding_jobs f ON f.id=j.job_id WHERE n.preparation IS NOT NULL AND f.id>?1 AND f.rowid<=?2 ORDER BY id LIMIT ?3")?
             .query_map(params![after,through,PAGE_SIZE as i64], |r| r.get::<_,String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut jobs = Vec::with_capacity(ids.len());
@@ -113,25 +113,13 @@ impl Store {
             !id.is_empty() && !operation.is_empty() && ownership,
             "unknown_funding_ownership"
         );
-        let (outgoing, source, budget_pool): (bool, bool, Option<String>) = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1),EXISTS(SELECT 1 FROM treasury_operations WHERE id=?1),(SELECT pool_id FROM budget_entries WHERE id=?1)",
-            [&operation], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        let (outgoing,source,accepted):(bool,bool,bool)=self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1),EXISTS(SELECT 1 FROM treasury_operations WHERE id=?1),EXISTS(SELECT 1 FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL)",[&operation],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
         ensure!(outgoing == source, "unknown_funding_source_correspondence");
-        let budget_exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM budget_entries WHERE id=?1)",
-            [&operation],
-            |r| r.get(0),
-        )?;
-        ensure!(
-            !budget_exists || budget_pool.as_deref() == Some(&pool),
-            "funding_source_pool_mismatch"
-        );
-        ensure!(
-            !source || budget_exists,
-            "unknown_funding_source_correspondence"
-        );
-        if source {
-            self.operation(&operation)?;
+        if outgoing || accepted {
+            ensure!(
+                self.preparation_intent(&operation)?.pool.as_deref() == Some(pool.as_str()),
+                "funding_source_pool_mismatch"
+            );
         }
         Ok(MalformedFunding {
             id: id.to_owned(),
@@ -157,16 +145,13 @@ impl Store {
             self.operation(operation)?
                 .facts
                 .deadline
-                .saturating_sub(instant)
-                < super::super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
-            "prepared quote window remains usable"
+                .is_some_and(|deadline| deadline <= instant),
+            "quote deadline has not expired"
         );
-        let changed=self.db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error=?3 WHERE job_id=?1 AND operation_id=?2 AND phase='\"PREPARED\"'",params![job,operation,diagnostic])?;
-        ensure!(changed == 1, "funding phase conflict");
+        self.db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error=?3 WHERE job_id=?1 AND operation_id=?2",params![job,operation,diagnostic])?;
         Ok(())
     }
-    /// Publish the serialized recovery owner's diagnostic. Canonical obligations
-    /// and current policy, never this text, determine subsequent disposition.
+
     pub(crate) fn record_source_operator_requirement(
         &mut self,
         job: &str,
@@ -248,7 +233,7 @@ mod tests {
                 .unwrap();
             let saved = store.funding_job(&job.id).unwrap().unwrap();
             assert_eq!(saved.last_error.as_deref(), error);
-            assert!(!crate::rotation::store::funding::can_recover_facts(
+            assert!(crate::rotation::store::funding::can_recover_facts(
                 &saved,
                 None,
                 &store.funding_facts(&job.id, &job.operation_id).unwrap()
@@ -275,7 +260,7 @@ mod tests {
             unknown.last_error.as_deref(),
             Some("funding_quote_failed; no preparation started")
         );
-        assert!(!crate::rotation::store::funding::can_recover_facts(
+        assert!(crate::rotation::store::funding::can_recover_facts(
             &unknown,
             None,
             &store.funding_facts(&job.id, &job.operation_id).unwrap()
@@ -296,7 +281,7 @@ mod tests {
                 .unwrap();
             let blocked = store.funding_job(&job.id).unwrap().unwrap();
             assert_eq!(blocked.last_error.as_deref(), error);
-            assert!(!crate::rotation::store::funding::can_recover_facts(
+            assert!(crate::rotation::store::funding::can_recover_facts(
                 &blocked,
                 None,
                 &store.funding_facts(&job.id, &job.operation_id).unwrap()
@@ -391,7 +376,7 @@ mod source_disposition_tests {
         let source_effects: i64 = store
             .db
             .query_row(
-                "SELECT (SELECT COUNT(*) FROM outgoing)+(SELECT COUNT(*) FROM budget_entries)",
+                "SELECT (SELECT COUNT(*) FROM outgoing)+(SELECT COUNT(*) FROM operation_network WHERE preparation IS NOT NULL)",
                 [],
                 |row| row.get(0),
             )

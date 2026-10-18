@@ -252,12 +252,26 @@ async fn paid_fixture() {
     }
     let after = store.call(|s| s.status()).await.unwrap();
     assert_eq!(after.pools[0].addresses.len(), 2);
-    assert_eq!(after.pools[0].addresses[0].role, "READY");
-    assert_eq!(after.pools[0].addresses[1].role, "ACTIVE");
+    assert_eq!(
+        after.pools[0]
+            .addresses
+            .iter()
+            .filter(|w| w.role == "ACTIVE")
+            .count(),
+        1
+    );
+    assert_eq!(
+        after.pools[0]
+            .addresses
+            .iter()
+            .filter(|w| w.role == "READY")
+            .count(),
+        1
+    );
     let consumed = after.pools[0]
         .reserve_claims
         .iter()
-        .find(|c| c.slot == "large")
+        .find(|c| c.wallet_id.is_none())
         .unwrap();
     assert_eq!(consumed.generation, 1);
     assert!(consumed.wallet_id.is_none());

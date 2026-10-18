@@ -32,12 +32,22 @@ pub(crate) struct FundingClaim {
     pub maximum_output: U256,
 }
 
+const CURRENT_FUNDING_CLAIM: &str = "SELECT c.target,c.maximum_output FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id AND w.pool_id=f.pool_id JOIN pools p ON p.id=w.pool_id JOIN reserve_claims c ON c.pool_id=p.id AND c.slot=f.allocation_kind WHERE f.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND c.enabled=1 AND f.readiness_requirement IS NULL AND (c.wallet_id=f.wallet_id AND c.generation=f.claim_generation)";
+
+pub(super) fn funding_claim_present(db: &Connection, job: &str) -> Result<bool> {
+    Ok(db.query_row(
+        &format!("SELECT EXISTS({CURRENT_FUNDING_CLAIM})"),
+        [job],
+        |r| r.get(0),
+    )?)
+}
+
 /// Current authority for accepting a quote or entering preparation. Accepted
 /// prepared work uses its original capability instead of this new-work predicate.
 pub(super) fn current_funding_claim(db: &Connection, job: &str) -> Result<Option<FundingClaim>> {
-    let row: Option<(String, String)> = db.query_row(
-        "SELECT c.target,c.maximum_output FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id AND w.pool_id=f.pool_id JOIN pools p ON p.id=w.pool_id JOIN reserve_claims c ON c.pool_id=p.id AND c.slot=f.allocation_kind WHERE f.id=?1 AND p.enabled=1 AND p.payment_limit IS NOT NULL AND c.enabled=1 AND f.readiness_requirement IS NULL AND (c.wallet_id=f.wallet_id AND c.generation=f.claim_generation)",
-        [job], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+    let row: Option<(String, String)> = db
+        .query_row(CURRENT_FUNDING_CLAIM, [job], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
     row.map(|(target, maximum)| {
         Ok(FundingClaim {
             target: amount(&target)?,
@@ -967,8 +977,11 @@ mod tests {
         assert_eq!(
             store
                 .db
-                .query_row("SELECT COUNT(*) FROM budget_entries", [], |r| r
-                    .get::<_, i64>(0))
+                .query_row(
+                    "SELECT COUNT(*) FROM operation_network WHERE preparation IS NOT NULL",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
                 .unwrap(),
             0
         );

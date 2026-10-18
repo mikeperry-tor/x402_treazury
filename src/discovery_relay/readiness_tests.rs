@@ -153,6 +153,21 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
         .await
         .unwrap()
         .unwrap();
+    store
+        .call(|s| {
+            for job in s.funding_jobs()? {
+                s.record_funding_balance(
+                    &job.id,
+                    &job.operation_id,
+                    &job.wallet_id,
+                    &job.recipient,
+                    alloy_primitives::U256::from(5_000_000),
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
     manager.reconcile().await.unwrap();
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     let original_role: String = db

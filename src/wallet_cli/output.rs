@@ -125,10 +125,9 @@ pub(super) fn status(status: &Status) -> String {
     }
     writeln!(
         text,
-        "Recorded treasury operations: {}\nRecorded funding jobs: {}\nRecorded refunds: {}",
+        "Recorded treasury operations: {}\nRecorded funding jobs: {}",
         status.treasury_operations.len(),
-        status.funding_jobs.len(),
-        status.refunds.len()
+        status.funding_jobs.len()
     )
     .unwrap();
     text

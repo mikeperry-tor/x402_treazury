@@ -85,8 +85,8 @@ available after a funding stop; optional remote catalog fixtures isolate missing
 or invalid inferred base URLs while keeping authored URL errors fatal.
 Real-process shutdown fixtures exercise responses beyond the old
 ten-second cutoff, explicit force, HTTP disconnect, stdio EOF and a signal with
-the parent input pipe still open. Treasury fixtures cover incremental catch-up,
-bounded preparation lag, read-only preflight and retained unknown sends; managed
+the parent input pipe still open. Treasury fixtures cover incremental scanning without local age/lag gates,
+read-only proposal checks and retained unknown sends; managed
 fixtures exercise advisory selection and post-failure balance refresh. A blocked
 or failed balance read does not prevent signing or delay another wallet attempt.
 New failures during active reads require follow-up; cancelled waiters retain the
@@ -100,7 +100,7 @@ selectors. Birthday fixtures advance the tip between observations. Nonce-outage
 fixtures retain original authorizations and explicit canonical reporting proofs;
 nonce outages are not payment admission gates.
 Synthetic proving checks actual-fee affordability and exact saved bytes through
-failed persistence/reopen. The optional synthetic-chain lifecycle exercises two
+failed publication, lost acknowledgement, cancellation and reopen. The optional synthetic-chain lifecycle exercises two
 managed recipients through the real treasury actor, scan reuse, confirmation depth,
 restart, cancellation after submission intent and funded same-height reorgs.
 The production funding worker also runs against local bridge/Base fixtures through
@@ -108,24 +108,21 @@ concurrent quote acquisition, refund derivation, bootstrap completion and signed
 payment-triggered replacement funding, with scan-reuse and no-replay assertions.
 Reopened insufficient-funds diagnostics cannot block bootstrap or serving before
 the current worker rechecks them. A synthetic deposit regression verifies that
-preparation readiness scans a newly confirmed deposit even when the saved low
-balance is still fresh, without creating a transaction or reservation.
+a preparation scan discovers a newly confirmed deposit despite a previously saved
+low estimate, without creating a transaction or input claim.
 Default fixtures cover concurrent
 replacement allocation/credit with retained old payment liabilities and paged,
 scoped bootstrap completion after reopen; see [LIFECYCLE.md](../tests/LIFECYCLE.md).
 These are unfunded/local tests, not evidence of live
 1Click delivery or a resolution of its Zcash quote-deadline contract.
 
-Managed-capacity fixtures exercise actual local HTTP signing and canonical Base
-observations: a $10 balance with $4 unresolved authority cannot pay $8; canonical
-USED evidence leaves $6, while canonical expired-unused evidence releases the
-liability without relabeling or renewing the original $10 observation. Candidate
-passes cover inventory beyond a page, independent completed candidates, contention,
-and complete-negative versus unavailable evidence. Funding-owner fixtures exercise
-independent bounded quote/status/credit progress, per-kind backoff, exact operation
-bindings, cancellation and reopen. Shared balance-read fixtures verify coalescing
-and retained acquisition ownership after a waiter leaves. These tests preserve
-serialized treasury prerequisites and accepted financial work.
+Managed-payment fixtures exercise advisory selection, one saturating estimate
+decrement per authorization, structured insufficient-funds traversal beyond a page,
+cloneable POST bodies, exhaustion and multiple retained authorizations. Refresh is
+independent and coalesced; failed reads preserve hints and low markers. Funding
+fixtures cover irreversible first-positive claims, exact accepted-work ownership,
+scoped observation/backoff, cancellation and restart. Qualification charges each
+accepted attempt under its original case allowance; a later success erases none.
 
 Managed payment crash fixtures use SIGKILL on an owned signing subprocess at
 private-signature, journal-acknowledgement and provider-receipt boundaries. They
@@ -241,13 +238,12 @@ window tests cover the caller boundary. Eligibility remains offline information,
 never renewed authority or permission to replay attempted work; these checks do not
 exhaustively enumerate concurrency schedules.
 
-Treasury accounting fixtures compare complete persisted summaries, including
-principal, fees, reservations, refunds, unresolved exposure and every wallet role.
-They distinguish anchored zero from unobserved balances, retain permissive historical
-fields and opaque sync metadata, and pin ordered errors and reachable arithmetic
-boundaries. Baseline, attribution, registry ownership/reopen and report fixtures
-exercise the consumers. These summaries remain saved bookkeeping, never fresh
-chain evidence or new spending authority.
+Current treasury reporting fixtures retain immutable principal/fee facts, encrypted
+preparation identity, unresolved work and advisory wallet estimates. Deleted budget
+and refund projections are unavailable rather than invented zero. Historical
+reports remain readable. Baseline, attribution, registry ownership/reopen and report
+fixtures preserve original qualification charges and unknowns. These summaries
+never supply current spending authority.
 
 Deployment validation fixtures pin complete static and managed wallet resolutions,
 ordered contextual failures, listener address uniqueness and port-zero exceptions,

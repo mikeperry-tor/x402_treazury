@@ -1,7 +1,7 @@
 //! Serialized, calculate-only deposit preparation and durable submission control.
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod proving_tests;
-use super::{SyncPhase, Treasury, snapshot};
+use super::{SyncPhase, Treasury};
 use crate::rotation::{
     base::now,
     transaction::{
@@ -57,10 +57,6 @@ impl TransactionPreparer for Treasury {
                 s.require_preparation_authority(&id, authority.as_ref())
                     .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
                 s.require_unstarted_preparation(&id)?;
-                // An obviously unaffordable principal needs no proposal mutation.
-                // Do not add the fee ceiling here: the proposal determines cost.
-                s.require_spend_ready(now()?, principal)
-                    .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
                 s.funding_preparation_context()
             })
             .await?;
@@ -79,14 +75,7 @@ impl TransactionPreparer for Treasury {
                 "indexer is not on mainnet"
             );
             let instant = now()?;
-            ensure!(
-                request
-                    .deadline
-                    .checked_sub(instant)
-                    .is_some_and(|remaining| remaining
-                        >= crate::rotation::transaction::MIN_QUOTE_VALIDITY_SECONDS),
-                "funding_deadline_too_close"
-            );
+            ensure!(request.deadline > instant, "funding_deadline_expired");
             ensure!(self.client.is_some(), "treasury client unavailable");
             Ok(indexer)
         }
@@ -99,10 +88,7 @@ impl TransactionPreparer for Treasury {
             .call(move |s| s.begin_funding_preparation(&operation, authority.as_ref()))
             .await
             .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
-        // Calculate-only proposal creation mutates library memory. Cancellation
-        // still poisons this owner, but no bytes exist and no ceiling-sized
-        // budget reservation is needed before its actual fee is known.
-        self.healthy = false;
+        // Proposal selection is read-only with respect to owned inputs and signed bytes.
         let client = self
             .client
             .as_mut()
@@ -124,8 +110,23 @@ impl TransactionPreparer for Treasury {
                 zcash_client_backend::zip321::TransactionRequest::new(vec![payment])?,
                 zip32::AccountId::ZERO,
             )
-            .await
-            .map_err(|_| anyhow::anyhow!("treasury proposal failed"))?;
+            .await;
+        let proposal = match proposal {
+            Ok(proposal) => proposal,
+            Err(zingolib::wallet::error::ProposeSendError::Proposal(
+                zcash_client_backend::data_api::error::Error::InsufficientFunds { .. },
+            )) => {
+                return Err(anyhow::Error::new(
+                    crate::rotation::error::FundingCondition::InsufficientFunds,
+                )
+                .context(crate::rotation::transaction::PreparationDeferred));
+            }
+            Err(_) => {
+                return Err(anyhow::anyhow!("treasury proposal failed")
+                    .context(crate::rotation::transaction::PreparationDeferred));
+            }
+        };
+        let selected_proposal: Result<_> = async {
         ensure!(
             proposal.steps().len() == 1,
             "multi-step deposits are unsupported"
@@ -154,28 +155,49 @@ impl TransactionPreparer for Treasury {
             zingolib::data::proposal::total_payment_amount(&proposal)? == amount,
             "proposal amount mismatch"
         );
+        let selected = super::inputs::selected_inputs(&proposal)?;
+        let calculation = crate::rotation::store::preparation::CalculationInputs {
+            destination: request.recipient.clone(),
+            inputs: selected,
+        };
+        Ok((calculation, i64::try_from(total)?, fee))
+        }.await;
+        let (calculation, authorized_cost, fee) = match selected_proposal {
+            Ok(value) => value,
+            Err(error) => {
+                client.clear_proposal().await;
+                return Err(error.context(crate::rotation::transaction::PreparationDeferred));
+            }
+        };
         let id = request.operation_id.clone();
         let pool = request.pool_id.clone();
-        let reserve = i64::try_from(total)?;
-        self.store
+        let deadline = request.deadline;
+        // A commit may succeed without an acknowledgment. Poison before dispatch;
+        // only a serialized proof of no accepted intent permits reuse on failure.
+        self.healthy = false;
+        let acceptance = self
+            .store
             .call(move |s| {
-                let instant = now()?;
-                s.require_unstarted_preparation(&id)?;
-                s.require_spend_ready(instant, reserve as u64)?;
-                ensure!(
-                    request
-                        .deadline
-                        .checked_sub(instant)
-                        .is_some_and(|remaining| remaining
-                            >= crate::rotation::transaction::MIN_QUOTE_VALIDITY_SECONDS),
-                    "funding_deadline_too_close"
-                );
-                let day = u32::try_from(instant / 86400)?;
-                s.reserve(&id, pool.as_deref(), day, reserve)?;
+                ensure!(now()? < deadline, "funding_deadline_expired");
+                s.accept_preparation(&id, pool.as_deref(), authorized_cost, Some(calculation))?;
                 s.set_sync_phase(crate::rotation::store::SyncPhase::Preparing)?;
                 Ok(())
             })
-            .await?;
+            .await;
+        if let Err(error) = acceptance {
+            let id = request.operation_id.clone();
+            if self
+                .store
+                .call(move |s| s.require_unstarted_preparation(&id))
+                .await
+                .is_ok()
+            {
+                client.clear_proposal().await;
+                self.healthy = true;
+                return Err(error.context(crate::rotation::transaction::PreparationDeferred));
+            }
+            return Err(error);
+        }
         let ids = client
             .calculate_stored_proposal()
             .await
@@ -188,64 +210,54 @@ impl TransactionPreparer for Treasury {
                 .get(ids.first())
                 .context("calculated transaction missing")?;
             let transaction = record.transaction();
-            let transparent = transaction
-                .transparent_bundle()
-                .context("deposit output missing")?;
-            ensure!(
-                transparent.vin.is_empty() && transparent.vout.len() == 1,
-                "unexpected transparent inputs or outputs"
-            );
-            let output = &transparent.vout[0];
-            ensure!(
-                output.value() == amount && *output.script_pubkey() == receiver.script().into(),
-                "calculated recipient or amount mismatch"
-            );
-            let shielded_value = [
-                transaction
-                    .sapling_bundle()
-                    .map(|b| i64::from(*b.value_balance())),
-                transaction
-                    .orchard_bundle()
-                    .map(|b| i64::from(*b.value_balance())),
-                transaction
-                    .ironwood_bundle()
-                    .map(|b| i64::from(*b.value_balance())),
-            ]
-            .into_iter()
-            .flatten()
-            .try_fold(0i64, |total, value| total.checked_add(value))
-            .context("transaction value overflow")?;
-            ensure!(
-                shielded_value.checked_sub(i64::try_from(request.amount_zatoshis)?)
-                    == Some(i64::try_from(fee)?),
-                "calculated fee mismatch"
-            );
             let mut raw = zeroize::Zeroizing::new(Vec::new());
             transaction.write(&mut *raw)?;
-            let facts = TransactionFacts {
-                txid: transaction.txid().to_string(),
-                expiry_height: transaction.expiry_height().into(),
-                amount_zatoshis: request.amount_zatoshis,
-                fee_zatoshis: fee,
-                deadline: request.deadline,
-            };
-            ensure!(facts.expiry_height > 0, "unbounded transaction expiry");
+            let facts: Result<TransactionFacts> = (|| {
+                let transparent = transaction
+                    .transparent_bundle()
+                    .context("deposit output missing")?;
+                ensure!(
+                    transparent.vin.is_empty() && transparent.vout.len() == 1,
+                    "unexpected transparent inputs or outputs"
+                );
+                let output = &transparent.vout[0];
+                ensure!(
+                    output.value() == amount && *output.script_pubkey() == receiver.script().into(),
+                    "calculated recipient or amount mismatch"
+                );
+                let shielded_value = [
+                    transaction
+                        .sapling_bundle()
+                        .map(|b| i64::from(*b.value_balance())),
+                    transaction
+                        .orchard_bundle()
+                        .map(|b| i64::from(*b.value_balance())),
+                    transaction
+                        .ironwood_bundle()
+                        .map(|b| i64::from(*b.value_balance())),
+                ]
+                .into_iter()
+                .flatten()
+                .try_fold(0i64, |total, value| total.checked_add(value))
+                .context("transaction value overflow")?;
+                ensure!(
+                    shielded_value.checked_sub(i64::try_from(request.amount_zatoshis)?)
+                        == Some(i64::try_from(fee)?),
+                    "calculated fee mismatch"
+                );
+                let facts = TransactionFacts {
+                    txid: transaction.txid().to_string(),
+                    expiry_height: transaction.expiry_height().into(),
+                    amount_zatoshis: request.amount_zatoshis,
+                    fee_zatoshis: fee,
+                    deadline: Some(request.deadline),
+                };
+                Ok(facts)
+            })();
             (raw, facts)
         };
-        let bytes = snapshot(client).await?;
-        let expected = self.revision;
-        let id = request.operation_id;
-        let (revision, prepared) = self
-            .store
-            .call(move |s| {
-                let revision = s.prepare_with_facts(&id, expected, &bytes, &raw, Some(facts))?;
-                Ok((revision, PreparedTransaction::load(s, &id)?))
-            })
-            .await?;
-        self.revision = revision;
-        client.go_offline().await;
-        self.healthy = true;
-        Ok(prepared)
+        self.retain_calculation(request.operation_id, raw, facts)
+            .await
     }
 }
 impl Treasury {
@@ -279,14 +291,23 @@ impl Treasury {
             _ = stop.cancelled() => anyhow::bail!("treasury stopping before submission intent"),
             result = sender.preflight(&durable, rebroadcast) => result?,
         }
-        // Re-read time after awaited preflight. Only the store mints authority;
+        let deadline = durable.facts().context("operation facts missing")?.deadline;
+        // Re-read required time after awaited preflight. Only the store mints authority;
         // cancellation after that commit remains an unknown outcome.
         let operation = id.clone();
         let (prepared, attempt) = self
             .store
             .call(move |s| {
+                // Shielding has no wall deadline. Its timestamp is diagnostic only;
+                // source deposits still require a readable current clock.
+                let instant = now();
+                let instant = if deadline.is_some() {
+                    instant?
+                } else {
+                    instant.unwrap_or_default()
+                };
                 let prepared =
-                    BroadcastTransaction::request(s, &operation, now()?, height, rebroadcast)?;
+                    BroadcastTransaction::request(s, &operation, instant, height, rebroadcast)?;
                 let attempt = prepared.attempt();
                 Ok((prepared, attempt))
             })
@@ -347,7 +368,6 @@ impl Treasury {
                 crate::rotation::transaction::RecoveryEvidenceError::TransactionMismatch
             );
             drop(wallet);
-            let instant = now()?;
             self.store
                 .call(move |s| {
                     let (_, revision, observation) = s.funding_preparation_context()?;
@@ -362,12 +382,7 @@ impl Treasury {
                                 && tip - height + 1 >= u64::from(observation.confirmations)),
                         crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending
                     );
-                    let facts = s.operation(&id)?.facts;
-                    let cost = facts
-                        .amount_zatoshis
-                        .checked_add(facts.fee_zatoshis)
-                        .context("source cost overflow")?;
-                    s.confirm_spend(&id, i64::try_from(cost)?, u32::try_from(instant / 86400)?)
+                    s.confirm_spend(&id)
                 })
                 .await?;
         }
@@ -379,13 +394,14 @@ impl Treasury {
 mod tests {
     use super::*;
     use crate::rotation::store::{SyncObservation, SyncPhase};
+    use crate::treasury::snapshot;
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
 
     #[tokio::test]
-    async fn proposal_failure_poisoning_preserves_snapshot_and_never_submits() {
+    async fn known_sdk_proposal_rejection_defers_without_poisoning_or_accepting_inputs() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let key = dir.path().join("key");
@@ -478,47 +494,29 @@ mod tests {
             max_fee_zatoshis: 20_000,
             max_input_zatoshis: 70_000,
         };
-        let deferred = request();
-        let deferred_id = deferred.operation_id.clone();
-        let error = treasury.prepare(deferred).await.err().unwrap();
-        assert!(error.is::<crate::rotation::transaction::PreparationDeferred>());
-        assert!(
-            treasury.healthy,
-            "read-only readiness failures do not poison the owner"
-        );
-        treasury
-            .store
-            .call(move |s| s.require_unstarted_preparation(&deferred_id))
-            .await
-            .unwrap();
-        advancement.store(3, Ordering::SeqCst);
-        let attempt = request();
-        let operation = attempt.operation_id.clone();
-        let error = treasury.prepare(attempt).await.err().unwrap();
-        assert!(error.to_string().contains("proposal failed"), "{error}");
-        assert!(!treasury.healthy);
-        assert_eq!(
-            treasury.status().await.unwrap().sync.unwrap().phase,
-            SyncPhase::Ready
-        );
-        assert_eq!(treasury.status().await.unwrap().snapshot_revision, 2);
-        assert!(!treasury.status().await.unwrap().outgoing_pending);
-        assert!(
+        for _ in 0..2 {
+            let attempt = request();
+            let operation = attempt.operation_id.clone();
+            let error = treasury.prepare(attempt).await.err().unwrap();
+            assert!(
+                error.is::<crate::rotation::transaction::PreparationDeferred>(),
+                "{error:#}"
+            );
+            assert!(treasury.healthy);
             treasury
-                .prepare(request())
+                .store
+                .call(move |s| s.require_unstarted_preparation(&operation))
                 .await
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("reopen")
-        );
+                .unwrap();
+            assert!(!treasury.status().await.unwrap().outgoing_pending);
+        }
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         treasury.close().await.unwrap();
         let restored = Treasury::open(state, key, id).await.unwrap();
         assert_eq!(restored.addresses().await.unwrap(), addresses);
         restored
             .store
-            .call(move |s| s.abandon_unprepared(&operation))
+            .call(move |s| s.abandon_unprepared("never-accepted"))
             .await
             .unwrap();
         restored.close().await.unwrap();

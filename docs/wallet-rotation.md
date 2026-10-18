@@ -86,10 +86,10 @@ keep more traffic on an address. See [sizing and selection limits](configuration
 `auto_fund=false` pauses new funding, while independently permitted retirement and
 reconciliation continue. Financial completion and current payment usability are
 separate: a consumed wallet need not rebuild its original funding balance to close
-the accepted source operation. Partial credited allocations retain their claims.
+the accepted source operation. First positive credit permanently consumes the initial claim.
 Already accepted work retains its bytes, reservations and original identities
 across disablement. A valid successful operation may receive excess input later;
-canonical returns update the original source accounting without reopening funding.
+SDK-observed returns become ordinary owned capital without reopening funding.
 
 Per-operation safeguards remain:
 
@@ -102,38 +102,20 @@ max_refund_shielding_fee_zec = "0.0003"
 # max_funding_spend_zec = "0.006" # One transfer including its network fee.
 ```
 
-Gross source expenditure, canonically confirmed returned principal and derived
-net cost remain distinct. Returned principal cannot erase source fees or credit
-another operation. Refund shielding is explicit and charges only its fee. Reported
-or expected returns are not spendable capacity, and successful funding never waits
-for a speculative surplus return.
+Immutable transaction facts report confirmed principal and actual fees. Shielding
+records principal zero and charges only its fee. There is no mutable gross/net cost,
+returned-principal credit or historical monetary equality gate. Missing swap
+attribution does not invalidate owned SDK funds. General automatic transparent
+shielding remains unfinished; the explicit per-address command retains privacy and
+selected-input ownership.
 
-Return attribution uses the original operation/address binding, including archived
-recovery records. Known credited outpoints are rechecked by transaction ID and
-output index even after spending or shielding. Missing or ambiguous attribution
-preserves the affected accounting obligation while independent returns and otherwise
-valid treasury readiness can progress. It grants no guessed credit, shielding,
-reservation release or retry. Canonical contradictions affecting inputs or shared
-financial state, and storage failures, still block the affected treasury work.
-
-The pinned Zingolib exposes an in-memory transaction map. Discovering unknown late
-returns therefore retains one linear output scan under the treasury owner, with
-keyed binding matching and no second full history copy. Its work and actor occupancy
-grow with wallet history. Bounded SQLite reads do not make that dependency scan
-incremental or bound its resident history; an incremental discovery API remains
-separate work.
-
-Zingolib proposes funding transactions and calculates their standard network fees.
-Refund shielding uses the backend's standard ZIP-317 fee rule. The application
-accepts or rejects the resulting fee; it does not force a lower fee into the
-transaction. Calculate-only proposals determine the actual fee before the serialized
-store reserves principal plus that fee (shielding reserves only its fee), and before
-signed bytes are created. A configured maximum is a rejection ceiling, not a
-reservation of money that will not be spent. Proposal mutation or cancellation
-poisons the owner until reopen; exact costs and prepared bytes commit atomically.
-Larger transactions can exceed a fee ceiling and require an explicit
-configuration adjustment. All money values are decimal strings; accounting uses
-integer atomic units, never floating-point currency conversion.
+Zingolib selects inputs and calculates standard network fees. The application
+checks the actual proposal against configured per-operation fee/spend safeguards,
+then persists the exact input owner before calculation. A configured maximum is a
+rejection ceiling, not a capital reservation. Unknown outcomes after calculation
+acceptance retain that input fence; known pre-calculation failures can defer. The
+SDK owns current balances, confirmations, witnesses, spent outputs and chain
+corrections. No full historical source/refund traversal gates publication.
 
 The bridge's USD valuation is not an independent exchange-rate oracle. Reserve output
 and conversion-overhead ceilings do not replace a per-operation ZEC safeguard when
@@ -145,9 +127,14 @@ to bound its native-asset permits.
 A stopped treasury owner or funding worker pauses funding until process restart.
 It does not stop MCP listeners or Base reconciliation. Existing confirmed assets
 remain usable under ordinary admission checks, with all reservations and unresolved
-liabilities retained. A poisoned treasury owner is closed, never reused in place.
+liabilities retained. An SDK owner with an unhealthy calculation failure is closed, never reused in place. A completed calculation
+with failed local publication stays with its existing owner: only identical local
+publication repeats on the existing 60-second maintenance cadence. Shutdown retains
+that owner until publication succeeds, even if its caller disconnects. Irrecoverable
+storage failure or forced process death can lose unpublished bytes; the durable
+input claim still prevents a duplicate calculation.
 
-## Treasury sync freshness
+## Treasury sync coverage
 
 Recurring `treasury sync unavailable` warnings include a broad `category` and,
 for Zingolib scan/launch failures, a fixed `reason`. Indexer request failures also
@@ -260,12 +247,13 @@ I/O do not hold a group turn to stabilize advisory balances.
 
 ## Automatic retirement
 
-Ordinary reconciliation may retire only a RETAINED wallet in an enabled group,
-using fresh compatible confirmed and latest balances. Both must be at or below
+The retained canonical-publication path may retire only a RETAINED wallet in an
+enabled group using compatible confirmed and latest balances. Ordinary advisory
+refresh does not collect these proofs or invoke permanent retirement. Both must be at or below
 `max_retirement_remainder_usdc`: the recorded bound is their maximum, not their
 minimum. Default zero therefore requires both observations to be zero. Pending
-payment exposure, a current enabled reserve claim, incomplete applicable destination
-credit or financial repair prevents retirement.
+payment exposure, a current enabled reserve claim, an actual pending source operation or conflicting canonical retirement evidence
+prevents retirement.
 
 Retirement records exact amounts, anchors, endpoint and supporting evidence in the
 same transaction that changes the role. It removes the wallet from routine balance
@@ -289,7 +277,7 @@ malformed replies, successful responses and output conversion failures grant no
 retry. The low-level `ManagedPool::pay_with_cover` API dispatches an already-bound
 challenge/transport once; use `PaidClient::managed` for complete routed calls.
 
-`rotation/base.rs` verifies Base chain identity, confirmed anchors, freshness,
+`rotation/base.rs` verifies Base chain identity, confirmed anchors,
 block-pinned USDC balances and EIP-3009 authorization use. A used authorization
 or an expired authorization proven unused can release its reservation through the
 store's canonical reconciliation transaction. An unused but still-valid signature
@@ -342,18 +330,17 @@ authenticated confidential execution remains unqualified; there is no fallback
 from confidential to public mode. Current requests do not add application
 commissions. Do not infer a commercial partner agreement from an API key.
 
-Before preparation, the shared treasury verifies fresh sync, spendable funds,
-actual reservations, per-operation safeguards and its single unresolved outgoing-operation gate.
-Zingolib calculates/proves without automatic broadcast. The post-calculation wallet
-snapshot, prepared bytes and accounting facts must commit before submission.
-Calculation followed by persistence failure invalidates that in-memory owner for
-further preparation; reopening restores the last durable state rather than making
-a conflicting send.
+The SDK selects available confirmed inputs and calculates standard fees. The
+application checks exact output/fee and current operation/run permission, then
+journals the exact selected-input owner before calculation. One unresolved input
+owner prevents overlapping SDK calculations. Completed snapshots and exact signed
+bytes commit atomically; failed publication does not grant another calculation.
+An accepted calculation with no bytes remains uncertain across restart.
 
-A quote crossing its delivery margin before the concrete backend dispatches a
-treasury preparation command is a typed pre-preparation deferral. The store
-requires proof of no outgoing or budget record before returning it to `Quoted`;
-ordinary untouched-quote refresh does not consume transaction recovery attempts.
+A returned quote deadline that has actually expired prevents a new preparation or
+first submission. Untouched quote refresh requires proof of no accepted calculation
+and no outgoing bytes, then archives the old binding without consuming a signed
+transaction recovery attempt. No local five-minute margin applies.
 
 Recovery eligibility comes from the original operation and its bound closure
 archive, with liabilities rechecked before reuse. Saved error messages grant no
@@ -412,16 +399,15 @@ pass through the same classifier, without starting funding or submitting transac
 Reports distinguish recovered, waiting, failed checks and operator-required cases.
 Unknown preparation outcomes, refunds and unresolved confirmed swaps require review.
 
-A prepared deposit is not submitted when fewer than 300 seconds remain before its
-swap quote deadline. Its signed bytes and reservation remain retained while recovery
-waits for transaction expiry, which is a separate Zcash block height. Existing
-canonical absence, fresh-tip and unspent-input proofs authorize recovery; elapsed
-time alone does not. Submitted/ambiguous operations are reconciled before expiry
-recovery, never automatically rebroadcast. A successful recovery archives the old
-operation and returns the job to allocation only under separately revalidated current funding authority.
+A prepared deposit retains its exact bytes and input owner when its external quote
+deadline expires. Recovery requires finite consensus expiry, complete coverage on
+both scans and every originally selected input confirmed and unspent. Expiry height
+N allows inclusion through N; zero never permits expiry release. Dummy shielded
+actions are not owned inputs. Submitted/uncertain operations are observed, never
+automatically replayed. A new attempt separately requires current funding authority.
 The profile's `max_attempts` bounds transaction recovery resets using durable
 history; neither process restart nor operation replacement erases this count.
-New quote refreshes proven to have no outgoing or budget record are explicitly
+New quote refreshes proven to have no accepted calculation or outgoing record are explicitly
 marked in durable history and excluded from that count; historical
 unclassified records still count. Earlier binaries reject the newer state schema.
 Unsigned quote outages use bounded per-pass work and backoff without consuming
@@ -440,11 +426,13 @@ Each swap uses a persisted unique high-index transparent refund address derived
 from the treasury. Refund visibility does not make funds automatically spendable
 for another deposit. Refund shielding is an explicit operation with observed
 inputs, fee caps, prepared-byte recovery and its original recipient network binding.
-Deep finalized-chain rollback requires operator investigation rather than an
-automatic balance/budget reset.
+The SDK owns return outputs, spent state, fees and chain corrections. There is no
+local refund credit, principal cap or historical refund/source revalidation gate.
+Source confirmation remains a distinct audit fact. A refund or stale workflow phase
+cannot erase an uncertain input owner or authorize a replacement deposit.
 
 `rotation/store.rs` keeps treasury snapshots, EVM keys, funding/outgoing records,
-roles, source budgets and payment authorizations in one versioned database.
+roles, accepted calculations and payment authorizations in one versioned database.
 Sensitive records are authenticated-encrypted with a separate 32-byte key and
 record identity bindings; public metadata still links addresses and operations.
 The directory, key, database, ownership lock and SQLite sidecars have filesystem
@@ -487,7 +475,7 @@ Funding inventory similarly isolates phase, provider and scheduling-health conve
 when exact job, wallet, pool and source-operation correspondence remains intact.
 The affected operation retains its original journals; independent jobs continue.
 One-pass recovery reports the incomplete inventory after draining healthy work.
-Unclassified source-accounting, ownership and storage failures still stop the shared
+Unclassified source-operation, ownership and storage failures still stop the shared
 owner. Diagnostic text is never substituted for a missing financial fact.
 
 Base background reconciliation retries transient SQLite busy/locked inventory reads
@@ -556,5 +544,24 @@ multiple charges. Qualification uses its existing case permit for the sum of all
 attempts, retains every receipt/proof, and checks current run authority before
 starting another unsigned attempt. A later success does not erase earlier unknowns.
 
-Initial-funding and SDK-owned treasury simplification continues in the active
-[implementation plan](plans/best_effort_wallet_balances.md).
+The first positive initial credit permanently consumes that funding claim, even
+below target. No later debit, partial return, disablement or restart grants a top-up.
+Source observation continues independently using exact original ownership.
+
+Accepted calculations, exact selected inputs, signed bytes and submission intent
+survive cancellation and failed local acknowledgment. Source expiry recovery checks
+every selected input and finite inclusive consensus expiry; a refund is never proof
+of non-submission. Earlier state schemas are rejected before mutation, without
+private-state conversion.
+
+R01 (SDK/actor reconstruction after unhealthy mutation or exited owner) and R02
+(general automatic recovery of owned transparent capital) remain unfinished in the
+[follow-on plan](plans/treasury_owner_followups.md).
+Local publication retries retain completed bytes within the existing owner; this
+does not reconstruct a failed SDK or replace an exited task. Other affected funding
+may require process restart; listeners and usable Base
+payers remain independent. Reopening does not erase uncertain accepted work.
+
+Multiple charges after the accepted USDC failure category and incomplete external
+settlement proof are accepted limitations. The [network guide](network-egress.md#remaining-timers-and-budgets)
+records the unresolved 1Click route contract and gRPC upload-inactivity limitation.

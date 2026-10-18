@@ -108,7 +108,9 @@ mod tests {
                 b"initial",
             )
             .unwrap();
-            source.reserve("pending", None, 1, 100).unwrap();
+            source
+                .accept_preparation("pending", None, 100, None)
+                .unwrap();
             source
                 .prepare("pending", 1, b"prepared", b"signed bytes")
                 .unwrap();

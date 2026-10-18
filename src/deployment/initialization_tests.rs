@@ -442,15 +442,14 @@ async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_i
             .unwrap();
         assert!(status.funding_jobs.is_empty());
         assert!(status.pools.iter().all(|pool| pool.addresses.is_empty()));
-        let before = initialized
+        initialized
             .treasury
             .as_ref()
             .unwrap()
             .store_handle()
-            .call(|store| Ok(store.require_spend_ready(0, 1).unwrap_err().to_string()))
+            .call(|store| store.require_preparation_available())
             .await
             .unwrap();
-        assert!(!before.contains("qualification_funding_denied"), "{before}");
         deployment.initialized = Some(initialized);
         match deployment
             .bind_restricted(&env(), FundingRestriction::DenyNewFunding)
@@ -461,7 +460,12 @@ async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_i
                 let owner = running.treasury.take().unwrap();
                 let after = owner
                     .store_handle()
-                    .call(|store| Ok(store.require_spend_ready(0, 1).unwrap_err().to_string()))
+                    .call(|store| {
+                        Ok(store
+                            .require_preparation_available()
+                            .unwrap_err()
+                            .to_string())
+                    })
                     .await
                     .unwrap();
                 assert!(after.contains("qualification_funding_denied"), "{after}");

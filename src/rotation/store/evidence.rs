@@ -28,7 +28,6 @@ CREATE INDEX admission_confirmed_support ON payment_admission_evidence(block_has
 CREATE INDEX admission_latest_support ON payment_admission_evidence(latest_hash,attempt_id);
 ALTER TABLE payment_resolutions ADD COLUMN support TEXT;
 CREATE INDEX resolution_anchor_support ON payment_resolutions(hash,attempt_id);
-CREATE INDEX IF NOT EXISTS refund_operation_outputs ON refund_outputs(operation_id);
 PRAGMA user_version=14;")?;
     // Decimal text is never summed by SQLite's floating point coercion. This is
     // a one-time journal derivation, not an ordinary admission/history sweep.

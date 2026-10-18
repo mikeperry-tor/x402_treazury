@@ -28,7 +28,7 @@ fn allocate(store: &mut Store, name: &str) {
 fn jobless_prepared_owner_stays_observable_when_new_submission_is_disabled() {
     let (_dir, mut store) = fixture();
     let id = uuid::Uuid::new_v4().to_string();
-    store.reserve(&id, None, 0, 100).unwrap();
+    store.accept_preparation(&id, None, 60, None).unwrap();
     store
         .bind_operation_recipient(&id, &format!("0x{:040x}", 1))
         .unwrap();
@@ -44,7 +44,7 @@ fn jobless_prepared_owner_stays_observable_when_new_submission_is_disabled() {
                 expiry_height: 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
-                deadline: 10000,
+                deadline: Some(10000),
             }),
         )
         .unwrap();
@@ -91,7 +91,7 @@ fn partial_credit_after_preparation_forbids_first_deposit_and_retains_incoming_o
         )
         .unwrap();
     store
-        .reserve(&job.operation_id, Some(&job.pool_id), 0, 100)
+        .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
         .unwrap();
     let revision = store.snapshot().unwrap().0;
     store
@@ -105,7 +105,7 @@ fn partial_credit_after_preparation_forbids_first_deposit_and_retains_incoming_o
                 expiry_height: 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
-                deadline: 10000,
+                deadline: Some(10000),
             }),
         )
         .unwrap();
@@ -163,7 +163,7 @@ fn pages_keep_bounds_order_and_matching_facts_without_mutation() {
             assert!(expected.contains(&job.id));
             assert!(seen.insert(job.id.clone()));
             assert_eq!(job.phase, funding::FundingPhase::Allocated);
-            assert!(facts.enabled);
+            assert!(facts.new_funding_allowed);
             assert!(!facts.accepted_quote);
             assert!(!facts.initial_credit_recorded);
             assert!(!facts.archived);
@@ -356,12 +356,32 @@ fn malformed_page_advances_without_releasing_or_replacing_jobs() {
     }
     let job = &jobs[0];
     // A payload fault cannot hide mismatched shared source ownership.
-    store.db.execute("INSERT INTO budget_entries(id,pool_id,day,original_day,requested,reserved,consumed) VALUES(?1,NULL,0,0,1,1,0)",[&job.operation_id]).unwrap();
+    store
+        .accept_preparation(&job.operation_id, None, 1, None)
+        .unwrap_err();
+    let bad = seal(
+        &store.key,
+        &format!(
+            "v1:{}:{}:preparation:{}",
+            store.id,
+            store.network.name(),
+            job.operation_id
+        ),
+        br#"{"pool":null,"cost_zatoshis":1,"calculation":null}"#,
+    )
+    .unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO operation_network(operation_id,preparation) VALUES(?1,?2)",
+            params![job.operation_id, bad],
+        )
+        .unwrap();
     assert!(store.funding_work_page("", through).is_err());
     store
         .db
         .execute(
-            "DELETE FROM budget_entries WHERE id=?1",
+            "DELETE FROM operation_network WHERE operation_id=?1",
             [&job.operation_id],
         )
         .unwrap();

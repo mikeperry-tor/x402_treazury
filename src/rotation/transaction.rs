@@ -6,11 +6,6 @@ use anyhow::{Result, ensure};
 use std::future::Future;
 use zeroize::Zeroizing;
 
-// Conservative delivery allowance retained pending the authoritative Zcash
-// 1Click arrival/route contract; never derive settlement from local broadcast.
-// All pre-preparation and first-submission gates use this one policy constant.
-pub const MIN_QUOTE_VALIDITY_SECONDS: u64 = 300;
-
 /// Local canonical proof failures. Display text is diagnostic only; recovery
 /// consumers downcast this type rather than interpreting upstream prose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,7 +145,7 @@ impl BroadcastTransaction {
 }
 
 pub trait TransactionPreparer {
-    /// Must check fresh spend readiness and reserve input+fee before calculation.
+    /// Must check actual permission and capture selected input ownership before calculation.
     /// Calculation never broadcasts. Return only after durable snapshot+bytes commit.
     fn prepare(
         &mut self,
@@ -203,7 +198,7 @@ pub struct TransactionFacts {
     pub expiry_height: u32,
     pub amount_zatoshis: u64,
     pub fee_zatoshis: u64,
-    pub deadline: u64,
+    pub deadline: Option<u64>,
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct OperationStatus {
@@ -211,4 +206,59 @@ pub struct OperationStatus {
     pub facts: TransactionFacts,
     pub submission: String,
     pub attempts: i64,
+}
+
+impl TransactionFacts {
+    pub(crate) fn require_protocol_validity(
+        &self,
+        clock: impl FnOnce() -> Result<u64>,
+        tip: u64,
+    ) -> Result<()> {
+        if let Some(deadline) = self.deadline {
+            ensure!(clock()? < deadline, "funding_deadline_expired");
+        }
+        // N is inclusive for mined transactions. At tip N the next block is N+1.
+        // Zero is the consensus no-expiry value and never grants expiry release.
+        ensure!(
+            self.expiry_height == 0 || tip < u64::from(self.expiry_height),
+            "transaction_expired"
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod validity_tests {
+    use super::*;
+    #[test]
+    fn returned_deadline_and_inclusive_consensus_expiry_are_independent() {
+        let mut facts = TransactionFacts {
+            txid: "original".into(),
+            expiry_height: 10,
+            amount_zatoshis: 1,
+            fee_zatoshis: 1,
+            deadline: Some(20),
+        };
+        assert!(facts.require_protocol_validity(|| Ok(19), 9).is_ok());
+        assert!(facts.require_protocol_validity(|| Ok(20), 9).is_err());
+        assert!(facts.require_protocol_validity(|| Ok(19), 10).is_err());
+        assert!(
+            facts
+                .require_protocol_validity(|| anyhow::bail!("clock unavailable"), 9)
+                .is_err()
+        );
+        facts.deadline = None;
+        assert!(
+            facts
+                .require_protocol_validity(|| panic!("shielding does not need wall time"), 9)
+                .is_ok()
+        );
+        assert!(facts.require_protocol_validity(|| Ok(u64::MAX), 9).is_ok());
+        facts.expiry_height = 0;
+        assert!(
+            facts
+                .require_protocol_validity(|| Ok(u64::MAX), u64::MAX)
+                .is_ok()
+        );
+    }
 }

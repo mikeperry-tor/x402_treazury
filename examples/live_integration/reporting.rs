@@ -9,6 +9,12 @@ pub enum Format {
     Json,
     Markdown,
 }
+fn optional_atomics(value: &Value) -> Result<String> {
+    if value.is_null() { Ok("unavailable".into()) } else { Ok(atomics(value)?.to_string()) }
+}
+fn optional_change(value: &Value) -> Result<String> {
+    if value.is_null() { Ok("unavailable".into()) } else { Ok(signed_atomics(value)?.to_string()) }
+}
 fn atomics(value: &Value) -> Result<u64> {
     match value {
         Value::String(s) => Ok(s.parse()?),
@@ -266,11 +272,11 @@ fn render_treasury_observation(out: &mut String, observation: &Value, index: usi
             atomics(&attributed["recorded_principal_zatoshis"])?,
             atomics(&attributed["recorded_fees_zatoshis"])?,
             atomics(&attributed["recorded_consumed_zatoshis"])?,
-            atomics(&attributed["source_reserved_zatoshis"])?,
+            optional_atomics(&attributed["source_reserved_zatoshis"])?,
             atomics(&attributed["registry_unreleased_bounds_zatoshis"])?,
             atomics(&attributed["registry_released_bounds_zatoshis"])?,
-            atomics(&attributed["attempts_without_treasury_budget"])?,
-            atomics(&attributed["recorded_refund_outputs_zatoshis"])?
+            optional_atomics(attributed.get("attempts_without_transaction_facts").unwrap_or(&attributed["attempts_without_treasury_budget"]))?,
+            optional_atomics(&attributed["recorded_refund_outputs_zatoshis"])?
         )?;
     } else {
         out.push_str("Run source-cost attribution was not recorded for this snapshot.\n");
@@ -283,8 +289,8 @@ fn render_treasury_observation(out: &mut String, observation: &Value, index: usi
         atomics(&summary["recorded_principal_zatoshis"])?,
         atomics(&summary["recorded_fees_zatoshis"])?,
         atomics(&summary["recorded_consumed_zatoshis"])?,
-        atomics(&summary["source_reserved_zatoshis"])?,
-        atomics(&summary["recorded_refund_outputs_zatoshis"])?
+        optional_atomics(&summary["source_reserved_zatoshis"])?,
+        optional_atomics(&summary["recorded_refund_outputs_zatoshis"])?
     )?;
     let exposure = summary["unresolved_payment_exposure_atomic"]
         .as_str()
@@ -322,7 +328,7 @@ fn render_treasury_observation(out: &mut String, observation: &Value, index: usi
             out,
             "| {role} | {} | {} | {} | {balance} |",
             atomics(&row["wallets"])?,
-            atomics(&row["anchored_observations"])?,
+            optional_atomics(&row["anchored_observations"])?,
             atomics(&row["unobserved_wallets"])?
         )?;
     }
@@ -344,9 +350,9 @@ fn render_baseline_comparison(out: &mut String, observation: &Value) -> Result<(
             writeln!(
                 out,
                 "| {label} | {} | {} | {} |",
-                atomics(&row["baseline"])?,
-                atomics(&row["observed"])?,
-                signed_atomics(&row["change"])?
+                optional_atomics(&row["baseline"])?,
+                optional_atomics(&row["observed"])?,
+                optional_change(&row["change"])?
             )?;
         }
         if comparison["wallets"]["aggregate_change_atomic"].is_null() {

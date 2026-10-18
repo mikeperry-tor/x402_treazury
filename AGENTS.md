@@ -185,11 +185,11 @@ known unprepared failures or canonically expired signed operations only; uncerta
 preparation, refunds and unresolved confirmed swaps require review. Recovery reset
 limits use durable `funding_recovery` history and profile `max_attempts`, never a
 process-local counter. Unsigned quote outages use per-pass backoff without consuming
-transaction recovery attempts. New refreshes need proof of no outgoing/budget
+transaction recovery attempts. New refreshes need proof of no accepted calculation or outgoing
 record and a durable refresh marker; historical unclassified records still count.
 The requested quote window defaults to 7200 seconds; the returned deadline governs.
-The shared 300-second submission margin awaits the authoritative 1Click Zcash
-deadline/route contract. swap_timeout_seconds is a health threshold with a
+The returned external deadline is authoritative; no local five-minute margin is imposed.
+The chain-specific 1Click arrival/confirmation contract remains unqualified. swap_timeout_seconds is a health threshold with a
 60-second polling floor, never an abort or replacement authority.
 Do not combine deployment configuration with standalone location/network overrides.
 User-facing deployment examples live in `examples/deployments/`; network-only examples in
@@ -501,12 +501,9 @@ Funding capital is actual spendable treasury funds after confirmations,
 reservations/liabilities and fees. `daily_funding_limit_usdc`,
 `total_funding_limit_usdc` and `daily_treasury_spend_limit_zec` are removed and
 rejected with migration guidance. Do not reintroduce equivalent aggregate limits.
-Preserve original authenticated quotes,
-source journals, archived operations and exact accounting/reservations. Missing
-history needed to establish actual liabilities fails closed. UTC rollover and gross
-historical allocations do not define funding authority. Canonical completion,
-refund accounting and proven unprepared/expired recovery remain the owners of
-reservation release; removing budget policy never deletes financial history.
+Preserve original authenticated quotes, exact input ownership, accepted calculations,
+prepared bytes and submission journals. The SDK owns current Zcash funds; do not
+restore a parallel principal/fee/refund capital ledger or historical monetary gate.
 Native safeguards are `max_funding_spend_zec` (optional per wallet transfer),
 `max_funding_transaction_fee_zec` and `max_refund_shielding_fee_zec` (both default
 0.0003 ZEC). Network-fee settings reject proposals; they never override standard
@@ -524,47 +521,24 @@ All declared managed pools initialize, including those unused by selected tools.
   snapshots and outgoing operations atomically; revision CAS prevents stale saves.
   Never use upstream plaintext saves or quick-send helpers. Failed/cancelled
   preparation or persistence requires owner teardown/reopen, not reuse.
-- Calculate-only preparation checks current quote, exact output/fee/expiry, actual
-  spendable capacity and applicable operation/run authority. Calculate proposal fees before reserving exact principal plus
-  fee (refund shielding reserves only its fee), but reserve before creating signed
-  bytes. Proposal mutation/cancellation poisons the owner until reopen. Read-only
-  submission preflight precedes durable intent; the preflighted send path performs
-  no further unsigned tip read. Post-intent failures stay unknown.
-  Commit prepared bytes and costs before broadcast intent;
-  submission consumes a single-use capability. Unknown sends remain possibly
-  broadcast. Only explicit reconciliation may rebroadcast identical saved bytes.
-- Absence, expiry or seller responses never release financial exposure. Recovery
-  needs fresh canonical evidence; expired-source recovery verifies unspent inputs
-  against retained preparation. Refund shielding charges only its fee, not returned
-  principal twice. Reorgs quarantine accounting instead of silently repairing it.
-- Double buffering promotes once under the pool gate, retains old liabilities and
-  queues a fresh recipient. Local signing creates no unsigned reservation; atomic
-  signed admission rechecks current balance/block/generation and commits exposure
-  with supporting evidence before dispatch. Shared group guards outlive cancelled
-  store waiters. Only definite expiry rollback permits one unpublished replacement;
-  lost acknowledgement never permits dispatch or retry. Late credit must not overwrite newer roles/evidence;
-  completed funding credit is idempotent. Retired balances are not active capacity.
-- `PreparationDeferred` alone certifies that preparation never began; only this
-  typed result plus no outgoing/budget record can rewind PREPARING. Missing bytes
-  or error prose cannot establish retry safety. Quote-window expiry before the
-  concrete backend dispatches preparation uses this typed deferral.
-- Base RPC failover restarts a complete read-only view, never mixes providers or
-  retries signed work. Data-validation/TLS failures do not trigger fallback.
-  Balance sweeps finish once and retain canonical evidence; the store checks the
-  original block-derived admission expiry before reserving or promoting. Stale
-  balances cannot authorize spending. Bounded unsigned verification may refresh
-  evidence once when a concurrent canonical resolution invalidates its compatibility;
-  repeated refresh-until-success loops remain prohibited. Admission
-  omits retired balance reads while retaining historical authorization checks.
-  Payment admission retains unavailable nonce observations as full unresolved
-  liabilities without requiring another provider to release them. Fresh balances minus those
-  liabilities may authorize spending; expiry alone cannot release them. Malformed
-  evidence and TLS/chain/anchor integrity failures fail the affected verification;
-  wider stops require typed evidence of wider impact. An unavailable refresh alone
-  does not invalidate independently usable evidence. Unavailable nonce observations
-  retain liabilities and back off historical reconciliation; that backoff must not
-  suppress independently verified balance publication or affordable admission.
-  Immutable original operation identities govern recovery, not current pool roles.
+- Proposal selection uses SDK input availability, confirmations and witnesses. Check
+  exact recipient/amount/fee and current operation/run permission before accepting
+  calculation; persist the exact selected-input owner before signed bytes can exist.
+  Known proposal failures can defer without poisoning. Cancellation/uncertainty after
+  calculation acceptance preserves ownership and may require SDK teardown/reopen.
+- Commit completed snapshots/bytes idempotently even if policy changes after accepted
+  calculation. Read-only submission preflight precedes durable intent; first broadcast
+  separately checks current permission. Post-intent failures remain unknown.
+- Expiry recovery proves finite consensus expiry, complete canonical coverage,
+  non-inclusion and every originally selected input confirmed/unspent. Height N is
+  still valid through N; zero means no consensus expiry. Missing bytes/prose/phase
+  cannot establish safety. Refunds never authorize another funding deposit.
+- [Best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules) own
+  advisory payment estimates, per-wallet attempts and first-positive no-top-up claims.
+  Keep exact journals and original identities through cancellation and restart.
+- Base failover restarts a read-only view without mixing providers. Balance refresh
+  is independent of historical authorization reconciliation; failed refresh retains
+  the prior hint and low-balance marker. Integrity failures affect their actual scope.
 - Logs/status expose bounded fixed failure categories and numeric codes, never
   upstream credential-bearing prose. Drain deliberately for transaction safety;
   tell operators promptly why shutdown is waiting. Accepted MCP calls are owned
@@ -647,14 +621,15 @@ construct reqwest clients, tonic channels or SDK RPC providers outside the facto
 username/password negotiation, normal TLS validation, no direct fallback, no ambient
 proxy/NO_PROXY influence, and no automatic transport-wide HTTP retries or redirects. The Base adapter alone
 allows one bounded retry of unsigned read RPC transport failures on the same
-client/identity/payload; signed API requests are never retried. Local MCP
+client/identity/payload; paid traversal follows the explicit wallet rules. Local MCP
 listeners remain inbound-only. `config show` exposes policy, never derived tokens.
 
 `PaidClient` owns payer state and source timeout, not arbitrary HTTP clients. Managed
-calls select a candidate before the unsigned request and require that same wallet/
-generation at admission. Promotion before signing returns `PayerChanged`: GET/HEAD
-may fetch one new challenge; other methods return an actionable error. Signed paid
-requests are never replayed. Static replacement preserves in-flight signer/transport.
+calls capture existing eligible wallets before the unsigned request. A structured
+insufficient-funds response after a signed attempt may try each captured wallet
+once with its own fresh challenge, transport and original cloneable arguments.
+Every authorization remains chargeable; no new wallet allocation or logical-call
+replay is implied. Static replacement preserves in-flight signer/transport.
 Base address reads and NEAR quote/status use the actual immutable EVM identity;
 shared scans use the treasury UUID; catalog/help/pricing use discovery origins.
 

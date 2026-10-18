@@ -525,7 +525,7 @@ impl FundingConfig {
                 && self.poll_seconds > 0
                 && self.poll_seconds <= 60
                 && self.swap_timeout_seconds > 0
-                && self.quote_deadline_seconds >= super::transaction::MIN_QUOTE_VALIDITY_SECONDS,
+                && self.quote_deadline_seconds > 0,
             "invalid funding limits"
         );
         Ok(())

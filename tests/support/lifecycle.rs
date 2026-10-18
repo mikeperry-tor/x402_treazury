@@ -105,9 +105,7 @@ impl FundingBackend for Funding {
             self.available.load(Ordering::SeqCst),
             "treasury_insufficient_spendable_funds"
         );
-        self.store
-            .call(|s| s.check_funding_capacity(now()?, 100))
-            .await
+        self.store.call(|s| s.require_preparation_available()).await
     }
     async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
         let id = job.id.clone();
@@ -138,12 +136,7 @@ impl FundingBackend for Funding {
                         },
                     ),
                 )?;
-                s.reserve(
-                    &job.operation_id,
-                    Some(&job.pool_id),
-                    u32::try_from(now()? / 86400)?,
-                    100,
-                )?;
+                s.accept_preparation(&job.operation_id, Some(&job.pool_id), 100, None)?;
                 let revision = s.snapshot()?.0;
                 s.prepare_with_facts(
                     &job.operation_id,
@@ -155,7 +148,7 @@ impl FundingBackend for Funding {
                         expiry_height: 100,
                         amount_zatoshis: 80,
                         fee_zatoshis: 20,
-                        deadline: u64::MAX,
+                        deadline: Some(u64::MAX),
                     }),
                 )?;
                 Ok(())
@@ -182,7 +175,7 @@ impl FundingBackend for Funding {
         self.store
             .call(move |s| {
                 let previously = s.operation(&id)?.submission == "CONFIRMED";
-                s.confirm_spend(&id, 100, u32::try_from(now()? / 86400)?)?;
+                s.confirm_spend(&id)?;
                 if !previously {
                     capital.fetch_sub(100, Ordering::SeqCst);
                 }
@@ -479,12 +472,12 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
             .all(|j| j.phase == FundingPhase::RefundPending)
     );
     assert!(
-        status.refunds.is_empty(),
+        status.legacy_refunds.is_none(),
         "API status must never manufacture on-chain refund credit"
     );
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
     let consumed: i64 = db
-        .query_row("SELECT SUM(consumed) FROM budget_entries", [], |r| r.get(0))
+        .query_row("SELECT SUM(json_extract(facts,'$.amount_zatoshis')+json_extract(facts,'$.fee_zatoshis')) FROM treasury_operations WHERE submission='CONFIRMED'", [], |r| r.get(0))
         .unwrap();
     assert_eq!(consumed, 300);
     assert_eq!(sends.lock().unwrap().len(), 3);
