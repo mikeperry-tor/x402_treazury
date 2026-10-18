@@ -14,6 +14,8 @@ struct Fixture {
     payer: PaymentCandidateHandle,
     url: String,
     signed: Arc<AtomicUsize>,
+    received: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Semaphore>,
     worker: tokio::task::JoinHandle<()>,
     server: tokio::task::JoinHandle<()>,
 }
@@ -41,6 +43,9 @@ impl Fixture {
     }
 }
 async fn fixture() -> Fixture {
+    fixture_with_held_response(false).await
+}
+async fn fixture_with_held_response(hold: bool) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let mut store = super::super::store::Store::create(
         &dir.path().join("state"),
@@ -77,9 +82,12 @@ async fn fixture() -> Fixture {
     .unwrap();
     let signed = Arc::new(AtomicUsize::new(0));
     let observed = signed.clone();
+    let received = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let (notify, barrier) = (received.clone(), release.clone());
     let state_path = dir.path().join("state/state.sqlite");
     let app = Router::new().route("/pay",get(move |headers: HeaderMap| {
-        let (signed,path) = (observed.clone(),state_path.clone());
+        let (signed,path,notify,barrier) = (observed.clone(),state_path.clone(),notify.clone(),barrier.clone());
         async move {
             if let Some(signature) = headers.get("payment-signature") {
                 let payload: Value = serde_json::from_slice(&STANDARD.decode(signature.as_bytes()).unwrap()).unwrap();
@@ -87,6 +95,8 @@ async fn fixture() -> Fixture {
                 let db = rusqlite::Connection::open(path).unwrap();
                 assert_eq!(db.query_row("SELECT count(*) FROM payment_attempts WHERE nonce=?1",[nonce],|r|r.get::<_,i64>(0)).unwrap(),1);
                 signed.fetch_add(1,Ordering::SeqCst);
+                notify.notify_one();
+                if hold { barrier.acquire().await.unwrap().forget(); }
                 return "paid".into_response();
             }
             let challenge = serde_json::json!({"x402Version":2,"resource":{"url":"https://example.com/pay"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"7","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
@@ -128,6 +138,8 @@ async fn fixture() -> Fixture {
         payer: PaymentCandidateHandle { wallet, address },
         url,
         signed,
+        received,
+        release,
         worker,
         server,
     }
@@ -370,3 +382,12 @@ async fn new_advisory_authorization_can_resolve_and_unknown_estimate_refreshes_t
     assert_eq!((balance.as_str(), pending, resolutions), ("0", 0, 1));
     f.close().await;
 }
+
+#[cfg(unix)]
+#[path = "crash_tests.rs"]
+mod crash_tests;
+#[cfg(unix)]
+#[path = "io_failure_tests.rs"]
+mod io_failure_tests;
+#[path = "ownership_tests.rs"]
+mod ownership_tests;

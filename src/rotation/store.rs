@@ -1426,14 +1426,14 @@ impl Store {
         Ok(())
     }
     pub(crate) fn payment_candidate(
-        &mut self,
+        &self,
         pool: &str,
     ) -> Result<super::manager::PaymentCandidateHandle> {
-        let wallet =
-            self.resolve_payment_identity(pool)?
-                .context(AdmissionError::WalletNotReady(
-                    "funded payment identity unavailable",
-                ))?;
+        let wallet = capacity::default_identity(&self.db, pool)?
+            .map(|(wallet, _)| wallet)
+            .context(AdmissionError::WalletNotReady(
+                "funded payment identity unavailable",
+            ))?;
         self.db
             .query_row(
                 "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",

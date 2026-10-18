@@ -4,29 +4,10 @@ use super::*;
 use crate::rotation::manager::PaymentCandidateHandle;
 
 impl Store {
-    pub(crate) fn cached_payment_candidate(
-        &mut self,
-        pool: &str,
-        cost: U256,
-        bound: Option<&str>,
-    ) -> Result<Option<PaymentCandidateHandle>> {
-        self.cached_payment_candidate_at_boundary(pool, cost, bound, i64::MAX)
-    }
-
-    pub(crate) fn cached_payment_candidate_at_boundary(
-        &mut self,
-        pool: &str,
-        cost: U256,
-        bound: Option<&str>,
-        through: i64,
-    ) -> Result<Option<PaymentCandidateHandle>> {
-        self.advisory_candidate(pool, cost, bound, through, &[])
-    }
-
     pub(crate) fn advisory_candidate(
         &self,
         pool: &str,
-        cost: U256,
+        selection_amount: U256,
         bound: Option<&str>,
         through: i64,
         attempted: &[String],
@@ -43,7 +24,7 @@ impl Store {
             if payment_ownership(&self.db, pool, wallet)?.is_none() {
                 return Ok(None);
             }
-            // Cost may be a historical price hint. It ranks estimates; only the
+            // This amount may be a historical price hint. It ranks estimates; only the
             // current challenge and journal boundary enforce payment amount caps.
             let row:Option<(Option<String>,Option<String>,bool)>=self.db.query_row(
                 "SELECT address,balance,low_balance FROM wallets WHERE pool_id=?1 AND id=?2 AND sequence<=?3",
@@ -59,7 +40,7 @@ impl Store {
                 && estimate
                     .as_deref()
                     .and_then(|v| amount(v).ok())
-                    .is_some_and(|balance| balance >= cost);
+                    .is_some_and(|balance| balance >= selection_amount);
             if affordable {
                 return Ok(Some(candidate));
             }

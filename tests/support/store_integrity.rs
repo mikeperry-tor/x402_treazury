@@ -535,7 +535,7 @@ fn expired_admission_evidence_preserves_prior_balance_without_role_change_or_res
         .admit_for(&pool, U256::from(1), "offer", view, Some(&candidate))
         .unwrap();
     drop(store);
-    let mut store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
+    let store = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     let after = store.payment_candidate(&pool).unwrap();
     assert_eq!(after.wallet, candidate.wallet);
     assert_eq!(after.address, candidate.address);
