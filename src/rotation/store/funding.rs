@@ -82,7 +82,9 @@ pub struct FundingJob {
 /// existing journals, not another durable work state or source of authority.
 #[derive(Debug)]
 pub struct FundingFacts {
-    pub enabled: bool,
+    /// Current claim eligibility for an uncredited, never-submitted attempt.
+    /// Mutation boundaries still check actual preparation/submission authority.
+    pub new_funding_allowed: bool,
     pub source_pending: bool,
     pub preparation_accepted: bool,
     pub initial_credit_recorded: bool,
@@ -304,7 +306,7 @@ impl Store {
             params![job,operation], |r| Ok((FundingFacts {
                 initial_credit_recorded:r.get(0)?, accepted_quote:r.get(1)?, archived:r.get(2)?, source_closed: false,
                 provider_success:false, provider_failed:false, provider_refunded:false, provider_incomplete:false,
-                source_submission:r.get(7)?, source_attempts:r.get(8)?,enabled:r.get(9)?, source_pending:r.get(10)?,preparation_accepted:r.get(11)?,
+                source_submission:r.get(7)?, source_attempts:r.get(8)?,new_funding_allowed:r.get(9)?, source_pending:r.get(10)?,preparation_accepted:r.get(11)?,
             }, provider_flags(r, 3))),
         ).context("funding operation binding changed")?;
         (
@@ -313,7 +315,7 @@ impl Store {
             facts.provider_refunded,
             facts.provider_incomplete,
         ) = flags.context(super::scheduling::FundingDecodeFailure)?;
-        facts.enabled = facts.enabled
+        facts.new_funding_allowed = facts.new_funding_allowed
             && facts.source_attempts == 0
             && !facts.initial_credit_recorded
             && self.funding_restriction == super::super::restriction::FundingRestriction::Ordinary
@@ -565,6 +567,44 @@ impl Store {
             self.funding_conditions.remove(job);
         }
         Ok(completed)
+    }
+
+    /// Settle existing work and read the bound current decision snapshot in one
+    /// serialized Store job. The reused mutations retain their own transactions.
+    pub(crate) fn settle_funding_source(
+        &mut self,
+        job: &str,
+        operation: &str,
+        phase_reconciliation_due: bool,
+    ) -> Result<Option<(FundingJob, FundingFacts)>> {
+        if phase_reconciliation_due {
+            self.reconcile_funding_phase(job, operation)?;
+        }
+        if self.finish_funding_if_proven(job, operation)? {
+            return Ok(None);
+        }
+        let current = self.funding_job(job)?.context("funding job missing")?;
+        ensure!(
+            current.operation_id == operation,
+            "funding operation binding changed"
+        );
+        let facts = self.funding_facts(job, operation)?;
+        if facts.initial_credit_recorded
+            && !facts.preparation_accepted
+            && !facts.source_pending
+            && matches!(
+                current.phase,
+                FundingPhase::Allocated | FundingPhase::Quoted
+            )
+        {
+            self.close_unprepared_funding_for_operation(job, operation)?;
+            ensure!(
+                self.finish_funding_if_proven(job, operation)?,
+                "closed destination lacks completion proof"
+            );
+            return Ok(None);
+        }
+        Ok(Some((current, facts)))
     }
 
     /// Source publication derives phase from all committed provider facts. It
@@ -1898,6 +1938,96 @@ mod completion_tests {
     }
 
     #[test]
+    fn source_settlement_closes_a_clean_partial_credit_once() {
+        let (_dir, mut store, job) = fixture();
+        let quote = serde_json::to_vec(
+            &serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}}),
+        )
+        .unwrap();
+        store.save_funding_quote(&job.id, &quote).unwrap();
+        store
+            .record_destination_readiness(&job.id, "1", "partial-credit", 1)
+            .unwrap();
+        for _ in 0..2 {
+            assert!(
+                store
+                    .settle_funding_source(&job.id, &job.operation_id, false)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let current = store.funding_job(&job.id).unwrap().unwrap();
+        assert_eq!(current.operation_id, job.operation_id);
+        assert_eq!(current.phase, FundingPhase::Complete);
+        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 1);
+        assert!(!store.operation_pending(&job.operation_id).unwrap());
+        assert!(store.operation(&job.operation_id).is_err());
+        assert_eq!(store.destination_requirement(&job.id).unwrap().amount, "1");
+    }
+
+    #[test]
+    fn source_settlement_preserves_accepted_and_prepared_work_after_credit() {
+        use crate::rotation::transaction::{ManagedFundingAuthority, TransactionFacts};
+        for with_bytes in [false, true] {
+            let (_dir, mut store, job) = fixture();
+            let quote = serde_json::to_vec(
+                &serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}}),
+            )
+            .unwrap();
+            store.save_funding_quote(&job.id, &quote).unwrap();
+            let authority = ManagedFundingAuthority {
+                job_id: job.id.clone(),
+                auto_fund: true,
+                max_attempts: 0,
+            };
+            store
+                .begin_funding_preparation(&job.operation_id, Some(&authority))
+                .unwrap();
+            store
+                .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                .unwrap();
+            if with_bytes {
+                let revision = store.snapshot().unwrap().0;
+                store
+                    .prepare_with_facts(
+                        &job.operation_id,
+                        revision,
+                        b"snapshot",
+                        b"exact signed bytes",
+                        Some(TransactionFacts {
+                            txid: "transaction".into(),
+                            expiry_height: 100,
+                            amount_zatoshis: 50,
+                            fee_zatoshis: 10,
+                            deadline: Some(u64::MAX),
+                        }),
+                    )
+                    .unwrap();
+            }
+            store
+                .record_destination_readiness(&job.id, "1", "partial-credit", 1)
+                .unwrap();
+            let (current, facts) = store
+                .settle_funding_source(&job.id, &job.operation_id, false)
+                .unwrap()
+                .expect("destination credit cannot close accepted source work");
+            assert_eq!(current.operation_id, job.operation_id);
+            assert!(facts.initial_credit_recorded);
+            assert!(!facts.new_funding_allowed);
+            assert_eq!(facts.preparation_accepted, !with_bytes);
+            assert_eq!(facts.source_pending, with_bytes);
+            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+            if with_bytes {
+                assert_eq!(
+                    store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
+                    b"exact signed bytes"
+                );
+                assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 0);
+            }
+        }
+    }
+
+    #[test]
     fn readiness_closes_a_clean_quote_without_starting_replacement() {
         let (_dir, mut store, job) = fixture();
         let quote = serde_json::to_vec(
@@ -2000,6 +2130,23 @@ mod completion_tests {
             .find(|j| j.id == job.id)
             .unwrap();
         assert_ne!(current.operation_id, job.operation_id);
+        for publication_due in [false, true] {
+            assert!(
+                store
+                    .settle_funding_source(&job.id, &job.operation_id, publication_due)
+                    .is_err()
+            );
+        }
+        assert_eq!(
+            store
+                .funding_quote_for_operation(&current.id, &current.operation_id)
+                .unwrap()
+                .as_slice(),
+            quote.as_slice()
+        );
+        let unchanged = store.funding_job(&job.id).unwrap().unwrap();
+        assert_eq!(unchanged.operation_id, current.operation_id);
+        assert_eq!(unchanged.phase, current.phase);
         assert_eq!(current.phase, FundingPhase::Quoted);
         assert_eq!(current.next_poll, 0);
         assert!(current.last_error.is_none());

@@ -163,7 +163,7 @@ fn pages_keep_bounds_order_and_matching_facts_without_mutation() {
             assert!(expected.contains(&job.id));
             assert!(seen.insert(job.id.clone()));
             assert_eq!(job.phase, funding::FundingPhase::Allocated);
-            assert!(facts.enabled);
+            assert!(facts.new_funding_allowed);
             assert!(!facts.accepted_quote);
             assert!(!facts.initial_credit_recorded);
             assert!(!facts.archived);

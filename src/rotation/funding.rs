@@ -161,13 +161,6 @@ impl<B: FundingBackend> FundingWorker<B> {
             .call(move |s| s.funding_facts(&id, &operation))
             .await
     }
-    async fn finish_if_proven(&self, job: &FundingJob) -> Result<bool> {
-        let id = job.id.clone();
-        let operation = job.operation_id.clone();
-        self.store
-            .call(move |s| s.finish_funding_if_proven(&id, &operation))
-            .await
-    }
     async fn source_step(
         &self,
         job: &FundingJob,
@@ -198,7 +191,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             false
         };
         let recovery_needed = if original.source_pending && original.source_attempts == 0 {
-            !original.enabled
+            !original.new_funding_allowed
                 || unsubmitted_expired
                 || original.source_submission.is_none()
                 || original.provider_failed
@@ -221,59 +214,26 @@ impl<B: FundingBackend> FundingWorker<B> {
         }
         let facts = self.facts(job).await?;
         let mut observation_error = None;
+        let mut phase_reconciliation_due = source_observed;
         // An operator disposition can precede source observation (for example,
         // conflicting evidence or qualification). Retain that liability's normal
         // reconciliation; a source already confirmed by recovery needs no repeat.
         if facts.source_reconciliation_needed() && !source_observed {
             match self.backend.lock().await.reconcile(job).await {
-                Ok(_) => {
-                    let id = job.id.clone();
-                    let operation = job.operation_id.clone();
-                    self.store
-                        .call(move |s| s.reconcile_funding_phase(&id, &operation))
-                        .await?;
-                }
+                Ok(_) => phase_reconciliation_due = true,
                 Err(error) => {
                     observation_error.get_or_insert(error.context("source_reconciliation_failed"));
                 }
             }
         }
-        if source_observed {
-            let (id, operation) = (job.id.clone(), job.operation_id.clone());
-            self.store
-                .call(move |s| s.reconcile_funding_phase(&id, &operation))
-                .await?;
-        }
-        if self.finish_if_proven(job).await? {
-            return Ok(None);
-        }
-        let id = job.id.clone();
-        let current = self
+        let (id, operation) = (job.id.clone(), job.operation_id.clone());
+        let Some((current, facts)) = self
             .store
-            .call(move |s| s.funding_job(&id))
+            .call(move |s| s.settle_funding_source(&id, &operation, phase_reconciliation_due))
             .await?
-            .context("funding job missing")?;
-        ensure!(
-            current.operation_id == job.operation_id,
-            "funding operation binding changed"
-        );
-        let facts = self.facts(&current).await?;
-        if facts.initial_credit_recorded
-            && !facts.preparation_accepted
-            && !facts.source_pending
-            && matches!(current.phase, Allocated | Quoted)
-        {
-            let id = current.id.clone();
-            let operation = current.operation_id.clone();
-            self.store
-                .call(move |s| s.close_unprepared_funding_for_operation(&id, &operation))
-                .await?;
-            ensure!(
-                self.finish_if_proven(&current).await?,
-                "closed destination lacks completion proof"
-            );
+        else {
             return Ok(None);
-        }
+        };
         match recovery {
             Some(RecoveryOutcome::OperatorRequired(reason)) => {
                 let error = anyhow::anyhow!(RecoveryBlocked(reason));
@@ -292,7 +252,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             None => {}
         }
         if facts.source_pending {
-            if facts.source_attempts == 0 && !facts.initial_credit_recorded && facts.enabled {
+            if facts.new_funding_allowed {
                 let id = current.operation_id.clone();
                 let operation = self.store.call(move |s| s.operation(&id)).await?;
                 if operation
@@ -327,7 +287,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             return observation_error.map_or(Ok(None), Err);
         }
         match current.phase {
-            Allocated if !facts.initial_credit_recorded && facts.enabled => {
+            Allocated if facts.new_funding_allowed => {
                 return self
                     .backend
                     .lock()
@@ -336,9 +296,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .await
                     .map(Some);
             }
-            Quoted if !facts.initial_credit_recorded && facts.enabled => {
-                self.prepare_quoted(&current, clock).await?
-            }
+            Quoted if facts.new_funding_allowed => self.prepare_quoted(&current, clock).await?,
             Preparing => {
                 let id = current.operation_id.clone();
                 let prepared = self.store.call(move |s| s.operation_pending(&id)).await?;
@@ -714,8 +672,7 @@ impl FundingObservations for Observations {
                 ensure!(
                     current.operation_id == operation
                         && current.phase == FundingPhase::Allocated
-                        && facts.enabled
-                        && !facts.initial_credit_recorded
+                        && facts.new_funding_allowed
                         && !facts.accepted_quote
                         && !facts.archived
                         && facts.source_submission.is_none(),

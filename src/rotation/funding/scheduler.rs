@@ -80,11 +80,8 @@ fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
             || crate::treasury::recovery::needs_recovery(job)
             || matches!(job.phase, FundingPhase::Preparing | FundingPhase::Prepared)
             || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
-                && (facts.enabled || facts.initial_credit_recorded)),
-        job.phase == FundingPhase::Allocated
-            && facts.enabled
-            && !facts.initial_credit_recorded
-            && !facts.accepted_quote,
+                && (facts.new_funding_allowed || facts.initial_credit_recorded)),
+        job.phase == FundingPhase::Allocated && facts.new_funding_allowed && !facts.accepted_quote,
     ]
 }
 

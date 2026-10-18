@@ -87,7 +87,7 @@ impl StartupPath {
         {
             return Obstructed("preparation_or_swap_requires_review");
         }
-        if !self.facts.enabled {
+        if !self.facts.new_funding_allowed {
             return Obstructed(match self.condition {
                 Some(super::super::error::FundingCondition::Disabled) => "funding_disabled",
                 Some(super::super::error::FundingCondition::QualificationDenied) => {
