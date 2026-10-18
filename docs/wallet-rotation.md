@@ -367,6 +367,11 @@ confirmation and destination credit are independent: a NEAR success response alo
 cannot mark a candidate spendable, and Base credit alone cannot prove source
 confirmation. Concurrent credit observers cannot overwrite a completed job with
 an obsolete persistence warning; genuine source-reconciliation errors remain visible.
+After source observation, one serialized Store job publishes any due phase,
+settles proven completion and reads the current operation and facts. These steps
+retain their existing transactions; they are not one all-or-nothing transaction.
+Derived eligibility for new funding is shared by observers and source work;
+mutation boundaries still recheck current preparation and submission authority.
 
 Successful financial completion combines three independent facts: the wallet's first positive credit, canonical source confirmation,
 and validated provider fulfillment. Initial credit alone publishes the funded

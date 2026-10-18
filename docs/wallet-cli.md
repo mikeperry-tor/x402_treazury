@@ -93,14 +93,14 @@ minute. A completed swap's retained timeout does not block bootstrap: confirmed
 USDC credit satisfies that job, while pending source accounting retains its
 reservations and continues reconciling during serving.
 
-Ordinary managed `serve` performs the same bootstrap before catalog/pricing
-discovery when `auto_fund=true`, then starts normal serving and replacement funding.
-This allows a new deployment to pay for discovery fallback. One eligible funded
-payer per group suffices; unfinished reserves keep reconciling through discovery
-and serving under the same retained owner. `auto_fund=false` skips this funding wait
-and makes explicit bootstrap fail, while accepted operations remain observed;
-qualification funding restrictions retain their existing lifecycle. `catalog warm` never starts funding: use this
-command first when warming needs a managed paid relay wallet.
+Ordinary managed `serve` binds listeners and exposes available tools before starting
+initial or replacement funding. Remote catalog/pricing discovery and pending paid
+relay discovery continue during serving under the retained owner; relay discovery
+waits for its assigned payer without allocating wallets itself. Serving does not
+wait for bootstrap completeness. `auto_fund=false` pauses new funding and makes
+explicit bootstrap fail, while accepted operations remain observed; qualification
+funding restrictions retain their existing lifecycle. `catalog warm` never starts
+funding: use `wallet bootstrap` first when warming needs a managed paid relay wallet.
 
 ## Treasury and managed pools
 

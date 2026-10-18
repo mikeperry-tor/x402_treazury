@@ -86,8 +86,10 @@ workflow; do not wait for the user to request delegation each time.
   change. Per-commit approval does not replace this review of the accumulated work.
 - Use CogC/CycC in substantive Rust refactors and architecture gates. Compare the
   agreed baseline with changed functions and complete call chains; examine relevant
-  warnings and unchanged high-risk hotspots. Resolve them through simplification
-  or a concrete explanation of retained responsibilities and supporting tests.
+  warnings and unchanged high-risk hotspots. Favor simpler representations of
+  state, ownership and control flow that preserve required behavior. Necessary
+  responsibilities and passing tests alone do not justify the current organization;
+  evaluate concrete simplifications before explaining why a hotspot should remain.
   Advisory scores require review, not automatic rejection or silent dismissal.
   Follow the [complexity review discipline](tests/COMPLEXITY.md#review-discipline);
   do not extract helpers merely to lower a score.

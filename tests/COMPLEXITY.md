@@ -147,8 +147,13 @@ For substantive Rust refactors and architecture gates:
    responsibilities from moved complexity. Inclusive scores contain nested closures
    and functions; do not sum overlapping rows into a supposed chain score.
 4. Give each relevant warning an explicit disposition: remove/simplify a
-   responsibility, or explain the concrete retained responsibility, why its ordering
-   and ownership belong together, and which tests cover its failure boundaries.
+   responsibility, or evaluate simpler representations before explaining the
+   concrete retained responsibility, why its ordering and ownership belong
+   together, and which tests cover its failure boundaries. Necessary behavior and
+   passing tests do not establish that its current organization is the clearest.
+   Prefer a concrete simplification that removes redundant decisions, invalid states
+   or ownership choreography while preserving required behavior, even when the
+   existing implementation is correct and its high score has an explanation.
    Grouped conclusions should name the affected functions so warnings can be traced
    to their rationale. Saying scores are advisory is not a disposition.
 5. Have the independent architecture reviewer examine those decisions and recurring

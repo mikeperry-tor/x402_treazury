@@ -88,9 +88,12 @@ remain distinct from ordinary HTTP cache entries. See
 
 Deployment initialization checks managed connection settings before opening the
 treasury and installs qualification, funding-denial and pause restrictions before
-configuring pools. Reused initialization receives binding-time funding restrictions before use. Setup
-and listener failures release relay-held store handles before waiting for treasury
-shutdown. Static signers are loaded only for effective selected bindings,
+configuring pools. Initialization represents store-only ownership separately from
+a treasury paired with its funding runtime, so consumers cannot combine unrelated
+optional owners and capabilities. Shutdown drops dependent Store handles before
+closing the matching owner. Reused initialization receives binding-time funding
+restrictions before use. Setup and listener failures release relay-held store
+handles before waiting for treasury shutdown. Static signers are loaded only for effective selected bindings,
 including source management and relay wallets. If discovery fails after wallets
 are initialized, loading shuts down the retained owner before returning an error.
 
