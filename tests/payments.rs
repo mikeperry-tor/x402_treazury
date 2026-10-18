@@ -256,13 +256,14 @@ async fn final_rejection_is_reported_without_third_attempt() {
     let mut gate = gate(challenge("exact", "1"));
     gate.reject = true;
     let (url, task) = start(gate.clone()).await;
-    let error = client("1")
-        .execute(route(url))
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("insufficient_funds"), "{error}");
+    let error = client("1").execute(route(url)).await.unwrap_err();
+    assert!(error.to_string().contains("do not automatically repeat"));
+    assert!(
+        format!("{error:#}").contains("insufficient_funds"),
+        "{error:#}"
+    );
     assert_eq!(gate.count.load(Ordering::SeqCst), 2);
+    assert_eq!(gate.signed.lock().unwrap().len(), 1);
     task.abort();
 }
 
