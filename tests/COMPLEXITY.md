@@ -131,8 +131,37 @@ those warnings in context; helper extraction does not automatically justify a ne
 hotspot. These are review triggers, not an instruction to split coherent code merely
 to meet a number. Own scores and nested callable rows remain available for review.
 
-Prioritize functions that combine financial transitions, permissions, network
-routing or cancellation with many branches. Extract coherent responsibilities,
-retain ordering and ownership, and compare behavior with focused regressions.
-A lower score alone does not justify an abstraction or establish correctness.
-Keep score tables and before/after reports in ignored local output.
+For substantive Rust refactors and architecture gates:
+
+1. Compare the agreed baseline and changed sources with the same pinned analyzer.
+   Check complete analysis, exclusions and source hashes before trusting results.
+   Use a local comparison for a fixup as well as the original baseline when needed
+   to distinguish a local improvement from accumulated branch complexity. Reuse a
+   verified source-matched artifact when the relevant source has not changed.
+2. Review relevant new/worsening warnings and unchanged high-risk hotspots. The
+   short Markdown ranking and absence of new warnings do not establish that the
+   whole design is simple; use the complete JSON/CSV. Prioritize financial
+   transitions, permissions, network routing and cancellation ownership.
+3. Inspect complete call chains, including new helpers, derived state, mandatory
+   reads, blocking predicates and independent publication paths. Distinguish deleted
+   responsibilities from moved complexity. Inclusive scores contain nested closures
+   and functions; do not sum overlapping rows into a supposed chain score.
+4. Give each relevant warning an explicit disposition: remove/simplify a
+   responsibility, or explain the concrete retained responsibility, why its ordering
+   and ownership belong together, and which tests cover its failure boundaries.
+   Grouped conclusions should name the affected functions so warnings can be traced
+   to their rationale. Saying scores are advisory is not a disposition.
+5. Have the independent architecture reviewer examine those decisions and recurring
+   fixup patterns. Resolve material findings; use any resulting simplification or
+   design change to guide focused regression tests. A repeated pattern may justify
+   a targeted wider audit even when its latest score did not increase.
+
+Delete unnecessary policy and state before extracting coherent responsibilities.
+Do not hide scores through helper extraction, add a workflow framework to distribute
+branches, or weaken ownership/financial checks for a lower number. A justified
+coordinator may retain a high score; thresholds are review triggers, not numerical
+merge gates or instructions to refactor until a target is reached.
+
+Record concise conclusions in the owning review or PR. Keep generated score tables,
+before/after reports and investigation notes in ignored local output. Metrics and
+coverage joins are review aids, not proof of correctness or test execution.

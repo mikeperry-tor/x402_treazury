@@ -94,7 +94,9 @@ are explicit, and existing coverage is joined only for unchanged source files.
 `scripts/check.sh` runs the audit by default. New or worsening hotspots above CogC
 20 or CycC 40 receive advisory review warnings against the merge base with `main`;
 scores do not fail the check. Use `--base REF` or `COMPLEXITY_BASE_REF` for another
-review target. Incomplete analysis fails visibly. See [definitions and findings](../tests/COMPLEXITY.md)
+review target. Incomplete analysis fails visibly. Apply the
+[review discipline](../tests/COMPLEXITY.md#review-discipline) to act on warnings;
+see [definitions and findings](../tests/COMPLEXITY.md)
 for syntax qualification, macro/feature limitations and the independent tool build.
 
 ### Local coverage

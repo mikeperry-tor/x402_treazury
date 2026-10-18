@@ -84,6 +84,13 @@ workflow; do not wait for the user to request delegation each time.
   regression coverage for gaps exposed by fixes, resolve additional findings and
   assess whether recurring patterns call for a wider audit, simplification or design
   change. Per-commit approval does not replace this review of the accumulated work.
+- Use CogC/CycC in substantive Rust refactors and architecture gates. Compare the
+  agreed baseline with changed functions and complete call chains; examine relevant
+  warnings and unchanged high-risk hotspots. Resolve them through simplification
+  or a concrete explanation of retained responsibilities and supporting tests.
+  Advisory scores require review, not automatic rejection or silent dismissal.
+  Follow the [complexity review discipline](tests/COMPLEXITY.md#review-discipline);
+  do not extract helpers merely to lower a score.
 - Give reviewers the user intent, scope, baseline and validation evidence. Ask them
   to verify claims and question unnecessary enforcement, not merely confirm the
   author's approach. The coordinating agent integrates findings and owns completion.
