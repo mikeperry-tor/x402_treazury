@@ -35,6 +35,11 @@ enum Wire {
     HeldSuccess,
     Expired,
     QualifiedThree,
+    DuplicateVerification,
+    DuplicateSettlement,
+    SettledWithVerification,
+    MalformedSettlementWithVerification,
+    SettlementWithGenericChallenge,
 }
 type CapturedRequest = (SocketAddr, Method, String, Vec<u8>);
 #[derive(Clone)]
@@ -126,6 +131,69 @@ async fn seller(
         return "paid".into_response();
     }
     match f.wire {
+        Wire::SettledWithVerification
+        | Wire::MalformedSettlementWithVerification
+        | Wire::SettlementWithGenericChallenge => {
+            let fixture: Value = serde_json::from_str(include_str!(
+                "../../tests/fixtures/x402/insufficient-funds.json"
+            ))
+            .unwrap();
+            let mut settlement = fixture["settlement"].clone();
+            if matches!(f.wire, Wire::SettledWithVerification) {
+                settlement["success"] = json!(true);
+            }
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [
+                    (
+                        "payment-response",
+                        if matches!(f.wire, Wire::MalformedSettlementWithVerification) {
+                            "not-base64".into()
+                        } else {
+                            STANDARD.encode(settlement.to_string())
+                        },
+                    ),
+                    (
+                        "payment-required",
+                        STANDARD.encode(
+                            if matches!(f.wire, Wire::SettlementWithGenericChallenge) {
+                                challenge()
+                            } else {
+                                fixture["verification"].clone()
+                            }
+                            .to_string(),
+                        ),
+                    ),
+                ],
+                "{}",
+            )
+                .into_response()
+        }
+        Wire::DuplicateVerification | Wire::DuplicateSettlement => {
+            let fixture: Value = serde_json::from_str(include_str!(
+                "../../tests/fixtures/x402/insufficient-funds.json"
+            ))
+            .unwrap();
+            let (header, value) = if matches!(f.wire, Wire::DuplicateVerification) {
+                ("payment-required", fixture["verification"].clone())
+            } else {
+                ("payment-response", fixture["settlement"].clone())
+            };
+            let mut response = (
+                StatusCode::PAYMENT_REQUIRED,
+                [(header, STANDARD.encode(value.to_string()))],
+                "{}",
+            )
+                .into_response();
+            response.headers_mut().append(
+                header,
+                STANDARD
+                    .encode(json!({"success":true,"error":"conflicting outcome"}).to_string())
+                    .parse()
+                    .unwrap(),
+            );
+            response
+        }
         Wire::Verification => {
             let fixture: Value = serde_json::from_str(include_str!(
                 "../../tests/fixtures/x402/insufficient-funds.json"
@@ -485,6 +553,36 @@ async fn prose_allowance_generic_malformed_and_truncated_responses_earn_no_retry
         assert_eq!(signed.len(), 1);
         assert_eq!(requests.len(), 2);
     }
+}
+
+#[tokio::test]
+async fn duplicate_failure_headers_never_authorize_another_payer() {
+    for wire in [Wire::DuplicateVerification, Wire::DuplicateSettlement] {
+        let (success, signed, requests, _) = run("POST", wire, 1).await;
+        assert!(!success, "ambiguous failure cannot authorize a repeat");
+        assert_eq!(signed.len(), 1);
+        assert_eq!(requests.len(), 2, "wallet B must not even be contacted");
+    }
+}
+
+#[tokio::test]
+async fn settlement_receipt_governs_retry_when_a_challenge_is_also_present() {
+    for wire in [
+        Wire::SettledWithVerification,
+        Wire::MalformedSettlementWithVerification,
+    ] {
+        let (success, signed, requests, _) = run("POST", wire, 1).await;
+        assert!(!success);
+        assert_eq!(signed.len(), 1);
+        assert_eq!(requests.len(), 2);
+    }
+    let (success, signed, requests, _) = run("POST", Wire::SettlementWithGenericChallenge, 1).await;
+    assert!(
+        success,
+        "a generic challenge does not override the settlement failure"
+    );
+    assert_eq!(signed.len(), 2);
+    assert_eq!(requests.len(), 4);
 }
 
 #[tokio::test]

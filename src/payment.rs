@@ -874,15 +874,28 @@ fn sanitize_challenge(response: &mut reqwest::Response) -> Result<()> {
 /// Structured forms emitted by the pinned x402 HTTP resource server. Call only
 /// after this payer's signed dispatch; an unsigned challenge never earns retry.
 fn insufficient_funds(headers: &reqwest::header::HeaderMap) -> bool {
+    // Both protocol fields carry one record. Ambiguous duplicates cannot grant
+    // the narrowly scoped permission to repeat a possibly chargeable request.
+    if ["payment-response", "payment-required"]
+        .iter()
+        .any(|name| headers.get_all(*name).iter().count() > 1)
+    {
+        return false;
+    }
     let decoded = |name: &str| -> Option<serde_json::Value> {
         serde_json::from_slice(&STANDARD.decode(headers.get(name)?.as_bytes()).ok()?).ok()
     };
-    decoded("payment-response").is_some_and(|v| {
-        v["success"] == false
-            && v["errorReason"] == "insufficient_funds"
-            && v["network"] == "eip155:8453"
-            && v["transaction"].is_string()
-    }) || decoded("payment-required").is_some_and(|v| {
+    // A receipt describes settlement of this signed attempt. A simultaneous
+    // challenge cannot override success, another failure or an unreadable receipt.
+    if headers.contains_key("payment-response") {
+        return decoded("payment-response").is_some_and(|v| {
+            v["success"] == false
+                && v["errorReason"] == "insufficient_funds"
+                && v["network"] == "eip155:8453"
+                && v["transaction"].is_string()
+        });
+    }
+    decoded("payment-required").is_some_and(|v| {
         v["x402Version"] == 2 && v["error"] == "insufficient_funds" && v["accepts"].is_array()
     })
 }
