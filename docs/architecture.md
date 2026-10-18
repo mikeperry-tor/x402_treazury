@@ -107,7 +107,9 @@ Clients must inspect this metadata; it does not imply a UI notification. Unsigne
 dependency waits add no timer or
 spending authority. Shutdown drains accepted relay work before financial owners.
 Local authored catalogs remain validated before serving; strict inspection and
-qualification still require complete discovery.
+qualification still require complete discovery. Remaining recovery acceptance is
+tracked in the
+[best-effort wallet and recovery plan](plans/best_effort_wallet_balances.md#be06-source-recovery-and-accounting-removal).
 
 ## MCP and output boundaries
 
