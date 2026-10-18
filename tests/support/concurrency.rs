@@ -367,12 +367,12 @@ async fn tor_burst_child() {
         }
     }
     assert_eq!(
-        signed, 12,
-        "all six signed calls in both bursts retain signer isolation"
+        signed, 18,
+        "all nine signed calls in both bursts retain signer isolation"
     );
     assert!(
         rpc > 0,
-        "actual readiness/acquisition RPC retains payer isolation"
+        "actual initial-credit and balance RPC retains payer isolation"
     );
 }
 
@@ -431,7 +431,7 @@ async fn fresh_small_only_group_promotes_once_under_concurrent_first_payments() 
             assert!(group.serving_ready);
             assert_eq!(group.addresses.len(), 1);
             assert_eq!(group.addresses[0].role, "READY");
-            assert_eq!(group.reserve_claims[0].generation, 1);
+            assert_eq!(group.reserve_claims[0].generation, 0);
             Ok(())
         })
         .await
