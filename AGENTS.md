@@ -37,6 +37,14 @@ guards first; do not stack whole-work deadlines or replace removed deadlines wit
 enormous durations. Keep the [remaining timer inventory](docs/network-egress.md#remaining-timers-and-budgets)
 current when policy changes.
 
+Avoid creating additional local resource limits or network timeouts. Arbitrary
+limits are largely reliability hazards, not default safeguards. Before changing
+caps, queues, cache lifetimes, readiness checks, polling or transport timeouts, read
+[local resource limits](docs/local-resource-limits.md) and the
+[network timeout policy](docs/network-egress.md#timeout-budgets-and-concurrency).
+These inventories help diagnose unexpected failures; existing limits are not
+precedent for another limit or proof that retaining one is necessary.
+
 - Needless double-enforcement is forbidden. When an operator-controlled resource or
   existing authority already supplies the intended limit, do not add, preserve or
   recommend a second policy ceiling for the same purpose. Each additional limit must
@@ -67,11 +75,18 @@ current when policy changes.
   or merely finishing work cannot renew another response's timer or financial authority.
 - USDC estimates and historical readiness are advisory, never signing permission.
   Select within actual pool/payer authority and journal before disclosure; decrement
-  the current estimate once per journaled authorization. See the maintained
-  [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules).
-- Put proven read-only readiness/preflight checks before mutation, reservation and
-  broadcast intent. After uncertain mutation or intent, preserve ownership, exact
-  bytes and liabilities; absence of a result is not proof that nothing happened.
+  the current estimate once per journaled authorization. Prefer best-effort attempts
+  on other existing wallets after recognized insufficient funds while blockchain
+  balance reconciliation runs independently; do not wait for local solvency proofs.
+  See the [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules).
+- Prefer blockchain/SDK spendability and reconciliation over parallel local monetary
+  tracking. Local financial journals must protect concrete ownership, signed authority
+  or off-chain uncertainty the blockchain cannot reconstruct. Remove responsibilities
+  before adding counters, certificates, recovery ledgers or workflow frameworks.
+- Necessary read-only preflight checks precede mutation, reservation and broadcast
+  intent; this ordering does not justify inventing readiness gates. After uncertain
+  mutation or intent, preserve ownership, exact bytes and liabilities; absence of a
+  result is not proof that nothing happened.
 - Scope failures to the affected operation unless typed evidence justifies a wider
   stop. Unsigned outages must not consume transaction recovery attempts. Preserve
   finite retry/backoff, optional-source status and required/qualification completeness.
@@ -182,8 +197,10 @@ funds the captured enabled reserve claims; other wallet administration never sta
 workers. `wallet recover --config FILE` performs one recovery pass without new
 allocations or submissions. Bootstrap/automatic funding share its eligibility logic:
 known unprepared failures or canonically expired signed operations only; uncertain
-preparation, refunds and unresolved confirmed swaps require review. Recovery reset
-limits use durable `funding_recovery` history and profile `max_attempts`, never a
+preparation, refunds and unresolved confirmed swaps require review before restarting
+or replacing funding. Owned-output discovery and shielding can continue under
+current authority without refund attribution. Recovery reset limits use durable
+`funding_recovery` history and profile `max_attempts`, never a
 process-local counter. Unsigned quote outages use per-pass backoff without consuming
 transaction recovery attempts. New refreshes need proof of no accepted calculation or outgoing
 record and a durable refresh marker; historical unclassified records still count.
@@ -383,6 +400,8 @@ and [the runtime architecture](docs/architecture.md).
 - A journaled signature remains potentially chargeable. Managed `PaidClient` calls
   may repeat reviewed arguments on each existing eligible wallet once only after
   recognized structured insufficient funds. Each new payer obtains its own challenge.
+  Recognized headers suffice; drop the unused error body. Its size, truncation or
+  inactivity cannot veto fallback. Every attempt remains journaled.
   Other uncertain outcomes grant no replay; see the best-effort wallet rules.
 - Preserve vendor descriptions whole by default. Any text limit must be explicit
   (`max_description_chars`, `--max-response-chars`). Authored overrides apply last.
@@ -504,6 +523,9 @@ rejected with migration guidance. Do not reintroduce equivalent aggregate limits
 Preserve original authenticated quotes, exact input ownership, accepted calculations,
 prepared bytes and submission journals. The SDK owns current Zcash funds; do not
 restore a parallel principal/fee/refund capital ledger or historical monetary gate.
+Automatic shielding uses SDK-owned transparent outputs without provider status or
+refund attribution. Remaining derived refund-address records serve routing and
+explicit administration, not balance accounting or permission to reopen funding.
 Native safeguards are `max_funding_spend_zec` (optional per wallet transfer),
 `max_funding_transaction_fee_zec` and `max_refund_shielding_fee_zec` (both default
 0.0003 ZEC). Network-fee settings reject proposals; they never override standard
@@ -544,8 +566,10 @@ All declared managed pools initialize, including those unused by selected tools.
   tell operators promptly why shutdown is waiting. Accepted MCP calls are owned
   independently of response delivery, including client disconnect and stdio EOF.
   Close admission first, drain calls while financial prerequisites remain alive,
-  then stop workers. Treasury/funding failure pauses funding until restart without
-  stopping listeners or Base reconciliation; retain ordinary admission and liabilities.
+  then stop workers. Eligible SDK and scheduler failures recover through retained
+  ownership on the existing maintenance/polling cadence, without stopping listeners
+  or Base reconciliation. Preserve exact pending work; recovery never grants replay
+  or replacement funding authority.
   A second signal returns typed `ForcedShutdown` from serving, wallet or bootstrap drains;
   the executable exits immediately without joining blocking workers or releasing
   liabilities. Library embedders own their process-level force behavior.
@@ -585,8 +609,10 @@ network default. Connection establishment remains separate (15 seconds direct,
 120 seconds Tor by default); both network settings work in either mode. Treasury gRPC uses the same connection/read-inactivity settings with per-response
 DATA progress below protobuf decoding. Injected transport removes legacy
 `grpc-timeout`; no application total-RPC or complete-message deadlines apply.
-Header inactivity starts at request dispatch. A separate dispatch-readiness guard
-uses the read-inactivity setting for channel-buffer/HTTP/2 stream-capacity waits;
+Header inactivity also includes request upload; it can reject a slow progressing
+upload, as documented in the network policy. Do not add another timer to compensate.
+A separate dispatch-readiness guard uses the read-inactivity setting for
+channel-buffer/HTTP/2 stream-capacity waits;
 connector attempts retain their full connection allowance plus a readiness window
 until dispatch proves establishment. Sibling traffic cannot renew this guard,
 which ends at dispatch and never caps an active response.
@@ -661,6 +687,9 @@ or privacy guarantee. `cover_fixture` and the ignored distribution matrix provid
 zero-spend qualification; see `tests/live/INTEGRATION.md`.
 
 ## Visible resource limits
+
+Consult [local resource limits](docs/local-resource-limits.md) before changing
+enforcement. The visibility rules below do not require adding a bound.
 
 Buffer bounding and output truncation must never be silent. When a bound rejects,
 truncates or discards input/output, emit a clear log/output message and give the
