@@ -368,7 +368,6 @@ const READY_IDENTITY_SQL: &str = "SELECT w.id,w.role FROM wallets w JOIN reserve
 /// wallet cannot hide independent funded capacity; retain its diagnostic when
 /// there is no eligible alternative. No balance acquisition or role change.
 pub(super) fn default_identity(db: &Connection, pool: &str) -> Result<Option<(String, String)>> {
-    let mut failure = None;
     for role in ["ACTIVE", "RETAINED", "READY"] {
         let sql = if role == "READY" {
             READY_IDENTITY_SQL
@@ -379,28 +378,12 @@ pub(super) fn default_identity(db: &Connection, pool: &str) -> Result<Option<(St
         let mut rows = statement.query(params![pool, role])?;
         while let Some(row) = rows.next()? {
             let wallet: String = row.get(0)?;
-            match payment_ownership(db, pool, &wallet) {
-                Ok(Some(_)) => return Ok(Some((wallet, role.to_owned()))),
-                Ok(None) => {}
-                Err(error)
-                    if error.downcast_ref::<super::super::base::evidence::EvidenceFailure>()
-                        == Some(
-                            &super::super::base::evidence::EvidenceFailure::MalformedSupport,
-                        ) =>
-                {
-                    if failure.is_none() {
-                        tracing::warn!(
-                            category = "malformed_durable_evidence_support",
-                            "Default wallet readiness rejected; checking independent funded identities"
-                        );
-                        failure = Some(error);
-                    }
-                }
-                Err(error) => return Err(error),
+            if payment_ownership(db, pool, &wallet)?.is_some() {
+                return Ok(Some((wallet, role.to_owned())));
             }
         }
     }
-    failure.map_or(Ok(None), Err)
+    Ok(None)
 }
 
 fn documentation_address(db: &Connection, pool: &str) -> Result<String> {

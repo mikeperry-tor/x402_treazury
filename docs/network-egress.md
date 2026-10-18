@@ -21,22 +21,23 @@ Eviction drops only cache ownership: acquired handles retain connections and
 in-flight work. Isolation, origin, runtime and transport keys remain unchanged;
 there is no cache-maintenance timer or wallet-inventory limit.
 
-Managed calls select the initial payer before provider I/O. A trusted price hint
-can choose a cached sufficient wallet; it never supplies a payment challenge.
-After a validated unpaid challenge, an insufficient payer may make one unsigned
-handoff using the replacement wallet's own provider transport and cover owner.
-The original business request is preserved for every supported method, including
-POST. The replacement obtains its own challenge and remains fixed for the second
-attempt. There is no handoff or replay after a signed submission. The
-[admission contract](wallet-rotation.md#capacity-and-admission) and pinned local
-middleware fixtures describe the supported boundary; this is not live-provider
-qualification for arbitrary middleware.
+Managed calls select an initial payer before provider I/O. Saved balances and
+trusted price hints guide selection without proving affordability. Each attempt
+obtains its own unsigned challenge and signs through the same wallet's transport
+and cover owner. Original business arguments/body remain unchanged, including
+supported POST requests. A recognized structured insufficient-funds response to a
+managed signed request can traverse the captured eligible inventory once. Each
+attempt retains its own authorization and possible charge. Other failures and
+successful responses earn no repetition. See the [best-effort wallet
+rules](wallet-rotation.md#best-effort-wallet-rules) and pinned public seller fixtures;
+local fixture acceptance is not live-provider qualification.
 
-Accepted calls retain their application owner through signed dispatch, response
-consumption and output conversion. A disconnected waiter cannot orphan that work
-or free its financial liability. Unsigned candidate acquisition has separate,
-cancellable read ownership; completion of unrelated reads cannot renew a balance
-observation or a signed authority deadline.
+Accepted calls retain their application owner through all attempts, signed
+dispatch, response consumption and output conversion. A disconnected waiter cannot
+orphan that work or free its financial liability. Ordinary advisory balance reads
+run through the existing reconciliation owner, independently of foreground signing.
+A failure during an active read schedules a follow-up; unrelated progress cannot
+renew another response's inactivity timer or signed authority.
 
 | Caller | Transport and identity |
 | --- | --- |

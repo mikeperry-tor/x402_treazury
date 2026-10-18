@@ -120,12 +120,12 @@ impl Registry {
             let event: Value = serde_json::from_str(raw)?;
             let case = event["case"].as_str().context("receipt case missing")?;
             ensure!(
-                seen.insert(case.to_owned()),
+                seen.insert(event["attempt_id"].as_str().context("receipt attempt missing")?.to_owned()),
                 "duplicate receipt observation"
             );
             let payment: String = self.db.query_row(
-                "SELECT detail FROM events WHERE run=?1 AND kind='application_payment' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2",
-                params![run,case], |r| r.get(0)).context("receipt lacks payment admission")?;
+                "SELECT detail FROM events WHERE run=?1 AND kind='application_payment' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2 AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.attempt_id')=?3",
+                params![run,case,event["attempt_id"].as_str().context("receipt attempt missing")?], |r| r.get(0)).context("receipt lacks payment admission")?;
             let payment: Value = serde_json::from_str(&payment)?;
             ensure!(
                 event["session"] == payment["session"]
@@ -188,7 +188,7 @@ impl Registry {
             rows.len() <= 10000,
             "payment evidence exceeds 10000-attempt run limit"
         );
-        let mut cases = std::collections::BTreeSet::new();
+        let mut totals = BTreeMap::<String,u64>::new();
         let mut attempts = std::collections::BTreeSet::new();
         for raw in &rows {
             let event: Value = serde_json::from_str(raw)?;
@@ -217,19 +217,20 @@ impl Registry {
                 .as_str()
                 .context("payment amount missing")?
                 .parse()?;
+            let total=totals.entry(case.to_owned()).or_default();
+            *total=total.checked_add(amount).context("case attempt charges overflow")?;
             ensure!(
-                amount > 0 && amount <= super::atomic_usdc(&reviewed.reserve_usdc)?,
+                amount > 0 && *total <= super::atomic_usdc(&reviewed.reserve_usdc)?,
                 "payment exceeds case reservation"
             );
             ensure!(
-                cases.insert(case.to_owned())
-                    && attempts.insert(
+                attempts.insert(
                         event["attempt_id"]
                             .as_str()
                             .context("payment attempt missing")?
                             .to_owned()
                     ),
-                "duplicate payment case/attempt evidence"
+                "duplicate payment attempt evidence"
             );
         }
         Ok(rows.len())

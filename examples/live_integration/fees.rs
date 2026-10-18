@@ -15,7 +15,8 @@ pub fn report(report: &Value) -> Result<Value> {
     let events = report["runtime_events"]
         .as_array()
         .context("fee events missing")?;
-    let mut admitted = BTreeMap::new();
+    let mut admitted = BTreeMap::<&str,Vec<(Option<&str>,u64)>>::new();
+    let mut attempts=BTreeSet::new();
     // Application correlation validation includes case cap, session, and unsigned refusal.
     let correlated = report["application_evidence"]["payment_attempts_correlated"].as_u64();
     for event in events.iter().filter(|e| e["kind"] == "application_payment") {
@@ -26,12 +27,11 @@ pub fn report(report: &Value) -> Result<Value> {
             .as_str()
             .context("admission amount missing")?
             .parse()?;
-        ensure!(
-            admitted.insert(case, amount).is_none(),
-            "duplicate admission price"
-        );
+        let attempt=detail["attempt_id"].as_str();
+        ensure!(attempts.insert((case,attempt)),"duplicate admission price");
+        admitted.entry(case).or_default().push((attempt,amount));
     }
-    let valid = correlated == Some(admitted.len() as u64);
+    let valid = correlated == Some(attempts.len() as u64);
     let offers = crate::offers::report(report)?;
     ensure!(
         offers.keys().all(|id| known.contains(id.as_str())),
@@ -53,7 +53,8 @@ pub fn report(report: &Value) -> Result<Value> {
         .iter()
         .map(|case| {
             let id = case["case"].as_str().expect("checked above");
-            let admission = valid.then(|| admitted.get(id).copied()).flatten();
+            let observations=valid.then(||admitted.get(id)).flatten();
+            let admission = observations.filter(|v|v.len()==1).map(|v|v[0].1);
             let verified = proofs
                 .get(id)
                 .map(|v| match v {
@@ -61,12 +62,15 @@ pub fn report(report: &Value) -> Result<Value> {
                     _ => v.as_u64().context("invalid debit amount"),
                 })
                 .transpose()?;
-            Ok(
-                json!({"case":id,"admitted_atomic":admission,"verified_debit_atomic":verified,
+            let mut row=json!({"case":id,"admitted_atomic":admission,"verified_debit_atomic":verified,
             "challenge_observations":if valid {offers.get(id).cloned().unwrap_or_default()} else {Vec::new()},
             "admitted_above_one_cent":admission.map(|v|v>10000),
-            "verified_debit_above_one_cent":verified.map(|v|v>10000)}),
-            )
+            "verified_debit_above_one_cent":verified.map(|v|v>10000)});
+            if let Some(observations)=observations.filter(|v|v.len()>1) {
+                row["admitted_attempts"]=json!(observations.iter().map(|(id,amount)|json!({"attempt_id":id,"amount_atomic":amount,"above_one_cent":*amount>10000})).collect::<Vec<_>>());
+                row["admitted_total_atomic"]=json!(observations.iter().try_fold(0_u64,|sum,(_,amount)|sum.checked_add(*amount).context("admitted amount overflow"))?);
+            }
+            Ok(row)
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(json!({"asset":"Base USDC", "threshold_atomic":10000,
@@ -78,6 +82,18 @@ pub fn report(report: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retry_prices_remain_per_attempt_and_total_is_not_a_single_price() {
+        let mut r=input();
+        r["runtime_events"].as_array_mut().unwrap().push(json!({"kind":"application_payment","detail":{"case":"a","attempt_id":"second","amount":"5000"}}));
+        r["application_evidence"]["payment_attempts_correlated"]=json!(3);
+        let result=report(&r).unwrap();
+        let a=&result["cases"][0];
+        assert!(a["admitted_atomic"].is_null());
+        assert!(a["admitted_above_one_cent"].is_null());
+        assert_eq!(a["admitted_total_atomic"],15000);
+        assert_eq!(a["admitted_attempts"].as_array().unwrap().len(),2);
+    }
     fn input() -> Value {
         json!({"cases":[{"case":"a"},{"case":"b"},{"case":"c"}],
             "application_evidence":{"payment_attempts_correlated":2},

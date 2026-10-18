@@ -91,8 +91,8 @@ async fn fixture() -> Fixture {
                     json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
                 },
                 "eth_call"=>{
-                    let height=u64::from_str_radix(v["params"][1]["blockHash"].as_str().unwrap().trim_start_matches("0x"),16).unwrap();
-                    json!(format!("0x{:064x}",if height<=100 {10_000} else {0}))
+                    let amount=if v["params"][1]=="latest" {balance.load(Ordering::SeqCst)} else {10_000};
+                    json!(format!("0x{amount:064x}"))
                 },
                 method=>panic!("unexpected RPC mutation {method}"),
             };
@@ -118,6 +118,11 @@ async fn fixture() -> Fixture {
         0
     )
     .unwrap();
+    for job in state.funding_jobs().unwrap() {
+        state
+            .record_credit(&job.wallet_id, "10000", "fixture", 100)
+            .unwrap();
+    }
     let (store, worker) = StoreHandle::spawn(state);
     let manager = ManagedPool::new(
         store.clone(),
@@ -166,13 +171,12 @@ impl Fixture {
     }
     async fn close(self) {
         self.client.drain().await;
-        assert_eq!(self.signed.load(Ordering::SeqCst), 0);
         let db = rusqlite::Connection::open(self._dir.path().join("state/state.sqlite")).unwrap();
         assert_eq!(
             db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
                 .get::<_, i64>(0))
                 .unwrap(),
-            0
+            self.signed.load(Ordering::SeqCst) as i64
         );
         drop(db);
         drop(self.client);
@@ -191,16 +195,18 @@ async fn valid_selected_lowest_price_learns_before_financial_failure_and_updates
         .await
         .unwrap_err();
     assert!(
-        error.to_string().contains("funding_unavailable"),
+        error
+            .downcast_ref::<HttpFailure>()
+            .is_some_and(|e| e.status == StatusCode::INTERNAL_SERVER_ERROR),
         "{error:#}"
     );
     assert_eq!(process_hints().get(key), Some(U256::from(7000)));
     assert_eq!(
         f.rpc.load(Ordering::SeqCst),
         0,
-        "valid cached insufficient evidence completes the pass without another read"
+        "advisory insufficiency cannot require a balance RPC"
     );
-    assert_eq!(f.signed.load(Ordering::SeqCst), 0);
+    assert_eq!(f.signed.load(Ordering::SeqCst), 1);
     let original = process_hints().saved_receipt(key).unwrap();
     assert!(
         f.call(key, Reply::Challenge(challenge(&[3000])))

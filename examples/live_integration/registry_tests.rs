@@ -764,6 +764,33 @@ fn settlement_observation_requires_canonical_reason_or_drained_unsigned_evidence
 }
 
 #[test]
+fn later_success_never_hides_an_earlier_pending_authorization() {
+    for earlier in [None,Some("EXPIRED_UNUSED"),Some("USED")] {
+        let f=Fixture::new();
+        let mut r=f.open();
+        f.prepare(&mut r);
+        r.reserve_batch("test_run","batch", &["call".into()],10).unwrap();
+        r.dispatching("test_run","call").unwrap();
+        r.event("test_run","application_claim",&json!({"case":"call","session":"s","server":"main","source":"api","tool":"api_read","mode":"managed","started_micros":0}),10).unwrap();
+        r.event("test_run","application_finished",&json!({"case":"call","session":"s","is_error":false,"finished_micros":1}),10).unwrap();
+        let mut attempts=Vec::new();
+        let mut resolutions=Vec::new();
+        for (id,outcome) in [("a",earlier),("b",Some("USED"))] {
+            r.event("test_run","application_payment",&json!({"case":"call","session":"s","stage":"admitted_before_signing","amount":"1","attempt_id":id,"pool":"p","wallet":id,"generation":0}),10).unwrap();
+            attempts.push(json!({"id":id,"pool":"p","wallet":id,"generation":0,"amount":"1","state":if outcome.is_some(){"RESOLVED"}else{"POSSIBLY_SUBMITTED"}}));
+            if let Some(outcome)=outcome {resolutions.push(json!({"attempt_id":id,"outcome":outcome,"height":12,"hash":"block","block_time":100}));}
+        }
+        r.finish_managed("test_run","call",Some(b"{}"),true).unwrap();
+        let snapshot=json!({"treasury_status":{"treasury_id":f.manifest.treasury_id},"payment_attempts":attempts,"payment_resolutions":resolutions});
+        r.apply_settlement("test_run",&snapshot,true).unwrap();
+        let report=r.report(Some("test_run"),12).unwrap();
+        assert_eq!(report["cases"][0]["settlement"],if earlier.is_some(){"USED"}else{"PENDING"});
+        assert_eq!(reserved(&r),20000);
+        assert_eq!(r.application_evidence("test_run").unwrap()["payment_attempts_correlated"],2);
+        assert!(r.verified_debits("test_run").unwrap().is_empty());
+    }
+}
+#[test]
 fn seller_receipts_are_correlated_but_never_promoted_to_chain_evidence() {
     let f = Fixture::new();
     let mut r = f.open();
@@ -806,6 +833,15 @@ fn seller_receipts_are_correlated_but_never_promoted_to_chain_evidence() {
     assert_eq!(reserved(&r), 20000);
     assert_eq!(before["cases"], after["cases"]);
     assert_eq!(r.verified_debits("test_run").unwrap().len(), 1);
+    let mut earlier=json!({"case":"call","session":"s","stage":"admitted_before_signing","amount":"1","attempt_id":"earlier","address":payer});
+    r.event("test_run","application_payment",&earlier,10).unwrap();
+    assert!(r.verified_debits("test_run").unwrap().is_empty(),"later debit cannot hide unresolved earlier charge");
+    let observed=json!({"case":"call","attempts":[{"attempt_id":"earlier","resolution":{"attempt_id":"earlier","outcome":"EXPIRED_UNUSED","height":42,"hash":format!("0x{:064x}",4),"block_time":1000}}]});
+    r.event("test_run","payment_observed",&observed,10).unwrap();
+    assert_eq!(r.verified_debits("test_run").unwrap().len(),1);
+    earlier["attempt_id"]=json!("unknown");
+    r.event("test_run","application_payment",&earlier,10).unwrap();
+    assert!(r.verified_debits("test_run").unwrap().is_empty());
     let db = rusqlite::Connection::open(f.state.join("live-integration/registry.sqlite")).unwrap();
     db.execute("UPDATE events SET detail=json_set(detail,'$.proof.amount_atomic','2') WHERE kind='application_debit_verified'",[]).unwrap();
     assert!(r.verified_debits("test_run").is_err());

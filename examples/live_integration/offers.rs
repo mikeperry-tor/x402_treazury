@@ -18,7 +18,6 @@ pub fn report(report: &Value) -> Result<BTreeMap<String, Vec<Value>>> {
             kind,
             "application_claim"
                 | "application_challenge"
-                | "application_payment"
                 | "application_finished"
         ) {
             continue;
@@ -33,7 +32,7 @@ pub fn report(report: &Value) -> Result<BTreeMap<String, Vec<Value>>> {
                     "duplicate offer case claim"
                 );
             }
-            "application_payment" | "application_finished" => {
+            "application_finished" => {
                 closed.insert(id);
             }
             _ => {
@@ -51,8 +50,8 @@ pub fn report(report: &Value) -> Result<BTreeMap<String, Vec<Value>>> {
                 ensure!(at >= start, "offer observation precedes application start");
                 let rows = observations.entry(id.to_owned()).or_default();
                 ensure!(
-                    rows.len() < 2 && detail["ordinal"].as_u64() == Some(rows.len() as u64),
-                    "duplicate or excessive challenge observations (limit two per case)"
+                    detail["ordinal"].as_u64() == Some(rows.len() as u64),
+                    "duplicate or out-of-order challenge observation"
                 );
                 if let Some(previous) = rows.last() {
                     ensure!(
@@ -144,6 +143,18 @@ mod tests {
                 "observation":{"status":"observed","offers":[{"index":0,"base_usdc":true,"scheme":"exact","amount_atomic":"10001","above_one_cent":true}]}}}]})
     }
     #[test]
+    fn later_wallet_challenges_remain_observable_after_earlier_admissions() {
+        let mut r=input();
+        for ordinal in 1..=3 {
+            r["runtime_events"].as_array_mut().unwrap().push(json!({"kind":"application_payment","detail":{"case":"a","attempt_id":ordinal}}));
+            let mut challenge=r["runtime_events"][1].clone();
+            challenge["detail"]["ordinal"]=json!(ordinal);
+            challenge["detail"]["observed_micros"]=json!(ordinal+2);
+            r["runtime_events"].as_array_mut().unwrap().push(challenge);
+        }
+        assert_eq!(report(&r).unwrap()["a"].len(),4);
+    }
+    #[test]
     fn rejected_offer_is_visible_without_an_admission() {
         let result = report(&input()).unwrap();
         assert_eq!(result["a"][0]["offers"][0]["amount_atomic"], "10001");
@@ -170,7 +181,7 @@ mod tests {
         let mut r = input();
         r["runtime_events"].as_array_mut().unwrap().insert(
             1,
-            json!({"kind":"application_payment","detail":{"case":"a"}}),
+            json!({"kind":"application_finished","detail":{"case":"a"}}),
         );
         assert!(report(&r).is_err());
     }

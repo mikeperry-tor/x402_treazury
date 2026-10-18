@@ -91,7 +91,7 @@ async fn rpc(State(f): State<Fixture>, Json(v): Json<Value>) -> Json<Value> {
             json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",f.timestamp)})
         }
         "eth_call" => {
-            assert_eq!(v["params"][1]["requireCanonical"], true);
+            assert!(v["params"][1] == "latest" || v["params"][1]["requireCanonical"] == true);
             let data = v["params"][0]["data"].as_str().unwrap();
             let amount = if data.starts_with("0x70a08231") {
                 *f.balances
@@ -209,6 +209,11 @@ async fn run_case(
             .unwrap();
     }
     let jobs = store.funding_jobs().unwrap();
+    for job in &jobs {
+        store
+            .record_credit(&job.wallet_id, &job.target, "fixture", 100)
+            .unwrap();
+    }
     let expected_signer = jobs
         .iter()
         .find(|j| j.target == "5000000")
@@ -349,10 +354,10 @@ async fn all_methods_handoff_repeats_business_bytes_and_runs_handler_once() {
     }
 }
 #[tokio::test]
-async fn second_challenge_is_fixed_payer_and_never_negotiates_again() {
+async fn second_challenge_uses_advisory_estimate_and_actual_protocol_permission() {
     for (second, success, handlers, signed) in [
         (Second::Price("1000000"), true, 1, 1),
-        (Second::Price("6000000"), false, 0, 0),
+        (Second::Price("6000000"), true, 1, 1),
         (Second::Free, true, 1, 0),
         (Second::Malformed, false, 0, 0),
         (Second::Unsupported, false, 0, 0),

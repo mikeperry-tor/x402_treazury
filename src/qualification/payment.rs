@@ -114,6 +114,27 @@ pub(super) fn reviewed_wallet(
     Ok(wallet.to_owned())
 }
 impl PaymentContext {
+    /// A new unsigned attempt may itself reach a free handler. Reuse the run's
+    /// current authority/window before starting it; capture grants no renewal.
+    pub(crate) async fn check_retry_start(&self) -> Result<()> {
+        let context = self.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let db = connection(&context.guard.binding)?;
+            let at = now()?;
+            authority(&db, &context.guard.binding, at)?;
+            let (state, start, end): (String, i64, i64) = db.query_row(
+                "SELECT execution,window_start,window_end FROM cases WHERE run=?1 AND id=?2",
+                params![context.guard.binding.run, context.case],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?;
+            ensure!(
+                state == "DISPATCHING" && at >= start && at < end,
+                "qualification retry is outside its authorized case window"
+            );
+            Ok(())
+        })
+        .await?
+    }
     pub fn elapsed_micros(&self) -> u128 {
         self.guard.origin.elapsed().as_micros()
     }
@@ -152,9 +173,9 @@ impl PaymentContext {
             params![self.guard.binding.run,self.case,self.guard.binding.session,attempt], |r| r.get(0))?;
         ensure!(matched, "receipt lacks correlated admitted payment");
         let exists: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM events WHERE run=?1 AND kind='application_receipt' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2)",
-            params![self.guard.binding.run,self.case], |r| r.get(0))?;
-        ensure!(!exists, "receipt already recorded for case");
+            "SELECT EXISTS(SELECT 1 FROM events WHERE run=?1 AND kind='application_receipt' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.attempt_id')=?2)",
+            params![self.guard.binding.run,attempt], |r| r.get(0))?;
+        ensure!(!exists, "receipt already recorded for attempt");
         let event = json!({"case":self.case,"session":self.guard.binding.session,"attempt_id":attempt,
             "receipt":receipt,"meaning":"unverified seller claim; never releases payment exposure"});
         tx.execute(
@@ -204,8 +225,30 @@ impl PaymentContext {
             10,
         )?;
         let (reservation,state,start,end): (i64,String,i64,i64) = tx.query_row("SELECT reservation,execution,window_start,window_end FROM cases WHERE run=?1 AND id=?2", params![self.guard.binding.run,self.case], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+        let mut previous = U256::ZERO;
+        let mut payments =
+            tx.prepare("SELECT detail FROM events WHERE run=?1 AND kind='application_payment'")?;
+        for detail in
+            payments.query_map([&self.guard.binding.run], |row| row.get::<_, String>(0))?
+        {
+            let detail: Value =
+                serde_json::from_str(&detail?).context("malformed qualification payment event")?;
+            if detail["case"] == self.case {
+                let value: U256 = detail["amount"]
+                    .as_str()
+                    .context("recorded attempt amount missing")?
+                    .parse()?;
+                previous = previous
+                    .checked_add(value)
+                    .context("qualified attempt total overflow")?;
+            }
+        }
+        drop(payments);
+        let total = previous
+            .checked_add(amount)
+            .context("qualified attempt total overflow")?;
         ensure!(
-            amount > U256::ZERO && amount <= U256::from(u64::try_from(reservation)?),
+            amount > U256::ZERO && total <= U256::from(u64::try_from(reservation)?),
             "payment exceeds reserved case budget"
         );
         ensure!(
@@ -223,8 +266,8 @@ impl PaymentContext {
         event.insert("stage".into(), json!("signed_admission_pending"));
         event.insert("admission_evidence_version".into(), json!(2));
         event.insert("admitted_micros".into(), json!(self.elapsed_micros()));
-        // At most one authorization attempt per reviewed case. Failure consumes
-        // the case reservation; no automatic re-admission after signing failure.
+        // Every authorization consumes this case's existing permit. Earlier
+        // attempts remain charged even when another wallet later succeeds.
         tx.execute(
             "INSERT INTO events(run,kind,detail,at) VALUES(?1,'application_payment',?2,?3)",
             params![self.guard.binding.run, Value::Object(event).to_string(), at],
@@ -236,14 +279,20 @@ impl PaymentContext {
 }
 
 #[cfg(test)]
+pub(crate) async fn managed_claim_fixture() -> (tempfile::TempDir, Claim, PathBuf) {
+    let (dir, guard, _db) = tests::fixture(true);
+    let path = guard.binding.registry.clone();
+    let claim = tests::claim(guard).await;
+    (dir, claim, path)
+}
+#[cfg(test)]
 mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
-    fn fixture(paid: bool) -> (tempfile::TempDir, Arc<Guard>, Connection) {
+    pub(super) fn fixture(paid: bool) -> (tempfile::TempDir, Arc<Guard>, Connection) {
         let (dir, guard, db) = super::super::tests::fixture();
         let mut binding = guard.binding.clone();
         db.execute_batch("ALTER TABLE cases ADD COLUMN reservation INTEGER; UPDATE cases SET reservation=20000;
-        CREATE UNIQUE INDEX application_payment_case_once ON events(run,json_extract(detail,'$.case')) WHERE kind='application_payment';
         CREATE UNIQUE INDEX application_payment_attempt_once ON events(run,json_extract(detail,'$.attempt_id')) WHERE kind='application_payment';").unwrap();
         let raw: String = db
             .query_row("SELECT manifest FROM runs", [], |r| r.get(0))
@@ -285,7 +334,7 @@ mod tests {
     fn attempt(amount: &str) -> Value {
         json!({"attempt_id":"attempt","pool":"pool_uuid","pool_name":"pool","wallet":"wallet_uuid","generation":0,"amount":amount,"address":"0x00","requirements_hash":"hash"})
     }
-    async fn claim(guard: Arc<Guard>) -> Claim {
+    pub(super) async fn claim(guard: Arc<Guard>) -> Claim {
         super::super::claim_with(
             guard,
             "listener",
@@ -316,16 +365,10 @@ mod tests {
                 assert!(payment_context().is_err());
                 record_challenge(&headers).await.unwrap();
                 record_challenge(&headers).await.unwrap();
-                assert!(
-                    record_challenge(&headers)
-                        .await
-                        .unwrap_err()
-                        .to_string()
-                        .contains("two-per-case limit")
-                );
+                record_challenge(&headers).await.unwrap();
             })
             .await;
-        assert_eq!(count(), 2);
+        assert_eq!(count(), 3);
         let event: String = db
             .query_row(
                 "SELECT detail FROM events WHERE kind='application_challenge' ORDER BY seq LIMIT 1",
@@ -345,6 +388,52 @@ mod tests {
             )
             .unwrap(),
             0
+        );
+    }
+    #[tokio::test]
+    async fn repeated_wallet_attempts_share_existing_case_permit_and_keep_both_receipts() {
+        let (_dir, guard, db) = fixture(true);
+        let claim = claim(guard).await;
+        claim
+            .invoke(async {
+                let context = payment_context().unwrap().unwrap();
+                let a = attempt("10000");
+                context.record(&a).unwrap();
+                let mut b = attempt("10000");
+                b["attempt_id"] = json!("attempt-b");
+                context.record(&b).unwrap();
+                let mut c = attempt("1");
+                c["attempt_id"] = json!("attempt-c");
+                assert!(context.record(&c).is_err());
+                context
+                    .save_receipt("attempt", json!({"classification":"seller_failure"}))
+                    .unwrap();
+                context
+                    .save_receipt("attempt-b", json!({"classification":"seller_success"}))
+                    .unwrap();
+                assert!(context.save_receipt("attempt", json!({})).is_err());
+                context.check_retry_start().await.unwrap();
+                db.execute("UPDATE cases SET window_end=0", []).unwrap();
+                assert!(context.check_retry_start().await.is_err());
+            })
+            .await;
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM events WHERE kind='application_payment'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM events WHERE kind='application_receipt'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
         );
     }
     #[tokio::test]

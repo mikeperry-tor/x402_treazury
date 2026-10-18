@@ -17,7 +17,7 @@ impl std::fmt::Display for AdmissionError {
         let (code, detail): (&str, &str) = match self {
             Self::PayerChanged => (
                 "payer_changed_before_payment",
-                "wallet rotated before signing; retry this tool call",
+                "bound payer identity changed before this authorization could be journaled",
             ),
             Self::UnsupportedPayment(s) => ("unsupported_payment", s),
             Self::PriceLimit(s) => ("price_limit", s),

@@ -24,9 +24,3 @@ pub(super) async fn rpc() -> Result<(SemaphorePermit<'static>, SemaphorePermit<'
         .context("Base RPC owner closed")?;
     Ok((caller, active))
 }
-
-// Read-only synchronization for the process-isolated saturation regression.
-#[cfg(test)]
-pub(crate) fn available_queries() -> usize {
-    QUERIES.available_permits()
-}

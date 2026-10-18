@@ -31,11 +31,8 @@ pub(crate) fn read_result<T>(
 #[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Read {
-    Priority,
     WalletBoundary,
     WalletPage,
-    HistoryBoundary,
-    HistoryPage,
     FundingBoundary,
     FundingPage,
 }

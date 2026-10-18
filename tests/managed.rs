@@ -191,24 +191,32 @@ async fn rpc(
             json!({"number":format!("0x{height:x}"),"hash":format!("0x{:064x}",height*2+fork),"timestamp":format!("0x{:x}",timestamp-if f.stale.load(Ordering::SeqCst){1000}else{0})})
         }
         "eth_call" => {
-            assert_eq!(v["params"][1]["requireCanonical"], true);
             let data = v["params"][0]["data"].as_str().unwrap();
-            let hash = u64::from_str_radix(
-                v["params"][1]["blockHash"]
-                    .as_str()
+            let snapshot = if v["params"][1] == "latest" {
+                assert!(data.starts_with("0x70a08231"));
+                ChainSnapshot {
+                    balances: f.balances.lock().unwrap().clone(),
+                    used: f.used.load(Ordering::SeqCst),
+                    timestamp: now().unwrap(),
+                }
+            } else {
+                assert_eq!(v["params"][1]["requireCanonical"], true);
+                let hash = u64::from_str_radix(
+                    v["params"][1]["blockHash"]
+                        .as_str()
+                        .unwrap()
+                        .trim_start_matches("0x"),
+                    16,
+                )
+                .unwrap();
+                f.chain
+                    .lock()
                     .unwrap()
-                    .trim_start_matches("0x"),
-                16,
-            )
-            .unwrap();
-            let snapshot = f
-                .chain
-                .lock()
-                .unwrap()
-                .blocks
-                .get(&(hash / 2))
-                .cloned()
-                .expect("known fixture block");
+                    .blocks
+                    .get(&(hash / 2))
+                    .cloned()
+                    .expect("known fixture block")
+            };
             let n = if data.starts_with("0x70a08231") {
                 assert_eq!(data.len(), 74);
                 let address = format!("0x{}", &data[data.len() - 40..])
@@ -507,11 +515,18 @@ fn assert_balance_observation_outcome(result: anyhow::Result<()>) {
     }
 }
 async fn reconcile_complete_history(h: &Harness) {
-    assert_balance_observation_outcome(
-        make_pool(h.store.clone(), h.pool.clone(), &h.base)
-            .reconcile()
-            .await,
-    );
+    let pool = h.pool.clone();
+    let query = h.store.call(move |s| s.chain_query(&pool)).await.unwrap();
+    let view = BaseRpc::new(&format!("{}/rpc", h.base), 12)
+        .unwrap()
+        .view(query)
+        .await
+        .unwrap();
+    let pool = h.pool.clone();
+    h.store
+        .call(move |s| s.reconcile_pool(&pool, view))
+        .await
+        .unwrap();
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
     let remaining: i64 = db
         .query_row(
@@ -522,7 +537,7 @@ async fn reconcile_complete_history(h: &Harness) {
         .unwrap();
     assert_eq!(
         remaining, 0,
-        "canonical history must finish even if a concurrent balance needs recertification"
+        "explicit canonical history must resolve the original attempts"
     );
 }
 fn make_pool(store: StoreHandle, pool: String, base: &str) -> Arc<ManagedPool> {

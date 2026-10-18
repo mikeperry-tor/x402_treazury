@@ -437,11 +437,36 @@ fn validate_prior_payment(
         name(&event, "address")?.parse::<alloy_primitives::Address>()? == payer,
         "earlier payment payer differs from journal"
     );
-    let reserved: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM cases WHERE run=?1 AND id=?2 AND execution NOT IN ('UNATTEMPTED','SKIPPED_TARGET_REACHED') AND reservation>0 AND settlement=?3)", params![prior_run,name(&event,"case")?,outcome],|r| r.get(0))?;
+    let case = name(&event, "case")?;
+    let reserved: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM cases WHERE run=?1 AND id=?2 AND execution NOT IN ('UNATTEMPTED','SKIPPED_TARGET_REACHED') AND reservation>0 AND settlement IN ('USED','EXPIRED_UNUSED'))", params![prior_run,case],|r| r.get(0))?;
     ensure!(
         reserved,
         "earlier payment needs its original charged case and matching observed settlement; reconcile that run first"
     );
+    let legacy_single:bool=db.query_row("SELECT (SELECT COUNT(*) FROM events WHERE run=?1 AND kind='application_payment' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2)=1 AND EXISTS(SELECT 1 FROM cases WHERE run=?1 AND id=?2 AND settlement=?3)",params![prior_run,case,outcome],|r|r.get(0))?;
+    if !legacy_single {
+        let rows=db.prepare("SELECT detail FROM events WHERE run=?1 AND kind='payment_observed' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2")?.query_map(params![prior_run,case],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut matched = 0;
+        for raw in rows {
+            let observed = qualification::bounded(raw)?;
+            for row in observed["attempts"]
+                .as_array()
+                .context("per-attempt settlement observation missing")?
+            {
+                if row["attempt_id"] == id {
+                    ensure!(
+                        &row["resolution"] == *resolution,
+                        "earlier attempt canonical observation differs"
+                    );
+                    matched += 1;
+                }
+            }
+        }
+        ensure!(
+            matched == 1,
+            "earlier attempt needs exactly one original canonical observation"
+        );
+    }
     Ok(())
 }
 
@@ -868,6 +893,38 @@ mod tests {
         .unwrap();
         assert!(guard.validate_state(&state).is_err());
         state["payment_resolutions"][0]["outcome"] = json!("EXPIRED_UNUSED");
+        guard.validate_state(&state).unwrap();
+        // A retry can use B while A proves unused; aggregate case USED must
+        // preserve A's distinct canonical outcome when a later run is reviewed.
+        let mut b = state["payment_attempts"][0].clone();
+        b["id"] = json!("attempt-b");
+        state["payment_attempts"].as_array_mut().unwrap().push(b);
+        let mut b_event = event.clone();
+        b_event["attempt_id"] = json!("attempt-b");
+        db.execute(
+            "INSERT INTO events(run,kind,detail,at) VALUES('previous','application_payment',?1,0)",
+            [b_event.to_string()],
+        )
+        .unwrap();
+        let mut b_resolution = state["payment_resolutions"][0].clone();
+        b_resolution["attempt_id"] = json!("attempt-b");
+        b_resolution["outcome"] = json!("USED");
+        state["payment_resolutions"]
+            .as_array_mut()
+            .unwrap()
+            .push(b_resolution);
+        db.execute(
+            "UPDATE cases SET settlement='USED' WHERE run='previous'",
+            [],
+        )
+        .unwrap();
+        assert!(guard.validate_state(&state).is_err());
+        let observed = json!({"case":"paid","attempts":state["payment_resolutions"].as_array().unwrap().iter().map(|r|json!({"attempt_id":r["attempt_id"],"resolution":r})).collect::<Vec<_>>()});
+        db.execute(
+            "INSERT INTO events(run,kind,detail,at) VALUES('previous','payment_observed',?1,0)",
+            [observed.to_string()],
+        )
+        .unwrap();
         guard.validate_state(&state).unwrap();
         db.execute("UPDATE cases SET reservation=0 WHERE run='previous'", [])
             .unwrap();

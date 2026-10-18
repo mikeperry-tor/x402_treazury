@@ -64,7 +64,7 @@ pub(crate) fn refill_ready(state: &Value, pool: &str, job: &str, generation: u64
             .parse::<U256>()?;
         ensure!(
             target > U256::ZERO
-                && wallet["balance_estimate_atomic"]
+                && wallet.get("balance_estimate_atomic").or_else(||wallet.get("confirmed_balance")).unwrap_or(&Value::Null)
                     .as_str()
                     .context("refill balance missing")?
                     .parse::<U256>()?
@@ -387,25 +387,39 @@ fn case_outcomes(
             unresolved.push(id.clone());
             continue;
         }
-        let payment = event(events, "application_payment", "case", id)?
-            .context("rotation admission missing")?;
-        verify_case_admission(payment, wallet, observation, round, id, promotion)?;
+        let payments:Vec<_>=events.iter().filter(|e|e["kind"]=="application_payment" && e["detail"]["case"]==*id).map(|e|&e["detail"]).collect();
+        ensure!(!payments.is_empty(),"rotation admission missing");
+        let mut attempted = std::collections::BTreeSet::new();
+        for payment in payments {
+        ensure!(attempted.insert(payment["attempt_id"].as_str().context("rotation attempt ID missing")?),"duplicate rotation evidence: application_payment");
+        let find=|kind:&str| -> Result<&Value> {
+            let mut rows=events.iter().filter(|e|e["kind"]==kind && e["detail"]["case"]==*id && e["detail"]["attempt_id"]==payment["attempt_id"]);
+            let found=rows.next().context("rotation attempt observation missing")?;
+            ensure!(rows.next().is_none(),"duplicate rotation attempt observation");
+            Ok(&found["detail"])
+        };
+        if !verify_case_admission(payment, wallet, observation, round, id, promotion)? {
+            failures.push(id.clone());
+            continue;
+        }
+        if crate::registry::attempt_outcome(events,id,&payment["attempt_id"])? == Some("EXPIRED_UNUSED") {
+            continue;
+        }
         if round.service_cases.contains(id) {
             let wallet_name = wallet
                 .as_str()
                 .context("service wallet missing")?
                 .to_owned();
             service_wallets.insert(wallet_name.clone());
-            let receipt = event(events, "application_receipt", "case", id)?
-                .context("service receipt missing")?;
-            let debit = event(events, "application_debit_verified", "case", id)?
-                .context("service debit missing")?;
+            let receipt=find("application_receipt")?;
+            let debit=find("application_debit_verified")?;
             if let Some(evidence) = x402_treazury::qualification::lifecycle::refill_service(
                 payment, receipt, debit, job,
             )? {
                 overlap_wallets.insert(wallet_name);
                 overlap.push(evidence);
             }
+        }
         }
     }
     Ok(CaseOutcomes {
@@ -424,7 +438,7 @@ fn verify_case_admission(
     round: &RotationRound,
     id: &str,
     promotion: &Promotion<'_>,
-) -> Result<()> {
+) -> Result<bool> {
     let Promotion {
         pool,
         generation,
@@ -444,8 +458,7 @@ fn verify_case_admission(
         "rotation payment wallet scope mismatch"
     );
     if round.service_cases.iter().any(|case| case == id) && *wallet == round.pool {
-        ensure!(
-            payment["pool"] == pool
+        return Ok(payment["pool"] == pool
                 && payment["generation"].as_u64() == Some(generation)
                 && payment["address"]
                     .as_str()
@@ -454,11 +467,9 @@ fn verify_case_admission(
                     == active["address"]
                         .as_str()
                         .context("promoted address missing")?
-                        .parse::<Address>()?,
-            "post-promotion service used another wallet generation"
-        );
+                        .parse::<Address>()?);
     }
-    Ok(())
+    Ok(true)
 }
 
 fn verify_refill_readiness(
@@ -614,7 +625,6 @@ mod tests {
         assert_eq!(result["status"], "incomplete");
         assert_eq!(result["pending_service_status"], "not_observed");
         for (field, value) in [
-            ("generation", json!(0)),
             ("admitted_micros", json!(9)),
             ("session", json!("another")),
             ("pool_name", json!("another")),
@@ -639,6 +649,11 @@ mod tests {
                 "{field}"
             );
         }
+        let mut wrong = events.clone();
+        wrong.iter_mut().find(|e|e["kind"]=="application_payment" && e["detail"]["case"]=="s").unwrap()["detail"]["generation"]=json!(0);
+        let result=phase_result(&phase,&wrong,&cases,&start,&observation,&config,&proofs).unwrap();
+        assert_ne!(result["status"],"passed");
+        assert_eq!(result["failed_cases"],json!(["s"]));
     }
     #[test]
     fn each_service_wallet_must_be_observed_during_the_pending_refill() {
@@ -965,7 +980,7 @@ mod tests {
             f.1.push(duplicate);
             assert_eq!(
                 assess(&f).unwrap_err().to_string(),
-                format!("duplicate rotation evidence: {kind}")
+                if matches!(kind,"application_receipt"|"application_debit_verified") {"duplicate rotation attempt observation".to_owned()} else {format!("duplicate rotation evidence: {kind}")}
             );
         }
         // Case lookup deliberately retains the first match.

@@ -75,16 +75,21 @@ fn batch(m: &Manifest, config: &Value, events: &[Value], ids: &[String]) -> Resu
         if case.unsigned {
             continue;
         }
-        let Some(payment) = event(events, "application_payment", id)? else {
-            return Ok(json!({"status":"incomplete","reason":"missing payment admission"}));
+        let payments:Vec<_>=events.iter().filter(|e|e["kind"]=="application_payment" && e["detail"]["case"]==*id).map(|e|&e["detail"]).collect();
+        if payments.is_empty() {return Ok(json!({"status":"incomplete","reason":"missing payment admission"}));}
+        for payment in payments {
+        let find = |kind:&str| -> Result<Option<&Value>> {
+            let mut rows=events.iter().filter(|e|e["kind"]==kind && e["detail"]["case"]==*id && e["detail"]["attempt_id"]==payment["attempt_id"]);
+            let found=rows.next().map(|e|&e["detail"]);
+            ensure!(rows.next().is_none(),"duplicate attempt evidence: {kind}");
+            Ok(found)
         };
-        let Some(receipt) = event(events, "application_receipt", id)? else {
-            return Ok(json!({"status":"incomplete","reason":"missing seller observation"}));
-        };
-        let Some(debit) = event(events, "application_debit_verified", id)? else {
-            return Ok(json!({"status":"incomplete","reason":"missing canonical debit proof"}));
-        };
-        for correlated in [payment, receipt, debit] {
+        let Some(receipt)=find("application_receipt")? else {return Ok(json!({"status":"incomplete","reason":"missing seller observation for an attempted authorization"}));};
+        let debit=find("application_debit_verified")?;
+        let unused=crate::registry::attempt_outcome(events,id,&payment["attempt_id"])?==Some("EXPIRED_UNUSED");
+        if unused {ensure!(debit.is_none(),"unused authorization has a debit proof");}
+        else if debit.is_none() {return Ok(json!({"status":"incomplete","reason":"attempt lacks canonical debit or proven non-use"}));}
+        for correlated in [Some(payment), Some(receipt), debit].into_iter().flatten() {
             ensure!(
                 correlated["session"] == session
                     && correlated["attempt_id"] == payment["attempt_id"],
@@ -105,6 +110,7 @@ fn batch(m: &Manifest, config: &Value, events: &[Value], ids: &[String]) -> Resu
             );
         }
         x402_treazury::qualification::validate_admission_balance(payment)?;
+        if let Some(debit)=debit {
         let proof = &debit["proof"];
         let payer = proof["payer"]
             .as_str()
@@ -126,6 +132,7 @@ fn batch(m: &Manifest, config: &Value, events: &[Value], ids: &[String]) -> Resu
         *total = total
             .checked_add(amount)
             .context("concurrent debit total overflow")?;
+        }
         let receipt = &receipt["receipt"];
         // Older evidence is still useful, but cannot prove these interval assertions.
         if payment.get("admitted_micros").is_none()
@@ -152,6 +159,7 @@ fn batch(m: &Manifest, config: &Value, events: &[Value], ids: &[String]) -> Resu
         );
         payment_work.push(paid);
         signed_requests.push(signed);
+        }
     }
     ensure!(
         sessions.len() == 1,
@@ -164,7 +172,7 @@ fn batch(m: &Manifest, config: &Value, events: &[Value], ids: &[String]) -> Resu
         "mcp_overlap":mcp_overlap,"application_overlap":app_overlap,
         "payment_work_overlap":overlap(&payment_work),"signed_request_future_overlap":overlap(&signed_requests),
         "paid_calls":signed_requests.len(),"wallets":wallets,"servers":servers,"sources":sources,
-        "balance_accounting":"each paid admission covered by confirmed balance after retaining all unresolved exposure",
+        "balance_accounting":"saved balances are advisory; every attempted authorization retains its own charge and canonical proof requirement",
         "verified_debits_atomic":totals.into_iter().map(|(k,v)|(k,v.to_string())).collect::<BTreeMap<_,_>>(),
         "scope":"Interval overlap within one session; signed-request future timing includes connection and final headers, not socket-byte or signature-computation timing"}),
     )
@@ -326,6 +334,18 @@ mod tests {
             .unwrap()
             .push(evidence["runtime_events"][0].clone());
         assert!(report(&m, &config, &duplicate).is_err());
+    }
+    #[test]
+    fn canonical_non_use_preserves_timing_without_inventing_a_debit() {
+        let (m, config, mut evidence)=fixture();
+        let events=evidence["runtime_events"].as_array_mut().unwrap();
+        events.retain(|e| !(e["kind"]=="application_debit_verified" && e["detail"]["case"]=="a"));
+        assert_eq!(report(&m,&config,&evidence).unwrap()[0]["status"],"incomplete");
+        evidence["runtime_events"].as_array_mut().unwrap().push(json!({"kind":"payment_observed","detail":{"case":"a","attempts":[{"attempt_id":"a","resolution":{"attempt_id":"a","outcome":"EXPIRED_UNUSED","height":10,"hash":"canonical","block_time":100}}]}}));
+        let result=report(&m,&config,&evidence).unwrap();
+        assert_eq!(result[0]["status"],"passed");
+        assert_eq!(result[0]["paid_calls"],2);
+        assert_eq!(result[0]["verified_debits_atomic"]["pool"],"7");
     }
     #[test]
     fn overlap_requires_positive_shared_interval() {

@@ -1,0 +1,16 @@
+{
+  "provenance": {
+    "repository": "https://github.com/x402-foundation/x402",
+    "commit": "faa1c694c66a3732aaabbce93bdae140e521a67d",
+    "path": "typescript/packages/core/src/http/x402HTTPResourceServer.ts",
+    "sha256": "9b4f144143a7c7b8f514e835ac04e83d01f41e876c445eaa5b843561ee5d22cb",
+    "scope": "Structural fixtures for failed verification and settlement on a signed request. They do not qualify a deployed seller or prove that an authorization cannot charge."
+  },
+  "verification": {
+    "x402Version": 2,
+    "error": "insufficient_funds",
+    "resource": {"url": "https://example.com/pay"},
+    "accepts": [{"scheme": "exact", "network": "eip155:8453", "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "amount": "100", "payTo": "0x0000000000000000000000000000000000000003", "maxTimeoutSeconds": 60, "extra": {"name": "USD Coin", "version": "2"}}]
+  },
+  "settlement": {"success": false, "errorReason": "insufficient_funds", "network": "eip155:8453", "transaction": ""}
+}

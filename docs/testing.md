@@ -87,17 +87,18 @@ Real-process shutdown fixtures exercise responses beyond the old
 ten-second cutoff, explicit force, HTTP disconnect, stdio EOF and a signal with
 the parent input pipe still open. Treasury fixtures cover incremental catch-up,
 bounded preparation lag, read-only preflight and retained unknown sends; managed
-fixtures separate slow historical reconciliation from fresh admission balances.
-Slow balance acquisition returns without a retry loop, persists canonical
-resolutions, and cannot sign until a subsequent fresh view is acquired. Submission
+fixtures exercise advisory selection and post-failure balance refresh. A blocked
+or failed balance read does not prevent signing or delay another wallet attempt.
+New failures during active reads require follow-up; cancelled waiters retain the
+reconciliation owner, and low-balance status survives restart. Submission
 fixtures reject failed preflight without intent and tolerate an unsigned tip outage
 after successful preflight without adding another read before sending. Concrete
 funding-backend tests distinguish quote expiry before command dispatch from
 uncertain preparation. Optional catalogs never suppress authored selector errors.
 Optional-outage fixtures also check inherited prefixes and ambiguous listener
 selectors. Birthday fixtures advance the tip between observations. Nonce-outage
-fixtures retain full liabilities, commit independent valid proofs, reject
-insufficient remaining capacity, and preserve those decisions across restart.
+fixtures retain original authorizations and explicit canonical reporting proofs;
+nonce outages are not payment admission gates.
 Synthetic proving checks actual-fee affordability and exact saved bytes through
 failed persistence/reopen. The optional synthetic-chain lifecycle exercises two
 managed recipients through the real treasury actor, scan reuse, confirmation depth,
@@ -344,3 +345,12 @@ operator-selected private external directory. Preserve raw evidence locally with
 its exact build/configuration pins. Commit durable findings as tests, provider
 configuration, maintained documentation or focused unfinished plans. Do not append
 dated run logs, handoffs, balances or report copies to these documents.
+
+Managed insufficient-funds fixtures exercise real `PaidClient` signing, separate
+identity-bound challenges, unchanged GET/POST arguments and retention of both
+authorizations. Their pinned seller forms are in
+[`insufficient-funds.json`](../tests/fixtures/x402/insufficient-funds.json). These
+local fixtures do not qualify a deployed seller or establish that the first attempt
+cannot charge. Qualification reservations cover every authorization within the
+existing per-case permit; reports correlate each receipt/debit by attempt ID and
+preserve incomplete earlier outcomes. Saved admission estimates do not prove solvency.

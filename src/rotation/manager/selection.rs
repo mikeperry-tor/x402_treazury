@@ -5,10 +5,13 @@ impl ManagedPool {
         &self,
         bound: &PaymentCandidateHandle,
         cost: U256,
+        through: i64,
+        attempted: &[String],
     ) -> Result<Option<PaymentCandidateHandle>> {
         let (pool, wallet) = (self.pool.clone(), bound.wallet.clone());
+        let attempted = attempted.to_vec();
         self.store
-            .call(move |s| s.cached_payment_candidate(&pool, cost, Some(&wallet)))
+            .call(move |s| s.advisory_candidate(&pool, cost, Some(&wallet), through, &attempted))
             .await
     }
 }

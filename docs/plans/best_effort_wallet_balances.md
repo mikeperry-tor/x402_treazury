@@ -5,8 +5,9 @@
 
 Implement advisory USDC wallet selection and SDK-owned Zcash spending state on
 branch `best_effort_wallet_balances`, based on
-`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. Planning is complete; BE02 implementation is under independent review.
-BE03–BE07 remain pending.
+`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. BE02 and its fixup passed independent review. BE03 implementation and focused
+acceptance are complete pending exact-commit and payment-transition review.
+BE04–BE07 remain pending.
 
 Cross-wallet repetition after an insufficient-funds response is explicitly accepted,
 even when the first authorization remains chargeable and both attempts could charge
@@ -254,7 +255,8 @@ failure. The BE02 fixup removes those responsibilities rather than restoring a
 reservation. It also preserves old qualification proof records, updates the renamed
 estimate consumers, and represents an unobserved estimate as unavailable. New
 focused coverage follows a real signed authorization through canonical resolution.
-Focused acceptance and independent fixup review are required before the BE03 gate.
+Focused acceptance and independent review of `798b211` and fixup `0951464` passed.
+The BE02/BE03 combined transition remains subject to its independent gate.
 
 ### BE03: Insufficient-funds traversal and refresh
 
@@ -270,6 +272,52 @@ reconciliation owner to advisory refresh without restoring historical payment ga
 - Preserve accepted HTTP/cover work through disconnect, cache eviction
   and shutdown drain. Cache retention cannot cancel live handles, orphan cleanup or
   reset existing traffic accounting. Waiter lifetime does not own operation lifetime.
+
+BE03 review decisions: structured verification/settlement fixtures are pinned to
+x402 seller commit `faa1c694c66a3732aaabbce93bdae140e521a67d` (source SHA-256
+`9b4f144143a7c7b8f514e835ac04e83d01f41e876c445eaa5b843561ee5d22cb`).
+Classification requires the signed attempt's actual 402 response and exact code;
+2xx error headers, allowance errors, prose and malformed/truncated responses earn
+no retry. Every captured identity is visited at most once, each with its own
+challenge/transport, original request and journal. No retry allocation or balance
+RPC is added to the foreground path.
+
+Schema 18 adds only durable low/pending/error advisory scheduling fields; schema
+17 is rejected for mutation without conversion. Status schema 3 names the value
+`balance_estimate_atomic`. Clearing pending before a read and retaining a later
+failure schedules a follow-up without a financial revision. Physical indexed pages
+advance malformed rows, and the retained owner survives cancelled waiters. The
+ordinary history/nonce repair lane is deleted. Explicit qualification alone still
+observes canonical authorization outcomes, including retired payer attempts; those
+observations never restore affordability admission.
+
+Precommit review caught lost qualification outcome production and report assumptions
+that every attempt had a debit. The correction keeps USED debits, proven non-use
+and unknown outcomes distinct. Qualification charges every attempt to its original
+case permit and rechecks that same start window before another unsigned request;
+this protects actual run authority because an unsigned POST can execute free work.
+A fallback identity can leave a particular promotion/service assertion unproved
+without invalidating its payment permission.
+
+Exact BE03 review found an obsolete two-challenge ceiling and report consumers
+that closed observations at the first admission or assumed one admitted price.
+The fixup removes those policies, retains per-attempt prices and canonical totals,
+and exercises real qualified A→B→C routing under the original case permit.
+Canonical authorization observation now captures only its journal/chain binding;
+malformed historical readiness or retirement support cannot starve another attempt.
+Its actual production loop is tested with bad historical readiness followed by a
+healthy wallet. These fixes delete inherited single-attempt and balance-proof
+responsibilities; they add no replacement spending ceiling or repair framework.
+
+Analyzer output `20261018T012356Z-1940d1b1` compares against `49566df`:
+payment orchestration 18/58 → 6/29; routed dispatch 17/30 → 28/44;
+maintenance 29/37 → 41/50 with read-one 14/29 replaced by read-balance 1/9.
+The whole historical repair/acquisition engine was removed rather than relocated.
+The surviving maintenance loop carries bounded physical paging, active reads,
+follow-up scheduling and retained ownership; its increased score and the full
+qualification reporting chain require transition review. Selection is 22/29
+(including its actual-authority lookup closure 11/15), replacing evidence selection
+9/14 plus removed proof orchestration. BE07 must inspect these complete chains.
 
 ### BE04: Initial funding and observation
 

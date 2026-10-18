@@ -120,13 +120,15 @@ Retained evidence never grants spending authority or permission to replay cases.
   resolution, canonical debit proofs and saved balances are distinct facts. Nested
   `isError:true` fails provider semantics; arbitrary `error` properties do not.
   Missing assertions/proofs remain incomplete. Do not infer zero fees or readiness.
-- Concurrency assertions use one application clock, exact wallet bindings, unique
-  authorizations and admission-time balance/block/exposure. Promotion, pending-
-  refill service, confirmed replacement credit and real restart are separate gates.
+- Concurrency assertions use one application clock, exact wallet bindings and unique
+  authorizations. Saved balances are advisory. Correlate every attempted authorization,
+  receipt and debit by attempt ID; an earlier unknown outcome remains incomplete.
+  Promotion, pending-refill service, confirmed replacement credit and restart are separate gates.
   Only structurally verified untouched depletion suffixes can be skipped without
   charge. Every attempted case retains its reservation.
 - Catalog/help/pricing instrumentation observes real production paths; no extra
-  probes or signed retries. Preserve typed catalog failure stages and HTTP codes.
+  probes or additional signed retries beyond the managed insufficient-funds policy.
+  Preserve typed catalog failure stages and HTTP codes.
   Continue independent qualification catalog loads within the normal rolling bound;
   aliases share failures without retries. No partial executable inventory. Complete
   catalog snapshots have a shared 128 MiB bound; ordinary evidence is 16 MiB.
@@ -379,8 +381,10 @@ and [the runtime architecture](docs/architecture.md).
 - v2 uses PAYMENT-REQUIRED / PAYMENT-SIGNATURE / PAYMENT-RESPONSE; v1 remains
   supported in static mode. Sanitize challenge resource descriptions to 500 chars
   before signing because facilitators reject longer echoed descriptions.
-- No replay after a journaled signed submission. A seller response alone does not
-  release managed exposure; use confirmed chain evidence.
+- A journaled signature remains potentially chargeable. Managed `PaidClient` calls
+  may repeat reviewed arguments on each existing eligible wallet once only after
+  recognized structured insufficient funds. Each new payer obtains its own challenge.
+  Other uncertain outcomes grant no replay; see the best-effort wallet rules.
 - Preserve vendor descriptions whole by default. Any text limit must be explicit
   (`max_description_chars`, `--max-response-chars`). Authored overrides apply last.
 - Provider/source `include_tools` and `exclude_tools` use the same case-sensitive
@@ -622,7 +626,8 @@ timeouts without per-RPC or whole-view deadlines. Managed admission has no total
 timeout, including pool-gate waits; legacy wait_seconds is ignored with a warning
 and omitted from effective configuration. Preserve cancellation and durable
 reservations. Retain finite unsigned retries,
-canonical block checks and evidence freshness checks; HTTP inactivity never renews financial
+canonical checks for actual receipt decisions; balance age never supplies payment permission.
+HTTP inactivity never renews financial
 or qualification authority. Historical timeout spellings remain readable through
 compatibility aliases; authored configs use the canonical read-timeout name.
 

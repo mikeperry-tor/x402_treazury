@@ -1,10 +1,10 @@
--- Fresh schema16 only. Legacy conversion has a separate strict preflight.
--- Older schema16 stores may retain unused payment_anchors and funding_progress.turn.
+-- Fresh schema18 only. Legacy conversion has a separate strict preflight.
+-- Historical stores may retain unused payment_anchors and funding_progress.turn.
 -- They are never read/written by runtime code; no destructive cleanup is needed.
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
 CREATE TABLE snapshots(revision INTEGER PRIMARY KEY,bytes BLOB NOT NULL);
 CREATE TABLE pools(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,generation INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), payment_limit TEXT, retirement_tolerance TEXT);
-CREATE TABLE wallets(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),sequence INTEGER NOT NULL,address TEXT UNIQUE NOT NULL,key BLOB NOT NULL,target TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('ALLOCATED','READY','ACTIVE','RETAINED','RETIRED')),balance TEXT NOT NULL DEFAULT '',block_hash TEXT,block_height INTEGER, financial_height INTEGER, financial_hash TEXT, debit_height INTEGER, debit_hash TEXT, evidence_repair TEXT, unresolved_exposure TEXT NOT NULL DEFAULT '0',UNIQUE(pool_id,sequence));
+CREATE TABLE wallets(id TEXT PRIMARY KEY,pool_id TEXT NOT NULL REFERENCES pools(id),sequence INTEGER NOT NULL,address TEXT UNIQUE NOT NULL,key BLOB NOT NULL,target TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('ALLOCATED','READY','ACTIVE','RETAINED','RETIRED')),balance TEXT NOT NULL DEFAULT '',low_balance INTEGER NOT NULL DEFAULT 0 CHECK(low_balance IN (0,1)),refresh_pending INTEGER NOT NULL DEFAULT 0 CHECK(refresh_pending IN (0,1)),balance_refresh_error TEXT,block_hash TEXT,block_height INTEGER, financial_height INTEGER, financial_hash TEXT, debit_height INTEGER, debit_hash TEXT, evidence_repair TEXT, unresolved_exposure TEXT NOT NULL DEFAULT '0',UNIQUE(pool_id,sequence));
 CREATE TABLE funding_jobs(id TEXT PRIMARY KEY,wallet_id TEXT UNIQUE NOT NULL REFERENCES wallets(id),state TEXT NOT NULL CHECK(state IN ('QUEUED','COMPLETE')),target TEXT NOT NULL, readiness_operation TEXT, readiness_requirement TEXT, readiness_capacity TEXT, readiness_hash TEXT, readiness_height INTEGER, readiness_support TEXT, readiness_latest_hash TEXT, readiness_endpoint TEXT, readiness_checkpoint_hash TEXT, readiness_disputed TEXT, completion_outcome TEXT, pool_id TEXT NOT NULL REFERENCES pools(id), allocation_kind TEXT NOT NULL CHECK(allocation_kind IN ('small','large')), claim_generation INTEGER NOT NULL CHECK(claim_generation>=0));
 CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT REFERENCES pools(id),day INTEGER NOT NULL,original_day INTEGER NOT NULL,requested INTEGER NOT NULL CHECK(requested>0),reserved INTEGER NOT NULL CHECK(reserved>=0),consumed INTEGER NOT NULL CHECK(consumed>=0));
 CREATE TABLE outgoing(id TEXT PRIMARY KEY REFERENCES budget_entries(id),state TEXT NOT NULL CHECK(state IN ('PREPARED','RESOLVED')),raw BLOB NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
@@ -73,9 +73,11 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=17;
+PRAGMA user_version=18;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
 CREATE INDEX funding_claim_lookup ON funding_jobs(pool_id,allocation_kind,claim_generation);
 CREATE INDEX funding_recovery_job ON funding_recovery(job_id,operation_id);
+
+CREATE INDEX wallet_pending_balance ON wallets(pool_id,sequence) WHERE refresh_pending=1 OR low_balance=1;

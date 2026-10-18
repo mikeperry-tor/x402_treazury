@@ -694,7 +694,7 @@ pub(super) fn checkpoint(db: &Connection, wallet: &str) -> Result<Option<Anchor>
     }
 }
 impl Store {
-    pub(crate) fn capture_evidence(
+    pub(crate) fn capture_authorization(
         &self,
         wallet: &str,
     ) -> Result<crate::rotation::base::EvidenceCapture> {
@@ -704,6 +704,23 @@ impl Store {
             .query_map([], |row| Ok((row.get::<_, String>(0)?, sql_u64(row, 1)?)))?
             .collect::<rusqlite::Result<std::collections::BTreeMap<_, _>>>()?;
         let checkpoint = checkpoint(&self.db, wallet)?;
+        Ok(crate::rotation::base::EvidenceCapture {
+            durable_balance_anchors: Vec::new(),
+            previous_confirmed_covered: false,
+            namespace: self.evidence_namespace,
+            wallet: wallet.into(),
+            generation: generation(&self.db, "wallet", wallet)?,
+            endpoint_generations: endpoints,
+            checkpoint,
+            previous: None,
+        })
+    }
+    pub(crate) fn capture_evidence(
+        &self,
+        wallet: &str,
+    ) -> Result<crate::rotation::base::EvidenceCapture> {
+        let mut capture = self.capture_authorization(wallet)?;
+        let checkpoint = &capture.checkpoint;
         let previous_confirmed_covered =
             self.evidence_cache
                 .get(wallet)
@@ -795,19 +812,13 @@ impl Store {
                 }
             }
         }
-        Ok(crate::rotation::base::EvidenceCapture {
-            durable_balance_anchors,
-            previous_confirmed_covered,
-            namespace: self.evidence_namespace,
-            wallet: wallet.into(),
-            generation: generation(&self.db, "wallet", wallet)?,
-            endpoint_generations: endpoints,
-            checkpoint,
-            previous: self
-                .evidence_cache
-                .get(wallet)
-                .map(|(_, certificate)| certificate.observation().clone()),
-        })
+        capture.durable_balance_anchors = durable_balance_anchors;
+        capture.previous_confirmed_covered = previous_confirmed_covered;
+        capture.previous = self
+            .evidence_cache
+            .get(wallet)
+            .map(|(_, certificate)| certificate.observation().clone());
+        Ok(capture)
     }
 }
 
@@ -936,13 +947,14 @@ pub(super) fn check_resolution(
     namespace: Uuid,
     certificate: &crate::rotation::base::ResolutionCertificate,
 ) -> Result<String> {
-    check_capture(
-        db,
-        namespace,
-        certificate.capture(),
-        certificate.endpoint(),
-        certificate.endpoint_generation(),
-    )?;
+    let capture = certificate.capture();
+    ensure!(
+        capture.namespace == namespace
+            && capture.generation == generation(db, "wallet", &capture.wallet)?
+            && certificate.endpoint_generation()
+                == generation(db, "endpoint", certificate.endpoint())?,
+        EvidenceFailure::Invalidated
+    );
     let auth = certificate.authorization();
     ensure!(
         auth.wallet == certificate.capture().wallet,

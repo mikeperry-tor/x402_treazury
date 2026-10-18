@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use x402_chain_eip155::V2Eip155ExactClient;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector, X402SchemeClient};
 
-pub(crate) const OMITTED_EXTENSIONS: &str = "Managed payment omitted advertised x402 extensions; the provider may require them. A submitted authorization may still settle and remains reserved until chain reconciliation. Do not automatically retry";
+pub(crate) const OMITTED_EXTENSIONS: &str = "Managed payment omitted advertised x402 extensions; the provider may require them. A submitted authorization may still charge. Only the built-in recognized insufficient-funds traversal may repeat the request";
 
 #[derive(Clone, Debug)]
 pub struct PaymentCandidateHandle {
@@ -38,9 +38,9 @@ pub struct ManagedResponse {
     pub cover: Option<crate::cover::runtime::Call>,
 }
 pub(crate) struct AdmissionObservation<'a> {
-    pub fixed_payer: bool,
+    pub through: i64,
+    pub attempted: &'a [String],
     pub progress: &'a crate::payment::SubmissionProgress,
-    pub recovery: &'a mut RecoveryAllowance,
     pub hint: Option<(
         crate::pricing::runtime::OperationKey,
         crate::pricing::runtime::Receipt,
@@ -74,16 +74,6 @@ pub struct ManagedPool {
     #[cfg(test)]
     test_admission_hook: Option<AdmissionTestHook>,
 }
-#[derive(Default)]
-pub(crate) struct RecoveryAllowance {
-    signature_replacement_used: bool,
-}
-impl RecoveryAllowance {
-    fn take_signature_replacement(&mut self) -> bool {
-        !std::mem::replace(&mut self.signature_replacement_used, true)
-    }
-}
-
 struct Offer {
     raw: Value,
     amount: U256,
@@ -163,6 +153,28 @@ impl ManagedPool {
             .await
     }
 
+    pub(crate) async fn inventory_boundary(&self) -> Result<i64> {
+        let pool = self.pool.clone();
+        self.store.call(move |s| s.wallet_boundary(&pool)).await
+    }
+    pub(crate) async fn next_candidate(
+        &self,
+        cost: U256,
+        through: i64,
+        attempted: &[String],
+    ) -> Result<Option<PaymentCandidateHandle>> {
+        let pool = self.pool.clone();
+        let attempted = attempted.to_vec();
+        self.store
+            .call(move |s| s.advisory_candidate(&pool, cost, None, through, &attempted))
+            .await
+    }
+    pub(crate) async fn note_insufficient(&self, wallet: String) -> Result<()> {
+        let pool = self.pool.clone();
+        self.store
+            .call(move |s| s.low_balance(&pool, &wallet))
+            .await
+    }
     pub async fn candidate(&self) -> Result<PaymentCandidateHandle> {
         self.candidate_for(None).await
     }
@@ -189,16 +201,10 @@ impl ManagedPool {
         let guard = Arc::new(self.gate.clone().lock_owned().await);
         self.store
             .call_with_guard(guard, move |s| {
-                if let Some(cost) = hint {
-                    match s.cached_payment_candidate(&pool, cost, None) {
-                        Ok(Some(candidate)) => return Ok(candidate),
-                        Ok(None) => {}
-                        // This is only an unsigned identity hint. A wallet-local
-                        // cache rejection must not prevent challenge-time traversal
-                        // from acquiring an independent payer's uncached evidence.
-                        Err(error) if error.is::<super::base::evidence::EvidenceFailure>() => {}
-                        Err(error) => return Err(error),
-                    }
+                if let Some(cost) = hint
+                    && let Some(candidate) = s.cached_payment_candidate(&pool, cost, None)?
+                {
+                    return Ok(candidate);
                 }
                 s.payment_candidate(&pool)
             })
@@ -216,6 +222,8 @@ impl ManagedPool {
             .await?;
         Ok((owned.response, owned.extensions_omitted))
     }
+    /// Low-level dispatch for an already bound transport/challenge. Use
+    /// `PaidClient::managed` for logical calls with identity-bound traversal.
     pub async fn pay_with_cover(
         &self,
         http: &reqwest::Client,
@@ -227,8 +235,8 @@ impl ManagedPool {
         let pool = self.clone();
         let http = http.clone();
         crate::payment::ownership::run(&self.direct_work, async move {
-            let mut recovery = RecoveryAllowance::default();
-            let (response, extensions_omitted) = pool
+            let through = pool.inventory_boundary().await?;
+            let (response, extensions_omitted, _) = pool
                 .pay_with_cover_observed(
                     &http,
                     expected,
@@ -237,9 +245,9 @@ impl ManagedPool {
                     cover.as_ref(),
                     AdmissionObservation {
                         progress: &crate::payment::SubmissionProgress::default(),
-                        recovery: &mut recovery,
                         hint: None,
-                        fixed_payer: false,
+                        through,
+                        attempted: &[],
                     },
                 )
                 .await?;
@@ -269,22 +277,21 @@ impl ManagedPool {
         response: reqwest::Response,
         cover: Option<&crate::cover::runtime::Call>,
         observation: AdmissionObservation<'_>,
-    ) -> Result<(reqwest::Response, bool)> {
+    ) -> Result<(reqwest::Response, bool, U256)> {
         let AdmissionObservation {
             progress,
-            recovery,
             hint,
-            fixed_payer,
+            through,
+            attempted,
         } = observation;
         // Bound foreground owners, including callers awaiting the group gate.
         // The permit lives through the one signed dispatch and cannot cancel it.
         let _foreground = crate::payment::ownership::foreground()?;
         let (challenge, offer, omitted) = prepare_challenge(&response, &self.policy)?;
-        let guard = Arc::new(self.gate.clone().lock_owned().await);
         let pool = self.pool.clone();
         let amount = offer.amount;
         self.store
-            .call_with_guard(guard, move |s| s.validate_payment_price(&pool, amount))
+            .call(move |s| s.validate_payment_price(&pool, amount))
             .await?;
         // Learning follows complete envelope validation, before financial admission.
         // An insufficient balance does not erase a valid observed price.
@@ -293,9 +300,9 @@ impl ManagedPool {
         }
         let requirements_hash = keccak256(serde_json::to_vec(&offer.raw)?).to_string();
         let qualification = crate::qualification::payment_context()?;
-        if !fixed_payer {
+        {
             let selected = self
-                .acquire_candidate(&expected, offer.amount)
+                .acquire_candidate(&expected, offer.amount, through, attempted)
                 .await?
                 .context(AdmissionError::WalletNotReady(
                     "no eligible payment identity",
@@ -307,7 +314,7 @@ impl ManagedPool {
         #[cfg(test)]
         self.admission_test_stage(AdmissionTestStage::Acquired)
             .await;
-        let (headers, attempt_id) = loop {
+        let (headers, attempt_id) = {
             let pool = self.pool.clone();
             let hash = requirements_hash.clone();
             let amount = offer.amount;
@@ -327,21 +334,12 @@ impl ManagedPool {
             let context = qualification.clone();
             // Lost journal acknowledgement must never imply no accepted intent.
             progress.mark_possible();
-            match self
-                .store
+            self.store
                 .call(move |s| s.journal_authorization(&prepared, auth, context.as_ref()))
-                .await
-            {
-                Ok(()) => {
-                    let mut headers = reqwest::header::HeaderMap::new();
-                    headers.insert("payment-signature", signature.parse()?);
-                    break (headers, attempt_id);
-                }
-                Err(error)
-                    if error.is::<super::store::AdmissionExpired>()
-                        && recovery.take_signature_replacement() => {}
-                Err(error) => return Err(error),
-            }
+                .await?;
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert("payment-signature", signature.parse()?);
+            (headers, attempt_id)
         };
         #[cfg(test)]
         self.admission_test_stage(AdmissionTestStage::Journaled)
@@ -351,7 +349,7 @@ impl ManagedPool {
         if let Some(p) = &mut padding {
             p.dispatched();
         }
-        // One attempt only. Receipt/final 402/transport errors do not release exposure.
+        // This bound attempt owns its own signature. A seller response never erases it.
         let signed_request_started = qualification.as_ref().map(|c| c.elapsed_micros());
         let result = http.execute(retry).await.map_err(|_| {
             anyhow::anyhow!(AdmissionError::OutcomeUnknown(
@@ -380,7 +378,7 @@ impl ManagedPool {
         } else {
             result?
         };
-        Ok((response, omitted))
+        Ok((response, omitted, offer.amount))
     }
 }
 

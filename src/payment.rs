@@ -1,5 +1,6 @@
 //! Static calls snapshot the payer before HTTP; managed calls lease a signer after
-//! challenge validation and durable admission. Paid failures are never replayed.
+//! challenge validation and durable admission. Managed insufficient-funds failures
+//! may traverse existing wallets; every authorization remains chargeable.
 use crate::catalog::{RoutedRequest, arg_text};
 use alloy_primitives::U256;
 use alloy_signer_local::PrivateKeySigner;
@@ -24,6 +25,8 @@ impl std::fmt::Display for HttpFailure {
 }
 impl std::error::Error for HttpFailure {}
 
+#[cfg(test)]
+mod best_effort_tests;
 #[cfg(test)]
 mod handoff_tests;
 #[cfg(test)]
@@ -467,12 +470,19 @@ impl PaidClient {
     ) -> Result<crate::output::HttpOutput> {
         let client = self.clone();
         let progress = progress.clone();
-        self.run_owned(async move {
-            client
-                .execute_response_owned(route, &progress, operation)
-                .await
-        })
-        .await?
+        let observed_progress = progress.clone();
+        let result = self
+            .run_owned(async move {
+                client
+                    .execute_response_owned(route, &progress, operation)
+                    .await
+            })
+            .await?;
+        if observed_progress.possible() {
+            result.context("An authorization may still charge or execute; do not automatically repeat this logical call")
+        } else {
+            result
+        }
     }
     async fn execute_response_owned(
         &self,
@@ -488,22 +498,39 @@ impl PaidClient {
             .map(|p| p.read().expect("payer lock poisoned").clone());
         let request = build_request(route)?;
         let unsigned_only = self.unsigned_only || crate::qualification::unsigned_case();
-        let mut attempt = 0;
-        let mut recovery = crate::rotation::manager::RecoveryAllowance::default();
+        let through = match &self.managed {
+            Some(pool) if !unsigned_only => pool.inventory_boundary().await?,
+            _ => 0,
+        };
+        let mut attempted = Vec::new();
         let mut paid_submission = false;
         let mut extensions_omitted = false;
         // Only a pre-signing managed identity change can restart this loop.
         // The new unsigned challenge must use the new identity-bound transport.
         let mut candidate = match &self.managed {
             Some(pool) if !unsigned_only => Some(
-                pool.candidate_for(
-                    operation.and_then(|key| crate::pricing::runtime::process_hints().get(key)),
+                pool.next_candidate(
+                    operation
+                        .and_then(|key| crate::pricing::runtime::process_hints().get(key))
+                        .unwrap_or_default(),
+                    through,
+                    &[],
                 )
-                .await?,
+                .await?
+                .context(
+                    crate::rotation::error::AdmissionError::WalletNotReady(
+                        "no eligible payment identity",
+                    ),
+                )?,
             ),
             _ => None,
         };
         let (response, mut cover) = loop {
+            if !attempted.is_empty()
+                && let Some(context) = crate::qualification::payment_context()?
+            {
+                context.check_retry_start().await?;
+            }
             let (http, mut cover) = self
                 .execution_transport(
                     &request,
@@ -536,23 +563,51 @@ impl PaidClient {
                             cover.as_ref(),
                             crate::rotation::manager::AdmissionObservation {
                                 progress,
-                                recovery: &mut recovery,
                                 hint: operation.zip(receipt),
-                                fixed_payer: attempt > 0,
+                                through,
+                                attempted: &attempted,
                             },
                         )
                         .await
                     {
-                        Ok((paid, omitted)) => {
-                            extensions_omitted = omitted;
+                        Ok((paid, omitted, cost)) => {
+                            extensions_omitted |= omitted;
                             paid_submission = true;
+                            if paid.status() == reqwest::StatusCode::PAYMENT_REQUIRED
+                                && insufficient_funds(paid.headers())
+                            {
+                                let status = paid.status();
+                                let version = paid.version();
+                                // Structured headers classify this failure. Its
+                                // unused body must not delay or veto fallback.
+                                drop(paid);
+                                if let Some(call) = &mut cover {
+                                    call.protocol(version);
+                                    call.rejected_padding(status);
+                                    call.response_headers();
+                                    call.complete();
+                                }
+                                let failed = candidate
+                                    .as_ref()
+                                    .expect("managed candidate")
+                                    .wallet
+                                    .clone();
+                                pool.note_insufficient(failed.clone()).await?;
+                                attempted.push(failed);
+                                candidate=Some(pool.next_candidate(cost,through,&attempted).await?
+                                    .context("insufficient_funds: captured eligible wallets exhausted; earlier authorizations may still charge or execute")?);
+                                continue;
+                            }
                             response = paid;
                         }
-                        Err(error)
-                            if error.is::<crate::rotation::manager::PayerHandoff>()
-                                && attempt == 0
-                                && !progress.possible() =>
-                        {
+                        Err(error) if error.is::<crate::rotation::manager::PayerHandoff>() => {
+                            attempted.push(
+                                candidate
+                                    .as_ref()
+                                    .expect("managed candidate")
+                                    .wallet
+                                    .clone(),
+                            );
                             candidate = Some(
                                 error
                                     .downcast_ref::<crate::rotation::manager::PayerHandoff>()
@@ -560,7 +615,6 @@ impl PaidClient {
                                     .0
                                     .clone(),
                             );
-                            attempt += 1;
                             continue;
                         }
                         Err(error) => return Err(error),
@@ -814,4 +868,33 @@ fn sanitize_challenge(response: &mut reqwest::Response) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Structured forms emitted by the pinned x402 HTTP resource server. Call only
+/// after this payer's signed dispatch; an unsigned challenge never earns retry.
+fn insufficient_funds(headers: &reqwest::header::HeaderMap) -> bool {
+    // Both protocol fields carry one record. Ambiguous duplicates cannot grant
+    // the narrowly scoped permission to repeat a possibly chargeable request.
+    if ["payment-response", "payment-required"]
+        .iter()
+        .any(|name| headers.get_all(*name).iter().count() > 1)
+    {
+        return false;
+    }
+    let decoded = |name: &str| -> Option<serde_json::Value> {
+        serde_json::from_slice(&STANDARD.decode(headers.get(name)?.as_bytes()).ok()?).ok()
+    };
+    // A receipt describes settlement of this signed attempt. A simultaneous
+    // challenge cannot override success, another failure or an unreadable receipt.
+    if headers.contains_key("payment-response") {
+        return decoded("payment-response").is_some_and(|v| {
+            v["success"] == false
+                && v["errorReason"] == "insufficient_funds"
+                && v["network"] == "eip155:8453"
+                && v["transaction"].is_string()
+        });
+    }
+    decoded("payment-required").is_some_and(|v| {
+        v["x402Version"] == 2 && v["error"] == "insufficient_funds" && v["accepts"].is_array()
+    })
 }

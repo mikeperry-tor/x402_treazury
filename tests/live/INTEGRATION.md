@@ -60,8 +60,9 @@ see [wallet setup](INTEGRATION_REFERENCE.md#wallet-setup-and-readiness). Standal
 Tor wallet commands require an already-running configured SOCKS listener. A failed
 sync is an error, not a zero balance. Keep seeds, keys and backups private.
 
-Existing-wallet tests require fresh observations and adequate active balances.
-Saved balances are not a fresh funded starting-point check. Arrange
+Existing-wallet qualification records starting observations separately from
+payment authority. Saved estimates do not prove affordability; permitted attempts
+can fail for insufficient funds and traverse existing eligible wallets. Arrange
 any necessary funding separately under reviewed source/job limits; do not enable funding or force rotation merely to make
 the provider sweep run. The preset does not substitute a static EVM private key.
 
@@ -189,3 +190,11 @@ bespoke scripts. Retain exact evidence links and manual gaps. Private financial 
 - [Unsigned HTTP preflight](README.md): useful when catalogs prevent MCP preparation.
   The [qualification scope](../../docs/testing.md#qualification-status) documents preserved evidence and regression
   coverage; all funded execution uses this runner.
+
+A managed logical call can sign on multiple captured wallets after exact structured
+insufficient funds. Every authorization consumes the original case permit, and
+earlier attempted/uncertain work remains charged. A later success does not settle
+earlier attempts. Reports preserve each attempt's receipt, canonical resolution
+and debit proof; missing evidence remains incomplete. Balance estimates and their
+ages are not admission proofs. These semantics have offline fixture coverage, not
+live-funded qualification.
