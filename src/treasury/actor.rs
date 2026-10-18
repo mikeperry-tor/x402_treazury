@@ -11,6 +11,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 enum Command {
+    #[cfg(test)]
+    Interrupt(oneshot::Sender<()>, oneshot::Receiver<()>),
     RecoverFunding(
         String,
         u32,
@@ -51,7 +53,8 @@ impl TreasuryHandle {
             .send(make(send))
             .await
             .map_err(|_| anyhow::anyhow!("treasury owner stopped"))?;
-        recv.await.context("treasury owner stopped")?
+        recv.await
+            .context("treasury command interrupted; accepted work remains owned")?
     }
     pub async fn refund_address(&self, job: String) -> Result<String> {
         self.call(|reply| Command::Refund(job, reply)).await
@@ -71,10 +74,65 @@ impl TreasuryHandle {
 }
 impl Treasury {
     pub async fn run_commands(
+        self,
+        commands: TreasuryCommands,
+        submission: impl TransactionSubmission + Send + 'static,
+        stop: CancellationToken,
+    ) -> Result<()> {
+        tokio::spawn(self.run_commands_owned(commands, submission, stop))
+            .await
+            .context("treasury command driver stopped")?
+    }
+    async fn run_commands_owned(
         mut self,
         mut commands: TreasuryCommands,
         mut submission: impl TransactionSubmission,
         stop: CancellationToken,
+    ) -> Result<()> {
+        use futures_util::FutureExt;
+        let result = loop {
+            let outcome = std::panic::AssertUnwindSafe(self.command_loop(
+                &mut commands,
+                &mut submission,
+                &stop,
+            ))
+            .catch_unwind()
+            .await;
+            match outcome {
+                Ok(result) => break result,
+                Err(_) => {
+                    self.healthy = false;
+                    tracing::warn!(
+                        category = "treasury_command_interrupted",
+                        "treasury command interrupted; failed command will not replay; accepted work retained"
+                    );
+                    if stop.is_cancelled() {
+                        break Ok(());
+                    }
+                    // An interrupted SDK must not turn reconstruction into a
+                    // busy loop. Reuse the existing maintenance retry cadence.
+                    tokio::select! {
+                        _=stop.cancelled()=>break Ok(()),
+                        _=tokio::time::sleep(std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS))=>{},
+                    }
+                }
+            }
+        };
+        commands.receiver.close();
+        drop(commands);
+        // Fatal shared-state errors stop their dependants. SDK-local failures
+        // reconstruct inside command_loop without cancelling this shutdown token.
+        if result.is_err() {
+            stop.cancel();
+        }
+        let closed = self.close().await;
+        result.and(closed)
+    }
+    async fn command_loop(
+        &mut self,
+        commands: &mut TreasuryCommands,
+        submission: &mut impl TransactionSubmission,
+        stop: &CancellationToken,
     ) -> Result<()> {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(
             super::publication::MAINTENANCE_SECONDS,
@@ -94,14 +152,23 @@ impl Treasury {
                 if self.completed.is_some() {
                     continue;
                 }
-                if !self.healthy {
-                    stop.cancel();
-                    commands.receiver.close();
-                    drop(commands);
-                    self.close().await?;
-                    anyhow::bail!(
-                        "completed invalid transaction retained; treasury requires review"
-                    );
+            }
+            if stop.is_cancelled() {
+                break;
+            }
+            if !self.healthy {
+                match self.reconstruct_sdk(stop).await {
+                    Ok(()) => {}
+                    Err(_) if stop.is_cancelled() => break,
+                    Err(error) if super::reconstruction::retryable(&error) => {
+                        tracing::warn!(
+                            category = "treasury_reconstruction_pending",
+                            "treasury SDK reconstruction deferred; independent Base service remains available"
+                        );
+                        tokio::select! { _=stop.cancelled()=>break, _=interval.tick()=>{} }
+                        continue;
+                    }
+                    Err(error) => return Err(error),
                 }
             }
             tokio::select! {
@@ -110,12 +177,14 @@ impl Treasury {
                 command = commands.receiver.recv() => {
                     let Some(command) = command else { break };
                     match command {
-                        Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_observed(id, max_attempts, allow_new_attempt, &mut submission, &stop).await); }
+                        #[cfg(test)]
+                        Command::Interrupt(entered, release) => { let _ = entered.send(()); release.await.unwrap(); },
+                        Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_observed(id, max_attempts, allow_new_attempt, submission, stop).await); }
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
-                        Command::Sync(reply) => { let _ = reply.send(self.sync_once(&stop).await); }
+                        Command::Sync(reply) => { let _ = reply.send(self.sync_once(stop).await); }
                         Command::Prepare(request, reply) => {
-                            let result = match self.sync_for_command(&stop).await {
+                            let result = match self.sync_for_command(stop).await {
                                 Ok(()) if !stop.is_cancelled() => self.prepare(request).await,
                                 Ok(()) => Err(anyhow::anyhow!("treasury stopping")),
                                 Err(error) if self.healthy => Err(error.context(crate::rotation::transaction::PreparationDeferred)),
@@ -123,12 +192,12 @@ impl Treasury {
                             };
                             let _ = reply.send(result);
                         }
-                        Command::Submit(id, retry, reply) => { let _ = reply.send(self.submit_prepared(id, &mut submission, retry, &stop).await); }
-                        Command::Reconcile(id, reply) => { let _ = reply.send(self.reconcile_prepared(id, &mut submission, &stop).await); }
+                        Command::Submit(id, retry, reply) => { let _ = reply.send(self.submit_prepared(id, submission, retry, stop).await); }
+                        Command::Reconcile(id, reply) => { let _ = reply.send(self.reconcile_prepared(id, submission, stop).await); }
                     }
                 }
                 _ = interval.tick() => {
-                    if let Err(error) = self.sync_once(&stop).await
+                    if let Err(error) = self.sync_once(stop).await
                         && !stop.is_cancelled() {
                             super::diagnostics::warn_sync_failure(&error);
                     }
@@ -142,10 +211,7 @@ impl Treasury {
                 let pending = self.store.call(|s| s.jobless_pending_operation()).await;
                 match pending {
                     Ok(Some(id)) => {
-                        if self
-                            .reconcile_prepared(id, &mut submission, &stop)
-                            .await
-                            .is_err()
+                        if self.reconcile_prepared(id, submission, stop).await.is_err()
                             && !stop.is_cancelled()
                         {
                             tracing::warn!(
@@ -164,18 +230,8 @@ impl Treasury {
             // Only an actual successfully persisted scan moves maintenance.
             // Reused evidence, failed scans and unrelated commands do not.
             schedule_after_sync(&mut interval, &mut scheduled_sync, self.last_completed_sync);
-            if !self.healthy && self.completed.is_none() {
-                stop.cancel();
-                commands.receiver.close();
-                drop(commands);
-                self.close().await?;
-                anyhow::bail!("treasury requires restart after interrupted mutation");
-            }
         }
-        // Discard queued work; accepted mutations above have finished and persisted.
-        commands.receiver.close();
-        drop(commands);
-        self.close().await
+        Ok(())
     }
 }
 
@@ -361,6 +417,86 @@ mod tests {
             restored.close().await.unwrap();
         }
     }
+    #[tokio::test]
+    async fn interrupted_command_retains_queue_claim_and_owner_after_driver_waiter_cancellation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+        crate::rotation::test_capacity::treasury_pair(&owner, "actor_recovery", "5", None, 0)
+            .await
+            .unwrap();
+        let status = owner.status().await.unwrap();
+        let identity = status.treasury_id;
+        let job = status.funding_jobs[0].id.clone();
+        let store = owner.store_handle();
+        store
+            .call(|s| s.accept_preparation("uncertain", None, 100, None))
+            .await
+            .unwrap();
+        owner.configure_sync(
+            super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
+        );
+        let (handle, commands) = channel();
+        let (entered, ready) = oneshot::channel();
+        let (release, wait) = oneshot::channel();
+        handle
+            .sender
+            .send(Command::Interrupt(entered, wait))
+            .await
+            .unwrap();
+        let (send, reply) = oneshot::channel();
+        handle
+            .sender
+            .send(Command::Refund(job.clone(), send))
+            .await
+            .unwrap();
+        let stop = CancellationToken::new();
+        let driver = tokio::spawn(owner.run_commands(commands, NoSubmission, stop.clone()));
+        ready.await.unwrap();
+        // The spawned cleanup owner outlives this caller, including its panic recovery.
+        driver.abort();
+        let _ = driver.await;
+        drop(release);
+        let address = tokio::time::timeout(std::time::Duration::from_secs(75), reply)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(address.starts_with('t'));
+        store
+            .call(move |s| {
+                assert_eq!(s.refund_address(&job)?.as_deref(), Some(address.as_str()));
+                assert!(s.require_unstarted_preparation("uncertain").is_err());
+                assert!(s.accept_preparation("duplicate", None, 100, None).is_err());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        stop.cancel();
+        // Channel closure acknowledges that the retained owner has reached its drain.
+        handle.sender.closed().await;
+        drop(handle);
+        drop(store);
+        // The exclusive Store lock must eventually be released by that owner.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(restored) = Treasury::open(
+                    dir.path().join("state"),
+                    dir.path().join("key"),
+                    identity.clone(),
+                )
+                .await
+                {
+                    restored.close().await.unwrap();
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn failed_sync_returns_typed_unstarted_response_without_reservation() {
         let dir = tempfile::tempdir().unwrap();

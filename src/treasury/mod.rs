@@ -8,6 +8,7 @@ mod inputs;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod lifecycle_tests;
 mod publication;
+mod reconstruction;
 pub mod recovery;
 mod refunds;
 #[cfg(all(test, feature = "zcash-regtest"))]
@@ -499,26 +500,50 @@ impl Treasury {
         outcome
     }
     /// One owner periodically syncs while Base payment admission remains independent.
-    pub async fn run_sync(mut self, stop: CancellationToken) -> Result<()> {
+    pub async fn run_sync(self, stop: CancellationToken) -> Result<()> {
+        tokio::spawn(self.run_sync_owned(stop))
+            .await
+            .context("treasury sync driver stopped")?
+    }
+    async fn run_sync_owned(mut self, stop: CancellationToken) -> Result<()> {
+        use futures_util::FutureExt;
         while !stop.is_cancelled() {
-            if let Err(error) = self.sync_once(&stop).await {
-                if !self.healthy {
-                    if let Some(client) = &mut self.client {
-                        client.go_offline().await;
+            if !self.healthy {
+                match self.reconstruct_sdk(&stop).await {
+                    Ok(()) => {}
+                    Err(_) if stop.is_cancelled() => break,
+                    Err(error) if reconstruction::retryable(&error) => {
+                        tracing::warn!(
+                            category = "treasury_reconstruction_pending",
+                            "treasury SDK reconstruction deferred; independent Base service remains available"
+                        );
+                        tokio::select! { _=stop.cancelled()=>break, _=tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS))=>{} }
+                        continue;
                     }
-                    stop.cancel();
-                    tracing::error!("treasury persistence failed; funding disabled until restart");
-                    // Persistence failure is fatal to treasury ownership, not Base payments.
-                    self.close().await?;
-                    return Err(error);
+                    Err(error) => {
+                        stop.cancel();
+                        self.close().await?;
+                        return Err(error);
+                    }
                 }
-                if !stop.is_cancelled() {
-                    diagnostics::warn_sync_failure(&error);
+            }
+            match std::panic::AssertUnwindSafe(self.sync_once(&stop))
+                .catch_unwind()
+                .await
+            {
+                Ok(Err(error)) if !stop.is_cancelled() => diagnostics::warn_sync_failure(&error),
+                Err(_) => {
+                    self.healthy = false;
+                    tracing::warn!(
+                        category = "treasury_sync_interrupted",
+                        "treasury sync interrupted; reconstructing from committed state"
+                    );
                 }
+                _ => {}
             }
             tokio::select! {
                 _ = stop.cancelled() => break,
-                _ = tokio::time::sleep(Duration::from_secs(60)) => {}
+                _ = tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS)) => {}
             }
         }
         self.close().await

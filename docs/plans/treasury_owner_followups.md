@@ -1,4 +1,4 @@
-# Unfinished treasury owner work
+# Treasury owner follow-ups
 
 Core best-effort balance simplification does not deliver these follow-ons. They
 require separate implementation and review, with no live spending authorization.
@@ -21,10 +21,19 @@ Irrecoverable storage failure or forced process death can still lose unpublished
 bytes; the durable accepted input claim remains uncertain and blocks duplicate
 calculation.
 
-Until implemented, unhealthy SDK calculation and exited treasury/funding
-or reconciliation owners can require process restart. Independent listeners and
-usable Base payers remain available. Restart retains an accepted calculation even
-when it has no outgoing bytes; it does not certify that calculation never happened.
+Implemented R01: the retained treasury driver reconstructs only the SDK from the
+latest committed authenticated snapshot through its existing Store. It retains the
+command receiver across interrupted commands, never replaying them. Funding and
+reconciliation supervisors replace joined failed tasks through existing leases and
+gates; source backoff/accepted work remain owned. Retry uses existing maintenance
+cadences; explicit shutdown prevents replacements. Shared Store/authentication loss
+still requires operator repair. Independent listeners and usable Base payers remain
+available. Restart retains an accepted calculation even without outgoing bytes.
+
+Focused tests cover failed derivation publication, lost commit acknowledgment,
+uncertain selected inputs and restrictions, shutdown during reconstruction,
+interrupted command/driver waiter cancellation, actual worker task replacement and
+completed publication retention. No live spending or private-state conversion.
 
 ## R02: Automatic recovery of owned transparent capital
 
@@ -38,4 +47,4 @@ the pinned SDK. Cover disablement, insufficient inputs and uncertain submission
 without preparing a duplicate spend.
 
 Current explicit per-address shielding remains available. General automatic
-shielding and automatic owner reconstruction remain unfinished.
+shielding remains unfinished.

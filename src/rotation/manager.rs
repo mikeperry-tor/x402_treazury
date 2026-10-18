@@ -72,6 +72,8 @@ pub struct ManagedPool {
     gate: Arc<Mutex<()>>,
     reconciliation: Arc<Mutex<()>>,
     #[cfg(test)]
+    reconciliation_test_hook: Option<Arc<dyn Fn() + Send + Sync>>,
+    #[cfg(test)]
     test_admission_hook: Option<AdmissionTestHook>,
 }
 struct Offer {
@@ -102,6 +104,8 @@ impl ManagedPool {
             direct_work: Default::default(),
             gate: store.group_gate(&pool)?,
             reconciliation: store.reconciliation_gate(&pool)?,
+            #[cfg(test)]
+            reconciliation_test_hook: None,
             #[cfg(test)]
             test_admission_hook: None,
             store,

@@ -1996,3 +1996,295 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
         }
     }
 }
+
+struct ExitingSource {
+    reads: Reads,
+    owners: mpsc::UnboundedSender<tokio::task::Id>,
+    first: std::sync::atomic::AtomicBool,
+}
+
+#[derive(Clone)]
+struct InterruptedReads {
+    reads: Reads,
+    interrupt: Arc<std::sync::atomic::AtomicBool>,
+    gate: Arc<Semaphore>,
+    exited: mpsc::UnboundedSender<()>,
+}
+impl FundingObservations for InterruptedReads {
+    type QuoteRequest = Quote;
+    async fn quote(&self, quote: Quote) -> Result<Quote> {
+        self.reads.quote(quote).await
+    }
+    async fn status(&self, quote: Quote) -> Result<SwapStatus> {
+        self.reads.status(quote).await
+    }
+    async fn credit(&self, job: FundingJob) -> Result<()> {
+        if self.interrupt.swap(false, Ordering::SeqCst) {
+            self.gate.acquire().await.unwrap().forget();
+            self.exited.send(()).unwrap();
+            panic!("fixture observation interrupted while source remains owned");
+        }
+        self.reads.credit(job).await
+    }
+}
+struct RetainedSource {
+    source: Source,
+    reads: InterruptedReads,
+    owners: mpsc::UnboundedSender<tokio::task::Id>,
+}
+impl FundingBackend for RetainedSource {
+    type Observations = InterruptedReads;
+    fn observations(&self) -> InterruptedReads {
+        self.owners.send(tokio::task::id()).unwrap();
+        self.reads.clone()
+    }
+    fn max_attempts(&self, _: &FundingJob) -> u32 {
+        3
+    }
+    async fn quote_prerequisite(&mut self, _: &FundingJob) -> Result<Quote> {
+        panic!("unexpected new quote")
+    }
+    async fn prepare(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
+        panic!("unexpected new calculation")
+    }
+    async fn submit(&mut self, _: &FundingJob) -> Result<()> {
+        panic!("unexpected new submission")
+    }
+    async fn reconcile(&mut self, job: &FundingJob) -> Result<bool> {
+        self.source.reconcile(job).await
+    }
+}
+
+#[tokio::test]
+async fn scheduler_replacement_waits_for_retained_source_and_preserves_backoff() {
+    for stop_before_release in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut raw = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut raw,
+            "pool",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+        let jobs = raw.funding_jobs().unwrap();
+        let job = jobs[0].clone();
+        submitted(&mut raw, &job);
+        for other in jobs.into_iter().skip(1) {
+            raw.record_credit(&other.wallet_id, "1", "fixture", 100)
+                .unwrap();
+        }
+        let (store, actor) = StoreHandle::spawn(raw);
+        let (statuses, _status_events) = mpsc::unbounded_channel();
+        let reads = Reads {
+            credits: Arc::new(Semaphore::new(0)),
+            credit_calls: Default::default(),
+            statuses,
+            status_gates: Arc::new(BTreeMap::from([(
+                job.id.clone(),
+                Arc::new(Semaphore::new(0)),
+            )])),
+            failed_job: Default::default(),
+            processing: false,
+            quotes: None,
+        };
+        let (started, mut sources) = mpsc::unbounded_channel();
+        let source_gate = Arc::new(Semaphore::new(0));
+        let interrupt_gate = Arc::new(Semaphore::new(0));
+        let (exited, mut exits) = mpsc::unbounded_channel();
+        let (owners, mut tasks) = mpsc::unbounded_channel();
+        {
+            let gate = store.funding_owner();
+            let lease = gate.lock().await;
+            lease.state.lock().unwrap().records.insert(
+                Key {
+                    operation: "backoff".into(),
+                    kind: Kind::Quote,
+                },
+                Record {
+                    reported_phase: None,
+                    due: u64::MAX,
+                    streak: 3,
+                    error: Some("retained outage".into()),
+                    condition: None,
+                },
+            );
+        }
+        let worker = FundingWorker::new(
+            store.clone(),
+            RetainedSource {
+                source: Source {
+                    store: store.clone(),
+                    reads: reads.clone(),
+                    gate: source_gate.clone(),
+                    started,
+                },
+                reads: InterruptedReads {
+                    reads,
+                    interrupt: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                    gate: interrupt_gate.clone(),
+                    exited,
+                },
+                owners,
+            },
+            1,
+        );
+        let stop = CancellationToken::new();
+        let running = tokio::spawn(worker.clone().run(stop.clone()));
+        let first = event(&mut tasks).await;
+        assert_eq!(event(&mut sources).await, job.id);
+        interrupt_gate.add_permits(1);
+        event(&mut exits).await;
+        assert!(worker.tick(1000).await.unwrap_err().is::<AlreadyOwned>());
+        assert!(
+            tasks.try_recv().is_err(),
+            "retained source excludes replacement"
+        );
+        assert!(sources.try_recv().is_err(), "no overlapping source");
+        if stop_before_release {
+            stop.cancel();
+        }
+        // A replacement may observe the same unresolved operation again, but
+        // only after the original source releases ownership. Let it drain too.
+        source_gate.add_permits(2);
+        if !stop_before_release {
+            assert_ne!(
+                first,
+                event(&mut tasks).await,
+                "a new scheduler must resume after release"
+            );
+            stop.cancel();
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), running)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let lease = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            store.funding_owner().lock_owned(),
+        )
+        .await
+        .unwrap();
+        assert!(tasks.try_recv().is_err());
+        if stop_before_release {
+            assert!(
+                sources.try_recv().is_err(),
+                "shutdown forbids replacement source"
+            );
+        }
+        {
+            let state = lease.state.lock().unwrap();
+            let backoff = state
+                .records
+                .get(&Key {
+                    operation: "backoff".into(),
+                    kind: Kind::Quote,
+                })
+                .unwrap();
+            assert_eq!(
+                (backoff.due, backoff.streak, backoff.error.as_deref()),
+                (u64::MAX, 3, Some("retained outage"))
+            );
+        }
+        let operation = job.operation_id.clone();
+        store
+            .call(move |s| {
+                assert_eq!(s.prepared_bytes(&operation)?.as_slice(), b"signed");
+                assert!(s.operation_pending(&operation)?);
+                assert_eq!(s.operation(&operation)?.attempts, 1);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(lease);
+        drop(worker);
+        drop(store);
+        actor.await.unwrap();
+    }
+}
+impl FundingBackend for ExitingSource {
+    type Observations = Reads;
+    fn observations(&self) -> Reads {
+        self.owners.send(tokio::task::id()).unwrap();
+        assert!(
+            !self.first.swap(false, Ordering::SeqCst),
+            "fixture owner exit"
+        );
+        self.reads.clone()
+    }
+    fn max_attempts(&self, _: &FundingJob) -> u32 {
+        3
+    }
+    async fn quote_prerequisite(&mut self, _: &FundingJob) -> Result<Quote> {
+        panic!("unexpected quote")
+    }
+    async fn prepare(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
+        panic!("unexpected calculation")
+    }
+    async fn submit(&mut self, _: &FundingJob) -> Result<()> {
+        panic!("unexpected submission")
+    }
+    async fn reconcile(&mut self, _: &FundingJob) -> Result<bool> {
+        panic!("unexpected reconciliation")
+    }
+}
+#[tokio::test]
+async fn exited_funding_task_is_replaced_with_same_store_and_shutdown_stops_replacement() {
+    for stop_before_retry in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let (store, actor) = StoreHandle::spawn(state);
+        let (owners, mut tasks) = mpsc::unbounded_channel();
+        let (statuses, _) = mpsc::unbounded_channel();
+        let source = ExitingSource {
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(0)),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: false,
+                quotes: None,
+            },
+            owners,
+            first: std::sync::atomic::AtomicBool::new(true),
+        };
+        let worker = FundingWorker::new(store.clone(), source, 1);
+        let stop = CancellationToken::new();
+        let running = tokio::spawn(worker.run(stop.clone()));
+        let first = event(&mut tasks).await;
+        if !stop_before_retry {
+            let second = event(&mut tasks).await;
+            assert_ne!(
+                first, second,
+                "real task replacement, not retained future retry"
+            );
+        }
+        stop.cancel();
+        running.await.unwrap().unwrap();
+        assert!(tasks.try_recv().is_err());
+        store
+            .call(|s| {
+                assert!(s.status()?.treasury_operations.is_empty());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(store);
+        actor.await.unwrap();
+    }
+}

@@ -38,10 +38,32 @@ impl ManagedPool {
         .context("reconciliation owner stopped")?
     }
     pub(crate) async fn run_reconciliation(&self, stop: CancellationToken) -> Result<()> {
-        let _owner = tokio::select! { _=stop.cancelled()=>return Ok(()), owner=self.reconciliation.clone().lock_owned()=>owner };
-        self.maintenance(stop, false).await
+        loop {
+            if stop.is_cancelled() {
+                return Ok(());
+            }
+            let pool = self.clone();
+            let stopped = stop.clone();
+            let owner = tokio::spawn(async move {
+                let _owner = tokio::select! { _=stopped.cancelled()=>return Ok(()), owner=pool.reconciliation.clone().lock_owned()=>owner };
+                pool.maintenance(stopped, false).await
+            });
+            match owner.await {
+                Ok(result) => return result,
+                Err(_) if stop.is_cancelled() => return Ok(()),
+                Err(_) => tracing::warn!(
+                    category = "reconciliation_owner_restart_pending",
+                    "reconciliation owner exited; retrying existing ownership; payment journals remain unchanged"
+                ),
+            }
+            tokio::select! { _=stop.cancelled()=>return Ok(()), _=tokio::time::sleep(CADENCE)=>{} }
+        }
     }
     async fn maintenance(&self, stop: CancellationToken, one_pass: bool) -> Result<()> {
+        #[cfg(test)]
+        if let Some(hook) = &self.reconciliation_test_hook {
+            hook();
+        }
         let pool = self.pool.clone();
         let changes = self
             .store
