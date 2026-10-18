@@ -89,18 +89,18 @@ operator review; cancellation drains
 accepted financial work and preserves journals. Treasury ZEC funding and Base
 confirmation can take time. The command introduces no new spending limits.
 While waiting, it logs unfinished jobs and their sync/submission state once a
-minute. A completed swap's retained timeout does not block bootstrap: confirmed
-USDC credit satisfies that job, while pending source accounting retains its
-reservations and continues reconciling during serving.
+minute. The first positive USDC observation satisfies the captured destination
+claim even when retained timeout diagnostics remain; exact pending source work
+stays owned and continues reconciling during serving.
 
-Ordinary managed `serve` performs the same bootstrap before catalog/pricing
-discovery when `auto_fund=true`, then starts normal serving and replacement funding.
-This allows a new deployment to pay for discovery fallback. One eligible funded
-payer per group suffices; unfinished reserves keep reconciling through discovery
-and serving under the same retained owner. `auto_fund=false` skips this funding wait
-and makes explicit bootstrap fail, while accepted operations remain observed;
-qualification funding restrictions retain their existing lifecycle. `catalog warm` never starts funding: use this
-command first when warming needs a managed paid relay wallet.
+Ordinary managed `serve` binds listeners and exposes available tools before starting
+initial or replacement funding. Remote catalog/pricing discovery and pending paid
+relay discovery continue during serving under the retained owner; relay discovery
+waits for its assigned payer without allocating wallets itself. Serving does not
+wait for bootstrap completeness. `auto_fund=false` pauses new funding and makes
+explicit bootstrap fail, while accepted operations remain observed; qualification
+funding restrictions retain their existing lifecycle. `catalog warm` never starts
+funding: use `wallet bootstrap` first when warming needs a managed paid relay wallet.
 
 ## Treasury and managed pools
 
@@ -329,7 +329,13 @@ stay `refund_pending`. The SDK owns incoming returns and current spendable input
 principal caps and historical refund revalidation are removed; provider status alone
 never proves an on-chain return or authorizes a new deposit.
 
-With serving stopped, prepare shielding for exactly one refund address:
+With `funding.auto_fund=true`, serving and bootstrap attempt shielding of confirmed
+spendable owned transparent funds after persisted sync, one address per transaction,
+including returns without job attribution. Paused funding and qualification permits
+do not authorize new automatic shielding. Pending exact bytes remain observable;
+uncertain submissions are never automatically replayed.
+
+With serving stopped, explicitly prepare shielding for exactly one refund address:
 
 ```sh
 target/debug/x402_treazury wallet shield-refunds \
@@ -681,8 +687,9 @@ Canonical authorization/debit proofs remain a qualification observation, preserv
 all attempts and the existing case permit; seller success does not prove a debit.
 
 Pools use existing eligible Base wallets and consume initially funded reserves.
-Queued replacements are funded only with `funding.auto_fund = true`. Refund shielding
-requires explicit operator handling. Eligible source-expiry recovery runs automatically
+Queued replacements and automatic per-address shielding require
+`funding.auto_fund = true`. Explicit refund shielding remains available with serving
+stopped. Eligible source-expiry recovery runs automatically
 with funding, or through `wallet recover` while serving is stopped.
 
 The [lifecycle qualification matrix](../tests/LIFECYCLE.md) maps each recovery and

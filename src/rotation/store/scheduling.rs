@@ -234,7 +234,6 @@ mod tests {
             let saved = store.funding_job(&job.id).unwrap().unwrap();
             assert_eq!(saved.last_error.as_deref(), error);
             assert!(crate::rotation::store::funding::can_recover_facts(
-                &saved,
                 None,
                 &store.funding_facts(&job.id, &job.operation_id).unwrap()
             ));
@@ -261,7 +260,6 @@ mod tests {
             Some("funding_quote_failed; no preparation started")
         );
         assert!(crate::rotation::store::funding::can_recover_facts(
-            &unknown,
             None,
             &store.funding_facts(&job.id, &job.operation_id).unwrap()
         ));
@@ -282,7 +280,6 @@ mod tests {
             let blocked = store.funding_job(&job.id).unwrap().unwrap();
             assert_eq!(blocked.last_error.as_deref(), error);
             assert!(crate::rotation::store::funding::can_recover_facts(
-                &blocked,
                 None,
                 &store.funding_facts(&job.id, &job.operation_id).unwrap()
             ));
@@ -344,7 +341,6 @@ mod source_disposition_tests {
             assert!(current.last_error.is_none());
             assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 1);
             assert!(crate::rotation::store::funding::can_recover_facts(
-                &current,
                 None,
                 &store.funding_facts(&job.id, &job.operation_id).unwrap()
             ));

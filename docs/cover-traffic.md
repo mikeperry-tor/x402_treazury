@@ -228,8 +228,9 @@ Cover never signs, retries a signed request, obtains an allowance, promotes a
 wallet or triggers funding. Static and managed calls retain ordinary financial
 admission and receipt handling. Optional failures are advisory; a real API error
 still follows the normal payment/output path. A rejected padded payment is never
-replayed without padding. Shutdown cancels cover and drains accepted financial
-work through the retained application owner; cover cleanup cannot abandon payment work.
+replayed without padding. Shutdown stops optional cover tasks before draining
+accepted financial work through the retained application owner. Cover cleanup
+cannot abandon payment work; the final aggregate stderr report follows that drain.
 
 An unsigned payer handoff ends the original attempt's cover call and binds the
 replacement attempt to the replacement wallet's owner. It preserves the existing

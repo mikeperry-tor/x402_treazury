@@ -169,7 +169,7 @@ impl Default for Config {
             discovery_source: None,
             discovery_relay: None,
             http_cache_enabled: true,
-            catalog_cache_ttl_seconds: 86400,
+            catalog_cache_ttl_seconds: crate::limits::API_CACHE_TTL_SECONDS,
             http_cache_directory: None,
             http_cache_direct_warm_target: None,
             reliability_tags: vec![],

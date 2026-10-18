@@ -33,6 +33,9 @@ owner manages zingolib sync, preparation and submission; a bounded blocking stor
 worker owns SQLite operations. Financial transactions do not hold a database
 transaction across remote calls. Accepted actor/store work survives cancellation
 of its caller. Independent EVM pools share source funds, not payment reservations.
+Encrypted wallet snapshots and outgoing operations commit atomically; snapshot
+revision compare-and-swap prevents stale saves. Do not use upstream plaintext
+wallet saves or SDK quick-send helpers to bypass this owner and journal path.
 
 ## Funding limits and fees
 
@@ -105,9 +108,15 @@ max_refund_shielding_fee_zec = "0.0003"
 Immutable transaction facts report confirmed principal and actual fees. Shielding
 records principal zero and charges only its fee. There is no mutable gross/net cost,
 returned-principal credit or historical monetary equality gate. Missing swap
-attribution does not invalidate owned SDK funds. General automatic transparent
-shielding remains unfinished; the explicit per-address command retains privacy and
-selected-input ownership.
+attribution does not invalidate owned SDK funds. Enabled automatic funding also shields confirmed spendable owned transparent
+outputs after a successful persisted sync, including unattributed returns. Each
+proposal uses one address and the actual standard fee under
+`max_refund_shielding_fee_zec`; the SDK determines confirmations, maturity and input
+availability. Selected inputs must exceed the actual proposed fee before accepting
+input ownership: the pinned SDK permits fee-only proposals, which cannot recover
+capital. Uneconomic/empty addresses do not block independent addresses. No
+principal reservation, attribution requirement or funding-claim reopening is added.
+The explicit per-address command remains available.
 
 Zingolib selects inputs and calculates standard network fees. The application
 checks the actual proposal against configured per-operation fee/spend safeguards,
@@ -220,9 +229,16 @@ Selection uses the saved wallet estimate as described in the
 [best-effort wallet rules](#best-effort-wallet-rules). It performs no balance RPC,
 nonce scan, historical readiness validation or certificate publication. Price hints
 can choose an existing identity before its own unsigned challenge is fetched.
+Unsigned selection is read-only: it neither promotes a retained wallet nor consumes
+a reserve claim, and it does not acquire the payment gate. `selection_amount` is
+only a ranking input. Actual challenge amounts and current ownership/caps are
+checked by payment preparation and the authorization journal; balances are not
+spending permission. No additional hint or authority state is maintained.
 
-Runtime hints expire 300 seconds after the unsigned response was received and
-retain at most 512 fixed-size entries per process. Their trusted key includes
+Runtime hints expire 24 hours after the unsigned response was received and
+retain at most 65,535 fixed-size entries per process. Their lifetime shares the
+API catalog disk-cache default; per-source catalog overrides remain independent.
+See [local resource limits](local-resource-limits.md). Their trusted key includes
 source/revision, method/OpenAPI template, wallet group and transport scope; request
 arguments cannot choose that scope. Receipt order controls updates, including lower
 prices. Restart, expiry and eviction lose only a selection estimate. They cause
@@ -351,6 +367,11 @@ confirmation and destination credit are independent: a NEAR success response alo
 cannot mark a candidate spendable, and Base credit alone cannot prove source
 confirmation. Concurrent credit observers cannot overwrite a completed job with
 an obsolete persistence warning; genuine source-reconciliation errors remain visible.
+After source observation, one serialized Store job publishes any due phase,
+settles proven completion and reads the current operation and facts. These steps
+retain their existing transactions; they are not one all-or-nothing transaction.
+Derived eligibility for new funding is shared by observers and source work;
+mutation boundaries still recheck current preparation and submission authority.
 
 Successful financial completion combines three independent facts: the wallet's first positive credit, canonical source confirmation,
 and validated provider fulfillment. Initial credit alone publishes the funded
@@ -392,7 +413,9 @@ Bootstrap and the serving funding worker recover eligible jobs automatically.
 The operator can run `wallet recover --config FILE` with serving stopped for one
 pass through the same classifier, without starting funding or submitting transactions.
 Reports distinguish recovered, waiting, failed checks and operator-required cases.
-Unknown preparation outcomes, refunds and unresolved confirmed swaps require review.
+Unknown preparation outcomes, refunds and unresolved confirmed swaps require review
+before restarting or replacing the funding attempt. Ordinary discovery and shielding
+of owned outputs can continue under the current funding authority.
 
 A prepared deposit retains its exact bytes and input owner when its external quote
 deadline expires. Recovery requires finite consensus expiry, complete coverage on
@@ -419,8 +442,25 @@ identities and the remaining upstream timeout boundaries.
 
 Each swap uses a persisted unique high-index transparent refund address derived
 from the treasury. Refund visibility does not make funds automatically spendable
-for another deposit. Refund shielding is an explicit operation with observed
-inputs, fee caps, prepared-byte recovery and its original recipient network binding.
+for another deposit. Serving and bootstrap with enabled automatic funding attempt per-address shielding
+through the existing treasury owner. `auto_fund=false` and qualification restrictions
+prevent new shielding; existing prepared bytes remain observable. Positive
+qualification funding permits authorize jobs only and do not authorize automatic
+jobless shielding. Explicit shielding remains available while serving is stopped,
+with its original job recipient network binding. Unattributed automatic shielding
+uses a stable per-address/network/treasury identity. Both paths retain observed
+inputs, fee caps and exact prepared-byte recovery.
+The remaining `funding_refunds` records store previously derived addresses for
+quote routing and explicit per-job administration. They store no returned amount
+or spendability. Automatic shielding does not consult refund attribution or
+provider status: the SDK discovers owned coins and determines when they become
+spendable. A return does not reopen an initial funding claim, since it cannot prove
+the swap will not also deliver USDC.
+The pinned SDK's `WalletWrite::store_transactions_to_be_sent` scans calculated
+transactions with the wallet's viewing keys. Validation requires the exact selected
+outpoints, no transparent outputs and decrypted account-zero shielded notes equal
+to inputs less actual fee. Check all supported shielded pools: the SDK may promote
+change from Orchard to Ironwood after an upgrade.
 The SDK owns return outputs, spent state, fees and chain corrections. There is no
 local refund credit, principal cap or historical refund/source revalidation gate.
 Source confirmation remains a distinct audit fact. A refund or stale workflow phase
@@ -509,6 +549,9 @@ bound payer, then other eligible affordable identities, then unknown or low esti
 Old or unavailable RPC observations and missing historical funding readiness do not
 prevent a permitted signature. Actual pool ownership, role, configured amount cap,
 asset/domain and caller authority still apply.
+Historical price hints rank estimates without excluding an otherwise authorized
+payer, including after a cap change. The current challenge and serialized journal
+enforce the actual payment amount against current authority.
 
 Each new authorization is durably journaled before disclosure. That transaction
 subtracts its maximum amount once from the current estimate, saturating at zero.
@@ -520,8 +563,13 @@ A signed attempt's HTTP 402 can earn another wallet attempt only through the
 [pinned x402 seller encodings](../tests/fixtures/x402/insufficient-funds.json):
 `PAYMENT-REQUIRED` with exact `error: insufficient_funds`, or a failed
 `PAYMENT-RESPONSE` with that exact `errorReason`. An unsigned challenge, arbitrary
-prose, a bare 402, allowance failure and malformed/truncated replies cannot earn it.
-The existing response-byte and read-inactivity limits still apply.
+prose, a bare 402, allowance failure and malformed protocol headers cannot earn it.
+Duplicate protocol headers cannot grant another attempt. When `PAYMENT-RESPONSE`
+is present, its settlement record governs classification: a simultaneous challenge
+cannot override a successful settlement, another failure or an unreadable receipt.
+The unused error body is dropped immediately: truncation, size and read inactivity
+cannot delay or prevent fallback after recognized headers. Ordinary returned
+responses retain their response-byte and read-inactivity limits.
 
 Each recognized failure marks its wallet low balance and queues an advisory
 `balanceOf(..., latest)` read through the existing maintenance owner. Payment
@@ -549,11 +597,16 @@ every selected input and finite inclusive consensus expiry; a refund is never pr
 of non-submission. Earlier state schemas are rejected before mutation, without
 private-state conversion.
 
-R01 reconstructs failed SDK capabilities and replaces exited funding/reconciliation
-tasks through existing ownership. R02 (general automatic recovery of owned transparent
-capital) remains unfinished in the [follow-on plan](plans/treasury_owner_followups.md).
+Failed SDK capabilities reconstruct and exited funding/reconciliation tasks resume
+through existing ownership. Automatic shielding recovers owned transparent capital
+per address under existing authority. Local tests cover these paths without live-funded,
+consensus or Tor qualification; see [testing](testing.md#qualification-status).
 Reopening never erases uncertain accepted work or recovers unpublished bytes lost
-with a process.
+with a process. An accepted shielding calculation blocks new calculation until its
+original transaction confirms or existing consensus-expiry recovery proves all
+original inputs remain unspent. Automatic initial submission requires current
+authority and zero prior attempts; uncertain broadcasts are never automatically
+replayed. Missing prepared bytes retain their uncertain accepted input claim.
 
 Multiple charges after the accepted USDC failure category and incomplete external
 settlement proof are accepted limitations. The [network guide](network-egress.md#remaining-timers-and-budgets)

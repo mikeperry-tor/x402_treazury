@@ -190,8 +190,7 @@ sources=[]
             initialized.wallets.keys().cloned().collect::<BTreeSet<_>>(),
             expected
         );
-        assert!(initialized.treasury.is_none());
-        assert!(initialized.funding_runtime.is_none());
+        assert!(matches!(initialized.runtime, ManagedRuntime::None));
         assert!(initialized.managed_pools.is_empty());
         initialized.shutdown().await.unwrap();
     }
@@ -235,12 +234,12 @@ async fn managed_initialization_restricts_before_selected_pool_setup_and_release
                 only
             );
             assert_eq!(initialized.managed_pools.len(), 1);
-            assert!(initialized.funding_runtime.is_some());
+            assert!(initialized.runtime.funding_available());
             let status = initialized
-                .treasury
-                .as_ref()
+                .runtime
+                .store()
                 .unwrap()
-                .status()
+                .call(|s| s.status())
                 .await
                 .unwrap();
             assert_eq!(status.pools.len(), 1);
@@ -434,19 +433,18 @@ async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_i
             .await
             .unwrap();
         let status = initialized
-            .treasury
-            .as_ref()
+            .runtime
+            .store()
             .unwrap()
-            .status()
+            .call(|s| s.status())
             .await
             .unwrap();
         assert!(status.funding_jobs.is_empty());
         assert!(status.pools.iter().all(|pool| pool.addresses.is_empty()));
         initialized
-            .treasury
-            .as_ref()
+            .runtime
+            .store()
             .unwrap()
-            .store_handle()
             .call(|store| store.require_preparation_available())
             .await
             .unwrap();
@@ -457,7 +455,13 @@ async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_i
         {
             Ok(mut running) => {
                 assert!(!reserved_namespace);
-                let owner = running.treasury.take().unwrap();
+                let ManagedRuntime::Treasury(treasury) =
+                    std::mem::replace(&mut running.runtime, ManagedRuntime::None)
+                else {
+                    panic!("treasury runtime required")
+                };
+                let TreasuryRuntime { owner, funding } = *treasury;
+                drop(funding);
                 let after = owner
                     .store_handle()
                     .call(|store| {
@@ -536,7 +540,7 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
         match deployment.bind(&env()).await {
             Ok(mut running) => {
                 assert!(!fail_second_bind);
-                assert!(running.funding_runtime.is_some());
+                assert!(running.runtime.funding_available());
                 let payer = PaidClient::managed(running.managed_pools[0].clone());
                 let error = tokio::time::timeout(
                     Duration::from_secs(2),
@@ -558,7 +562,13 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
                     "{error:#}"
                 );
                 drop(payer);
-                let owner = running.treasury.take().unwrap();
+                let ManagedRuntime::Treasury(treasury) =
+                    std::mem::replace(&mut running.runtime, ManagedRuntime::None)
+                else {
+                    panic!("treasury runtime required")
+                };
+                let TreasuryRuntime { owner, funding } = *treasury;
+                drop(funding);
                 drop(running);
                 owner.close().await.unwrap();
             }
@@ -620,13 +630,13 @@ async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_prov
     .expect("relay load waited for funding")
     .unwrap();
     let initialized = deployment.initialized.as_ref().unwrap();
-    assert!(initialized.funding_runtime.is_some());
+    assert!(initialized.runtime.funding_available());
     assert!(
         initialized
-            .treasury
-            .as_ref()
+            .runtime
+            .store()
             .unwrap()
-            .status()
+            .call(|s| s.status())
             .await
             .unwrap()
             .funding_jobs
@@ -651,7 +661,13 @@ async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_prov
         Some(crate::rotation::error::AdmissionError::WalletNotReady(_))
     ));
     drop(payer);
-    let owner = running.treasury.take().unwrap();
+    let ManagedRuntime::Treasury(treasury) =
+        std::mem::replace(&mut running.runtime, ManagedRuntime::None)
+    else {
+        panic!("treasury runtime required")
+    };
+    let TreasuryRuntime { owner, funding } = *treasury;
+    drop(funding);
     let status = owner.status().await.unwrap();
     assert!(status.funding_jobs.is_empty());
     assert!(status.treasury_operations.is_empty());

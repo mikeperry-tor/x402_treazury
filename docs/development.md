@@ -58,16 +58,17 @@ as routine disk cleanup.
 
 ## Verification
 
-Run `scripts/check.sh` for both build configurations, all-feature Clippy and
-compatibility checks. Use `scripts/check.sh --no-default-features` to check only
-the build without the embedded wallet. See [development tools](../scripts/README.md).
+Run `scripts/check.sh` for the default Zcash build, all-feature Clippy,
+compatibility checks and the local synthetic-chain treasury lifecycle. Reduced-
+feature checks require an explicit user request; they are not part of ordinary
+validation. If both configurations are requested, run them sequentially because
+CLI tests share the executable path. See [development tools](../scripts/README.md).
 Individual commands:
 
 ```sh
 scripts/zcash.sh test --all-targets -- --test-threads=1
 scripts/zcash.sh clippy --all-targets -- -D warnings
 cargo fmt --check
-cargo test --locked --no-default-features --all-targets
 ```
 
 Tests cover local x402 handshakes and signatures, spend limits, managed admission
@@ -93,7 +94,9 @@ are explicit, and existing coverage is joined only for unchanged source files.
 `scripts/check.sh` runs the audit by default. New or worsening hotspots above CogC
 20 or CycC 40 receive advisory review warnings against the merge base with `main`;
 scores do not fail the check. Use `--base REF` or `COMPLEXITY_BASE_REF` for another
-review target. Incomplete analysis fails visibly. See [definitions and findings](../tests/COMPLEXITY.md)
+review target. Incomplete analysis fails visibly. Apply the
+[review discipline](../tests/COMPLEXITY.md#review-discipline) to act on warnings;
+see [definitions and findings](../tests/COMPLEXITY.md)
 for syntax qualification, macro/feature limitations and the independent tool build.
 
 ### Local coverage
@@ -125,6 +128,20 @@ separate from the stable run. It uses nightly's matching LLVM tools; unset any
 `LLVM_COV`/`LLVM_PROFDATA` overrides pointing at a different LLVM version. Production
 builds continue to use the existing stable compiler. Branch results measure the
 compiler's supported branch instrumentation, not every possible logical path.
+
+## Logging and diagnostics
+
+All application logs go to stderr; stdout carries the MCP wire or requested CLI
+JSON. Process `RUST_LOG` overrides the default `warn,x402_treazury=info` filter for
+every command. Info reports catalog/pricing completion, listener startup and
+funding progress. Download, parse and protocol details belong at debug; warnings
+identify failures, degraded operation or actionable configuration problems.
+
+Sanitize Zingolib errors before logging or persistence. Retain fixed categories
+and typed reasons, numeric gRPC codes and fixed status names when available, never
+upstream prose, metadata, wallet identifiers or credentials. Shard-tree diagnostics
+retain the fixed pool and operation labels from the pinned Pepper Sync patch.
+Keep ordinary CLI errors legible even with backtrace environment variables enabled.
 
 ## Dependency compatibility
 

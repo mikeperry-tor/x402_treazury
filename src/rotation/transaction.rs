@@ -11,7 +11,6 @@ use zeroize::Zeroizing;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryEvidenceError {
     ExpiryNotBuried,
-    ExpiryNotInvalidated,
     TipLag,
     StaleSync,
     ChainChanged,
@@ -28,7 +27,6 @@ impl std::fmt::Display for RecoveryEvidenceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::ExpiryNotBuried => "transaction expiry not buried",
-            Self::ExpiryNotInvalidated => "sync has not invalidated expired transaction",
             Self::TipLag => "expiry recovery requires zero observed tip lag; synchronize again before releasing reservations",
             Self::StaleSync => "expiry recovery sync stale",
             Self::ChainChanged => "expiry recovery chain changed",
@@ -82,7 +80,7 @@ pub struct PrepareRequest {
 /// Deliberately lacks Debug/Serialize: signed bytes must not enter logs or tools.
 pub struct PreparedTransaction {
     operation_id: String,
-    recipient_identity: Option<String>,
+    identity: Option<crate::network::IsolationId>,
     raw: Zeroizing<Vec<u8>>,
     facts: Option<TransactionFacts>,
 }
@@ -92,17 +90,28 @@ impl PreparedTransaction {
             store.operation_pending(operation_id)?,
             "transaction is not pending"
         );
+        let facts = store.operation_facts(operation_id)?;
+        let identity = store
+            .operation_recipient(operation_id)?
+            .as_deref()
+            .map(crate::network::IsolationId::evm)
+            .transpose()?;
+        #[cfg(feature = "zcash")]
+        let identity = match identity {
+            Some(identity) => Some(identity),
+            None => store.shielding_identity(operation_id, facts.as_ref())?,
+        };
         Ok(Self {
             operation_id: operation_id.into(),
-            recipient_identity: store.operation_recipient(operation_id)?,
+            identity,
             raw: store.prepared_bytes(operation_id)?,
-            facts: store.operation_facts(operation_id)?,
+            facts,
         })
     }
     pub fn network_identity(&self) -> Result<crate::network::IsolationId> {
-        crate::network::IsolationId::evm(self.recipient_identity.as_deref().ok_or_else(|| {
-            anyhow::anyhow!("network_identity_missing: durable operation recipient")
-        })?)
+        self.identity
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("network_identity_missing: durable operation recipient"))
     }
     pub fn facts(&self) -> Option<&TransactionFacts> {
         self.facts.as_ref()

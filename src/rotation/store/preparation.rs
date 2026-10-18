@@ -84,8 +84,7 @@ impl Store {
             );
         }
 
-        let pending:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",[],|r|r.get(0))?;
-        ensure!(!pending, "treasury_send_pending");
+        ensure!(!self.preparation_pending()?, "treasury_send_pending");
         if let Some(pool) = pool {
             let enabled: bool =
                 self.db
@@ -106,6 +105,71 @@ impl Store {
         tx.execute("INSERT INTO operation_network(operation_id,preparation) VALUES(?1,?2) ON CONFLICT(operation_id) DO UPDATE SET preparation=excluded.preparation",params![id,bytes])?;
         tx.commit()?;
         Ok(())
+    }
+
+    pub(super) fn preparation_pending(&self) -> Result<bool> {
+        Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)", [], |r| r.get(0))?)
+    }
+
+    /// Read-only authority/readiness check. Qualification permits currently
+    /// authorize funding jobs only, so they cannot authorize jobless shielding.
+    pub(crate) fn automatic_shielding_available(&self) -> Result<bool> {
+        if self.funding_restriction != super::super::restriction::FundingRestriction::Ordinary
+            || self.funding_permits.is_some()
+        {
+            return Ok(false);
+        }
+        Ok(!self.preparation_pending()?)
+    }
+
+    #[cfg(feature = "zcash")]
+    pub(crate) fn automatic_shielding_submission(&self, id: &str, max_fee: u64) -> Result<bool> {
+        if self.funding_restriction != super::super::restriction::FundingRestriction::Ordinary
+            || self.funding_permits.is_some()
+        {
+            return Ok(false);
+        }
+        let operation = self.operation(id)?;
+        Ok(operation.attempts == 0
+            && operation.facts.fee_zatoshis <= max_fee
+            && self
+                .shielding_identity(id, Some(&operation.facts))?
+                .is_some())
+    }
+
+    #[cfg(feature = "zcash")]
+    pub(crate) fn shielding_identity(
+        &self,
+        id: &str,
+        facts: Option<&TransactionFacts>,
+    ) -> Result<Option<crate::network::IsolationId>> {
+        let Some(facts) = facts else {
+            return Ok(None);
+        };
+        if facts.amount_zatoshis != 0 || facts.deadline.is_some() {
+            return Ok(None);
+        }
+        let intent = self.preparation_intent(id)?;
+        let Some(calculation) = intent.calculation else {
+            return Ok(None);
+        };
+        if intent.pool.is_some()
+            || intent.cost_zatoshis != facts.fee_zatoshis
+            || calculation.inputs.is_empty()
+            || calculation
+                .inputs
+                .iter()
+                .any(|i| i.pool != InputPool::Transparent)
+        {
+            return Ok(None);
+        }
+        // Invalid completed facts must not prevent retaining exact local bytes.
+        Ok(crate::network::IsolationId::transparent_treasury(
+            self.network,
+            &self.id,
+            &calculation.destination,
+        )
+        .ok())
     }
 
     pub(crate) fn prepared_inputs(&self, id: &str) -> Result<Vec<OwnedInput>> {
@@ -180,6 +244,65 @@ mod tests {
         );
         assert!(store.request_broadcast("operation", 1, 1, false).is_err());
         assert!(store.status()?.legacy_refunds.is_none());
+        Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "zcash"))]
+mod shielding_identity_tests {
+    use super::*;
+    use crate::rotation::transaction::PreparedTransaction;
+    #[test]
+    fn shielding_identity_reloads_unchanged_and_explicit_recipient_takes_precedence() -> Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let state = dir.path().join("state");
+        let key = dir.path().join("key");
+        let mut store = Store::create(&state, &key, 1, b"fixture")?;
+        let owner = store.id().to_owned();
+        let address = "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F";
+        store.accept_preparation(
+            "shield",
+            None,
+            100,
+            Some(CalculationInputs {
+                destination: address.into(),
+                inputs: vec![OwnedInput {
+                    pool: InputPool::Transparent,
+                    txid: "owned input".into(),
+                    output_index: 0,
+                }],
+            }),
+        )?;
+        store.prepare_with_facts(
+            "shield",
+            1,
+            b"next",
+            b"exact",
+            Some(TransactionFacts {
+                txid: "shield".into(),
+                expiry_height: 100,
+                amount_zatoshis: 0,
+                fee_zatoshis: 100,
+                deadline: None,
+            }),
+        )?;
+        let original = PreparedTransaction::load(&store, "shield")?.network_identity()?;
+        drop(store);
+        let mut store = Store::open(&state, &key, &owner)?;
+        assert_eq!(
+            PreparedTransaction::load(&store, "shield")?.network_identity()?,
+            original
+        );
+        let recipient = format!("0x{:040x}", 1);
+        store.bind_operation_recipient("shield", &recipient)?;
+        let explicit = PreparedTransaction::load(&store, "shield")?;
+        assert_eq!(
+            explicit.network_identity()?,
+            crate::network::IsolationId::evm(&recipient)?
+        );
+        assert_ne!(explicit.network_identity()?, original);
+        assert_eq!(explicit.bytes(), b"exact");
         Ok(())
     }
 }

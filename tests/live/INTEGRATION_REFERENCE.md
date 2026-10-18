@@ -121,6 +121,10 @@ this call ran the initializer, `hit` means the cache was ready at invocation, an
 response with the wrong cache path fails the assertion. Missing completion or
 invalid correlation remains incomplete and blocks dependent phases. These checks
 are independent of optional content `checks` and never authorize another request.
+Instrumentation observes the real production OnceCell initializer and pricing
+paths; it must not add probes or signed retries beyond the managed payment policy.
+Observe concurrent initialization directly rather than inferring a cache hit from
+successful output. Failed help initialization remains uncached.
 
 For example, add these reviewed cases and an unsigned phase to an existing
 manifest with a `main` window and a selected SocialFetch help tool:
@@ -207,6 +211,7 @@ pricing stage; request an assertion only for a source that will be priced. Catal
 inspection (`config check`/preparation) still does not probe. The real-executable suite
 in `tests/integration_preparation.rs` shares the runner entry code in
 `examples/live_integration/driver.rs`, preventing module/CLI drift.
+Keep CLI and module wiring in this shared driver; do not duplicate it in tests.
 
 ## Report output
 
@@ -608,7 +613,8 @@ start another call. Cancelled waiters do not undo accepted blocking journal work
 Missing application completion remains incomplete. Independent provider failures
 may allow other eligible cases to proceed; ambiguous payments are never replayed.
 The parent pipe drives deliberate bounded drain on EOF/SIGINT/SIGTERM. Preserve an
-in-progress drain across cancelled waiters, with its original deadline. Forced kill
+in-progress drain across cancelled waiters, with its original deadline and owned
+child process handle; never recover it through a PID-based kill/restart. Forced kill
 or missing output remains explicit incomplete evidence. Per-session private output,
 process records and results supplement the durable registry.
 
@@ -621,27 +627,39 @@ never establishes payment, content, Tor or scenario qualification.
 ### Saved accounting and report bounds
 
 After clean managed shutdown, exclusive treasury ownership permits a private
-snapshot correlated to that registered session. Reports recompute consumed source
-principal/fees, outstanding reservations, refunds, unresolved payment exposure and
-anchored balances by role. Refund shielding consumes its fee only. Retired funds
-are not active capacity; unanchored default zeros are unobserved. Saved observations
+snapshot correlated to that registered session. Current snapshots retain exact
+accepted preparation/transaction identities and facts, unresolved payment attempts
+and advisory wallet estimates. Removed monetary reservation/refund projections
+are unavailable, not invented zero. Historical formats retain their original
+accounting interpretation. Refund shielding consumes its fee only. Retired funds
+are not active capacity. Historical unanchored default zeros remain unobserved;
+current unavailable estimates are null. Saved observations
 are not fresh chain queries or costs attributable exclusively to the selected run.
 Missing/crashed sessions have no final snapshot.
 
-Current qualification pool balances use `schema_version=2` and a `wallets` map.
+Separately authorized canonical qualification pool observations use
+`schema_version=2` and a `wallets` map.
 Each wallet records exact `confirmed_balance_atomic` and `latest_balance_atomic`
 with their separate block heights/hashes, plus `conservative_balance_atomic`
-(the minimum) for capacity calculations. Admission `balance_evidence` uses the
-same versioned fields alongside its original exposure and immutable support.
-Depletion estimates and admission arithmetic use the conservative amount, never
-the exact confirmed amount alone. Historical unversioned records remain readable:
+(the minimum) for qualification analysis, never current signing permission.
+New admission `balance_evidence` uses `schema_version=3` and advisory
+`estimate_atomic`, which may be null. Current ownership, amount authority and the
+original authorization journal govern admission; saved balances and reserved-before
+arithmetic do not prove solvency. Historical schema-2 admission records retain
+their original exact support and arithmetic. Unversioned records remain readable:
 their `confirmed` map and `confirmed_balance_atomic` field held conservative
 values and must not be interpreted as exact confirmed-block observations.
 Admissions without saved exact support retain that historical representation.
 
+SQLite event details mix plain text and JSON. Guard extraction inside the
+expression (for example, `CASE WHEN json_valid(detail) THEN json_extract(detail,
+'$.amount') END`), not merely in a WHERE clause. Malformed relevant financial
+events must fail explicitly rather than disappear from accounting.
+
 Run attribution uses immutable operation-permit bindings captured with the snapshot,
-never later mutable releases. Separate conservative registry ceilings from treasury
-reservations and consumed costs. Missing budget evidence does not prove zero cost.
+never later mutable releases. Separate conservative registry ceilings from
+historical treasury reservations and consumed costs. Missing budget evidence does
+not prove zero cost.
 Compare against the hash-verified authorization baseline, which can span runs;
 reservation/balance differences do not prove debits. Old baselines without wallet
 anchors cannot establish aggregate USDC changes. Contradictory costs, transactions,

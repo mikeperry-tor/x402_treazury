@@ -11,6 +11,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Architecture](architecture.md) | Catalog generation, MCP execution, ownership and the [wallet selection/isolation decision](architecture.md#wallet-selection-and-network-isolation) |
 | [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, reserve claims, retained capacity, funding and recovery |
 | [Network egress](network-egress.md) | Direct/Tor factory, isolation identities, timeout policy and SDK boundaries |
+| [Local resource limits](local-resource-limits.md) | Existing failure thresholds, cache lifetimes and maintenance cadence for troubleshooting |
 | [Cover traffic](cover-traffic.md) | Optional bounded HTTP/2 ranges, padding, sampling and evidence |
 | [Agent sources](agent-sources.md) | Endpoint-local APIs, wallet selection, dynamic tools and persistence |
 | [Testing](testing.md) | Offline checks, coverage, consensus, Tor and funded qualification boundaries |
@@ -21,7 +22,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
 describe advisory estimates, per-wallet attempts, no top-ups and SDK-owned Zcash
 funds. The [implementation review](plans/best_effort_wallet_balances.md) retains
-review provenance and explicitly unfinished [R01/R02 follow-ons](plans/treasury_owner_followups.md).
+review provenance, including completed R01/R02 ownership and shielding follow-ups.
 The [live runbook](../tests/live/INTEGRATION.md) is the provider execution walkthrough;
 [testing](testing.md#qualification-status) states qualification limits.
 [Deferred plans](plans/deferred/) cover independent provider startup, polling,

@@ -7,6 +7,7 @@ mod expiry;
 mod inputs;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod lifecycle_tests;
+mod owned_transparent;
 mod publication;
 mod reconstruction;
 pub mod recovery;
@@ -18,7 +19,7 @@ mod server;
 mod sync_reuse;
 use crate::rotation::store::TreasuryNetwork;
 impl TreasuryNetwork {
-    fn chain(self) -> zingolib::config::ChainType {
+    pub(crate) fn chain(self) -> zingolib::config::ChainType {
         match self {
             Self::Mainnet => zingolib::config::ChainType::Mainnet,
             #[cfg(all(test, feature = "zcash-testutils"))]
@@ -58,6 +59,7 @@ pub struct Treasury {
     healthy: bool,
     completed: Option<publication::CompletedPreparation>,
     sync_settings: Option<SyncSettings>,
+    automatic_shielding_fee: Option<u64>,
     reusable_sync_revision: Option<i64>,
     // Scheduling only; never used to date or authorize spending evidence.
     last_completed_sync: Option<tokio::time::Instant>,
@@ -182,6 +184,7 @@ impl Treasury {
             healthy: true,
             completed: None,
             sync_settings: None,
+            automatic_shielding_fee: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
         })
@@ -254,6 +257,7 @@ impl Treasury {
             healthy: true,
             completed: None,
             sync_settings: None,
+            automatic_shielding_fee: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
         })))
@@ -384,6 +388,9 @@ impl Treasury {
         self.store
             .call(move |s| s.allocate_capacity_kind(&pool, kind, auto_fund))
             .await
+    }
+    pub(crate) fn configure_automatic_shielding(&mut self, max_fee: u64) {
+        self.automatic_shielding_fee = Some(max_fee);
     }
     pub fn configure_sync(&mut self, settings: SyncSettings) {
         self.reusable_sync_revision = None;

@@ -492,3 +492,85 @@ fn qualification_snapshot_accepts_parent_alias_but_refuses_database_symlink() {
     std::os::unix::fs::symlink(&saved, &database).unwrap();
     assert!(qualification_state(&dir.path().join("state")).is_err());
 }
+
+#[cfg(feature = "zcash")]
+#[test]
+fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_submission() {
+    use crate::rotation::store::preparation::{CalculationInputs, InputPool, OwnedInput};
+    use crate::rotation::transaction::PreparedTransaction;
+    let (_restricted_dir, mut restricted, _) = fixture();
+    restricted
+        .install_funding_permits(Arc::new(TestPermits::new(restricted.id())))
+        .unwrap();
+    assert!(restricted.require_preparation_available().is_ok());
+    assert!(!restricted.automatic_shielding_available().unwrap());
+    assert!(
+        restricted
+            .accept_preparation("unauthorized shield", None, 100, None)
+            .is_err()
+    );
+    assert!(
+        restricted
+            .require_unstarted_preparation("unauthorized shield")
+            .is_ok()
+    );
+    let (_dir, mut store, _) = fixture();
+    let address = "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F";
+    let facts = TransactionFacts {
+        txid: "shield fixture".into(),
+        expiry_height: 100,
+        amount_zatoshis: 0,
+        fee_zatoshis: 100,
+        deadline: None,
+    };
+    let manifest = CalculationInputs {
+        destination: address.into(),
+        inputs: vec![OwnedInput {
+            pool: InputPool::Transparent,
+            txid: "original input".into(),
+            output_index: 0,
+        }],
+    };
+    assert!(store.automatic_shielding_available().unwrap());
+    store
+        .accept_preparation("shield", None, 100, Some(manifest))
+        .unwrap();
+    assert!(!store.automatic_shielding_available().unwrap());
+    store
+        .prepare_with_facts("shield", 1, b"next", b"exact shield", Some(facts))
+        .unwrap();
+    assert!(store.automatic_shielding_submission("shield", 100).unwrap());
+    assert!(!store.automatic_shielding_submission("shield", 99).unwrap());
+    let identity = PreparedTransaction::load(&store, "shield")
+        .unwrap()
+        .network_identity()
+        .unwrap();
+    assert_eq!(
+        identity,
+        crate::network::IsolationId::transparent_treasury(store.network(), store.id(), address)
+            .unwrap()
+    );
+    assert_ne!(
+        identity,
+        crate::network::IsolationId::transparent_treasury(
+            store.network(),
+            "another treasury",
+            address
+        )
+        .unwrap()
+    );
+    store
+        .install_funding_permits(Arc::new(TestPermits::new(store.id())))
+        .unwrap();
+    assert!(!store.automatic_shielding_submission("shield", 100).unwrap());
+    denied(store.request_broadcast("shield", 1, 1, false));
+    assert_eq!(store.operation("shield").unwrap().attempts, 0);
+    let retained = PreparedTransaction::load(&store, "shield").unwrap();
+    assert_eq!(retained.bytes(), b"exact shield");
+    assert_eq!(retained.network_identity().unwrap(), identity);
+    assert!(
+        store
+            .accept_preparation("duplicate", None, 1, None)
+            .is_err()
+    );
+}

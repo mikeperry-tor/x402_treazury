@@ -208,23 +208,16 @@ impl Treasury {
                 && self.last_completed_sync != observed_sync
             {
                 observed_sync = self.last_completed_sync;
-                let pending = self.store.call(|s| s.jobless_pending_operation()).await;
-                match pending {
-                    Ok(Some(id)) => {
-                        if self.reconcile_prepared(id, submission, stop).await.is_err()
-                            && !stop.is_cancelled()
-                        {
-                            tracing::warn!(
-                                category = "pending_shielding_observation_unavailable",
-                                "accepted shielding retained for later observation"
-                            );
-                        }
-                    }
-                    Err(_) => tracing::warn!(
-                        category = "pending_shielding_inventory_unavailable",
-                        "accepted shielding retained; independent treasury commands remain available"
-                    ),
-                    Ok(None) => {}
+                if self
+                    .maintain_owned_transparent(submission, stop)
+                    .await
+                    .is_err()
+                    && !stop.is_cancelled()
+                {
+                    tracing::warn!(
+                        category = "owned_transparent_maintenance_unavailable",
+                        "accepted shielding remains owned; independent Base service remains available"
+                    );
                 }
             }
             // Only an actual successfully persisted scan moves maintenance.

@@ -163,14 +163,14 @@ impl ManagedPool {
     }
     pub(crate) async fn next_candidate(
         &self,
-        cost: U256,
+        selection_amount: U256,
         through: i64,
         attempted: &[String],
     ) -> Result<Option<PaymentCandidateHandle>> {
         let pool = self.pool.clone();
         let attempted = attempted.to_vec();
         self.store
-            .call(move |s| s.advisory_candidate(&pool, cost, None, through, &attempted))
+            .call(move |s| s.advisory_candidate(&pool, selection_amount, None, through, &attempted))
             .await
     }
     pub(crate) async fn note_insufficient(&self, wallet: String) -> Result<()> {
@@ -180,7 +180,8 @@ impl ManagedPool {
             .await
     }
     pub async fn candidate(&self) -> Result<PaymentCandidateHandle> {
-        self.candidate_for(None).await
+        let pool = self.pool.clone();
+        self.store.call(move |s| s.payment_candidate(&pool)).await
     }
     pub(crate) async fn discovery_changes(&self) -> Result<Arc<tokio::sync::Notify>> {
         let pool = self.pool.clone();
@@ -198,20 +199,6 @@ impl ManagedPool {
         let pool = self.pool.clone();
         self.store
             .call(move |s| s.payment_identity_available(&pool))
-            .await
-    }
-    pub(crate) async fn candidate_for(&self, hint: Option<U256>) -> Result<PaymentCandidateHandle> {
-        let pool = self.pool.clone();
-        let guard = Arc::new(self.gate.clone().lock_owned().await);
-        self.store
-            .call_with_guard(guard, move |s| {
-                if let Some(cost) = hint
-                    && let Some(candidate) = s.cached_payment_candidate(&pool, cost, None)?
-                {
-                    return Ok(candidate);
-                }
-                s.payment_candidate(&pool)
-            })
             .await
     }
     pub async fn pay(

@@ -21,6 +21,9 @@ subcommand; running it without arguments displays help and never starts serving.
 | `build-info` | Print build identity and provenance |
 
 Use `x402_treazury COMMAND --help` for the options available to each operation.
+Keep these modes in the shared Clap command tree. Only `serve` accepts listener,
+authentication and supervised-funding options; administration and inspection must
+retain their distinct authority and side effects.
 
 ## Configuration file roles
 
@@ -531,12 +534,16 @@ exceeding it returns HTTP 413 with the limit in its message and a stderr warning
 - Base canonical USDC payments: v1/v2 `exact` and v2 `upto`, signed by the SDK.
   V2 challenge descriptions are capped at 500 characters for facilitator
   compatibility. The accepted requirements themselves remain intact.
+  Static Permit2/`upto` requires an externally provisioned allowance; never
+  automatically approve one. Managed profiles support v2 `exact` only.
 - Asset/network filtering and an exact decimal per-payment cap before signing.
   `--max-api-payment-usdc` overrides `X402_MAX_PRICE_USD`, default `1.00`.
   `none`, `off`, or an empty value removes the amount cap **but retains the
   Base USDC restriction**.
-- One signed retry only. A final 402 surfaces its payment error; a paid request
-  is not retried again after an ambiguous failure. Redirects are disabled.
+- Static profiles perform one signed payment attempt after the unsigned challenge.
+  Managed profiles may traverse existing eligible wallets after recognized
+  insufficient-funds headers; see the [best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
+  Other ambiguous failures grant no paid replay. Redirects are disabled.
 - `PaidClient::replace_payer` swaps the signer for subsequent requests. A
   request captures its payer before the unpaid attempt and retains it until
   completion. This API is for static profiles. Managed profiles acquire an
@@ -891,6 +898,10 @@ Catalogs are local snapshots, using a provider/source setting:
 ```toml
 catalog_cache_ttl_seconds = 86400 # default: 24 hours; 0 disables catalog disk caching
 ```
+
+This default shares a constant with the runtime API price-hint lifetime. A catalog
+override does not change that process-wide hint lifetime; see
+[local resource limits](local-resource-limits.md).
 
 A deployment source can override its provider's value. Any positive integer sets
 local retention regardless of upstream `Cache-Control` or `Expires`, including

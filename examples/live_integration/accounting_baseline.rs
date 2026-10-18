@@ -179,6 +179,44 @@ pub(crate) fn snapshot(data: &Value) -> Value {
 mod tests {
     use super::*;
     #[test]
+    fn modern_baseline_preserves_original_calculation_and_prepared_record_identity() {
+        let mut current = crate::accounting::fixture();
+        current["schema_version"] = json!(2);
+        current["source_budget_entries"] = Value::Null;
+        current["refunds"] = Value::Null;
+        current["operations"][1]["facts"]["amount_zatoshis"] = json!(0);
+        current["source_preparations"] = json!([
+            {"operation_id":"deposit", "preparation_sha256":"a".repeat(64), "prepared_record_sha256":"d".repeat(64)},
+            {"operation_id":"shield", "preparation_sha256":"b".repeat(64), "prepared_record_sha256":"e".repeat(64)},
+            {"operation_id":"calculation-only", "preparation_sha256":"c".repeat(64), "prepared_record_sha256":null}
+        ]);
+        let mut baseline = snapshot(&current);
+        baseline["source_preparations"] = current["source_preparations"].clone();
+        baseline["lifecycle"] = json!({"source_operations":current["operations"]});
+        let unchanged = compare(&baseline, &current).unwrap();
+        assert_eq!(unchanged["source"]["recorded_consumed_zatoshis"]["change"], "0");
+        assert!(unchanged["source"]["source_reserved_zatoshis"]["change"].is_null());
+        assert!(unchanged["source"]["recorded_refund_outputs_zatoshis"]["change"].is_null());
+
+        for field in ["preparation_sha256", "prepared_record_sha256"] {
+            let mut changed = current.clone();
+            changed["source_preparations"][0][field] = json!("f".repeat(64));
+            assert_eq!(
+                compare(&baseline, &changed).unwrap_err().to_string(),
+                "baseline calculation changed or disappeared",
+                "a well-formed but substituted {field} must not preserve continuity"
+            );
+        }
+        let mut missing = current.clone();
+        missing["source_preparations"].as_array_mut().unwrap().pop();
+        assert_eq!(
+            compare(&baseline, &missing).unwrap_err().to_string(),
+            "baseline calculation changed or disappeared",
+            "an accepted calculation without signed bytes must remain owned"
+        );
+    }
+
+    #[test]
     fn pending_source_confirmation_adds_cost_without_recounting_history() {
         let after = crate::accounting::fixture();
         let mut before = after.clone();
