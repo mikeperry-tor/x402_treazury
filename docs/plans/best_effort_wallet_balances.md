@@ -3,14 +3,14 @@
 
 ## Status and scope
 
-Implement advisory USDC wallet selection and SDK-owned Zcash spending state on
-branch `best_effort_wallet_balances`, based on
-`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. BE02 (`798b211`, fixup `0951464`) and BE03 (`879d712`, fixup `59f8317`)
-passed independent exact-commit and combined payment-transition review. BE04 (`fb4667a`, fixups `fb7cc7d` and `46092e7`) passed exact independent review
-and focused acceptance. BE05 and its exact fixup have passed review and focused
-acceptance. BE06 (`ce62463` with independently reviewed fixups through `58bdf7a`)
-passed focused acceptance and the combined BE04/BE06 architecture gate. BE07
-integration/documentation is implemented; standard checks and final review remain pending.
+BE02–BE07 are implemented on branch `best_effort_wallet_balances`, starting at
+`e004c74`. Complexity comparisons retain the planned baseline
+`49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. Independent exact-commit/fixup reviews,
+the combined BE02/BE03 payment gate, and the BE04/BE06 source-ownership gate passed.
+Default Zcash check components and focused fixup acceptance passed as recorded
+under BE07. Final integration review covers the unsquashed history and maintained
+documentation handoff. R01/R02 remain unfinished and explicitly separate from core
+delivery.
 
 Cross-wallet repetition after an insufficient-funds response is explicitly accepted,
 even when the first authorization remains chargeable and both attempts could charge
@@ -602,6 +602,71 @@ uncertain source submission or consumed initial claims; never claim automatic
 detection of an undeclared filesystem rollback. The accepted USDC retry risk does
 not authorize recreating lost source intent or topping up an already funded wallet.
 
+
+**Completed acceptance and final fixup analysis:**
+
+The standard default-build check was started with `COMPLEXITY_BASE_REF=49566df`.
+Sources/executables stayed frozen during each run. After a failing target, completed
+suites were retained and remaining targets resumed; localized fixes used focused
+checks. This is component-complete acceptance, not a claim that the original
+`scripts/check.sh` invocation exited successfully.
+
+- Formatting, tooling/complexity tests, both vendor verifiers and complete source
+  complexity analysis passed (`target/be07-standard-check.log`). The default library
+  passed 518 tests with eight intentional helper/optional tests ignored.
+- Default integration targets completed across `target/be07-standard-check.log`,
+  `target/be07-standard-remaining2.log`, `target/be07-standard-final-targets.log` and
+  focused corrections. Integration preparation passed 250 tests with six helpers
+  ignored; revised managed acceptance passed 42 with three helpers ignored, and
+  static payment acceptance passed 15 (`target/be07-managed-payment5.log`).
+- Final constructor audit, provider status and startup checks passed in
+  `target/be07-final-fixup-tests.log`; the remaining sync fixture passed in
+  `target/be07-empty-sync-final3.log`. Earlier failures in these logs are retained
+  honestly, not relabeled as successful suites.
+- SDK proving plus affected network/admission fixtures passed 16 tests, actual
+  synthetic-chain lifecycle passed four, and address-codec scoping passed one
+  (`target/be07-feature-checks.log`). That run subsequently found a test tuple-type
+  Clippy warning; alias-only fixup `71642d4` passed exact review and final all-target
+  `zcash-regtest` Clippy with warnings denied (`target/be07-clippy-final.log`).
+  Independent dependency compatibility passed (`target/be07-compat-final.log`).
+
+Late fixups expose removed-policy consumers rather than justify replacement gates.
+Managed fixtures now explicitly establish initial credit through its funding owner;
+ordinary maintenance does not activate allocated wallets or sweep historical nonces.
+Canonical-proof tests request the actual production query/view/publication path.
+Obsolete solvency, precise smallest-sufficient selection, gross accounting and
+retirement-model oracles were deleted, preserving focused claim correlation,
+concurrent journal ownership, cancellation, pool and transport isolation, and
+retained-wallet GET/POST coverage. This test deletion is reported separately from
+runtime responsibility deletion. Initial source-credit consumption and reserve
+promotion remain distinct; their generation and immutable journal assertions survive.
+
+Other fixups correct pre-existing provider snapshots, startup message/auth-fixture
+ordering and six test-only network constructors without relaxing strict equality,
+preflight authority or the constructor tripwire. Empty-wallet indexer mocks prove
+typed safe deferral, one actual network-identity read, unchanged snapshots, no
+accepted operation and no broadcast; real SDK proving separately establishes typed
+insufficient funds. Review also caught a call placed after drain closed admission,
+a weakened per-pool test assertion and a mistaken RPC recorder representation.
+Unsquashed corrections restore those real ownership/isolation checks. Warning prose
+now describes advisory estimates and potentially chargeable authorizations honestly.
+
+The final hazard review distinguishes deletion from movement: ordinary solvency,
+readiness/history/freshness gates, top-up authority and source/refund monetary repair
+are removed. Finite payer traversal and scalar refresh replace the USDC machinery;
+the SDK owns Zcash funds. Higher orchestration scores remain visible because exact
+accepted inputs/bytes, same-owner publication retry, scoped concurrent work and
+original qualification evidence still need owners. These are actual off-chain
+boundaries, not renamed balance certificates or another monetary ledger.
+
+Possible multiple USDC charges, inaccurate estimates, forced-death unpublished-byte
+loss with uncertain intent, incompatible-state rejection and restoration limits
+remain explicit. No private-state conversion, old-binary execution, live-funded,
+live Tor or Docker consensus qualification was performed. R01 SDK/task reconstruction,
+R02 general automatic transparent shielding, the external 1Click route contract and
+the gRPC progressing-upload limitation remain unfinished/unqualified; none is
+claimed as delivered recovery or settlement behavior.
+
 **Maintained documentation:**
 
 The plan is a review artifact, not the permanent home of runtime rules. Publish a
@@ -673,7 +738,7 @@ The final fixup analysis must distinguish deleted responsibilities from complexi
 merely moved into other helpers.
 
 BE07 complete-chain complexity review uses source-matched artifact
-`20261018T033519Z-163a9c12` (322 files, 6,446 callable spaces), against `49566df`.
+`20261018T045854Z-c305cd65` (322 files, 6,356 callable spaces), against `49566df`.
 Scores below are inclusive CogC/CycC; nested rows are not additive.
 
 | Responsibility | Baseline → current | Disposition |
