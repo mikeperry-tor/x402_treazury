@@ -134,17 +134,15 @@ impl Deployment {
 }
 
 impl InitializedWallets {
-    pub(super) async fn shutdown(mut self) -> Result<()> {
-        let treasury = self.treasury.take();
-        let store_only = self.store_only.take();
-        drop(self);
-        if let Some(treasury) = treasury {
-            treasury.close().await?;
-        }
-        if let Some(owner) = store_only {
-            owner.close().await?;
-        }
-        Ok(())
+    pub(super) async fn shutdown(self) -> Result<()> {
+        let Self {
+            wallets,
+            runtime,
+            managed_pools,
+        } = self;
+        drop(wallets);
+        drop(managed_pools);
+        runtime.close().await
     }
 }
 
@@ -156,27 +154,26 @@ async fn supervise(
 ) -> Result<BootstrapSummary> {
     let InitializedWallets {
         wallets,
-        treasury,
-        funding_runtime,
+        runtime,
         managed_pools,
-        store_only,
     } = initialized;
-    ensure!(
-        store_only.is_none(),
-        "explicit bootstrap requires treasury SDK"
-    );
-    let owner = treasury.context("bootstrap treasury unavailable")?;
-    let store = owner.store_handle();
     // No paid clients or pool gates are needed. Drop their store handles before
     // closing the owner, whose close waits for the store worker to drain.
     drop(wallets);
     drop(managed_pools);
+    let treasury = match runtime {
+        ManagedRuntime::Treasury(treasury) => treasury,
+        runtime => {
+            runtime.close().await?;
+            bail!("explicit bootstrap requires treasury SDK");
+        }
+    };
+    let store = treasury.owner.store_handle();
     let captured = match capture_startup(&store, &names).await {
         Ok(captured) => captured,
         Err(error) => {
-            drop(funding_runtime);
             drop(store);
-            owner.close().await?;
+            ManagedRuntime::Treasury(treasury).close().await?;
             return Err(error);
         }
     };
@@ -186,9 +183,8 @@ async fn supervise(
             Ok(_) => bootstrap_summary(&store, &names, &captured).await,
             Err(error) => Err(error),
         };
-        drop(funding_runtime);
         drop(store);
-        owner.close().await?;
+        ManagedRuntime::Treasury(treasury).close().await?;
         if summary.is_ok() {
             tracing::info!(
                 wallets = names.len(),
@@ -197,8 +193,10 @@ async fn supervise(
         }
         return summary;
     }
-    let (commands, sender, worker) =
-        funding_runtime.context("bootstrap funding worker unavailable")?;
+    let TreasuryRuntime {
+        owner,
+        funding: (commands, sender, worker),
+    } = *treasury;
     tracing::info!(
         wallets = names.len(),
         "Explicit wallet bootstrap waiting for captured initial USDC credit"
@@ -530,6 +528,36 @@ mod tests {
             assert!(!text.contains(&id));
         }
         assert!(!text.contains("job_id") && !text.contains(&group.pool));
+    }
+
+    #[tokio::test]
+    async fn rejected_store_only_bootstrap_closes_owner_before_returning() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state");
+        let key = dir.path().join("key");
+        let state =
+            crate::rotation::store::Store::create(&state_path, &key, 1, b"fixture").unwrap();
+        let id = state.id().to_owned();
+        let initialized = InitializedWallets {
+            wallets: BTreeMap::new(),
+            runtime: ManagedRuntime::StoreOnly(StoreOnlyOwner::new(state)),
+            managed_pools: Vec::new(),
+        };
+        let error = supervise(
+            initialized,
+            BTreeSet::new(),
+            BTreeMap::new(),
+            CancellationToken::new(),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(
+            error.to_string(),
+            "explicit bootstrap requires treasury SDK"
+        );
+        let reopened = crate::rotation::store::Store::open(&state_path, &key, &id).unwrap();
+        assert!(reopened.funding_jobs().unwrap().is_empty());
     }
 
     #[tokio::test]

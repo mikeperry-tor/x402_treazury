@@ -86,7 +86,7 @@ sources=["api"]
     .unwrap()
     .unwrap();
     let running = deployment.bind(&env).await.unwrap();
-    let store = running.treasury.as_ref().unwrap().store_handle();
+    let store = running.runtime.store().unwrap();
     assert!(
         store
             .call(|s| s.funding_jobs())

@@ -174,9 +174,8 @@ async fn base_service(fault: &str, relay_enabled: bool) {
         .await
         .unwrap();
     let running = deployment.bind(&env).await.unwrap();
-    assert!(running.treasury.is_none());
-    assert!(running.funding_runtime.is_none());
-    let store = running.store_only.as_ref().unwrap().store.clone();
+    assert!(matches!(running.runtime, ManagedRuntime::StoreOnly(_)));
+    let store = running.runtime.store().unwrap();
     assert!(Store::open(&state, &key, &id).is_err());
     let pool = running.managed_pools[0].clone();
     pool.reconcile().await.unwrap();
@@ -386,7 +385,7 @@ async fn store_only_binding_rollback_and_cancelled_serving_release_owner() {
             if mode == "drop_bound" {
                 drop(running);
             } else {
-                let store = running.store_only.as_ref().unwrap().store.clone();
+                let store = running.runtime.store().unwrap();
                 let task = tokio::spawn(running.serve(CancellationToken::new()));
                 // A real store roundtrip gives the serving task a scheduling
                 // opportunity without establishing a runtime deadline.
@@ -451,15 +450,18 @@ async fn dependency_declaration_failures_are_scoped_but_shared_failures_remain_f
             .await;
         assert!(strict.is_err(), "strict preflight accepted {declaration}");
         let running = deployment.bind(&env()).await.unwrap();
-        assert!(running.store_only.is_some(), "{declaration}");
+        assert!(
+            matches!(running.runtime, ManagedRuntime::StoreOnly(_)),
+            "{declaration}"
+        );
         assert_eq!(running.managed_pools.is_empty(), !scoped, "{declaration}");
-        assert!(running.funding_runtime.is_none());
+        assert!(!running.runtime.funding_available());
         // No accepted work exists before serve. Use the normal close sequence
         // without detaching the owner while checking every declaration.
         let mut running = running;
-        let owner = running.store_only.take().unwrap();
+        let runtime = std::mem::replace(&mut running.runtime, ManagedRuntime::None);
         drop(running);
-        owner.close().await.unwrap();
+        runtime.close().await.unwrap();
         let store = Store::open(&state, &key, &id).unwrap();
         assert!(store.funding_jobs().unwrap().is_empty());
         drop(store);
@@ -569,9 +571,8 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
         initialized.shutdown().await.unwrap();
         let running = deployment.bind(&env).await.unwrap();
         assert!(running.managed_pools.is_empty());
-        assert!(running.funding_runtime.is_none());
-        assert!(running.treasury.is_none());
-        assert!(running.store_only.is_some());
+        assert!(!running.runtime.funding_available());
+        assert!(matches!(running.runtime, ManagedRuntime::StoreOnly(_)));
         let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
         let stop = CancellationToken::new();
         let task = tokio::spawn(running.serve(stop.clone()));
