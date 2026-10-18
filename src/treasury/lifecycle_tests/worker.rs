@@ -266,7 +266,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     )
     .await
     .unwrap();
-    owner.configure_sync(SyncSettings::new(endpoint.clone(), 2, 300).unwrap());
+    owner.configure_sync(SyncSettings::new(endpoint.clone(), 2).unwrap());
     let store = owner.store_handle();
     store
         .call(|s| {
@@ -315,7 +315,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         .route("/pay", get(seller))
         .with_state(f.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let base = BaseRpc::new(&format!("{origin}/base"), 2, 120).unwrap();
+    let base = BaseRpc::new(&format!("{origin}/base"), 2).unwrap();
     let (handle, commands) = actor::channel();
     let backend = Backend { treasury: handle.clone(), store: store.clone(), near: NearClient::synthetic_at(&origin).unwrap(), base: base.clone(),
         wallets: ["alpha", "beta"].into_iter().map(|name| (name.into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())).collect(),
@@ -511,7 +511,7 @@ async fn production_readiness_scans_new_deposit_before_repeating_shortage() {
     let mut backend = Backend {
         treasury: handle.clone(), store: store.clone(),
         near: NearClient::synthetic_at("http://127.0.0.1:1").unwrap(),
-        base: BaseRpc::new("http://127.0.0.1:1", 2, 120).unwrap(),
+        base: BaseRpc::new("http://127.0.0.1:1", 2).unwrap(),
         wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())]),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
         max_network_fee: 30_000,

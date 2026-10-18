@@ -76,14 +76,7 @@ impl Treasury {
         mut submission: impl TransactionSubmission,
         stop: CancellationToken,
     ) -> Result<()> {
-        let delay = self
-            .sync_settings
-            .as_ref()
-            .context("sync endpoint not configured")?
-            .max_age_seconds
-            .saturating_div(2)
-            .clamp(1, 60);
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(delay));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut scheduled_sync = None;
         let mut observed_sync = None;
@@ -294,7 +287,7 @@ mod tests {
             let id = status.treasury_id;
             let job = status.funding_jobs[0].id.clone();
             treasury.configure_sync(
-                super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3, 300).unwrap(),
+                super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
             );
             let (handle, commands) = channel();
             let stop = CancellationToken::new();
@@ -354,7 +347,7 @@ mod tests {
             Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))
         ).await.unwrap();
         treasury.configure_sync(
-            super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3, 300).unwrap(),
+            super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
         );
         let id = treasury.status().await.unwrap().treasury_id;
         let (handle, commands) = channel();

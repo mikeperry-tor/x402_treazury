@@ -6,8 +6,8 @@
 Implement advisory USDC wallet selection and SDK-owned Zcash spending state on
 branch `best_effort_wallet_balances`, based on
 `49566df4ae9e40c26349dc9ac6f6d3541ef3c02b`. BE02 (`798b211`, fixup `0951464`) and BE03 (`879d712`, fixup `59f8317`)
-passed independent exact-commit and combined payment-transition review. BE04 is in
-focused acceptance; BE05–BE07 remain pending.
+passed independent exact-commit and combined payment-transition review. BE04 (`fb4667a`, fixups `fb7cc7d` and `46092e7`) passed exact independent review
+and focused acceptance; BE05 is in progress, BE06–BE07 remain pending.
 
 Cross-wallet repetition after an insufficient-funds response is explicitly accepted,
 even when the first authorization remains chargeable and both attempts could charge
@@ -353,7 +353,11 @@ production chains: `source_step` CogC/CycC 27/59, `finish_if_proven` 10/36,
 `funding_work_page` 3/14 and actor `run_commands` 9/17. Historical credit repair
 and its old proof tests are deleted; BE06 still owns source monetary closure.
 All-target compilation passed. Focused acceptance is recorded with the exact
-commit review below once complete.
+commit review: funding 25 tests, bootstrap 14 tests and the real actor jobless
+regression passed. Store 110 tests passed; the sole obsolete completed-job fixture
+call was removed and its focused rerun passed. The final BE04 complexity artifact
+is `20261018T020001Z-ef76f737`. Fixup causes were missed versioned output fixture,
+missing actor-path coverage and tests that still encoded deleted proof/lock behavior.
 Independent precommit review identified that stale display dependency; the fix
 removes it without another RPC or signing check. Development schema 19 rejects
 older mutation without conversion; no private state was converted.
@@ -387,6 +391,22 @@ discards prepared bytes or authorizes a second deposit. Keep connection/read
 inactivity limits, byte/storage bounds, actual work concurrency bounds and useful
 polling. Simplify resource machinery when its protected work disappears; add no
 replacement whole-work deadlines or enormous sentinel durations.
+
+BE05 implementation deletes Base/receipt host-age gates, the receipt log count
+ceiling and treasury age/ordinary three-block catch-up machinery. It removes
+`max_sync_age_seconds` and `base_max_block_age_seconds` with explicit configuration
+errors, replaces age-derived polling with 60-second maintenance, and names status 4's
+snapshot-bound completed scan `sync_complete` (development state schema 20).
+Pinned SDK review traced `LightClient::propose_send`, wallet target/anchor selection
+and `spendable_notes`: selected inputs already need confirmations, witnesses,
+spend links and scan coverage. Ordinary host age/three-block rules add no ownership
+invariant. Scan target completion, non-regressing coverage and actual cancellation
+remain distinct from expiry/non-inclusion's exact observed-tip coverage. Diagnostic
+clock failure does not veto sync/checkpoint/status. Original observation time stays
+unchanged through slow progress and same-owner reuse. Dead balance/nonce proof
+recertification helpers and balance-certificate expiry fields are deleted.
+Complexity artifact `20261018T020557Z-00f01e41` records the owning changed chains;
+BE06 still owns historical source/refund traversal and monetary closure deletion.
 
 ### BE06: Source recovery and accounting removal
 

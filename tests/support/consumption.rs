@@ -354,7 +354,7 @@ async fn expensive_retained_inventory(active_outage: bool) {
                     .as_ref()
                     .expect("payment balance evidence");
                 assert!(
-                    evidence.fresh && evidence.compatible,
+                    evidence.compatible,
                     "{}",
                     serde_json::to_string(wallet).unwrap()
                 );

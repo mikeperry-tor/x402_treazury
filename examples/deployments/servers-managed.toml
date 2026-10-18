@@ -18,7 +18,6 @@ max_refund_shielding_fee_zec = "0.001"
 # near_user_session_env = "NEAR_USER_SESSION"
 base_rpc_url_env = "BASE_RPC_URL"
 base_confirmations = 12
-base_max_block_age_seconds = 120
 confidentiality = "public" # No NEAR signup; public settlement.
 
 [wallets.research]

@@ -41,7 +41,6 @@ pub(super) fn synced_capacity(s: &mut Store, capacity: u64) -> Result<()> {
             observed_tip_height: None,
             height: Some(1),
             confirmations: 1,
-            max_age_seconds: 3600,
             confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 10000,
             spendable_shielded_zatoshis: capacity,
@@ -68,7 +67,7 @@ impl FundingObservations for Funding {
     async fn credit(&self, job: FundingJob) -> Result<()> {
         let pool = job.pool_id.clone();
         let query = self.store.call(move |s| s.chain_query(&pool)).await?;
-        let view = BaseRpc::new(&format!("{}/rpc", self.base), 12, 120)?
+        let view = BaseRpc::new(&format!("{}/rpc", self.base), 12)?
             .view(query)
             .await?;
         let wallet = job.wallet_id.clone();

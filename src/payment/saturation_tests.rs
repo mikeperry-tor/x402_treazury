@@ -75,7 +75,7 @@ async fn saturation_child() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let rpc = BaseRpc::new(&format!("{origin}/rpc"), 12, 120).unwrap();
+    let rpc = BaseRpc::new(&format!("{origin}/rpc"), 12).unwrap();
     let mut state = Store::create(
         &dir.path().join("state"),
         &dir.path().join("key"),

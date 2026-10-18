@@ -51,7 +51,7 @@ pub async fn acquire(query: ChainQuery, amounts: BTreeMap<String, u64>, head: u6
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let result = BaseRpc::new(&url, 12, 120).unwrap().view(query).await;
+    let result = BaseRpc::new(&url, 12).unwrap().view(query).await;
     server.abort();
     result.unwrap()
 }

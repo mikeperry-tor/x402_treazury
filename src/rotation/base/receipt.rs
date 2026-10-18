@@ -57,8 +57,7 @@ impl BaseRpc {
             quantity(&self.rpc("eth_chainId", json!([])).await?)? == 8453,
             "wrong Base chain"
         );
-        let (latest, stamp) = self.block("latest").await?;
-        validate_timestamp(stamp, now()?, self.max_age)?;
+        let (latest, _) = self.block("latest").await?;
         let receipt = self
             .rpc(
                 "eth_getTransactionReceipt",
@@ -85,7 +84,6 @@ impl BaseRpc {
                 "Base view changed during reconciliation"
             );
         }
-        validate_timestamp(stamp, now()?, self.max_age)?;
         Ok(Some(proof))
     }
 }
@@ -119,14 +117,6 @@ fn validate_receipt(
         "receipt transaction/block mismatch"
     );
     let logs = value["logs"].as_array().context("receipt logs missing")?;
-    if logs.len() > 4096 {
-        tracing::warn!(
-            limit = 4096,
-            actual = logs.len(),
-            "receipt log limit exceeded; evidence rejected without truncation"
-        );
-        anyhow::bail!("receipt log limit exceeded");
-    }
     let token: Address = USDC.parse()?;
     let transfer = keccak256("Transfer(address,address,uint256)");
     let authorized = keccak256("AuthorizationUsed(address,bytes32)");
@@ -256,20 +246,21 @@ mod tests {
             .unwrap()
             .push(v["logs"][1].clone());
         assert!(validate_receipt(&duplicate, &e, &b).is_err());
-        let mut excessive = v.clone();
-        excessive["logs"] = json!(vec![v["logs"][1].clone(); 4097]);
-        assert!(
-            validate_receipt(&excessive, &e, &b)
-                .unwrap_err()
-                .to_string()
-                .contains("log limit")
-        );
+        let mut many = v.clone();
+        let mut unrelated = v["logs"][1].clone();
+        unrelated["address"] = json!(Address::ZERO);
+        let mut logs = vec![unrelated; 4097];
+        logs.extend(v["logs"].as_array().unwrap().iter().cloned());
+        many["logs"] = json!(logs);
+        validate_receipt(&many, &e, &b).unwrap();
     }
     #[tokio::test]
     async fn receipt_verification_waits_for_confirmations_and_rechecks_canonical_blocks() {
         use axum::{Json, Router, routing::post};
         for mode in [
             "valid",
+            "old",
+            "host_future",
             "fallback",
             "pending",
             "unconfirmed",
@@ -300,7 +291,7 @@ mod tests {
                                 let changed = !latest && seen.fetch_add(1,std::sync::atomic::Ordering::SeqCst)>0 && mode == "reorg";
                                 json!({"number":if latest {"0x64"} else {"0x50"},
                                     "hash":if latest {B256::repeat_byte(6).to_string()} else if changed {B256::ZERO.to_string()} else {b.hash},
-                                    "timestamp":format!("0x{:x}",now().unwrap()-5)})
+                                    "timestamp":format!("0x{:x}",match mode {"old"=>1,"host_future"=>now().unwrap()+3600,_=>now().unwrap()-5})})
                             },
                             method => panic!("unexpected RPC {method}"),
                         };
@@ -312,13 +303,15 @@ mod tests {
                 let refused = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
                 let refused_url = format!("http://{}", refused.local_addr().unwrap());
                 drop(refused);
-                BaseRpc::with_fallbacks(&[refused_url, url], 12, 120).unwrap()
+                BaseRpc::with_fallbacks(&[refused_url, url], 12).unwrap()
             } else {
-                BaseRpc::new(&url, 12, 120).unwrap()
+                BaseRpc::new(&url, 12).unwrap()
             };
             let result = rpc.verify_transfer(&e).await;
             match mode {
-                "valid" | "fallback" => assert_eq!(result.unwrap().unwrap().amount_atomic, "7000"),
+                "valid" | "old" | "host_future" | "fallback" => {
+                    assert_eq!(result.unwrap().unwrap().amount_atomic, "7000")
+                }
                 "pending" | "unconfirmed" => assert!(result.unwrap().is_none()),
                 _ => assert!(result.is_err(), "{mode}"),
             }

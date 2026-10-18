@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn real_certificates_preserve_age_recheck_lineage_and_reject_predebit_or_conflicting_balances()
+    async fn real_certificates_preserve_canonical_lineage_and_reject_predebit_or_conflicting_balances()
      {
         use crate::rotation::base::{BaseRpc, now};
         use axum::{Json, Router, routing::post};
@@ -226,12 +226,7 @@ mod tests {
             }
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let rpc = BaseRpc::new(
-            &format!("http://{}/", listener.local_addr().unwrap()),
-            12,
-            120,
-        )
-        .unwrap();
+        let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -265,13 +260,12 @@ mod tests {
         let first = rpc.view(query).await.unwrap();
         store.publish_scoped_evidence(&pool, first).unwrap();
         let saved = store.evidence_cache[&wallet].1.observation().clone();
-        let runtime =
-            crate::rotation::store::reporting::runtime_status(&store, saved.valid_until).unwrap();
+        let runtime = crate::rotation::store::reporting::runtime_status(&store).unwrap();
         let evidence = runtime.pools[0].addresses[0]
             .runtime_balance_evidence
             .as_ref()
             .unwrap();
-        assert!(evidence.fresh && evidence.compatible);
+        assert!(evidence.compatible);
         assert_eq!(
             evidence.confirmed.amount_atomic,
             saved.confirmed.amount.to_string()
@@ -283,20 +277,13 @@ mod tests {
         assert_eq!(evidence.confirmed.hash, saved.confirmed.anchor.hash);
         assert_eq!(evidence.latest.hash, saved.latest.anchor.hash);
         assert!(evidence.confirmed.block_timestamp.is_none());
-        assert_eq!(evidence.valid_until, saved.valid_until);
-        let expired =
-            crate::rotation::store::reporting::runtime_status(&store, saved.valid_until + 1)
-                .unwrap();
+        let expired = crate::rotation::store::reporting::runtime_status(&store).unwrap();
         let evidence = expired.pools[0].addresses[0]
             .runtime_balance_evidence
             .as_ref()
             .unwrap();
-        assert!(!evidence.fresh && evidence.compatible);
-        assert_eq!(
-            evidence.unavailable_reason.as_deref(),
-            Some("evidence_expired")
-        );
-        assert_eq!(evidence.valid_until, saved.valid_until);
+        assert!(evidence.compatible);
+        assert!(evidence.unavailable_reason.is_none());
         assert!(
             crate::rotation::store::status(&dir.path().join("state"))
                 .unwrap()
@@ -305,29 +292,11 @@ mod tests {
                 .runtime_balance_evidence
                 .is_none()
         );
-        let expired_at = now().unwrap() - 1;
-        store
-            .evidence_cache
-            .get_mut(&wallet)
-            .unwrap()
-            .1
-            .restrict_validity(expired_at);
-        let query = store
-            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
-            .unwrap();
-        let equivalent = store
-            .prepare_evidence_view(rpc.view(query).await.unwrap())
-            .unwrap();
-        assert_eq!(
-            equivalent.observations[&wallet].valid_until, expired_at,
-            "equivalent anchors cannot renew even an expired saved observation"
-        );
         *state.lock().unwrap() = (120, 90);
         let query = store
             .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
             .unwrap();
         let mut raced = rpc.view(query).await.unwrap();
-        let original_age = raced.observations[&wallet].valid_until;
         let anchor = |height| Anchor {
             height,
             hash: format!("0x{height:064x}"),
@@ -340,14 +309,11 @@ mod tests {
                 .downcast_ref::<EvidenceFailure>(),
             Some(&EvidenceFailure::CompatibilityRequired)
         );
-        let certificate = rpc
-            .recheck_balance(
-                raced.balance_certificates[&wallet].clone(),
-                store.capture_evidence(&wallet).unwrap(),
-            )
-            .await
+        let query = store
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
             .unwrap();
-        assert_eq!(certificate.observation().valid_until, original_age);
+        let refreshed = rpc.view(query).await.unwrap();
+        let certificate = refreshed.balance_certificates[&wallet].clone();
         raced
             .balance_certificates
             .insert(wallet.clone(), certificate);
@@ -402,10 +368,9 @@ mod tests {
             valid_before,
         };
         let query = store
-            .scoped_chain_query(&pool, vec![], vec![authorization])
+            .scoped_chain_query(&pool, vec![], vec![authorization.clone()])
             .unwrap();
         let mut historical = rpc.view(query).await.unwrap();
-        let original = historical.resolution_certificates["history-proof"].clone();
         store
             .invalidate_wallet_evidence(&wallet, &anchor(140), false, false)
             .unwrap();
@@ -420,10 +385,11 @@ mod tests {
             Some(&EvidenceFailure::Invalidated)
         );
         assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::from(7));
-        let verified = rpc
-            .recheck_resolution(original, store.capture_evidence(&wallet).unwrap())
-            .await
+        let query = store
+            .scoped_chain_query(&pool, vec![], vec![authorization])
             .unwrap();
+        let refreshed = rpc.view(query).await.unwrap();
+        let verified = refreshed.resolution_certificates["history-proof"].clone();
         historical
             .resolution_certificates
             .insert("history-proof".into(), verified.clone());
@@ -442,10 +408,8 @@ mod tests {
             .invalidate_endpoint_evidence(verified.endpoint())
             .unwrap();
         assert_eq!(
-            rpc.recheck_resolution(verified, store.capture_evidence(&wallet).unwrap())
-                .await
-                .err()
-                .unwrap()
+            check_resolution(&store.db, store.evidence_namespace, &verified)
+                .unwrap_err()
                 .downcast_ref::<EvidenceFailure>(),
             Some(&EvidenceFailure::Invalidated)
         );
@@ -453,7 +417,7 @@ mod tests {
             observation: durable_observation.clone(),
             checkpoint: Some(anchor(120)),
         };
-        store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role) VALUES('history-proof',128,?1,'80','0',?2,?3,140,?4,?5,'ACTIVE')",params![durable_observation.confirmed.anchor.hash,durable_observation.valid_until.to_string(),serde_json::to_string(&durable_support).unwrap(),durable_observation.latest.anchor.hash,durable_observation.endpoint]).unwrap();
+        store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role) VALUES('history-proof',128,?1,'80','0',?2,?3,140,?4,?5,'ACTIVE')",params![durable_observation.confirmed.anchor.hash,"1000",{let mut value=serde_json::to_value(&durable_support).unwrap();value["observation"]["valid_until"]=serde_json::json!(1000);serde_json::to_string(&value).unwrap()},durable_observation.latest.anchor.hash,durable_observation.endpoint]).unwrap();
         let identity = store.id().to_owned();
         drop(store);
         let mut store = Store::open(
@@ -1229,13 +1193,7 @@ impl Store {
                     observation,
                     saved.observation(),
                 )?;
-                if order == std::cmp::Ordering::Equal {
-                    incoming.restrict_validity(saved.observation().valid_until);
-                    view.observations
-                        .insert(wallet.clone(), incoming.observation().clone());
-                }
                 if order != std::cmp::Ordering::Greater
-                    && crate::rotation::base::now()? <= saved.observation().valid_until
                     && check_balance(&self.db, self.evidence_namespace, &saved).is_ok()
                 {
                     *incoming = saved;

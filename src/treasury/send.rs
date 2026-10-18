@@ -1,7 +1,7 @@
 //! Serialized, calculate-only deposit preparation and durable submission control.
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod proving_tests;
-use super::{Treasury, snapshot};
+use super::{SyncPhase, Treasury, snapshot};
 use crate::rotation::{
     base::now,
     transaction::{
@@ -43,7 +43,7 @@ impl TransactionPreparer for Treasury {
         let deposit = request.recipient.clone();
         let binding_pool = request.pool_id.clone();
         let deadline = request.deadline;
-        let (treasury_id, revision, observed) = self
+        let (treasury_id, _, _) = self
             .store
             .call(move |s| {
                 s.require_preparation_binding(
@@ -79,7 +79,6 @@ impl TransactionPreparer for Treasury {
                 "indexer is not on mainnet"
             );
             let instant = now()?;
-            super::freshness::spending_ready(&observed, revision, info.block_height, instant)?;
             ensure!(
                 request
                     .deadline
@@ -265,7 +264,10 @@ impl Treasury {
         self.sync_for_command(stop).await?;
         let (_, revision, observation) =
             self.store.call(|s| s.funding_preparation_context()).await?;
-        ensure!(observation.fresh(now()?, revision), "treasury_sync_stale");
+        ensure!(
+            (observation.phase == SyncPhase::Ready && observation.snapshot_revision == revision),
+            "treasury_snapshot_changed"
+        );
         let height = observation.height.context("missing sync height")?;
         let operation = id.clone();
         let durable = self
@@ -349,7 +351,11 @@ impl Treasury {
             self.store
                 .call(move |s| {
                     let (_, revision, observation) = s.funding_preparation_context()?;
-                    ensure!(observation.fresh(instant, revision), "treasury_sync_stale");
+                    ensure!(
+                        (observation.phase == SyncPhase::Ready
+                            && observation.snapshot_revision == revision),
+                        "treasury_snapshot_changed"
+                    );
                     ensure!(
                         height > 0
                             && observation.height.is_some_and(|tip| tip >= height
@@ -407,7 +413,6 @@ mod tests {
                         observed_tip_height: Some(2_000_000),
                         height: Some(2_000_000),
                         confirmations: 3,
-                        max_age_seconds: 300,
                         confirmed_pool_balances_zatoshis: None,
                         confirmed_shielded_zatoshis: 1_000_000,
                         spendable_shielded_zatoshis: 1_000_000,
@@ -455,7 +460,6 @@ mod tests {
             super::super::SyncSettings::new(
                 format!("http://{}", listener.local_addr().unwrap()),
                 3,
-                300,
             )
             .unwrap(),
         );

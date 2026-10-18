@@ -66,7 +66,7 @@ async fn cancel_at(cancel_at: CancelAt) {
     let mut manager = ManagedPool::new(
         store.clone(),
         pool,
-        BaseRpc::new(&format!("{base}/rpc"), 12, 120).unwrap(),
+        BaseRpc::new(&format!("{base}/rpc"), 12).unwrap(),
         SpendPolicy::dollars("5").unwrap(),
     )
     .unwrap();

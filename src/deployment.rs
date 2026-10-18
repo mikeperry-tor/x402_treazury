@@ -756,7 +756,6 @@ impl Deployment {
         let sync_settings = crate::treasury::SyncSettings::new(
             t.indexer_endpoint(|name| env.get(name).cloned())?,
             t.confirmations,
-            t.max_sync_age_seconds,
         )?;
         secure_endpoint(&t.submission_endpoint(|name| env.get(name).cloned())?)?;
         let key = f
@@ -798,8 +797,7 @@ impl Deployment {
                 "Direct Base RPC verification exposes your client IP address and queried wallet addresses to each contacted RPC provider, including fallbacks; see config show base_rpc_policy"
             );
         }
-        let base =
-            BaseRpc::with_fallbacks(&urls, f.base_confirmations, f.base_max_block_age_seconds)?;
+        let base = BaseRpc::with_fallbacks(&urls, f.base_confirmations)?;
         Ok(base)
     }
 
@@ -1992,7 +1990,7 @@ bearer_token_env="TOKEN"
             crate::rotation::manager::ManagedPool::new(
                 store.clone(),
                 pool,
-                crate::rotation::base::BaseRpc::new(&rpc_url, 12, 120).unwrap(),
+                crate::rotation::base::BaseRpc::new(&rpc_url, 12).unwrap(),
                 crate::payment::SpendPolicy::dollars("5").unwrap(),
             )
             .unwrap(),

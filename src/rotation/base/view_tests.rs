@@ -13,7 +13,14 @@ async fn fixture_nonce(
     reorg: bool,
     nonce: u64,
 ) -> (BaseRpc, Requests, tokio::task::JoinHandle<()>, u64) {
-    let stamp = now().unwrap();
+    fixture_timestamp(reorg, nonce, now().unwrap()).await
+}
+
+async fn fixture_timestamp(
+    reorg: bool,
+    nonce: u64,
+    stamp: u64,
+) -> (BaseRpc, Requests, tokio::task::JoinHandle<()>, u64) {
     let requests = Requests::default();
     let head = Arc::new(std::sync::atomic::AtomicU64::new(100));
     let app = Router::new().route("/", post({
@@ -55,12 +62,7 @@ async fn fixture_nonce(
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let rpc = BaseRpc::new(
-        &format!("http://{}/", listener.local_addr().unwrap()),
-        12,
-        120,
-    )
-    .unwrap();
+    let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (rpc, requests, server, stamp)
 }
@@ -119,7 +121,7 @@ fn header_reads(requests: &Requests, height: u64) -> usize {
 
 #[tokio::test]
 async fn captured_and_acquired_anchors_share_post_balance_checks_across_wallets() {
-    let (rpc, requests, server, stamp) = fixture(false).await;
+    let (rpc, requests, server, _stamp) = fixture(false).await;
     let mut query = query(false);
     query
         .wallets
@@ -131,7 +133,7 @@ async fn captured_and_acquired_anchors_share_post_balance_checks_across_wallets(
     }
     let view = rpc.view(query).await.unwrap();
     assert_eq!(view.balance_certificates.len(), 2);
-    assert_eq!(view.admission_valid_until, stamp - 60 + 120);
+
     assert_eq!(
         header_reads(&requests, 88),
         2,
@@ -191,7 +193,6 @@ async fn historical_resolution_and_compatibility_share_identical_anchors() {
     query.captures.insert("wallet".into(), captured.clone());
     let view = rpc.view(query).await.unwrap();
     assert_eq!(header_reads(&requests, 88), 2);
-    let original = view.resolution_certificates["attempt"].clone();
     assert!(view.balances.is_empty());
     assert!(view.observations.is_empty());
     assert!(view.balance_certificates.is_empty());
@@ -216,20 +217,6 @@ async fn historical_resolution_and_compatibility_share_identical_anchors() {
         assert_eq!(requests[2]["params"][0], "0x58");
         assert_eq!(requests[4]["params"][0], "0x58");
     }
-    requests.lock().unwrap().clear();
-    let verified = rpc
-        .recheck_resolution(original.clone(), captured)
-        .await
-        .unwrap();
-    assert_eq!(header_reads(&requests, 88), 1);
-    assert_eq!(verified.anchor(), original.anchor());
-    assert_eq!(verified.block_time(), original.block_time());
-    assert_eq!(verified.outcome(), original.outcome());
-    assert_eq!(
-        requests.lock().unwrap().len(),
-        2,
-        "chain ID and exact header only"
-    );
     server.abort();
 }
 
@@ -254,12 +241,12 @@ async fn history_replacement_retains_readiness_only_conflict_scope() {
 
 #[tokio::test]
 async fn balance_only_reads_one_header_pair_and_rechecks_both_anchors() {
-    let (rpc, requests, server, stamp) = fixture(false).await;
+    let (rpc, requests, server, _stamp) = fixture(false).await;
     let view = rpc.view(query(false)).await.unwrap();
     let observation = &view.observations["wallet"];
     assert_eq!(observation.confirmed.anchor.height, 88);
     assert_eq!(observation.latest.anchor.height, 100);
-    assert_eq!(view.admission_valid_until, stamp - 60 + 120);
+
     let requests = requests.lock().unwrap();
     assert_eq!(requests.len(), 7, "no redundant admission header fetches");
     let headers: Vec<_> = requests
@@ -295,7 +282,7 @@ async fn combined_history_acquires_new_admission_headers_without_relabeling_reso
     assert_eq!(view.resolutions["attempt"].block_time, stamp - 60);
     assert_eq!(observation.confirmed.anchor.height, 188);
     assert_eq!(observation.latest.anchor.height, 200);
-    assert_eq!(view.admission_valid_until, stamp + 120);
+
     let requests = requests.lock().unwrap();
     let headers: Vec<_> = requests
         .iter()
@@ -417,4 +404,15 @@ async fn invalid_authorization_boolean_fails_before_admission_balance_reads() {
     );
     drop(reads);
     server.abort();
+}
+
+#[tokio::test]
+async fn old_and_host_future_blocks_do_not_veto_chain_observation() {
+    for stamp in [61, now().unwrap() + 3600] {
+        let (rpc, _, server, _) = fixture_timestamp(false, 1, stamp).await;
+        let view = rpc.view(query(false)).await.unwrap();
+        assert_eq!(view.observations["wallet"].confirmed.anchor.height, 88);
+        assert_eq!(view.observations["wallet"].latest.anchor.height, 100);
+        server.abort();
+    }
 }

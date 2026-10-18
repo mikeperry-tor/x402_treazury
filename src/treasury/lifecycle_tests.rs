@@ -150,7 +150,7 @@ async fn funded_fixture_amount(
         chain.mine_block(vec![funding]);
         chain.mine_empty_blocks(2);
     }
-    let settings = SyncSettings::new(endpoint.clone(), confirmations, 300).unwrap();
+    let settings = SyncSettings::new(endpoint.clone(), confirmations).unwrap();
     owner.configure_sync(settings.clone());
     owner.sync_once(&CancellationToken::new()).await.unwrap();
     (dir, net, owner, endpoint)
@@ -161,7 +161,7 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
     let (dir, net, owner, endpoint) = funded_fixture(2).await;
     let state = dir.path().join("state");
     let key = dir.path().join("key");
-    let settings = SyncSettings::new(endpoint.clone(), 2, 300).unwrap();
+    let settings = SyncSettings::new(endpoint.clone(), 2).unwrap();
     assert!(
         owner
             .status()

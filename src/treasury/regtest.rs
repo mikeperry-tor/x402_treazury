@@ -336,7 +336,7 @@ async fn run() -> Result<()> {
     Chain::mine(&chain.rpc, 7).await?;
     Chain::copy(&chain.rpc, &chain.fork, 2, 8).await?;
     chain.indexer_ready(8).await?;
-    let settings = SyncSettings::new(chain.endpoint.clone(), 2, 300)?;
+    let settings = SyncSettings::new(chain.endpoint.clone(), 2)?;
     treasury.configure_sync(settings.clone());
     let stop = CancellationToken::new();
     treasury.sync_once(&stop).await?;
@@ -530,7 +530,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
     Chain::mine(&chain.rpc, 7).await?;
     chain.indexer_ready(8).await?;
     let cli_fixture = RecoveryCli::new(dir.path(), &id, &chain.endpoint)?;
-    let settings = SyncSettings::new(chain.endpoint.clone(), 2, 300)?;
+    let settings = SyncSettings::new(chain.endpoint.clone(), 2)?;
     let stop = CancellationToken::new();
     let mut treasury = Treasury::open_with_network(
         state.clone(),
@@ -814,7 +814,7 @@ async fn expiry_run(cli: bool) -> Result<()> {
     Chain::mine(&chain.rpc, 7).await?;
     chain.indexer_ready(8).await?;
     let cli_fixture = RecoveryCli::new(dir.path(), &id, &chain.endpoint)?;
-    let settings = SyncSettings::new(chain.endpoint.clone(), 2, 300)?;
+    let settings = SyncSettings::new(chain.endpoint.clone(), 2)?;
     treasury.configure_sync(settings.clone());
     let stop = CancellationToken::new();
     treasury.sync_once(&stop).await?;
@@ -1048,7 +1048,7 @@ impl RecoveryCli {
         std::fs::write(
             directory.join("recovery.toml"),
             format!(
-                "version = 1\nservers = {{}}\n[sources.unused]\nspec = 'must-not-be-read.json'\n[treasury]\nid = {id:?}\nstate_dir = 'state'\nkey_file = 'key'\nindexer_url_env = 'TEST_INDEXER'\nsubmission_url_env = 'TEST_SUBMISSION'\nmax_refund_shielding_fee_zec = '0.0003'\nconfirmations = 2\nmax_sync_age_seconds = 300\n"
+                "version = 1\nservers = {{}}\n[sources.unused]\nspec = 'must-not-be-read.json'\n[treasury]\nid = {id:?}\nstate_dir = 'state'\nkey_file = 'key'\nindexer_url_env = 'TEST_INDEXER'\nsubmission_url_env = 'TEST_SUBMISSION'\nmax_refund_shielding_fee_zec = '0.0003'\nconfirmations = 2\n"
             ),
         )?;
         Ok(Self {
@@ -1065,7 +1065,7 @@ impl RecoveryCli {
             TreasuryNetwork::Regtest,
         )
         .await?;
-        treasury.configure_sync(SyncSettings::new(self.endpoint.clone(), 2, 300)?);
+        treasury.configure_sync(SyncSettings::new(self.endpoint.clone(), 2)?);
         Ok(treasury)
     }
     async fn call(

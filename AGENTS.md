@@ -158,15 +158,14 @@ Retained evidence never grants spending authority or permission to replay cases.
   credentials, provider prose and paths. Tor-only outcomes do not identify causation.
   Preserve explicit qualification limits in maintained guides.
 
-Treasury sync accepts at most three blocks of tip advancement after scanning a
-freshly observed target, identically for direct and Tor. The starting observation
-age includes sync time; never renew freshness at completion. A completed scan with
-stale observation or excessive lag checkpoints and takes a new observation for
-incremental catch-up. Ordinary preparation accepts the same three-block lag and
-performs read-only readiness checks before proposal mutation or reservation. Persist the final
-`observed_tip_height` separately from scanned `height`; confirmations use the latter.
-Expiry recovery requires equality on both syncs before releasing reservations.
-The treasury is exclusively spent here; accepted lag appears at debug level and in CLI output.
+Treasury sync retains completed scan work without host-age or ordinary tip-lag
+permission gates, identically for direct and Tor. Persist final `observed_tip_height`
+separately from scanned `height`; confirmations use the latter. SDK input selection
+owns confirmation, witness, spend-link and scan-coverage requirements. Preserve
+same-owner snapshot revisions and actual scan completion across cancellation.
+Expiry recovery requires coverage through both observed tips and every original
+owned input before releasing exact prepared ownership. Maintenance runs on an
+independent cadence; elapsed time and wallet count cannot abandon valid work.
 
 ## Configuration and wallet workflow
 

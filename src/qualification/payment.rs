@@ -671,7 +671,7 @@ mod tests {
         let pool = ManagedPool::new(
             handle,
             "nonexistent_pool".into(),
-            BaseRpc::new("http://127.0.0.1:1", 1, 60).unwrap(),
+            BaseRpc::new("http://127.0.0.1:1", 1).unwrap(),
             SpendPolicy::dollars("1").unwrap(),
         )
         .unwrap();

@@ -44,7 +44,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
         .unwrap_err();
     assert!(raw.to_string().contains(SECRET));
     clean(&format!("{:#}", load_json(&url, &http).await.unwrap_err()));
-    let rpc = BaseRpc::new(&url, 1, 60).unwrap();
+    let rpc = BaseRpc::new(&url, 1).unwrap();
     let err = rpc
         .view(ChainQuery {
             captures: Default::default(),

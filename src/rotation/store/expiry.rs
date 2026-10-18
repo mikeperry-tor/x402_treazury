@@ -10,7 +10,7 @@ impl Store {
         )
     }
     /// Evidence is checked by Treasury, never supplied by a CLI/MCP caller.
-    pub(crate) fn resolve_expired(&mut self, id: &str, revision: i64, instant: u64) -> Result<()> {
+    pub(crate) fn resolve_expired(&mut self, id: &str, revision: i64, _instant: u64) -> Result<()> {
         let closed: Option<bool> = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED') AND EXISTS(SELECT 1 FROM budget_entries WHERE id=?1 AND reserved=0 AND consumed=0) FROM expired_operations WHERE id=?1",
             [id], |row| row.get(0)).optional()?;
@@ -30,7 +30,8 @@ impl Store {
             |row| row.get(0),
         )?;
         ensure!(
-            current_revision == revision && sync.fresh(instant, revision),
+            current_revision == revision
+                && (sync.phase == SyncPhase::Ready && sync.snapshot_revision == revision),
             "expiry recovery requires fresh unchanged snapshot"
         );
         ensure!(
@@ -134,7 +135,6 @@ mod tests {
             observed_tip_height: Some(22),
             height: Some(22),
             confirmations: 2,
-            max_age_seconds: 300,
             confirmed_pool_balances_zatoshis: None,
             confirmed_shielded_zatoshis: 1000,
             spendable_shielded_zatoshis: 1000,
@@ -160,8 +160,7 @@ mod tests {
         }
         revision = s.save_sync_snapshot(revision, b"synced", Some(observation))?;
         assert!(s.resolve_expired(&job.operation_id, 2, 100).is_err());
-        assert!(s.resolve_expired(&job.operation_id, revision, 401).is_err());
-        s.resolve_expired(&job.operation_id, revision, 100)?;
+        s.resolve_expired(&job.operation_id, revision, 401)?;
         assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
         let facts = s.funding_facts(&job.id, &job.operation_id)?;
         assert!(facts.archived && facts.accepted_quote && facts.source_attempts == 1);

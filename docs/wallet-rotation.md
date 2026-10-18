@@ -170,30 +170,23 @@ policy; a successful sync is still required before new treasury preparation.
 
 
 The Zcash treasury is exclusively spent by this application. Direct and Tor sync
-use the same bounded policy: a successful scan must reach the tip observed at the
-start, and may trail the final indexer observation by at most **three blocks**.
-A regressing indexer tip fails the observation. Greater lag or an aged starting
-observation retains the completed scan/checkpoint and starts a fresh observation
-with incremental catch-up. It never relabels old evidence as fresh. Confirmation counts
-and spendability use the **scanned** height, never the newer unscanned tip.
+retain completed work without a local age ceiling or ordinary three-block lag
+policy. SDK proposal selection enforces actual confirmations, witnesses, spend
+links and scan coverage. Snapshot revision and the serialized actor bind mutation
+to its owning SDK state. Cancellation cannot turn an interrupted scan into a
+completed observation. An unchanged completed scan can be reused within its owner
+after checking its exact canonical tip height/hash; restart or chain changes scan
+again. Independent maintenance runs every 60 seconds.
 
-`treasury.max_sync_age_seconds` (default 300) limits the age of the starting tip
-observation, including sync and validation time; completing a slow sync does not
-restart this clock. Status records `target_height` (starting tip), `height` (scan),
-`observed_tip_height` (final query), and `checked_at` (starting observation time).
-Historical snapshots have no observed tip. Accepted lag is logged at debug level
-and appears in wallet-sync output. Both serving and one-shot sync can acquire a
-fresh observation through incremental catch-up. Ordinary preparation uses the
-same three-block allowance and rejects a regressing observed tip. Read-only
-readiness checks precede proposal mutation and reservation; only a proven untouched
-operation can return `PreparationDeferred`.
+Status keeps `target_height`, scanned `height`, final `observed_tip_height` and
+the original `checked_at` for diagnostics. Completion never relabels observation
+time. Confirmation and expiry decisions use scanned coverage. Exact expiry recovery
+requires both scans to reach their observed tips and to verify all original owned
+inputs. No host clock age or ordinary lag allowance supplies that proof.
+`max_sync_age_seconds` and `base_max_block_age_seconds` are removed settings;
+configuration explicitly rejects them. Base balance and receipt verification have
+no block-age or host-future gate, and receipt logs use the existing byte bound.
 
-This allowance does not change reservations, outgoing transaction tracking,
-confirmation depth, reorg checks or expiry. Recovery that releases an expired
-transaction's reservation still requires zero observed tip lag on both syncs,
-along with buried expiry and confirmed unspent inputs. Unknown historical tip
-evidence cannot satisfy that recovery check. Do not spend the treasury from an
-external wallet while relying on this policy.
 
 Base observations and historical authorization resolution provide reporting facts.
 They do not certify affordability or grant signing permission. Unavailable balance

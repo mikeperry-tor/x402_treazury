@@ -46,12 +46,7 @@ impl Fixture {
             }
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let rpc = BaseRpc::new(
-            &format!("http://{}/", listener.local_addr().unwrap()),
-            12,
-            120,
-        )
-        .unwrap();
+        let rpc = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let directory = tempfile::tempdir().unwrap();
         let mut store = Store::create(
@@ -522,7 +517,7 @@ async fn overlapping_resolution_reads_preserve_first_proof_in_either_completion_
         let older = fixture.rpc.view(query.clone()).await.unwrap();
         fixture.chain.lock().unwrap().0 = 101;
         let newer = fixture.rpc.view(query).await.unwrap();
-        let (first, mut second) = if newer_first {
+        let (first, second) = if newer_first {
             (newer, older)
         } else {
             (older, newer)
@@ -534,17 +529,6 @@ async fn overlapping_resolution_reads_preserve_first_proof_in_either_completion_
         let saved: (String,String,i64,String) = fixture.store.db.query_row(
             "SELECT outcome,hash,height,support FROM payment_resolutions WHERE attempt_id='proof'",[],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
-        // Match the maintenance owner's ordinary exact-anchor recertification.
-        let certificate = second.resolution_certificates["proof"].clone();
-        let capture = fixture.store.capture_evidence(&fixture.wallets[0]).unwrap();
-        second.resolution_certificates.insert(
-            "proof".into(),
-            fixture
-                .rpc
-                .recheck_resolution(certificate, capture)
-                .await
-                .unwrap(),
-        );
         fixture
             .store
             .publish_scoped_evidence(&fixture.pool, second)

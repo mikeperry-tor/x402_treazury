@@ -1,9 +1,9 @@
 //! Embedded treasury with encrypted sync and explicit durable transaction operations.
 pub mod actor;
 pub mod birthday;
+mod coverage;
 pub(crate) mod diagnostics;
 mod expiry;
-mod freshness;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod lifecycle_tests;
 pub mod recovery;
@@ -78,18 +78,15 @@ impl std::error::Error for SnapshotUnavailable {}
 pub struct SyncSettings {
     endpoint: String,
     confirmations: NonZeroU32,
-    max_age_seconds: u64,
 }
 impl SyncSettings {
-    pub fn new(endpoint: String, confirmations: u64, max_age_seconds: u64) -> Result<Self> {
+    pub fn new(endpoint: String, confirmations: u64) -> Result<Self> {
         crate::rotation::base::secure_endpoint(&endpoint)?;
         let confirmations = NonZeroU32::new(u32::try_from(confirmations)?)
             .context("confirmations must be positive")?;
-        ensure!(max_age_seconds > 0, "sync age must be positive");
         Ok(Self {
             endpoint,
             confirmations,
-            max_age_seconds,
         })
     }
 }
@@ -438,14 +435,12 @@ impl Treasury {
                 observed_tip_height: None,
                 height: None,
                 confirmations: settings.confirmations.get(),
-                max_age_seconds: settings.max_age_seconds,
                 confirmed_pool_balances_zatoshis: None,
                 confirmed_shielded_zatoshis: 0,
                 spendable_shielded_zatoshis: 0,
             });
         observation.phase = SyncPhase::Syncing;
         observation.confirmations = settings.confirmations.get();
-        observation.max_age_seconds = settings.max_age_seconds;
         tracing::info!("treasury sync: synchronizing wallet with indexer");
         self.checkpoint(observation.clone()).await?;
         let session = SyncSession {
@@ -500,13 +495,6 @@ impl Treasury {
     }
     /// One owner periodically syncs while Base payment admission remains independent.
     pub async fn run_sync(mut self, stop: CancellationToken) -> Result<()> {
-        let delay = self
-            .sync_settings
-            .as_ref()
-            .context("sync endpoint not configured")?
-            .max_age_seconds
-            .saturating_div(2)
-            .clamp(1, 60);
         while !stop.is_cancelled() {
             if let Err(error) = self.sync_once(&stop).await {
                 if !self.healthy {
@@ -525,7 +513,7 @@ impl Treasury {
             }
             tokio::select! {
                 _ = stop.cancelled() => break,
-                _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {}
             }
         }
         self.close().await
@@ -594,29 +582,6 @@ impl SyncSession {
         settings: &SyncSettings,
         observation: &mut SyncObservation,
     ) -> Result<()> {
-        loop {
-            match self.scan_observation(settings, observation).await {
-                Err(error) if error.is::<freshness::FreshObservationRequired>() => {
-                    // Persist completed scan work, but never renew its timestamp
-                    // or publish it as spend-ready. The next pass obtains new
-                    // observations and scans only the remaining history.
-                    self.checkpoint(observation.clone()).await?;
-                    tracing::info!(
-                        stage = "freshness_catch_up",
-                        scanned_blocks = observation.scanned_blocks,
-                        "Treasury scan retained; acquiring fresh spending evidence"
-                    );
-                    tokio::task::yield_now().await;
-                }
-                result => return result,
-            }
-        }
-    }
-    async fn scan_observation(
-        &mut self,
-        settings: &SyncSettings,
-        observation: &mut SyncObservation,
-    ) -> Result<()> {
         tracing::debug!("treasury sync: connecting to indexer");
         let mut indexer = crate::network::global()
             .grpc(&self.identity, &settings.endpoint)
@@ -633,7 +598,7 @@ impl SyncSession {
             "indexer is not on mainnet"
         );
         let target_height = info.block_height;
-        let checked_at = now()?;
+        let checked_at = now().ok();
         let started = std::time::Instant::now();
         tracing::debug!(
             target_height,
@@ -688,7 +653,7 @@ impl SyncSession {
             });
         tracing::debug!(
             scanned_blocks = observation.scanned_blocks,
-            "treasury sync: scan completed; verifying final chain tip and observation freshness"
+            "treasury sync: scan completed; verifying final chain tip"
         );
         let info = indexer
             .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
@@ -700,13 +665,14 @@ impl SyncSession {
             "indexer is not on mainnet"
         );
         observation.observed_tip_height = Some(info.block_height);
-        let lag = freshness::validate(
-            target_height,
-            height,
-            info.block_height,
-            started.elapsed(),
-            settings.max_age_seconds,
-        )?;
+        ensure!(
+            height >= target_height,
+            "treasury sync did not reach its observed target"
+        );
+        ensure!(
+            info.block_height >= height,
+            "indexer tip regressed below scanned height"
+        );
         server::check_endpoint(
             &settings.endpoint,
             &self.identity,
@@ -787,23 +753,7 @@ impl SyncSession {
         tracing::debug!("treasury sync: spending and balances checked; reconciling refunds");
         self.reconcile_refunds(height, settings.confirmations.get())
             .await?;
-        freshness::validate(
-            target_height,
-            height,
-            info.block_height,
-            started.elapsed(),
-            settings.max_age_seconds,
-        )?;
-        if lag > 0 {
-            tracing::debug!(
-                scanned_height = height,
-                observed_tip_height = info.block_height,
-                lag_blocks = lag,
-                max_lag_blocks = freshness::MAX_LAG_BLOCKS,
-                "treasury sync accepted with bounded tip lag; background sync will continue"
-            );
-        }
-        observation.checked_at = Some(checked_at);
+        observation.checked_at = checked_at;
         observation.height = Some(height);
         Ok(())
     }

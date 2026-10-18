@@ -60,7 +60,7 @@ fn consume(store: Store, state: &Path, key: &Path, pool: &str, replace: bool) ->
             let url=format!("http://{}",listener.local_addr().unwrap());
             let server=tokio::spawn(async move {axum::serve(listener,app).await.unwrap()});
             let (handle,owner)=StoreHandle::spawn(store);
-            let manager=ManagedPool::new(handle.clone(),pool.clone(),BaseRpc::new(&format!("{url}/rpc"),12,120).unwrap(),SpendPolicy::dollars("1").unwrap()).unwrap();
+            let manager=ManagedPool::new(handle.clone(),pool.clone(),BaseRpc::new(&format!("{url}/rpc"), 12).unwrap(),SpendPolicy::dollars("1").unwrap()).unwrap();
             let client=PaidClient::managed(Arc::new(manager));
             assert_eq!(client.execute(RoutedRequest {method:"GET".into(),url:format!("{url}/pay"),query:BTreeMap::new(),body:None}).await.unwrap(),"paid");
             let selected_pool=pool.clone();

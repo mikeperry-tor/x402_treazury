@@ -177,7 +177,7 @@ keys. It does not report where funds reside. After sync,
 `sapling` individually, alongside the aggregate shielded balance. A null pool
 report means no pool breakdown has been recorded (including older snapshots);
 a null individual balance means the SDK did not provide it. These are cached
-observations whose freshness is reported separately.
+observations; their scan completion and snapshot binding are reported separately.
 
 After NU6.3 activation, birthday discovery and sync require the indexer's tip
 TreeState to contain a nonempty Ironwood frontier at the requested height. Sync
@@ -218,8 +218,8 @@ local testing. Account 0's shielded funds are used, with `confirmations` (defaul
 3) applied to zingolib's spendability calculation. Unconfirmed change is excluded.
 
 Managed serving starts one shared background sync worker after all listeners bind.
-It retries or refreshes after half `max_sync_age_seconds`, bounded to 1–60 seconds;
-connection and tip requests have 15-second deadlines. Failed sync disables new
+It refreshes on an independent 60-second cadence. Connection establishment and
+per-response read inactivity use the shared network policy. Failed sync disables new
 treasury spending while independently funded EVM pools keep serving. Initial
 scans can take a long time. Sync checkpoints every 30 seconds and on completion,
 failure or cancellation; each checkpoint atomically commits the encrypted wallet
@@ -229,12 +229,14 @@ and every snapshot referenced by an outgoing operation.
 
 `wallet status` reports the last persisted sync phase, checkpoint time, scan target
 and scanned-block count, last successful tip height/time, confirmed and spendable
-shielded balances in zatoshis, and any last sync error. `sync_fresh` also checks the
-snapshot revision and `max_sync_age_seconds` (default 300). Cached balances remain
-observations during sync/failure; they are not authorization to spend. New sends
-must also pass the unresolved-outgoing gate and have sufficient spendable input
-including fees. Reopening and clean shutdown mark readiness offline; a fresh sync
-is required after restart. SIGINT/SIGTERM cancel the CLI sync and save its state.
+shielded balances in zatoshis, and any last sync error. `sync_complete` reports a
+completed scan bound to the current snapshot revision; it is independent of host
+clock age. Cached amounts are observations. SDK input selection, exact pending
+input ownership and current operation permission govern new spending. Reopening
+marks the owner offline until it scans. SIGINT/SIGTERM save retained scan work.
+The removed `max_sync_age_seconds` and `base_max_block_age_seconds` settings fail
+configuration validation explicitly.
+
 
 Stop serving before running an offline backup:
 
@@ -590,9 +592,9 @@ elapsed time and completed calls. No endpoint URL, wallet address or nonce is lo
 
 Treasury tip-check failures retain sanitized gRPC codes and identify `starting_tip`
 or `final_tip`. Scan failures include elapsed observation time and scanned block
-count. Rejected tip lag logs target, scanned and observed heights plus the allowed
-lag and observation age limit. `Cancelled` alone does not identify who cancelled
-the RPC. These diagnostics do not relax freshness checks or release reservations.
+count, with target, scanned and observed heights. Ordinary age and three-block
+lag gates have been removed. `Cancelled` alone does not identify who cancelled
+the RPC. These diagnostics never release prepared input ownership.
 
 Default public endpoints, in order (availability and Tor acceptance vary):
 

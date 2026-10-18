@@ -262,16 +262,14 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
     if let Some(diagnostic) = error.downcast_ref::<SyncDiagnostic>() {
         return diagnostic.category;
     }
-    if error.is::<super::freshness::FreshObservationRequired>() {
-        return "sync_freshness_catch_up";
-    }
+
     for cause in error.chain() {
         let message = cause.to_string();
         let category = match message.as_str() {
             "transaction not seen by wallet sync" => "transaction_not_yet_scanned",
             "confirmation disagrees with wallet sync" => "confirmation_height_mismatch",
             "confirmed transaction bytes mismatch" => "confirmed_transaction_mismatch",
-            "treasury_sync_stale" => "sync_observation_expired",
+            "treasury_snapshot_changed" => "sync_snapshot_changed",
             "indexer connection failed" => "indexer_connection_failed",
             "indexer connection timed out" => "indexer_connection_timeout",
             "indexer tip check timed out" => "indexer_tip_timeout",
@@ -290,18 +288,8 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
             "treasury balance unavailable" | "treasury spendable balance unavailable" => {
                 "balance_unavailable"
             }
-            _ if message.starts_with("treasury sync did not reach observed starting tip (") => {
-                "sync_target_not_reached"
-            }
-            _ if message.starts_with("treasury indexer tip regressed below scanned height (") => {
-                "indexer_tip_regressed"
-            }
-            _ if message.starts_with("treasury sync tip lag exceeds ") => "sync_tip_lag_exceeded",
-            _ if message
-                .starts_with("treasury sync observation exceeded max_sync_age_seconds=") =>
-            {
-                "sync_observation_expired"
-            }
+            "treasury sync did not reach its observed target" => "sync_target_not_reached",
+            "indexer tip regressed below scanned height" => "indexer_tip_regressed",
             _ if message.starts_with("treasury_confirmed_spend_reorg:") => "confirmed_spend_reorg",
             _ if message.starts_with("treasury_expiry_reorg:") => "expiry_reorg",
             _ => continue,
@@ -566,25 +554,24 @@ mod tests {
                 .contains("grpc_code=4 grpc_status=DeadlineExceeded")
         );
     }
+}
 
+#[cfg(test)]
+mod coverage_diagnostic_tests {
+    use super::*;
     #[test]
-    fn diagnostics_are_fixed_and_find_nested_causes() {
-        let error = anyhow::anyhow!("indexer tip check failed").context("private endpoint detail");
-        assert_eq!(sync_failure(&error), "indexer_tip_failed");
-        let error = anyhow::anyhow!("https://user:secret@example.invalid/token");
-        assert_eq!(sync_failure(&error), "sync_internal_or_storage_failure");
-        let error =
-            crate::treasury::freshness::validate(100, 100, 104, std::time::Duration::ZERO, 300)
-                .unwrap_err();
-        assert_eq!(sync_failure(&error), "sync_freshness_catch_up");
-        let error = crate::treasury::freshness::validate(
-            100,
-            100,
-            100,
-            std::time::Duration::from_secs(301),
-            300,
-        )
-        .unwrap_err();
-        assert_eq!(sync_failure(&error), "sync_freshness_catch_up");
+    fn incomplete_and_regressed_scans_retain_fixed_categories() {
+        for (message, expected) in [
+            (
+                "treasury sync did not reach its observed target",
+                "sync_target_not_reached",
+            ),
+            (
+                "indexer tip regressed below scanned height",
+                "indexer_tip_regressed",
+            ),
+        ] {
+            assert_eq!(sync_failure(&anyhow::anyhow!(message)), expected);
+        }
     }
 }

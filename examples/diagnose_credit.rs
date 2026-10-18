@@ -61,7 +61,7 @@ async fn run() -> Result<()> {
             .map(|s| (*s).into())
             .collect()
     };
-    let rpc = BaseRpc::with_fallbacks(&urls, 12, 120)?;
+    let rpc = BaseRpc::with_fallbacks(&urls, 12)?;
     eprintln!(
         "Read-only RPC policy: {} endpoints; wallet-address queries may use configured fallbacks",
         urls.len()

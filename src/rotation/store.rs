@@ -60,7 +60,7 @@ pub struct Status {
     pub pools: Vec<PoolStatus>,
     pub sync: Option<SyncObservation>,
     pub outgoing_pending: bool,
-    pub sync_fresh: bool,
+    pub sync_complete: bool,
     pub treasury_operations: Vec<OperationStatus>,
     pub funding_jobs: Vec<funding::FundingJob>,
     pub refunds: Vec<refunds::RefundStatus>,
@@ -80,7 +80,7 @@ pub struct SyncObservation {
     #[serde(default)]
     pub observed_tip_height: Option<u64>,
     pub confirmations: u32,
-    pub max_age_seconds: u64,
+
     #[serde(default)]
     pub confirmed_pool_balances_zatoshis: Option<PoolBalances>,
     pub confirmed_shielded_zatoshis: u64,
@@ -105,14 +105,6 @@ impl SyncObservation {
     #[cfg(feature = "zcash")]
     pub(crate) fn at_observed_tip(&self) -> bool {
         self.height.is_some() && self.height == self.observed_tip_height
-    }
-
-    pub fn fresh(&self, now: u64, revision: i64) -> bool {
-        self.phase == SyncPhase::Ready
-            && self.snapshot_revision == revision
-            && self
-                .checked_at
-                .is_some_and(|at| now >= at && now - at <= self.max_age_seconds)
     }
 }
 #[derive(Serialize)]
@@ -448,7 +440,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 19,
+                version == 20,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -568,7 +560,8 @@ impl Store {
         tx.execute("DELETE FROM snapshots WHERE revision < ?1 AND revision NOT IN (SELECT revision FROM outgoing UNION SELECT revision FROM expired_operations)", [revision])?;
         if let Some(mut observation) = observation {
             observation.snapshot_revision = revision;
-            observation.checkpoint_at = crate::rotation::base::now()?;
+            observation.checkpoint_at =
+                crate::rotation::base::now().unwrap_or(observation.checkpoint_at);
             tx.execute(
                 "INSERT OR REPLACE INTO treasury_sync VALUES (1,?1)",
                 [serde_json::to_string(&observation)?],
@@ -661,7 +654,7 @@ impl Store {
         }
         Ok(())
     }
-    pub fn require_spend_ready(&self, now: u64, input_zatoshis: u64) -> Result<()> {
+    pub fn require_spend_ready(&self, _now: u64, input_zatoshis: u64) -> Result<()> {
         self.funding_restriction
             .require_new_funding("treasury_preparation")?;
         let outgoing_pending: bool = self.db.query_row(
@@ -685,7 +678,10 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
-        ensure!(observation.fresh(now, revision), "treasury_sync_stale");
+        ensure!(
+            (observation.phase == SyncPhase::Ready && observation.snapshot_revision == revision),
+            "treasury_snapshot_changed"
+        );
         if input_zatoshis > observation.spendable_shielded_zatoshis {
             tracing::warn!(
                 category = "treasury_insufficient_spendable_funds",
@@ -749,7 +745,6 @@ impl Store {
                     amount: point.amount,
                 },
                 confirmations: 1,
-                valid_until: u64::MAX,
             },
         };
         let tx = self
@@ -1031,7 +1026,7 @@ impl Store {
         )
     }
     pub fn status(&self) -> Result<Status> {
-        reporting::runtime_status(self, super::base::now()?)
+        reporting::runtime_status(self)
     }
 }
 fn allocation_jobs(
@@ -1087,7 +1082,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 19,
+        schema == 20,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1148,8 +1143,8 @@ fn read_status(db: &Connection) -> Result<Status> {
         [],
         |r| r.get(0),
     )?;
-    let sync_fresh = sync.as_ref().is_some_and(|observation| {
-        crate::rotation::base::now().is_ok_and(|now| observation.fresh(now, revision))
+    let sync_complete = sync.as_ref().is_some_and(|observation| {
+        observation.phase == SyncPhase::Ready && observation.snapshot_revision == revision
     });
     let treasury_operations = reporting::read_operations(db, version)?;
     let funding_jobs = if version >= 4 {
@@ -1169,7 +1164,7 @@ fn read_status(db: &Connection) -> Result<Status> {
         });
     }
     Ok(Status {
-        schema_version: 3,
+        schema_version: 4,
         state_schema_version: version,
         refunds: if version >= 7 {
             refunds::read_refunds(db)?
@@ -1178,7 +1173,7 @@ fn read_status(db: &Connection) -> Result<Status> {
         },
         funding_jobs,
         treasury_operations,
-        sync_fresh,
+        sync_complete,
         sync,
         outgoing_pending,
         treasury_id: id,
@@ -1295,7 +1290,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 19,
+        version == 20,
         "unsupported state schema; private-state conversion requires separate authorization; a code rollback is not a state downgrade"
     );
     // Additive lookup optimization for existing schema16 stores; financial
@@ -2085,7 +2080,6 @@ fn publish_chain_balances(
                         amount: point.amount,
                     },
                     confirmations: 1,
-                    valid_until: view.admission_valid_until,
                 },
             };
             if funding::record_initial_credit(tx, id, support.observation.available())? {

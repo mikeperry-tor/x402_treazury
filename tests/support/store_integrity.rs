@@ -538,7 +538,7 @@ fn expired_admission_evidence_preserves_prior_balance_without_role_change_or_res
         observations: Default::default(),
         balance_certificates: Default::default(),
         resolution_certificates: Default::default(),
-        admission_valid_until: 0,
+
         anchor: Anchor {
             height: 20,
             hash: "historical".into(),
@@ -750,7 +750,7 @@ fn prepared_payment(store: &mut Store) -> PreparedPayment {
         observations: Default::default(),
         balance_certificates: Default::default(),
         resolution_certificates: Default::default(),
-        admission_valid_until: crate::rotation::base::now().unwrap() + 120,
+
         anchor: crate::rotation::base::Anchor {
             height: 100,
             hash: "base-block".into(),
@@ -1034,7 +1034,7 @@ fn obsolete_capacity_metadata_is_optional_and_never_rewritten() {
             height: 200,
             hash: "new-observation".into(),
         },
-        admission_valid_until: u64::MAX,
+
         balances: Default::default(),
         observations: Default::default(),
         balance_certificates: Default::default(),

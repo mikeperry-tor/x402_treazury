@@ -31,14 +31,8 @@ fn attempts() -> u32 {
 fn confirmations() -> u64 {
     3
 }
-fn sync_age() -> u64 {
-    300
-}
 fn base_confirmations() -> u64 {
     12
-}
-fn block_age() -> u64 {
-    120
 }
 fn confidentiality() -> String {
     "basic".into()
@@ -322,8 +316,6 @@ pub struct TreasuryConfig {
     pub max_refund_shielding_fee_zec: String,
     #[serde(default = "confirmations")]
     pub confirmations: u64,
-    #[serde(default = "sync_age")]
-    pub max_sync_age_seconds: u64,
 }
 impl_config_serde!(TreasuryConfig);
 
@@ -403,9 +395,7 @@ impl TreasuryConfig {
         zatoshis(&self.max_refund_shielding_fee_zec)
             .context("invalid max_refund_shielding_fee_zec")?;
         ensure!(
-            self.confirmations > 0
-                && self.confirmations <= u32::MAX as u64
-                && self.max_sync_age_seconds > 0,
+            self.confirmations > 0 && self.confirmations <= u32::MAX as u64,
             "invalid treasury limits"
         );
         Ok(())
@@ -435,8 +425,6 @@ pub struct FundingConfig {
     pub base_rpc_fallback_url_envs: Option<Vec<String>>,
     #[serde(default = "base_confirmations")]
     pub base_confirmations: u64,
-    #[serde(default = "block_age")]
-    pub base_max_block_age_seconds: u64,
     #[serde(default = "confidentiality")]
     pub confidentiality: String,
     pub near_api_key_env: Option<String>,
@@ -514,10 +502,7 @@ impl FundingConfig {
             env_name(name)?;
             ensure!(names.insert(name), "duplicate Base RPC environment name");
         }
-        ensure!(
-            self.base_confirmations > 0 && self.base_max_block_age_seconds > 0,
-            "invalid funding limits"
-        );
+        ensure!(self.base_confirmations > 0, "invalid funding limits");
         Ok(())
     }
     pub fn validate(&self) -> Result<()> {
@@ -565,6 +550,13 @@ fn reject_replaced_settings<E: serde::de::Error>(
             )));
         }
     }
+    for name in ["max_sync_age_seconds", "base_max_block_age_seconds"] {
+        if fields.contains_key(name) {
+            return Err(E::custom(format!(
+                "{name} was removed; remove this local balance-age setting. SDK input selection and protocol transaction validity govern spending"
+            )));
+        }
+    }
     if scope == "WalletConfig"
         && fields.get("mode").and_then(serde_json::Value::as_str) == Some("zcash_rotation")
     {
@@ -582,4 +574,32 @@ fn reject_replaced_settings<E: serde::de::Error>(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod retired_age_tests {
+    use super::*;
+    #[test]
+    fn removed_age_settings_fail_explicitly_before_value_parsing() {
+        for value in [
+            serde_json::json!(0),
+            serde_json::json!(300),
+            serde_json::json!("invalid"),
+        ] {
+            for key in ["max_sync_age_seconds", "base_max_block_age_seconds"] {
+                let mut document = serde_json::json!({});
+                document[key] = value.clone();
+                let error = if key == "max_sync_age_seconds" {
+                    serde_json::from_value::<TreasuryConfig>(document)
+                        .err()
+                        .unwrap()
+                } else {
+                    serde_json::from_value::<FundingConfig>(document)
+                        .err()
+                        .unwrap()
+                };
+                assert!(error.to_string().contains(&format!("{key} was removed")));
+            }
+        }
+    }
 }

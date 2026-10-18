@@ -35,7 +35,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         treasury,
         store: store.clone(),
         near: super::super::near::NearClient::new(None).unwrap(),
-        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12, 120).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
         wallets: std::collections::BTreeMap::from([("pool".into(), policy())]),
         funding: serde_json::from_value(
             json!({"base_rpc_url_env":"BASE","confidentiality":"public"}),
@@ -434,7 +434,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     });
     let unchanged = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
     for (path, code) in [("forbidden", "403"), ("limited", "429")] {
-        backend.base = super::super::base::BaseRpc::new(&format!("{url}/{path}"), 12, 120).unwrap();
+        backend.base = super::super::base::BaseRpc::new(&format!("{url}/{path}"), 12).unwrap();
         let error = backend
             .credit(&job)
             .await
@@ -449,7 +449,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap()
         );
     }
-    backend.base = super::super::base::BaseRpc::new(&url, 12, 120).unwrap();
+    backend.base = super::super::base::BaseRpc::new(&url, 12).unwrap();
     let before = serde_json::to_value(store.call(|s| s.status()).await.unwrap()).unwrap();
     let mut missing = job.clone();
     missing.wallet_id = "not-a-candidate".into();
@@ -613,7 +613,7 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
         Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into())),
     ).await.unwrap();
     owner.configure_sync(
-        crate::treasury::SyncSettings::new("http://127.0.0.1:1".into(), 3, 300).unwrap(),
+        crate::treasury::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
     );
     let pool = owner
         .ensure_capacity_group(
@@ -657,7 +657,7 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     let (treasury, commands) = actor::channel();
     let backend = Backend {
         treasury, store: store.clone(), near: super::super::near::NearClient::test_at(&origin).unwrap(),
-        base: super::super::base::BaseRpc::new("http://127.0.0.1:1",12,120).unwrap(),
+        base: super::super::base::BaseRpc::new("http://127.0.0.1:1", 12).unwrap(),
         wallets: [("pool".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5})).unwrap())].into(),
         funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
         max_network_fee: 10000,
