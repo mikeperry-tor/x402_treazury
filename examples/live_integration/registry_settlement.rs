@@ -8,6 +8,11 @@ pub(crate) fn attempt_outcome<'a>(events: &'a [Value], case: &str, attempt: &Val
             for row in attempts.iter().filter(|r| r["attempt_id"] == *attempt) {
                 ensure!(found.is_none(), "duplicate canonical authorization outcome");
                 let outcome = row["resolution"]["outcome"].as_str().context("canonical outcome missing")?;
+                ensure!(row["resolution"]["attempt_id"]==*attempt
+                    && row["resolution"]["height"].as_u64().is_some()
+                    && row["resolution"]["block_time"].as_u64().is_some()
+                    && row["resolution"]["hash"].as_str().is_some_and(|s|!s.is_empty()),
+                    "canonical attempt observation incomplete");
                 ensure!(matches!(outcome,"USED"|"EXPIRED_UNUSED"), "unknown canonical authorization outcome");
                 found = Some(outcome);
             }

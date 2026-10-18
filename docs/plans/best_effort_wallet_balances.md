@@ -299,6 +299,16 @@ this protects actual run authority because an unsigned POST can execute free wor
 A fallback identity can leave a particular promotion/service assertion unproved
 without invalidating its payment permission.
 
+Exact BE03 review found an obsolete two-challenge ceiling and report consumers
+that closed observations at the first admission or assumed one admitted price.
+The fixup removes those policies, retains per-attempt prices and canonical totals,
+and exercises real qualified A→B→C routing under the original case permit.
+Canonical authorization observation now captures only its journal/chain binding;
+malformed historical readiness or retirement support cannot starve another attempt.
+Its actual production loop is tested with bad historical readiness followed by a
+healthy wallet. These fixes delete inherited single-attempt and balance-proof
+responsibilities; they add no replacement spending ceiling or repair framework.
+
 Analyzer output `20261018T012356Z-1940d1b1` compares against `49566df`:
 payment orchestration 18/58 → 6/29; routed dispatch 17/30 → 28/44;
 maintenance 29/37 → 41/50 with read-one 14/29 replaced by read-balance 1/9.

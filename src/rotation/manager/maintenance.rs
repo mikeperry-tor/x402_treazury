@@ -163,7 +163,9 @@ impl ManagedPool {
                     async {
                         Completion {
                             id: None,
-                            result: self.qualification_observation().await,
+                            result: self
+                                .qualification_observation(crate::qualification::active())
+                                .await,
                         }
                     }
                     .boxed(),
@@ -232,9 +234,9 @@ impl ManagedPool {
             result,
         }
     }
-    async fn qualification_observation(&self) -> Result<()> {
+    pub(super) async fn qualification_observation(&self, canonical: bool) -> Result<()> {
         let mut malformed = false;
-        if crate::qualification::active() {
+        if canonical {
             let pool = self.pool.clone();
             let through = self
                 .store

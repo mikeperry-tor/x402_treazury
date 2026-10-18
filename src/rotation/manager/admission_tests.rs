@@ -130,6 +130,67 @@ async fn fixture() -> Fixture {
 }
 
 #[tokio::test]
+async fn qualification_canonical_loop_ignores_bad_historical_readiness_and_resolves_later_wallet() {
+    let mut f = fixture().await;
+    f.pool.base = BaseRpc::new(&f.url.replace("/pay", "/rpc"), 12, 120).unwrap();
+    f.pay().await.unwrap().0.text().await.unwrap();
+    let other: PaymentCandidateHandle = f
+        .db()
+        .query_row(
+            "SELECT id,address FROM wallets WHERE id!=?1",
+            [&f.payer.wallet],
+            |r| {
+                Ok(PaymentCandidateHandle {
+                    wallet: r.get(0)?,
+                    address: r.get(1)?,
+                })
+            },
+        )
+        .unwrap();
+    let wallet = other.wallet.clone();
+    f.pool
+        .store
+        .call(move |s| s.record_credit(&wallet, "5000000", "fixture", 100))
+        .await
+        .unwrap();
+    let http = reqwest::Client::new();
+    let request = http.get(&f.url).build().unwrap();
+    let challenge = http.execute(request.try_clone().unwrap()).await.unwrap();
+    f.pool
+        .pay(&http, other, request, challenge)
+        .await
+        .unwrap()
+        .0
+        .text()
+        .await
+        .unwrap();
+    f.db().execute("UPDATE funding_jobs SET readiness_requirement='1',readiness_support='malformed',readiness_disputed=NULL WHERE wallet_id=?1",[&f.payer.wallet]).unwrap();
+    // Invoke the same qualification observation loop used by maintenance, without
+    // installing a process-global spending guard in this unfunded fixture.
+    f.pool.qualification_observation(true).await.unwrap();
+    assert_eq!(
+        f.db()
+            .query_row(
+                "SELECT count(*) FROM payment_resolutions WHERE outcome='USED'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        f.db()
+            .query_row(
+                "SELECT count(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    f.close().await;
+}
+#[tokio::test]
 async fn old_low_missing_and_malformed_estimates_and_readiness_do_not_gate_signing() {
     let f = fixture().await;
     for estimate in ["100", "2", "", "malformed"] {

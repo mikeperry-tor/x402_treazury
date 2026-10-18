@@ -1446,18 +1446,20 @@ impl Store {
             })
             .collect::<Result<Vec<_>>>()?;
         let mut captures = std::collections::BTreeMap::new();
-        for wallet in wallets
-            .iter()
-            .map(|(wallet, _)| wallet)
-            .chain(pending.iter().map(|auth| &auth.wallet))
-        {
+        for (wallet, _) in &wallets {
+            captures.insert(wallet.clone(), self.capture_evidence(wallet)?);
+        }
+        for auth in &pending {
+            let wallet = &auth.wallet;
             let belongs: bool = self.db.query_row(
                 "SELECT EXISTS(SELECT 1 FROM wallets WHERE id=?1 AND pool_id=?2)",
                 params![wallet, pool],
-                |row| row.get(0),
+                |r| r.get(0),
             )?;
             ensure!(belongs, "evidence wallet group mismatch");
-            captures.insert(wallet.clone(), self.capture_evidence(wallet)?);
+            if !captures.contains_key(wallet) {
+                captures.insert(wallet.clone(), self.capture_authorization(wallet)?);
+            }
         }
         Ok(super::base::ChainQuery {
             wallets,

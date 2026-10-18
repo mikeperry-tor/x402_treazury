@@ -15,7 +15,7 @@ pub use debit::{receipt_expectation, reconcile_debit};
 mod payment;
 pub(crate) use payment::PaymentContext;
 #[cfg(test)]
-pub(crate) use payment::expiring_claim_fixture;
+pub(crate) use payment::managed_claim_fixture;
 pub(crate) use payment::{capture_case, inherit_case};
 mod pricing;
 mod receipt;

@@ -786,7 +786,7 @@ fn later_success_never_hides_an_earlier_pending_authorization() {
         let report=r.report(Some("test_run"),12).unwrap();
         assert_eq!(report["cases"][0]["settlement"],if earlier.is_some(){"USED"}else{"PENDING"});
         assert_eq!(reserved(&r),20000);
-        assert_eq!(report["application_evidence"]["payment_attempts_correlated"],2);
+        assert_eq!(r.application_evidence("test_run").unwrap()["payment_attempts_correlated"],2);
         assert!(r.verified_debits("test_run").unwrap().is_empty());
     }
 }
@@ -833,6 +833,15 @@ fn seller_receipts_are_correlated_but_never_promoted_to_chain_evidence() {
     assert_eq!(reserved(&r), 20000);
     assert_eq!(before["cases"], after["cases"]);
     assert_eq!(r.verified_debits("test_run").unwrap().len(), 1);
+    let mut earlier=json!({"case":"call","session":"s","stage":"admitted_before_signing","amount":"1","attempt_id":"earlier","address":payer});
+    r.event("test_run","application_payment",&earlier,10).unwrap();
+    assert!(r.verified_debits("test_run").unwrap().is_empty(),"later debit cannot hide unresolved earlier charge");
+    let observed=json!({"case":"call","attempts":[{"attempt_id":"earlier","resolution":{"attempt_id":"earlier","outcome":"EXPIRED_UNUSED","height":42,"hash":format!("0x{:064x}",4),"block_time":1000}}]});
+    r.event("test_run","payment_observed",&observed,10).unwrap();
+    assert_eq!(r.verified_debits("test_run").unwrap().len(),1);
+    earlier["attempt_id"]=json!("unknown");
+    r.event("test_run","application_payment",&earlier,10).unwrap();
+    assert!(r.verified_debits("test_run").unwrap().is_empty());
     let db = rusqlite::Connection::open(f.state.join("live-integration/registry.sqlite")).unwrap();
     db.execute("UPDATE events SET detail=json_set(detail,'$.proof.amount_atomic','2') WHERE kind='application_debit_verified'",[]).unwrap();
     assert!(r.verified_debits("test_run").is_err());

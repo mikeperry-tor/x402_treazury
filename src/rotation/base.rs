@@ -12,8 +12,6 @@ pub mod evidence;
 pub(crate) mod historical;
 mod receipt;
 mod resources;
-#[cfg(test)]
-pub(crate) use resources::available_queries;
 mod shared;
 mod transport;
 mod verification;

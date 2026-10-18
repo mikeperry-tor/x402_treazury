@@ -135,7 +135,7 @@ mod tests {
         let payment = json!({"amount":"7","balance_evidence":evidence});
         validate_admission_balance(&payment).unwrap();
         for (field, value) in [
-            ("schema_version", json!(3)),
+            ("schema_version", json!(4)),
             ("latest_balance_atomic", Value::Null),
             ("conservative_balance_atomic", json!("80")),
             ("available_after_atomic", json!("68")),

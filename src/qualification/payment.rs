@@ -279,7 +279,7 @@ impl PaymentContext {
 }
 
 #[cfg(test)]
-pub(crate) async fn expiring_claim_fixture() -> (tempfile::TempDir, Claim, PathBuf) {
+pub(crate) async fn managed_claim_fixture() -> (tempfile::TempDir, Claim, PathBuf) {
     let (dir, guard, _db) = tests::fixture(true);
     let path = guard.binding.registry.clone();
     let claim = tests::claim(guard).await;
@@ -365,16 +365,10 @@ mod tests {
                 assert!(payment_context().is_err());
                 record_challenge(&headers).await.unwrap();
                 record_challenge(&headers).await.unwrap();
-                assert!(
-                    record_challenge(&headers)
-                        .await
-                        .unwrap_err()
-                        .to_string()
-                        .contains("two-per-case limit")
-                );
+                record_challenge(&headers).await.unwrap();
             })
             .await;
-        assert_eq!(count(), 2);
+        assert_eq!(count(), 3);
         let event: String = db
             .query_row(
                 "SELECT detail FROM events WHERE kind='application_challenge' ORDER BY seq LIMIT 1",

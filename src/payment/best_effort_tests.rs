@@ -34,6 +34,7 @@ enum Wire {
     SuccessfulHeader,
     HeldSuccess,
     Expired,
+    QualifiedThree,
 }
 #[derive(Clone)]
 struct Fixture {
@@ -105,7 +106,9 @@ async fn seller(
         signed.push((payer, nonce));
         signed.len()
     };
-    if let Some(path) = &f.authority {
+    if matches!(f.wire, Wire::Expired)
+        && let Some(path) = &f.authority
+    {
         rusqlite::Connection::open(path)
             .unwrap()
             .execute("UPDATE cases SET window_end=0", [])
@@ -140,7 +143,8 @@ async fn seller(
         | Wire::Oversized
         | Wire::SuccessfulHeader
         | Wire::HeldSuccess
-        | Wire::Expired => {
+        | Wire::Expired
+        | Wire::QualifiedThree => {
             let reason = if matches!(f.wire, Wire::Allowance) {
                 "insufficient_allowance"
             } else {
@@ -208,8 +212,36 @@ async fn run(
             .record_credit(&job.wallet_id, "5000000", "fixture", 100)
             .unwrap();
     }
-    let authority = if matches!(wire, Wire::Expired) {
-        Some(crate::qualification::expiring_claim_fixture().await)
+    if matches!(wire, Wire::QualifiedThree) {
+        // Seed prior reserve consumption; the retry itself may allocate nothing.
+        let first = state
+            .status()
+            .unwrap()
+            .pools
+            .remove(0)
+            .addresses
+            .remove(0)
+            .id;
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        db.execute("UPDATE wallets SET role='ACTIVE' WHERE id=?1", [&first])
+            .unwrap();
+        db.execute(
+            "UPDATE reserve_claims SET wallet_id=NULL,generation=generation+1 WHERE wallet_id=?1",
+            [&first],
+        )
+        .unwrap();
+        drop(db);
+        state
+            .allocate_capacity_kind(&pool, crate::rotation::store::AllocationKind::Small, true)
+            .unwrap();
+        for job in state.funding_jobs().unwrap() {
+            state
+                .record_credit(&job.wallet_id, "5000000", "fixture", 100)
+                .unwrap();
+        }
+    }
+    let authority = if matches!(wire, Wire::Expired | Wire::QualifiedThree) {
+        Some(crate::qualification::managed_claim_fixture().await)
     } else {
         None
     };
@@ -318,7 +350,11 @@ async fn run(
         db.query_row("SELECT count(*) FROM funding_jobs", [], |r| r
             .get::<_, i64>(0))
             .unwrap(),
-        2,
+        if matches!(wire, Wire::QualifiedThree) {
+            3
+        } else {
+            2
+        },
         "retry cannot allocate or top up"
     );
     let low: i64 = db
@@ -330,9 +366,16 @@ async fn run(
         .unwrap();
     if matches!(
         wire,
-        Wire::Verification | Wire::Settlement | Wire::HeldSuccess
+        Wire::Verification | Wire::Settlement | Wire::HeldSuccess | Wire::QualifiedThree
     ) {
-        assert_eq!(low, rejects.min(2) as i64);
+        assert_eq!(
+            low,
+            rejects.min(if matches!(wire, Wire::QualifiedThree) {
+                3
+            } else {
+                2
+            }) as i64
+        );
     }
     assert_eq!(
         f.rpc.load(Ordering::SeqCst),
@@ -351,9 +394,32 @@ async fn run(
             |r| r.get::<_, i64>(0)
         )
         .unwrap(),
-        2
+        if matches!(wire, Wire::QualifiedThree) {
+            3
+        } else {
+            2
+        }
     );
     drop(db);
+    if matches!(wire, Wire::QualifiedThree) {
+        let (_, _, path) = authority.as_ref().unwrap();
+        let db = rusqlite::Connection::open(path).unwrap();
+        for kind in [
+            "application_payment",
+            "application_receipt",
+            "application_challenge",
+        ] {
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM events WHERE kind=?1", [kind], |r| r
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+                3
+            );
+        }
+        assert_eq!(db.query_row("SELECT sum(CAST(json_extract(detail,'$.amount') AS INTEGER)) FROM events WHERE kind='application_payment'",[],|r|r.get::<_,i64>(0)).unwrap(),300);
+    }
     drop(client);
     drop(manager);
     drop(store);
@@ -450,4 +516,20 @@ async fn expired_case_authority_after_a_forbids_even_unsigned_b_request() {
     assert!(!success);
     assert_eq!(signed.len(), 1);
     assert_eq!(requests.len(), 2);
+}
+
+#[tokio::test]
+async fn qualified_a_b_c_traversal_uses_original_permit_and_retains_all_observations() {
+    let (success, signed, requests, _) = run("POST", Wire::QualifiedThree, 2).await;
+    assert!(success);
+    assert_eq!(signed.len(), 3);
+    assert_eq!(requests.len(), 6);
+    assert_eq!(
+        signed
+            .iter()
+            .map(|(payer, _)| payer)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
+    );
 }

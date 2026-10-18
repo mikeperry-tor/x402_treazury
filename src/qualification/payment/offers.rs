@@ -67,10 +67,6 @@ pub async fn record(headers: &reqwest::header::HeaderMap) -> Result<()> {
         ensure!(claim,"challenge observation lacks application claim");
         let count: i64 = tx.query_row("SELECT COUNT(*) FROM events WHERE run=?1 AND kind='application_challenge' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2",
             params![context.guard.binding.run,context.case], |r|r.get(0))?;
-        if count >= 2 {
-            tracing::warn!(limit_challenges=2,"qualification challenge observation limit exceeded; refusing further challenge processing");
-            anyhow::bail!("qualification challenge observation exceeds two-per-case limit; no further challenge accepted");
-        }
         let event = json!({"case":context.case,"session":context.guard.binding.session,"ordinal":count,
             "observed_micros":context.elapsed_micros(),"observation":observation});
         tx.execute("INSERT INTO events(run,kind,detail,at) VALUES(?1,'application_challenge',?2,?3)",

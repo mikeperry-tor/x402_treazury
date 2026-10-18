@@ -99,6 +99,21 @@ impl Registry {
             summary["verified_total_atomic"]=json!(total.checked_add(amount).context("case debit total overflow")?.to_string());
             summary["attempts"].as_array_mut().context("debit attempts missing")?.push(json!({"attempt_id":event["attempt_id"],"proof":proof}));
         }
+        // A later debit cannot turn an earlier unknown charge into zero. Keep
+        // partial proofs in their original events; publish a case total only
+        // when every attempted authorization has a debit or proven non-use.
+        let events=self.report_runtime_events(Some(run))?;
+        let mut incomplete=std::collections::BTreeSet::new();
+        for event in events.iter().filter(|e| e["kind"]=="application_payment") {
+            let payment=&event["detail"];
+            let case=payment["case"].as_str().context("payment case missing")?;
+            let Some(summary)=proofs.get(case) else {continue};
+            let verified=summary["attempts"].as_array().context("debit attempts missing")?.iter().any(|a|a["attempt_id"]==payment["attempt_id"]);
+            if !verified && super::settlement::attempt_outcome(&events,case,&payment["attempt_id"])?!=Some("EXPIRED_UNUSED") {
+                incomplete.insert(case.to_owned());
+            }
+        }
+        for case in incomplete {proofs.remove(&case);}
         Ok(proofs)
     }
 }

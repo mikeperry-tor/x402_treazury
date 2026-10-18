@@ -341,7 +341,7 @@ mod tests {
         let events=evidence["runtime_events"].as_array_mut().unwrap();
         events.retain(|e| !(e["kind"]=="application_debit_verified" && e["detail"]["case"]=="a"));
         assert_eq!(report(&m,&config,&evidence).unwrap()[0]["status"],"incomplete");
-        evidence["runtime_events"].as_array_mut().unwrap().push(json!({"kind":"payment_observed","detail":{"case":"a","attempts":[{"attempt_id":"a","resolution":{"outcome":"EXPIRED_UNUSED","height":10,"hash":"canonical","block_time":100}}]}}));
+        evidence["runtime_events"].as_array_mut().unwrap().push(json!({"kind":"payment_observed","detail":{"case":"a","attempts":[{"attempt_id":"a","resolution":{"attempt_id":"a","outcome":"EXPIRED_UNUSED","height":10,"hash":"canonical","block_time":100}}]}}));
         let result=report(&m,&config,&evidence).unwrap();
         assert_eq!(result[0]["status"],"passed");
         assert_eq!(result[0]["paid_calls"],2);
