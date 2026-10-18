@@ -75,6 +75,8 @@ workflow; do not wait for the user to request delegation each time.
   lines. Report concrete findings and evidence, including where no issue was found.
 - Independently review every exact committed SHA and its relevant consumers. The
   reviewer must not be the author of the change.
+- Address findings with `git commit --fixup=<introducing-SHA>` and independently
+  review each fixup. Preserve unsquashed history through final integration review.
 - At meaningful architecture gates, independently review the combined implementation
   and full call chains, especially financial ownership, concurrency, network policy
   and documentation handoffs. Review all prior fixups in the branch or plan alongside
@@ -82,8 +84,6 @@ workflow; do not wait for the user to request delegation each time.
   regression coverage for gaps exposed by fixes, resolve additional findings and
   assess whether recurring patterns call for a wider audit, simplification or design
   change. Per-commit approval does not replace this review of the accumulated work.
-- Address findings with `git commit --fixup=<introducing-SHA>` and independently
-  review each fixup. Preserve unsquashed history through final integration review.
 - Give reviewers the user intent, scope, baseline and validation evidence. Ask them
   to verify claims and question unnecessary enforcement, not merely confirm the
   author's approach. The coordinating agent integrates findings and owns completion.
