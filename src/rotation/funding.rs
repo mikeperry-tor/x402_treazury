@@ -310,8 +310,8 @@ impl<B: FundingBackend> FundingWorker<B> {
         }
         Ok(None)
     }
-    // Readiness and quote refresh precede PREPARING; once that phase commits,
-    // only saved-byte recovery may proceed after an interrupted preparation.
+    // Readiness, quote refresh and read-only proposal checks precede input
+    // acceptance. Accepted ownership, rather than a display phase, fences retries.
     async fn prepare_quoted(&self, job: &FundingJob, clock: &TickClock) -> Result<()> {
         let quote = self.quote(job).await?;
         let id = job.id.clone();
@@ -344,8 +344,8 @@ impl<B: FundingBackend> FundingWorker<B> {
                 .call(move |s| s.refresh_unprepared_quote_for_operation(&id, &operation))
                 .await;
         }
-        // The treasury owner accepts PREPARING after its read-only preflight.
-        // A queued command cannot outrun a destination-readiness commit.
+        // The treasury owner commits PREPARING with selected input ownership
+        // after read-only proposal checks and a current-authority recheck.
         self.backend.lock().await.prepare(job, &quote).await?;
         Ok(())
     }
@@ -543,8 +543,7 @@ impl FundingBackend for Backend {
                 now()?,
             )
             .map_err(|error| {
-                // The scheduler may have committed PREPARING while this quote crossed
-                // its delivery boundary. No treasury command has been sent here.
+                // Quote expiry here precedes the treasury command and input acceptance.
                 if error.is::<super::near::QuoteWindowExpired>() {
                     error.context(super::transaction::PreparationDeferred)
                 } else {

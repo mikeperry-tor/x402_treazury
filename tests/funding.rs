@@ -130,16 +130,10 @@ impl FundingBackend for Fake {
         }
         assert!(quote.request["amount"].as_str().is_some());
         let id = j.operation_id.clone();
-        let authority = x402_treazury::rotation::transaction::ManagedFundingAuthority {
-            job_id: j.id.clone(),
-            auto_fund: true,
-            max_attempts: 10,
-        };
         let pool = j.pool_id.clone();
         let deadline = quote.deadline;
         self.store
             .call(move |s| {
-                s.begin_funding_preparation(&id, Some(&authority))?;
                 s.accept_preparation(&id, Some(&pool), 60, None)?;
                 let revision = s.snapshot()?.0;
                 s.prepare_with_facts(

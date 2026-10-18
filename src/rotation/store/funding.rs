@@ -414,27 +414,6 @@ impl Store {
         Ok(())
     }
 
-    /// Render preparation after current claim/quote/permission and unstarted-work
-    /// checks. A stale display phase cannot authorize or veto calculation.
-    pub fn begin_funding_preparation(
-        &mut self,
-        operation: &str,
-        authority: Option<&super::super::transaction::ManagedFundingAuthority>,
-    ) -> Result<()> {
-        self.require_preparation_authority(operation, authority)?;
-        self.require_unstarted_preparation(operation)?;
-        let Some(authority) = authority else {
-            return Ok(());
-        };
-        let tx = self
-            .db
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let changed=tx.execute("UPDATE funding_progress SET phase='\"PREPARING\"',last_error=NULL WHERE job_id=?1 AND operation_id=?2",params![authority.job_id,operation])?;
-        ensure!(changed == 1, "funding preparation boundary changed");
-        tx.commit()?;
-        Ok(())
-    }
-
     pub(crate) fn funding_recovery_context(
         &self,
         job: &str,
@@ -1398,6 +1377,62 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>) -> Result<Vec<FundingJ
 mod completion_tests {
     use super::*;
 
+    #[test]
+    fn preparation_phase_and_input_owner_commit_together() {
+        let (dir, mut store, job) = fixture();
+        store
+            .save_funding_quote(
+                &job.id,
+                &serde_json::to_vec(
+                    &serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        store.db.execute_batch("CREATE TRIGGER reject_preparing BEFORE UPDATE OF phase ON funding_progress WHEN NEW.phase='\"PREPARING\"' BEGIN SELECT RAISE(ABORT,'fixture phase publication failure'); END;").unwrap();
+        assert!(
+            store
+                .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                .is_err()
+        );
+        store
+            .require_unstarted_preparation(&job.operation_id)
+            .unwrap();
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().phase,
+            FundingPhase::Quoted
+        );
+        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+        store
+            .db
+            .execute_batch("DROP TRIGGER reject_preparing")
+            .unwrap();
+        store
+            .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+            .unwrap();
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().phase,
+            FundingPhase::Preparing
+        );
+        let treasury = store.id().to_owned();
+        drop(store);
+        let store = Store::open(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            &treasury,
+        )
+        .unwrap();
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().phase,
+            FundingPhase::Preparing
+        );
+        assert!(
+            store
+                .require_unstarted_preparation(&job.operation_id)
+                .is_err()
+        );
+    }
+
     fn fixture() -> (tempfile::TempDir, Store, FundingJob) {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::create(
@@ -1623,7 +1658,7 @@ mod completion_tests {
             };
             if !credit_first {
                 store
-                    .begin_funding_preparation(&job.operation_id, Some(&authority))
+                    .require_preparation_authority(&job.operation_id, Some(&authority))
                     .unwrap();
                 store
                     .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
@@ -1635,7 +1670,7 @@ mod completion_tests {
             if credit_first {
                 assert!(
                     store
-                        .begin_funding_preparation(&job.operation_id, Some(&authority))
+                        .require_preparation_authority(&job.operation_id, Some(&authority))
                         .is_err()
                 );
                 let effects:bool=store.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing) OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)",[],|r|r.get(0)).unwrap();
@@ -1981,7 +2016,7 @@ mod completion_tests {
                 max_attempts: 0,
             };
             store
-                .begin_funding_preparation(&job.operation_id, Some(&authority))
+                .require_preparation_authority(&job.operation_id, Some(&authority))
                 .unwrap();
             store
                 .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
@@ -2253,7 +2288,7 @@ mod completion_tests {
             "a quote alone must not trigger status I/O"
         );
         store
-            .begin_funding_preparation(
+            .require_preparation_authority(
                 &job.operation_id,
                 Some(&ManagedFundingAuthority {
                     job_id: job.id.clone(),
@@ -2426,7 +2461,7 @@ mod recovery_classification_tests {
         store.accept_preparation(&unknown.operation_id, Some(&unknown.pool_id), 10, None)?;
         store.advance_funding(
             &unknown.id,
-            FundingPhase::Allocated,
+            FundingPhase::Preparing,
             FundingPhase::RecoveryRequired,
         )?;
         for diagnostic in [

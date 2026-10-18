@@ -122,7 +122,9 @@ Zingolib selects inputs and calculates standard network fees. The application
 checks the actual proposal against configured per-operation fee/spend safeguards,
 then persists the exact input owner before calculation. A configured maximum is a
 rejection ceiling, not a capital reservation. Unknown outcomes after calculation
-acceptance retain that input fence; known pre-calculation failures can defer. The
+acceptance retain that input fence. The preparation phase commits with input
+ownership; known proposal shortages and fee rejections leave the quoted operation
+unstarted without consuming transaction recovery attempts. The
 SDK owns current balances, confirmations, witnesses, spent outputs and chain
 corrections. No full historical source/refund traversal gates publication.
 

@@ -392,7 +392,7 @@ mod tests {
         owner
             .store
             .call(move |s| {
-                s.advance_funding(&id, FundingPhase::Allocated, FundingPhase::RecoveryRequired)
+                s.advance_funding(&id, FundingPhase::Preparing, FundingPhase::RecoveryRequired)
             })
             .await
             .unwrap();

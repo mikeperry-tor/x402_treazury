@@ -81,7 +81,7 @@ fn partial_credit_after_preparation_forbids_first_deposit_and_retains_incoming_o
         )
         .unwrap();
     store
-        .begin_funding_preparation(
+        .require_preparation_authority(
             &job.operation_id,
             Some(&crate::rotation::transaction::ManagedFundingAuthority {
                 job_id: job.id.clone(),

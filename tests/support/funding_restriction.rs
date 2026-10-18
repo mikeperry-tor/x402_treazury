@@ -345,12 +345,10 @@ fn permit_hooks_bound_each_allocation_and_preparation_before_mutation() {
     .unwrap();
     s.accept_preparation(&job.operation_id, Some(&pool), 100, None)
         .unwrap();
-    s.advance_funding(
-        &job.id,
-        funding::FundingPhase::Quoted,
-        funding::FundingPhase::Preparing,
-    )
-    .unwrap();
+    assert_eq!(
+        s.funding_job(&job.id).unwrap().unwrap().phase,
+        funding::FundingPhase::Preparing
+    );
     s.prepare(&job.operation_id, 1, b"next", b"signed").unwrap();
     for job in &jobs {
         s.record_credit(&job.wallet_id, "1000000", "block", 1)

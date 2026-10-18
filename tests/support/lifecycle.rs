@@ -126,16 +126,6 @@ impl FundingBackend for Funding {
         let job = job.clone();
         self.store
             .call(move |s| {
-                s.begin_funding_preparation(
-                    &job.operation_id,
-                    Some(
-                        &x402_treazury::rotation::transaction::ManagedFundingAuthority {
-                            job_id: job.id.clone(),
-                            auto_fund: true,
-                            max_attempts: 3,
-                        },
-                    ),
-                )?;
                 s.accept_preparation(&job.operation_id, Some(&job.pool_id), 100, None)?;
                 let revision = s.snapshot()?.0;
                 s.prepare_with_facts(

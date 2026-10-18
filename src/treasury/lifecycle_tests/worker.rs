@@ -594,3 +594,194 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
     drop(handle);
     task.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_funded() {
+    use crate::rotation::{
+        error::FundingCondition, funding::FundingBackend, store::funding::FundingPhase,
+    };
+    let (_dir, net, owner, endpoint) = funded_fixture_amount(2, 10_000).await;
+    let address = owner
+        .client
+        .as_ref()
+        .unwrap()
+        .unified_addresses_json()
+        .await[0]["encoded_address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    owner
+        .ensure_capacity_group(
+            "alpha".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let f = Bridge {
+        store: store.clone(),
+        deposits: Arc::new(vec![DEPOSIT.into()]),
+        quotes: Default::default(),
+        quote_count: Default::default(),
+        quotes_entered: Arc::new(tokio::sync::Semaphore::new(0)),
+        release_quotes: CancellationToken::new(),
+        signed: Default::default(),
+        destination: Arc::new(Mutex::new(DestinationChain {
+            height: 100,
+            credits: BTreeMap::new(),
+        })),
+        timestamp: now().unwrap(),
+    };
+    f.release_quotes.cancel();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new()
+        .route(
+            "/v0/tokens",
+            get(|| async {
+                Json(
+                    serde_json::from_str::<Value>(include_str!(
+                        "../../../tests/fixtures/near/tokens.json"
+                    ))
+                    .unwrap(),
+                )
+            }),
+        )
+        .route("/v0/quote", post(quote))
+        .route("/v0/status", get(status))
+        .route("/base", post(base))
+        .with_state(f.clone());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (handle, commands) = actor::channel();
+    let backend = Backend {
+        treasury: handle.clone(), store: store.clone(),
+        near: NearClient::synthetic_at(&origin).unwrap(),
+        base: BaseRpc::new(&format!("{origin}/base"), 2).unwrap(),
+        wallets: BTreeMap::from([("alpha".into(), serde_json::from_value(json!({"mode":"zcash_rotation","reserves":{"small":{"funding_amount_usdc":"5"}},"max_api_payment_usdc":"1","max_funding_spend_zec":"0.002","max_conversion_overhead_percent":5,"max_attempts":1})).unwrap())]),
+        funding: serde_json::from_value(json!({"base_rpc_url_env":"BASE","confidentiality":"public"})).unwrap(),
+        max_network_fee: 30_000,
+    };
+    let worker = FundingWorker::new(store.clone(), backend, 1);
+    let sends = Arc::new(AtomicUsize::new(0));
+    let stop = CancellationToken::new();
+    let sender = CountedSender {
+        inner: submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap(),
+        sends: sends.clone(),
+        lookups: Arc::new(AtomicUsize::new(0)),
+    };
+    let actor = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
+    let epoch = now().unwrap();
+    worker.tick(epoch).await.unwrap();
+    let original = store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    assert_eq!(original.phase, FundingPhase::Quoted);
+    let id = original.id.clone();
+    let operation = original.operation_id.clone();
+    let saved_quote = store
+        .call(move |s| Ok(s.funding_quote_for_operation(&id, &operation)?.to_vec()))
+        .await
+        .unwrap();
+    let accepted_quote: Quote = serde_json::from_slice(&saved_quote).unwrap();
+    // Exceed max_attempts with actual SDK rejections, then run the coordinator's
+    // next source pass as well: metadata must not turn these into recovery work.
+    for pass in 1..=4 {
+        let error = worker
+            .backend
+            .lock()
+            .await
+            .prepare(&original, &accepted_quote)
+            .await
+            .unwrap_err();
+        assert!(error.is::<PreparationDeferred>(), "{error:#}");
+        assert_eq!(
+            error.downcast_ref::<FundingCondition>(),
+            Some(&FundingCondition::InsufficientFunds)
+        );
+        worker.tick(epoch + pass * 60).await.unwrap();
+        let job = original.clone();
+        let quote = saved_quote.clone();
+        store
+            .call(move |s| {
+                let current = s.funding_job(&job.id)?.unwrap();
+                assert_eq!(current.phase, FundingPhase::Quoted);
+                assert_eq!(current.operation_id, job.operation_id);
+                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                assert_eq!(&*s.funding_quote(&job.id)?, quote.as_slice());
+                s.require_unstarted_preparation(&job.operation_id)?;
+                assert!(
+                    !s.status()?.outgoing_pending && s.status()?.treasury_operations.is_empty()
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
+    }
+    let deposit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_block(vec![deposit]);
+        chain.mine_empty_blocks(2);
+    }
+    // A known fee rejection has the same unstarted semantics after new funds arrive.
+    worker.backend.lock().await.max_network_fee = 1;
+    let error = worker
+        .backend
+        .lock()
+        .await
+        .prepare(&original, &accepted_quote)
+        .await
+        .unwrap_err();
+    assert!(error.is::<PreparationDeferred>(), "{error:#}");
+    assert_eq!(
+        error.downcast_ref::<FundingCondition>(),
+        Some(&FundingCondition::CostLimit)
+    );
+    worker.tick(epoch + 300).await.unwrap();
+    let job = original.clone();
+    store
+        .call(move |s| {
+            let current = s.funding_job(&job.id)?.unwrap();
+            assert_eq!(current.phase, FundingPhase::Quoted);
+            assert_eq!(current.operation_id, job.operation_id);
+            assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+            s.require_unstarted_preparation(&job.operation_id)
+        })
+        .await
+        .unwrap();
+    worker.backend.lock().await.max_network_fee = 30_000;
+    worker.tick(epoch + 360).await.unwrap();
+    let job = original.clone();
+    store
+        .call(move |s| {
+            let current = s.funding_job(&job.id)?.unwrap();
+            assert_eq!(current.phase, FundingPhase::Prepared);
+            assert_eq!(current.operation_id, job.operation_id);
+            assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+            assert!(s.require_unstarted_preparation(&job.operation_id).is_err());
+            assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
+            assert!(s.status()?.outgoing_pending);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(f.quote_count.load(Ordering::SeqCst), 1);
+    assert_eq!(sends.load(Ordering::SeqCst), 0);
+    stop.cancel();
+    drop(worker);
+    drop(handle);
+    drop(store);
+    drop(f);
+    server.abort();
+    let _ = server.await;
+    actor.await.unwrap().unwrap();
+}

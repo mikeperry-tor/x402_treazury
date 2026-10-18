@@ -485,7 +485,7 @@ fn submitted(store: &mut Store, job: &FundingJob) {
         .save_funding_quote(&job.id, &serde_json::to_vec(&quote(job)).unwrap())
         .unwrap();
     store
-        .begin_funding_preparation(
+        .require_preparation_authority(
             &job.operation_id,
             Some(&crate::rotation::transaction::ManagedFundingAuthority {
                 job_id: job.id.clone(),

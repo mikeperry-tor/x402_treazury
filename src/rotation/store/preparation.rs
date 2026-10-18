@@ -45,7 +45,8 @@ impl Store {
     }
 
     /// The actual proposal cost and owned input identities are captured before
-    /// SDK calculation. An existing intent cannot authorize another calculation.
+    /// SDK calculation, atomically with its funding preparation phase. An existing
+    /// intent cannot authorize another calculation or reset its later phase.
     pub fn accept_preparation(
         &mut self,
         id: &str,
@@ -103,6 +104,10 @@ impl Store {
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute("INSERT INTO operation_network(operation_id,preparation) VALUES(?1,?2) ON CONFLICT(operation_id) DO UPDATE SET preparation=excluded.preparation",params![id,bytes])?;
+        tx.execute(
+            "UPDATE funding_progress SET phase='\"PREPARING\"',last_error=NULL WHERE operation_id=?1",
+            [id],
+        )?;
         tx.commit()?;
         Ok(())
     }

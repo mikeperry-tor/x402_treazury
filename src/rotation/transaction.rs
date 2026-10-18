@@ -42,7 +42,8 @@ impl std::fmt::Display for RecoveryEvidenceError {
 }
 impl std::error::Error for RecoveryEvidenceError {}
 
-/// Issued only through a proven read-only path before proposal/preparation starts.
+/// Issued only through a proven read-only path before accepting input ownership
+/// or starting calculation. SDK proposal selection can fail on this path.
 /// It is not evidence that an interrupted calculation is safe to repeat.
 #[derive(Debug)]
 pub struct PreparationDeferred;

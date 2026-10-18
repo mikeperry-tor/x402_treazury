@@ -82,12 +82,6 @@ impl TransactionPreparer for Treasury {
         .await;
         let indexer =
             preflight.map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
-        let operation = request.operation_id.clone();
-        let authority = request.managed_funding;
-        self.store
-            .call(move |s| s.begin_funding_preparation(&operation, authority.as_ref()))
-            .await
-            .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
         // Proposal selection is read-only with respect to owned inputs and signed bytes.
         let client = self
             .client
@@ -172,6 +166,7 @@ impl TransactionPreparer for Treasury {
         let id = request.operation_id.clone();
         let pool = request.pool_id.clone();
         let deadline = request.deadline;
+        let authority = request.managed_funding;
         // A commit may succeed without an acknowledgment. Poison before dispatch;
         // only a serialized proof of no accepted intent permits reuse on failure.
         self.healthy = false;
@@ -179,6 +174,7 @@ impl TransactionPreparer for Treasury {
             .store
             .call(move |s| {
                 ensure!(now()? < deadline, "funding_deadline_expired");
+                s.require_preparation_authority(&id, authority.as_ref())?;
                 s.accept_preparation(&id, pool.as_deref(), authorized_cost, Some(calculation))?;
                 s.set_sync_phase(crate::rotation::store::SyncPhase::Preparing)?;
                 Ok(())
