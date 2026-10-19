@@ -60,7 +60,7 @@ pub(super) fn attempt(
     let observation = &outcome.observation;
     for scope in session.scopes.lock().unwrap().iter() {
         macro_rules! event {
-            ($level:expr) => {
+            ($level:expr, $($message:tt)+) => {
                 tracing::event!($level,
                     listener = %scope.listener, source = %scope.source,
                     episode_id = %session.id, code, resource, qualifying,
@@ -71,15 +71,25 @@ pub(super) fn attempt(
                     http_status = observation.http_status, http_version = ?observation.http_version,
                     declared_body_bytes = observation.declared_body_bytes,
                     received_bytes = observation.received_bytes, elapsed_ms = observation.elapsed_ms,
-                    "optional cover range outcome; no full-download fallback")
+                    $($message)+)
             };
         }
         if matches!(capability_after, Some(Capability::Unavailable(_))) {
-            event!(Level::WARN);
+            event!(
+                Level::WARN,
+                "HTTP/2 range cover traffic unavailable for provider [{}]; further range attempts disabled for this identity/origin until restart or cache eviction",
+                scope.source
+            );
         } else if fallback_selected {
-            event!(Level::INFO);
+            event!(
+                Level::INFO,
+                "optional cover range outcome; no full-download fallback"
+            );
         } else {
-            event!(Level::DEBUG);
+            event!(
+                Level::DEBUG,
+                "optional cover range outcome; no full-download fallback"
+            );
         }
     }
 }
@@ -103,7 +113,7 @@ pub(super) fn episode(
         tokio::time::Instant::now() >= e.tail_deadline.unwrap_or(e.deadline).min(e.deadline);
     for scope in session.scopes.lock().unwrap().iter() {
         macro_rules! event {
-            ($level:expr) => {
+            ($level:expr, $($message:tt)+) => {
                 tracing::event!($level,
                     listener = %scope.listener, source = %scope.source,
                     episode_id = %session.id, code, resource, capability, retained_failure,
@@ -118,15 +128,31 @@ pub(super) fn episode(
                     episode_padding_byte_limit = session.config.padding.as_ref().map(|p| p.max_value_bytes_per_episode),
                     header_list_byte_limit = session.config.padding.as_ref().map(|p| p.max_total_header_list_bytes),
                     elapsed_ms = e.started.elapsed().as_millis() as u64,
-                    "optional cover episode finished; pooled best-effort, not a privacy guarantee")
+                    $($message)+)
             };
         }
-        if newly_unavailable || matches!(code, "cover_task_failed" | "cover_sampling_exhausted") {
-            event!(Level::WARN);
+        if newly_unavailable {
+            event!(
+                Level::WARN,
+                "HTTP/2 range cover qualification did not finish for provider [{}]; further range attempts disabled for this identity/origin until restart or cache eviction",
+                scope.source
+            );
+        } else if matches!(code, "cover_task_failed" | "cover_sampling_exhausted") {
+            event!(
+                Level::WARN,
+                "HTTP/2 cover traffic failed for provider [{}]; see diagnostic fields",
+                scope.source
+            );
         } else if matches!(capability_after, Capability::Unavailable(_)) {
-            event!(Level::DEBUG);
+            event!(
+                Level::DEBUG,
+                "optional cover episode finished; pooled best-effort, not a privacy guarantee"
+            );
         } else {
-            event!(Level::INFO);
+            event!(
+                Level::INFO,
+                "optional cover episode finished; pooled best-effort, not a privacy guarantee"
+            );
         }
     }
 }

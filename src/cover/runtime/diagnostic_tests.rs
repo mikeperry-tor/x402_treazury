@@ -91,7 +91,7 @@ async fn deadline_cleanup_reports_actual_capability_without_warn_on_available_sh
         let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
         let episode = logs
             .lines()
-            .find(|line| line.contains("optional cover episode finished"))
+            .find(|line| line.contains("sampled_body_bytes="))
             .unwrap();
         for field in [
             "episode_id=",
@@ -105,6 +105,13 @@ async fn deadline_cleanup_reports_actual_capability_without_warn_on_available_sh
             assert!(episode.contains(field), "{logs}");
         }
         if checking {
+            assert!(
+                episode.contains(
+                    "HTTP/2 range cover qualification did not finish for provider [source]"
+                ),
+                "{logs}"
+            );
+            assert!(episode.contains("further range attempts disabled for this identity/origin until restart or cache eviction"), "{logs}");
             assert!(episode.contains("WARN"), "{logs}");
             assert!(episode.contains("capability=\"unavailable\""), "{logs}");
             assert!(

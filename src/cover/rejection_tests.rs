@@ -52,7 +52,7 @@ fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
         .filter(|line| {
             line.contains("WARN")
                 && line.contains("code=\"cover_forbidden\"")
-                && line.contains("optional cover range outcome")
+                && line.contains("capability_applied=true")
         })
         .collect();
     assert_eq!(
@@ -76,6 +76,7 @@ fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
         1,
         "{logs}"
     );
+    assert!(refusal.iter().all(|line| line.contains("HTTP/2 range cover traffic unavailable for provider [api]") && line.contains("further range attempts disabled for this identity/origin until restart or cache eviction")), "{logs}");
     for field in [
         "listener=main",
         "source=api",
