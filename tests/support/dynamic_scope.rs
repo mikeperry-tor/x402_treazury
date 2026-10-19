@@ -215,9 +215,27 @@ async fn scope_child() {
     assert_eq!(requests.load(Ordering::SeqCst), 12);
     assert_eq!(signatures.lock().unwrap().len(), 6);
     let before = requests.load(Ordering::SeqCst);
+    // Names can match across independently owned registrations. References cannot.
+    let writer_bound = m.catalog.read().views["writer"]
+        .iter()
+        .find(|b| b.tool.name == name)
+        .unwrap()
+        .clone();
+    let reader_bound = m.catalog.read().views["reader"]
+        .iter()
+        .find(|b| b.tool.name == name)
+        .unwrap()
+        .clone();
+    let foreign_reference = m.tool_reference("writer", &writer_bound);
+    assert_ne!(foreign_reference, m.tool_reference("reader", &reader_bound));
     assert!(
         server(&m, "reader")
-            .invoke(&name, &Default::default())
+            .invoke(
+                "x402_treazury_tool_call",
+                json!({"tool_ref":foreign_reference,"arguments":{}})
+                    .as_object()
+                    .unwrap()
+            )
             .await
             .is_err()
     );

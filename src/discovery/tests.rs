@@ -4,6 +4,7 @@ use crate::{
     payment::{Payer, SpendPolicy},
     server::Server,
 };
+use std::collections::BTreeSet;
 fn listeners(_persistent: bool) -> BTreeMap<String, ListenerConfig> {
     ["writer", "reader", "hidden"].into_iter().map(|id| (id.into(), serde_json::from_value(json!({"listen":"127.0.0.1:0","bearer_token_env":"TEST_TOKEN","sources":[],"source_management":id != "hidden"})).unwrap())).collect()
 }
@@ -130,8 +131,7 @@ async fn add(m: &Arc<Manager>, name: &str, _lifetime: &str, _visibility: &str) -
 fn importer_rejects_unsafe_and_expanding_documents() {
     let p = policy(None);
     let c: Candidate = serde_json::from_value(candidate("demo", "process", "server")).unwrap();
-    let id = Uuid::new_v4().to_string();
-    assert!(import::build(&p, &c, &id, &serde_json::to_vec(&spec()).unwrap()).is_ok());
+    assert!(import::build(&p, &c, &serde_json::to_vec(&spec()).unwrap()).is_ok());
     for url in [
         "file:///etc/passwd",
         "http://api.example.com",
@@ -152,18 +152,18 @@ fn importer_rejects_unsafe_and_expanding_documents() {
     ] {
         let mut doc = spec();
         doc["components"] = replacement;
-        assert!(import::build(&p, &c, &id, &serde_json::to_vec(&doc).unwrap()).is_err());
+        assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
     }
     let mut doc = spec();
     doc["paths"]["/read"]["get"]["servers"] = json!([{"url":"https://evil.example.com"}]);
-    assert!(import::build(&p, &c, &id, &serde_json::to_vec(&doc).unwrap()).is_err());
+    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
     let mut doc = spec();
     doc["components"] = json!({"x0":{"type":"string"}});
     for n in 1..25 {
         doc["components"][format!("x{n}")] = json!({"allOf":[{"$ref":format!("#/components/x{}",n-1)},{"$ref":format!("#/components/x{}",n-1)}]});
     }
     assert!(
-        import::build(&p, &c, &id, &serde_json::to_vec(&doc).unwrap())
+        import::build(&p, &c, &serde_json::to_vec(&doc).unwrap())
             .unwrap_err()
             .to_string()
             .contains("complexity")
@@ -174,9 +174,8 @@ fn importer_rejects_unsafe_and_expanding_documents() {
 fn import_pipeline_preserves_origin_checks_and_validation_before_selection() {
     let mut p = policy(None);
     let mut c: Candidate = serde_json::from_value(candidate("demo", "process", "server")).unwrap();
-    let id = Uuid::new_v4().to_string();
     let build = |p: &policy::Policy, c: &Candidate, doc: &Value| {
-        import::build(p, c, &id, &serde_json::to_vec(doc).unwrap())
+        import::build(p, c, &serde_json::to_vec(doc).unwrap())
     };
     let mut doc = spec();
     doc["servers"][0]["url"] = json!("/v1");
@@ -875,12 +874,16 @@ async fn real_http_directory_search_and_cached_client_workflow() {
     let added = call(
         &base,
         "x402_treazury_source_add",
-        json!({"spec_url":"https://api.example.com/openapi.json"}),
+        json!({"spec_url":"https://api.example.com/openapi.json","name":"demo"}),
     )
     .await;
-    let id = added["structuredContent"]["source_id"].clone();
-    assert!(id.is_string(), "{added}");
-    let signatures = call(&base, "x402_treazury_tools_search", json!({"source_id":id})).await;
+    assert_eq!(added["structuredContent"]["tool_prefix"], "dyn_demo__");
+    let signatures = call(
+        &base,
+        "x402_treazury_tools_search",
+        json!({"source_name":"demo"}),
+    )
+    .await;
     let item = &signatures["structuredContent"]["items"][0];
     assert!(item["input_schema"].is_object());
     assert!(item["tool_ref"].is_string());
@@ -2305,4 +2308,270 @@ async fn on_demand_endpoint_bypasses_quota_on_add_restart_and_static_publication
         .await
         .unwrap();
     assert_eq!(found["items"].as_array().unwrap().len(), 2);
+}
+
+// Seed an imported document without live provider requests or wallet material.
+async fn register_spec(
+    m: &Arc<Manager>,
+    owner: &str,
+    name: &str,
+    url_path: &str,
+    doc: Value,
+) -> Result<Value> {
+    let url = format!("https://api.example.com/{url_path}");
+    let cell = OnceCell::new();
+    cell.set(Fetched {
+        completed: Instant::now(),
+        result: Ok(Arc::new(serde_json::to_vec(&doc).unwrap())),
+    })
+    .unwrap();
+    m.fetches
+        .lock()
+        .unwrap()
+        .insert(url.clone(), Arc::new(cell));
+    m.invoke(
+        owner,
+        "x402_treazury_source_add",
+        json!({"name":name,"spec_url":url}),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn named_sources_have_unambiguous_tools_and_name_only_search() {
+    let m = manager(None).await;
+    let mut doc = spec();
+    doc["paths"] = json!({"/ip_risk":{"get":{}}});
+    let added = register_spec(&m, "writer", "acme", "one.json", doc)
+        .await
+        .unwrap();
+    let mut doc = spec();
+    doc["paths"] = json!({"/risk":{"get":{}}});
+    register_spec(&m, "writer", "acme_ip", "two.json", doc)
+        .await
+        .unwrap();
+    let names: BTreeSet<_> = m.catalog.read().views["writer"]
+        .iter()
+        .map(|b| b.tool.name.clone())
+        .collect();
+    assert_eq!(
+        names,
+        ["dyn_acme__ip_risk", "dyn_acme_ip__risk"]
+            .map(String::from)
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+    );
+    assert_eq!(added["tool_prefix"], "dyn_acme__");
+    let result = m
+        .search_tools(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"source_name":"acme"}),
+        )
+        .unwrap();
+    assert_eq!(result["items"].as_array().unwrap().len(), 1);
+    assert_eq!(result["items"][0]["tool_id"], "dyn_acme__ip_risk");
+    let reference = result["items"][0]["tool_ref"].as_str().unwrap();
+    assert_eq!(
+        m.find_reference("writer", reference).unwrap().tool.name,
+        "dyn_acme__ip_risk"
+    );
+    assert!(m.find_reference("reader", reference).is_err());
+    for args in [
+        json!({"source_name":"missing"}),
+        json!({"source_name":"acme","source_id":added["source_id"]}),
+    ] {
+        assert!(
+            m.search_tools("writer", "x402_treazury_tools_search", args)
+                .is_err()
+        );
+    }
+    assert!(
+        m.search_tools(
+            "reader",
+            "x402_treazury_tools_search",
+            json!({"source_name":"acme"})
+        )
+        .is_err()
+    );
+    assert!(
+        search_catalog(
+            &m.catalog,
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"source_name":"acme"})
+        )
+        .is_err()
+    );
+    // Rebuilding saved sources preserves the same visible names.
+    m.restore().unwrap();
+    let restored: BTreeSet<_> = m.catalog.read().views["writer"]
+        .iter()
+        .map(|b| b.tool.name.clone())
+        .collect();
+    assert_eq!(restored, names.into_iter().collect());
+}
+
+#[tokio::test]
+async fn source_filters_use_names_without_rewriting_id_filters() {
+    let mut ls = listeners(false);
+    ls.get_mut("writer").unwrap().include_tools = vec!["dyn_demo__read".into()];
+    ls.get_mut("reader").unwrap().include_tools =
+        vec!["dyn_00000000000000000000000000000001_*".into()];
+    let m = manager_with(policy(None), ls).await;
+    register_spec(&m, "writer", "demo", "demo.json", spec())
+        .await
+        .unwrap();
+    register_spec(&m, "reader", "demo", "demo.json", spec())
+        .await
+        .unwrap();
+    assert_eq!(m.catalog.read().views["writer"].len(), 1);
+    assert_eq!(
+        m.catalog.read().views["writer"][0].tool.name,
+        "dyn_demo__read"
+    );
+    assert!(m.catalog.read().views["reader"].is_empty());
+    assert_eq!(
+        m.listeners["reader"].include_tools,
+        ["dyn_00000000000000000000000000000001_*"]
+    );
+}
+
+#[tokio::test]
+async fn source_names_are_verbatim_unique_and_race_safe() {
+    let m = manager(None).await;
+    for (i, name) in ["Acme-IP", "Acme_IP", "acme_ip", "acme_", "_", "-"]
+        .iter()
+        .enumerate()
+    {
+        let result = register_spec(&m, "writer", name, &format!("{i}.json"), spec())
+            .await
+            .unwrap();
+        assert_eq!(result["name"], *name);
+        assert_eq!(result["tool_prefix"], format!("dyn_{name}__"));
+        let result = m
+            .search_tools(
+                "writer",
+                "x402_treazury_tools_search",
+                json!({"source_name":name}),
+            )
+            .unwrap();
+        assert!(result["items"].as_array().unwrap().iter().all(|item| {
+            item["tool_id"]
+                .as_str()
+                .unwrap()
+                .starts_with(&format!("dyn_{name}__"))
+        }));
+    }
+    assert!(
+        register_spec(&m, "writer", "acme__ip", "invalid.json", spec())
+            .await
+            .is_err()
+    );
+    let (one, two) = tokio::join!(
+        register_spec(&m, "writer", "racer", "race-one.json", spec()),
+        register_spec(&m, "writer", "racer", "race-two.json", spec())
+    );
+    assert_ne!(one.is_ok(), two.is_ok());
+    assert_eq!(
+        one.err().or(two.err()).unwrap().to_string(),
+        "source_name_reserved"
+    );
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), 7);
+    // The same name is independently available to a different authenticated endpoint.
+    register_spec(&m, "reader", "racer", "reader.json", spec())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn restore_unsupported_names_disables_only_the_affected_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("registry.sqlite");
+    let m = manager(Some(file.clone())).await;
+    register_spec(&m, "writer", "healthy", "healthy.json", spec())
+        .await
+        .unwrap();
+    let unsupported = register_spec(&m, "writer", "legacy", "legacy.json", spec())
+        .await
+        .unwrap();
+    register_spec(&m, "reader", "healthy", "reader.json", spec())
+        .await
+        .unwrap();
+    {
+        let mut inner = m.inner.lock().unwrap();
+        let mut state = inner.state.clone();
+        state
+            .records
+            .get_mut(unsupported["source_id"].as_str().unwrap())
+            .unwrap()
+            .candidate
+            .name = "old__name".into();
+        inner.store.as_mut().unwrap().save(&state).unwrap();
+    }
+    drop(m);
+    let m = manager(Some(file)).await;
+    assert_eq!(
+        m.inner.lock().unwrap().state.records[unsupported["source_id"].as_str().unwrap()]
+            .disabled
+            .as_deref(),
+        Some("invalid_source_name")
+    );
+    assert!(
+        m.catalog.read().views["writer"]
+            .iter()
+            .all(|b| b.tool.name.starts_with("dyn_healthy__"))
+    );
+    assert_eq!(m.catalog.read().views["writer"].len(), 2);
+    assert_eq!(m.catalog.read().views["reader"].len(), 2);
+}
+
+#[tokio::test]
+async fn source_name_search_preserves_request_boundary_and_cursor_scope() {
+    let m = manager(None).await;
+    register_spec(&m, "writer", "demo", "demo.json", spec())
+        .await
+        .unwrap();
+    for mut args in [
+        json!({"query":""}),
+        json!({"source_name":"demo","query":""}),
+        json!({"source_id":"missing","query":""}),
+    ] {
+        let overhead = serde_json::to_vec(&args).unwrap().len();
+        args["query"] = json!("x".repeat(65536 - overhead));
+        assert_eq!(serde_json::to_vec(&args).unwrap().len(), 65536);
+        m.invoke("writer", "x402_treazury_tools_search", args.clone())
+            .await
+            .unwrap();
+        if args.get("source_name").is_none() {
+            search_catalog(
+                &m.catalog,
+                "writer",
+                "x402_treazury_tools_search",
+                args.clone(),
+            )
+            .unwrap();
+        }
+        args["query"] = json!(format!("{}x", args["query"].as_str().unwrap()));
+        assert!(
+            m.invoke("writer", "x402_treazury_tools_search", args)
+                .await
+                .is_err()
+        );
+    }
+    let first = m
+        .search_tools(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"source_name":"demo","limit":1}),
+        )
+        .unwrap();
+    let second = m
+        .search_tools(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"source_name":"demo","limit":1,"cursor":first["next_cursor"]}),
+        )
+        .unwrap();
+    assert_ne!(first["items"][0]["tool_id"], second["items"][0]["tool_id"]);
 }

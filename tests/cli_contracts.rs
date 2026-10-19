@@ -79,8 +79,8 @@ async fn source_inspection_lists_saved_tools_without_tokens_catalog_fetches_or_r
     assert_eq!(
         shown["sources"][0]["tools"],
         json!([
-            {"name":"dyn_00000000000000000000000000000001_read","method":"GET","path":"/read"},
-            {"name":"dyn_00000000000000000000000000000001_write","method":"POST","path":"/write"}
+            {"name":"dyn_demo__read","method":"GET","path":"/read"},
+            {"name":"dyn_demo__write","method":"POST","path":"/write"}
         ])
     );
     assert_eq!(std::fs::read(dir.join("registry.sqlite")).unwrap(), before);

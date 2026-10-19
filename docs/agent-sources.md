@@ -62,7 +62,9 @@ Persistence belongs to the operator. With `registry_file`, all additions are sav
 without it, additions disappear on exit. Agents cannot select lifetime, wallet,
 timeouts, payment limits or visibility. Existing endpoint tag/tool filters still
 constrain imported API tools. Include `dyn_*` when an endpoint has an explicit
-`include_tools` allowlist. The `x402_treazury_` and `dyn_` namespaces are reserved in
+`include_tools` allowlist, or use `dyn_netintel__*` to select a named registration.
+Filters use source names, not registry IDs; existing ID-based filters are not rewritten.
+The `x402_treazury_` and `dyn_` namespaces are reserved in
 participating deployments. Management tools have their own enable switch and are
 not removed by API filters.
 
@@ -76,7 +78,7 @@ not removed by API filters.
 | `x402_treazury_raw_get` | Required public HTTPS `url`; optional `query` object. Direct GET, including automatic x402 payment when required. |
 | `x402_treazury_raw_post` | Required public HTTPS `url` and JSON `body`; optional `query` object. Direct POST, including automatic x402 payment when required. |
 | `x402_treazury_source_add` | Required `spec_url`; optional `name`. |
-| `x402_treazury_tools_search` | Optional `query`, `source_id`, `cursor`, `limit`. |
+| `x402_treazury_tools_search` | Optional `query`, `source_name` (or `source_id`, mutually exclusive), `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Required `tool_ref` and `arguments`. |
 
 Directory search and service details are provided automatically, using embedded reviewed schemas
@@ -113,7 +115,7 @@ may supply a published specification link. Pass that URL directly to `source_add
 for server-side validation without opening the specification. Never invent URLs
 or derive request schemas from prose. If no published spec can be found, use
 `raw_get` or `raw_post` only with a documented endpoint, method and arguments.
-After registration, use `tools_search` with the returned `source_id` and a targeted
+After registration, use `tools_search` with `source_name` set to the returned `name` and a targeted
 query to retrieve only relevant tool schemas, then invoke the chosen `tool_ref`
 through `tool_call`.
 
@@ -193,11 +195,21 @@ An explicit x402-list provider remains available for its broader API surface.
 Add accepts a public HTTPS OpenAPI 3 JSON document. The API address comes from the
 first root OpenAPI server, resolving relative addresses against the specification
 URL. Optional names are ASCII labels of at most 64 letters/digits/underscores/hyphens;
-omission produces a stable URL-derived label. Unknown fields fail. There is no
+`__` is reserved as the source/operation delimiter and is rejected within names.
+Names are preserved exactly, are case-sensitive and must be unique within an endpoint,
+including disabled registrations. Omission produces a stable URL-derived label.
+Choose a readable name such as `netintel`: its tools use `dyn_netintel__<operation>`.
+Operation suffixes still come from normalized OpenAPI paths, with method or numerical
+suffixes where needed to distinguish operations within one source.
+Unsupported saved names remain disabled on restore while unrelated registrations
+remain available. A name containing the reserved `__` separator produces an explicit error and a WARN diagnostic when rejected, including
+during restore and offline inspection. Unknown fields fail. There is no
 preview, scope, lifetime, selection or mutation-key argument.
 
-Add validates before publication and returns a source ID, revision and filtered tool
-count. The canonical specification URL identifies an existing registration within the
+Add validates before publication and returns `name`, `tool_prefix` (for example
+`dyn_netintel__`), a source ID, revision and filtered tool count. Agents can search
+with the name and call the returned reference without using the source ID.
+The canonical specification URL identifies an existing registration within the
 endpoint. A repeated add returns that registration without fetching again, regardless
 of the supplied label. Concurrent additions recheck duplicates under the publication
 lock. Busy errors can be retried with the same URL. An operator can remove a source
@@ -211,7 +223,7 @@ cannot use this path to recursively invoke management commands.
 
 HTTP is stateless and does not advertise list-change notifications. Stable search/call
 tools work with clients that cache their initial tool list. Clients that refresh
-`tools/list` can also invoke normal `dyn_<uuid>_*` tools. Each call retains its captured
+`tools/list` can also invoke normal `dyn_<name>__*` tools. Each call retains its captured
 route and payer for its entire lifetime.
 
 Search pages default to 20 and allow at most 100 entries. MCP tool-list pages also

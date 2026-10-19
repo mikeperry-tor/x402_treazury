@@ -86,47 +86,15 @@ fn allowed_origins_apply_to_spec_base_and_explicit_override() {
         serde_json::from_value(candidate("origins", "process", "server")).unwrap();
     c.spec_url = "https://spec.example.com:8443/spec".into();
     let mut doc = spec();
-    assert!(
-        import::build(
-            &p,
-            &c,
-            &Uuid::new_v4().to_string(),
-            &serde_json::to_vec(&doc).unwrap()
-        )
-        .is_ok()
-    );
+    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_ok());
     c.base_url = Some("https://other.example.com".into());
-    assert!(
-        import::build(
-            &p,
-            &c,
-            &Uuid::new_v4().to_string(),
-            &serde_json::to_vec(&doc).unwrap()
-        )
-        .is_err()
-    );
+    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
     c.base_url = None;
     doc["servers"] = json!([{"url":"https://other.example.com"}]);
-    assert!(
-        import::build(
-            &p,
-            &c,
-            &Uuid::new_v4().to_string(),
-            &serde_json::to_vec(&doc).unwrap()
-        )
-        .is_err()
-    );
+    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
     c.spec_url = "https://other.example.com/spec".into();
     doc = spec();
-    assert!(
-        import::build(
-            &p,
-            &c,
-            &Uuid::new_v4().to_string(),
-            &serde_json::to_vec(&doc).unwrap()
-        )
-        .is_err()
-    );
+    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
 }
 
 #[derive(Clone, Default)]
@@ -175,15 +143,14 @@ fn resource_limit_warns_only_when_exceeded() {
 fn generated_tool_names_accept_512_bytes_and_warn_above_boundary() {
     let p = policy(None);
     let c: Candidate = serde_json::from_value(candidate("name", "process", "server")).unwrap();
-    let id = Uuid::new_v4().to_string();
-    // The dynamic prefix is dyn_ plus the 32 UUID digits, followed by an underscore.
-    let prefix_len = "dyn_".len() + 32 + 1;
+    // The source name is separated from the operation by two underscores.
+    let prefix_len = "dyn_name__".len();
     for length in [512, 513] {
         let path = format!("/{}", "x".repeat(length - prefix_len));
         let mut doc = spec();
         doc["paths"] = json!({(path):{"get":{}}});
         let logs = capture_limit_logs(|| {
-            let result = import::build(&p, &c, &id, &serde_json::to_vec(&doc).unwrap());
+            let result = import::build(&p, &c, &serde_json::to_vec(&doc).unwrap());
             if length == 512 {
                 assert_eq!(result.unwrap().tools[0].name.len(), 512);
             } else {
@@ -222,12 +189,7 @@ fn generated_schema_limit_warns_without_logging_document_content() {
     doc["paths"]["/read"]["get"]["parameters"][0]["schema"]["description"] =
         json!("PRIVATE_DOCUMENT_CONTENT".repeat(12_000));
     let logs = capture_limit_logs(|| {
-        let result = import::build(
-            &p,
-            &c,
-            &Uuid::new_v4().to_string(),
-            &serde_json::to_vec(&doc).unwrap(),
-        );
+        let result = import::build(&p, &c, &serde_json::to_vec(&doc).unwrap());
         assert!(
             result
                 .err()
@@ -253,12 +215,7 @@ fn operation_count_limit_warns_even_when_selection_excludes_operations() {
         doc["paths"][format!("/excluded-{index}")] = json!({"get":{}});
     }
     let logs = capture_limit_logs(|| {
-        let result = import::build(
-            &p,
-            &c,
-            &Uuid::new_v4().to_string(),
-            &serde_json::to_vec(&doc).unwrap(),
-        );
+        let result = import::build(&p, &c, &serde_json::to_vec(&doc).unwrap());
         assert!(
             result
                 .err()
@@ -382,7 +339,7 @@ fn import_policy_rejections_warn_without_private_content() {
     }
     for (bytes, reason) in cases {
         let logs = capture_limit_logs(|| {
-            let error = import::build(&p, &c, &Uuid::new_v4().to_string(), &bytes).unwrap_err();
+            let error = import::build(&p, &c, &bytes).unwrap_err();
             assert!(error.to_string().contains(reason), "{error}");
         });
         assert!(logs.contains("WARN") && logs.contains(reason), "{logs}");
@@ -520,4 +477,56 @@ async fn import_redirect_and_read_timeout_warn_without_response_prose() {
         );
         task.abort();
     }
+}
+
+#[tokio::test]
+async fn reserved_source_delimiter_warns_for_add_inspection_and_restore() {
+    let m = manager(None).await;
+    let (result, logs) = capture_future_logs(m.invoke(
+        "writer",
+        "x402_treazury_source_add",
+        json!({"spec_url":"https://private.example.com/openapi.json","name":"PRIVATE__LABEL"}),
+    ))
+    .await;
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("source_name_contains_reserved_double_underscore")
+    );
+    assert!(m.fetches.lock().unwrap().is_empty());
+    assert!(
+        logs.contains("WARN") && logs.contains("source_name_contains_reserved_double_underscore"),
+        "{logs}"
+    );
+    assert!(
+        !logs.contains("PRIVATE") && !logs.contains("private.example"),
+        "{logs}"
+    );
+    let c: Candidate =
+        serde_json::from_value(candidate("PRIVATE__LABEL", "process", "server")).unwrap();
+    let logs = capture_limit_logs(|| {
+        assert!(import::saved_tools(&c, &serde_json::to_vec(&spec()).unwrap()).is_err());
+    });
+    assert!(
+        logs.contains("WARN") && logs.contains("source_name_contains_reserved_double_underscore"),
+        "{logs}"
+    );
+    let added = add(&m, "valid", "", "").await;
+    m.inner
+        .lock()
+        .unwrap()
+        .state
+        .records
+        .get_mut(added["source_id"].as_str().unwrap())
+        .unwrap()
+        .candidate
+        .name = "PRIVATE__LABEL".into();
+    let logs = capture_limit_logs(|| m.restore().unwrap());
+    assert!(
+        logs.contains("WARN") && logs.contains("source_name_contains_reserved_double_underscore"),
+        "{logs}"
+    );
+    assert!(!logs.contains("PRIVATE"), "{logs}");
+    assert!(m.catalog.read().views["writer"].is_empty());
 }

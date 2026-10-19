@@ -100,6 +100,7 @@ struct Add {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Query {
+    source_name: Option<String>,
     source_id: Option<String>,
     query: Option<String>,
     cursor: Option<String>,
@@ -122,6 +123,7 @@ impl Manager {
     }
     fn targets(&self, owner: &str, c: &Candidate) -> Result<Vec<String>> {
         ensure!(self.enabled(owner), "source_management_disabled");
+        import::validate_source_name(&c.name)?;
         ensure!(
             c.visibility == Visibility::Server && c.targets.is_empty(),
             "source_scope_must_be_endpoint_local"
@@ -253,7 +255,9 @@ impl Manager {
         let mut state = inner.state.clone();
         for record in state.records.values_mut().filter(|r| !r.removed) {
             let c = record.candidate.clone();
-            record.disabled = if record.format != FORMAT {
+            record.disabled = if import::validate_source_name(&c.name).is_err() {
+                Some("invalid_source_name".into())
+            } else if record.format != FORMAT {
                 Some("catalog_format_changed: explicit refresh required".into())
             } else if !self.listeners.contains_key(&record.owner) {
                 Some("owner_removed".into())
@@ -264,13 +268,8 @@ impl Manager {
                             targets == record.targets,
                             "saved source scope is not endpoint-local"
                         );
-                        import::build(
-                            &self.policy,
-                            &record.candidate,
-                            &record.id,
-                            record.document.as_bytes(),
-                        )
-                        .map(|_| ())
+                        import::build(&self.policy, &record.candidate, record.document.as_bytes())
+                            .map(|_| ())
                     })
                     .err()
                     .map(|_| "policy_or_catalog_invalid".into())
@@ -307,12 +306,7 @@ impl Manager {
         result.generation = generation;
         let previous = self.catalog.read();
         for record in live.into_iter().filter(|r| r.disabled.is_none()) {
-            let built = import::build(
-                &self.policy,
-                &record.candidate,
-                &record.id,
-                record.document.as_bytes(),
-            )?;
+            let built = import::build(&self.policy, &record.candidate, record.document.as_bytes())?;
             let doc: Value = serde_json::from_str(&record.document)?;
             let ops = crate::catalog::operations(&doc, None)?;
             for target in &record.targets {
@@ -390,7 +384,7 @@ impl Manager {
                     .map(|listener| (t.clone(), policy::wallet(&self.policy, listener).to_owned()))
             })
             .collect();
-        json!({"source_id":r.id,"name":r.candidate.name,"revision":r.revision,"catalog_generation":snapshot.generation,"targets":targets,"lifetime":r.candidate.lifetime,"disabled":r.disabled,"removed":r.removed,"wallet_profiles":wallets,"readiness":"payment readiness checked at invocation; registration does not fund wallets","spec_hash":r.hash,"accepted_at":r.accepted_at,"updated_at":r.updated_at,"tool_count":snapshot.views.get(caller).into_iter().flatten().filter(|t|t.source.as_ref().is_some_and(|s|s.0==r.id)).count(),"next":"Use x402_treazury_tools_search and x402_treazury_tool_call, or explicitly refresh your client's tool list."})
+        json!({"source_id":r.id,"name":r.candidate.name,"tool_prefix":import::tool_prefix(&r.candidate.name).ok(),"revision":r.revision,"catalog_generation":snapshot.generation,"targets":targets,"lifetime":r.candidate.lifetime,"disabled":r.disabled,"removed":r.removed,"wallet_profiles":wallets,"readiness":"payment readiness checked at invocation; registration does not fund wallets","spec_hash":r.hash,"accepted_at":r.accepted_at,"updated_at":r.updated_at,"tool_count":snapshot.views.get(caller).into_iter().flatten().filter(|t|t.source.as_ref().is_some_and(|s|s.0==r.id)).count(),"next":"Search with x402_treazury_tools_search using source_name=name, then pass the returned tool_ref to x402_treazury_tool_call. Tool filters use tool_prefix followed by *, never the source ID."})
     }
     async fn document(&self, owner: &str, url: &str, refresh: bool) -> Result<Arc<Vec<u8>>> {
         let canonical = import::endpoint(&self.policy, url)?.to_string();
@@ -525,7 +519,7 @@ impl Manager {
         self.targets(owner, &candidate)?;
         let document = self.document(owner, &candidate.spec_url, false).await?;
         let id = Uuid::new_v4().to_string();
-        import::build(&self.policy, &candidate, &id, &document)?;
+        import::build(&self.policy, &candidate, &document)?;
         let record = Record {
             id,
             owner: owner.into(),
@@ -544,7 +538,27 @@ impl Manager {
     }
 
     fn search_tools(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
-        search_catalog(&self.catalog, owner, name, args)
+        let mut query: Query = serde_json::from_value(args)?;
+        ensure!(
+            query.source_name.is_none() || query.source_id.is_none(),
+            "source_name_and_source_id_are_exclusive"
+        );
+        if let Some(name) = query.source_name.take() {
+            import::validate_source_name(&name)?;
+            query.source_id = Some(
+                self.inner
+                    .lock()
+                    .unwrap()
+                    .state
+                    .records
+                    .values()
+                    .find(|r| !r.removed && r.owner == owner && r.candidate.name == name)
+                    .context("source_name_unknown")?
+                    .id
+                    .clone(),
+            );
+        }
+        search_catalog_query(&self.catalog, owner, name, query)
     }
 
     async fn commit(
@@ -673,6 +687,17 @@ pub(crate) fn search_catalog(
         "hardcoded_management_request_bytes",
     )?;
     let q: Query = serde_json::from_value(args)?;
+    ensure!(q.source_name.is_none(), "source_name_unknown");
+    search_catalog_query(catalog, owner, name, q)
+}
+
+// Resolve source names before projection without reserializing the caller's request.
+fn search_catalog_query(
+    catalog: &CatalogState,
+    owner: &str,
+    name: &str,
+    q: Query,
+) -> Result<Value> {
     let snapshot = catalog.read();
     let query = q.query.as_ref().map(|q| q.to_lowercase());
     let values = snapshot
@@ -801,7 +826,7 @@ pub async fn maintain_cli(
         );
         crate::network::install(cfg.network.clone())?;
         let bytes = import::fetch(&policy, &record.candidate.spec_url).await?;
-        import::build(&policy, &record.candidate, &record.id, &bytes)?;
+        import::build(&policy, &record.candidate, &bytes)?;
         record.hash = hash(&bytes);
         record.document = String::from_utf8(bytes)?;
         record.format = FORMAT;
@@ -834,7 +859,7 @@ pub async fn maintain_cli(
             .values()
             .filter(|r| !r.removed && r.disabled.is_none() && r.owner == owner)
         {
-            let built = import::build(&policy, &r.candidate, &r.id, r.document.as_bytes())?;
+            let built = import::build(&policy, &r.candidate, r.document.as_bytes())?;
             let document: Value = serde_json::from_str(&r.document)?;
             let operations = crate::catalog::operations(&document, None)?;
             for tool in &built.tools {

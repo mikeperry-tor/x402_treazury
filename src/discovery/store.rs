@@ -210,7 +210,7 @@ fn inspect_source(record: &Record) -> serde_json::Value {
             super::hash(record.document.as_bytes()) == record.hash,
             "corrupt source document hash"
         );
-        super::import::saved_tools(&record.candidate, &record.id, record.document.as_bytes())
+        super::import::saved_tools(&record.candidate, record.document.as_bytes())
     })();
     match tools {
         Ok(tools) => {
@@ -261,7 +261,7 @@ mod tests {
             "/outside":{"get":{"tags":["company"]}}
         }});
         let mut selected = record(1, "selected", &document);
-        let prefix = format!("dyn_{}", selected.id.replace('-', ""));
+        let prefix = "dyn_selected_";
         selected.candidate.selection.include = vec!["/api".into()];
         selected.candidate.selection.tags = vec!["company".into()];
         selected.candidate.selection.include_tools =
@@ -271,7 +271,7 @@ mod tests {
         disabled.candidate.selection.include = vec!["/api".into()];
         disabled.candidate.selection.tags = vec!["company".into()];
         disabled.disabled = Some("policy_or_catalog_invalid".into());
-        let disabled_prefix = format!("dyn_{}", disabled.id.replace('-', ""));
+        let disabled_prefix = "dyn_disabled_";
         let mut removed = record(3, "removed", &document);
         removed.removed = true;
         removed.document.clear();

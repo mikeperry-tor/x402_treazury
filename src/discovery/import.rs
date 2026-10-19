@@ -230,7 +230,34 @@ pub fn matches(name: &str, include: &[String], exclude: &[String]) -> Result<boo
     };
     Ok((include.is_empty() || any(include)?) && !any(exclude)?)
 }
-pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<Built> {
+/// Source names are used verbatim; reserve the source/operation delimiter.
+pub(super) fn validate_source_name(name: &str) -> Result<()> {
+    require(
+        !name.contains("__"),
+        "source_name_contains_reserved_double_underscore",
+    )?;
+    crate::limits::check(
+        name.len(),
+        64,
+        "invalid source name",
+        "hardcoded_source_name_bytes",
+    )?;
+    require(
+        !name.is_empty()
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
+        "invalid source name",
+    )?;
+    Ok(())
+}
+
+pub(super) fn tool_prefix(name: &str) -> Result<String> {
+    validate_source_name(name)?;
+    Ok(format!("dyn_{name}__"))
+}
+
+pub fn build(policy: &Policy, c: &Candidate, bytes: &[u8]) -> Result<Built> {
     if bytes.len() > policy.max_spec_bytes {
         return Err(crate::limits::exceeded(
             "imported spec",
@@ -239,19 +266,7 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
         )
         .context("spec_too_large"));
     }
-    crate::limits::check(
-        c.name.len(),
-        64,
-        "invalid source name",
-        "hardcoded_source_name_bytes",
-    )?;
-    require(
-        !c.name.is_empty()
-            && c.name
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
-        "invalid source name",
-    )?;
+    validate_source_name(&c.name)?;
     let spec = endpoint(policy, &c.spec_url)?;
     let root = parse_document(bytes)?;
     let paths = root["paths"]
@@ -265,7 +280,7 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
     )?;
     let (base, base_url) = resolve_base(policy, c, &spec, &root)?;
     validate_paths(paths)?;
-    let tools = selected_tools(c, id, &root)?;
+    let tools = selected_tools(c, &root)?;
     validate_tools(policy, &tools, &base, &base_url)?;
     Ok(Built { tools, base })
 }
@@ -351,11 +366,11 @@ fn validate_paths(paths: &serde_json::Map<String, Value>) -> Result<()> {
 
 /// Rebuild the saved registration's inventory without current admission policy,
 /// listener filtering, transports or payment credentials.
-pub(super) fn saved_tools(c: &Candidate, id: &str, bytes: &[u8]) -> Result<Vec<ToolSpec>> {
-    selected_tools(c, id, &parse_document(bytes)?)
+pub(super) fn saved_tools(c: &Candidate, bytes: &[u8]) -> Result<Vec<ToolSpec>> {
+    selected_tools(c, &parse_document(bytes)?)
 }
 
-fn selected_tools(c: &Candidate, id: &str, root: &Value) -> Result<Vec<ToolSpec>> {
+fn selected_tools(c: &Candidate, root: &Value) -> Result<Vec<ToolSpec>> {
     let cfg = Config {
         spec: c.spec_url.clone(),
         include: c.selection.include.clone(),
@@ -366,7 +381,8 @@ fn selected_tools(c: &Candidate, id: &str, root: &Value) -> Result<Vec<ToolSpec>
         pricing_key: Some("x-payment-info".into()),
         ..Default::default()
     };
-    let prefix = format!("dyn_{}", id.replace('-', ""));
+    validate_source_name(&c.name)?;
+    let prefix = format!("dyn_{}_", c.name);
     let tools = catalog::build_tools(&cfg, root, &prefix)?
         .into_iter()
         .filter_map(|t| {
