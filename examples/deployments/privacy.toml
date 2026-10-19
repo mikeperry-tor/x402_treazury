@@ -100,9 +100,17 @@ registry_file = "../../state/privacy-sources.sqlite"
 
 [sources.social]
 extends = "../../providers/socialfetch.toml"
-instructions_text = "Research people and communities using SocialFetch tools for Bluesky, Facebook, Instagram, LinkedIn, Reddit, Telegram, Threads, TikTok, Truth Social, Twitter (X), and Yelp. This listener uses on-demand tool discovery: search x402_treazury_tools_search for the platform name (use Twitter for X) and inspect the returned descriptions and schemas, then invoke the selected tool_ref with x402_treazury_tool_call. This source belongs to the social research context; overlapping Reddit tools on the web listener use a separate payment wallet. Request content can still identify or correlate activity. LinkedIn tool names distinguish v1 (socialfetch_linkedin_) and v2 (socialfetch_v2_linkedin_); preserve argument casing. Preserve lookupStatus, partial-result and provenance fields; an incomplete lookup is not proof of absence."
+instructions_text = "Research people and communities using SocialFetch tools for Bluesky, Facebook, Instagram, LinkedIn, Reddit, Telegram, Threads, TikTok, Truth Social, Twitter (X), and Yelp, alongside TeleSINT (telesint_*) for Telegram cyber threat intelligence and conflict/geopolitical OSINT channels. This listener uses on-demand tool discovery: search x402_treazury_tools_search for the platform name (use Twitter for X, or search Telegram / telesint for Telegram channel and threat-intel calls) and inspect the returned descriptions and schemas, then invoke the selected tool_ref with x402_treazury_tool_call. This source belongs to the social research context; overlapping Reddit tools on the web listener use a separate payment wallet. Request content can still identify or correlate activity. LinkedIn tool names distinguish v1 (socialfetch_linkedin_) and v2 (socialfetch_v2_linkedin_); preserve argument casing. Preserve lookupStatus, partial-result and provenance fields; an incomplete lookup is not proof of absence."
 tags = ["Bluesky", "Facebook", "Instagram", "LinkedIn", "Reddit", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Yelp"]
 exclude_tools = ["socialfetch_help"]
+
+# TeleSINT provides 18 stateless Telegram CTI and OSINT channel intelligence tools
+# ($0.01-$0.10, all within the $0.10 social/company payment cap), discovered on demand
+# via x402_treazury_tools_search (search for Telegram, telesint, or category names).
+[sources.telesint]
+extends = "../../providers/telesint.toml"
+exclude_tools = ["telesint_help"]
+instructions_text = "Telegram cyber threat intelligence and conflict/geopolitical OSINT via TeleSINT (telesint_*): search x402_treazury_tools_search for Telegram, telesint, or specific categories (ioc, c2, actor, breach, vulnerability, darkweb, ransomware, intent, malware, feed, artifact, asn, source, preparation, velocity, target_mentions, claim_check) and call the returned tool_ref with x402_treazury_tool_call. Always supply at least one scope parameter on telesint_preparation and telesint_velocity (organization, sector, country, actor, or vendor) and id or text on telesint_claim_check so calls do not return a paid HTTP 200 guidance error. Wallet-bound /watch/* tools are excluded."
 
 [sources.webinfo]
 extends = "../../providers/socialfetch.toml"
@@ -210,6 +218,29 @@ include_tools = [
 ]
 instructions_text = "US public-company research: resolve symbols with tickers, then request overview, SEC disclosure dossier or filing summary. Pass ticker symbols in the tool's ticker argument. Check timestamps and unavailable sections; quotes may be delayed, and filing summaries are synthesized. Treazury handles x402 payment."
 
+# Multi-board job search (LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter,
+# Bayt, BDJobs, Naukri). Base price is $0.05 + $0.002 * len(sites) * maxResults,
+# so keeping len(sites) * maxResults <= 25 stays within the $0.10 company cap.
+# (hirescrape_linkedin's job-search modes from llms.txt are absent from its OpenAPI schema.)
+[sources.company_hirescrape]
+extends = "../../providers/hirescrape.toml"
+include_tools = ["hirescrape_jobs"]
+instructions_text = "Company hiring and job-opening research through HireScrape (hirescrape_jobs). Always specify 1-2 target job boards in sites (e.g. ['linkedin'] or ['linkedin', 'indeed']) and keep maxResults small so len(sites) * maxResults <= 25: the live x402 quote is $0.05 + $0.002 * len(sites) * maxResults, so larger queries or omitting sites (which defaults to all 8 boards) will exceed this example's $0.10 company payment cap."
+
+# European and global business registries, German Handelsregister, one-call due
+# diligence ($0.10), EU VIES VAT validation, sanctions screening and domain intel.
+[sources.company_agosint]
+extends = "../../providers/agosint.toml"
+include_tools = [
+  "agosint_company",
+  "agosint_company_de",
+  "agosint_due_diligence",
+  "agosint_vat",
+  "agosint_sanctions",
+  "agosint_domain",
+]
+instructions_text = "Company registry and compliance research through AgOSINT: look up legal entities across Czechia, Norway, UK, France, Finland, US SEC and GLEIF LEI (agosint_company, $0.02), German Handelsregister records and officers (agosint_company_de, keep limit <= 4 so $0.056 + $0.012 * (limit - 1) stays within the $0.10 cap), combined one-call due diligence (agosint_due_diligence, $0.10), EU VIES VAT validation (agosint_vat, $0.015), sanctions screening (agosint_sanctions, $0.015) and domain intelligence (agosint_domain, $0.015). For agosint_company and agosint_due_diligence pass exactly one of id, name, lei, vat, or domain (with country required for id or name); for agosint_sanctions pass name or wallet. Treazury handles x402 payment and never replays signed payments automatically."
+
 [sources.googletrends]
 extends = "../../providers/google-trends.toml"
 instructions_text = "Use Google Trends for aggregate keyword interest over time, by region, and related queries/topics in the web research context. Supply keyword and an ISO country code as required by the tools. This is aggregate trend data, not web search or evidence about a specific person's behavior. Treazury handles x402 payment; use the live challenge and configured cap for costs. google_trends_help describes this complete selected toolset."
@@ -236,7 +267,7 @@ discover_on_demand = true
 listen = "127.0.0.1:6338"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["social", "pdl_people", "social_stableenrich"]
+sources = ["social", "telesint", "pdl_people", "social_stableenrich"]
 
 # Note: Exa is the same source used by web, but this listener pays from the
 # "company" wallet shared with social. Its Exa connections use a separate Tor
@@ -246,7 +277,7 @@ sources = ["social", "pdl_people", "social_stableenrich"]
 listen = "127.0.0.1:6339"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich"]
+sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint"]
 
 # Start with discovery tools; agent-added APIs are persisted in the registry above.
 [servers.toolbox]
