@@ -25,6 +25,7 @@ use std::{
 fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
     if std::env::var_os("TREAZURY_COVER_REJECTION_CHILD").is_some() {
         tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
             .with_ansi(false)
             .with_writer(std::io::stderr)
             .init();
@@ -46,6 +47,86 @@ fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
     ] {
         assert!(logs.contains(code), "missing {code}: {logs}");
     }
+    let refusal: Vec<_> = logs
+        .lines()
+        .filter(|line| {
+            line.contains("WARN")
+                && line.contains("code=\"cover_forbidden\"")
+                && line.contains("optional cover range outcome")
+        })
+        .collect();
+    assert_eq!(
+        refusal.len(),
+        2,
+        "one primary refusal and one failed fallback: {logs}"
+    );
+    assert_eq!(
+        refusal
+            .iter()
+            .filter(|line| line.contains("resource=\"primary\""))
+            .count(),
+        1,
+        "{logs}"
+    );
+    assert_eq!(
+        refusal
+            .iter()
+            .filter(|line| line.contains("resource=\"fallback\""))
+            .count(),
+        1,
+        "{logs}"
+    );
+    for field in [
+        "listener=main",
+        "source=api",
+        "episode_id=",
+        "resource=\"primary\"",
+        "qualifying=true",
+        "fresh_attempt=true",
+        "http_status=403",
+        "range_start=0",
+        "requested_bytes=",
+        "received_bytes=0",
+        "elapsed_ms=",
+        "capability=\"unavailable\"",
+    ] {
+        assert!(refusal[0].contains(field), "{logs}");
+    }
+    let cached = logs
+        .lines()
+        .find(|line| line.contains("cached cover capability"))
+        .unwrap();
+    assert!(
+        cached.contains("DEBUG") && cached.contains("fresh_attempt=false"),
+        "{logs}"
+    );
+    let fallback = logs
+        .lines()
+        .find(|line| line.contains("code=\"cover_fallback_selected\""))
+        .unwrap();
+    assert!(fallback.contains("INFO"), "{logs}");
+    let successful_fallbacks: Vec<_> = logs
+        .lines()
+        .filter(|line| {
+            line.contains("resource=\"fallback\"")
+                && line.contains("capability=\"available\"")
+                && line.contains("code=\"cover_range_completed\"")
+        })
+        .collect();
+    assert!(!successful_fallbacks.is_empty(), "{logs}");
+    for success in successful_fallbacks {
+        let episode = success
+            .split_whitespace()
+            .find(|field| field.starts_with("episode_id="))
+            .unwrap();
+        assert!(
+            !logs
+                .lines()
+                .any(|line| line.contains("WARN") && line.contains(episode)),
+            "successful fallback must not disable ranges: {logs}"
+        );
+    }
+    assert!(!logs.contains("api.example.com/refused"), "{logs}");
 }
 async fn run() {
     let signed = Arc::new(AtomicUsize::new(0));

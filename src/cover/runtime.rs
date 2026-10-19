@@ -17,6 +17,8 @@ use std::{
 use tokio::{sync::Notify, task::JoinSet, time::Instant};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
+mod diagnostics;
+
 pub struct Engine {
     limits: Limits,
     metrics: super::metrics::Shared,
@@ -36,6 +38,7 @@ struct RequestGate {
     handles: Vec<tokio::task::AbortHandle>,
 }
 pub struct Session {
+    id: String,
     gate: Mutex<RequestGate>,
     quiet: Notify,
     episode: Arc<Mutex<Episode>>,
@@ -52,7 +55,7 @@ pub struct Call {
     completed: bool,
     request_pending: bool,
 }
-type RangeCompletion = (bool, Result<Representation, range::Failure>);
+type RangeCompletion = (bool, range::Outcome);
 
 impl Engine {
     pub fn new(limits: Limits) -> Arc<Self> {
@@ -96,30 +99,14 @@ impl Engine {
         *self.rng.lock().unwrap() = Some(StdRng::seed_from_u64(seed));
     }
     fn record(&self, session: &Session, reason: &'static str) {
-        for scope in session.scopes.lock().unwrap().iter() {
-            tracing::warn!(
-                listener = %scope.listener,
-                source = %scope.source,
-                code = reason,
-                episode_request_limit = session.config.max_requests_per_episode,
-                episode_body_byte_limit = session.config.max_cover_body_bytes_per_episode,
-                process_request_limit = self.limits.max_requests_per_window,
-                process_body_byte_limit = self.limits.max_cover_body_bytes_per_window,
-                process_padding_byte_limit = self.limits.max_padding_value_bytes_per_window,
-                episode_padding_byte_limit = session
-                    .config
-                    .padding
-                    .as_ref()
-                    .map(|p| p.max_value_bytes_per_episode),
-                header_list_byte_limit = session
-                    .config
-                    .padding
-                    .as_ref()
-                    .map(|p| p.max_total_header_list_bytes),
-                "optional cover status; pooled best-effort connection reuse"
-            );
-        }
+        let level = match reason {
+            "cover_preempted_for_api" | "cover_padding_disabled" => tracing::Level::DEBUG,
+            "cover_shutdown" | "cover_range_size_adjusted" => tracing::Level::INFO,
+            _ => tracing::Level::WARN,
+        };
+        diagnostics::status(session, &self.limits, reason, level);
     }
+
     pub fn begin(
         self: &Arc<Self>,
         owner: Owner,
@@ -137,6 +124,7 @@ impl Engine {
         let state = registry.owners.get_mut(&owner).unwrap();
         let session = if fresh {
             let s = Arc::new(Session {
+                id: uuid::Uuid::new_v4().to_string(),
                 gate: Mutex::new(RequestGate::default()),
                 quiet: Notify::new(),
                 episode,
@@ -166,7 +154,7 @@ impl Engine {
         session.scopes.lock().unwrap().insert(scope.clone());
         tracing::debug!(listener = %scope.listener, source = %scope.source, code = "cover_episode_active", "optional cover episode active");
         if let Capability::Unavailable(code) = state.capability {
-            self.record(&session, code);
+            diagnostics::cached(&session, code, state.resource_label());
         }
         if *state.padding_disabled.lock().unwrap() {
             self.record(&session, "cover_padding_disabled");
@@ -237,7 +225,7 @@ impl Engine {
                 };
                 let length_request = requested.min(length).min(available);
                 if length_request != requested {
-                    tracing::warn!(
+                    tracing::info!(
                         code = "cover_range_size_adjusted",
                         sampled_bytes = requested,
                         admitted_bytes = length_request,
@@ -304,7 +292,7 @@ impl Engine {
         }
         let mut range = range;
         if reserved != range.length {
-            tracing::warn!(
+            tracing::info!(
                 code = "cover_range_size_adjusted",
                 requested_bytes = range.length,
                 admitted_bytes = reserved,
@@ -313,9 +301,11 @@ impl Engine {
             self.record(s, "cover_range_size_adjusted");
         }
         range.length = reserved;
-        let resource_url = self.registry.lock().unwrap().owners[owner]
-            .resource_url()
-            .to_owned();
+        let (resource_url, resource) = {
+            let registry = self.registry.lock().unwrap();
+            let state = &registry.owners[owner];
+            (state.resource_url().to_owned(), state.resource_label())
+        };
         let mut padding_request = reqwest::Request::new(
             reqwest::Method::GET,
             resource_url.parse().expect("validated cover URL"),
@@ -350,6 +340,10 @@ impl Engine {
             session: s.clone(),
             reserved,
             counter,
+            resource,
+            qualifying,
+            range_start: range.start,
+            started: Instant::now(),
         };
         let mut cfg = (*s.config).clone();
         cfg.url = resource_url;
@@ -383,8 +377,23 @@ impl Engine {
             if let Some(p) = &mut padding_budget {
                 p.dispatched();
             }
-            let result = range::download(&client, &cfg, range, deadline, budget, padding).await;
-            guard.outcome = Some(result.as_ref().map(|_| "qualified").unwrap_or_else(|e| e.0));
+            let result =
+                range::download_observed(&client, &cfg, range, deadline, budget, padding).await;
+            diagnostics::attempt(
+                &guard.session,
+                guard.resource,
+                qualifying,
+                &result,
+                None,
+                false,
+            );
+            guard.outcome = Some(
+                result
+                    .result
+                    .as_ref()
+                    .map(|_| "qualified")
+                    .unwrap_or_else(|e| e.0),
+            );
             drop(guard);
             (qualifying, result)
         });
@@ -399,10 +408,12 @@ impl Engine {
         item: Option<Result<RangeCompletion, tokio::task::JoinError>>,
     ) -> Result<Option<Instant>, &'static str> {
         match item {
-            Some(Ok((qualifying, result))) => {
+            Some(Ok((qualifying, outcome))) => {
+                let result = &outcome.result;
+                let resource = self.registry.lock().unwrap().owners[owner].resource_label();
                 let mut next = None;
                 if qualifying {
-                    if let Err(error) = &result {
+                    if let Err(error) = result {
                         let switched = self
                             .registry
                             .lock()
@@ -412,12 +423,19 @@ impl Engine {
                             .unwrap()
                             .try_fallback(*error);
                         if switched {
-                            self.record(s, error.0);
-                            self.record(s, "cover_fallback_selected");
-                            tracing::warn!(
-                                code = "cover_fallback_selected",
-                                reason = error.0,
-                                "Primary cover qualification failed; trying configured fallback within existing budgets"
+                            diagnostics::attempt(
+                                s,
+                                resource,
+                                qualifying,
+                                &outcome,
+                                Some(&Capability::Unknown),
+                                true,
+                            );
+                            diagnostics::status(
+                                s,
+                                &self.limits,
+                                "cover_fallback_selected",
+                                tracing::Level::INFO,
                             );
                             return Ok(Some(Instant::now()));
                         }
@@ -428,7 +446,7 @@ impl Engine {
                         .owners
                         .get_mut(owner)
                         .unwrap()
-                        .qualified(result.clone());
+                        .qualified(outcome.result.clone());
                     next = Some(Instant::now());
                 }
                 if let Err(error) = result {
@@ -439,8 +457,20 @@ impl Engine {
                         .get_mut(owner)
                         .unwrap()
                         .capability = Capability::Unavailable(error.0);
+                    diagnostics::attempt(
+                        s,
+                        resource,
+                        qualifying,
+                        &outcome,
+                        Some(&Capability::Unavailable(error.0)),
+                        false,
+                    );
                     return Err(error.0);
                 }
+                let capability = self.registry.lock().unwrap().owners[owner]
+                    .capability
+                    .clone();
+                diagnostics::attempt(s, resource, qualifying, &outcome, Some(&capability), false);
                 Ok(next)
             }
             Some(Err(error)) if error.is_cancelled() => {
@@ -568,27 +598,34 @@ impl Engine {
         } else {
             reason
         };
-        let mut registry = self.registry.lock().unwrap();
-        if matches!(registry.owners[&owner].capability, Capability::Checking) {
-            registry.owners.get_mut(&owner).unwrap().capability =
-                Capability::Unavailable("cover_qualification_cancelled");
-        }
-        drop(registry);
-        self.record(&s, reason);
-        let e = s.episode.lock().unwrap();
-        tracing::debug!(
-            code = reason,
-            mode = "extra_body",
-            sampled_body_bytes = e.target,
-            cover_body_bytes = e.received,
-            padding_value_bytes = e.padding,
-            range_requests = e.requests,
-            elapsed_ms = e.started.elapsed().as_millis() as u64,
-            "cover episode range work finished; pooled best-effort, not a privacy guarantee"
+        let (capability, resource, newly_unavailable) = {
+            let mut registry = self.registry.lock().unwrap();
+            let state = registry.owners.get_mut(&owner).unwrap();
+            let newly_unavailable = matches!(state.capability, Capability::Checking);
+            if newly_unavailable {
+                state.capability = Capability::Unavailable("cover_qualification_cancelled");
+            }
+            (
+                state.capability.clone(),
+                state.resource_label(),
+                newly_unavailable,
+            )
+        };
+        diagnostics::episode(
+            &s,
+            &self.limits,
+            reason,
+            &capability,
+            resource,
+            newly_unavailable,
         );
     }
 }
 struct RangeGuard {
+    resource: &'static str,
+    qualifying: bool,
+    range_start: u64,
+    started: Instant,
     metrics: super::metrics::Shared,
     outcome: Option<&'static str>,
     dispatched: bool,
@@ -616,6 +653,16 @@ impl Drop for RangeGuard {
             self.counter.load(std::sync::atomic::Ordering::Relaxed),
             self.dispatched,
         );
+        if self.dispatched && self.outcome.is_none() {
+            for scope in self.session.scopes.lock().unwrap().iter() {
+                tracing::debug!(listener = %scope.listener, source = %scope.source,
+                    episode_id = %self.session.id, resource = self.resource, qualifying = self.qualifying,
+                    code = "cover_range_cancelled", range_start = self.range_start,
+                    requested_bytes = self.reserved, received_bytes = self.counter.load(std::sync::atomic::Ordering::Relaxed),
+                    elapsed_ms = self.started.elapsed().as_millis() as u64,
+                    "optional range cancelled locally; capability reported at episode completion");
+            }
+        }
         self.session.quiet.notify_waiters();
     }
 }
@@ -823,3 +870,6 @@ fn header_list_size(request: &reqwest::Request) -> u64 {
 #[cfg(test)]
 #[path = "retention_tests.rs"]
 mod retention_tests;
+
+#[cfg(test)]
+mod diagnostic_tests;

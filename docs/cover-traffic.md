@@ -246,7 +246,12 @@ the qualification evidence.
 
 ## Qualification and refusal
 
-The first range request is a budgeted qualification. Require HTTP/2, status 206,
+The first range request is a budgeted qualification beginning at byte zero (the
+default requests `bytes=0-1023`). Starting at zero does not ask for the entire
+file: it is an ordinary bounded [HTTP byte range](https://www.rfc-editor.org/rfc/rfc9110.html#section-14.1.2).
+An arbitrary nonzero qualification offset could exclude short resources before
+their size is known. Once qualified, subsequent ranges choose random offsets
+within the observed resource length. Require HTTP/2, status 206,
 exact Content-Range, a finite resource size, a matching declared length when
 present, identity encoding and an exact bounded body. Subsequent reads preserve
 resource size and any observed validator. Redirects, authentication/payment
@@ -259,6 +264,38 @@ the retained owner's lifetime; failure of both candidates disables ranges while
 that cache entry remains retained. Failure after a
 successful qualification does not switch resources. There is no full-download
 fallback, periodic requalification, paid retry or cross-origin redirect. Logs retain the primary refusal and `cover_fallback_selected`.
+
+### Cover diagnostics
+
+Range outcomes identify listener/source, an ephemeral episode ID, primary or
+fallback resource, qualification versus ordinary range, requested offset/length,
+HTTP status/version when received, declared body length, observed bytes, stage
+and elapsed time. They never include resource URLs, raw headers, validators,
+padding contents, payment identities or upstream prose. A 200 response is
+`cover_range_ignored`; its full body is not downloaded. A longer resource alone
+does not establish range support.
+
+WARN reports a fresh failure applied as retained unavailability. Fallback
+selection is INFO, retaining the primary failure in the preceding range outcome
+with the same episode ID. Cached refusal is DEBUG with `fresh_attempt=false`;
+repeated calls do not imply repeated HTTP probes. Completed attempt facts are
+also DEBUG before the scheduler consumes their result, so an episode-deadline
+race cannot erase an observed timeout. Local cancellation reports its own DEBUG
+event and observed byte count without claiming an HTTP response was received.
+
+Episode summaries include sampled versus received bytes, request count, elapsed
+time, effective deadline kind (tail or episode), whether it expired, any explicit
+stop reason and the actual final capability/retained failure. An ordinary
+`cover_budget_unspent` shortfall is INFO; it is neither a wallet-funding failure
+nor proof that the resource is unusable. If cleanup cancels unfinished
+qualification, the summary is WARN and records retained
+`cover_qualification_cancelled`, even when the episode reason is
+`cover_budget_unspent`. Previously available capability may remain available at
+the same deadline. Summaries for already cached unavailability are DEBUG.
+Unexpected task or sampling failures remain WARN even when capability has not
+changed. Summaries retain the configured episode/process limit fields alongside
+actual usage. These observations do not change retry, cache lifetime, fallback or
+budget policy.
 
 Header values use random visible ASCII, protected-name/collision checks and a
 separate conservative header-list budget. Sensitive/never-indexed HPACK fields

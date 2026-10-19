@@ -114,6 +114,23 @@ fn response_metadata(
     }
     Ok(representation)
 }
+/// Numeric response observations; never retain headers, URLs or upstream prose.
+#[derive(Clone, Debug)]
+pub(crate) struct Observation {
+    pub start: u64,
+    pub requested_bytes: u64,
+    pub http_status: Option<u16>,
+    pub http_version: Option<Version>,
+    pub declared_body_bytes: Option<u64>,
+    pub received_bytes: u64,
+    pub elapsed_ms: u64,
+    pub stage: &'static str,
+}
+pub(crate) struct Outcome {
+    pub result: Result<Representation, Failure>,
+    pub observation: Observation,
+}
+
 /// No sign/retry middleware, redirects or full-download fallback. Cancellation drops
 /// only this response stream and retains already received bytes in the reservation.
 pub async fn download(
@@ -121,11 +138,38 @@ pub async fn download(
     config: &Config,
     range: Range,
     deadline: Instant,
-    mut budget: Reservation,
+    budget: Reservation,
     padding: Option<(header::HeaderName, header::HeaderValue)>,
 ) -> Result<Representation, Failure> {
+    download_observed(client, config, range, deadline, budget, padding)
+        .await
+        .result
+}
+
+pub(crate) async fn download_observed(
+    client: &Client,
+    config: &Config,
+    range: Range,
+    deadline: Instant,
+    mut budget: Reservation,
+    padding: Option<(header::HeaderName, header::HeaderValue)>,
+) -> Outcome {
+    let started = Instant::now();
+    let mut observation = Observation {
+        start: range.start,
+        requested_bytes: range.length,
+        http_status: None,
+        http_version: None,
+        declared_body_bytes: None,
+        received_bytes: 0,
+        elapsed_ms: 0,
+        stage: "request",
+    };
     if range.length == 0 || range.start.checked_add(range.length).is_none() {
-        return Err(Failure("cover_range_invalid"));
+        return Outcome {
+            result: Err(Failure("cover_range_invalid")),
+            observation,
+        };
     }
     let end = range.start + range.length - 1;
     let mut request = client
@@ -141,20 +185,26 @@ pub async fn download(
             .send()
             .await
             .map_err(|_| Failure("cover_transport_error"))?;
+        observation.http_status = Some(response.status().as_u16());
+        observation.http_version = Some(response.version());
+        observation.declared_body_bytes = response.content_length();
+        observation.stage = "response_metadata";
         let representation = response_metadata(&response, config, &range)?;
-        let mut read = 0u64;
+        observation.stage = "response_body";
         while let Some(chunk) = response
             .chunk()
             .await
             .map_err(|_| Failure("cover_body_error"))?
         {
             budget.received(chunk.len() as u64);
-            read = read.saturating_add(chunk.len() as u64);
-            if read > range.length {
+            observation.received_bytes = observation
+                .received_bytes
+                .saturating_add(chunk.len() as u64);
+            if observation.received_bytes > range.length {
                 return Err(Failure("cover_body_overflow"));
             }
         }
-        if read != range.length {
+        if observation.received_bytes != range.length {
             return Err(Failure("cover_body_truncated"));
         }
         Ok(representation)
@@ -163,13 +213,11 @@ pub async fn download(
         .await
         .unwrap_or(Err(Failure("cover_deadline")));
     budget.finish(Instant::now());
-    if let Err(failure) = &result {
-        tracing::warn!(
-            code = failure.0,
-            "optional cover range stopped; no retry or full-download fallback"
-        );
+    observation.elapsed_ms = started.elapsed().as_millis() as u64;
+    Outcome {
+        result,
+        observation,
     }
-    result
 }
 #[cfg(test)]
 mod tests;

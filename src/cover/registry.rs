@@ -78,6 +78,14 @@ impl OwnerState {
         self.capability = Capability::Unknown;
         true
     }
+    /// Safe label for the selected resource; never exposes its URL.
+    pub(crate) fn resource_label(&self) -> &'static str {
+        if self.using_fallback {
+            "fallback"
+        } else {
+            "primary"
+        }
+    }
     pub fn resource_url(&self) -> &str {
         if self.using_fallback {
             self.config
@@ -256,9 +264,11 @@ mod tests {
                 padding_disabled: Arc::new(Mutex::new(false)),
                 episode: None,
             };
+            assert_eq!(state.resource_label(), "primary");
             let switched = state.try_fallback(super::super::range::Failure(code));
             assert_eq!(switched, code == "cover_range_ignored");
             if switched {
+                assert_eq!(state.resource_label(), "fallback");
                 assert_eq!(state.resource_url(), "https://api.example.com/llms.txt");
                 assert!(state.begin_qualification());
                 assert!(!state.try_fallback(super::super::range::Failure(code)));

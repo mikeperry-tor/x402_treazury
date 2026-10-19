@@ -156,6 +156,12 @@ calls warn on unsuccessful returned HTTP status; their completion covers respons
 headers, while body consumption remains the caller's responsibility. Diagnostics
 never authorize replay or change payment execution.
 
+Optional cover diagnostics distinguish fresh range failures from cached refusal
+and episode shortfalls. Retained range-capability loss is WARN; fallback selection
+and ordinary shortfalls are INFO; cached refusals and individual attempt facts are
+DEBUG. See [cover diagnostics](cover-traffic.md#cover-diagnostics) for fields,
+deadline cleanup and safe resource labels.
+
 Waiting for confirmed spendable ZEC and funding deferred by a reported treasury
 sync failure are info events; their retry backoff and stored failure conditions
 remain intact. Treasury sync failures stay warnings with safe connection reasons

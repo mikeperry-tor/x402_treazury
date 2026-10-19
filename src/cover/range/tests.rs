@@ -139,7 +139,7 @@ async fn unsigned_ranges_validate_every_response_and_never_follow_or_pay() {
                 validator: Some(("etag".into(), "\"v1\"".into())),
             });
         }
-        let result = download(
+        let outcome = download_observed(
             &http,
             &config,
             range,
@@ -153,7 +153,19 @@ async fn unsigned_ranges_validate_every_response_and_never_follow_or_pay() {
             None,
         )
         .await;
+        let result = &outcome.result;
         assert_eq!(result.as_ref().err().map(|e| e.0), error, "{path}");
+        assert_eq!(outcome.observation.start, 0);
+        assert_eq!(outcome.observation.requested_bytes, 1024);
+        if path == "ignored" {
+            assert_eq!(outcome.observation.http_status, Some(200));
+            assert_eq!(outcome.observation.http_version, Some(Version::HTTP_2));
+            assert_eq!(
+                outcome.observation.received_bytes, 0,
+                "ignored range must not download the full document"
+            );
+            assert_eq!(outcome.observation.stage, "response_metadata");
+        }
     }
     assert_eq!(count.load(Ordering::SeqCst), cases.len());
     assert!(
