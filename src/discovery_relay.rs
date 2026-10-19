@@ -395,12 +395,14 @@ impl Relay {
                     changed
                 });
             }
-            let permit = match &gate {
-                Some(gate) => Some(gate.clone().acquire_owned().await?),
-                None => None,
-            };
             let result = self
-                .fetch_with_permit(url, expected, limit, setting, permit)
+                .fetch_with_capacity(
+                    url,
+                    expected,
+                    limit,
+                    setting,
+                    gate.iter().cloned().collect(),
+                )
                 .await;
             match result {
                 Err(error) => match RetryDisposition::from_error(&error) {
@@ -431,23 +433,24 @@ impl Relay {
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
-        self.fetch_with_permit(url, expected, limit, setting, None)
+        self.fetch_with_capacity(url, expected, limit, setting, Vec::new())
             .await
     }
-    async fn fetch_with_permit(
+    pub(crate) async fn fetch_with_capacity(
         &self,
         url: &str,
         expected: u16,
         limit: usize,
         setting: &'static str,
-        permit: Option<tokio::sync::OwnedSemaphorePermit>,
+        capacity: Vec<Arc<tokio::sync::Semaphore>>,
     ) -> Result<Arc<Response>> {
         let relay = self.clone();
         let url = url.to_owned();
         self.client
             .run_owned(async move {
-                let _permit = permit;
-                relay.fetch_owned(&url, expected, limit, setting).await
+                relay
+                    .fetch_owned(&url, expected, limit, setting, capacity)
+                    .await
             })
             .await?
     }
@@ -457,6 +460,7 @@ impl Relay {
         expected: u16,
         limit: usize,
         setting: &'static str,
+        capacity: Vec<Arc<tokio::sync::Semaphore>>,
     ) -> Result<Arc<Response>> {
         let target = reqwest::Url::parse(url)?;
         ensure!(
@@ -507,6 +511,14 @@ impl Relay {
         {
             return Err(RetryDisposition::DependencyWait.into());
         }
+        // Queue/cache/dependency checks reserve no active transport slots. Once
+        // admitted, this retained owner keeps capacity through publication even
+        // if its waiter disconnects. Callers order source capacity before global.
+        let mut permits = Vec::with_capacity(capacity.len());
+        for gate in capacity {
+            permits.push(gate.acquire_owned().await?);
+        }
+        let _permits = permits;
         // The accepted owner retains this lock through payment, decoding and
         // publication. Cancelling its waiter cannot admit another paid fetch.
         // Leave the breaker closed if the owner fails before publishing an outcome.
@@ -1376,7 +1388,7 @@ pub(crate) mod tests {
     }
     #[tokio::test]
     async fn blocked_catalog_falls_back_once_and_only_relay_cache_reuses_result() {
-        for status in [403, 429, 503, 500, 404, 200] {
+        for status in [403, 429, 503, 500, 404, 200, 302, 307] {
             let log = tempfile::NamedTempFile::new().unwrap();
             let subscriber = tracing_subscriber::fmt()
                 .without_time()
@@ -1385,18 +1397,32 @@ pub(crate) mod tests {
                 .finish();
             let _guard = tracing::subscriber::set_default(subscriber);
             let origin_calls = Arc::new(AtomicUsize::new(0));
+            let followed = Arc::new(AtomicUsize::new(0));
             let count = origin_calls.clone();
-            let app = Router::new().route(
-                "/spec",
-                axum::routing::get(move || {
-                    let count = count.clone();
-                    async move {
-                        count.fetch_add(1, Ordering::SeqCst);
-                        // 200 deliberately returns invalid catalog text.
-                        (StatusCode::from_u16(status).unwrap(), "invalid catalog")
-                    }
-                }),
-            );
+            let followed_route = followed.clone();
+            let app = Router::new()
+                .route(
+                    "/spec",
+                    axum::routing::get(move || {
+                        let count = count.clone();
+                        async move {
+                            count.fetch_add(1, Ordering::SeqCst);
+                            // 200 deliberately returns invalid catalog text.
+                            (
+                                StatusCode::from_u16(status).unwrap(),
+                                [("location", "/must-not-follow")],
+                                "invalid catalog",
+                            )
+                        }
+                    }),
+                )
+                .route(
+                    "/must-not-follow",
+                    axum::routing::get(move || {
+                        followed_route.fetch_add(1, Ordering::SeqCst);
+                        async { "{\"openapi\":\"3.0.0\",\"paths\":{}}" }
+                    }),
+                );
             let (address, origin) = crate::test_tls::serve(app).await;
             let url = "https://api.example.com/spec".to_owned();
             let _socks = crate::test_socks::Socks::start(
@@ -1411,13 +1437,6 @@ pub(crate) mod tests {
             })
             .unwrap()
             .with_test_root(crate::test_tls::CA);
-            let http = context
-                .http(
-                    &crate::network::IsolationId::discovery(&url).unwrap(),
-                    &url,
-                    std::time::Duration::from_secs(5),
-                )
-                .unwrap();
             let (relay, f, task) = fixture(envelope(&url), false, false).await;
             let dir = tempfile::tempdir().unwrap();
             let mut cfg = Config {
@@ -1427,15 +1446,41 @@ pub(crate) mod tests {
                 http_cache_directory: Some(dir.path().join("http-cache")),
                 ..Default::default()
             };
-            let pending = match crate::catalog::prepare_json_discovery(&cfg, &http)
+            let expected_attempts = if matches!(status, 403 | 429 | 503) {
+                crate::network::TOR_ISOLATION_RETRY_ATTEMPTS
+            } else {
+                1
+            };
+            let identity = crate::network::IsolationId::discovery(&url).unwrap();
+            let selected = context
+                .http_participating(&identity, &url, None, false, cfg.transport())
+                .unwrap();
+            let pending = match crate::catalog::prepare_json_discovery_with(&cfg, &context)
                 .await
                 .unwrap()
             {
                 crate::catalog::CatalogLoad::RelayPending(pending) => pending,
                 crate::catalog::CatalogLoad::Ready(_) => panic!("blocked origin must defer relay"),
             };
-            assert_eq!(origin_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(origin_calls.load(Ordering::SeqCst), expected_attempts);
+            assert_eq!(followed.load(Ordering::SeqCst), 0);
+            assert!(
+                Arc::ptr_eq(
+                    &selected,
+                    &context
+                        .http_participating(&identity, &url, None, false, cfg.transport())
+                        .unwrap()
+                ),
+                "invalid origin bodies never promote, including redirects"
+            );
             assert_eq!(f.calls.load(Ordering::SeqCst), 0);
+            {
+                let records = _socks.records.lock().unwrap();
+                assert_eq!(records.len(), expected_attempts);
+                let passwords: std::collections::BTreeSet<_> =
+                    records.iter().map(|r| r.password.clone()).collect();
+                assert_eq!(passwords.len(), expected_attempts);
+            }
             // The continuation retains its original target/cache/relay after the
             // caller changes its configuration. Concurrent aliases share paid work.
             let original = cfg.clone();
@@ -1445,13 +1490,22 @@ pub(crate) mod tests {
             assert_eq!(a.unwrap(), b.unwrap());
             cfg = original;
             assert!(matches!(
-                crate::catalog::prepare_json_discovery(&cfg, &http)
+                crate::catalog::prepare_json_discovery_with(&cfg, &context)
                     .await
                     .unwrap(),
                 crate::catalog::CatalogLoad::Ready(_)
             ));
-            assert_eq!(origin_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(origin_calls.load(Ordering::SeqCst), expected_attempts);
             assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+            assert!(
+                Arc::ptr_eq(
+                    &selected,
+                    &context
+                        .http_participating(&identity, &url, None, false, cfg.transport())
+                        .unwrap()
+                ),
+                "successful paid relay never promotes the origin transport"
+            );
             assert!(
                 crate::http_cache::Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes)
                     .unwrap()
@@ -1464,15 +1518,15 @@ pub(crate) mod tests {
                 ..cfg
             };
             assert!(
-                crate::catalog::load_json_discovery(&without, &http)
+                crate::catalog::load_json_discovery_with(&without, &context)
                     .await
                     .is_err()
             );
-            assert_eq!(origin_calls.load(Ordering::SeqCst), 2);
+            assert_eq!(origin_calls.load(Ordering::SeqCst), expected_attempts * 2);
             let logs = std::fs::read_to_string(log.path()).unwrap();
             assert!(logs.contains("source=\"test_provider\""), "{logs}");
             assert!(logs.contains("stage=\"catalog\""), "{logs}");
-            if status != 200 {
+            if !matches!(status, 200 | 302 | 307) {
                 assert!(logs.contains(&format!("http_status={status}")), "{logs}");
             } else {
                 assert!(logs.contains("reason=\"parse\""), "{logs}");

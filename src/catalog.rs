@@ -361,7 +361,30 @@ pub async fn load_json_with_limit(
     http: &reqwest::Client,
     limit: usize,
 ) -> Result<Value> {
-    load_json_cached(source, http, limit, None).await
+    if !source.starts_with("https://") && !source.starts_with("http://") {
+        tracing::info!(cache = "local_file", "Catalog loading local file");
+        let bytes = tokio::fs::read(source)
+            .await
+            .context(LoadStage::LocalRead)?;
+        return parse_document(&bytes);
+    }
+    let started = std::time::Instant::now();
+    let response = crate::http_cache::discovery_get(http, source)
+        .send()
+        .await
+        .map_err(reqwest::Error::without_url)
+        .context(LoadStage::Headers)?
+        .error_for_status()
+        .map_err(reqwest::Error::without_url)
+        .context(LoadStage::Headers)?;
+    tracing::debug!(target: "x402_treazury::startup",
+        headers_ms = started.elapsed().as_millis() as u64,
+        "Catalog response headers received; reading body");
+    crate::network::log_http(&response, "catalog");
+    let (_, _, bytes) = read_catalog_body(response, limit)
+        .await
+        .context(LoadStage::Body)?;
+    parse_document(&bytes)
 }
 /// An unsigned load can retain its exact relay continuation without repeating
 /// origin I/O. The continuation owns its configuration and shared relay state.
@@ -373,22 +396,27 @@ pub(crate) struct RelayContinuation {
     config: Config,
     origin_error: anyhow::Error,
     relay_slot: Option<crate::http_cache::Slot>,
+    retry_after: Option<crate::network::RetryAfter>,
 }
 impl RelayContinuation {
     pub(crate) async fn resume(&self) -> Result<Value> {
-        self.resume_mode(None, None).await
+        self.resume_mode(None, None, false).await
+    }
+    async fn resume_bounded(&self, gate: std::sync::Arc<tokio::sync::Semaphore>) -> Result<Value> {
+        self.resume_mode(Some(gate), None, false).await
     }
     pub(crate) async fn resume_when_ready(
         &self,
         gate: std::sync::Arc<tokio::sync::Semaphore>,
         operator_status: Option<tokio::sync::watch::Sender<bool>>,
     ) -> Result<Value> {
-        self.resume_mode(Some(gate), operator_status).await
+        self.resume_mode(Some(gate), operator_status, true).await
     }
     async fn resume_mode(
         &self,
         gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
         operator_status: Option<tokio::sync::watch::Sender<bool>>,
+        wait_for_ready: bool,
     ) -> Result<Value> {
         let cfg = &self.config;
         let error = &self.origin_error;
@@ -417,21 +445,28 @@ impl RelayContinuation {
                 .and_then(reqwest::Error::status)
                 .map(|s| s.as_u16()),
         );
+        crate::network::sleep_retry_after(self.retry_after).await;
         let relay = cfg.discovery_relay.as_ref().expect("captured relay");
-        let response = if let Some(gate) = gate {
+        let response = if wait_for_ready {
             relay
                 .fetch_when_ready_bounded(
                     &cfg.spec,
                     200,
                     cfg.max_spec_bytes,
                     "max_spec_bytes",
-                    Some(gate),
+                    gate,
                     operator_status,
                 )
                 .await
         } else {
             relay
-                .fetch(&cfg.spec, 200, cfg.max_spec_bytes, "max_spec_bytes")
+                .fetch_with_capacity(
+                    &cfg.spec,
+                    200,
+                    cfg.max_spec_bytes,
+                    "max_spec_bytes",
+                    gate.into_iter().collect(),
+                )
                 .await
         }
         .inspect_err(|error| {
@@ -466,17 +501,44 @@ impl RelayContinuation {
     }
 }
 
-pub(crate) async fn load_json_discovery(cfg: &Config, http: &reqwest::Client) -> Result<Value> {
-    match prepare_json_discovery(cfg, http).await? {
+pub async fn load_json_discovery(cfg: &Config) -> Result<Value> {
+    load_json_discovery_with(cfg, crate::network::global()).await
+}
+
+pub(crate) async fn load_json_discovery_with(
+    cfg: &Config,
+    network: &crate::network::NetworkContext,
+) -> Result<Value> {
+    load_json_discovery_bounded(cfg, network, None).await
+}
+
+pub(crate) async fn load_json_discovery_bounded(
+    cfg: &Config,
+    network: &crate::network::NetworkContext,
+    gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
+) -> Result<Value> {
+    match prepare_json_discovery_bounded(cfg, network, gate.clone()).await? {
         CatalogLoad::Ready(document) => Ok(document),
-        CatalogLoad::RelayPending(pending) => pending.resume().await,
+        CatalogLoad::RelayPending(pending) => match gate {
+            Some(gate) => pending.resume_bounded(gate).await,
+            None => pending.resume().await,
+        },
     }
 }
 
-#[tracing::instrument(name = "catalog", skip_all, fields(source = cfg.discovery_source.as_deref().unwrap_or("standalone")))]
-pub(crate) async fn prepare_json_discovery(
+#[cfg(test)]
+pub(crate) async fn prepare_json_discovery_with(
     cfg: &Config,
-    http: &reqwest::Client,
+    network: &crate::network::NetworkContext,
+) -> Result<CatalogLoad> {
+    prepare_json_discovery_bounded(cfg, network, None).await
+}
+
+#[tracing::instrument(name = "catalog", skip_all, fields(source = cfg.discovery_source.as_deref().unwrap_or("standalone")))]
+pub(crate) async fn prepare_json_discovery_bounded(
+    cfg: &Config,
+    network: &crate::network::NetworkContext,
+    gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
 ) -> Result<CatalogLoad> {
     tracing::info!(
         cache = crate::http_cache::Slot::availability(cfg, "catalog"),
@@ -495,14 +557,14 @@ pub(crate) async fn prepare_json_discovery(
         }
         slot.write(None).await;
     }
-    let result = load_json_cached(
-        &cfg.spec,
-        http,
-        cfg.max_spec_bytes,
+    let result = load_json_discovery_origin(
+        cfg,
+        network,
         crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes),
+        gate.as_deref(),
     )
     .await;
-    let error = match result {
+    let (error, retry_after) = match result {
         Ok(doc) => return Ok(CatalogLoad::Ready(doc)),
         Err(e) => e,
     };
@@ -516,21 +578,24 @@ pub(crate) async fn prepare_json_discovery(
         config: cfg.clone(),
         origin_error: error,
         relay_slot,
+        retry_after,
     })))
 }
 
-pub(crate) async fn load_json_cached(
-    source: &str,
-    http: &reqwest::Client,
-    limit: usize,
+async fn load_json_discovery_origin(
+    cfg: &Config,
+    network: &crate::network::NetworkContext,
     slot: Option<crate::http_cache::Slot>,
-) -> Result<Value> {
+    gate: Option<&tokio::sync::Semaphore>,
+) -> std::result::Result<Value, (anyhow::Error, Option<crate::network::RetryAfter>)> {
+    let source = &cfg.spec;
     if !source.starts_with("https://") && !source.starts_with("http://") {
         tracing::info!(cache = "local_file", "Catalog loading local file");
         let bytes = tokio::fs::read(source)
             .await
-            .context(LoadStage::LocalRead)?;
-        return parse_document(&bytes);
+            .context(LoadStage::LocalRead)
+            .map_err(|e| (e, None))?;
+        return parse_document(&bytes).map_err(|e| (e, None));
     }
 
     let cached = read_cached_catalog(slot.as_ref()).await;
@@ -544,8 +609,7 @@ pub(crate) async fn load_json_cached(
         );
         return Ok(cached.expect("fresh cached document").1);
     }
-    let started = std::time::Instant::now();
-    let request = crate::http_cache::discovery_get(http, source);
+
     let conditional = cached
         .as_ref()
         .map(|(entry, _)| entry)
@@ -564,24 +628,147 @@ pub(crate) async fn load_json_cached(
         conditional = conditional.is_some(),
         "Catalog fetching origin"
     );
-    let request = conditional.map_or_else(
-        || crate::http_cache::discovery_get(http, source),
-        |e| e.metadata.conditional(request),
-    );
-    let response = request
-        .send()
-        .await
-        .map_err(reqwest::Error::without_url)
-        .context(LoadStage::Headers)?;
-    tracing::debug!(target: "x402_treazury::startup",
-        headers_ms = started.elapsed().as_millis() as u64,
-        "Catalog response headers received; reading body");
-    crate::network::log_http(&response, "catalog");
-    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
-        revalidate_cached_catalog(response.headers(), conditional, slot.as_ref()).await?;
-        return Ok(cached.expect("validated cached document").1);
+
+    match fetch_catalog_origin(cfg, network, conditional, slot.as_ref(), gate).await {
+        Ok(Some(document)) => Ok(document),
+        Ok(None) => Ok(cached.expect("validated cached document").1),
+        Err(err) => {
+            if let Some(slot) = &slot {
+                slot.write(None).await;
+            }
+            Err(err)
+        }
     }
-    load_catalog_response(response, limit, slot.as_ref()).await
+}
+
+async fn fetch_catalog_origin(
+    cfg: &Config,
+    network: &crate::network::NetworkContext,
+    conditional: Option<&crate::http_cache::Entry>,
+    slot: Option<&crate::http_cache::Slot>,
+    gate: Option<&tokio::sync::Semaphore>,
+) -> std::result::Result<Option<Value>, (anyhow::Error, Option<crate::network::RetryAfter>)> {
+    let source = &cfg.spec;
+    let id = crate::network::IsolationId::discovery(source).map_err(|e| (e, None))?;
+    let timeout = cfg
+        .read_timeout_seconds
+        .map(std::time::Duration::from_secs_f64);
+    let selected = network
+        .http_participating(&id, source, timeout, false, cfg.transport())
+        .map_err(|e| (e, None))?;
+    let max_attempts = network.max_http_attempts(cfg.http_cache_direct_warm_target.is_some());
+
+    for attempt in 1..=max_attempts {
+        let permit = match gate {
+            Some(gate) => Some(gate.acquire().await.expect("owned catalog gate")),
+            None => None,
+        };
+        let current = network
+            .http_attempt(&selected, attempt)
+            .map_err(|e| (e, None))?;
+        let started = std::time::Instant::now();
+        let request = catalog_request(&current.client, source, conditional);
+        let response = match request.send().await.map_err(reqwest::Error::without_url) {
+            Ok(response) => response,
+            Err(err)
+                if attempt < max_attempts && crate::network::eligible_retry_transport(&err) =>
+            {
+                tracing::debug!(
+                    stage = "catalog",
+                    attempt,
+                    "Catalog origin transport failed; retrying on fresh Tor isolation scope"
+                );
+                continue;
+            }
+            Err(err) => return Err((anyhow::Error::new(err).context(LoadStage::Headers), None)),
+        };
+        tracing::debug!(target: "x402_treazury::startup",
+            headers_ms = started.elapsed().as_millis() as u64,
+            "Catalog response headers received; reading body");
+        crate::network::log_http(&response, "catalog");
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_MODIFIED {
+            revalidate_cached_catalog(response.headers(), conditional, slot)
+                .await
+                .map_err(|e| (e, None))?;
+            network.promote_http(&selected, &current);
+            return Ok(None);
+        }
+        // Preserve ordinary reqwest status semantics: an unfollowed redirect's
+        // complete body may still be a valid catalog, and never earns a retry.
+        if status.is_client_error() || status.is_server_error() {
+            let retry_after = crate::network::parse_retry_after(status, response.headers())
+                .map(crate::network::RetryAfter::after);
+            let err = response
+                .error_for_status()
+                .expect_err("non-success status")
+                .without_url();
+            if attempt < max_attempts && crate::network::eligible_retry_status(status) {
+                tracing::debug!(
+                    stage = "catalog",
+                    attempt,
+                    http_status = status.as_u16(),
+                    "Catalog origin HTTP status eligible for retry on fresh Tor isolation scope"
+                );
+                drop(permit);
+                crate::network::sleep_retry_after(retry_after).await;
+                continue;
+            }
+            return Err((
+                anyhow::Error::new(err).context(LoadStage::Headers),
+                retry_after,
+            ));
+        }
+        let (status, headers, bytes) = match read_catalog_body(response, cfg.max_spec_bytes).await {
+            Ok(read) => read,
+            Err(err)
+                if attempt < max_attempts
+                    && err
+                        .downcast_ref::<reqwest::Error>()
+                        .is_some_and(crate::network::eligible_retry_transport) =>
+            {
+                tracing::debug!(
+                    stage = "catalog",
+                    attempt,
+                    "Catalog origin body read failed; retrying on fresh Tor isolation scope"
+                );
+                continue;
+            }
+            Err(err) => return Err((err.context(LoadStage::Body), None)),
+        };
+        // Only complete, valid JSON catalogs promote candidate scopes or reach persistent storage.
+        let document = parse_document(&bytes).map_err(|e| (e, None))?;
+        network.promote_http(&selected, &current);
+        persist_catalog_response(status, &headers, bytes, slot).await;
+        return Ok(Some(document));
+    }
+    unreachable!("finite attempt budget must return inside loop")
+}
+
+fn catalog_request(
+    http: &reqwest::Client,
+    url: &str,
+    conditional: Option<&crate::http_cache::Entry>,
+) -> reqwest::RequestBuilder {
+    let request = crate::http_cache::discovery_get(http, url);
+    match conditional {
+        Some(entry) => entry.metadata.conditional(request),
+        None => request,
+    }
+}
+
+async fn read_catalog_body(
+    response: reqwest::Response,
+    limit: usize,
+) -> Result<(reqwest::StatusCode, reqwest::header::HeaderMap, Vec<u8>)> {
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body_started = std::time::Instant::now();
+    let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes").await?;
+    tracing::debug!(target: "x402_treazury::startup",
+        body_ms = body_started.elapsed().as_millis() as u64, bytes = bytes.len(),
+        "Catalog response body complete");
+    Ok((status, headers, bytes))
 }
 
 async fn read_cached_catalog(
@@ -604,13 +791,10 @@ async fn revalidate_cached_catalog(
     conditional: Option<&crate::http_cache::Entry>,
     slot: Option<&crate::http_cache::Slot>,
 ) -> Result<()> {
-    let entry = conditional
-        .context("unsolicited catalog HTTP 304")
-        .context(LoadStage::Headers)?;
+    let Some(entry) = conditional else {
+        return Err(anyhow::anyhow!("unsolicited catalog HTTP 304")).context(LoadStage::Headers);
+    };
     if !entry.metadata.matches_validation(headers) {
-        if let Some(slot) = slot {
-            slot.write(None).await;
-        }
         return Err(anyhow::anyhow!(
             "catalog HTTP 304 did not validate cached representation"
         ))
@@ -641,33 +825,15 @@ async fn revalidate_cached_catalog(
     Ok(())
 }
 
-async fn load_catalog_response(
-    response: reqwest::Response,
-    limit: usize,
+async fn persist_catalog_response(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    bytes: Vec<u8>,
     slot: Option<&crate::http_cache::Slot>,
-) -> Result<Value> {
-    // Invalidate before status/body/parse errors; never fall back to stale data.
-    if let Some(slot) = slot {
-        slot.write(None).await;
-    }
-    let response = response
-        .error_for_status()
-        .map_err(reqwest::Error::without_url)
-        .context(LoadStage::Headers)?;
-    let status = response.status();
-    let headers = response.headers().clone();
-    let body_started = std::time::Instant::now();
-    let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes")
-        .await
-        .context(LoadStage::Body)?;
-    tracing::debug!(target: "x402_treazury::startup",
-        body_ms = body_started.elapsed().as_millis() as u64, bytes = bytes.len(),
-        "Catalog response body complete");
-    // Only complete, valid JSON catalogs reach persistent storage.
-    let document = parse_document(&bytes)?;
+) {
     let metadata = if status == reqwest::StatusCode::OK {
         crate::http_cache::Metadata::from_catalog_headers(
-            &headers,
+            headers,
             std::time::Duration::ZERO,
             None,
             slot.map_or(0, |s| s.catalog_ttl),
@@ -681,18 +847,17 @@ async fn load_catalog_response(
         } else {
             "unavailable"
         },
-        cache_policy = crate::http_cache::Metadata::policy_label(&headers, metadata.as_ref()),
+        cache_policy = crate::http_cache::Metadata::policy_label(headers, metadata.as_ref()),
         http_status = status.as_u16(),
         "Catalog origin response cache policy"
     );
-    if let (Some(slot), Some(metadata)) = (slot, metadata) {
-        slot.write(Some(crate::http_cache::Entry {
+    if let Some(slot) = slot {
+        slot.write(metadata.map(|metadata| crate::http_cache::Entry {
             metadata,
             data: bytes,
         }))
         .await;
     }
-    Ok(document)
 }
 fn parse_document(bytes: &[u8]) -> Result<Value> {
     let started = std::time::Instant::now();

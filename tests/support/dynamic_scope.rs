@@ -246,13 +246,27 @@ async fn scope_child() {
             .is_err()
     );
     assert_eq!(requests.load(Ordering::SeqCst), before);
+    let discovery_id = IsolationId::discovery("https://api.example.com").unwrap();
+    let legacy_discovery = crate::network::global().credentials(&discovery_id);
+    let pricing_transport = crate::network::global()
+        .http_participating(
+            &discovery_id,
+            "https://api.example.com",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    let pricing_credentials = crate::network::global().credentials(&pricing_transport.scope);
+    assert_eq!(pricing_credentials.0, legacy_discovery.0);
+    assert_ne!(pricing_credentials.1, legacy_discovery.1);
     let mut expected = vec![
-        crate::network::global()
-            .credentials(&IsolationId::discovery("https://api.example.com").unwrap()),
+        legacy_discovery.clone(),
+        // Public-only imports and lazy help retain separate legacy pools;
+        // participating pricing discovery uses its own fresh-scope pool.
+        legacy_discovery,
+        pricing_credentials,
     ];
-    // Public-only imports retain a separate pool. Help and pricing share the
-    // same idle policy and discovery credential.
-    expected.push(expected[0].clone());
     for key in [1, 2] {
         let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
         expected.push(
@@ -263,8 +277,8 @@ async fn scope_child() {
     let records = proxy.records.lock().unwrap();
     assert_eq!(
         records.len(),
-        4,
-        "pools separate identity and public destination policy"
+        5,
+        "pools separate identity, selection policy and public destination policy"
     );
     assert_eq!(
         records

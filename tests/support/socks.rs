@@ -31,6 +31,7 @@ pub struct Record {
 pub struct Socks {
     pub address: SocketAddr,
     pub records: Arc<Mutex<Vec<Record>>>,
+    pub accepted: Arc<std::sync::atomic::AtomicUsize>,
     stop: CancellationToken,
 }
 impl Drop for Socks {
@@ -43,11 +44,13 @@ impl Socks {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let records = Arc::new(Mutex::new(Vec::new()));
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let stop = CancellationToken::new();
-        let (logs, cancel) = (records.clone(), stop.clone());
+        let (logs, count, cancel) = (records.clone(), accepted.clone(), stop.clone());
         tokio::spawn(async move {
             loop {
                 let socket = tokio::select! { _ = cancel.cancelled() => break, result = listener.accept() => match result { Ok((s,_)) => s, Err(_) => break } };
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let (records, routes, stop) = (logs.clone(), routes.clone(), cancel.clone());
                 tokio::spawn(async move {
                     tokio::select! { _ = stop.cancelled() => {}, _ = serve(socket, routes, fault, records) => {} }
@@ -57,6 +60,7 @@ impl Socks {
         Self {
             address,
             records,
+            accepted,
             stop,
         }
     }

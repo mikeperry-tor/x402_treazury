@@ -124,6 +124,15 @@ pub async fn observe(path: &Path, digest: &str) -> Result<u8> {
         .iter()
         .map(|c| receipt_expectation(&c.payment, &c.receipt, &task.snapshot))
         .collect::<Result<Vec<_>>>()?;
+    let scopes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = scopes.clone();
+    network::install_http_scope_observer(move |observation| {
+        observed
+            .lock()
+            .expect("receipt scopes poisoned")
+            .push(observation.clone());
+        Ok(())
+    })?;
     network::install(task.policy)?;
     let rpc = BaseRpc::with_fallbacks(&task.urls, task.confirmations)?;
     let mut results = Vec::new();
@@ -144,7 +153,7 @@ pub async fn observe(path: &Path, digest: &str) -> Result<u8> {
     }
     println!(
         "{}",
-        json!({"version":1,"task_sha256":digest,"results":results})
+        json!({"version":1,"task_sha256":digest,"results":results,"http_scopes":*scopes.lock().expect("receipt scopes poisoned")})
     );
     Ok(0)
 }
@@ -332,12 +341,15 @@ pub async fn reconcile(state: &Path, run: &str, evidence: &Path) -> Result<u8> {
                 && !signals.stop.is_cancelled(),
             "receipt observer incomplete; no proofs imported, paid cases never replayed"
         );
-        validate_results(
-            &task,
-            &digest,
-            &serde_json::from_slice(&result.stdout.bytes)?,
-            &digest,
-        )
+        let output: Value = serde_json::from_slice(&result.stdout.bytes)?;
+        let scopes: Vec<network::ScopeObservation> =
+            serde_json::from_value(output["http_scopes"].clone())?;
+        let observations = validate_results(&task, &digest, &output, &digest)?;
+        files::publish(
+            &evidence.join("http-scopes.json"),
+            &serde_json::to_vec_pretty(&scopes)?,
+        )?;
+        Ok((observations, scopes))
     }
     .await;
     // Always reap the owned Tor, including launch/parse/cancellation failures.
@@ -348,8 +360,8 @@ pub async fn reconcile(state: &Path, run: &str, evidence: &Path) -> Result<u8> {
             &json!({"version":1,"complete":true,"event_count":events.len(),"events_sha256":files::hash_file(&evidence.join("tor-events.log"))?}),
         )?,
     )?;
-    let observations = outcome?;
-    let audit = tor::audit::verify(&expected, &events)?;
+    let (observations, scopes) = outcome?;
+    let audit = tor::audit::verify_with_scopes(&expected, &scopes, &events)?;
     files::publish(
         &evidence.join("stream-audit.json"),
         &serde_json::to_vec_pretty(&audit)?,

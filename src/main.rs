@@ -183,16 +183,13 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
     if !args.list_tools && !args.list_tags && !args.check && args.route_tool.is_none() {
         x402_treazury::provider_status::warn(cfg.name.as_deref().unwrap_or("standalone"), &cfg);
     }
-    let http = x402_treazury::network::provider_discovery(
-        if cfg.spec.starts_with("http") {
-            &cfg.spec
-        } else {
-            "https://local.invalid"
-        },
-        cfg.read_timeout_seconds.map(Duration::from_secs_f64),
-        cfg.transport(),
-    )?;
-    let root = catalog::load_json_with_limit(&cfg.spec, &http, cfg.max_spec_bytes).await?;
+    ensure!(
+        cfg.read_timeout_seconds
+            .map(Duration::from_secs_f64)
+            .is_none_or(|t| t >= Duration::from_millis(1)),
+        "HTTP read inactivity timeout must be at least 1ms"
+    );
+    let root = catalog::load_json_discovery(&cfg).await?;
     if args.list_tags {
         println!(
             "{}",

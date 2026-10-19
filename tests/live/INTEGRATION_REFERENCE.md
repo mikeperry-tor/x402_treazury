@@ -832,7 +832,20 @@ Only the SOCKS endpoint is permitted for outbound application connections; MCP
 ports are inbound exceptions. No proxy-only downgrade is permitted. Control
 loss/output overflow stops application progression and leaves incomplete evidence.
 Raw Tor credentials and targets stay in private evidence, while the qualification
-summary reports per-identity observations and circuit separation without them.
+summary reports per-identity observations and circuit separation without them. Participating HTTP
+scopes are random per cache miss/candidate, so a deterministic owner export alone
+cannot identify them. The child records `application_network_scope` events in its
+private session registry before SOCKS disclosure. The runner retains the selected
+interval's observations in `http-scopes.json`; the standalone read-only receipt
+observer returns the same metadata through its private result pipe. The audit
+resolves aliases only against independently derived canonical owner/destination
+permissions. Required owner observations may span scopes; distinct actual SOCKS
+credentials must retain circuit separation, including scopes of the same owner.
+Unknown, conflicting or missing mappings fail qualification. Re-audit compares
+archived mappings with the registered interval, and never infers missing owner
+metadata from observed streams. These records grant no financial/replay authority.
+Local migration tests do not requalify the changed recovery paths on real Tor.
+
 Unsigned execution proves discovery identity behavior only. Managed execution
 exports initial and final identity maps; the latter includes replacement addresses
 created during the run. Treasury traffic is confined to configured indexer/submission

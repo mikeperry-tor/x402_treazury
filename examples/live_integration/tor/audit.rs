@@ -67,12 +67,20 @@ struct Stream {
     success: bool,
 }
 pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
+    verify_with_scopes(expected, &[], events)
+}
+pub fn verify_with_scopes(
+    expected: &Identities,
+    scopes: &[x402_treazury::network::ScopeObservation],
+    events: &[String],
+) -> Result<Value> {
     ensure!(!expected.is_empty(), "empty Tor identity map");
     ensure!(
         events.len() <= 100000,
         "Tor event audit exceeds 100000-event limit"
     );
-    let labels = identity_labels(expected)?;
+    let mut labels = identity_labels(expected)?;
+    scope_labels(expected, scopes, &mut labels)?;
     let mut audit = StreamAudit::default();
     for line in events {
         audit.apply_event(expected, &labels, line)?;
@@ -81,8 +89,12 @@ pub fn verify(expected: &Identities, events: &[String]) -> Result<Value> {
 }
 
 type Credential = (String, String);
+struct Label<'a> {
+    owner: &'a String,
+    scope: Option<(String, String)>,
+}
 
-fn identity_labels(expected: &Identities) -> Result<BTreeMap<Credential, &String>> {
+fn identity_labels(expected: &Identities) -> Result<BTreeMap<Credential, Label<'_>>> {
     let mut labels = BTreeMap::new();
     for (label, id) in expected {
         ensure!(
@@ -91,7 +103,13 @@ fn identity_labels(expected: &Identities) -> Result<BTreeMap<Credential, &String
         );
         ensure!(
             labels
-                .insert((id.user.clone(), id.password.clone()), label)
+                .insert(
+                    (id.user.clone(), id.password.clone()),
+                    Label {
+                        owner: label,
+                        scope: None
+                    }
+                )
                 .is_none(),
             "distinct identity labels share SOCKS credentials"
         );
@@ -108,13 +126,72 @@ fn identity_labels(expected: &Identities) -> Result<BTreeMap<Credential, &String
     }
     Ok(labels)
 }
+fn scope_labels<'a>(
+    expected: &'a Identities,
+    scopes: &[x402_treazury::network::ScopeObservation],
+    labels: &mut BTreeMap<Credential, Label<'a>>,
+) -> Result<()> {
+    let canonical: BTreeMap<_, _> = expected
+        .iter()
+        .map(|(label, id)| ((id.user.clone(), id.password.clone()), label))
+        .collect();
+    for observation in scopes {
+        let owner = *canonical
+            .get(&observation.canonical)
+            .context("HTTP scope has an unknown canonical identity")?;
+        ensure!(
+            !canonical.contains_key(&observation.scope),
+            "HTTP scope collides with canonical credentials"
+        );
+        let origin = reqwest::Url::parse(&observation.origin)?;
+        ensure!(
+            matches!(origin.scheme(), "http" | "https")
+                && origin.origin().ascii_serialization() == observation.origin,
+            "HTTP scope origin is not canonical"
+        );
+        let target = format!(
+            "{}:{}",
+            origin
+                .domain()
+                .context("HTTP scope requires a remote hostname")?,
+            origin
+                .port_or_known_default()
+                .context("HTTP scope origin lacks port")?
+        );
+        ensure!(
+            expected[owner].targets.contains(&target),
+            "HTTP scope destination exceeds canonical identity permissions"
+        );
+        match labels.get(&observation.scope) {
+            Some(previous) => ensure!(
+                previous.owner == owner
+                    && previous
+                        .scope
+                        .as_ref()
+                        .is_some_and(|(origin, previous_target)| origin == &observation.origin
+                            && previous_target == &target),
+                "HTTP scope credentials have conflicting owner or origin"
+            ),
+            None => {
+                labels.insert(
+                    observation.scope.clone(),
+                    Label {
+                        owner,
+                        scope: Some((observation.origin.clone(), target)),
+                    },
+                );
+            }
+        }
+    }
+    Ok(())
+}
 
 #[derive(Default)]
 struct StreamAudit<'a> {
     observed_targets: BTreeMap<&'a String, BTreeSet<String>>,
     streams: BTreeMap<String, Stream>,
     circuits: BTreeMap<&'a String, BTreeSet<String>>,
-    owners: BTreeMap<String, &'a String>,
+    owners: BTreeMap<String, Credential>,
     successes: BTreeMap<&'a String, usize>,
 }
 
@@ -122,7 +199,7 @@ impl<'a> StreamAudit<'a> {
     fn apply_event(
         &mut self,
         expected: &'a Identities,
-        labels: &BTreeMap<Credential, &'a String>,
+        labels: &BTreeMap<Credential, Label<'a>>,
         line: &str,
     ) -> Result<()> {
         let f = fields(line)?;
@@ -162,10 +239,11 @@ impl<'a> StreamAudit<'a> {
                 "Tor USER stream lacks isolation credentials"
             );
         }
-        let Some(credential) = &state.credential else {
+        let Some(credential) = state.credential.clone() else {
             return Ok(());
         };
-        let label = labels[credential];
+        let binding = &labels[&credential];
+        let label = binding.owner;
         let identity = &expected[label];
         ensure!(
             identity.permitted,
@@ -173,10 +251,20 @@ impl<'a> StreamAudit<'a> {
         );
         if status == "NEW" {
             observe_destination(state, identity, target)?;
+            ensure!(
+                binding
+                    .scope
+                    .as_ref()
+                    .is_none_or(|(_, target)| state.target.as_ref() == Some(target)),
+                "HTTP scope used another origin"
+            );
         }
         if circuit != "0" {
-            if let Some(other) = self.owners.insert(circuit.clone(), label) {
-                ensure!(other == label, "distinct identities shared a Tor circuit");
+            if let Some(other) = self.owners.insert(circuit.clone(), credential.clone()) {
+                ensure!(
+                    other == credential,
+                    "distinct identities shared a Tor circuit"
+                );
             }
             self.circuits
                 .entry(label)
@@ -226,7 +314,7 @@ impl<'a> StreamAudit<'a> {
 fn observe_credentials(
     state: &mut Stream,
     attrs: &BTreeMap<&str, &str>,
-    labels: &BTreeMap<Credential, &String>,
+    labels: &BTreeMap<Credential, Label<'_>>,
 ) -> Result<()> {
     let user = attrs.get("SOCKS_USERNAME");
     let password = attrs.get("SOCKS_PASSWORD");
@@ -396,6 +484,200 @@ mod tests {
         );
         assert!(fields("KEY=\"unfinished").is_err());
         assert!(fields(&"x".repeat(1024 * 1024 + 1)).is_err());
+    }
+    fn scope(password: &str, origin: &str) -> x402_treazury::network::ScopeObservation {
+        x402_treazury::network::ScopeObservation {
+            canonical: ("u".into(), "old".into()),
+            scope: ("fresh-user".into(), password.into()),
+            origin: origin.into(),
+        }
+    }
+    fn scoped_ids() -> Identities {
+        let mut ids = optional_identities();
+        let payer = ids.get_mut("old").unwrap();
+        payer.targets =
+            BTreeSet::from(["provider.example:443".into(), "second.example:443".into()]);
+        payer.required = true;
+        payer.required_targets = payer.targets.clone();
+        ids
+    }
+    fn scoped_events() -> Vec<String> {
+        vec![
+            "650 STREAM 1 NEW 0 provider.example:443 SOCKS_USERNAME=fresh-user SOCKS_PASSWORD=scope-a".into(),
+            "650 STREAM 1 SUCCEEDED 10 ignored-target".into(),
+            "650 STREAM 2 NEW 0 second.example:443 SOCKS_USERNAME=fresh-user SOCKS_PASSWORD=scope-b".into(),
+            "650 STREAM 2 SUCCEEDED 20 ignored-target".into(),
+        ]
+    }
+    #[test]
+    fn fresh_scopes_aggregate_canonical_requirements_without_learning_from_streams() {
+        let ids = scoped_ids();
+        let scopes = [
+            scope("scope-a", "https://provider.example"),
+            scope("scope-b", "https://second.example"),
+        ];
+        let events = scoped_events();
+        assert!(
+            verify(&ids, &events).is_err(),
+            "STREAM credentials alone never authorize an alias"
+        );
+        let result = verify_with_scopes(&ids, &scopes, &events).unwrap();
+        assert_eq!(result["identities"]["old"]["successful_streams"], 2);
+        assert_eq!(result["identities"]["old"]["circuits"], 2);
+        for private in ["scope-a", "scope-b", "fresh-user", "provider.example"] {
+            assert!(!result.to_string().contains(private));
+        }
+        let duplicated = [scopes[0].clone(), scopes[0].clone(), scopes[1].clone()];
+        assert_eq!(
+            verify_with_scopes(&ids, &duplicated, &events).unwrap(),
+            result,
+            "reobserving the same pooled scope is idempotent"
+        );
+        assert!(
+            verify_with_scopes(&ids, &scopes, &[]).is_err(),
+            "scope observations alone cannot satisfy successful-stream requirements"
+        );
+    }
+    #[test]
+    fn fresh_scopes_cannot_share_circuits_or_broaden_target_or_owner_authority() {
+        let mut ids = scoped_ids();
+        let scopes = [
+            scope("scope-a", "https://provider.example"),
+            scope("scope-b", "https://second.example"),
+        ];
+        let events = scoped_events();
+        let mut shared = events.clone();
+        shared[3] = shared[3].replace("20", "10");
+        assert!(
+            verify_with_scopes(&ids, &scopes, &shared).is_err(),
+            "two fresh scopes of one payer still require separate circuits"
+        );
+        let mut crossed = events.clone();
+        crossed[0] = crossed[0].replace("provider.example", "second.example");
+        let mut no_required = ids.clone();
+        no_required.get_mut("old").unwrap().required = false;
+        no_required.get_mut("old").unwrap().required_targets.clear();
+        assert!(
+            verify_with_scopes(&no_required, &scopes, &crossed).is_err(),
+            "an alias is restricted to its observed origin even if the owner permits another"
+        );
+        ids.get_mut("old").unwrap().permitted = false;
+        assert!(
+            verify_with_scopes(&ids, &scopes, &events).is_err(),
+            "observations never make a historical owner permitted"
+        );
+        ids.get_mut("old").unwrap().permitted = true;
+        ids.get_mut("old").unwrap().required_targets.clear();
+        ids.get_mut("old").unwrap().required = false;
+        assert_eq!(
+            verify_with_scopes(&ids, &scopes, &[]).unwrap()["identities"]["old"]["status"],
+            "not_observed"
+        );
+    }
+    #[test]
+    fn malformed_unknown_colliding_and_conflicting_scope_declarations_fail() {
+        let mut ids = scoped_ids();
+        ids.get_mut("old").unwrap().required = false;
+        ids.get_mut("old").unwrap().required_targets.clear();
+        ids.get_mut("new").unwrap().targets = BTreeSet::from(["provider.example:443".into()]);
+        let a = scope("scope-a", "https://provider.example");
+        assert!(verify_with_scopes(&ids, std::slice::from_ref(&a), &[]).is_ok());
+        for origin in [
+            "https://forbidden.example",
+            "https://provider.example/path",
+            "https://provider.example?query=value",
+            "https://user@provider.example",
+            "https://192.0.2.1",
+        ] {
+            assert!(verify_with_scopes(&ids, &[scope("scope-a", origin)], &[]).is_err());
+        }
+        let mut unknown = a.clone();
+        unknown.canonical.1 = "unknown".into();
+        assert!(verify_with_scopes(&ids, &[unknown], &[]).is_err());
+        let mut collision = a.clone();
+        collision.scope = ("u".into(), "new".into());
+        assert!(verify_with_scopes(&ids, &[collision], &[]).is_err());
+        let mut changed_owner = a.clone();
+        changed_owner.canonical.1 = "new".into();
+        assert!(verify_with_scopes(&ids, &[a.clone(), changed_owner], &[]).is_err());
+        assert!(
+            verify_with_scopes(
+                &ids,
+                &[a.clone(), scope("scope-a", "https://second.example")],
+                &[]
+            )
+            .is_err()
+        );
+        assert!(
+            verify_with_scopes(
+                &ids,
+                &[a, scope("scope-a", "http://provider.example:443")],
+                &[]
+            )
+            .is_err(),
+            "different full origins conflict even when their host and port coincide"
+        );
+    }
+    #[test]
+    fn actual_factory_observations_feed_the_strict_scope_auditor() {
+        if std::env::var_os("TREAZURY_SCOPE_AUDIT_CHILD").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .env_clear()
+                .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+                .env("TREAZURY_SCOPE_AUDIT_CHILD", "1")
+                .args([
+                    "--exact",
+                    "tor::audit::tests::actual_factory_observations_feed_the_strict_scope_auditor",
+                    "--nocapture",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                "isolated exact test must execute"
+            );
+            return;
+        }
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            use std::sync::{Arc,Mutex};
+            use x402_treazury::network::{self,HttpPolicy,IsolationId,Mode,NetworkContext,NetworkPolicy,ScopeObservation};
+            let observations=Arc::new(Mutex::new(Vec::<ScopeObservation>::new()));
+            let saved=observations.clone();
+            network::install_http_scope_observer(move |scope| {saved.lock().unwrap().push(scope.clone());Ok(())}).unwrap();
+            let network=NetworkContext::new(NetworkPolicy {mode:Mode::Tor,socks_endpoint:Some("127.0.0.1:9150".parse().unwrap()),..Default::default()}).unwrap();
+            let owner=IsolationId::evm("0x0000000000000000000000000000000000000001").unwrap();
+            let canonical=network.credentials(&owner);
+            let endpoint="https://provider.example/path";
+            let primary=network.http_participating(&owner,endpoint,None,false,HttpPolicy::default()).unwrap();
+            let retry=network.http_candidate(&primary).unwrap();
+            assert!(network.promote_http(&primary,&retry));
+            let later=network.http_participating(&owner,endpoint,None,false,HttpPolicy::default()).unwrap();
+            assert!(Arc::ptr_eq(&later,&retry));
+            let scopes=observations.lock().unwrap().clone();
+            assert_eq!(scopes.len(),2,"cache hits never invent another observed scope");
+            assert_eq!(scopes[0].canonical,canonical);
+            assert_eq!(scopes[1].canonical,canonical);
+            assert_eq!(scopes[0].scope,network.credentials(&primary.scope));
+            assert_eq!(scopes[1].scope,network.credentials(&retry.scope));
+            assert_ne!(scopes[0].scope,scopes[1].scope);
+            let expected=Identities::from([("payer".into(),Identity {user:canonical.0,password:canonical.1,kind:"evm".into(),targets:BTreeSet::from(["provider.example:443".into()]),required:true,required_targets:BTreeSet::from(["provider.example:443".into()]),permitted:true})]);
+            let mut events=Vec::new();
+            for (index,scope) in scopes.iter().enumerate() {
+                events.push(format!("650 STREAM {} NEW 0 provider.example:443 SOCKS_USERNAME=\"{}\" SOCKS_PASSWORD=\"{}\"",index+1,scope.scope.0,scope.scope.1));
+                events.push(format!("650 STREAM {} {} {} ignored-target",index+1,if index==0 {"CLOSED"} else {"SUCCEEDED"},index+10));
+            }
+            let report=verify_with_scopes(&expected,&scopes,&events).unwrap();
+            assert_eq!(report["identities"]["payer"]["successful_streams"],1);
+            assert_eq!(report["identities"]["payer"]["circuits"],2);
+            let mut reused=events;reused[3]=reused[3].replace("SUCCEEDED 11","SUCCEEDED 10");
+            assert!(verify_with_scopes(&expected,&scopes,&reused).is_err(),"distinct actual fresh scopes cannot share one circuit even for the same canonical payer");
+        });
     }
     include!("audit_tests.rs");
 }

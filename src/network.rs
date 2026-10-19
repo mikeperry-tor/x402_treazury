@@ -9,7 +9,9 @@ mod http_queue_tests;
 #[cfg(test)]
 #[path = "network/http_timeout_tests.rs"]
 mod http_timeout_tests;
+mod scope_observation;
 use anyhow::{Context, Result, ensure};
+pub use scope_observation::{ScopeObservation, install_http_scope_observer};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -295,6 +297,10 @@ pub struct NetworkContext {
     >,
 }
 impl NetworkContext {
+    #[cfg(test)]
+    pub(crate) fn http_cache_len(&self) -> usize {
+        self.http.lock().expect("network cache poisoned").len()
+    }
     pub fn new(policy: NetworkPolicy) -> Result<Self> {
         policy.validate()?;
         Ok(Self {
@@ -429,6 +435,24 @@ impl NetworkContext {
         clients.insert(key, CachedClient::new(record.clone()));
         Ok(record)
     }
+    pub(crate) fn max_http_attempts(&self, direct_override: bool) -> usize {
+        if self.policy.mode == Mode::Tor && !direct_override {
+            TOR_ISOLATION_RETRY_ATTEMPTS
+        } else {
+            1
+        }
+    }
+    pub(crate) fn http_attempt(
+        &self,
+        selected: &Arc<HttpTransport>,
+        attempt: usize,
+    ) -> Result<Arc<HttpTransport>> {
+        if attempt == 1 {
+            Ok(selected.clone())
+        } else {
+            self.http_candidate(selected)
+        }
+    }
     pub fn http_candidate(&self, selected: &Arc<HttpTransport>) -> Result<Arc<HttpTransport>> {
         ensure!(
             selected.selection() == SelectionPolicy::Participating,
@@ -506,6 +530,13 @@ impl NetworkContext {
         let client = builder
             .build()
             .context("network client construction failed")?;
+        if key.selection == SelectionPolicy::Participating && self.policy.mode == Mode::Tor {
+            scope_observation::observe(|| ScopeObservation {
+                canonical: self.credentials(&key.identity),
+                scope: self.credentials(&scope),
+                origin: key.origin.clone(),
+            })?;
+        }
         Ok(Arc::new(HttpTransport {
             client,
             identity: key.identity.clone(),
@@ -553,6 +584,99 @@ pub fn provider_discovery(
 }
 pub fn discovery(url: &str, timeout: impl Into<Option<Duration>>) -> Result<reqwest::Client> {
     global().discovery(url, timeout)
+}
+
+/// Finite per-operation attempt budget in Tor mode (1 selected + up to 2 fresh candidate scopes).
+pub(crate) const TOR_ISOLATION_RETRY_ATTEMPTS: usize = 3;
+
+pub(crate) fn eligible_retry_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 400 | 403 | 429 | 503)
+}
+
+pub(crate) fn eligible_retry_transport(error: &reqwest::Error) -> bool {
+    if error.is_builder() || error.is_redirect() || error.is_status() {
+        return false;
+    }
+    let mut source = std::error::Error::source(error);
+    while let Some(err) = source {
+        if err.is::<rustls::Error>() {
+            return false;
+        }
+        if let Some(io) = err.downcast_ref::<std::io::Error>()
+            && io
+                .get_ref()
+                .is_some_and(|inner| inner.is::<rustls::Error>())
+        {
+            return false;
+        }
+        if let Some(hyper) = err.downcast_ref::<hyper::Error>()
+            && (hyper.is_parse() || hyper.is_user() || hyper.is_canceled())
+        {
+            return false;
+        }
+        let text = err.to_string();
+        if text.starts_with("SOCKS error: ")
+            && (text.contains("failed to create underlying connection")
+                || text.contains("auth")
+                || text.contains("credentials not accepted")
+                || text.contains("not a SOCKS proxy"))
+        {
+            return false;
+        }
+        source = err.source();
+    }
+    true
+}
+
+pub(crate) fn parse_retry_after(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+) -> Option<Duration> {
+    if !matches!(status.as_u16(), 429 | 503) {
+        return None;
+    }
+    let mut values = headers.get_all(reqwest::header::RETRY_AFTER).iter();
+    let first = values.next()?.to_str().ok()?.trim();
+    if first.is_empty() {
+        return None;
+    }
+    for value in values {
+        if value.to_str().ok()?.trim() != first {
+            return None;
+        }
+    }
+    if first.bytes().all(|b| b.is_ascii_digit()) {
+        let secs = first.parse::<u64>().ok()?;
+        return (secs > 0).then(|| Duration::from_secs(secs));
+    }
+    let target = httpdate::parse_http_date(first).ok()?;
+    target
+        .duration_since(std::time::SystemTime::now())
+        .ok()
+        .filter(|delay| !delay.is_zero())
+}
+
+/// Retain a valid server delay even when the platform cannot represent its
+/// deadline. Such a delay must never collapse into permission to dispatch now.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum RetryAfter {
+    At(tokio::time::Instant),
+    BeyondClock,
+}
+impl RetryAfter {
+    pub(crate) fn after(delay: Duration) -> Self {
+        match tokio::time::Instant::now().checked_add(delay) {
+            Some(deadline) => Self::At(deadline),
+            None => Self::BeyondClock,
+        }
+    }
+}
+pub(crate) async fn sleep_retry_after(deadline: Option<RetryAfter>) {
+    match deadline {
+        Some(RetryAfter::At(deadline)) => tokio::time::sleep_until(deadline).await,
+        Some(RetryAfter::BeyondClock) => std::future::pending::<()>().await,
+        None => {}
+    }
 }
 
 #[cfg(feature = "zcash")]

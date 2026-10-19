@@ -690,3 +690,6 @@ fn open(directory: &Path) -> Result<Connection> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod retry_after_tests;

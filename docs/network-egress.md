@@ -25,8 +25,29 @@ an existing canonical slot only when it still holds the exact originally acquire
 `Arc<HttpTransport>`. Evicted, missing, reinserted or already-promoted entries are
 never overwritten or resurrected, and no separate winner registry, history cache
 or counter is kept; a miss after normal LRU eviction or restart creates a fresh
-scope. Current production callers still acquire legacy deterministic transports
-until consumer activation in the
+scope. Static catalog and pricing discovery use participating selection per origin
+(`SelectionPolicy::Participating`): in Tor mode, eligible status (`400`, `403`,
+`429`, `503`) or transport/timeout failures retry up to 2 times on fresh candidate
+scopes (`3` attempts total), honoring valid `Retry-After` headers on `429`/`503`
+before the next candidate attempt and before any paid discovery-relay fallback.
+A valid delay beyond the platform clock's range remains pending and cancellable;
+it cannot collapse into an immediate retry or relay dispatch. This introduces no
+local delay cap or substitute timer. Catalog download capacity covers each active
+attempt and is released during server delays. All logical source loads can wait
+independently, including inspection and warming, while compatible aliases keep one
+coalesced owner. Unfollowed catalog redirects retain baseline
+complete-body parsing: a valid JSON catalog succeeds, while rejected content can
+use existing relay fallback, without another origin circuit attempt. A
+candidate promotes only after complete valid JSON parse or valid HTTP 304
+revalidation for catalogs, or a usable HTTP 402 challenge or 2xx response for
+pricing; fresh disk-cache hits and relay-supplied results never promote a scope.
+Pricing's process-wide and per-source request permits cover active attempts;
+`Retry-After` waits reserve neither. Queued relay work acquires these permits only
+after serialization, cache and readiness checks, and retains them through response
+consumption and publication even if its waiter disconnects. Logical probe ownership
+and one-shot coalescing span the complete retry sequence without a second source gate.
+Remaining HTTP callers still acquire legacy deterministic transports until later
+consumer activation in the
 [Tor isolation retry plan](plans/tor_isolation_retries.md). Sync releases its
 channels before tearing down its private runtime. Each cache retains at most 256
 entries and evicts one least-recently-used entry when admitting another. Access
@@ -57,8 +78,8 @@ renew another response's inactivity timer or signed authority.
 
 | Caller | Transport and identity |
 | --- | --- |
-| `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, discovery origin |
-| `pricing.rs` | Startup-only unsigned GET probe, discovery origin; successes/failures remain cached |
+| `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, participating discovery origin (up to 3 Tor attempts; promotes on valid JSON or 304) |
+| `pricing.rs` | Startup-only unsigned GET probe, participating discovery origin (up to 3 Tor attempts; promotes on usable 402 or 2xx); successes/failures remain cached |
 | `catalog_state.rs` | Lazy help fetch, help URL discovery origin |
 | `discovery/import.rs` | Agent OpenAPI fetch, discovery origin, public-destination policy |
 | `payment.rs` | Actual unsigned challenge and paid retry, selected EVM payer |
@@ -249,8 +270,9 @@ independently; historical authorization reads are qualification-only. Cancellati
 of a response waiter does not abandon its accepted pass.
 Help coalesces requests for the same document without blocking other resources.
 Required catalogs must succeed; explicitly optional remote failures are reported
-as unavailable during serving. The rolling catalog-load limit defaults to 2
-(configurable 1..64). Concurrent catalogs retain discovery-origin
+as unavailable during serving. The active catalog-download limit defaults to 2
+(configurable 1..64); server-delay waits hold no download permit, including during
+inspection and warming. Concurrent catalogs retain discovery-origin
 credentials; paths on the same origin share an identity, different origins do not.
 Compatible aliases coalesce downloads within the load. See
 [the deferred independent provider startup plan](plans/deferred/independent_provider_startup.md) for independent
@@ -298,6 +320,19 @@ The only application-source exception is the disposable consensus test harness,
 which administers its local Docker nodes independently of the wallet under test.
 This text scan is a tripwire, not proof about future dependencies; review this
 inventory whenever dependencies or network features change.
+
+Opt-in qualification installs a private HTTP scope observer before transport
+construction. It records canonical owner credentials, effective scope credentials
+and canonical origin before SOCKS disclosure, including failed candidates. Ordinary
+serving installs no observer and retains no scope history. Application records are
+bound to their existing qualification session; the read-only receipt subprocess
+returns the same private metadata through its owned result pipe. These observations
+never authorize requests, financial work or destinations. Audits derive owner and
+destination permissions independently, aggregate required observations across
+that owner's recorded scopes, and check circuit separation by actual credentials.
+Unknown or conflicting aliases and unrecorded scopes remain failures. Archived
+re-audits compare interval metadata against the registered session evidence;
+missing historical metadata cannot be reconstructed from Tor STREAM events.
 
 ## Verification
 
@@ -442,6 +477,8 @@ financial or qualification authority.
 | MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
 | Treasury observation: 60-second minimum, errors back off to 300 seconds | Available treasury startup and explicit sync request one pass. Current enabled unfilled funding demand or validated pending source/shielding work owns recurring scans; idle treasury performs none. Shared scan timing is measured from attempt completion, so long later command work cannot postpone an already-due scan. Busy/locked read-only demand acquisition uses a 60-second local reevaluation wake while commands and notifications remain usable; unknown demand never authorizes a scan or resets observation timing. Scheduled source observers reuse healthy current-owner persisted scans without intervening tip probes; actual new-action validation still checks exact canonical height/hash and snapshot revision. Publication and SDK reconstruction have independent 60-second retries and never justify another scan alone. Owned shutdown retains identical completed-result publication retries without another calculation or submission. Scheduling/reuse never renews the original observation time or financial authority. Successful needed scans may start per-address owned-transparent shielding under current permission/fees. Removed age/lag gates remain removed; expiry/non-inclusion requires actual scanned coverage and signed protocol expiry remains authoritative. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
 | Base resource ownership: 64 query owners, 32 active RPCs, 128 RPC callers | Bounds acquired query memory, active transports, and RPC work including callers awaiting transport capacity. Saturation rejects unsigned acquisition; no whole-work timeout or spending limit. Production owners acquire wallet and authorization pages of at most 64 rows each. Identical in-flight background balance reads share one retained query owner under these same bounds; completed results are not retained by that sharing layer and no local age policy is applied. |
+| Pricing requests: 16 process-wide; `probe_concurrency` per source | Bounds active origin attempts and admitted relay work. Logical probes release request capacity during server delays; queued relay callers and cache hits hold no request permit. Accepted relay work retains permits through publication despite waiter cancellation. No separate source-wide scheduling gate. |
+| Catalog downloads: `startup.catalog_concurrency`, default 2 | Bounds active origin downloads and admitted relay work per deployment load or deferred runtime. Logical retry delays, relay serialization/readiness waits and cache hits reserve no download capacity. Strict loads/warming retain completeness and single-fetch relay semantics; serving may wait for discovery readiness. |
 | Managed payment owners: 128 | Bounds completed financial observations and private signing work retained while waiting for the group gate or signed dispatch. Saturation cannot sign or create a liability. |
 | Advisory maintenance: four balance reads per group | One finite startup inventory pass, then explicitly requested refreshes only. Shared per-wallet acquisitions wait at least 60 seconds after completion, with independent error backoff up to 300 seconds; idle wallets are not swept. Zero success completes a request; failures and notifications arriving during reads retain pending work. Accepted scalar owners survive waiter cancellation. Indexed 64-row pages cover pending requests and the captured startup boundary. The five-second local scheduler/owner-restart cadence does not authorize Base reads during cooldown. Canonical pending authorization traversal remains qualification-only. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
 | Managed payer selection | Indexed saved hints select among existing eligible identities, without RPC or historical repair. Insufficient-funds traversal captures the existing inventory and visits each identity once; it never allocates or waits for funding. |

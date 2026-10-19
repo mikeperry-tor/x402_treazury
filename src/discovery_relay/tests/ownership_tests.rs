@@ -80,9 +80,18 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
                 }),
             );
             let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let capacity = vec![
+                Arc::new(tokio::sync::Semaphore::new(1)),
+                Arc::new(tokio::sync::Semaphore::new(1)),
+            ];
             let waiter = tokio::spawn({
                 let relay = relay.clone();
-                async move { relay.fetch(TARGET, 200, 4096, "max_spec_bytes").await }
+                let capacity = capacity.clone();
+                async move {
+                    relay
+                        .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", capacity)
+                        .await
+                }
             });
             tokio::time::timeout(
                 std::time::Duration::from_secs(5),
@@ -102,6 +111,13 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
                 relay.state.try_lock().is_err(),
                 "accepted owner lost its lock: {outcome:?}"
             );
+            for gate in &capacity {
+                assert_eq!(
+                    gate.available_permits(),
+                    0,
+                    "cancelled waiter released accepted relay capacity: {outcome:?}"
+                );
+            }
 
             // A second wallet shares the breaker, but cannot borrow the first
             // wallet's paid response. No provider I/O can start before publication.
@@ -152,8 +168,136 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             }
             relay.client.drain().await;
             other.client.drain().await;
+            for gate in &capacity {
+                assert_eq!(
+                    gate.available_permits(),
+                    1,
+                    "relay capacity leaked: {outcome:?}"
+                );
+            }
             server.abort();
             other_server.abort();
         }
     }
+}
+
+#[tokio::test]
+async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
+    let (mut relay, fixture, unused) = fixture(envelope(TARGET), false, false).await;
+    unused.abort();
+    let arrived = CancellationToken::new();
+    let release = CancellationToken::new();
+    let healthy_calls = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    Arc::get_mut(&mut relay).unwrap().endpoint = format!("http://{address}/curl");
+    let app = Router::new()
+        .route(
+            "/curl",
+            post({
+                let fixture = fixture.clone();
+                let arrived = arrived.clone();
+                let release = release.clone();
+                move |headers: HeaderMap| {
+                    let fixture = fixture.clone();
+                    let arrived = arrived.clone();
+                    let release = release.clone();
+                    async move {
+                        if headers.contains_key("payment-signature") {
+                            arrived.cancel();
+                            release.cancelled().await;
+                        }
+                        handler(AxumState(fixture), headers).await
+                    }
+                }
+            }),
+        )
+        .route(
+            "/healthy",
+            axum::routing::get({
+                let calls = healthy_calls.clone();
+                move || {
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::OK
+                    }
+                }
+            }),
+        );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let capacity = Arc::new(tokio::sync::Semaphore::new(16));
+    let active = tokio::spawn({
+        let relay = relay.clone();
+        let capacity = capacity.clone();
+        async move {
+            relay
+                .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![capacity])
+                .await
+        }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), arrived.cancelled())
+        .await
+        .unwrap();
+    assert_eq!(capacity.available_permits(), 15);
+    let mut queued = Vec::new();
+    for _ in 0..16 {
+        queued.push(tokio::spawn({
+            let relay = relay.clone();
+            let capacity = capacity.clone();
+            async move {
+                relay
+                    .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![capacity])
+                    .await
+            }
+        }));
+    }
+    // Give every queued owner a chance to reach serialization. The active owner
+    // cannot finish until explicitly released, regardless of this fixture wait.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(queued.iter().all(|task| !task.is_finished()));
+    assert_eq!(
+        capacity.available_permits(),
+        15,
+        "relay queue reserved idle capacity"
+    );
+    let healthy_url = format!("http://{address}/healthy");
+    let healthy = crate::network::global()
+        .discovery(&healthy_url, None)
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_millis(500), async {
+        let _permit = capacity.acquire().await.unwrap();
+        assert_eq!(
+            healthy.get(&healthy_url).send().await.unwrap().status(),
+            200
+        );
+    })
+    .await
+    .expect("queued relay calls blocked unrelated request capacity");
+    assert_eq!(healthy_calls.load(Ordering::SeqCst), 1);
+    release.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        active.await.unwrap().unwrap();
+        for task in queued {
+            task.await.unwrap().unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(capacity.available_permits(), 16);
+
+    // A cached result must remain available even when no request slot exists.
+    let unavailable = Arc::new(tokio::sync::Semaphore::new(0));
+    tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        relay.fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![unavailable]),
+    )
+    .await
+    .expect("cached relay result waited for request capacity")
+    .unwrap();
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), 2);
+    relay.client.drain().await;
+    server.abort();
 }

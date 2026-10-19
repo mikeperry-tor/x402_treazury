@@ -1059,9 +1059,8 @@ impl Deployment {
                 pending.push(startup::price_source(id, source, selected));
             }
         }
-        use futures_util::{StreamExt, TryStreamExt, stream};
-        let completed: Vec<_> = stream::iter(pending)
-            .buffer_unordered(crate::pricing::CONCURRENCY)
+        use futures_util::{TryStreamExt, stream};
+        let completed: Vec<_> = stream::FuturesUnordered::from_iter(pending)
             .try_collect()
             .await?;
         // Apply only after every source succeeds; completion order cannot change inventory.

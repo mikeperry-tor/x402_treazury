@@ -22,6 +22,11 @@ scripts/zcash.sh build
 The ignored SOCKS child is exercised by its parent. Pricing barriers additionally
 assert a shared 16-request cap, lower per-source limits, rolling progress past a
 stalled endpoint, duplicate-URL coalescing, and cancellation releasing permits.
+Pricing retry regressions additionally cover a delayed probe releasing a single
+source slot, sixteen delayed sources permitting a queued provider's description
+publication through the deferred runtime, and unchanged active request bounds.
+Relay ownership fixtures cover capacity retained after waiter cancellation and
+queued serialized fetches leaving unrelated request capacity available.
 The deployment suite verifies concurrent source discovery and complete, ordered
 priced inventories through synchronous loading. The `deployment::deferred::tests`
 unit tests cover ordinary deployment serving: listeners bind before slow remote
@@ -31,6 +36,10 @@ publication preserves tool order and existing callable snapshots. Deferred colli
 regressions cover opposite completion orders, three owners, exact selectors,
 unique tools, listener isolation and captured bindings; strict loading still rejects
 duplicate names.
+The catalog capacity subprocess saturates both slots with indefinite server delays
+and verifies a queued healthy source publishes a callable tool. It also exercises
+strict loading and warming, which download the healthy source while remaining
+pending for completeness; cancellation cannot dispatch delayed retries.
 
 Wallet discovery uses the [wallet observation policy](../docs/wallet-rotation.md#wallet-observation-policy).
 `rotation::manager::maintenance::tests` exercises finite Base discovery, successful

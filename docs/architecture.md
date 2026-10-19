@@ -48,9 +48,10 @@ for example, file uploads and asynchronous job orchestration are unsupported.
 
 `src/deployment.rs` validates listeners, filters and wallet references and resolves
 source overrides, listener defaults and optional automatic assignment. Local
-catalogs load before ordinary deployment serving. Remote catalogs use a
-rolling queue, defaulting to 2 active loads (`startup.catalog_concurrency`, 1..64),
-after listeners bind. Available tools remain callable while remote catalogs and
+catalogs load before ordinary deployment serving. Remote catalogs share capacity
+for 2 active downloads by default (`startup.catalog_concurrency`, 1..64), after
+listeners bind. Server-directed retry waits release download capacity while their
+logical loads remain pending. Available tools remain callable while remote catalogs and
 pricing are pending; failed remote sources remain unavailable with status in MCP
 instructions. Strict inspection/qualification wait for complete catalogs. The
 synchronous unsigned-serving loader cancels unfinished loads on required failure

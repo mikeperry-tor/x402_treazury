@@ -1,4 +1,6 @@
 //! One serving-owned publisher; accepted relay work drains before financial owners.
+#[cfg(test)]
+mod tor_catalog_capacity_tests;
 use super::*;
 use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
 use std::sync::Arc;
@@ -11,7 +13,6 @@ pub(super) struct Runtime {
     catalog: Arc<crate::catalog_state::CatalogState>,
     manager: Option<Arc<crate::discovery::Manager>>,
     relays: Vec<Arc<crate::discovery_relay::Relay>>,
-    pricing_gate: Arc<tokio::sync::Semaphore>,
     can_allocate: bool,
 }
 enum Event {
@@ -61,7 +62,6 @@ impl Runtime {
             catalog,
             manager,
             relays,
-            pricing_gate: Arc::new(tokio::sync::Semaphore::new(crate::pricing::CONCURRENCY)),
         }
     }
     pub fn relays(&self) -> Vec<Arc<crate::discovery_relay::Relay>> {
@@ -78,9 +78,7 @@ impl Runtime {
             .filter(|(s, _)| s == &id)
             .map(|(_, t)| t.clone())
             .collect();
-        let gate = self.pricing_gate.clone();
         async move {
-            let _permit = gate.acquire_owned().await.expect("owned pricing gate");
             let result = startup::price_source(&id, &source, selected)
                 .await
                 .map(|(_, tools)| tools);
@@ -334,6 +332,150 @@ mod tests {
     use axum::{Router, routing::get};
     use serde_json::json;
     use std::sync::atomic::Ordering;
+
+    #[tokio::test]
+    async fn delayed_pricing_sources_do_not_block_queued_description_publication() {
+        let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+            .args([
+                "--ignored",
+                "--exact",
+                "deployment::deferred::tests::pricing_capacity_child",
+                "--nocapture",
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "private Tor policy; invoked by parent"]
+    async fn pricing_capacity_child() {
+        use axum::{
+            http::{HeaderMap, StatusCode, Uri},
+            response::IntoResponse,
+        };
+        use base64::Engine;
+        use std::sync::{Mutex, atomic::AtomicUsize};
+        let calls = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
+        let healthy = Arc::new(AtomicUsize::new(0));
+        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = origin.local_addr().unwrap();
+        let app = Router::new().fallback({
+            let calls = calls.clone();
+            let healthy = healthy.clone();
+            move |uri: Uri, headers: HeaderMap| {
+                let calls = calls.clone();
+                let healthy = healthy.clone();
+                async move {
+                    assert!(!headers.contains_key("payment-signature"));
+                    assert!(!headers.contains_key("x-payment"));
+                    if uri.path() == "/healthy/price" {
+                        healthy.fetch_add(1, Ordering::SeqCst);
+                        while calls.lock().unwrap().len() < crate::pricing::CONCURRENCY {
+                            tokio::task::yield_now().await;
+                        }
+                        (
+                            StatusCode::PAYMENT_REQUIRED,
+                            [(
+                                "payment-required",
+                                base64::engine::general_purpose::STANDARD
+                                    .encode(r#"{"accepts":[{"amount":"2500","asset":"USDC"}]}"#),
+                            )],
+                        )
+                            .into_response()
+                    } else {
+                        *calls
+                            .lock()
+                            .unwrap()
+                            .entry(uri.path().to_owned())
+                            .or_default() += 1;
+                        (
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            [("retry-after", "18446744073709551615")],
+                        )
+                            .into_response()
+                    }
+                }
+            }
+        });
+        let api = tokio::spawn(async move { axum::serve(origin, app).await.unwrap() });
+        let socks = crate::test_socks::Socks::start(
+            BTreeMap::from([("pricing.example.com".into(), address)]),
+            crate::test_socks::Fault::None,
+        )
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("spec.json"),
+            r#"{"operations":[{"method":"GET","path":"/price"}]}"#,
+        )
+        .unwrap();
+        let mut config = format!(
+            "version=1\n[network]\nmode='tor'\nsocks_endpoint='{}'\ncover_traffic_enabled=false\n[wallets.payer]\nmode='static'\nprivate_key_env='KEY'\n",
+            socks.address
+        );
+        let mut sources = Vec::new();
+        for n in 0..crate::pricing::CONCURRENCY {
+            let id = format!("a{n:02}");
+            config.push_str(&format!(
+                "[sources.{id}]\nspec='spec.json'\nbase_url='http://pricing.example.com/{id}'\n"
+            ));
+            sources.push(format!("'{id}'"));
+        }
+        config.push_str(
+            "[sources.zhealthy]\nspec='spec.json'\nbase_url='http://pricing.example.com/healthy'\n",
+        );
+        sources.push("'zhealthy'".into());
+        config.push_str(&format!("[servers.one]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='payer'\nsources=[{}]\n", sources.join(",")));
+        let path = dir.path().join("deployment.toml");
+        std::fs::write(&path, config).unwrap();
+        let env = BTreeMap::from([
+            ("KEY".into(), format!("{:064x}", 2)),
+            ("TOKEN".into(), "fixture".into()),
+        ]);
+        let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+            .await
+            .unwrap();
+        let running = deployment.bind(&env).await.unwrap();
+        let catalog = running.deferred.as_ref().unwrap().catalog.clone();
+        let stop = CancellationToken::new();
+        let serving = tokio::spawn(running.serve(stop.clone()));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if catalog.read().views["one"].iter().any(|bound| {
+                    bound.base.ends_with("/healthy") && bound.tool.description.contains("$0.0025")
+                }) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("healthy pricing must publish while all earlier providers await Retry-After");
+        assert_eq!(calls.lock().unwrap().len(), crate::pricing::CONCURRENCY);
+        assert!(calls.lock().unwrap().values().all(|count| *count == 1));
+        assert_eq!(healthy.load(Ordering::SeqCst), 1);
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(
+            calls.lock().unwrap().values().all(|count| *count == 1),
+            "shutdown must not dispatch delayed retries"
+        );
+        assert_eq!(healthy.load(Ordering::SeqCst), 1);
+        api.abort();
+    }
 
     #[tokio::test]
     async fn conflicting_catalogs_withdraw_all_owners_in_either_completion_order() {

@@ -1,6 +1,8 @@
 //! Dedicated installed-Tor supervision and evidence (never a bundled Tor binary).
 #[path = "tor/audit.rs"]
 pub mod audit;
+#[path = "tor/http_scopes.rs"]
+pub mod http_scopes;
 
 #[path = "tor/confinement.rs"]
 pub mod confinement;

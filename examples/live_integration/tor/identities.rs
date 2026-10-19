@@ -8,6 +8,23 @@ use x402_treazury::network::{IsolationId, NetworkContext, NetworkPolicy};
 #[path = "identities_managed.rs"]
 mod managed;
 pub use managed::{managed_map, managed_map_frozen};
+/// One mode decision for current sessions and archived interval re-audits.
+/// Frozen catalogs do not fabricate successful discovery observations.
+pub fn for_interval(
+    m: &Manifest,
+    snapshot: &Value,
+    state: &std::path::Path,
+    lookup: impl Fn(&str) -> Option<String>,
+    payments: &[Value],
+    fetched: bool,
+) -> Result<Identities> {
+    match (m.start.pools.is_empty(), fetched) {
+        (true, true) => unsigned_map(m, snapshot, state),
+        (true, false) => unsigned_map_frozen(m, snapshot, state),
+        (false, true) => managed_map(m, snapshot, state, lookup, payments),
+        (false, false) => managed_map_frozen(m, snapshot, state, lookup, payments),
+    }
+}
 fn discovery_catalogs(m: &Manifest, snapshot: &Value, fetched: bool) -> Result<Identities> {
     let policy: NetworkPolicy = serde_json::from_value(snapshot["deployment"]["network"].clone())?;
     let context = NetworkContext::new(policy)?;

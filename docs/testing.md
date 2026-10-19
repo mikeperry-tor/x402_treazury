@@ -38,7 +38,7 @@ by their parent tests differ from ignored optional live tests.
 | MCP/deployment/discovery | Auth, scope and grants, immutable invocation snapshots, update/remove races, persistent idempotency, cancellation, pagination, shutdown and ownership release. |
 | Payments/managed rotation | Real local signing, cap/asset validation, journal-before-disclosure, captured-wallet traversal only after typed insufficient funds, retained chargeable attempts, concurrent admission, exact reserve promotion, independent initial funding, and separately requested canonical resolution. |
 | Treasury/store/funding | Encrypted persistence, explicit conversion preflight, snapshot ordering, reservations and qualification limits, uncertain source sends, refund/expiry rules, backups and filesystem protections. |
-| Network | Production HTTP/gRPC through authenticated fixture SOCKS, remote hostnames, identity/pool boundaries, proxy failure, TLS, redirects and public-destination enforcement. |
+| Network | Production HTTP/gRPC through authenticated fixture SOCKS, remote hostnames, identity/pool boundaries, participating Tor discovery retries, `Retry-After` handling, conditional promotion, proxy failure, TLS, redirects and public-destination enforcement. |
 | Output/resource limits | Exact/over-bound behavior, visible errors and logs, no partial cache success, no retry of paid oversized responses, typed inline image/mapping behavior. |
 
 Tests should establish the absence of forbidden side effects as well as the
@@ -125,7 +125,11 @@ These are unfunded/local tests, not evidence of live
 Managed-payment fixtures exercise advisory selection, one saturating estimate
 decrement per authorization, structured insufficient-funds traversal beyond a page,
 cloneable POST bodies, exhaustion and multiple retained authorizations. Refresh is
-independent and coalesced; failed reads preserve hints and low markers. Funding
+independent and coalesced; failed reads preserve hints and low markers. Unfollowed 302/307 catalog
+fixtures preserve complete JSON validation and existing relay fallback without
+extra origin attempts. Unrepresentable Retry-After fixtures exercise catalog,
+pricing and relay continuation: no early dispatch, unrelated progress and explicit
+cancellation. Funding
 fixtures cover irreversible first-positive claims, exact accepted-work ownership,
 scoped observation/backoff, cancellation and restart. Qualification charges each
 accepted attempt under its original case allowance; a later success erases none.
@@ -332,6 +336,7 @@ keys and do not establish consensus or live-funded settlement qualification.
 | --- | --- |
 | Catalogs, MCP, payments, permissions, durable funding and cancellation | Offline fixtures cover named invariants and interleavings, not exhaustive race freedom or real settlement. |
 | Synthetic proving and local consensus | Optional suites exercise saved-byte recovery, mined deposits, reorg refusal, refunds and expiry. See LIFECYCLE and REGTEST; these results are separate from default coverage. |
+| Fresh HTTP scope recovery and qualification mapping | Local fixtures cover retry credentials and private scope-to-owner/origin handoff, strict STREAM audit and session isolation. The changed recovery paths have not been requalified with a real Tor daemon or funded provider run. |
 | Real Tor and confinement | Exercised on macOS with an installed Tor process, authenticated control events and OS egress controls. Local SOCKS tests do not prove this; other operating systems and all-network anonymity remain outside the claim. |
 | Funded provider workflow | The reusable runner has exercised treasury bootstrap, a selected provider sweep, help caching, canonical debit reporting and a separate startup-pricing check through Tor. Failed or omitted providers remain failed or unobserved; this is not universal provider compatibility or current health. |
 | Shared/separate-wallet concurrency and refill service | Manual live tests exercised overlapping paid calls and continued service during pending refill. Runner assertions have offline coverage; manual evidence does not qualify every automated lifecycle preset. |

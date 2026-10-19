@@ -31,7 +31,6 @@ type Document = Arc<serde_json::Value>;
 struct DeferredDocument(Arc<DeferredLoad>);
 struct DeferredLoad {
     config: catalog::Config,
-    http: reqwest::Client,
     prepared: OnceCell<std::result::Result<PreparedDocument, SharedFailure>>,
 }
 enum PreparedDocument {
@@ -49,18 +48,19 @@ impl DeferredDocument {
             .0
             .prepared
             .get_or_init(|| async {
-                let _permit = gate.acquire().await.expect("owned catalog gate");
-                catalog::prepare_json_discovery(&self.0.config, &self.0.http)
-                    .await
-                    .map(|prepared| match prepared {
-                        catalog::CatalogLoad::Ready(document) => {
-                            PreparedDocument::Ready(Arc::new(document))
-                        }
-                        catalog::CatalogLoad::RelayPending(pending) => {
-                            PreparedDocument::Relay(pending)
-                        }
-                    })
-                    .map_err(|error| SharedFailure(Arc::new(error)))
+                catalog::prepare_json_discovery_bounded(
+                    &self.0.config,
+                    crate::network::global(),
+                    Some(gate.clone()),
+                )
+                .await
+                .map(|prepared| match prepared {
+                    catalog::CatalogLoad::Ready(document) => {
+                        PreparedDocument::Ready(Arc::new(document))
+                    }
+                    catalog::CatalogLoad::RelayPending(pending) => PreparedDocument::Relay(pending),
+                })
+                .map_err(|error| SharedFailure(Arc::new(error)))
             })
             .await;
         match prepared {
@@ -134,17 +134,13 @@ struct Downloads {
     entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
     cache_directory: Option<std::path::PathBuf>,
     direct_warm_target: Option<crate::network::NetworkPolicy>,
+    gate: Option<Arc<tokio::sync::Semaphore>>,
 }
 impl Downloads {
-    async fn load(
-        &self,
-        id: &str,
-        cfg: &catalog::Config,
-        http: &reqwest::Client,
-    ) -> Result<Download> {
+    async fn load(&self, id: &str, cfg: &catalog::Config) -> Result<Download> {
         if !(cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://")) {
             return Ok(Download::Ready(Arc::new(
-                catalog::load_json_with_limit(&cfg.spec, http, cfg.max_spec_bytes).await?,
+                catalog::load_json_discovery(cfg).await?,
             )));
         }
         // Exact URL (including query), requested timeout and byte limit are deliberately
@@ -174,15 +170,18 @@ impl Downloads {
                 Ok(Download::Deferred(DeferredDocument(Arc::new(
                     DeferredLoad {
                         config: cfg.clone(),
-                        http: http.clone(),
                         prepared: OnceCell::new(),
                     },
                 ))))
             } else {
-                catalog::load_json_discovery(cfg, http)
-                    .await
-                    .map(|document| Download::Ready(Arc::new(document)))
-                    .map_err(|error| SharedFailure(Arc::new(error)))
+                catalog::load_json_discovery_bounded(
+                    cfg,
+                    crate::network::global(),
+                    self.gate.clone(),
+                )
+                .await
+                .map(|document| Download::Ready(Arc::new(document)))
+                .map_err(|error| SharedFailure(Arc::new(error)))
             }
         })
         .await
@@ -261,6 +260,7 @@ pub(super) async fn load(
     let downloads = Downloads {
         defer,
         relay,
+        gate: Some(Arc::new(tokio::sync::Semaphore::new(limit))),
         direct_warm_target: None,
         entries: Mutex::default(),
         cache_directory: config
@@ -284,7 +284,8 @@ pub(super) async fn load(
             )
         });
     }
-    let mut pending = stream::iter(loads).buffer_unordered(limit);
+    // Logical owners may wait for server delays without occupying download slots.
+    let mut pending = stream::iter(loads).buffer_unordered(total.max(1));
     let mut sources = BTreeMap::new();
     let mut unavailable = BTreeMap::new();
     let mut deferred = BTreeMap::new();
@@ -408,20 +409,20 @@ impl Source {
         if cfg.prefix.is_none() {
             cfg.prefix = Some(id.to_owned());
         }
-        let http = crate::network::provider_discovery(
-            if cfg.spec.starts_with("http") {
-                &cfg.spec
-            } else {
-                "https://local.invalid"
-            },
-            cfg.read_timeout_seconds.map(Duration::from_secs_f64),
-            cfg.transport(),
-        )?;
+        if cfg.spec.starts_with("http") {
+            let _ = crate::network::IsolationId::discovery(&cfg.spec)?;
+        }
+        ensure!(
+            cfg.read_timeout_seconds
+                .map(Duration::from_secs_f64)
+                .is_none_or(|t| t >= Duration::from_millis(1)),
+            "HTTP read inactivity timeout must be at least 1ms"
+        );
         progress.phase = "fetch_parse";
         let fetch_started = Instant::now();
         tracing::debug!(target: "x402_treazury::startup", source = id, phase = progress.phase,
             "Loading catalog document");
-        let document = downloads.load(id, &cfg, &http)
+        let document = downloads.load(id, &cfg)
             .instrument(tracing::debug_span!(target: "x402_treazury::startup", "catalog_download", source = id))
             .await;
         let document = document
@@ -651,6 +652,9 @@ pub(super) async fn warm(
     let downloads = Downloads {
         defer: false,
         relay,
+        gate: Some(Arc::new(tokio::sync::Semaphore::new(
+            config.startup.catalog_concurrency,
+        ))),
         entries: Mutex::default(),
         cache_directory: config
             .treasury
@@ -659,28 +663,31 @@ pub(super) async fn warm(
         direct_warm_target: direct.then(|| config.network.clone()),
     };
     let pricing = crate::pricing::PricingCache::default();
-    let mut pending = stream::iter(selected.iter().map(|id| async {
-        let SourceLoad::Ready(source) =
-            load_one(id, &config.sources[id], path, false, &downloads).await?
-        else {
-            anyhow::bail!("cache warming cannot defer catalog discovery");
-        };
-        let catalog_cache = catalog_cache_status(&source.config).await;
-        let (evidence, fresh_pricing_entries) = if discover_pricing {
-            let (evidence, fresh_entries) =
-                discover_warm_pricing(config, id, &source, &pricing).await?;
-            (Some(evidence), fresh_entries)
-        } else {
-            (None, 0)
-        };
-        Ok::<_, anyhow::Error>(super::cache_warm::CacheWarmSource {
-            source: id.clone(),
-            catalog_cache,
-            pricing: evidence,
-            fresh_pricing_entries,
-        })
-    }))
-    .buffer_unordered(config.startup.catalog_concurrency);
+    let mut loads = Vec::with_capacity(selected.len());
+    for id in selected {
+        loads.push(async {
+            let SourceLoad::Ready(source) =
+                load_one(id, &config.sources[id], path, false, &downloads).await?
+            else {
+                anyhow::bail!("cache warming cannot defer catalog discovery");
+            };
+            let catalog_cache = catalog_cache_status(&source.config).await;
+            let (evidence, fresh_pricing_entries) = if discover_pricing {
+                let (evidence, fresh_entries) =
+                    discover_warm_pricing(config, id, &source, &pricing).await?;
+                (Some(evidence), fresh_entries)
+            } else {
+                (None, 0)
+            };
+            Ok::<_, anyhow::Error>(super::cache_warm::CacheWarmSource {
+                source: id.clone(),
+                catalog_cache,
+                pricing: evidence,
+                fresh_pricing_entries,
+            })
+        });
+    }
+    let mut pending = stream::iter(loads).buffer_unordered(selected.len().max(1));
     let mut results = Vec::new();
     while let Some(result) = pending.next().await {
         results.push(result?);
@@ -709,14 +716,10 @@ mod deferred_tests {
             defer: true,
             ..Default::default()
         };
-        let http = crate::network::NetworkContext::new(Default::default())
-            .unwrap()
-            .discovery(&cfg.spec, None)
-            .unwrap();
-        let Download::Deferred(first) = downloads.load("a", &cfg, &http).await.unwrap() else {
+        let Download::Deferred(first) = downloads.load("a", &cfg).await.unwrap() else {
             panic!("remote catalog must defer before serving");
         };
-        let Download::Deferred(second) = downloads.load("b", &cfg, &http).await.unwrap() else {
+        let Download::Deferred(second) = downloads.load("b", &cfg).await.unwrap() else {
             panic!("remote alias must share deferred catalog");
         };
         assert!(Arc::ptr_eq(&first.0, &second.0));

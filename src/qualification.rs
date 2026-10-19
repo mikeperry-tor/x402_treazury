@@ -259,7 +259,21 @@ fn install_mode(path: &Path, config: &Path, managed: bool) -> Result<()> {
             .is_ok(),
         "qualification guard already installed"
     );
+    install_scope_observer(ACTIVE.get().expect("installed qualification guard").clone())?;
     Ok(())
+}
+fn install_scope_observer(guard: Arc<Guard>) -> Result<()> {
+    crate::network::install_http_scope_observer(move |observation| {
+        // Private evidence only. Recording a scope grants no request or funding
+        // authority; failure precedes disclosure of its SOCKS credentials.
+        let db = connection(&guard.binding)?;
+        let detail = json!({"session":guard.binding.session,"observation":observation});
+        db.execute(
+            "INSERT INTO events(run,kind,detail,at) VALUES(?1,'application_network_scope',?2,?3)",
+            params![guard.binding.run, detail.to_string(), now()?],
+        )?;
+        Ok(())
+    })
 }
 pub struct Claim {
     guard: Arc<Guard>,
@@ -390,6 +404,82 @@ mod tests {
             .unwrap();
         let recorded:String = db.query_row("SELECT json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.failure_category') FROM events WHERE kind='application_finished'",[],|r|r.get(0)).unwrap();
         assert_eq!(recorded, "http_connect");
+    }
+    #[tokio::test]
+    async fn qualification_records_actual_http_scopes_without_claiming_work() {
+        let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+            .args([
+                "--ignored",
+                "--exact",
+                "qualification::tests::http_scope_event_child",
+                "--nocapture",
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    #[tokio::test]
+    #[ignore = "private observer state; invoked by parent"]
+    async fn http_scope_event_child() {
+        let (_directory, guard, db) = fixture();
+        install_scope_observer(guard.clone()).unwrap();
+        let network = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+            mode: crate::network::Mode::Tor,
+            socks_endpoint: Some("127.0.0.1:1".parse().unwrap()),
+            ..Default::default()
+        })
+        .unwrap();
+        let owner =
+            crate::network::IsolationId::evm("0x0000000000000000000000000000000000000001").unwrap();
+        let selected = network
+            .http_participating(
+                &owner,
+                "https://api.example.com/private?credential=fixture",
+                None,
+                false,
+                Default::default(),
+            )
+            .unwrap();
+        let candidate = network.http_candidate(&selected).unwrap();
+        let rows: Vec<String> = db
+            .prepare(
+                "SELECT detail FROM events WHERE kind='application_network_scope' ORDER BY seq",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        for (row, transport) in rows.iter().zip([selected, candidate]) {
+            let detail: Value = serde_json::from_str(row).unwrap();
+            assert_eq!(detail["session"], guard.binding.session);
+            let observation: crate::network::ScopeObservation =
+                serde_json::from_value(detail["observation"].clone()).unwrap();
+            assert_eq!(observation.canonical, network.credentials(&owner));
+            assert_eq!(observation.scope, network.credentials(&transport.scope));
+            assert_eq!(observation.origin, "https://api.example.com");
+            assert!(!row.contains("credential=fixture"));
+        }
+        let claims: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE kind='application_claim'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            claims, 0,
+            "scope metadata grants no application work authority"
+        );
     }
     pub(super) fn fixture() -> (tempfile::TempDir, Arc<Guard>, Connection) {
         let dir = tempfile::tempdir().unwrap();

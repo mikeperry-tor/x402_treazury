@@ -215,22 +215,19 @@ async fn supervise(state: &Path, m: &Manifest, allow: bool, prepare_only: bool) 
             .directory;
         let snapshot: Value =
             serde_json::from_slice(&files::read_catalog(&directory.join("snapshot.json"))?)?;
-        let map = if managed {
-            identities::managed_map_frozen(
-                m,
-                &snapshot,
-                state,
-                |name| std::env::var(name).ok(),
-                &[],
-            )?
-        } else {
-            identities::unsigned_map_frozen(m, &snapshot, state)?
-        };
+        let map = identities::for_interval(
+            m,
+            &snapshot,
+            state,
+            |name| std::env::var(name).ok(),
+            &[],
+            false,
+        )?;
         files::publish(
             &evidence.join("identities.json"),
             &serde_json::to_vec_pretty(&map)?,
         )?;
-        expected = Some(map);
+        expected = Some((map, Vec::new()));
         drop(registry);
         runtime
             .tor
@@ -240,32 +237,36 @@ async fn supervise(state: &Path, m: &Manifest, allow: bool, prepare_only: bool) 
         let execution =
             execution::run_owned_with_funding(state, &m.run_id, &profile, &mut runtime, allow)
                 .await;
-        if managed {
-            let registry = Registry::open(state, true)?;
-            let report = registry.report(
-                Some(&m.run_id),
-                i64::try_from(x402_treazury::rotation::base::now()?)?,
-            )?;
-            let projection = interval_scope.project(m, &report)?;
-            let map = identities::managed_map_frozen(
-                &projection.manifest,
-                &snapshot,
-                state,
-                |name| std::env::var(name).ok(),
-                &projection.payments,
-            )?;
-            files::publish(
-                &evidence.join("session-scope.json"),
-                &serde_json::to_vec_pretty(
-                    &json!({"version":1,"sessions":projection.sessions,"catalogs_fetched":false}),
-                )?,
-            )?;
-            files::publish(
-                &evidence.join("identities-final.json"),
-                &serde_json::to_vec_pretty(&map)?,
-            )?;
-            expected = Some(map);
-        }
+        let registry = Registry::open(state, true)?;
+        let report = registry.report(
+            Some(&m.run_id),
+            i64::try_from(x402_treazury::rotation::base::now()?)?,
+        )?;
+        let projection = interval_scope.project(m, &report)?;
+        let map = identities::for_interval(
+            &projection.manifest,
+            &snapshot,
+            state,
+            |name| std::env::var(name).ok(),
+            &projection.payments,
+            false,
+        )?;
+        let scopes = super::http_scopes::from_report(&report, &projection.sessions)?;
+        files::publish(
+            &evidence.join("session-scope.json"),
+            &serde_json::to_vec_pretty(
+                &json!({"version":1,"sessions":projection.sessions,"catalogs_fetched":false}),
+            )?,
+        )?;
+        files::publish(
+            &evidence.join("identities-final.json"),
+            &serde_json::to_vec_pretty(&map)?,
+        )?;
+        files::publish(
+            &evidence.join("http-scopes.json"),
+            &serde_json::to_vec_pretty(&scopes)?,
+        )?;
+        expected = Some((map, scopes));
         execution
     }
     .await;
@@ -285,8 +286,9 @@ async fn supervise(state: &Path, m: &Manifest, allow: bool, prepare_only: bool) 
         return Ok(code);
     }
     let isolation = match (expected, stopped) {
-        (Some(expected), Ok(())) => audit::verify(
+        (Some((expected, scopes)), Ok(())) => audit::verify_with_scopes(
             &expected,
+            &scopes,
             runtime.events.as_deref().context("Tor events missing")?,
         ),
         (_, Err(error)) => Err(error),

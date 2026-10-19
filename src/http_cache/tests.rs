@@ -198,13 +198,9 @@ fn client(url: &str) -> reqwest::Client {
     crate::network::provider_discovery(url, Duration::from_secs(5), Default::default()).unwrap()
 }
 async fn catalog(url: &str, cfg: &Config) -> Result<serde_json::Value> {
-    catalog::load_json_cached(
-        url,
-        &client(url),
-        cfg.max_spec_bytes,
-        Slot::new(cfg, url, "catalog", cfg.max_spec_bytes),
-    )
-    .await
+    let mut cfg = cfg.clone();
+    cfg.spec = url.to_owned();
+    catalog::load_json_discovery(&cfg).await
 }
 #[tokio::test]
 async fn catalogs_survive_reopen_revalidate_replace_and_never_serve_stale_errors() {
@@ -587,20 +583,19 @@ async fn catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_
         .with_writer(log.reopen().unwrap())
         .finish();
     async {
-        let http = client(&cfg.spec);
-        catalog::load_json_discovery(&cfg, &http).await.unwrap();
-        catalog::load_json_discovery(&cfg, &http).await.unwrap();
+        catalog::load_json_discovery(&cfg).await.unwrap();
+        catalog::load_json_discovery(&cfg).await.unwrap();
         let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
         let mut entry = slot.read().await.unwrap();
         entry.metadata.expires = 0;
         slot.write(Some(entry)).await;
         origin.lock().unwrap().mode = 1;
-        catalog::load_json_discovery(&cfg, &http).await.unwrap();
+        catalog::load_json_discovery(&cfg).await.unwrap();
         let mut entry = slot.read().await.unwrap();
         entry.metadata.expires = 0;
         slot.write(Some(entry)).await;
         origin.lock().unwrap().mode = 2;
-        catalog::load_json_discovery(&cfg, &http).await.unwrap();
+        catalog::load_json_discovery(&cfg).await.unwrap();
         assert!(slot.read().await.unwrap().metadata.fresh());
     }
     .with_subscriber(subscriber)
@@ -709,9 +704,7 @@ async fn headerless_and_private_vary_catalogs_reuse_disk_without_cookies() {
         for _ in 0..2 {
             // New client and load: exercise persisted reuse, not a process cache.
             assert_eq!(
-                catalog::load_json_discovery(&cfg, &client(&url))
-                    .await
-                    .unwrap()["value"],
+                catalog::load_json_discovery(&cfg).await.unwrap()["value"],
                 mode
             );
         }
@@ -1129,4 +1122,423 @@ fn metadata_directive_quoting_does_not_hide_real_policy() {
             .expires,
         0
     );
+}
+
+#[test]
+fn retry_after_parses_seconds_and_http_dates_and_ignores_invalid_or_conflicting_headers() {
+    let status_429 = reqwest::StatusCode::TOO_MANY_REQUESTS;
+    let status_503 = reqwest::StatusCode::SERVICE_UNAVAILABLE;
+    let status_403 = reqwest::StatusCode::FORBIDDEN;
+
+    assert_eq!(
+        crate::network::parse_retry_after(status_429, &headers(&[("retry-after", "2")])),
+        Some(Duration::from_secs(2))
+    );
+    assert_eq!(
+        crate::network::parse_retry_after(status_503, &headers(&[("retry-after", " 1 ")])),
+        Some(Duration::from_secs(1))
+    );
+    assert_eq!(
+        crate::network::parse_retry_after(status_403, &headers(&[("retry-after", "2")])),
+        None
+    );
+    for invalid in ["0", "-1", "abc", "", "Sun, 06 Nov 1994 08:49:37 GMT"] {
+        assert_eq!(
+            crate::network::parse_retry_after(status_429, &headers(&[("retry-after", invalid)])),
+            None,
+            "{invalid}"
+        );
+    }
+    let future_date = httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(5));
+    let parsed_date =
+        crate::network::parse_retry_after(status_503, &headers(&[("retry-after", &future_date)]))
+            .unwrap();
+    assert!(parsed_date > Duration::ZERO && parsed_date <= Duration::from_secs(5));
+
+    let mut dup_same = headers(&[("retry-after", "1")]);
+    dup_same.append("retry-after", " 1 ".parse().unwrap());
+    assert_eq!(
+        crate::network::parse_retry_after(status_429, &dup_same),
+        Some(Duration::from_secs(1))
+    );
+    let mut dup_conflict = headers(&[("retry-after", "1")]);
+    dup_conflict.append("retry-after", "2".parse().unwrap());
+    assert_eq!(
+        crate::network::parse_retry_after(status_429, &dup_conflict),
+        None
+    );
+}
+
+#[tokio::test]
+async fn unfollowed_catalog_redirects_consume_complete_json_without_retries_or_disk_caching() {
+    use crate::network::{IsolationId, Mode, NetworkContext, NetworkPolicy};
+    use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for mode in [Mode::Direct, Mode::Tor] {
+        for code in [
+            axum::http::StatusCode::FOUND,
+            axum::http::StatusCode::TEMPORARY_REDIRECT,
+        ] {
+            for valid in [true, false] {
+                for candidate in [false, true] {
+                    if candidate && mode == Mode::Direct {
+                        continue;
+                    }
+                    let calls = Arc::new(AtomicUsize::new(0));
+                    let followed = Arc::new(AtomicUsize::new(0));
+                    let observed = calls.clone();
+                    let followed_route = followed.clone();
+                    let app = Router::new()
+                        .route(
+                            "/spec",
+                            axum::routing::get(move || {
+                                let observed = observed.clone();
+                                async move {
+                                    let ordinal = observed.fetch_add(1, Ordering::SeqCst);
+                                    if candidate && ordinal == 0 {
+                                        return axum::http::StatusCode::FORBIDDEN.into_response();
+                                    }
+                                    (
+                                        code,
+                                        [
+                                            ("location", "/must-not-follow"),
+                                            ("cache-control", "max-age=600"),
+                                        ],
+                                        if valid {
+                                            "{\"value\":1}"
+                                        } else {
+                                            "invalid catalog"
+                                        },
+                                    )
+                                        .into_response()
+                                }
+                            }),
+                        )
+                        .route(
+                            "/must-not-follow",
+                            axum::routing::get(move || {
+                                followed_route.fetch_add(1, Ordering::SeqCst);
+                                async { "{\"value\":999}" }
+                            }),
+                        );
+                    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                    let address = listener.local_addr().unwrap();
+                    let server = tokio::spawn(async move {
+                        axum::serve(listener, app).await.unwrap();
+                    });
+                    let socks = crate::test_socks::Socks::start(
+                        BTreeMap::from([("api.example.com".into(), address)]),
+                        crate::test_socks::Fault::None,
+                    )
+                    .await;
+                    let network = NetworkContext::new(NetworkPolicy {
+                        mode: mode.clone(),
+                        socks_endpoint: (mode == Mode::Tor).then_some(socks.address),
+                        ..Default::default()
+                    })
+                    .unwrap();
+                    let dir = tempfile::tempdir().unwrap();
+                    let mut cfg = config(dir.path());
+                    cfg.spec = if mode == Mode::Tor {
+                        "http://api.example.com/spec".into()
+                    } else {
+                        format!("http://{address}/spec")
+                    };
+                    let identity = IsolationId::discovery(&cfg.spec).unwrap();
+                    let before = network
+                        .http_participating(&identity, &cfg.spec, None, false, cfg.transport())
+                        .unwrap();
+                    let result = catalog::load_json_discovery_with(&cfg, &network).await;
+                    if valid {
+                        assert_eq!(result.unwrap()["value"], 1);
+                    } else {
+                        assert_eq!(
+                            result.unwrap_err().downcast_ref::<catalog::LoadStage>(),
+                            Some(&catalog::LoadStage::Parse)
+                        );
+                    }
+                    let after = network
+                        .http_participating(&identity, &cfg.spec, None, false, cfg.transport())
+                        .unwrap();
+                    assert_eq!(
+                        Arc::ptr_eq(&before, &after),
+                        !candidate || !valid,
+                        "only a complete valid candidate catalog promotes"
+                    );
+                    let expected = if candidate { 2 } else { 1 };
+                    assert_eq!(
+                        calls.load(Ordering::SeqCst),
+                        expected,
+                        "redirect status never earns another request"
+                    );
+                    assert_eq!(followed.load(Ordering::SeqCst), 0);
+                    assert!(
+                        Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes)
+                            .unwrap()
+                            .read()
+                            .await
+                            .is_none(),
+                        "redirect body must not become a persistent200 catalog"
+                    );
+                    assert_eq!(
+                        socks.records.lock().unwrap().len(),
+                        if mode == Mode::Tor { expected } else { 0 }
+                    );
+                    server.abort();
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn tor_catalog_retries_promote_only_valid_json_or_304_and_stop_on_local_or_content_errors() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let step = Arc::new(AtomicUsize::new(0));
+    let step_for_route = step.clone();
+    let app = Router::new().route(
+        "/spec",
+        axum::routing::get(move |req: Request| {
+            let step = step_for_route.clone();
+            async move {
+                match step.fetch_add(1, Ordering::SeqCst) {
+                    // Sequence 1: 429 (Retry-After: 1) on selected -> 200 valid JSON on candidate 1 -> promotes candidate 1.
+                    0 => (
+                        axum::http::StatusCode::TOO_MANY_REQUESTS,
+                        [("retry-after", "1")],
+                        "rate limited",
+                    )
+                        .into_response(),
+                    1 => (
+                        axum::http::StatusCode::OK,
+                        [("cache-control", "max-age=600"), ("etag", "\"v1\"")],
+                        "{\"value\":1}",
+                    )
+                        .into_response(),
+                    // Sequence 2 (after expiring disk cache): 503 on promoted scope -> 304 Not Modified on candidate -> promotes candidate.
+                    2 => {
+                        assert_eq!(req.headers()["if-none-match"], "\"v1\"");
+                        (axum::http::StatusCode::SERVICE_UNAVAILABLE, "busy").into_response()
+                    }
+                    3 => {
+                        assert_eq!(req.headers()["if-none-match"], "\"v1\"");
+                        (
+                            axum::http::StatusCode::NOT_MODIFIED,
+                            [("cache-control", "max-age=600"), ("etag", "\"v1\"")],
+                            "",
+                        )
+                            .into_response()
+                    }
+                    // Sequence 3: 403 on selected -> 200 invalid JSON on candidate -> fails at parse without retry or promotion.
+                    4 => (axum::http::StatusCode::FORBIDDEN, "exit blocked").into_response(),
+                    5 => (axum::http::StatusCode::OK, "not json").into_response(),
+                    // Sequence 4: 400 on selected -> 200 oversized body on candidate -> fails at body limit without retry or promotion.
+                    6 => (axum::http::StatusCode::BAD_REQUEST, "bad exit").into_response(),
+                    7 => (axum::http::StatusCode::OK, "x".repeat(2048)).into_response(),
+                    // Sequence 5: 404 (ineligible status) -> fails immediately after 1 attempt.
+                    _ => (axum::http::StatusCode::NOT_FOUND, "missing").into_response(),
+                }
+            }
+        }),
+    );
+    let (address, origin) = crate::test_tls::serve(app).await;
+    let url = "https://api.example.com/spec".to_owned();
+    let socks = crate::test_socks::Socks::start(
+        std::collections::BTreeMap::from([("api.example.com".into(), address)]),
+        crate::test_socks::Fault::None,
+    )
+    .await;
+    let context = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+        mode: crate::network::Mode::Tor,
+        socks_endpoint: Some(socks.address),
+        ..Default::default()
+    })
+    .unwrap()
+    .with_test_root(crate::test_tls::CA);
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(dir.path());
+    cfg.spec = url.clone();
+    cfg.max_spec_bytes = 1024;
+    let id = crate::network::IsolationId::discovery(&url).unwrap();
+
+    let initial_selected = context
+        .http_participating(&id, &url, None, false, cfg.transport())
+        .unwrap();
+    let started = std::time::Instant::now();
+    let doc = catalog::load_json_discovery_with(&cfg, &context)
+        .await
+        .unwrap();
+    assert_eq!(doc["value"], 1);
+    assert!(started.elapsed() >= Duration::from_millis(900));
+    assert_eq!(step.load(Ordering::SeqCst), 2);
+    let promoted_1 = context
+        .http_participating(&id, &url, None, false, cfg.transport())
+        .unwrap();
+    assert!(!Arc::ptr_eq(&initial_selected, &promoted_1));
+    {
+        let records = socks.records.lock().unwrap();
+        assert_eq!(records.len(), 2);
+        assert_ne!(records[0].password, records[1].password);
+        assert_eq!(
+            records[1].password,
+            context.credentials(&promoted_1.scope).1
+        );
+    }
+
+    // Fresh disk cache hit returns without network I/O or transport changes.
+    let cached_doc = catalog::load_json_discovery_with(&cfg, &context)
+        .await
+        .unwrap();
+    assert_eq!(cached_doc["value"], 1);
+    assert_eq!(step.load(Ordering::SeqCst), 2);
+    assert_eq!(socks.records.lock().unwrap().len(), 2);
+    assert!(Arc::ptr_eq(
+        &promoted_1,
+        &context
+            .http_participating(&id, &url, None, false, cfg.transport())
+            .unwrap()
+    ));
+
+    // Expire disk cache entry to trigger conditional revalidation: 503 on promoted_1 (reusing pooled HTTP/2 connection) -> 304 on candidate -> promotes candidate.
+    let slot = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
+    let mut entry = slot.read().await.unwrap();
+    entry.metadata.expires = 0;
+    slot.write(Some(entry)).await;
+    let revalidated = catalog::load_json_discovery_with(&cfg, &context)
+        .await
+        .unwrap();
+    assert_eq!(revalidated["value"], 1);
+    assert_eq!(step.load(Ordering::SeqCst), 4);
+    let promoted_2 = context
+        .http_participating(&id, &url, None, false, cfg.transport())
+        .unwrap();
+    assert!(!Arc::ptr_eq(&promoted_1, &promoted_2));
+    {
+        let records = socks.records.lock().unwrap();
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[2].password,
+            context.credentials(&promoted_2.scope).1
+        );
+    }
+
+    // Expire disk cache entry; next sequence gets 403 on promoted_2 then 200 invalid JSON on candidate -> fails at Parse without third attempt or promotion.
+    let mut entry = slot.read().await.unwrap();
+    entry.metadata.expires = 0;
+    slot.write(Some(entry)).await;
+    let parse_err = catalog::load_json_discovery_with(&cfg, &context)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        parse_err.downcast_ref::<catalog::LoadStage>(),
+        Some(&catalog::LoadStage::Parse)
+    );
+    assert_eq!(step.load(Ordering::SeqCst), 6);
+    {
+        let records = socks.records.lock().unwrap();
+        assert_eq!(records.len(), 4);
+        assert_ne!(
+            records[3].password,
+            context.credentials(&promoted_2.scope).1
+        );
+    }
+    assert!(Arc::ptr_eq(
+        &promoted_2,
+        &context
+            .http_participating(&id, &url, None, false, cfg.transport())
+            .unwrap()
+    ));
+
+    // Sequence 4: 400 on promoted_2 then 200 oversized body on candidate -> fails at Body limit without third attempt or promotion.
+    let body_err = catalog::load_json_discovery_with(&cfg, &context)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        body_err.downcast_ref::<catalog::LoadStage>(),
+        Some(&catalog::LoadStage::Body)
+    );
+    assert_eq!(step.load(Ordering::SeqCst), 8);
+    {
+        let records = socks.records.lock().unwrap();
+        assert_eq!(records.len(), 5);
+        assert_ne!(
+            records[4].password,
+            context.credentials(&promoted_2.scope).1
+        );
+    }
+    assert!(Arc::ptr_eq(
+        &promoted_2,
+        &context
+            .http_participating(&id, &url, None, false, cfg.transport())
+            .unwrap()
+    ));
+
+    // Sequence 5: 404 (ineligible HTTP status) -> fails immediately after 1 attempt without opening any candidate SOCKS connection.
+    let status_err = catalog::load_json_discovery_with(&cfg, &context)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        status_err
+            .downcast_ref::<reqwest::Error>()
+            .unwrap()
+            .status(),
+        Some(reqwest::StatusCode::NOT_FOUND)
+    );
+    assert_eq!(step.load(Ordering::SeqCst), 9);
+    assert_eq!(socks.records.lock().unwrap().len(), 5);
+
+    // Untrusted TLS certificate fails immediately after 1 attempt without burning candidate scopes.
+    let untrusted_ctx = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+        mode: crate::network::Mode::Tor,
+        socks_endpoint: Some(socks.address),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(
+        catalog::load_json_discovery_with(&cfg, &untrusted_ctx)
+            .await
+            .is_err()
+    );
+    assert_eq!(socks.records.lock().unwrap().len(), 6);
+
+    // Local SOCKS auth failure (BadAuth) and closed local SOCKS listener fail after 1 attempt.
+    let bad_socks = crate::test_socks::Socks::start(
+        std::collections::BTreeMap::from([("api.example.com".into(), address)]),
+        crate::test_socks::Fault::BadAuth,
+    )
+    .await;
+    let bad_ctx = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+        mode: crate::network::Mode::Tor,
+        socks_endpoint: Some(bad_socks.address),
+        ..Default::default()
+    })
+    .unwrap()
+    .with_test_root(crate::test_tls::CA);
+    let err = catalog::load_json_discovery_with(&cfg, &bad_ctx)
+        .await
+        .unwrap_err();
+    assert!(!crate::network::eligible_retry_transport(
+        err.downcast_ref::<reqwest::Error>().unwrap()
+    ));
+    assert_eq!(bad_socks.accepted.load(Ordering::SeqCst), 1);
+    assert_eq!(bad_socks.records.lock().unwrap().len(), 0);
+
+    let closed_addr = bad_socks.address;
+    drop(bad_socks);
+    tokio::task::yield_now().await;
+    let closed_ctx = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+        mode: crate::network::Mode::Tor,
+        socks_endpoint: Some(closed_addr),
+        ..Default::default()
+    })
+    .unwrap()
+    .with_test_root(crate::test_tls::CA);
+    let err = catalog::load_json_discovery_with(&cfg, &closed_ctx)
+        .await
+        .unwrap_err();
+    assert!(!crate::network::eligible_retry_transport(
+        err.downcast_ref::<reqwest::Error>().unwrap()
+    ));
+
+    origin.abort();
 }

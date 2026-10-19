@@ -55,23 +55,14 @@ fn interval(
     let ids: BTreeSet<String> = raw_ids.iter().cloned().collect();
     ensure!(ids.len() == raw_ids.len(), "duplicate Tor interval session");
     let projected = scope::Sessions::including(report, &ids)?.project(m, report)?;
-    let derived = if fetched {
-        identities::managed_map(
-            &projected.manifest,
-            snapshot,
-            state,
-            |n| std::env::var(n).ok(),
-            &projected.payments,
-        )?
-    } else {
-        identities::managed_map_frozen(
-            &projected.manifest,
-            snapshot,
-            state,
-            |n| std::env::var(n).ok(),
-            &projected.payments,
-        )?
-    };
+    let derived = identities::for_interval(
+        &projected.manifest,
+        snapshot,
+        state,
+        |name| std::env::var(name).ok(),
+        &projected.payments,
+        fetched,
+    )?;
     files::directory(path)?;
     let process = document(&path.join("tor.process.json"))?;
     ensure!(
@@ -99,7 +90,19 @@ fn interval(
             && complete["events_sha256"] == files::hash(&bytes),
         "prior Tor control evidence is incomplete or changed"
     );
-    audit::verify(&map, &events)?;
+    let scopes = super::http_scopes::from_report(report, &ids)?;
+    let scope_path = path.join("http-scopes.json");
+    if scope_path.try_exists()? {
+        let archived: Vec<x402_treazury::network::ScopeObservation> =
+            serde_json::from_value(document(&scope_path)?)?;
+        ensure!(
+            archived == scopes,
+            "prior HTTP scopes differ from registered session evidence"
+        );
+    } else {
+        ensure!(scopes.is_empty(), "prior HTTP scope evidence is missing");
+    }
+    audit::verify_with_scopes(&map, &scopes, &events)?;
     Ok(ids)
 }
 fn interval_kind(run: &str, name: &str) -> Option<bool> {
@@ -170,6 +173,82 @@ mod tests {
         );
         assert_eq!(interval_kind("run", "run-tor-resume_not_a_uuid"), None);
         assert_eq!(interval_kind("run", "other-tor"), None);
+    }
+    #[test]
+    fn unsigned_interval_reaudit_uses_registered_scope_and_keyless_permissions() {
+        use serde_json::json;
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let store = x402_treazury::rotation::store::Store::create(
+            &state,
+            &dir.path().join("key"),
+            1,
+            b"public fixture",
+        )
+        .unwrap();
+        let mut m = crate::tests::manifest();
+        m.treasury_id = store.status().unwrap().treasury_id;
+        m.start.pools.clear();
+        m.cases.iter_mut().for_each(|case| case.unsigned = true);
+        let snapshot = json!({"deployment":{"network":{"mode":"tor","socks_endpoint":"127.0.0.1:19050"}},
+            "sources":{"api":{"settings":{"help_url":"https://help.test/llms.txt"}}},
+            "inventory":[{"server":"main","tools":[{"source":"api","name":"api_read","help_url":"https://help.test/llms.txt"}]}]});
+        let map = identities::unsigned_map_frozen(&m, &snapshot, &state).unwrap();
+        let discovery = map
+            .values()
+            .find(|identity| identity.targets.contains("help.test:443"))
+            .unwrap();
+        let scope = x402_treazury::network::ScopeObservation {
+            canonical: (discovery.user.clone(), discovery.password.clone()),
+            scope: ("scope-user".into(), "public-scope-fixture".into()),
+            origin: "https://help.test".into(),
+        };
+        let report = json!({"runtime_events":[
+            {"kind":"application_session","detail":{"session":"session"}},
+            {"kind":"application_claim","detail":{"session":"session","case":m.cases[0].id,"server":"main","source":"api","tool":"api_read"}},
+            {"kind":"application_network_scope","detail":{"session":"session","observation":scope}}
+        ]});
+        let evidence = dir.path().join("evidence");
+        files::create_dir(&evidence).unwrap();
+        let publish = |name: &str, value: Value| {
+            files::publish(&evidence.join(name), &serde_json::to_vec(&value).unwrap()).unwrap()
+        };
+        publish(
+            "session-scope.json",
+            json!({"version":1,"catalogs_fetched":false,"sessions":["session"]}),
+        );
+        publish("identities-final.json", serde_json::to_value(&map).unwrap());
+        publish("http-scopes.json", json!([scope]));
+        publish(
+            "tor.process.json",
+            json!({"success":true,"valid_output":true,"forced_kill":false}),
+        );
+        publish("confinement.json", json!({"status":"qualified"}));
+        let events = "650 STREAM 1 NEW 0 help.test:443 PURPOSE=USER SOCKS_USERNAME=scope-user SOCKS_PASSWORD=public-scope-fixture\n650 STREAM 1 SUCCEEDED 11 help.test:443\n";
+        files::publish(&evidence.join("tor-events.log"), events.as_bytes()).unwrap();
+        publish(
+            "control-completion.json",
+            json!({"version":1,"complete":true,"event_count":2,"events_sha256":files::hash(events.as_bytes())}),
+        );
+        assert_eq!(
+            interval(&evidence, &state, &m, &report, &snapshot, false).unwrap(),
+            BTreeSet::from(["session".into()])
+        );
+        // Deliberately tamper with this temporary archive; production evidence
+        // publication correctly refuses to overwrite any existing file.
+        std::fs::write(evidence.join("http-scopes.json"), b"[]").unwrap();
+        assert!(
+            interval(&evidence, &state, &m, &report, &snapshot, false).is_err(),
+            "archive mappings must match registered session"
+        );
+        std::fs::write(
+            evidence.join("http-scopes.json"),
+            serde_json::to_vec(&json!([scope])).unwrap(),
+        )
+        .unwrap();
+        let mut changed = report;
+        changed["runtime_events"][2]["detail"]["session"] = json!("unknown");
+        assert!(interval(&evidence, &state, &m, &changed, &snapshot, false).is_err());
     }
     #[test]
     fn retained_maps_cannot_widen_destinations_or_change_credentials() {

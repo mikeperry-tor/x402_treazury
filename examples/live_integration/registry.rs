@@ -28,9 +28,9 @@ mod lifecycle;
 mod observation;
 #[path = "registry_settlement.rs"]
 mod settlement;
-pub(crate) use settlement::attempt_outcome;
 #[cfg(test)]
 pub use cases::Outcome;
+pub(crate) use settlement::attempt_outcome;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -519,7 +519,7 @@ impl Registry {
     }
 
     fn report_runtime_events(&self, run: Option<&str>) -> Result<Vec<Value>> {
-        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','cover_observed','funding_execution','bootstrap_wait_started','bootstrap_wait_progress','bootstrap_ready','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished','application_pricing','application_claim','application_help','application_challenge','application_payment','application_receipt','application_debit_check','application_debit_verified','application_finished','payment_observed','tor_outage_started','tor_outage_qualified','rotation_promotion','pool_observation_requested','application_pool_observation','rotation_started','rotation_refill_ready','application_session','restart_requested','restart_drained','restart_completed','restart_checkpoint_unobserved','outage_backup_completed') ORDER BY seq LIMIT 50001")?;
+        let mut events = self.db.prepare("SELECT run,kind,detail,at FROM events WHERE (?1 IS NULL OR run=?1) AND kind IN ('execution_started','execution_resumed','cover_observed','funding_execution','bootstrap_wait_started','bootstrap_wait_progress','bootstrap_ready','mcp_dispatch_intent','mcp_finished','mcp_failure','child_finished','application_pricing','application_network_scope','application_claim','application_help','application_challenge','application_payment','application_receipt','application_debit_check','application_debit_verified','application_finished','payment_observed','tor_outage_started','tor_outage_qualified','rotation_promotion','pool_observation_requested','application_pool_observation','rotation_started','rotation_refill_ready','application_session','restart_requested','restart_drained','restart_completed','restart_checkpoint_unobserved','outage_backup_completed') ORDER BY seq LIMIT 50001")?;
         let runtime_events = events
             .query_map([run], |r| {
                 Ok((

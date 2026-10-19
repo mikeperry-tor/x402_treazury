@@ -356,21 +356,20 @@ async fn tor_catalog_child() {
     assert_eq!(records.len(), 6);
     for record in records.iter() {
         assert_eq!(record.address_type, 3);
-        let expected = context
+        let legacy = context
             .credentials(&IsolationId::discovery(&format!("http://{}", record.host)).unwrap());
-        assert_eq!((&record.user, &record.password), (&expected.0, &expected.1));
+        assert_eq!(record.user, legacy.0);
+        assert_ne!(record.password, legacy.1);
+        assert_eq!(record.password.len(), legacy.1.len());
+        assert!(record.password.starts_with("x402_treazury:v1:"));
     }
     let a: Vec<_> = records.iter().filter(|r| r.host == "a.test").collect();
     assert_eq!(a.len(), 4);
     assert!(a.iter().all(|r| r.password == a[0].password));
-    assert_ne!(
-        a[0].password,
-        records
-            .iter()
-            .find(|r| r.host == "b.test")
-            .unwrap()
-            .password
-    );
+    let b: Vec<_> = records.iter().filter(|r| r.host == "b.test").collect();
+    assert_eq!(b.len(), 2);
+    assert!(b.iter().all(|r| r.password == b[0].password));
+    assert_ne!(a[0].password, b[0].password);
 }
 
 #[tokio::test]

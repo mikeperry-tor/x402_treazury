@@ -54,8 +54,8 @@ Zcash support does not spend funds. Source limits remain required. See the
 
 ## Multiple MCP ports from one configuration
 
-Deployment catalogs load concurrently through a rolling queue. The default is 2
-active loads; set a value from 1 to 64 in the deployment TOML:
+Deployment catalogs share download capacity. The default is 2 active downloads;
+set a value from 1 to 64 in the deployment TOML:
 
 ```toml
 [startup]
@@ -67,7 +67,13 @@ simultaneous large downloads leave headroom when Tor’s prebuilt Conflux capaci
 is unavailable. Current measurements do not establish that mechanism or an optimal
 limit; see [startup qualification](../tests/STARTUP.md). Pricing concurrency is separate.
 
-A free slot starts the next source immediately. Ordinary deployment serving loads
+A free slot starts the next ready download immediately. Logical loads waiting for
+`Retry-After` release download capacity while retaining their retry sequence and
+deadline. The same scheduling applies to inspection, warming and deferred serving;
+inspection and warming still require their complete selected results. Relay work
+reserves capacity only after serialization/cache/readiness checks and retains it
+through terminal publication. Synchronous relay fallback remains a single fetch;
+only deferred serving waits for discovery readiness. Ordinary deployment serving loads
 local catalogs, binds listeners and exposes available tools while remote catalogs
 and pricing discovery run in the background. Stderr and MCP instructions identify
 pending or unavailable sources; a failed remote source's tools are omitted as a
@@ -897,9 +903,12 @@ are sorted by path/method and capped per source. TOML controls are
 `probe_max_endpoints` (default 200; zero disables requests), `probe_concurrency`
 (default 4) and `probe_ttl_seconds` (default 3600 seconds). Pricing uses the same
 `read_timeout_seconds` as the source's other HTTP requests. `probe_methods` accepts GET only. Process-wide concurrency is
-capped at 16, even when sources request a higher limit. Up to 16 sources discover
-prices concurrently; each source uses rolling slots at its own configured limit.
-Completed slots are reused without waiting for a batch. Ordinary deployment
+capped at 16 active requests, even when sources request a higher limit. Each
+source also bounds active requests by `probe_concurrency`. Logical probes waiting
+for `Retry-After` keep their coalesced owner but release both request permits, so
+queued endpoints and other sources can proceed. Relay calls acquire capacity after
+relay serialization and readiness checks; accepted work retains it through response
+consumption and publication despite waiter cancellation. Ordinary deployment
 serving publishes price descriptions as discovery completes, without changing
 inventory order. Standalone provider serving and explicit priced inventories wait
 for pricing discovery.
@@ -910,7 +919,13 @@ Paid calls still validate the current challenge and enforce spend caps.
 
 A process-wide cache keys GET requests by their full routed URL (including any
 base URL path prefix), transport compatibility flags, disk-cache scope and opt-out. Sources and listeners
-with the same policy share results; concurrent matching requests coalesce. Failures, malformed challenges, rate limits and
+with the same policy share results; concurrent matching requests coalesce. In Tor
+mode, static catalog and pricing origin fetches use participating per-origin
+isolation scopes and retry eligible status (`400`, `403`, `429`, `503`) or
+transport/timeout failures up to 2 times on fresh candidate scopes (`3` attempts
+total), honoring valid `Retry-After` delays on `429`/`503` and promoting a
+winning candidate only after a valid catalog JSON/304 or usable 402/2xx pricing
+response. Terminal failures, malformed challenges, rate limits and
 unpaid successes are cached too. Redirects are not followed. Nothing refreshes
 a cached attempt during the process lifetime; TTL expiry makes its result
 unavailable to later catalog builds without making another request. Tool
@@ -966,8 +981,9 @@ versions; those disposable entries are left for eviction.
 Pricing persists only the derived display estimate from a usable HTTP 402 with
 explicit, positive freshness, capped by `probe_ttl_seconds`. Payment challenges,
 headers and paid responses are never stored or reused for signing. An expired
-estimate triggers the ordinary single unsigned GET on a later startup, with no
-conditional pricing request. Within a process, one-shot success/failure caching
+estimate triggers one logical unsigned GET probe on a later startup, including
+eligible Tor recovery, with no conditional pricing request. Within a process,
+one-shot success/failure caching
 and expiry-without-refresh remain unchanged. Previously built descriptions are
 still startup estimates. A disk hit retains its remaining lifetime rather than
 receiving a new full TTL.
@@ -1052,10 +1068,13 @@ challenge was observed, which does not establish that the API is free.
 Pricing discovery skips tools with required arguments: it sends bare GETs and cannot
 supply agent inputs (for example, Straits’ `/api/v1/since` requires `at`).
 These exclusions are recorded as `skipped_arguments` and never invoke the relay.
-These discovery requests do not immediately
-retry the origin: each failure gets one configured relay fallback. Local-file failures
-remain local. This does not diagnose Tor blocking; the same policy applies on a direct
-deployment. Warnings identify the source, catalog/pricing stage, fixed failure category
+In direct mode, or for ineligible origin errors (such as `404`, `500`, oversized/invalid
+bodies, or malformed `402` challenges), origin failure proceeds to one configured relay
+fallback without origin retry; in Tor mode, eligible status (`400`, `403`, `429`, `503`)
+or transport failures try up to two fresh Tor isolation scopes first, honoring any valid
+`Retry-After` on `429`/`503` before the next attempt or relay fallback. Relay-supplied
+responses never promote an origin transport scope. Local-file failures
+remain local. Warnings identify the source, catalog/pricing stage, fixed failure category
 and HTTP status when available, without logging request URLs or upstream error text.
 
 ```toml

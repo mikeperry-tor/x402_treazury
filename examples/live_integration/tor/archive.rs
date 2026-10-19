@@ -127,21 +127,17 @@ pub fn audit_run(state: &Path, run: &str, output: &Path) -> Result<u8> {
         .filter(|e| e["kind"] == "application_payment")
         .map(|e| e["detail"].clone())
         .collect();
-    let expected = if manifest.start.pools.is_empty() {
-        if directory.ends_with(format!("{run}-tor-run")) {
-            identities::unsigned_map_frozen(&manifest, &snapshot, state)?
-        } else {
-            identities::unsigned_map(&manifest, &snapshot, state)?
-        }
-    } else {
-        identities::managed_map(
-            &manifest,
-            &snapshot,
-            state,
-            |name| std::env::var(name).ok(),
-            &payments,
-        )?
-    };
+    // Historical managed exports included fetched catalogs; preserve that scope.
+    let fetched =
+        !manifest.start.pools.is_empty() || !directory.ends_with(format!("{run}-tor-run"));
+    let expected = identities::for_interval(
+        &manifest,
+        &snapshot,
+        state,
+        |name| std::env::var(name).ok(),
+        &payments,
+        fetched,
+    )?;
     let initial: audit::Identities =
         serde_json::from_value(document(&directory.join("identities.json"))?)?;
     let corrections = initial_identities(&initial, &expected)?;

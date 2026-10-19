@@ -574,6 +574,12 @@ Acceptance evidence:
   and shared-read fixtures, plus affected network/managed/treasury-consumer tests.
   Verify nonzero executed cases and actual negative-side-effect assertions. Reuse
   unchanged discovery/API evidence only where hashes and dependencies still match.
+- Verify qualification consumers use private, session-bound observations of actual
+  fresh scope credentials and canonical owner/origin association, rather than
+  predicting random scopes from deterministic owners. Preserve independently
+  derived permissions, actual-credential circuit separation, strict unknown-scope
+  refusal, archived interval re-audits and standalone receipt observation. No normal
+  serving history or new authority; no live qualification claim from fixtures.
 - Update network (caller inventory and Base retry behavior), configuration Base
   policy, architecture, wallet observation/reconciliation, both resource inventories
   and testing guidance in this commit. Document endpoint-first ordering, exact
