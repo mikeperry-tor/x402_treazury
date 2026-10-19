@@ -57,7 +57,9 @@ URL at `https://api.socialfetch.dev`.
 Credit prose comes from `x-socialfetch-credits-pricing`. The provider's
 `credit_pricing` setting converts structured `x-socialfetch-pricing` metadata
 into per-tool USDC estimates, including metered costs and maximums, while retaining
-that prose. The configured 0.014 USDC/credit is a historical estimate, not a verified
+that prose. This includes Instagram v2 `include` surcharges and the recognized
+`always` / `fixed_price_only` exact-payment hints; those hints do not select payment
+behavior. The configured 0.014 USDC/credit is a historical estimate, not a verified
 current x402 tariff; the payment challenge remains authoritative. Instruction
 overrides and platform filters retain estimates. Pricing probes are disabled;
 no endpoint sweep is needed. Fetching the live spec still requires one startup

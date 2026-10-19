@@ -1182,6 +1182,9 @@ spending caps or signing. The supported version-1 metadata describes `baseCredit
 `maxCredits`, `normalizationFailureCredits`, `surcharges`, optional URL batches and
 per-returned-record metering. Conditional surcharge amounts are shown as upper
 bounds, since the metadata may describe a maximum across multiple assets.
+The `includes` surcharge condition names a value in a query parameter's array.
+Recognized `x402ExactPolicy` hints (`always`, `fixed_price_only`) leave credit
+estimates unchanged; payment negotiation still uses the actual challenge.
 Original credit prose remains alongside the estimate. Missing, malformed or unknown
 metadata retains that prose and the configured rate, explicitly marks the per-call
 estimate unavailable, and logs one WARN summary per catalog build. The summary

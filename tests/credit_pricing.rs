@@ -295,6 +295,33 @@ fn expect_estimate(metadata: Value, estimate: &str) {
 }
 
 #[test]
+fn exact_policy_hints_and_instagram_include_surcharges_preserve_estimates() {
+    for policy in ["always", "fixed_price_only"] {
+        let mut p = tariff();
+        p["x402ExactPolicy"] = json!(policy);
+        assert_eq!(tools(p)[0].description, tools(tariff())[0].description);
+    }
+    // Live Instagram v2 profile and media tariffs (2026-10-19).
+    expect_estimate(
+        json!({"version":1,"baseCredits":1,"maxCredits":3,
+        "normalizationFailureCredits":0,"settlement":"actual_credits",
+        "x402ExactPolicy":"fixed_price_only","surcharges":[
+            {"queryParam":"include","when":"includes","value":"recentMedia","credits":1,"label":"+1 credit for recentMedia"},
+            {"queryParam":"include","when":"includes","value":"about","credits":1,"label":"+1 credit for about"}
+        ]}),
+        "0.014 USDC base; maximum 0.042 USDC/request; up to 0.014 USDC extra when include includes recentMedia (+1 credit for recentMedia); up to 0.014 USDC extra when include includes about (+1 credit for about)",
+    );
+    expect_estimate(
+        json!({"version":1,"baseCredits":1,"maxCredits":61,
+        "normalizationFailureCredits":0,"settlement":"actual_credits",
+        "x402ExactPolicy":"fixed_price_only","surcharges":[
+            {"queryParam":"include","when":"includes","value":"files","credits":60,"label":"+10 credits per 16 MB of files, max 60","badge":"+10 / 16 MB"}
+        ]}),
+        "0.014 USDC base; maximum 0.854 USDC/request; up to 0.84 USDC extra when include includes files (+10 credits per 16 MB of files, max 60)",
+    );
+}
+
+#[test]
 fn complete_tariff_descriptions_preserve_modes_and_ordered_suffixes() {
     expect_estimate(tariff(), "0.014 USDC/request");
     let mut bounded = tariff();
@@ -343,6 +370,8 @@ fn unsupported_tariff_rules_and_arithmetic_overflow_keep_complete_unknown_descri
         ("maxCredits", json!(1.5)),
         ("normalizationFailureCredits", json!(2)),
         ("settlement", json!("estimated_credits")),
+        ("x402ExactPolicy", json!("unknown")),
+        ("x402ExactPolicy", json!(true)),
         ("surcharges", Value::Null),
     ] {
         let mut p = tariff();
@@ -405,6 +434,9 @@ fn unsupported_tariff_rules_and_arithmetic_overflow_keep_complete_unknown_descri
     invalid.push(overflow);
     for (key, value) in [
         ("when", json!("false")),
+        ("when", json!("includes")), // Missing the membership value.
+        ("value", json!("files")),   // Conflicts with the `present` condition.
+        ("value", json!(1)),
         ("credits", json!(2)),
         ("credits", json!(-1)),
         ("unknown", json!(true)),

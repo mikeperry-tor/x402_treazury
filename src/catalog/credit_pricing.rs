@@ -110,6 +110,15 @@ struct Tariff {
     batch: Option<Batch>,
     metered: Option<Metered>,
     settlement: Option<String>,
+    // Recognized transport hints do not change credit amounts or payment authority.
+    #[serde(rename = "x402ExactPolicy")]
+    _x402_exact_policy: Option<ExactPolicy>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ExactPolicy {
+    Always,
+    FixedPriceOnly,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -134,6 +143,7 @@ struct Surcharge {
     label: String,
     query_param: String,
     when: String,
+    value: Option<String>,
     #[serde(rename = "badge")]
     _badge: Option<String>,
 }
@@ -178,9 +188,10 @@ impl Batch {
 impl Tariff {
     fn append_charges(&self, line: &mut String, rate: u64) -> Option<()> {
         for surcharge in &self.surcharges {
-            let condition = match surcharge.when.as_str() {
-                "boolean_true" => "is true",
-                "present" => "is supplied",
+            let condition = match (surcharge.when.as_str(), surcharge.value.as_deref()) {
+                ("boolean_true", None) => "is true".to_owned(),
+                ("present", None) => "is supplied".to_owned(),
+                ("includes", Some(value)) => format!("includes {value}"),
                 _ => return None,
             };
             if surcharge.credits > self.max_credits {
