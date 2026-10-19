@@ -70,6 +70,7 @@ struct Fake {
     arrived: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
     unsigned_gate: Arc<Mutex<Option<UnsignedGate>>>,
+    body_only: Arc<AtomicBool>,
     db: std::path::PathBuf,
     traces: Arc<Mutex<Vec<(std::net::SocketAddr, String, String)>>>,
 }
@@ -281,7 +282,10 @@ async fn seller(
     if f.free.load(Ordering::SeqCst) {
         return "free".into_response();
     }
-    if let Some(h) = headers.get("payment-signature") {
+    if let Some(h) = headers
+        .get("payment-signature")
+        .or_else(|| headers.get("x-payment"))
+    {
         let p: Value = serde_json::from_slice(&STANDARD.decode(h.as_bytes()).unwrap()).unwrap();
         let recovered = signatures::recover_exact(&p);
         f.traces
@@ -320,6 +324,13 @@ async fn seller(
         tokio::time::timeout(std::time::Duration::from_secs(10), gate.wait())
             .await
             .unwrap();
+    }
+    if f.body_only.load(Ordering::SeqCst) {
+        return (
+            StatusCode::PAYMENT_REQUIRED,
+            axum::Json(f.challenge.lock().unwrap().clone()),
+        )
+            .into_response();
     }
     (
         StatusCode::PAYMENT_REQUIRED,
@@ -384,6 +395,7 @@ impl Harness {
             arrived: Arc::default(),
             release: Arc::default(),
             unsigned_gate: Arc::default(),
+            body_only: Arc::default(),
             db: dir.path().join("state/state.sqlite"),
             traces: Arc::default(),
         };
@@ -842,10 +854,97 @@ async fn informational_metadata_cannot_override_payment_safety() {
     h.close().await;
 }
 #[tokio::test]
+async fn direct_managed_calls_bound_body_challenges_and_drop_unused_header_bodies() {
+    let h = Harness::new().await;
+    let manager = ManagedPool::new(
+        h.store.clone(),
+        h.pool.clone(),
+        BaseRpc::new(&format!("{}/rpc", h.base), 12).unwrap(),
+        SpendPolicy::dollars("5").unwrap(),
+    )
+    .unwrap();
+    let http = reqwest::Client::new();
+    let retry = || reqwest::Request::new(reqwest::Method::GET, h.url.parse().unwrap());
+    let oversized = reqwest::Response::from(
+        axum::http::Response::builder()
+            .status(402)
+            .header("content-length", x402_treazury::limits::RESPONSE_BYTES + 1)
+            .body("")
+            .unwrap(),
+    );
+    assert!(
+        manager
+            .pay(
+                &http,
+                manager.candidate().await.unwrap(),
+                retry(),
+                oversized
+            )
+            .await
+            .is_err()
+    );
+    assert!(h.f.signed.lock().unwrap().is_empty());
+    let c = challenge("1");
+    for header in [true, false] {
+        let response = if header {
+            // Neither a claimed oversized body nor an unreadable body
+            // can obstruct a complete direct header challenge.
+            struct UnreadableBody;
+            impl http_body::Body for UnreadableBody {
+                type Data = axum::body::Bytes;
+                type Error = std::io::Error;
+                fn poll_frame(
+                    self: std::pin::Pin<&mut Self>,
+                    _: &mut std::task::Context<'_>,
+                ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>>
+                {
+                    panic!("unused direct challenge body must never be polled")
+                }
+            }
+            let body = reqwest::Body::wrap(UnreadableBody);
+            reqwest::Response::from(
+                axum::http::Response::builder()
+                    .status(402)
+                    .header("content-length", x402_treazury::limits::RESPONSE_BYTES + 1)
+                    .header("payment-required", STANDARD.encode(c.to_string()))
+                    .body(body)
+                    .unwrap(),
+            )
+        } else {
+            let mut v1 = c.clone();
+            v1["x402Version"] = json!(1);
+            let raw = &mut v1["accepts"][0];
+            raw["network"] = json!("base");
+            raw["maxAmountRequired"] = raw.as_object_mut().unwrap().remove("amount").unwrap();
+            raw["resource"] = json!("http://localhost/pay");
+            raw["description"] = json!("legacy direct fixture");
+            reqwest::Response::from(
+                axum::http::Response::builder()
+                    .status(402)
+                    .body(v1.to_string())
+                    .unwrap(),
+            )
+        };
+        let (paid, _) = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            manager.pay(&http, manager.candidate().await.unwrap(), retry(), response),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(paid.status(), reqwest::StatusCode::OK);
+    }
+    assert_eq!(h.f.signed.lock().unwrap().len(), 2);
+    drop(manager);
+    h.close().await;
+}
+
+#[tokio::test]
 async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
     let h = Harness::new().await;
     for kind in [
-        "v1",
+        "v3",
+        "v1_with_v2_offer",
         "upto",
         "permit2",
         "flow",
@@ -863,7 +962,8 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
         let mut c = challenge("1");
         c["accepts"][0]["outputSchema"] = json!({"type": "object"});
         match kind {
-            "v1" => c["x402Version"] = json!(1),
+            "v3" => c["x402Version"] = json!(3),
+            "v1_with_v2_offer" => c["x402Version"] = json!(1),
             "upto" => c["accepts"][0]["scheme"] = json!("upto"),
             "permit2" => c["accepts"][0]["extra"]["assetTransferMethod"] = json!("permit2"),
             "flow" => c["accepts"][0]["extra"]["flow"] = json!("upfront"),
@@ -893,6 +993,28 @@ async fn unsupported_and_over_target_offers_have_no_admission_side_effects() {
     *h.f.challenge.lock().unwrap() = c;
     h.client.execute(h.route()).await.unwrap();
     assert_eq!(h.f.signed.lock().unwrap()[0]["accepted"], supported);
+    *h.f.challenge.lock().unwrap() = json!({
+        "x402Version": 1,
+        "accepts": [{
+            "scheme": "exact",
+            "network": "base",
+            "asset": USDC,
+            "maxAmountRequired": "1",
+            "resource": "http://localhost/pay",
+            "description": "v1 exact payment",
+            "mimeType": "application/json",
+            "payTo": "0x0000000000000000000000000000000000000003",
+            "maxTimeoutSeconds": 60,
+            "extra": {"name": "USD Coin", "version": "2"}
+        }]
+    });
+    h.client.execute(h.route()).await.unwrap();
+    assert_eq!(h.f.signed.lock().unwrap()[1]["x402Version"], 1);
+    assert_eq!(h.f.signed.lock().unwrap()[1]["network"], "base");
+    h.f.body_only.store(true, Ordering::SeqCst);
+    h.client.execute(h.route()).await.unwrap();
+    assert_eq!(h.f.signed.lock().unwrap().len(), 3);
+    assert_eq!(h.f.signed.lock().unwrap()[2]["x402Version"], 1);
     h.close().await;
 }
 #[tokio::test]

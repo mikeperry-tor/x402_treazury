@@ -8,20 +8,32 @@ pub(super) fn evidence(result: &anyhow::Result<reqwest::Response>) -> Value {
     let Ok(response) = result else {
         return json!({"classification":"transport_unknown"});
     };
-    let values: Vec<_> = response
-        .headers()
-        .get_all("payment-response")
-        .iter()
+    let values: Vec<_> = ["payment-response", "x-payment-response"]
+        .into_iter()
+        .flat_map(|name| {
+            response
+                .headers()
+                .get_all(name)
+                .iter()
+                .map(move |header| (name, header))
+        })
         .collect();
     let mut receipt = match values.as_slice() {
         [] => json!({"classification":"missing"}),
-        [header] => parse(header.as_bytes()),
+        [(name, header)] => parse_network(
+            header.as_bytes(),
+            if *name == "x-payment-response" {
+                "base"
+            } else {
+                "eip155:8453"
+            },
+        ),
         _ => json!({"classification":"duplicate"}),
     };
     receipt["http_status"] = json!(response.status().as_u16());
     receipt
 }
-fn parse(raw: &[u8]) -> Value {
+fn parse_network(raw: &[u8], network: &str) -> Value {
     if raw.len() > HEADER_LIMIT {
         tracing::warn!(
             code = "qualification_receipt_limit",
@@ -50,7 +62,7 @@ fn parse(raw: &[u8]) -> Value {
         result["error_reason_present"] = json!(value.get("errorReason").is_some());
         return result;
     }
-    if value["network"] != "eip155:8453" {
+    if value["network"] != network {
         return result;
     }
     let Some(transaction) = value["transaction"]
@@ -77,6 +89,9 @@ fn parse(raw: &[u8]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn parse(raw: &[u8]) -> Value {
+        parse_network(raw, "eip155:8453")
+    }
     #[test]
     fn receipts_are_bounded_projected_and_cannot_claim_chain_verification() {
         let encode = |v: Value| BASE64_STANDARD.encode(v.to_string());
@@ -125,6 +140,50 @@ mod tests {
         assert_eq!(
             evidence(&Err(anyhow::anyhow!("sensitive transport error")))["classification"],
             "transport_unknown"
+        );
+    }
+
+    #[test]
+    fn legacy_receipts_normalize_for_recovery_and_both_names_share_ambiguity() {
+        let claim = json!({"success":true,"network":"base","transaction":format!("0x{:064x}",1),"payer":format!("0x{:040x}",2)});
+        let encoded = BASE64_STANDARD.encode(claim.to_string());
+        let response = |headers: &[(&str, &str)]| {
+            let mut r = axum::http::Response::builder().status(200);
+            for (name, value) in headers {
+                r = r.header(*name, *value);
+            }
+            Ok(reqwest::Response::from(r.body("").unwrap()))
+        };
+        let legacy = evidence(&response(&[("x-payment-response", &encoded)]));
+        assert_eq!(legacy["classification"], "seller_success");
+        assert_eq!(legacy["network"], "eip155:8453");
+        assert_eq!(legacy["transaction"], claim["transaction"]);
+        assert_eq!(legacy["payer"], claim["payer"]);
+        assert_eq!(
+            evidence(&response(&[("payment-response", &encoded)]))["classification"],
+            "malformed"
+        );
+        assert_eq!(
+            evidence(&response(&[("x-payment-response", "bad")]))["classification"],
+            "malformed"
+        );
+        for names in [
+            ["x-payment-response", "x-payment-response"],
+            ["x-payment-response", "payment-response"],
+        ] {
+            assert_eq!(
+                evidence(&response(&[(names[0], &encoded), (names[1], "bad")]))["classification"],
+                "duplicate"
+            );
+        }
+        let mut wrong = claim.clone();
+        wrong["network"] = json!("eip155:8453");
+        assert_eq!(
+            evidence(&response(&[(
+                "x-payment-response",
+                &BASE64_STANDARD.encode(wrong.to_string())
+            )]))["classification"],
+            "malformed"
         );
     }
 }

@@ -41,16 +41,35 @@ fn summary(headers: &reqwest::header::HeaderMap) -> Value {
         );
         return json!({"status":"offer_limit_exceeded","limit_offers":OFFERS,"observed_offers":offers.len(),"header_sha256":digest,"offers":[]});
     }
-    let rows: Vec<_> = offers.iter().enumerate().map(|(index, offer)| {
-        let base_usdc = offer["network"] == "eip155:8453" && offer["asset"].as_str()
-            .is_some_and(|asset| asset.eq_ignore_ascii_case(crate::payment::USDC));
-        let amount = offer["amount"].as_str().filter(|s| !s.is_empty() && s.len() <= 78 && s.bytes().all(|b| b.is_ascii_digit()))
-            .and_then(|s| U256::from_str_radix(s, 10).ok());
-        json!({"index":index,"base_usdc":base_usdc,
-            "scheme":match offer["scheme"].as_str() {Some("exact")=>"exact",Some("upto")=>"upto",_=>"other_or_missing"},
-            "amount_atomic":amount.map(|n|n.to_string()),
-            "above_one_cent":if base_usdc {amount.map(|n|n>U256::from(10000))} else {None}})
-    }).collect();
+    let v1 = challenge["x402Version"] == 1;
+    let rows: Vec<_> = offers
+        .iter()
+        .enumerate()
+        .map(|(index, offer)| {
+            let base_network = if v1 {
+                offer["network"] == "base"
+            } else {
+                offer["network"] == "eip155:8453"
+            };
+            let base_usdc = base_network
+                && offer["asset"]
+                    .as_str()
+                    .is_some_and(|asset| asset.eq_ignore_ascii_case(crate::payment::USDC));
+            let amount_field = if v1 {
+                &offer["maxAmountRequired"]
+            } else {
+                &offer["amount"]
+            };
+            let amount = amount_field
+                .as_str()
+                .filter(|s| !s.is_empty() && s.len() <= 78 && s.bytes().all(|b| b.is_ascii_digit()))
+                .and_then(|s| U256::from_str_radix(s, 10).ok());
+            json!({"index":index,"base_usdc":base_usdc,
+                "scheme":match offer["scheme"].as_str() {Some("exact")=>"exact",Some("upto")=>"upto",_=>"other_or_missing"},
+                "amount_atomic":amount.map(|n|n.to_string()),
+                "above_one_cent":if base_usdc {amount.map(|n|n>U256::from(10000))} else {None}})
+        })
+        .collect();
     json!({"status":"observed","version":challenge["x402Version"].as_u64(),"header_sha256":digest,"offers":rows})
 }
 
@@ -86,6 +105,22 @@ mod tests {
             STANDARD.encode(value.to_string()).parse().unwrap(),
         );
         h
+    }
+    #[tokio::test]
+    async fn normalized_body_only_v1_offers_are_projected_without_private_fields() {
+        let response = reqwest::Response::from(axum::http::Response::builder().status(402).body(
+            json!({"x402Version":1,"accepts":[{"network":"base","asset":crate::payment::USDC,"scheme":"exact","maxAmountRequired":"50000","resource":"private","description":"private","payTo":"private"}]}).to_string()
+        ).unwrap());
+        let response = crate::payment::bound_challenge(response, crate::limits::RESPONSE_BYTES)
+            .await
+            .unwrap();
+        let observed = summary(response.headers());
+        assert_eq!(observed["status"], "observed");
+        assert_eq!(observed["version"], 1);
+        assert_eq!(observed["offers"][0]["base_usdc"], true);
+        assert_eq!(observed["offers"][0]["amount_atomic"], "50000");
+        assert_eq!(observed["offers"][0]["above_one_cent"], true);
+        assert!(!observed.to_string().contains("private"));
     }
     #[test]
     fn unselected_prices_are_observed_without_private_metadata_or_authority() {

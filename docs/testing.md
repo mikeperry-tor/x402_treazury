@@ -383,3 +383,12 @@ local fixtures do not qualify a deployed seller or establish that the first atte
 cannot charge. Qualification reservations cover every authorization within the
 existing per-case permit; reports correlate each receipt/debit by attempt ID and
 preserve incomplete earlier outcomes. Saved admission estimates do not prove solvency.
+
+V1 fixtures cover static and managed signing from header and body challenges,
+the local SDK version-metadata adapter, and configured challenge limits above the
+default. Legacy receipt failures can traverse existing wallets; successful,
+malformed, duplicate and mixed-version receipt headers cannot earn another attempt.
+Receipt projection retains legacy transaction/payer claims under the canonical
+Base network for recovery. Direct managed header challenges discard their unused
+bodies, while body-only challenges retain the default collection bound. These
+checks use local sellers and unfunded keys, not live settlement.

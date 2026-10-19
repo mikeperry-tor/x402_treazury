@@ -223,10 +223,15 @@ into RETAINED inventory; it forbids a new deposit. Known prepared source bytes k
 the destination from automatic retirement until their original outcome is resolved.
 A partial credit never releases those source inputs or permits another deposit.
 
-`rotation/manager.rs` admits supported Base USDC v2 exact EIP-3009 offers. It
+`rotation/manager.rs` admits supported Base USDC v1 and v2 exact EIP-3009 offers. It
 validates the envelope, domain, amount and configured challenge-policy cap before
 acquisition. Payment preparation checks the current Store cap before retrieving
 the signing key, and the authorization journal rechecks it before disclosure.
+The local v1 SDK adapter corrects protocol-version metadata in the pinned client's
+candidates; signing remains in the SDK and the signed payload must still match
+the selected protocol, payer, payee, amount and validity. V1 uses `X-PAYMENT`;
+v2 uses `PAYMENT-SIGNATURE`. Standard body-only v1 challenges are normalized at
+the same bounded response boundary used for header challenges.
 Advertised extensions outside the managed payment contract are omitted
 with DEBUG diagnostics for `bazaar` discovery metadata and WARN diagnostics for
 other extensions; seller rejection remains possible.
@@ -306,6 +311,12 @@ Both authorizations can charge or execute. Other HTTP failures, transport loss,
 malformed replies, successful responses and output conversion failures grant no
 retry. The low-level `ManagedPool::pay_with_cover` API dispatches an already-bound
 challenge/transport once; use `PaidClient::managed` for complete routed calls.
+Settlement receipts take precedence over simultaneous insufficient-funds challenges.
+`X-PAYMENT-RESPONSE` (v1, network `base`) and `PAYMENT-RESPONSE` (v2, network
+`eip155:8453`) share one ambiguity boundary: duplicates, including both names
+together, grant no retry. Qualification normalizes valid legacy receipt networks
+to `eip155:8453` for existing canonical-debit recovery; seller claims remain
+unverified until the chain checks succeed.
 
 `rotation/base.rs` verifies Base chain identity, confirmed anchors,
 block-pinned USDC balances and EIP-3009 authorization use. A used authorization

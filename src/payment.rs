@@ -8,9 +8,11 @@ use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::Value;
 use std::sync::{Arc, RwLock};
-use x402_chain_eip155::{V1Eip155ExactClient, V2Eip155ExactClient, V2Eip155UptoClient};
+use x402_chain_eip155::{V2Eip155ExactClient, V2Eip155UptoClient};
 use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
+mod v1;
+pub(crate) use v1::V1ExactClient;
 
 /// Typed HTTP status for callers that must discard untrusted response prose.
 #[derive(Debug)]
@@ -187,7 +189,7 @@ impl Payer {
         let address = signer.address().to_string();
         let signer = Arc::new(signer);
         let client = X402Client::new()
-            .register(V1Eip155ExactClient::new(signer.clone()))
+            .register(V1ExactClient::new(signer.clone()))
             .register(V2Eip155ExactClient::new(signer.clone()))
             .register(V2Eip155UptoClient::new(signer))
             .with_selector(policy);
@@ -542,8 +544,8 @@ impl PaidClient {
             let (mut response, retry, receipt) =
                 unsigned_response(&http, &request, cover.as_ref()).await?;
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
-                crate::qualification::record_challenge(response.headers()).await?;
                 if unsigned_only {
+                    crate::qualification::record_challenge(response.headers()).await?;
                     tracing::warn!(
                         code = "qualification_payment_denied",
                         "unsigned qualification case refused HTTP 402; no payment signed or retried"
@@ -552,7 +554,15 @@ impl PaidClient {
                         "qualification_payment_denied: unsigned-only mode; HTTP 402 received; no payment signed or retried"
                     );
                 }
-                response = self.bound_challenge(response).await?;
+                let original_headers = response.headers().clone();
+                let bounded = bound_challenge(response, self.max_response_bytes).await;
+                crate::qualification::record_challenge(
+                    bounded
+                        .as_ref()
+                        .map_or(&original_headers, |response| response.headers()),
+                )
+                .await?;
+                response = bounded?;
                 if let Some(pool) = &self.managed {
                     match pool
                         .pay_with_cover_observed(
@@ -704,21 +714,6 @@ impl PaidClient {
         Ok((http, cover))
     }
 
-    async fn bound_challenge(&self, response: reqwest::Response) -> Result<reqwest::Response> {
-        // Bound legacy JSON-body challenges before the SDK can collect them.
-        let mut envelope = axum::http::Response::builder().status(response.status());
-        *envelope.headers_mut().expect("valid status") = response.headers().clone();
-        let bytes = crate::limits::read(
-            response,
-            self.max_response_bytes,
-            "payment challenge body",
-            "max_response_bytes",
-        )
-        .await
-        .context("payment challenge rejected before signing")?;
-        Ok(envelope.body(bytes)?.into())
-    }
-
     async fn response_output(
         &self,
         response: reqwest::Response,
@@ -755,6 +750,38 @@ impl PaidClient {
             paid_submission,
         })
     }
+}
+
+// PaidClient challenges and direct body-only challenges are collected here once.
+// Normalize legacy body-only envelopes so admission and qualification share the
+// same challenge. Header-based v1 providers can have unrelated wrapper bodies.
+pub(crate) async fn bound_challenge(
+    response: reqwest::Response,
+    limit: usize,
+) -> Result<reqwest::Response> {
+    let mut envelope = axum::http::Response::builder().status(response.status());
+    *envelope.headers_mut().expect("valid status") = response.headers().clone();
+    let bytes = crate::limits::read(
+        response,
+        limit,
+        "payment challenge body",
+        "max_response_bytes",
+    )
+    .await
+    .context("payment challenge rejected before signing")?;
+    if !envelope
+        .headers_ref()
+        .expect("valid status")
+        .contains_key("payment-required")
+        && let Ok(challenge) = serde_json::from_slice::<Value>(&bytes)
+        && challenge["x402Version"] == 1
+    {
+        envelope.headers_mut().expect("valid status").insert(
+            "payment-required",
+            STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
+        );
+    }
+    Ok(envelope.body(bytes)?.into())
 }
 
 // Capture receipt time before challenge handling, and release unsigned padding
@@ -862,10 +889,15 @@ fn sanitize_challenge(response: &mut reqwest::Response) -> Result<()> {
             }
             *desc = Value::String(text.chars().take(500).collect());
         }
-        response.headers_mut().insert(
-            "payment-required",
-            STANDARD.encode(serde_json::to_vec(&challenge)?).parse()?,
-        );
+        let encoded = serde_json::to_vec(&challenge)?;
+        response
+            .headers_mut()
+            .insert("payment-required", STANDARD.encode(&encoded).parse()?);
+        if challenge["x402Version"] == 1 {
+            let mut envelope = axum::http::Response::builder().status(response.status());
+            *envelope.headers_mut().expect("valid status") = response.headers().clone();
+            *response = envelope.body(encoded)?.into();
+        }
     }
     Ok(())
 }
@@ -875,9 +907,13 @@ fn sanitize_challenge(response: &mut reqwest::Response) -> Result<()> {
 fn insufficient_funds(headers: &reqwest::header::HeaderMap) -> bool {
     // Both protocol fields carry one record. Ambiguous duplicates cannot grant
     // the narrowly scoped permission to repeat a possibly chargeable request.
-    if ["payment-response", "payment-required"]
+    let receipts = ["payment-response", "x-payment-response"];
+    if receipts
         .iter()
-        .any(|name| headers.get_all(*name).iter().count() > 1)
+        .map(|name| headers.get_all(*name).iter().count())
+        .sum::<usize>()
+        > 1
+        || headers.get_all("payment-required").iter().count() > 1
     {
         return false;
     }
@@ -886,15 +922,25 @@ fn insufficient_funds(headers: &reqwest::header::HeaderMap) -> bool {
     };
     // A receipt describes settlement of this signed attempt. A simultaneous
     // challenge cannot override success, another failure or an unreadable receipt.
-    if headers.contains_key("payment-response") {
-        return decoded("payment-response").is_some_and(|v| {
+    if let Some(name) = receipts
+        .into_iter()
+        .find(|name| headers.contains_key(*name))
+    {
+        let network = if name == "x-payment-response" {
+            "base"
+        } else {
+            "eip155:8453"
+        };
+        return decoded(name).is_some_and(|v| {
             v["success"] == false
                 && v["errorReason"] == "insufficient_funds"
-                && v["network"] == "eip155:8453"
+                && v["network"] == network
                 && v["transaction"].is_string()
         });
     }
     decoded("payment-required").is_some_and(|v| {
-        v["x402Version"] == 2 && v["error"] == "insufficient_funds" && v["accepts"].is_array()
+        (v["x402Version"] == 1 || v["x402Version"] == 2)
+            && v["error"] == "insufficient_funds"
+            && v["accepts"].is_array()
     })
 }

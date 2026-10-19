@@ -77,6 +77,7 @@ pub struct ManagedPool {
     test_admission_hook: Option<AdmissionTestHook>,
 }
 struct Offer {
+    version: u8,
     raw: Value,
     amount: U256,
     payee: Address,
@@ -84,7 +85,7 @@ struct Offer {
 impl PaymentSelector for Offer {
     fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate> {
         candidates.iter().find(|c| {
-            c.x402_version == 2
+            c.x402_version == self.version
                 && c.scheme == "exact"
                 && c.chain_id.to_string() == "eip155:8453"
                 && c.asset.eq_ignore_ascii_case(USDC)
@@ -227,6 +228,11 @@ impl ManagedPool {
         let http = http.clone();
         crate::payment::ownership::run(&self.direct_work, async move {
             let through = pool.inventory_boundary().await?;
+            let response = if response.headers().contains_key("payment-required") {
+                response
+            } else {
+                crate::payment::bound_challenge(response, crate::limits::RESPONSE_BYTES).await?
+            };
             let (response, extensions_omitted, _) = pool
                 .pay_with_cover_observed(
                     &http,
@@ -324,7 +330,12 @@ impl ManagedPool {
                 .call(move |s| s.journal_authorization(&prepared, auth, context.as_ref()))
                 .await?;
             let mut headers = reqwest::header::HeaderMap::new();
-            headers.insert("payment-signature", signature.parse()?);
+            let header = if offer.version == 1 {
+                "x-payment"
+            } else {
+                "payment-signature"
+            };
+            headers.insert(header, signature.parse()?);
             (headers, attempt_id)
         };
         #[cfg(test)]
@@ -372,10 +383,13 @@ fn prepare_challenge(
     response: &reqwest::Response,
     policy: &SpendPolicy,
 ) -> Result<(x402_types::proto::PaymentRequired, Offer, bool)> {
-    let header = response
-        .headers()
-        .get("payment-required")
-        .context(AdmissionError::UnsupportedPayment("v2 challenge required"))?;
+    let header =
+        response
+            .headers()
+            .get("payment-required")
+            .context(AdmissionError::UnsupportedPayment(
+                "payment challenge required",
+            ))?;
     let mut challenge: Value = serde_json::from_slice(&STANDARD.decode(header.as_bytes())?)?;
     let omitted = strip_extensions(&mut challenge)?;
     let offer = select_offer(&challenge, policy)?;
@@ -393,10 +407,17 @@ fn prepare_challenge(
     }
     // Parse once; the SDK signs this exact selected envelope on each
     // permitted unpublished attempt, without reconstructing HTTP responses.
-    let envelope: x402_types::proto::v2::PaymentRequired<x402_types::proto::OriginalJson> =
-        serde_json::from_value(challenge)
-            .map_err(|_| AdmissionError::UnsupportedPayment("malformed v2 envelope"))?;
-    let challenge = x402_types::proto::PaymentRequired::V2(envelope);
+    let challenge = if offer.version == 1 {
+        let envelope: x402_types::proto::v1::PaymentRequired<x402_types::proto::OriginalJson> =
+            serde_json::from_value(challenge)
+                .map_err(|_| AdmissionError::UnsupportedPayment("malformed v1 envelope"))?;
+        x402_types::proto::PaymentRequired::V1(envelope)
+    } else {
+        let envelope: x402_types::proto::v2::PaymentRequired<x402_types::proto::OriginalJson> =
+            serde_json::from_value(challenge)
+                .map_err(|_| AdmissionError::UnsupportedPayment("malformed v2 envelope"))?;
+        x402_types::proto::PaymentRequired::V2(envelope)
+    };
     Ok((challenge, offer, omitted))
 }
 
@@ -411,7 +432,12 @@ async fn sign_authorization(
         signer.address().to_string() == prepared.address,
         "stored signer identity mismatch"
     );
-    let candidates = V2Eip155ExactClient::new(Arc::new(signer)).accept(challenge);
+    let signer = Arc::new(signer);
+    let candidates = if offer.version == 1 {
+        crate::payment::V1ExactClient::new(signer).accept(challenge)
+    } else {
+        V2Eip155ExactClient::new(signer).accept(challenge)
+    };
     let candidate = offer
         .select(&candidates)
         .context("managed SDK rejected selected requirements")?;
@@ -451,10 +477,13 @@ fn strip_extensions(challenge: &mut Value) -> Result<bool> {
     Ok(omitted)
 }
 fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
-    ensure!(
-        challenge["x402Version"] == 2,
-        AdmissionError::UnsupportedPayment("only v2 exact Base USDC is supported")
-    );
+    let version = match challenge["x402Version"].as_u64() {
+        Some(1) => 1u8,
+        Some(2) => 2u8,
+        _ => anyhow::bail!(AdmissionError::UnsupportedPayment(
+            "only v1/v2 exact Base USDC is supported"
+        )),
+    };
     ensure!(
         challenge
             .get("extensions")
@@ -476,9 +505,27 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
             );
             // Bounded opaque annotations are preserved in the accepted payload.
             // Only authority-bearing fields below determine compatibility.
+            let amount_raw = if version == 1 {
+                ensure!(
+                    raw["network"] == "base"
+                        && raw["resource"].is_string()
+                        && raw["description"].is_string()
+                        && raw
+                            .get("mimeType")
+                            .is_none_or(|v| v.is_null() || v.is_string())
+                        && raw.get("amount").is_none(),
+                    "unsupported offer"
+                );
+                &raw["maxAmountRequired"]
+            } else {
+                ensure!(
+                    raw["network"] == "eip155:8453" && raw.get("maxAmountRequired").is_none(),
+                    "unsupported offer"
+                );
+                &raw["amount"]
+            };
             ensure!(
                 raw["scheme"] == "exact"
-                    && raw["network"] == "eip155:8453"
                     && raw["asset"]
                         .as_str()
                         .is_some_and(|v| v.eq_ignore_ascii_case(USDC)),
@@ -515,6 +562,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
                     "network",
                     "asset",
                     "amount",
+                    "maxAmountRequired",
                     "payTo",
                     "maxTimeoutSeconds",
                     "permit2",
@@ -531,7 +579,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
                     && extra.get("version").is_some_and(|v| v == "2"),
                 "wrong USDC domain"
             );
-            let amount = atomic(&raw["amount"])?;
+            let amount = atomic(amount_raw)?;
             ensure!(amount > U256::ZERO, "zero amount");
             let payee: Address = raw["payTo"].as_str().context("missing payee")?.parse()?;
             ensure!(payee != Address::ZERO, "zero payee");
@@ -543,6 +591,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
                 "invalid payment timeout"
             );
             Ok(Offer {
+                version,
                 raw: raw.clone(),
                 amount,
                 payee,
@@ -580,10 +629,19 @@ fn atomic(value: &Value) -> Result<U256> {
     Ok(U256::from_str_radix(s, 10)?)
 }
 fn validate_payload(payload: &Value, offer: &Offer, payer: &str) -> Result<Authorization> {
-    ensure!(
-        payload["x402Version"] == 2 && payload["accepted"] == offer.raw,
-        "payment payload requirements mismatch"
-    );
+    if offer.version == 1 {
+        ensure!(
+            payload["x402Version"] == 1
+                && payload["scheme"] == "exact"
+                && payload["network"] == "base",
+            "payment payload requirements mismatch"
+        );
+    } else {
+        ensure!(
+            payload["x402Version"] == 2 && payload["accepted"] == offer.raw,
+            "payment payload requirements mismatch"
+        );
+    }
     let auth = &payload["payload"]["authorization"];
     let address = |key: &str| -> Result<Address> {
         Ok(auth[key]
@@ -631,6 +689,48 @@ mod offer_tests {
         serde_json::json!({"scheme":"exact","network":"eip155:8453","asset":USDC,
             "amount":amount,"payTo":format!("0x{payee:040x}"),"maxTimeoutSeconds":60,
             "extra":{"name":"USD Coin","version":"2"},"annotation":{"opaque":true}})
+    }
+    #[tokio::test]
+    async fn body_only_v1_uses_the_owning_response_limit_once() {
+        let v1 = serde_json::json!({"x402Version":1,"accepts":[{
+            "scheme":"exact","network":"base","asset":USDC,"maxAmountRequired":"1",
+            "resource":"http://localhost/pay","description":"legacy fixture","mimeType":"application/json",
+            "payTo":format!("0x{:040x}",1),"maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}
+        }]});
+        // Whitespace makes the wire body exceed the default without inventing
+        // a large offer or changing the amount authority.
+        let mut body = vec![b' '; crate::limits::RESPONSE_BYTES + 1];
+        body.extend_from_slice(v1.to_string().as_bytes());
+        let response = |body: Vec<u8>| {
+            reqwest::Response::from(
+                axum::http::Response::builder()
+                    .status(402)
+                    .body(body)
+                    .unwrap(),
+            )
+        };
+        let error =
+            crate::payment::bound_challenge(response(body.clone()), crate::limits::RESPONSE_BYTES)
+                .await
+                .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("payment challenge rejected before signing")
+        );
+        let normalized = crate::payment::bound_challenge(response(body.clone()), body.len())
+            .await
+            .unwrap();
+        let (_, selected, _) = prepare_challenge(
+            &normalized,
+            &SpendPolicy {
+                max_atomic: Some(U256::from(1)),
+            },
+        )
+        .unwrap();
+        assert_eq!(selected.version, 1);
+        assert_eq!(selected.amount, U256::from(1));
+        assert_eq!(selected.raw, v1["accepts"][0]);
     }
     #[test]
     fn sole_offer_ceiling_is_inclusive_and_unlimited_keeps_asset_validation() {
@@ -738,6 +838,45 @@ mod offer_tests {
         let challenge = serde_json::json!({"x402Version":2,"accepts":[cheap,equal,expected]});
         let selected = select_offer(&challenge, &SpendPolicy { max_atomic: None }).unwrap();
         assert_eq!(selected.raw, challenge["accepts"][2]);
+    }
+    #[test]
+    fn v1_base_exact_offer_selection_requires_v1_fields_and_forbids_conflicting_amounts() {
+        let valid_v1 = serde_json::json!({
+            "scheme": "exact",
+            "network": "base",
+            "asset": USDC,
+            "maxAmountRequired": "50000",
+            "resource": "https://api.relayshield.net/v1/payg/phone-reputation",
+            "description": "Phone reputation check",
+            "mimeType": "application/json",
+            "payTo": format!("0x{:040x}", 1),
+            "maxTimeoutSeconds": 300,
+            "extra": {"name": "USD Coin", "version": "2"},
+            "outputSchema": {"input": {"type": "http"}}
+        });
+        let mut bad_mime = valid_v1.clone();
+        bad_mime["maxAmountRequired"] = serde_json::json!("1");
+        bad_mime["mimeType"] = serde_json::json!(123);
+        let mut bad_dual_amount = valid_v1.clone();
+        bad_dual_amount["maxAmountRequired"] = serde_json::json!("1");
+        bad_dual_amount["amount"] = serde_json::json!("1");
+        let mut bad_extra = valid_v1.clone();
+        bad_extra["maxAmountRequired"] = serde_json::json!("1");
+        bad_extra["extra"]["maxAmountRequired"] = serde_json::json!("1");
+        let challenge = serde_json::json!({
+            "x402Version": 1,
+            "accepts": [bad_mime, bad_dual_amount, bad_extra, valid_v1]
+        });
+        let selected = select_offer(
+            &challenge,
+            &SpendPolicy {
+                max_atomic: Some(U256::from(50000)),
+            },
+        )
+        .unwrap();
+        assert_eq!(selected.version, 1);
+        assert_eq!(selected.amount, U256::from(50000));
+        assert_eq!(selected.raw, challenge["accepts"][3]);
     }
 }
 

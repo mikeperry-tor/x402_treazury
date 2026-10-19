@@ -31,6 +31,7 @@ struct Gate {
     count: Arc<AtomicUsize>,
     signed: Arc<Mutex<Vec<Value>>>,
     reject: bool,
+    v1_header: bool,
     arrived: Option<Arc<Notify>>,
     release: Option<Arc<Notify>>,
 }
@@ -50,7 +51,7 @@ async fn handle(State(gate): State<Gate>, headers: HeaderMap) -> Response {
         arrived.notify_one();
         gate.release.as_ref().unwrap().notified().await;
     }
-    if gate.challenge["x402Version"] == 1 {
+    if gate.challenge["x402Version"] == 1 && !gate.v1_header {
         return (StatusCode::PAYMENT_REQUIRED, axum::Json(gate.challenge)).into_response();
     }
     (
@@ -75,6 +76,7 @@ fn gate(challenge: Value) -> Gate {
         count: Arc::default(),
         signed: Arc::default(),
         reject: false,
+        v1_header: false,
         arrived: None,
         release: None,
     }
@@ -342,22 +344,25 @@ async fn legacy_v1_uses_x_payment_header() {
         "maxAmountRequired":"14000","resource":"http://localhost/pay","description":"legacy",
         "mimeType":"application/json","payTo":"0x0000000000000000000000000000000000000003",
         "maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
-    let gate = gate(c);
-    let (url, task) = start(gate.clone()).await;
-    assert_eq!(client("1").execute(route(url)).await.unwrap(), "paid");
-    assert_eq!(gate.count.load(Ordering::SeqCst), 2);
-    let signed = gate.signed.lock().unwrap();
-    assert_eq!(signed[0]["x402Version"], 1);
-    assert_eq!(
-        signatures::recover_exact(&signed[0]).to_string(),
-        payer(KEY1, "1").address
-    );
-    assert_eq!(signed[0]["payload"]["authorization"]["value"], "14000");
-    assert_eq!(
-        signed[0]["payload"]["authorization"]["to"],
-        "0x0000000000000000000000000000000000000003"
-    );
-    task.abort();
+    for header in [false, true] {
+        let mut gate = gate(c.clone());
+        gate.v1_header = header;
+        let (url, task) = start(gate.clone()).await;
+        assert_eq!(client("1").execute(route(url)).await.unwrap(), "paid");
+        assert_eq!(gate.count.load(Ordering::SeqCst), 2);
+        let signed = gate.signed.lock().unwrap();
+        assert_eq!(signed[0]["x402Version"], 1);
+        assert_eq!(
+            signatures::recover_exact(&signed[0]).to_string(),
+            payer(KEY1, "1").address
+        );
+        assert_eq!(signed[0]["payload"]["authorization"]["value"], "14000");
+        assert_eq!(
+            signed[0]["payload"]["authorization"]["to"],
+            "0x0000000000000000000000000000000000000003"
+        );
+        task.abort();
+    }
 }
 
 #[tokio::test]

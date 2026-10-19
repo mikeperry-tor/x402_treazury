@@ -24,6 +24,7 @@ use std::{
 };
 #[derive(Clone, Copy)]
 enum Wire {
+    V1(LegacyReceipt),
     Verification,
     Settlement,
     Allowance,
@@ -42,6 +43,15 @@ enum Wire {
     SettledWithVerification,
     MalformedSettlementWithVerification,
     SettlementWithGenericChallenge,
+}
+#[derive(Clone, Copy)]
+enum LegacyReceipt {
+    Verification,
+    Failure,
+    Success,
+    Malformed,
+    Duplicate,
+    Mixed,
 }
 type CapturedRequest = (SocketAddr, Method, String, Vec<u8>);
 #[derive(Clone)]
@@ -71,7 +81,13 @@ async fn seller(
         .lock()
         .unwrap()
         .push((peer, method, uri.to_string(), body.to_vec()));
-    let Some(encoded) = headers.get("payment-signature") else {
+    let Some(encoded) = headers
+        .get("payment-signature")
+        .or_else(|| headers.get("x-payment"))
+    else {
+        if matches!(f.wire, Wire::V1(_)) {
+            return (StatusCode::PAYMENT_REQUIRED, Json(legacy_challenge())).into_response();
+        }
         return (
             StatusCode::PAYMENT_REQUIRED,
             [(
@@ -133,6 +149,38 @@ async fn seller(
         return "paid".into_response();
     }
     match f.wire {
+        Wire::V1(kind) => {
+            let mut challenge = legacy_challenge();
+            challenge["error"] = json!("insufficient_funds");
+            let mut response = (
+                StatusCode::PAYMENT_REQUIRED,
+                [("payment-required", STANDARD.encode(challenge.to_string()))],
+                "{}",
+            )
+                .into_response();
+            if !matches!(kind, LegacyReceipt::Verification) {
+                let receipt = json!({"success":matches!(kind, LegacyReceipt::Success),"errorReason":"insufficient_funds","network":"base","transaction":""});
+                let encoded = if matches!(kind, LegacyReceipt::Malformed) {
+                    "not-base64".into()
+                } else {
+                    STANDARD.encode(receipt.to_string())
+                };
+                response
+                    .headers_mut()
+                    .insert("x-payment-response", encoded.parse().unwrap());
+                if matches!(kind, LegacyReceipt::Duplicate | LegacyReceipt::Mixed) {
+                    let name = if matches!(kind, LegacyReceipt::Mixed) {
+                        "payment-response"
+                    } else {
+                        "x-payment-response"
+                    };
+                    response
+                        .headers_mut()
+                        .append(name, "not-base64".parse().unwrap());
+                }
+            }
+            response
+        }
         Wire::SettledWithVerification
         | Wire::MalformedSettlementWithVerification
         | Wire::SettlementWithGenericChallenge => {
@@ -449,6 +497,7 @@ async fn run(
     if matches!(
         wire,
         Wire::Verification
+            | Wire::V1(LegacyReceipt::Verification | LegacyReceipt::Failure)
             | Wire::Settlement
             | Wire::HeldSuccess
             | Wire::QualifiedThree
@@ -533,6 +582,37 @@ async fn run(
     drop(restored);
     server.abort();
     (success, signed, requests, error)
+}
+fn legacy_challenge() -> Value {
+    json!({"x402Version":1,"accepts":[{"scheme":"exact","network":"base","asset":USDC,"maxAmountRequired":"100","resource":"http://localhost/pay","description":"legacy fixture","mimeType":"application/json","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]})
+}
+
+#[tokio::test]
+async fn v1_receipts_govern_traversal_and_preserve_each_authorization() {
+    for kind in [
+        LegacyReceipt::Verification,
+        LegacyReceipt::Failure,
+        LegacyReceipt::Success,
+        LegacyReceipt::Malformed,
+        LegacyReceipt::Duplicate,
+        LegacyReceipt::Mixed,
+    ] {
+        let retry = matches!(kind, LegacyReceipt::Verification | LegacyReceipt::Failure);
+        let (success, signed, requests, _) = run("POST", Wire::V1(kind), 1).await;
+        assert_eq!(success, retry);
+        assert_eq!(signed.len(), if retry { 2 } else { 1 });
+        assert_eq!(requests.len(), if retry { 4 } else { 2 });
+        if retry {
+            assert_ne!(signed[0].0, signed[1].0);
+            assert_ne!(signed[0].1, signed[1].1);
+            assert_ne!(requests[0].0, requests[2].0);
+        }
+        for request in &requests {
+            assert_eq!(request.1, requests[0].1);
+            assert_eq!(request.2, requests[0].2);
+            assert_eq!(request.3, requests[0].3);
+        }
+    }
 }
 #[tokio::test]
 async fn insufficient_funds_traverses_once_with_original_get_and_post_and_isolated_challenges() {
