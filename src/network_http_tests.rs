@@ -353,3 +353,151 @@ async fn evicted_transport_handle_finishes_sibling_http2_streams_without_recreat
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn participating_candidates_use_distinct_socks_pools_and_promote_without_interrupting_held_streams()
+ {
+    let (entered, mut arrivals) = mpsc::unbounded_channel();
+    let release = Arc::new(Semaphore::new(0));
+    let gate = release.clone();
+    let app = axum::Router::new()
+        .route("/warm", axum::routing::get(|| async { "warm" }))
+        .route(
+            "/hold",
+            axum::routing::get(move || {
+                let (entered, gate) = (entered.clone(), gate.clone());
+                async move {
+                    entered.send(()).unwrap();
+                    gate.acquire().await.unwrap().forget();
+                    "held"
+                }
+            }),
+        );
+    let (address, server) =
+        crate::test_tls::serve_with(app, &[&rustls::version::TLS13], &[b"h2"]).await;
+    let socks = Socks::start(
+        BTreeMap::from([("api.example.com".into(), address)]),
+        Fault::None,
+    )
+    .await;
+    let ctx = context(&socks);
+    let owner = wallet(1);
+    let selected = ctx
+        .http_participating(
+            &owner,
+            "https://api.example.com",
+            Duration::from_secs(3),
+            false,
+            HttpPolicy::default(),
+        )
+        .unwrap();
+    assert_eq!(selected.identity, owner);
+    assert_ne!(selected.scope, owner);
+
+    let retained_selected = selected.clone();
+    let held_stream = tokio::spawn(async move {
+        let response = retained_selected
+            .client
+            .get("https://api.example.com/hold")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.version(), reqwest::Version::HTTP_2);
+        assert_eq!(response.text().await.unwrap(), "held");
+    });
+    tokio::time::timeout(Duration::from_secs(2), arrivals.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(socks.records.lock().unwrap().len(), 1);
+
+    // Cloning the client reuses the same physical HTTP/2 + SOCKS connection.
+    let cloned_client = selected.client.clone();
+    assert_eq!(
+        cloned_client
+            .get("https://api.example.com/warm")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        "warm"
+    );
+    assert_eq!(socks.records.lock().unwrap().len(), 1);
+
+    // Two private candidates have distinct auth and physical pools without replacing selected.
+    let cand1 = ctx.http_candidate(&selected).unwrap();
+    let cand2 = ctx.http_candidate(&selected).unwrap();
+    assert!(Arc::ptr_eq(
+        &ctx.http_participating(
+            &owner,
+            "https://api.example.com",
+            Duration::from_secs(3),
+            false,
+            HttpPolicy::default(),
+        )
+        .unwrap(),
+        &selected
+    ));
+
+    for cand in [&cand1, &cand2] {
+        let resp = cand
+            .client
+            .get("https://api.example.com/warm")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.version(), reqwest::Version::HTTP_2);
+        assert_eq!(resp.text().await.unwrap(), "warm");
+    }
+
+    let records = socks.records.lock().unwrap().clone();
+    assert_eq!(records.len(), 3);
+    for (rec, handle) in records.iter().zip([&selected, &cand1, &cand2]) {
+        assert_eq!(rec.address_type, 3);
+        assert_eq!(
+            (rec.user.clone(), rec.password.clone()),
+            ctx.credentials(&handle.scope)
+        );
+        assert_ne!(
+            (rec.user.clone(), rec.password.clone()),
+            ctx.credentials(&owner)
+        );
+    }
+
+    // Promote cand2; lost promotion race from cand1 cannot overwrite it.
+    assert!(ctx.promote_http(&selected, &cand2));
+    assert!(!ctx.promote_http(&selected, &cand1));
+    let winner = ctx
+        .http_participating(
+            &owner,
+            "https://api.example.com",
+            Duration::from_secs(3),
+            false,
+            HttpPolicy::default(),
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(&winner, &cand2));
+
+    // Later acquisitions reuse the promoted winner's pool; old retained handles remain usable.
+    for retained in [&winner, &selected, &cand1] {
+        assert_eq!(
+            retained
+                .client
+                .get("https://api.example.com/warm")
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap(),
+            "warm"
+        );
+    }
+    assert_eq!(socks.records.lock().unwrap().len(), 3);
+
+    release.add_permits(1);
+    held_stream.await.unwrap();
+    server.abort();
+}

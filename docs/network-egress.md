@@ -18,9 +18,15 @@ and effective isolation scope, keyed by `SelectionPolicy` (`Legacy` versus
 `Participating`), protocol compatibility, public-destination enforcement, owning
 Tokio runtime, canonical identity, origin and read-inactivity timeout. Legacy and
 participating lookups cannot consume or overwrite each other's cache entries.
-Current production callers still acquire legacy deterministic transports; fresh
-scope selection, conditional promotion and unsigned Tor circuit retries remain
-pending activation as described in the
+In Tor mode, `http_participating` misses and `http_candidate` retry candidates
+derive fresh owner-bound `tor-scope` isolation scopes (`IsolationId::fresh_scope`)
+with separate `reqwest::Client` pools, while `promote_http` conditionally replaces
+an existing canonical slot only when it still holds the exact originally acquired
+`Arc<HttpTransport>`. Evicted, missing, reinserted or already-promoted entries are
+never overwritten or resurrected, and no separate winner registry, history cache
+or counter is kept; a miss after normal LRU eviction or restart creates a fresh
+scope. Current production callers still acquire legacy deterministic transports
+until consumer activation in the
 [Tor isolation retry plan](plans/tor_isolation_retries.md). Sync releases its
 channels before tearing down its private runtime. Each cache retains at most 256
 entries and evicts one least-recently-used entry when admitting another. Access
@@ -263,6 +269,9 @@ big-endian byte length, including the kind field. Fields are:
 - Discovery: `discovery`, canonical URL scheme, canonical URL host, two-byte
   big-endian effective port. Path, userinfo and query are excluded.
 - Bootstrap: `bootstrap`, 16 random UUID bytes for that invocation.
+- Participating Tor scope: `tor-scope`, the complete length-prefixed canonical
+  owner encoding above, 16 random UUID bytes for that selected or candidate
+  transport record.
 
 This byte format is pinned by `tests/network.rs`. It contains no signing or
 storage-encryption secret. Changing it requires a new versioned domain separator.

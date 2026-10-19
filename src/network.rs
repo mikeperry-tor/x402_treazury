@@ -192,6 +192,9 @@ impl IsolationId {
         hash.update(&self.0);
         alloy_primitives::hex::encode(hash.finalize())
     }
+    pub fn fresh_scope(&self) -> Self {
+        Self::fields("tor-scope", &[&self.0, uuid::Uuid::new_v4().as_bytes()])
+    }
 }
 /// Provider HTTPS defaults; infrastructure clients retain their existing policy.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -372,6 +375,23 @@ impl NetworkContext {
             .client
             .clone())
     }
+    pub fn http_participating(
+        &self,
+        id: &IsolationId,
+        url: &str,
+        timeout: impl Into<Option<Duration>>,
+        public_only: bool,
+        transport: HttpPolicy,
+    ) -> Result<Arc<HttpTransport>> {
+        self.http_transport(
+            id,
+            url,
+            timeout,
+            public_only,
+            transport,
+            SelectionPolicy::Participating,
+        )
+    }
     pub fn http_transport(
         &self,
         id: &IsolationId,
@@ -403,18 +423,58 @@ impl NetworkContext {
         if let Some(entry) = clients.get_mut(&key) {
             return Ok(entry.touch().clone());
         }
-        let scope = id.clone();
+        let record = self.build_http_transport(key.clone())?;
+        // Eviction drops only cache ownership. Existing requests keep their connections.
+        evict_oldest(&mut clients);
+        clients.insert(key, CachedClient::new(record.clone()));
+        Ok(record)
+    }
+    pub fn http_candidate(&self, selected: &Arc<HttpTransport>) -> Result<Arc<HttpTransport>> {
+        ensure!(
+            selected.selection() == SelectionPolicy::Participating,
+            "candidate transport requires a participating selected record"
+        );
+        self.build_http_transport(selected.key.clone())
+    }
+    pub fn promote_http(
+        &self,
+        expected: &Arc<HttpTransport>,
+        candidate: &Arc<HttpTransport>,
+    ) -> bool {
+        if expected.selection() != SelectionPolicy::Participating
+            || expected.key != candidate.key
+            || Arc::ptr_eq(expected, candidate)
+        {
+            return false;
+        }
+        let mut clients = self.http.lock().expect("network cache poisoned");
+        let Some(entry) = clients.get_mut(&expected.key) else {
+            return false;
+        };
+        if !Arc::ptr_eq(&entry.client, expected) {
+            return false;
+        }
+        *entry = CachedClient::new(candidate.clone());
+        true
+    }
+    fn build_http_transport(&self, key: HttpKey) -> Result<Arc<HttpTransport>> {
+        let scope =
+            if key.selection == SelectionPolicy::Participating && self.policy.mode == Mode::Tor {
+                key.identity.fresh_scope()
+            } else {
+                key.identity.clone()
+            };
         let mut builder = reqwest::Client::builder()
             .no_proxy()
             .retry(reqwest::retry::never())
             .read_timeout(key.read_timeout)
             .connect_timeout(self.policy.connect_timeout())
             .redirect(reqwest::redirect::Policy::none());
-        if parsed.scheme() == "https" {
-            if !transport.allow_http1 {
+        if key.origin.starts_with("https://") {
+            if !key.transport.allow_http1 {
                 builder = builder.http2_prior_knowledge();
             }
-            if !transport.allow_tls12 {
+            if !key.transport.allow_tls12 {
                 builder = builder.min_tls_version(reqwest::tls::Version::TLS_1_3);
             }
         }
@@ -424,7 +484,7 @@ impl NetworkContext {
         {
             builder = builder.dns_resolver(resolver.clone());
         }
-        if public_only && self.policy.mode == Mode::Direct {
+        if key.public_only && self.policy.mode == Mode::Direct {
             let resolver = PublicResolver::default();
             #[cfg(test)]
             let resolver = PublicResolver {
@@ -446,16 +506,12 @@ impl NetworkContext {
         let client = builder
             .build()
             .context("network client construction failed")?;
-        let record = Arc::new(HttpTransport {
+        Ok(Arc::new(HttpTransport {
             client,
-            identity: id.clone(),
+            identity: key.identity.clone(),
             scope,
-            key: key.clone(),
-        });
-        // Eviction drops only cache ownership. Existing requests keep their connections.
-        evict_oldest(&mut clients);
-        clients.insert(key, CachedClient::new(record.clone()));
-        Ok(record)
+            key,
+        }))
     }
     pub fn discovery(
         &self,
@@ -1017,5 +1073,277 @@ mod retention_tests {
         .unwrap();
         assert!(!Arc::ptr_eq(&first, &other_runtime));
         assert_eq!(context.http.lock().unwrap().len(), 8);
+    }
+
+    #[tokio::test]
+    async fn participating_scopes_conditional_promotion_eviction_and_restart_isolation() {
+        let policy = NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some("127.0.0.1:9150".parse().unwrap()),
+            ..Default::default()
+        };
+        let context = Arc::new(NetworkContext::new(policy.clone()).unwrap());
+        let origin = "https://api.example.com/v1/resource";
+        let owner = IsolationId::evm("0x00000000000000000000000000000000000000aa").unwrap();
+        let owner_alias = IsolationId::evm("0x00000000000000000000000000000000000000AA").unwrap();
+        let other_wallet = IsolationId::evm("0x00000000000000000000000000000000000000bb").unwrap();
+        let discovery_owner = IsolationId::discovery(origin).unwrap();
+
+        let legacy = context
+            .http_transport(
+                &owner,
+                origin,
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+                SelectionPolicy::Legacy,
+            )
+            .unwrap();
+        assert_eq!(legacy.identity, owner);
+        assert_eq!(legacy.scope, owner);
+        assert!(context.http_candidate(&legacy).is_err());
+
+        let selected0 = context
+            .http_participating(
+                &owner,
+                origin,
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+        assert_eq!(selected0.identity, owner);
+        assert_ne!(selected0.scope, owner);
+        let alias_hit = context
+            .http_participating(
+                &owner_alias,
+                "https://API.EXAMPLE.COM:443/v2/other",
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&selected0, &alias_hit));
+
+        let other_origin_slot = context
+            .http_participating(
+                &owner,
+                "https://second.example.com/v1",
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+        let other_wallet_slot = context
+            .http_participating(
+                &other_wallet,
+                origin,
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+        let discovery_slot = context
+            .http_participating(
+                &discovery_owner,
+                origin,
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+        let timeout_slot = context
+            .http_participating(
+                &owner,
+                origin,
+                Duration::from_secs(6),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+
+        let count_before_candidates = context.http.lock().unwrap().len();
+        let cand_a = context.http_candidate(&selected0).unwrap();
+        let cand_b = context.http_candidate(&selected0).unwrap();
+        assert_eq!(context.http.lock().unwrap().len(), count_before_candidates);
+        assert_eq!(cand_a.identity, owner);
+        assert_eq!(cand_b.identity, owner);
+        assert_ne!(cand_a.scope, owner);
+        assert_ne!(cand_b.scope, owner);
+        assert_ne!(cand_a.scope, selected0.scope);
+        assert_ne!(cand_b.scope, selected0.scope);
+        assert_ne!(cand_a.scope, cand_b.scope);
+
+        // Candidate creation does not replace the selected slot.
+        let still_selected = context
+            .http_participating(
+                &owner,
+                origin,
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&still_selected, &selected0));
+
+        // First recovery promotes cand_a; late original completion and lost race cannot overwrite.
+        assert!(!context.promote_http(&selected0, &selected0));
+        assert!(!context.promote_http(&legacy, &cand_a));
+        assert!(!context.promote_http(&other_origin_slot, &cand_a));
+        assert!(context.promote_http(&selected0, &cand_a));
+        assert!(!context.promote_http(&selected0, &selected0));
+        assert!(!context.promote_http(&selected0, &cand_b));
+        assert_eq!(context.http.lock().unwrap().len(), count_before_candidates);
+
+        let after_promo = context
+            .http_participating(
+                &owner_alias,
+                "https://api.example.com:443/v3",
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&after_promo, &cand_a));
+
+        // Sibling keys and legacy slot remain untouched by promotion.
+        assert!(Arc::ptr_eq(
+            &context
+                .http_transport(
+                    &owner,
+                    origin,
+                    Duration::from_secs(5),
+                    false,
+                    HttpPolicy::default(),
+                    SelectionPolicy::Legacy,
+                )
+                .unwrap(),
+            &legacy
+        ));
+        assert!(Arc::ptr_eq(
+            &context
+                .http_participating(
+                    &owner,
+                    "https://second.example.com/v1",
+                    Duration::from_secs(5),
+                    false,
+                    HttpPolicy::default(),
+                )
+                .unwrap(),
+            &other_origin_slot
+        ));
+        assert!(Arc::ptr_eq(
+            &context
+                .http_participating(
+                    &other_wallet,
+                    origin,
+                    Duration::from_secs(5),
+                    false,
+                    HttpPolicy::default(),
+                )
+                .unwrap(),
+            &other_wallet_slot
+        ));
+        assert!(Arc::ptr_eq(
+            &context
+                .http_participating(
+                    &discovery_owner,
+                    origin,
+                    Duration::from_secs(5),
+                    false,
+                    HttpPolicy::default(),
+                )
+                .unwrap(),
+            &discovery_slot
+        ));
+        assert!(Arc::ptr_eq(
+            &context
+                .http_participating(
+                    &owner,
+                    origin,
+                    Duration::from_secs(6),
+                    false,
+                    HttpPolicy::default(),
+                )
+                .unwrap(),
+            &timeout_slot
+        ));
+
+        // Start a candidate from cand_a, then evict owner's slot via normal LRU pressure.
+        let cand_c = context.http_candidate(&cand_a).unwrap();
+        for n in 0..256 {
+            context
+                .http_participating(
+                    &IsolationId::treasury(&format!("evict-{n}")),
+                    origin,
+                    Duration::from_secs(5),
+                    false,
+                    HttpPolicy::default(),
+                )
+                .unwrap();
+        }
+        assert_eq!(context.http.lock().unwrap().len(), 256);
+        assert!(
+            !context
+                .http
+                .lock()
+                .unwrap()
+                .keys()
+                .any(|k| k.identity == owner)
+        );
+        // Stale candidate cannot resurrect an evicted entry.
+        assert!(!context.promote_http(&cand_a, &cand_c));
+        assert!(
+            !context
+                .http
+                .lock()
+                .unwrap()
+                .keys()
+                .any(|k| k.identity == owner)
+        );
+
+        // Reinsertion after eviction uses a fresh scope and still rejects the stale candidate.
+        let reinserted = context
+            .http_participating(
+                &owner,
+                origin,
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+        assert_eq!(context.http.lock().unwrap().len(), 256);
+        assert!(!context.promote_http(&cand_a, &cand_c));
+        for prior in [
+            &owner,
+            &selected0.scope,
+            &cand_a.scope,
+            &cand_b.scope,
+            &cand_c.scope,
+        ] {
+            assert_ne!(&reinserted.scope, prior);
+        }
+
+        // Recreating the context for restart selects a fresh scope rather than any prior scope.
+        let restarted_ctx = NetworkContext::new(policy).unwrap();
+        let after_restart = restarted_ctx
+            .http_participating(
+                &owner,
+                origin,
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+            )
+            .unwrap();
+        for prior in [
+            &owner,
+            &selected0.scope,
+            &cand_a.scope,
+            &cand_b.scope,
+            &cand_c.scope,
+            &reinserted.scope,
+        ] {
+            assert_ne!(&after_restart.scope, prior);
+        }
     }
 }
