@@ -32,9 +32,20 @@ regressions cover opposite completion orders, three owners, exact selectors,
 unique tools, listener isolation and captured bindings; strict loading still rejects
 duplicate names.
 
+Wallet discovery uses the [wallet observation policy](../docs/wallet-rotation.md#wallet-observation-policy).
+`rotation::manager::maintenance::tests` exercises finite Base discovery, successful
+zero refresh completion, notification bursts at 59 seconds, cancellation/restart,
+retired-wallet exclusion, startup inventory failure and first-positive initial
+claim consumption. `tests/treasury_sync.rs` checks finite available-treasury startup,
+shared scan/failure cooldowns, accepted jobless ownership, independent explicit-sync
+asset scopes and exclusive administration ownership.
 The explicit-sync scope regressions also preserve configured wallets, generated
 identities and accepted removed recipients despite invalid unrelated templates,
 spending settings or bindings, without creating allocations or funding work.
+The deployment Store-only fixtures preserve usable Base service when the SDK/source capability is unavailable;
+that runtime performs no ZEC discovery. Listener-binding tests retain the ordering
+that tools become available before these background observations complete. These
+local fixtures do not qualify live settlement or Tor.
 
 ## Reproducible measurement
 

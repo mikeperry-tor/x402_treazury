@@ -348,10 +348,23 @@ power for less observation work; it does not bound cumulative stranded capital.
 Funding capital comes from actual spendable treasury funds after confirmations,
 reservations, liabilities and fees. Displayed total balance is not spendable
 capacity. Adding spendable ZEC restores capacity without another aggregate-budget
-setting. `auto_fund=false` pauses new funding. Ordinary scalar maintenance does
-not invoke permanent retirement. Keep group
+setting. `auto_fund=false` pauses new funding. Enabled unfilled reserve claims
+keep discovering later ZEC deposits and confirmations through the shared treasury
+owner; fully funded idle serving does not watch for incoming funds. Ordinary scalar
+maintenance does not invoke permanent retirement. Keep group
 payment caps, per-operation ZEC/output/fee safeguards, explicit funding controls
 and separately authorized qualification-run limits.
+
+`funding.poll_seconds` defaults to 5 (accepted range 1 through 60). It controls
+local funding inventory/owner scheduling and existing per-job jitter. Each
+recurring source, provider-status or Base credit observation starts at least
+60 seconds after the previous observation for that work completes; configured
+polling does not shorten that floor or delay successful local preparation and
+submission handoffs. `funding.swap_timeout_seconds` defaults to 1,800 seconds
+from the first durable broadcast intent and reports degraded health without
+abandoning accepted work or granting replay authority. See the
+[wallet observation policy](wallet-rotation.md#wallet-observation-policy) for
+startup, explicit sync and requested-refresh scopes.
 
 The old managed top-level `funding_amount_usdc` and `max_funding_amount_usdc` must
 move into named reserve tables. `limit_payments_to_funding_target` is removed:

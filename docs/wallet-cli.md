@@ -27,12 +27,14 @@ Human status also shows the primary shielded ZEC receive address from the encryp
 snapshot when the wallet key is available. If the key or snapshot cannot be read,
 status still shows saved metadata and explicitly marks the address unavailable.
 Use `wallet init --json`, `wallet sync --json`, or `wallet status --json` for
-machine-readable output. Init returns `{state, receive_addresses}`; sync retains those fields and adds
+machine-readable output. Init returns `{state, receive_addresses}`; sync retains
+those fields and adds
 `observations.zec` and `observations.usdc`, each with `status` (`completed`,
 `failed`, or `inapplicable`), wallet/pass counts `attempted`, `completed`, `failed`,
 and an optional content-free `error` category. Setup failure attempts no remote
 observation. Sync prints independent asset results even on partial failure and
-returns a nonzero exit code if either applicable scope fails. Status returns the saved state object. `wallet addresses` continues to return JSON.
+returns a nonzero exit code if either applicable scope fails. Status returns the
+saved state object. `wallet addresses` continues to return JSON.
 Progress logs remain on stderr in both modes.
 
 Stop `serve` before running `wallet sync`: it acquires the same exclusive treasury
@@ -55,10 +57,11 @@ Base pass: ZEC reports `zec_snapshot_unavailable` and `receive_addresses` is emp
 identity and exclusive-ownership failures remain command setup errors and perform
 neither asset's remote observation.
 
-
 While `serve` is running, use `wallet status --config FILE` with the same deployment
 file to see the shielded receive address, saved balances and sync progress. This
-read-only command does not acquire treasury ownership. Status remains a cached read with no network traffic; idle incoming funds may be absent until startup, explicit sync, or another authorized discovery trigger. `wallet addresses` also
+read-only command does not acquire treasury ownership. Status reads cached
+observations without network traffic; idle incoming funds may be absent until
+startup, explicit sync, or another relevant discovery trigger. `wallet addresses` also
 reads the encrypted snapshot without exclusive ownership and returns all saved
 receive addresses as JSON. Neither command derives an address or changes sync
 readiness. `wallet init` refuses an existing wallet; `wallet address` creates a new
@@ -255,11 +258,16 @@ The indexer must serve mainnet over TLS; HTTP is permitted only on loopback for
 local testing. Account 0's shielded funds are used, with `confirmations` (default
 3) applied to zingolib's spendability calculation. Unconfirmed change is excluded.
 
-Managed serving starts one shared background sync worker after all listeners bind.
-It refreshes on an independent 60-second cadence. Connection establishment and
-per-response read inactivity use the shared network policy. Failed sync disables new
-treasury spending while independently funded EVM pools keep serving. Initial
-scans can take a long time. Sync checkpoints every 30 seconds and on completion,
+Available treasury serving requests one background ZEC scan after listeners bind.
+Further scans need enabled unfilled funding claims or validated pending source or
+shielding transactions. Each recurring scan starts at least 60 seconds after the
+previous scan completes, with independent failure backoff bounded by 300 seconds.
+New reserve demand wakes discovery; idle serving does not watch for deposits.
+The [wallet observation policy](wallet-rotation.md#wallet-observation-policy)
+describes the Store-only exception when the SDK/source capability is unavailable.
+Connection establishment and per-response read inactivity use the shared network
+policy. Actual spending keeps its SDK/canonical validation; independently funded
+Base payers remain usable during scan failure. Initial scans can take a long time. Sync checkpoints every 30 seconds and on completion,
 failure or cancellation; each checkpoint atomically commits the encrypted wallet
 and its observation under one snapshot revision. Checkpoints resume from saved
 scan state. Old unreferenced snapshots are pruned, retaining the current snapshot
@@ -320,10 +328,11 @@ uncertain preparation. Refund handling and confirmed deposits with unresolved sw
 outcomes are reported for operator review. The low-level recovery commands remain
 available for advanced use, but are omitted from ordinary help.
 
-Managed serving reconciles each pool's Base balances and authorizations every five
-seconds, sharing the admission gate with paid calls. This can resolve confirmed
-payments and finish bootstrap; it never signs a payment or promotes the active
-wallet. Changed canonical anchors remain blocked for explicit recovery.
+Managed serving performs finite startup Base discovery and requested scalar
+balance refreshes under the [wallet observation policy](wallet-rotation.md#wallet-observation-policy).
+Idle wallets are not swept, and ordinary scalar reads do not reconcile historical
+payment authorizations. Canonical qualification and explicit recovery retain their
+separate evidence and authority requirements.
 
 Each sync cycle owns a separate Tokio runtime because pinned upstream sync can
 leave helper tasks alive on early exit. Teardown stops those tasks and joins
@@ -366,15 +375,17 @@ confirmation/expiry and first-positive credit retain their separate stop rules.
 
 `swap_timeout_seconds` is a health-warning threshold, default 1,800 seconds from
 the first durable broadcast intent, not an abort deadline. When exceeded,
-status shows `timed_out` and pool `funding_degraded`; reconciliation continues at
-least 60 seconds apart. This never releases funds or stops a funded active wallet.
-Status failures have their own persisted exponential backoff (up to 300 seconds,
-plus per-job jitter), independent of quote retry counts. Successful observations
-reset the error streak. Status errors contain fixed actionable categories, never
-remote bodies, credentials or deposit addresses. It resumes phases without repeating ambiguous
+status shows `timed_out` and pool `funding_degraded`; reconciliation retains its
+existing minute floor. This never releases funds or stops a funded active wallet.
+Each observation kind retains its own runtime error backoff, bounded by 300 seconds
+plus existing jitter, independently of quote retry counts. Saved health/`next_poll`
+fields report aggregate progress; they do not impose one kind's failure on another
+after reopen. Successful observations reset only their own error streak. Status
+errors contain fixed actionable categories, never remote bodies, credentials or
+deposit addresses. The coordinator resumes phases without repeating ambiguous
 submissions, reconciles source confirmation, polls the same deposit, and independently
-checks Base credit. Partial deposits enter `recovery_required`; failed/refunded swaps
-stay `refund_pending`. The SDK owns incoming returns and current spendable inputs. Local refund credits,
+checks Base credit. Provider-reported partial deposits enter `recovery_required`;
+failed/refunded swaps stay `refund_pending`. The SDK owns incoming returns and current spendable inputs. Local refund credits,
 principal caps and historical refund revalidation are removed; provider status alone
 never proves an on-chain return or authorizes a new deposit.
 
@@ -737,8 +748,11 @@ cloneable arguments (including POST). Every earlier authorization may still char
 or execute. Other failures never grant paid replay, and process restart never
 replays the logical call. See [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
 
-Ordinary maintenance reads unsigned latest USDC estimates separately from payment
-admission. It retains low-balance failures for follow-up without delaying fallback.
+A finite startup pass and requested refreshes read unsigned latest USDC estimates
+separately from payment admission; idle wallets are not swept. A successful zero
+refresh finishes its request. Failed reads and notifications arriving during reads
+retain follow-up work without delaying payment fallback. See the
+[wallet observation policy](wallet-rotation.md#wallet-observation-policy).
 Canonical authorization/debit proofs remain a qualification observation, preserving
 all attempts and the existing case permit; seller success does not prove a debit.
 

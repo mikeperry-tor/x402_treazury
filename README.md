@@ -169,11 +169,20 @@ Send ZEC to that **shielded receive address**. The example's two wallet groups e
 > initial funding, remove an unused `[wallets.NAME]` definition and remove or
 > rebind servers and sources that reference it before starting `serve`.
 
-Once the ZEC is confirmed and
-spendable, `serve` funds the managed USDC wallets automatically.
-Available tools remain accessible while funding is pending; managed paid
-calls require confirmed USDC capacity. Logs report funding progress, and you can
-rerun `wallet status` at any time.
+While enabled reserve claims need funds, `serve` discovers later ZEC deposits
+and confirmations at its shared observation cadence, then funds the managed USDC
+wallets when the SDK can spend them. Available tools remain accessible during
+funding; paid calls use existing eligible payers under their payment authority.
+Saved balance estimates do not prevent an otherwise permitted signature. A
+wallet's first positive USDC observation consumes its initial claim, even below
+its target, and never authorizes a top-up.
+
+Startup performs finite balance discovery behind bound listeners. Fully funded
+idle serving does not watch for incoming transfers. `wallet status` reads saved
+observations without network traffic; an idle deposit may remain absent until
+startup, explicit `wallet sync` with serving stopped, or another relevant trigger.
+See the [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy)
+for the discovery scopes and unavailable-treasury exception.
 
 The privacy example conf uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
 over Tor when catalog or pricing requests are blocked, rate limited or time out.
