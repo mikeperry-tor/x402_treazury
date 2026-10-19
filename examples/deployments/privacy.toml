@@ -267,6 +267,23 @@ extends = "../../providers/relayshield/phone-reputation.toml"
 include_tools = ["relayshield_phone_reputation"]
 instructions_text = "Use relayshield_phone_reputation for a company's known contact phone, supplied as phone in E.164 format. It returns phone reputation, attack-graph pivots and carrier line-type signals, with SIM-swap data cached for 24 hours rather than a fresh carrier check. Preserve checked/unknown markers and evidence timestamps; an absence of flags is not proof of safety. This locally authored companion covers a route omitted from the vendor OpenAPI catalog; Treazury handles its x402 v1 payment. Advertised cost is $0.05, subject to the live challenge and shared $0.50 cap. Do not automatically repeat an uncertain paid request."
 
+# Focused NetIntel phone, IP and company-infrastructure intelligence.
+# Inherit the company wallet and its $0.50 per-payment cap.
+[sources.company_netintel]
+extends = "../../providers/netintel.toml"
+include_tools = [
+  "netintel_phone_intel_analyze",
+  "netintel_ip_reputation_analyze",
+  "netintel_ip_risk_score",
+  "netintel_ip_report_full",
+  "netintel_ip_geo_locate",
+  "netintel_asn_lookup_analyze",
+  "netintel_domain_vendor_risk",
+  "netintel_cloud_fingerprint_analyze",
+  "netintel_tech_fingerprint_analyze",
+]
+instructions_text = "NetIntel phone, IP and company-infrastructure intelligence (netintel_*). Use phone_intel_analyze with phone in any format and optional country_hint when no country dial code is present; it validates and normalizes the number, with line-type classification limited to NANP and UK numbers, not scam history, subscriber identity or proof of reachability. Use ip for ip_reputation_analyze, ip_risk_score, ip_report_full and ip_geo_locate; target (an IP address or domain) for asn_lookup_analyze; domain for domain_vendor_risk and cloud_fingerprint_analyze; and url for tech_fingerprint_analyze. Choose individual IP checks for focused information or ip_report_full for a combined profile. Score direction differs: ip_reputation_analyze risk_score rises with danger; ip_risk_score trust_score rises with safety and its deprecated risk_score aliases trust_score. Preserve section availability, partial results, unknown fields and source timestamps; unavailable signals are not clean results. IPv6 inputs skip IPv4-only blacklist checks. Advertised selected-tool prices are $0.002-$0.20 per call; live challenges and the shared $0.50 company cap govern payment. Treazury handles x402 USDC on Base; do not automatically repeat uncertain paid submissions."
+
 [sources.googletrends]
 extends = "../../providers/google-trends.toml"
 instructions_text = "Use Google Trends for aggregate keyword interest over time, by region, and related queries/topics in the web research context. Supply keyword and an ISO country code as required by the tools. This is aggregate trend data, not web search or evidence about a specific person's behavior. Treazury handles x402 payment; use the live challenge and configured cap for costs. google_trends_help describes this complete selected toolset."
@@ -303,7 +320,7 @@ sources = ["social", "telesint", "pdl_people", "social_stableenrich"]
 listen = "127.0.0.1:6339"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone"]
+sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel"]
 
 # Start with discovery tools; agent-added APIs are persisted in the registry above.
 [servers.toolbox]
