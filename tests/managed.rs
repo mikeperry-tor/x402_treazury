@@ -702,6 +702,7 @@ async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization(
                     json!({"unknown-extension": {"secret": "private-extension-value"}});
                 c
             };
+            c["resource"]["description"] = json!("short public description");
             let expected = c["accepts"][0].clone();
             *h.f.challenge.lock().unwrap() = c.take();
             assert_eq!(h.client.execute(h.route()).await.unwrap(), "paid");
@@ -740,9 +741,207 @@ async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization(
     for name in ["unknown-extension", "bazaar", "builder-code"] {
         assert!(logs.contains(name), "{logs}");
     }
-    assert!(logs.contains("stripping advertised x402 extension"));
+    let omissions: Vec<_> = logs
+        .lines()
+        .filter(|line| line.contains("omitting advertised x402 extension"))
+        .collect();
+    assert!(!omissions.is_empty(), "{logs}");
+    assert!(
+        omissions.iter().all(|line| line.contains("INFO")
+            && line.contains("call_id=")
+            && line.contains("source=\"standalone\"")
+            && line.contains("method=\"GET\"")),
+        "{logs}"
+    );
+    assert!(logs.contains("Payment call completed"), "{logs}");
+    assert!(!logs.contains("WARN"), "{logs}");
     assert!(!logs.contains("private-extension-value"));
 }
+#[tokio::test]
+async fn managed_failure_diagnostics_survive_cancellation_and_hide_upstream_prose() {
+    use tracing::instrument::WithSubscriber;
+    for cancel in [false, true] {
+        let logs = LogCapture(Arc::default());
+        let sink = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .with_max_level(if cancel {
+                tracing::Level::WARN
+            } else {
+                tracing::Level::INFO
+            })
+            .finish();
+        async {
+            let h = Harness::new().await;
+            {
+                let mut c = h.f.challenge.lock().unwrap();
+                c["resource"]["description"] = json!("short");
+                c["error"] = json!("private-upstream-prose");
+                c["extensions"] =
+                    json!({"payment-identifier":{"secret":"private-extension-value"}});
+            }
+            h.f.reject.store(true, Ordering::SeqCst);
+            h.f.hold.store(cancel, Ordering::SeqCst);
+            let task = tokio::spawn({
+                let client = h.client.clone();
+                let mut route = h.route();
+                route
+                    .query
+                    .insert("credential".into(), json!("private-query-value"));
+                async move {
+                    if cancel {
+                        client.execute(route).await.map(|_| ())
+                    } else {
+                        let tools = x402_treazury::catalog::build_tools(
+                            &x402_treazury::catalog::Config::default(),
+                            &json!({"paths":{"/pay":{"get":{"operationId":"diagnostic_call"}}}}),
+                            "fixture",
+                        )
+                        .unwrap();
+                        let mut bound = x402_treazury::catalog_state::bind(vec![(
+                            tools[0].clone(),
+                            client,
+                            route.url.trim_end_matches("/pay").to_owned(),
+                        )])
+                        .pop()
+                        .unwrap();
+                        bound.source = Some(("registered-fixture".into(), 1));
+                        bound.invoke_output(&Default::default()).await.map(|_| ())
+                    }
+                }
+                .with_current_subscriber()
+            });
+            if cancel {
+                concurrency::bounded(h.f.arrived.notified()).await;
+                task.abort();
+                assert!(task.await.unwrap_err().is_cancelled());
+                h.f.release.notify_one();
+            } else {
+                assert!(task.await.unwrap().is_err());
+            }
+            h.client.drain().await;
+            assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+            h.close().await;
+        }
+        .with_subscriber(subscriber)
+        .await;
+        let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
+        assert_eq!(warnings.len(), 1, "{logs}");
+        let warning = warnings[0];
+        assert_eq!(warning.matches("stage=").count(), 1, "{logs}");
+        assert_eq!(warning.matches("last_http_status=").count(), 1, "{logs}");
+        for expected in [
+            "Payment call failed",
+            "call_id=",
+            "last_http_status=402",
+            "stage=\"response_body\"",
+            "authorization_may_charge=true",
+            "failure_kind=\"http_status\"",
+        ] {
+            assert!(warning.contains(expected), "{logs}");
+        }
+        if cancel {
+            assert!(warning.contains("source=\"standalone\""), "{logs}");
+        } else {
+            assert!(warning.contains("source=\"registered-fixture\""), "{logs}");
+            assert!(warning.contains("tool="), "{logs}");
+        }
+        for secret in [
+            "private-upstream-prose",
+            "private-extension-value",
+            "private-query-value",
+            "127.0.0.1",
+            "payment-signature",
+        ] {
+            assert!(!logs.contains(secret), "{logs}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn direct_managed_failure_diagnostics_distinguish_refusal_and_rejection() {
+    use tracing::instrument::WithSubscriber;
+    let logs = LogCapture(Arc::default());
+    let sink = logs.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(move || sink.clone())
+        .with_max_level(tracing::Level::INFO)
+        .finish();
+    async {
+        let h = Harness::new().await;
+        let manager = make_pool(h.store.clone(), h.pool.clone(), &h.base);
+        let http = reqwest::Client::new();
+        let mut c = challenge("1");
+        c["resource"]["description"] = json!("short");
+        c["extensions"] = json!({"agentkit":{"secret":"private-extension-value"}});
+        let response = |c: &Value| {
+            reqwest::Response::from(
+                axum::http::Response::builder()
+                    .status(402)
+                    .header("payment-required", STANDARD.encode(c.to_string()))
+                    .body("")
+                    .unwrap(),
+            )
+        };
+        let mut malformed = c.clone();
+        malformed["accepts"] = json!([]);
+        assert!(
+            manager
+                .pay(
+                    &http,
+                    manager.candidate().await.unwrap(),
+                    reqwest::Request::new(reqwest::Method::GET, h.url.parse().unwrap()),
+                    response(&malformed)
+                )
+                .await
+                .is_err()
+        );
+        assert!(h.f.signed.lock().unwrap().is_empty());
+        h.f.reject.store(true, Ordering::SeqCst);
+        let (paid, _) = manager
+            .pay(
+                &http,
+                manager.candidate().await.unwrap(),
+                reqwest::Request::new(reqwest::Method::GET, h.url.parse().unwrap()),
+                response(&c),
+            )
+            .await
+            .unwrap();
+        assert_eq!(paid.status(), StatusCode::PAYMENT_REQUIRED);
+        assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+        drop(manager);
+        h.close().await;
+    }
+    .with_subscriber(subscriber)
+    .await;
+    let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
+    assert_eq!(warnings.len(), 2, "{logs}");
+    assert!(
+        warnings[0].contains("stage=\"challenge_preparation\""),
+        "{logs}"
+    );
+    assert!(
+        warnings[0].contains("authorization_may_charge=false"),
+        "{logs}"
+    );
+    assert!(warnings[1].contains("last_http_status=402"), "{logs}");
+    assert!(
+        warnings[1].contains("authorization_may_charge=true"),
+        "{logs}"
+    );
+    assert!(
+        warnings.iter().all(|line| line.contains("call_id=")),
+        "{logs}"
+    );
+    assert!(!logs.contains("private-extension-value"), "{logs}");
+}
+
 // Captured unsigned challenges: top-level extension omission is deliberately
 // separate from rejecting unreviewed metadata inside payment offers.
 #[tokio::test]

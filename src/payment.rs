@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::Value;
 use std::sync::{Arc, RwLock};
+use tracing::Instrument;
 use x402_chain_eip155::{V2Eip155ExactClient, V2Eip155UptoClient};
 use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
@@ -209,6 +210,7 @@ impl SubmissionProgress {
     }
 }
 
+pub(crate) mod diagnostics;
 pub(crate) mod ownership;
 #[cfg(test)]
 mod ownership_tests;
@@ -473,12 +475,18 @@ impl PaidClient {
         let client = self.clone();
         let progress = progress.clone();
         let observed_progress = progress.clone();
+        let span = diagnostics::span(&self.source_identity, &route.method);
         let result = self
-            .run_owned(async move {
-                client
-                    .execute_response_owned(route, &progress, operation)
-                    .await
-            })
+            .run_owned(
+                diagnostics::scope(async move {
+                    let result = client
+                        .execute_response_owned(route, &progress, operation)
+                        .await;
+                    diagnostics::finish(&result, &progress);
+                    result
+                })
+                .instrument(span),
+            )
             .await?;
         if observed_progress.possible() {
             result.context("An authorization may still charge or execute; do not automatically repeat this logical call")
@@ -533,6 +541,7 @@ impl PaidClient {
             {
                 context.check_retry_start().await?;
             }
+            diagnostics::stage("transport_selection");
             let (http, mut cover) = self
                 .execution_transport(
                     &request,
@@ -541,9 +550,12 @@ impl PaidClient {
                     payer.as_deref(),
                 )
                 .await?;
+            diagnostics::stage("unsigned_request");
             let (mut response, retry, receipt) =
                 unsigned_response(&http, &request, cover.as_ref()).await?;
+            diagnostics::response(&response);
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
+                diagnostics::stage("challenge_preparation");
                 if unsigned_only {
                     crate::qualification::record_challenge(response.headers()).await?;
                     tracing::warn!(
@@ -643,6 +655,7 @@ impl PaidClient {
                 }
             }
             crate::network::log_http(&response, "payment_result");
+            diagnostics::response(&response);
             if let Some(c) = &cover {
                 c.protocol(response.version());
                 c.rejected_padding(response.status());
@@ -652,6 +665,7 @@ impl PaidClient {
             }
             break (response, cover);
         };
+        diagnostics::stage("response_body");
         let result = self.response_output(response, paid_submission).await;
         if let Some(call) = &mut cover
             && result.is_ok()
@@ -827,8 +841,10 @@ async fn static_payment(
     cover: Option<&crate::cover::runtime::Call>,
     progress: &SubmissionProgress,
 ) -> Result<reqwest::Response> {
+    diagnostics::stage("challenge_preparation");
     sanitize_challenge(&mut response)?;
     // Selection (asset/network/cap) happens inside the SDK before signing.
+    diagnostics::stage("signing");
     let headers = payer
         .expect("static payer")
         .client
@@ -842,6 +858,7 @@ async fn static_payment(
         p.dispatched();
     }
     progress.mark_possible();
+    diagnostics::stage("signed_request");
     let response = http
         .execute(retry)
         .await

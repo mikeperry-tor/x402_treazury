@@ -4,7 +4,7 @@ use super::{
     base::{BaseRpc, now},
     store::{Authorization, StoreHandle},
 };
-use crate::payment::{SpendPolicy, USDC};
+use crate::payment::{SpendPolicy, USDC, diagnostics};
 use alloy_primitives::{Address, B256, U256, keccak256};
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result, ensure};
@@ -216,6 +216,7 @@ impl ManagedPool {
     }
     /// Low-level dispatch for an already bound transport/challenge. Use
     /// `PaidClient::managed` for logical calls with identity-bound traversal.
+    #[tracing::instrument(level = "warn", name = "direct_payment", skip_all, fields(call_id = %uuid::Uuid::new_v4()))]
     pub async fn pay_with_cover(
         &self,
         http: &reqwest::Client,
@@ -226,39 +227,53 @@ impl ManagedPool {
     ) -> Result<ManagedResponse> {
         let pool = self.clone();
         let http = http.clone();
-        crate::payment::ownership::run(&self.direct_work, async move {
-            let through = pool.inventory_boundary().await?;
-            let response = if response.headers().contains_key("payment-required") {
-                response
-            } else {
-                crate::payment::bound_challenge(response, crate::limits::RESPONSE_BYTES).await?
-            };
-            let (response, extensions_omitted, _) = pool
-                .pay_with_cover_observed(
-                    &http,
-                    expected,
-                    retry,
-                    response,
-                    cover.as_ref(),
-                    AdmissionObservation {
-                        progress: &crate::payment::SubmissionProgress::default(),
-                        hint: None,
-                        through,
-                        attempted: &[],
-                    },
-                )
-                .await?;
-            if let Some(call) = &mut cover {
-                call.protocol(response.version());
-                call.rejected_padding(response.status());
-                call.response_headers();
-            }
-            Ok(ManagedResponse {
-                response,
-                extensions_omitted,
-                cover,
-            })
-        })
+        crate::payment::ownership::run(
+            &self.direct_work,
+            diagnostics::scope(async move {
+                diagnostics::stage("challenge_preparation");
+                let progress = crate::payment::SubmissionProgress::default();
+                let result: Result<ManagedResponse> = async {
+                    let through = pool.inventory_boundary().await?;
+                    let response = if response.headers().contains_key("payment-required") {
+                        response
+                    } else {
+                        crate::payment::bound_challenge(response, crate::limits::RESPONSE_BYTES)
+                            .await?
+                    };
+                    let (response, extensions_omitted, _) = pool
+                        .pay_with_cover_observed(
+                            &http,
+                            expected,
+                            retry,
+                            response,
+                            cover.as_ref(),
+                            AdmissionObservation {
+                                progress: &progress,
+                                hint: None,
+                                through,
+                                attempted: &[],
+                            },
+                        )
+                        .await?;
+                    if let Some(call) = &mut cover {
+                        call.protocol(response.version());
+                        call.rejected_padding(response.status());
+                        call.response_headers();
+                    }
+                    Ok(ManagedResponse {
+                        response,
+                        extensions_omitted,
+                        cover,
+                    })
+                }
+                .await;
+                match &result {
+                    Ok(owned) => diagnostics::finish_response(&owned.response, &progress),
+                    Err(_) => diagnostics::finish(&result, &progress),
+                }
+                result
+            }),
+        )
         .await?
     }
     /// Close direct payment admission and retain its accepted signing/dispatch
@@ -284,6 +299,7 @@ impl ManagedPool {
         // Bound foreground owners, including callers awaiting the group gate.
         // The permit lives through the one signed dispatch and cannot cancel it.
         let _foreground = crate::payment::ownership::foreground()?;
+        diagnostics::stage("challenge_preparation");
         let (challenge, offer, omitted) = prepare_challenge(&response, &self.policy)?;
         // Learning follows complete envelope validation, before financial admission.
         // An insufficient balance does not erase a valid observed price.
@@ -292,6 +308,7 @@ impl ManagedPool {
         }
         let requirements_hash = keccak256(serde_json::to_vec(&offer.raw)?).to_string();
         let qualification = crate::qualification::payment_context()?;
+        diagnostics::stage("wallet_admission");
         {
             let selected = self
                 .acquire_candidate(&expected, offer.amount, through, attempted)
@@ -315,6 +332,7 @@ impl ManagedPool {
                 .store
                 .call(move |s| s.prepare_advisory_payment(&pool, amount, &hash, &bound))
                 .await?;
+            diagnostics::stage("signing");
             let (signature, auth) = sign_authorization(&prepared, &offer, &challenge).await?;
             #[cfg(test)]
             self.admission_test_stage(AdmissionTestStage::Signed {
@@ -325,6 +343,7 @@ impl ManagedPool {
             let attempt_id = prepared.id.clone();
             let context = qualification.clone();
             // Lost journal acknowledgement must never imply no accepted intent.
+            diagnostics::stage("authorization_journal");
             progress.mark_possible();
             self.store
                 .call(move |s| s.journal_authorization(&prepared, auth, context.as_ref()))
@@ -348,11 +367,15 @@ impl ManagedPool {
         }
         // This bound attempt owns its own signature. A seller response never erases it.
         let signed_request_started = qualification.as_ref().map(|c| c.elapsed_micros());
+        diagnostics::stage("signed_request");
         let result = http.execute(retry).await.map_err(|_| {
             anyhow::anyhow!(AdmissionError::OutcomeUnknown(
                 "signed request transport failed"
             ))
         });
+        if let Ok(response) = &result {
+            diagnostics::response(response);
+        }
         if let Some(context) = qualification {
             let response_observed = context.elapsed_micros();
             let observer = context.clone();
@@ -467,7 +490,7 @@ fn strip_extensions(challenge: &mut Value) -> Result<bool> {
         if name == "bazaar" {
             tracing::debug!(extension = ?name, "managed payment omitting Bazaar discovery metadata before signing");
         } else {
-            tracing::warn!(extension = ?name, "managed payment stripping advertised x402 extension; attempting payment without extensions; provider may reject; submitted authorization may still charge");
+            tracing::info!(extension = ?name, stage = "challenge_preparation", reason = "unsupported_extension", "managed payment omitting advertised x402 extension before offer validation and signing; provider may require it");
         }
     }
     challenge

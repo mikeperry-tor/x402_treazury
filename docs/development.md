@@ -137,6 +137,25 @@ every command. Info reports catalog/pricing completion, listener startup and
 funding progress. Download, parse and protocol details belong at debug; warnings
 identify failures, degraded operation or actionable configuration problems.
 
+Managed extension omission is INFO (`bazaar` discovery metadata remains DEBUG).
+It reports challenge preparation before offer validation or signing, not a failed
+payment. Payment-call spans carry an ephemeral `call_id`, configured source and
+HTTP method; catalog calls also carry tool identity. Dynamic catalog calls use
+their registered source identity. Direct managed-library calls have their own
+call ID without claiming a configured source. No request URL, arguments, raw
+challenge, extension values, signed bytes or upstream error prose is logged.
+
+Accepted payment work logs its terminal result inside its retained owner, even
+after caller cancellation: completion is INFO, failure is WARN with a fixed
+failure kind, execution stage and `authorization_may_charge`. That flag records
+possible financial liability, not confirmed settlement. `last_http_status`, when
+present, is the most recently observed response status; a later signing or
+transport failure can follow an unsigned 402. Recoverable payer handoffs and
+insufficient-funds traversal do not emit terminal failures. Direct managed-library
+calls warn on unsuccessful returned HTTP status; their completion covers response
+headers, while body consumption remains the caller's responsibility. Diagnostics
+never authorize replay or change payment execution.
+
 Waiting for confirmed spendable ZEC and funding deferred by a reported treasury
 sync failure are info events; their retry backoff and stored failure conditions
 remain intact. Treasury sync failures stay warnings with safe connection reasons

@@ -21,6 +21,7 @@ impl BoundTool {
     ) -> Result<String> {
         self.invoke_output(args).await?.into_text()
     }
+    #[tracing::instrument(level = "warn", name = "tool_call", skip_all, fields(tool = %self.tool.name, source = self.source.as_ref().map(|(id, _)| id.as_str())))]
     pub async fn invoke_output(
         &self,
         args: &serde_json::Map<String, serde_json::Value>,
@@ -66,7 +67,11 @@ impl BoundTool {
             crate::qualification::record_help(false, Some(cache), Some(&result)).await?;
             Ok(crate::output::ToolOutput::text(result?))
         } else {
-            self.client
+            let client = match &self.source {
+                Some((source, _)) => self.client.clone().with_source_identity(source),
+                None => self.client.clone(),
+            };
+            client
                 .execute_response_scoped(
                     self.tool.route(&self.base, args)?,
                     &crate::payment::SubmissionProgress::default(),
