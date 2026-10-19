@@ -1,0 +1,44 @@
+# Stateless paid CTI and OSINT operations; excludes free /status and wallet-bound /watch/* routes.
+spec = "https://telesint-api.onrender.com/openapi.json"
+name = "TeleSINT"
+base_url = "https://telesint-api.onrender.com"
+prefix = "telesint"
+include_operations = [
+  "GET /actor",
+  "GET /artifact",
+  "GET /asn",
+  "GET /breach",
+  "GET /c2",
+  "GET /claim-check",
+  "GET /darkweb",
+  "GET /feed",
+  "GET /intent",
+  "GET /ioc",
+  "GET /malware",
+  "GET /preparation",
+  "GET /ransomware",
+  "GET /search",
+  "GET /source",
+  "GET /target-mentions",
+  "GET /velocity",
+  "GET /vulnerability",
+]
+pricing_key = "x-payment-info"
+probe_pricing = false
+read_timeout_seconds = 90
+# Use SKILL.md (advertised via x-skill-url in openapi.json) because /llms.txt is truncated mid-line at line 25.
+help_url = "https://telesint-api.onrender.com/SKILL.md"
+instructions_text = "TeleSINT cyber threat intelligence and conflict/geopolitical OSINT via x402 USDC on Base. Wallet-bound watchlist routes (/watch/*) are excluded because they tie watchlist ownership to the paying wallet address, which changes across managed wallet rotation. Always supply required scope parameters on telesint_preparation and telesint_velocity (at least one of organization, sector, country, actor, or vendor) and on telesint_claim_check (id or text): the upstream server returns HTTP 200 with a guidance/error JSON body when scope parameters are omitted, which would still consume a paid call. Use the parameter names and enum values declared in each tool's input schema rather than undocumented query fields in the vendor guide."
+
+[overrides.telesint_help]
+description = "Read TeleSINT's full SKILL.md reference guide (used instead of /llms.txt, which is truncated mid-line), fetched on demand and cached for this process. The guide also describes excluded wallet-bound /watch/* routes, free /status, and some query parameter names or enum spellings that differ from the OpenAPI schema; follow the exposed tools' input schemas."
+
+[overrides.telesint_preparation]
+description = "Pre-attack preparation radar: score 0-100, status (ELEVATED/WATCH/BASELINE), breakdown across five signal types. Pass at least one scope parameter (organization, sector, country, actor, or vendor); calling without a scope parameter returns a paid HTTP 200 guidance error."
+
+[overrides.telesint_velocity]
+description = "Signal acceleration (recent vs baseline rate) with spike detection. Pass at least one scope parameter (organization, sector, country, actor, or vendor); calling without a scope parameter returns a paid HTTP 200 guidance error."
+
+[overrides.telesint_claim_check]
+description = "Corroboration verdict (CORROBORATED / PARTIALLY_CORROBORATED / UNCORROBORATED / CONTRADICTED) against 90 days of victim mentions, breach records and ransomware claims. Pass either id or text (at least one is required to avoid a paid HTTP 200 guidance error)."
+

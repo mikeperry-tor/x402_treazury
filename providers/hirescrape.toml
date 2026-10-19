@@ -1,0 +1,48 @@
+# Synchronous first-party scraper tools; SIWX-gated snapshots, skills, reports and bounty routes are excluded.
+spec = "https://hirescrape.com/openapi.json"
+name = "HireScrape"
+base_url = "https://hirescrape.com"
+prefix = "hirescrape"
+include = ["/api/tools"]
+include_operations = [
+  "POST /api/tools/instagram",
+  "POST /api/tools/jobs",
+  "POST /api/tools/linkedin",
+  "POST /api/tools/tiktok",
+  "POST /api/tools/tiktok-shop",
+  "POST /api/tools/youtube",
+]
+pricing_key = "x-payment-info"
+probe_pricing = false
+read_timeout_seconds = 120
+help_url = "https://hirescrape.com/llms.txt"
+instructions_text = "HireScrape job-board and social-media scrapers paid via x402 USDC on Base. Keep requested record counts small (well below 200 total records, and within the configured payment cap): requests exceeding ~200 records or using async discovery modes switch to asynchronous snapshots whose GET /api/snapshots/{id} polling requires same-wallet SIWX authentication and session cookies not supported by Treazury. Follow each tool's input schema mode enum and limit/maxResults fields rather than divergent mode or num_of_posts names in vendor guidance. Published dynamic price ranges are estimates; the live 402 challenge and configured spend cap are authoritative. Missing receipts after a timeout do not prove nothing was charged; do not automatically replay a signed payment."
+
+[overrides.hirescrape_help]
+description = "Read HireScrape's vendor guide, fetched on demand and cached for this process. The guide includes excluded SIWX-authenticated snapshot polling, empty skills-marketplace routes, MPP/API-key flows, and legacy mode/parameter names (such as person, profile_discover, or num_of_posts on Instagram/LinkedIn/TikTok) that differ from the live OpenAPI schema. Always use the selected tools' input schema enums and keep total requested records below 200 so calls remain synchronous."
+
+[overrides.hirescrape_jobs.params]
+maxResults = "Max results per site (1-100, default 20). Total records across all selected boards is len(sites) * maxResults; keep that product below 200 (and small enough for the payment cap) so the call stays synchronous instead of returning an unpollable SIWX snapshot."
+sites = "Job boards to query (defaults to all 8 boards when omitted). Specify only needed boards so len(sites) * maxResults stays below the 200-record async snapshot threshold."
+
+[overrides.hirescrape_instagram.params]
+mode = "Use one of the schema enum values (profile, basic_profile, user_posts, post, transcript, search_reels, post_comments, user_reels, highlights, highlight_detail, song_reels, embed); ignore legacy mode names in vendor prose."
+limit = "Max records to collect (default 20). Keep well below 200 (and within the payment cap) so the call completes synchronously inline."
+
+[overrides.hirescrape_linkedin.params]
+mode = "Use one of the schema enum values (profile, company, company_posts, post); ignore legacy person/job search mode names in vendor prose that are absent from the request schema."
+limit = "Max items to collect (default 20, max 100). Keep small so the call stays synchronous and within the payment cap."
+
+[overrides.hirescrape_tiktok.params]
+mode = "Use one of the schema enum values; ignore legacy mode names in vendor prose."
+limit = "Max records to collect (default 20). Keep well below 200 (and within the payment cap) so the call completes synchronously inline."
+
+[overrides.hirescrape_tiktok_shop.params]
+mode = "Use one of the schema enum values (search, products, product, reviews, showcase); ignore legacy mode names in vendor prose."
+limit = "Max items to collect (default 20, max 200). Keep below 200 (and within the payment cap) so the call completes synchronously inline."
+
+[overrides.hirescrape_youtube.params]
+mode = "Use one of the schema enum values. Prefer synchronous profile/video/transcript reads; discovery modes marked async in vendor guidance may return a running snapshot that requires unsupported SIWX polling."
+limit = "Max items to collect (default 20). Keep well below 200 (and within the payment cap) so the call completes synchronously inline."
+num_of_posts = "Max records to collect. Set an explicit small count well below 200 (avoid 0) so the scrape does not switch to an asynchronous SIWX snapshot."
+
