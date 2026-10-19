@@ -279,6 +279,7 @@ include_tools = [
   "netintel_ip_geo_locate",
   "netintel_asn_lookup_analyze",
   "netintel_domain_vendor_risk",
+  "netintel_whois_rdap_lookup",
   "netintel_cloud_fingerprint_analyze",
   "netintel_tech_fingerprint_analyze",
 ]
