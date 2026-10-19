@@ -2,7 +2,7 @@
 
 Use these notes alongside [provider definitions](README.md). Prices and vendor
 behavior describe the committed configuration and fixtures; live challenges remain
-authoritative. Tests pin 966 tool contracts across 26 providers and settings for
+authoritative. Tests pin 971 tool contracts across 26 providers and settings for
 30 providers without contacting vendors.
 
 ## Reliability annotations
@@ -1013,7 +1013,7 @@ filings/news; the $0.50 tearsheet is mainly a trading-signal bundle.
 
 ## vaaya.toml — Vaaya
 
-Uses vendor `https://vaaya.ai/openapi.json` with an exact allowlist of 41
+Uses vendor `https://vaaya.ai/openapi.json` with an exact allowlist of 46
 synchronous research POST operations plus lazy `llms.txt` help. Selection covers
 OneSearch, web search/scrape, EDGAR, CourtListener, ProPublica, Wayback, USPTO,
 GDELT, Federal Register, Fundable, Signalbase, Akta and TheirStack. All selected
@@ -1064,3 +1064,29 @@ Strong company candidates are `vaaya_akta_headcount_trends` ($0.18),
 `vaaya_fundable_company` ($0.01 / $0.10). Raw EDGAR and USPTO records add evidence
 beyond existing company summaries; Signalbase funding/acquisitions ($0.25 each)
 add event feeds. OneSearch ($0.05) is convenient but overlaps existing Exa search.
+
+The example company listener in `examples/deployments/privacy.toml` selects 26
+Vaaya tools: Fundable company search/profile; CourtListener opinions/dockets;
+Akta headcount/product reviews; TheirStack technographics/keyword lookup;
+Signalbase funding/acquisitions; all six EDGAR reads; USPTO assignees/patents;
+Wayback snapshots/availability/fetch; Tako search/answer/contents; and RecallRadar
+search/get. They share its existing company wallet and payment cap. These
+sources are not restricted to listed companies: coverage depends on indexed
+profiles, products or public records. CourtListener's `q` remains required even
+when supplying `party_name`; EDGAR XBRL concepts principally serve public-company
+financial reporting.
+
+Tako research and RecallRadar have no known synchronous JSON/x402 compatibility
+blocker; their original omission was a compact catalog choice. The provider
+includes the complete search/result research chains. Tako chart creation is
+outside this research selection. RecallRadar search advertises `q` in prose
+("Query params") but publishes an open JSON request body with no declared
+properties. Pass `q` in the POST JSON body; the provider deliberately preserves
+the upstream schema rather than closing it. Its get route requires a returned
+`id`. Tako search/answer require `query`, and contents requires `url` from a result.
+No paid result or completeness qualification is implied by these contracts.
+
+Description prices are inconsistent with structured prices: Tako search/answer/
+contents prose quotes about $0.012/$0.018/$0.002, while `x-payment-info` advertises
+$0.03/$0.03/$0.05; RecallRadar search/get prose quotes $0.10/$0.025 while structured
+prices are $0.12/$0.03. Use the structured estimates and live payment challenge.

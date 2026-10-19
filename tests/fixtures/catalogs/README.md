@@ -2,7 +2,7 @@
 
 The 14 legacy tool catalogs were captured from the independent Python implementation
 before its retirement and verified against Rust. Together with the reviewed Rust
-provider catalogs, the 26 fixtures pin 966 tool names, full descriptions, schemas,
+provider catalogs, the 26 fixtures pin 971 tool names, full descriptions, schemas,
 methods, paths, parameter routes and help URLs. Settings snapshots cover 30
 bundled providers, including those without offline specs.
 Local spec paths are relative to the repository root.
@@ -85,8 +85,15 @@ vendor OpenAPI's concrete example ticker/token paths.
 
 The Vaaya fixture preserves all 252 paths from the live vendor OpenAPI,
 omitting response documentation via `snapshot_spec`. The companion discovery fixture
-contains 249 distinct x402 actions; the default golden pins 41 synchronous
+contains 249 distinct x402 actions; the default golden pins 46 synchronous
 research calls plus help. Tests check discovery membership, x402 pricing,
 exclusions, JSON body filters and regex escaping. These fixtures do not qualify
 current availability, paid settlement or Tor access. See provider caveats for
 schema/prose gaps and data limitations.
+
+Tako search/answer/contents and RecallRadar search/get extend the Vaaya default
+with synchronous research chains. The routing regression preserves RecallRadar's
+open, property-free input schema while sending its documented `q` in the JSON
+body, and verifies all five routes and structured estimates despite lower prices
+in vendor prose. The company deployment selects these and focused company/public
+record tools, inheriting its existing wallet and cap.

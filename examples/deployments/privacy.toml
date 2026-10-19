@@ -292,6 +292,40 @@ extends = "../../providers/ipintel.toml"
 include_tools = ["ipintel_ip_lookup", "ipintel_satellite"]
 instructions_text = "Company infrastructure and physical-site research through IPIntel.ai. Use ipintel_ip_lookup with an IPv4 or IPv6 ip for geolocation, ASN, ISP, organization, reverse DNS and proxy/mobile/hosting indicators; these are vendor signals, not proof of company ownership or location. Use ipintel_satellite with known lat and lon and optional radius_m, mode and date. Null date selects the latest suitable scene; fallback defaults to true and may select a nearby date. Preserve selected-scene timestamps, fulfillment status, warnings and Copernicus attribution. Satellite image links remain JSON metadata and are not automatically fetched. Advertised prices are $0.003 for IP lookup and $0.09 for satellite; live challenges and the shared $0.50 company payment cap govern payment. Treazury handles x402 USDC on Base; do not automatically repeat uncertain paid submissions."
 
+# Company profiles, public records, market signals and specialist research through Vaaya.
+# Inherit the existing company wallet and its $0.50 per-payment cap.
+[sources.company_vaaya]
+extends = "../../providers/vaaya.toml"
+include_tools = [
+  "vaaya_fundable_company_search",
+  "vaaya_fundable_company",
+  "vaaya_courtlistener_cases",
+  "vaaya_courtlistener_dockets",
+  "vaaya_akta_headcount_trends",
+  "vaaya_akta_product_reviews",
+  "vaaya_theirstack_technographics",
+  "vaaya_theirstack_tech_catalog",
+  "vaaya_signalbase_funding",
+  "vaaya_signalbase_acquisitions",
+  "vaaya_edgar_entities",
+  "vaaya_edgar_fulltext",
+  "vaaya_edgar_filings",
+  "vaaya_edgar_document",
+  "vaaya_edgar_concept",
+  "vaaya_edgar_index",
+  "vaaya_uspto_assignees",
+  "vaaya_uspto_patents",
+  "vaaya_wayback_snapshots",
+  "vaaya_wayback_available",
+  "vaaya_wayback_fetch",
+  "vaaya_tako_search",
+  "vaaya_tako_answer",
+  "vaaya_tako_contents",
+  "vaaya_recallradar_search",
+  "vaaya_recallradar_get",
+]
+instructions_text = "Company profiles, funding, workforce/product signals, US litigation, filings, patents, historical sites, numerical evidence and recalls through Vaaya. For Fundable company_search supply one of name/domain/linkedin/crunchbase; use the returned id with company, or call company directly with one of id/domain/linkedin/crunchbase. Verify legal entity/domain and source articles: the vendor documents identity mismatches and funding totals that may lag the latest round. CourtListener cases/dockets require q with optional party_name/court/date filters; cases searches opinions, dockets searches RECAP federal dockets. Akta headcount_trends/product_reviews take company as domain or Akta uuid. TheirStack technographics takes a company identifier, preferably company_domain; resolve technology slugs with tech_catalog before filtering, and preserve confidence and first/last dates because job mentions do not prove current deployment. Signalbase funding/acquisitions support company_domain/company_name and date filters; preserve event/source dates. EDGAR entities resolves q to CIK; filings takes cik, fulltext takes q with optional forms/date filters, document takes cik/accession/filename, concept takes cik/concept for public-company XBRL financials, and index takes date. Private Form D/C filings may be available, but missing results prove neither nonregistration nor absent financing. USPTO assignees takes organization; patents takes q. Wayback snapshots/available take url and date selectors; fetch takes url/timestamp from a snapshot. Tako search/answer take query with optional source_indexes; contents takes a result url for its backing CSV/page text. RecallRadar search takes q (product/brand) in the JSON body; get takes an id from search. Preserve source links, dates, jurisdiction, coverage, partial results and recall record identifiers; no hits do not prove no litigation or safety notices. Hosted assets remain links. Structured advertised prices govern estimates, including Tako $0.03/$0.03/$0.05 and RecallRadar $0.12/$0.03 rather than lower description prices. Live challenges and the shared $0.50 company payment cap govern payment. Treazury handles x402 USDC on Base; do not automatically repeat uncertain paid submissions."
+
 [sources.googletrends]
 extends = "../../providers/google-trends.toml"
 instructions_text = "Use Google Trends for aggregate keyword interest over time, by region, and related queries/topics in the web research context. Supply keyword and an ISO country code as required by the tools. This is aggregate trend data, not web search or evidence about a specific person's behavior. Treazury handles x402 payment; use the live challenge and configured cap for costs. google_trends_help describes this complete selected toolset."
@@ -328,7 +362,7 @@ sources = ["social", "telesint", "pdl_people", "social_stableenrich"]
 listen = "127.0.0.1:6339"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel", "company_ipintel"]
+sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel", "company_ipintel", "company_vaaya"]
 
 # Start with discovery tools; agent-added APIs are persisted in the registry above.
 [servers.toolbox]

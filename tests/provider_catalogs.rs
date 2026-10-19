@@ -107,7 +107,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 966);
+    assert_eq!(total, 971);
 }
 
 #[tokio::test]
@@ -1016,7 +1016,7 @@ async fn vaaya_selects_synchronous_x402_research_and_routes_json_filters() {
     doc["paths"]["/api/run/edgar/new-action"] = json!({"post":{"summary":"New action"}});
     doc["paths"]["/api/run/edgar/entities"]["get"] = json!({"summary":"New method"});
     let tools = catalog::build_tools(&cfg, &doc, "vaaya").unwrap();
-    assert_eq!(tools.len(), 42);
+    assert_eq!(tools.len(), 47);
     for tool in tools.iter().filter(|t| t.help_url.is_none()) {
         assert_eq!(tool.method, "POST");
         assert!(
@@ -1110,5 +1110,82 @@ async fn vaaya_selects_synchronous_x402_research_and_routes_json_filters() {
             .unwrap()
             .help_url,
         cfg.help_url
+    );
+}
+
+#[tokio::test]
+async fn vaaya_tako_and_recallradar_keep_research_bodies_and_structured_prices() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/vaaya.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value = serde_json::from_str(include_str!("fixtures/vaaya_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "vaaya").unwrap();
+    for (name, args, path, price) in [
+        (
+            "vaaya_tako_search",
+            json!({"query":"Acme revenue","source_indexes":["data"]}),
+            "/api/run/tako/search",
+            "$0.03",
+        ),
+        (
+            "vaaya_tako_answer",
+            json!({"query":"Acme revenue","effort":"fast"}),
+            "/api/run/tako/answer",
+            "$0.03",
+        ),
+        (
+            "vaaya_tako_contents",
+            json!({"url":"https://example.com/card"}),
+            "/api/run/tako/contents",
+            "$0.05",
+        ),
+        (
+            "vaaya_recallradar_search",
+            json!({"q":"Acme kettle"}),
+            "/api/run/recallradar/search",
+            "$0.12",
+        ),
+        (
+            "vaaya_recallradar_get",
+            json!({"id":"public-fixture-id"}),
+            "/api/run/recallradar/get",
+            "$0.03",
+        ),
+    ] {
+        let tool = tools.iter().find(|t| t.name == name).unwrap();
+        let route = tool
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.url, format!("https://vaaya.ai{path}"));
+        assert_eq!(route.method, "POST");
+        assert_eq!(route.body, Some(args));
+        assert!(route.query.is_empty());
+        assert!(tool.description.contains(price));
+    }
+    let recall = tools
+        .iter()
+        .find(|t| t.name == "vaaya_recallradar_search")
+        .unwrap();
+    assert!(
+        recall.input_schema["properties"]
+            .as_object()
+            .unwrap()
+            .is_empty()
+    );
+    assert_ne!(recall.input_schema["additionalProperties"], false);
+    let search = tools
+        .iter()
+        .find(|t| t.name == "vaaya_tako_search")
+        .unwrap();
+    assert_eq!(search.input_schema["required"], json!(["query"]));
+    assert_eq!(search.input_schema["properties"]["effort"]["const"], "fast");
+    assert!(
+        !tools.iter().any(
+            |t| t.path == "/api/run/tako/visualize" || t.path == "/api/run/tako/thinviz-create"
+        )
     );
 }

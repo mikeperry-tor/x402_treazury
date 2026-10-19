@@ -1202,6 +1202,40 @@
     "has_body": true
   },
   {
+    "name": "vaaya_recallradar_get",
+    "description": "recallradar — fetch one record by `id` from a prior search. 2.5¢. Cost: ~$0.03/call [spec].",
+    "method": "POST",
+    "path": "/api/run/recallradar/get",
+    "input_schema": {
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "id": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "vaaya_recallradar_search",
+    "description": "recallradar — search normalized consumer-product safety notices (six public authorities). 10¢/search. Query params: `q` (product/brand). Cost: ~$0.12/call [spec].",
+    "method": "POST",
+    "path": "/api/run/recallradar/search",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": true
+  },
+  {
     "name": "vaaya_serper_news",
     "description": "Serper — Google News results: recent articles with source, date, and thumbnail. Pass `q`; optional `num`, `page`, `gl`, `hl`, `location`, `tbs` (freshness qdr:h|d|w|m|y — always set one for current events). Use for news-cycle queries; brave/news is the non-Google comparison. Cost: ~$0.01/call [spec].",
     "method": "POST",
@@ -2099,6 +2133,104 @@
       "ticket_size_max": "body",
       "ticket_size_min": "body",
       "type": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "vaaya_tako_answer",
+    "description": "Tako — one written, cited answer grounded in the same licensed data, with the backing cards, ~1.8¢. Params: `query`, optionally `source_indexes`. Same body as tako/search plus a synthesized answer. Cost: ~$0.03/call [spec].",
+    "method": "POST",
+    "path": "/api/run/tako/answer",
+    "input_schema": {
+      "properties": {
+        "effort": {
+          "const": "fast",
+          "type": "string"
+        },
+        "query": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_indexes": {
+          "items": {
+            "enum": [
+              "data",
+              "web"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "effort": "body",
+      "query": "body",
+      "source_indexes": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "vaaya_tako_contents",
+    "description": "Tako — download what is behind a result: a card URL returns its data as CSV, any other URL returns the extracted page text, ~0.2¢. Params: `url` (a `webpage_url` from tako/search or tako/answer). Cost: ~$0.05/call [spec].",
+    "method": "POST",
+    "path": "/api/run/tako/contents",
+    "input_schema": {
+      "properties": {
+        "url": {
+          "format": "uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "vaaya_tako_search",
+    "description": "Tako — search licensed live data (company financials, market prices, macro, sports, polls, weather) and get knowledge cards with named sources, ~1.2¢. Params: `query`, optionally `source_indexes` ([\"data\"] default, add \"web\"). Use it when the answer is a NUMBER from an authoritative source, not a web page. Cost: ~$0.03/call [spec].",
+    "method": "POST",
+    "path": "/api/run/tako/search",
+    "input_schema": {
+      "properties": {
+        "effort": {
+          "const": "fast",
+          "type": "string"
+        },
+        "query": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_indexes": {
+          "items": {
+            "enum": [
+              "data",
+              "web"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "effort": "body",
+      "query": "body",
+      "source_indexes": "body"
     },
     "has_body": true
   },
