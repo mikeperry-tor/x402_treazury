@@ -24,8 +24,7 @@ describe advisory estimates, per-wallet attempts, no top-ups, SDK-owned Zcash
 funds, owner recovery and automatic owned-transparent shielding. The
 [wallet observation policy](wallet-rotation.md#wallet-observation-policy) owns
 USDC/ZEC discovery triggers, recurring cadence, stop rules and accepted-work
-exceptions. The unfinished [unified polling policy plan](plans/unified_polling_policy.md)
-tracks the remaining acceptance and permanent documentation handoff.
+exceptions.
 The [live runbook](../tests/live/INTEGRATION.md) is the provider execution walkthrough;
 [testing](testing.md#qualification-status) states qualification limits.
 [Deferred plans](plans/deferred/) cover independent provider startup, polling,
