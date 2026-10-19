@@ -932,3 +932,43 @@ the main catalog. The unsigned phone challenge uses x402 v1; the vendor OpenAPI
 advertises `x402_version: 2` for its payg operations. Live challenges determine
 the protocol. Offline catalog and signing regressions establish local
 compatibility only; no funded settlement or live Tor qualification is claimed.
+
+## ipintel.toml — IPIntel.ai
+
+Uses the vendor's live `https://tools.ipintel.ai/openapi.json` and lazy
+`https://tools.ipintel.ai/llms.txt`. The exact allowlist selects all 13 current
+POST operations plus help. Each operation has structured `x-payment-info`, so
+pricing probes are disabled. The request fixture retains complete request
+schemas, descriptions, tags and extensions; no local schema repair is needed.
+Published payment metadata advertises x402 v2, USDC on Base. Offline catalog
+coverage does not qualify paid settlement or Tor access.
+
+Observed documentation oddities and interpretation boundaries:
+
+- The guide and schema overview advertise $0.001–$0.17, but operation prices
+  currently span $0.001–$0.09; satellite is $0.09. Live challenges govern payment.
+- Satellite returns JSON with hosted PNG links, not image bytes/base64. Links
+  remain metadata; Treazury does not automatically fetch them. Nullable `date`
+  means latest when null, and default `fallback = true` can select a nearby scene.
+  Preserve scene timestamps, fulfillment status, warnings and Copernicus attribution.
+- HTTP latency prose calls it a HEAD check, but its request schema also permits
+  `method = "GET"`. Measurements come from the handling Cloudflare Worker edge,
+  not the agent's location, and are not ICMP ping.
+- The domain-health example scores 100 with DMARC `p=none`. Treat scores as the
+  vendor's configuration summary, not evidence of enforced anti-spoofing policy
+  or company legitimacy. Email validation documents syntax/DNS/MX/provider checks,
+  not confirmed mailbox reachability; availability checks are probabilistic.
+- JWT decode explicitly does not verify signatures. Base64 and JSON Schema
+  utilities are paid remote computations often better performed locally. The
+  validator's `data` property deliberately accepts any JSON value.
+
+For the company listener in `examples/deployments/privacy.toml`, the strongest
+additions would be `ipintel_domain_health` ($0.001) and `ipintel_dns_lookup`
+($0.001): email-domain configuration plus raw DNS evidence complement its current
+selected tools. `ipintel_satellite` ($0.09) is an optional physical-site research
+specialist, requiring known coordinates and careful scene interpretation.
+`ipintel_email_validate` ($0.004) is optional contact hygiene rather than company
+identity evidence. WHOIS, IP enrichment and reverse DNS largely overlap existing
+NetIntel/RelayShield selections; domain availability mostly serves naming work.
+The example company listener selects only `ipintel_ip_lookup` and
+`ipintel_satellite`, sharing its existing company wallet and payment cap.

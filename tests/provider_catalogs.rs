@@ -73,7 +73,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    assert_eq!(cases.len(), 23);
+    assert_eq!(cases.len(), 24);
     let mut total = 0;
     for case in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
@@ -107,7 +107,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 861);
+    assert_eq!(total, 875);
 }
 
 #[tokio::test]
@@ -822,4 +822,90 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
         .map(|tool| &tool.name)
         .collect();
     assert_eq!(names.len(), tools.len() + phone_tools.len());
+}
+
+#[tokio::test]
+async fn ipintel_preserves_paid_post_contracts_and_arbitrary_json() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/ipintel.toml"))
+        .await
+        .unwrap()
+        .settings;
+    assert!(!cfg.probe_pricing);
+    assert!(!cfg.allow_http1 && !cfg.allow_tls12);
+    let mut doc: Value =
+        serde_json::from_str(include_str!("fixtures/ipintel_openapi.json")).unwrap();
+    assert_eq!(doc["paths"].as_object().unwrap().len(), 13);
+    doc["paths"]["/dns-lookup"]["get"] = json!({"summary":"New method"});
+    doc["paths"]["/dns-lookup/debug"] = json!({"post":{"summary":"New subroute"}});
+    doc["paths"]["/health"] = json!({"get":{"summary":"Diagnostic"}});
+    let tools = catalog::build_tools(&cfg, &doc, "ipintel").unwrap();
+    assert_eq!(tools.len(), 14);
+    for tool in tools.iter().filter(|tool| tool.help_url.is_none()) {
+        assert_eq!(tool.method, "POST");
+        assert!(
+            cfg.include_operations
+                .contains(&format!("POST {}", tool.path))
+        );
+        let price = doc["paths"][&tool.path]["post"]["x-payment-info"]["price"]["amount"]
+            .as_str()
+            .unwrap();
+        assert!(
+            tool.description.contains(&format!("${price}")),
+            "{}",
+            tool.name
+        );
+    }
+    let find = |name: &str| tools.iter().find(|t| t.name == name).unwrap();
+    let dns = find("ipintel_dns_lookup");
+    assert_eq!(dns.input_schema["required"], json!(["domain"]));
+    assert_eq!(
+        dns.input_schema["properties"]["types"]["items"]["enum"],
+        json!(["A", "AAAA", "MX", "NS", "TXT", "CAA", "SOA"])
+    );
+    let args = json!({"domain":"example.com","types":["MX","TXT"]});
+    let route = dns
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.url, "https://tools.ipintel.ai/dns-lookup");
+    assert_eq!(route.body, Some(args));
+    assert!(route.query.is_empty());
+    let satellite = find("ipintel_satellite");
+    assert_eq!(
+        satellite.input_schema["properties"]["date"]["type"],
+        json!(["string", "null"])
+    );
+    assert_eq!(
+        satellite.input_schema["properties"]["fallback"]["default"],
+        true
+    );
+    assert!(satellite.response_mapping.is_none());
+    let validator = find("ipintel_json_schema_validator");
+    assert!(
+        validator.input_schema["properties"]["data"]
+            .get("type")
+            .is_none()
+    );
+    for data in [json!(null), json!([1, "two"]), json!(false)] {
+        let args = json!({"schema":{},"data":data});
+        let route = validator
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.body, Some(args));
+    }
+    assert_eq!(
+        find("ipintel_http_latency").input_schema["properties"]["method"]["enum"],
+        json!(["HEAD", "GET"])
+    );
+    assert!(
+        find("ipintel_jwt_decode")
+            .description
+            .contains("without verifying")
+    );
+    assert_eq!(
+        find("ipintel_help").help_url.as_deref(),
+        Some("https://tools.ipintel.ai/llms.txt")
+    );
 }

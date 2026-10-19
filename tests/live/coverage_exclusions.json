@@ -23,5 +23,10 @@
     "provider": "relayshield-phone-reputation",
     "config": "providers/relayshield/phone-reputation.toml",
     "reason": "Locally authored companion request schema and offline x402 v1 signing compatibility; no paid request or budget authorized. Live settlement and Tor behavior are not qualified."
+  },
+  {
+    "provider": "ipintel",
+    "config": "providers/ipintel.toml",
+    "reason": "Public request catalog and offline contracts only; no paid request or budget authorized. Live settlement and Tor behavior are not qualified."
   }
 ]

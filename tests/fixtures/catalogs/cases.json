@@ -113,5 +113,10 @@
     "name": "curl",
     "provider": "providers/curl/provider.toml",
     "spec": null
+  },
+  {
+    "name": "ipintel",
+    "provider": "providers/ipintel.toml",
+    "spec": "tests/fixtures/ipintel_openapi.json"
   }
 ]

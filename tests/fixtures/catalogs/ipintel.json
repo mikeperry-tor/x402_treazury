@@ -1,0 +1,415 @@
+[
+  {
+    "name": "ipintel_base64_decode",
+    "description": "Base64 Decode API. Decode standard or URL-safe Base64 and return UTF-8 text when possible, hex output, validity, and output length. Useful for agents, developers, token inspection, API debugging, decoding workflows, data transformation, and automation tasks. Paid per call via x402. Cost: ~$0.001/call [spec].",
+    "method": "POST",
+    "path": "/base64-decode",
+    "input_schema": {
+      "properties": {
+        "url_safe": {
+          "description": "Whether the input uses URL-safe Base64",
+          "type": "boolean"
+        },
+        "value": {
+          "description": "Base64 value to decode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "url_safe": "body",
+      "value": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_base64_encode",
+    "description": "Base64 Encode API. Encode plain text into standard or URL-safe Base64 and return structured JSON with input length and encoded output. Useful for agents, developers, API testing, token workflows, data transformation, encoding workflows, and automation tasks. Paid per call via x402. Cost: ~$0.001/call [spec].",
+    "method": "POST",
+    "path": "/base64-encode",
+    "input_schema": {
+      "properties": {
+        "url_safe": {
+          "description": "Whether to return URL-safe Base64 without padding",
+          "type": "boolean"
+        },
+        "value": {
+          "description": "String value to encode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "url_safe": "body",
+      "value": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_dns_lookup",
+    "description": "DNS Lookup API. Resolve domain DNS records and receive structured JSON with A, AAAA, MX, NS, TXT, CAA, and SOA records. Useful for agents, developers, domain diagnostics, email setup checks, DNS troubleshooting, and infrastructure investigation. Paid per call via x402. Cost: ~$0.001/call [spec].",
+    "method": "POST",
+    "path": "/dns-lookup",
+    "input_schema": {
+      "properties": {
+        "domain": {
+          "description": "Domain name to query, for example example.com",
+          "type": "string"
+        },
+        "types": {
+          "description": "Optional DNS record types to return",
+          "items": {
+            "enum": [
+              "A",
+              "AAAA",
+              "MX",
+              "NS",
+              "TXT",
+              "CAA",
+              "SOA"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "domain"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "domain": "body",
+      "types": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_domain_availability",
+    "description": "Domain Availability Check API. Check whether a domain name is registered or likely available for registration. Uses RDAP registry data plus DNS fallback signals and returns a machine-readable availability verdict. Useful for AI agents, startup naming, brand checks, registrar pre-checks, domain search workflows, and domain intelligence automation. Paid per call via x402. Cost: ~$0.002/call [spec].",
+    "method": "POST",
+    "path": "/domain-availability",
+    "input_schema": {
+      "properties": {
+        "domain": {
+          "description": "Domain name to check, for example example.com",
+          "type": "string"
+        }
+      },
+      "required": [
+        "domain"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "domain": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_domain_health",
+    "description": "Domain Health Check API. Check domain DNS, MX, SPF, DMARC, and email configuration health and receive a structured JSON score with issues and recommendations. Useful for agents, developers, email deliverability checks, domain diagnostics, infrastructure investigation, and security workflows. Paid per call via x402. Cost: ~$0.001/call [spec].",
+    "method": "POST",
+    "path": "/domain-health",
+    "input_schema": {
+      "properties": {
+        "domain": {
+          "description": "Domain name to analyze",
+          "type": "string"
+        }
+      },
+      "required": [
+        "domain"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "domain": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_email_validate",
+    "description": "Email validation for syntax, DNS/MX, disposable domain, role-based address, free provider and provider-typo checks. Returns normalized email, deliverability verdict, risk score, typo suggestion and structured validation flags for agents processing leads, signups and contact data. Cost: ~$0.004/call [spec].",
+    "method": "POST",
+    "path": "/email-validate",
+    "input_schema": {
+      "properties": {
+        "email": {
+          "description": "Email address to validate.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "email"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "email": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_help",
+    "description": "Extended documentation for all ipintel_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other ipintel_* tools when unsure how to use them.",
+    "method": "GET",
+    "path": "https://tools.ipintel.ai/llms.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://tools.ipintel.ai/llms.txt"
+  },
+  {
+    "name": "ipintel_http_latency",
+    "description": "IPIntel.ai x402 Tools is a pay-per-call collection of agent-ready APIs for domain intelligence, DNS lookup, reverse DNS, WHOIS lookup, domain availability checks, domain health checks, JSON Schema validation, JWT decoding, Base64 encoding/decoding, and HTTP diagnostics. This endpoint specifically measures HTTP response latency for a URL from the Cloudflare Worker edge location that handled the request. Returns status code, response time, redirect location, content type, Cloudflare colo metadata, and basic response headers. Useful for agents, developers, uptime checks, API diagnostics, website monitoring, HTTP troubleshooting, and latency checks. This is an HTTP HEAD latency check, not ICMP ping. Paid per call via x402. Cost: ~$0.001/call [spec].",
+    "method": "POST",
+    "path": "/http-latency",
+    "input_schema": {
+      "properties": {
+        "method": {
+          "description": "HTTP method to use. Defaults to HEAD.",
+          "enum": [
+            "HEAD",
+            "GET"
+          ],
+          "type": "string"
+        },
+        "url": {
+          "description": "HTTP or HTTPS URL to check",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "method": "body",
+      "url": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_ip_lookup",
+    "description": "IP Lookup API. Enrich an IPv4 or IPv6 address with geolocation, ASN, ISP, organization, reverse DNS, timezone, and proxy/mobile/hosting indicators. Useful for security, fraud checks, abuse triage, bot detection, traffic enrichment, and infrastructure investigation. Paid per call via x402. Cost: ~$0.003/call [spec].",
+    "method": "POST",
+    "path": "/ip-lookup",
+    "input_schema": {
+      "properties": {
+        "ip": {
+          "description": "IPv4 or IPv6 address to enrich, for example 8.8.8.8",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "ip": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_json_schema_validator",
+    "description": "JSON Schema Validator API. Validate JSON data against a JSON Schema and receive structured valid/invalid results with detailed validation errors. Supports common JSON Schema features including type, required, properties, additionalProperties, enum, const, items, string lengths, patterns, and numeric bounds. Useful for agents, developers, API testing, structured output validation, schema checks, and automation workflows. Paid per call via x402. Cost: ~$0.001/call [spec].",
+    "method": "POST",
+    "path": "/json-schema-validator",
+    "input_schema": {
+      "properties": {
+        "data": {
+          "description": "JSON value to validate against the schema"
+        },
+        "schema": {
+          "description": "JSON Schema object",
+          "type": "object"
+        }
+      },
+      "required": [
+        "data",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "data": "body",
+      "schema": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_jwt_decode",
+    "description": "JWT Decode API. Decode JWT header and payload without verifying the signature. Returns algorithm, claims, expiration, issued-at, not-before timestamps, and token validity hints. Useful for agents, developers, authentication debugging, token inspection, API testing, and security workflows. Paid per call via x402. Cost: ~$0.001/call [spec].",
+    "method": "POST",
+    "path": "/jwt-decode",
+    "input_schema": {
+      "properties": {
+        "token": {
+          "description": "JWT token to decode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "token": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_reverse_dns",
+    "description": "Reverse DNS Lookup API. Look up PTR records for an IP address and receive reverse DNS hostname data in structured JSON. Useful for agents, developers, IP enrichment, network diagnostics, infrastructure investigation, abuse analysis, and security workflows. Paid per call via x402. Cost: ~$0.001/call [spec].",
+    "method": "POST",
+    "path": "/reverse-dns",
+    "input_schema": {
+      "properties": {
+        "ip": {
+          "description": "IPv4 or IPv6 address to reverse-resolve",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "ip": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_satellite",
+    "description": "Satellite Observation API. Turn coordinates into a ready-to-use satellite observation for AI agents. Submit latitude, longitude, radius and mode to inspect any location on Earth, verify what is there, monitor change over time, compare before/after events, detect water or vegetation signals, review land surface conditions, check thermal-style anomalies, or switch to cloud-independent Radar when optical views are limited. Built for geospatial agents, OSINT workflows, location intelligence, environmental monitoring, disaster/event analysis, remote asset inspection, infrastructure checks, field reports, and automated due diligence. The response includes satellite image links and structured machine-readable observations that an agent can use directly in a report, decision workflow, or follow-up investigation. Paid per call via x402. Cost: ~$0.09/call [spec].",
+    "method": "POST",
+    "path": "/satellite",
+    "input_schema": {
+      "properties": {
+        "date": {
+          "default": null,
+          "description": "Requested date in YYYY-MM-DD format. Null means latest suitable scene.",
+          "format": "date",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date_tolerance_days": {
+          "default": 30,
+          "description": "Allowed date search tolerance in days.",
+          "maximum": 60,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fallback": {
+          "default": true,
+          "description": "Allow nearest or best available scene when exact criteria are unavailable.",
+          "type": "boolean"
+        },
+        "lat": {
+          "description": "Latitude of the observation center.",
+          "maximum": 90,
+          "minimum": -90,
+          "type": "number"
+        },
+        "lon": {
+          "description": "Longitude of the observation center.",
+          "maximum": 180,
+          "minimum": -180,
+          "type": "number"
+        },
+        "max_cloud_cover": {
+          "default": 20,
+          "description": "Maximum scene-level cloud cover for optical modes. Ignored for radar.",
+          "maximum": 100,
+          "minimum": 0,
+          "type": "number"
+        },
+        "mode": {
+          "default": "true_color",
+          "description": "Observation mode: true_color, vegetation, water, thermal, or Radar.",
+          "enum": [
+            "true_color",
+            "vegetation",
+            "water",
+            "thermal",
+            "radar"
+          ],
+          "type": "string"
+        },
+        "orbit_direction": {
+          "default": "ASCENDING",
+          "description": "Radar mode only. Keep fixed for stable radar time comparisons.",
+          "enum": [
+            "ASCENDING",
+            "DESCENDING"
+          ],
+          "type": "string"
+        },
+        "radius_m": {
+          "default": 3000,
+          "description": "Observation radius in meters.",
+          "maximum": 5000,
+          "minimum": 100,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "lat",
+        "lon"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "date": "body",
+      "date_tolerance_days": "body",
+      "fallback": "body",
+      "lat": "body",
+      "lon": "body",
+      "max_cloud_cover": "body",
+      "mode": "body",
+      "orbit_direction": "body",
+      "radius_m": "body"
+    },
+    "has_body": true
+  },
+  {
+    "name": "ipintel_whois_lookup",
+    "description": "WHOIS Lookup API. Retrieve domain registration data including registrar, WHOIS server, creation date, expiration date, updated date, nameservers, domain status, and privacy/redaction signals. Useful for agents, developers, domain intelligence, expiry checks, registrar lookup, ownership investigation, and security workflows. Paid per call via x402. Cost: ~$0.005/call [spec].",
+    "method": "POST",
+    "path": "/whois-lookup",
+    "input_schema": {
+      "properties": {
+        "domain": {
+          "description": "Domain name to query, for example example.com",
+          "type": "string"
+        }
+      },
+      "required": [
+        "domain"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "domain": "body"
+    },
+    "has_body": true
+  }
+]

@@ -52,6 +52,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Genuine Good Grants | `genuinegood.toml` | Vendor OpenAPI |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
 | Google Trends | `google-trends.toml` | Vendor OpenAPI |
+| IPIntel.ai | `ipintel.toml` | 13 POST domain, DNS, IP, email, satellite and developer tools plus lazy help |
 | Kronos | `kronos.toml` | Vendor OpenAPI |
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |
 | LoneStarOracle | `lonestar.toml` | Vendor unified OpenAPI |
@@ -77,8 +78,8 @@ have a generic description because their schemas are not modeled. Preserve the
 Locus gateway body rewrite and job exclusions, Straits free/premium split,
 Concordance POST pricing, and Glassnode's discovery workflow when editing them.
 
-`tests/provider_catalogs.rs` pins 861 tool definitions across the 23 providers
-with committed fixtures. `tests/config.rs` pins settings for all 27 providers.
+`tests/provider_catalogs.rs` pins 875 tool definitions across the 24 providers
+with committed fixtures. `tests/config.rs` pins settings for 28 providers.
 Tests need no Python or live vendor access. See [provider caveats](CAVEATS.md)
 for route exclusions, pricing semantics and vendor-specific workflows.
 

@@ -67,3 +67,9 @@ the exact main allowlist, exclusions, prices, representative routing, and collis
 composition with the authored phone companion. The companion's provenance and x402
 v1 limitation are documented in `providers/CAVEATS.md`; neither fixture qualifies
 funded settlement.
+
+The IPIntel fixture captures `https://tools.ipintel.ai/openapi.json` using
+`snapshot_spec`, removing response documentation only. Its 13 POST operations
+plus lazy help have a full golden contract. Focused tests preserve all prices,
+JSON body routing, DNS enums, nullable satellite dates and unrestricted validator
+JSON values, and exclude prospective methods/routes. No paid call was made.

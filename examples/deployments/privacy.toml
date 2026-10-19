@@ -285,6 +285,13 @@ include_tools = [
 ]
 instructions_text = "NetIntel phone, IP and company-infrastructure intelligence (netintel_*). Use phone_intel_analyze with phone in any format and optional country_hint when no country dial code is present; it validates and normalizes the number, with line-type classification limited to NANP and UK numbers, not scam history, subscriber identity or proof of reachability. Use ip for ip_reputation_analyze, ip_risk_score, ip_report_full and ip_geo_locate; target (an IP address or domain) for asn_lookup_analyze; domain for domain_vendor_risk and cloud_fingerprint_analyze; and url for tech_fingerprint_analyze. Choose individual IP checks for focused information or ip_report_full for a combined profile. Score direction differs: ip_reputation_analyze risk_score rises with danger; ip_risk_score trust_score rises with safety and its deprecated risk_score aliases trust_score. Preserve section availability, partial results, unknown fields and source timestamps; unavailable signals are not clean results. IPv6 inputs skip IPv4-only blacklist checks. Advertised selected-tool prices are $0.002-$0.20 per call; live challenges and the shared $0.50 company cap govern payment. Treazury handles x402 USDC on Base; do not automatically repeat uncertain paid submissions."
 
+# IP enrichment and satellite observations for company infrastructure/site research.
+# Inherit the existing company wallet and its $0.50 per-payment cap.
+[sources.company_ipintel]
+extends = "../../providers/ipintel.toml"
+include_tools = ["ipintel_ip_lookup", "ipintel_satellite"]
+instructions_text = "Company infrastructure and physical-site research through IPIntel.ai. Use ipintel_ip_lookup with an IPv4 or IPv6 ip for geolocation, ASN, ISP, organization, reverse DNS and proxy/mobile/hosting indicators; these are vendor signals, not proof of company ownership or location. Use ipintel_satellite with known lat and lon and optional radius_m, mode and date. Null date selects the latest suitable scene; fallback defaults to true and may select a nearby date. Preserve selected-scene timestamps, fulfillment status, warnings and Copernicus attribution. Satellite image links remain JSON metadata and are not automatically fetched. Advertised prices are $0.003 for IP lookup and $0.09 for satellite; live challenges and the shared $0.50 company payment cap govern payment. Treazury handles x402 USDC on Base; do not automatically repeat uncertain paid submissions."
+
 [sources.googletrends]
 extends = "../../providers/google-trends.toml"
 instructions_text = "Use Google Trends for aggregate keyword interest over time, by region, and related queries/topics in the web research context. Supply keyword and an ISO country code as required by the tools. This is aggregate trend data, not web search or evidence about a specific person's behavior. Treazury handles x402 payment; use the live challenge and configured cap for costs. google_trends_help describes this complete selected toolset."
@@ -321,7 +328,7 @@ sources = ["social", "telesint", "pdl_people", "social_stableenrich"]
 listen = "127.0.0.1:6339"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel"]
+sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel", "company_ipintel"]
 
 # Start with discovery tools; agent-added APIs are persisted in the registry above.
 [servers.toolbox]
