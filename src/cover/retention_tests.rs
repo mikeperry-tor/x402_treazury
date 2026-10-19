@@ -15,7 +15,7 @@ fn owner(name: &str) -> Owner {
         origin: "https://api.example.com".into(),
         transport: HttpPolicy::default(),
         public_only: false,
-        timeout_ms: 1000,
+        read_timeout: std::time::Duration::from_secs(1),
     }
 }
 fn scope() -> Scope {

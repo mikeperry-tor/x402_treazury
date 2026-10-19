@@ -35,12 +35,14 @@ async fn deadline_cleanup_reports_actual_capability_without_warn_on_available_sh
                 origin: "https://api.example.com".into(),
                 transport: HttpPolicy::default(),
                 public_only: false,
-                timeout_ms: 30000,
+                read_timeout: std::time::Duration::from_secs(30),
             };
             let mut config = crate::cover::tests::example_config();
             // No task or network is launched by begin; invoke the real cleanup loop below.
             config.ranges_enabled = false;
-            let http = reqwest::Client::new();
+            let http = crate::network::global()
+                .http(&owner.identity, &owner.origin, None)
+                .unwrap();
             let call = engine
                 .begin(
                     owner.clone(),

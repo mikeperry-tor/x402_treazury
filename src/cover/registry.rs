@@ -16,7 +16,7 @@ pub struct Owner {
     pub origin: String,
     pub transport: HttpPolicy,
     pub public_only: bool,
-    pub timeout_ms: u64,
+    pub read_timeout: std::time::Duration,
 }
 #[derive(Clone, Debug)]
 pub enum Capability {
@@ -204,7 +204,7 @@ mod tests {
             origin: "https://example.com".into(),
             transport: Default::default(),
             public_only: false,
-            timeout_ms: 1000,
+            read_timeout: std::time::Duration::from_secs(1),
         };
         let config = Arc::new(crate::cover::tests::example_config());
         let mut rng = StdRng::seed_from_u64(4);

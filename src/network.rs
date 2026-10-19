@@ -212,15 +212,43 @@ pub fn log_http(response: &reqwest::Response, stage: &str) {
         http_version = ?response.version(), "HTTP response protocol");
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+/// Separates legacy deterministic HTTP pooling from participating Tor selection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SelectionPolicy {
+    #[default]
+    Legacy,
+    Participating,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct HttpKey {
+    selection: SelectionPolicy,
     transport: HttpPolicy,
     public_only: bool,
     runtime: Option<tokio::runtime::Id>,
     identity: IsolationId,
     origin: String,
-    timeout_ms: u64,
+    read_timeout: Duration,
 }
+
+/// Immutable HTTP transport record pairing a pooled client with its canonical
+/// owner identity and effective isolation scope.
+#[derive(Debug)]
+pub struct HttpTransport {
+    pub client: reqwest::Client,
+    pub identity: IsolationId,
+    pub scope: IsolationId,
+    key: HttpKey,
+}
+impl HttpTransport {
+    pub fn selection(&self) -> SelectionPolicy {
+        self.key.selection
+    }
+    pub fn read_timeout(&self) -> Duration {
+        self.key.read_timeout
+    }
+}
+
 struct CachedClient<T> {
     client: T,
     last_used: std::time::Instant,
@@ -250,7 +278,7 @@ fn evict_oldest<K: Clone + Eq + std::hash::Hash, T>(cache: &mut HashMap<K, Cache
 pub struct NetworkContext {
     pub cover: Option<Arc<crate::cover::runtime::Engine>>,
     pub policy: NetworkPolicy,
-    http: Mutex<HashMap<HttpKey, CachedClient<reqwest::Client>>>,
+    http: Mutex<HashMap<HttpKey, CachedClient<Arc<HttpTransport>>>>,
     #[cfg(test)]
     test_root: Option<&'static [u8]>,
     #[cfg(test)]
@@ -332,6 +360,27 @@ impl NetworkContext {
         public_only: bool,
         transport: HttpPolicy,
     ) -> Result<reqwest::Client> {
+        Ok(self
+            .http_transport(
+                id,
+                url,
+                timeout,
+                public_only,
+                transport,
+                SelectionPolicy::Legacy,
+            )?
+            .client
+            .clone())
+    }
+    pub fn http_transport(
+        &self,
+        id: &IsolationId,
+        url: &str,
+        timeout: impl Into<Option<Duration>>,
+        public_only: bool,
+        transport: HttpPolicy,
+        selection: SelectionPolicy,
+    ) -> Result<Arc<HttpTransport>> {
         if public_only {
             public_url(url)?;
         }
@@ -342,21 +391,23 @@ impl NetworkContext {
             "unsupported network URL scheme"
         );
         let key = HttpKey {
+            selection,
             transport,
             public_only,
             runtime: tokio::runtime::Handle::try_current().ok().map(|h| h.id()),
             identity: id.clone(),
             origin: parsed.origin().ascii_serialization(),
-            timeout_ms: timeout.as_millis().try_into()?,
+            read_timeout: timeout,
         };
         let mut clients = self.http.lock().expect("network cache poisoned");
-        if let Some(client) = clients.get_mut(&key) {
-            return Ok(client.touch().clone());
+        if let Some(entry) = clients.get_mut(&key) {
+            return Ok(entry.touch().clone());
         }
+        let scope = id.clone();
         let mut builder = reqwest::Client::builder()
             .no_proxy()
             .retry(reqwest::retry::never())
-            .read_timeout(timeout)
+            .read_timeout(key.read_timeout)
             .connect_timeout(self.policy.connect_timeout())
             .redirect(reqwest::redirect::Policy::none());
         if parsed.scheme() == "https" {
@@ -386,7 +437,7 @@ impl NetworkContext {
             builder = builder.tls_certs_only([reqwest::Certificate::from_pem(root)?]);
         }
         if self.policy.mode == Mode::Tor {
-            let (user, pass) = self.credentials(id);
+            let (user, pass) = self.credentials(&scope);
             let proxy =
                 reqwest::Proxy::all(format!("socks5h://{}", self.policy.socks_endpoint.unwrap()))?
                     .basic_auth(&user, &pass);
@@ -395,10 +446,16 @@ impl NetworkContext {
         let client = builder
             .build()
             .context("network client construction failed")?;
+        let record = Arc::new(HttpTransport {
+            client,
+            identity: id.clone(),
+            scope,
+            key: key.clone(),
+        });
         // Eviction drops only cache ownership. Existing requests keep their connections.
         evict_oldest(&mut clients);
-        clients.insert(key, CachedClient::new(client.clone()));
-        Ok(client)
+        clients.insert(key, CachedClient::new(record.clone()));
+        Ok(record)
     }
     pub fn discovery(
         &self,
@@ -831,5 +888,134 @@ mod retention_tests {
                 .keys()
                 .any(|key| key.identity == IsolationId::treasury("wallet-767"))
         );
+    }
+
+    #[tokio::test]
+    async fn transport_records_share_selected_handle_and_separate_keys_and_policies() {
+        let context = Arc::new(NetworkContext::new(NetworkPolicy::default()).unwrap());
+        let origin = "https://api.example.com/v1/resource";
+        let owner = IsolationId::evm("0x0000000000000000000000000000000000000001").unwrap();
+        let other_owner = IsolationId::evm("0x0000000000000000000000000000000000000002").unwrap();
+        let first = context
+            .http_transport(
+                &owner,
+                origin,
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+                SelectionPolicy::Legacy,
+            )
+            .unwrap();
+        let repeated = context
+            .http_transport(
+                &owner,
+                "https://api.example.com/v2/other",
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+                SelectionPolicy::Legacy,
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&first, &repeated));
+        assert_eq!(first.identity, owner);
+        assert_eq!(first.scope, owner);
+        assert_eq!(first.selection(), SelectionPolicy::Legacy);
+
+        let participating = context
+            .http_transport(
+                &owner,
+                origin,
+                Duration::from_secs(5),
+                false,
+                HttpPolicy::default(),
+                SelectionPolicy::Participating,
+            )
+            .unwrap();
+        assert!(!Arc::ptr_eq(&first, &participating));
+        assert_eq!(participating.selection(), SelectionPolicy::Participating);
+        assert_eq!(participating.identity, owner);
+        assert_eq!(participating.scope, owner);
+
+        let variations = [
+            context
+                .http_transport(
+                    &other_owner,
+                    origin,
+                    Duration::from_secs(5),
+                    false,
+                    HttpPolicy::default(),
+                    SelectionPolicy::Legacy,
+                )
+                .unwrap(),
+            context
+                .http_transport(
+                    &owner,
+                    "https://other.example.com/v1",
+                    Duration::from_secs(5),
+                    false,
+                    HttpPolicy::default(),
+                    SelectionPolicy::Legacy,
+                )
+                .unwrap(),
+            context
+                .http_transport(
+                    &owner,
+                    origin,
+                    Duration::from_secs(6),
+                    false,
+                    HttpPolicy::default(),
+                    SelectionPolicy::Legacy,
+                )
+                .unwrap(),
+            context
+                .http_transport(
+                    &owner,
+                    origin,
+                    Duration::from_secs(5),
+                    true,
+                    HttpPolicy::default(),
+                    SelectionPolicy::Legacy,
+                )
+                .unwrap(),
+            context
+                .http_transport(
+                    &owner,
+                    origin,
+                    Duration::from_secs(5),
+                    false,
+                    HttpPolicy::COMPATIBLE,
+                    SelectionPolicy::Legacy,
+                )
+                .unwrap(),
+        ];
+        for distinct in &variations {
+            assert!(!Arc::ptr_eq(&first, distinct));
+            assert!(!Arc::ptr_eq(&participating, distinct));
+        }
+
+        let ctx_for_rt = context.clone();
+        let owner_for_rt = owner.clone();
+        let other_runtime = tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                ctx_for_rt
+                    .http_transport(
+                        &owner_for_rt,
+                        origin,
+                        Duration::from_secs(5),
+                        false,
+                        HttpPolicy::default(),
+                        SelectionPolicy::Legacy,
+                    )
+                    .unwrap()
+            })
+        })
+        .await
+        .unwrap();
+        assert!(!Arc::ptr_eq(&first, &other_runtime));
+        assert_eq!(context.http.lock().unwrap().len(), 8);
     }
 }

@@ -261,3 +261,95 @@ async fn http_responses_time_out_on_stalled_headers_or_body() {
         let _ = server.await;
     }
 }
+
+#[tokio::test]
+async fn evicted_transport_handle_finishes_sibling_http2_streams_without_recreating_cache_entry() {
+    let (entered, mut arrivals) = mpsc::unbounded_channel();
+    let release = Arc::new(Semaphore::new(0));
+    let gate = release.clone();
+    let app = axum::Router::new()
+        .route("/warm", axum::routing::get(|| async { "warm" }))
+        .route(
+            "/hold",
+            axum::routing::get(move || {
+                let (entered, gate) = (entered.clone(), gate.clone());
+                async move {
+                    entered.send(()).unwrap();
+                    gate.acquire().await.unwrap().forget();
+                    "held"
+                }
+            }),
+        );
+    let (address, server) =
+        crate::test_tls::serve_with(app, &[&rustls::version::TLS13], &[b"h2"]).await;
+    let socks = Socks::start(
+        BTreeMap::from([("api.example.com".into(), address)]),
+        Fault::None,
+    )
+    .await;
+    let ctx = context(&socks);
+    let owner = wallet(1);
+    let handle = ctx
+        .http_transport(
+            &owner,
+            "https://api.example.com",
+            Duration::from_secs(3),
+            false,
+            HttpPolicy::default(),
+            SelectionPolicy::Legacy,
+        )
+        .unwrap();
+    let mut held = tokio::task::JoinSet::new();
+    for _ in 0..2 {
+        let retained = handle.clone();
+        held.spawn(async move {
+            let response = retained
+                .client
+                .get("https://api.example.com/hold")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.version(), reqwest::Version::HTTP_2);
+            assert_eq!(response.text().await.unwrap(), "held");
+        });
+    }
+    for _ in 0..2 {
+        tokio::time::timeout(Duration::from_secs(2), arrivals.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    for n in 2..=257 {
+        let other = IsolationId::evm(&format!("0x{n:040x}")).unwrap();
+        ctx.http_transport(
+            &other,
+            "https://api.example.com",
+            Duration::from_secs(3),
+            false,
+            HttpPolicy::default(),
+            SelectionPolicy::Legacy,
+        )
+        .unwrap();
+    }
+    assert!(!ctx.http.lock().unwrap().keys().any(|k| k.identity == owner));
+    let after_eviction = handle
+        .client
+        .get("https://api.example.com/warm")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after_eviction.version(), reqwest::Version::HTTP_2);
+    assert_eq!(after_eviction.text().await.unwrap(), "warm");
+    release.add_permits(2);
+    while let Some(joined) = held.join_next().await {
+        joined.unwrap();
+    }
+    assert!(!ctx.http.lock().unwrap().keys().any(|k| k.identity == owner));
+    let records = socks.records.lock().unwrap().clone();
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        (records[0].user.clone(), records[0].password.clone()),
+        ctx.credentials(&owner)
+    );
+    server.abort();
+}

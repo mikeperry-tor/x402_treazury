@@ -12,14 +12,22 @@ suppressed. RPC providers still receive the wallet addresses being queried.
 
 `src/network.rs` owns the process's immutable transport policy, canonical isolation
 identities, reqwest pools and tonic channels. Direct and Tor use the same factory,
-callers and payment/funding state machines. Cache keys include identity, endpoint,
-timeout settings and the owning Tokio runtime. Sync releases its channels before
-tearing down its private runtime. Each cache retains at most 256 entries and evicts
-one least-recently-used entry when admitting another. Access refreshes recency;
-interleaved wallet traversal does not flush frequently reused provider clients.
-Eviction drops only cache ownership: acquired handles retain connections and
-in-flight work. Isolation, origin, runtime and transport keys remain unchanged;
-there is no cache-maintenance timer or wallet-inventory limit.
+callers and payment/funding state machines. Each HTTP cache slot holds an immutable
+`HttpTransport` record pairing the pooled client with its canonical owner identity
+and effective isolation scope, keyed by `SelectionPolicy` (`Legacy` versus
+`Participating`), protocol compatibility, public-destination enforcement, owning
+Tokio runtime, canonical identity, origin and read-inactivity timeout. Legacy and
+participating lookups cannot consume or overwrite each other's cache entries.
+Current production callers still acquire legacy deterministic transports; fresh
+scope selection, conditional promotion and unsigned Tor circuit retries remain
+pending activation as described in the
+[Tor isolation retry plan](plans/tor_isolation_retries.md). Sync releases its
+channels before tearing down its private runtime. Each cache retains at most 256
+entries and evicts one least-recently-used entry when admitting another. Access
+refreshes recency; interleaved wallet traversal does not flush frequently reused
+provider clients. Eviction drops only cache ownership: acquired handles retain
+connections and in-flight work without recreating the evicted cache entry. There
+is no cache-maintenance timer or wallet-inventory limit.
 
 Managed calls select an initial payer before provider I/O. Saved balances and
 trusted price hints guide selection without proving affordability. Each attempt
@@ -112,7 +120,9 @@ Byte limits remain enforced, and partial documents are never published.
 
 A provider/source or source-management `read_timeout_seconds` explicitly overrides
 the network default. Omission inherits it. HTTP pools key on the effective idle
-budget alongside identity, transport and public-destination policy.
+budget alongside identity, transport and public-destination policy, preserving
+the exact configured duration, including fractional milliseconds. Cover owners
+use the same exact duration to keep distinct transport policies separate.
 
 Connection establishment remains separate: `connect_timeout_seconds` defaults
 to 15 seconds direct and 120 seconds Tor. Both settings are available in either

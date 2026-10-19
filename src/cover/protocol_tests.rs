@@ -291,7 +291,7 @@ async fn http1_compatibility_keeps_real_calls_and_reports_cover_unavailable() {
         origin: "https://api.example.com".into(),
         transport,
         public_only: false,
-        timeout_ms: 240000,
+        read_timeout: std::time::Duration::from_secs(240),
     };
     let mut call = engine
         .begin(

@@ -712,7 +712,7 @@ impl PaidClient {
                     origin: request.url().origin().ascii_serialization(),
                     transport: self.transport,
                     public_only: self.public_only,
-                    timeout_ms: factory.read_timeout(self.timeout).as_millis() as u64,
+                    read_timeout: factory.read_timeout(self.timeout),
                 };
                 match engine.begin(owner, config.clone(), scope.clone(), http.clone()) {
                     Ok(call) => Some(call),
