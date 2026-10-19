@@ -27,6 +27,10 @@ positions or hashes are exposed. The synthetic `scan_merge_conflict_preserves_po
 unit fixture exercises actual conflicting merges in all three shielded pools,
 without wallet keys or network requests. Pepper Sync retains its upstream unit-test
 dependencies for this fixture.
+The diagnostic patch also removes raw `err` events from latest-block and tree-state
+fetch instrumentation and places those spans at debug level. The application owns
+sanitized failure reporting and describes retries according to its caller's schedule;
+no upstream status prose is emitted by those spans, including at debug level.
 
 `pepper-sync-tip-reorg.patch` fixes same-height fork verification. Once the stored
 chain-tip hash is known to disagree with the indexer, sync truncates that block's

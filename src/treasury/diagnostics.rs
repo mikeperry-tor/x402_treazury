@@ -229,12 +229,19 @@ fn wallet_reason(error: &WalletError, diagnostic: &mut SyncDiagnostic) -> &'stat
     }
 }
 
-/// Both background owner loops share the same bounded, credential-free fields.
-pub(crate) fn warn_sync_failure(error: &anyhow::Error) {
+/// The owner supplies its existing retry schedule; one-pass callers pass `None`.
+pub(crate) fn warn_sync_failure(error: &anyhow::Error, retry_after: Option<std::time::Duration>) {
     let diagnostic = error.downcast_ref::<SyncDiagnostic>();
     let connection = error.downcast_ref::<crate::network::ConnectionDiagnostic>();
     let progress = error.downcast_ref::<SyncProgress>();
+    let message = if retry_after.is_some() {
+        "Treasury sync unavailable; will retry automatically after backoff while serving and sync is needed; SDK recovery may delay retry; existing Base service remains available"
+    } else {
+        "Treasury sync unavailable; this one-pass command will not retry automatically; rerun wallet sync to try again"
+    };
     tracing::warn!(
+        automatic_retry = retry_after.is_some(),
+        retry_after_seconds = retry_after.map(|delay| delay.as_secs_f64().ceil() as u64),
         phase = progress.map(|p| p.phase),
         elapsed_ms = progress.map(|p| p.elapsed_ms),
         target_height = progress.map(|p| p.target_height),
@@ -252,7 +259,7 @@ pub(crate) fn warn_sync_failure(error: &anyhow::Error) {
         grpc_status = diagnostic
             .and_then(|d| d.grpc_code)
             .map(|c| format!("{c:?}")),
-        "Treasury sync unavailable; recoverable failures retry automatically; funding needs successful sync; existing Base service remains available"
+        "{message}"
     );
 }
 
@@ -319,6 +326,62 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
 mod tests {
     use super::*;
 
+    #[tokio::test(start_paused = true)]
+    async fn sync_warning_reports_existing_backoff_and_one_pass_without_retry_promises() {
+        let mut schedule = crate::treasury::observation::Schedule::default();
+        for seconds in [60, 120, 240, 300, 300] {
+            schedule.complete(false);
+            let remaining = schedule
+                .due()
+                .saturating_duration_since(tokio::time::Instant::now());
+            assert_eq!(remaining.as_secs(), seconds);
+            for retry_after in [Some(remaining), None] {
+                let error = client_failure(
+                    LightClientError::IndexerError(tonic::Status::deadline_exceeded(
+                        "grpc_headers_inactivity",
+                    )),
+                    false,
+                )
+                .context("https://private-token@example.invalid/private-path");
+                let log = tempfile::NamedTempFile::new().unwrap();
+                let subscriber = tracing_subscriber::fmt()
+                    .without_time()
+                    .with_ansi(false)
+                    .with_max_level(tracing::Level::TRACE)
+                    .with_writer(log.reopen().unwrap())
+                    .finish();
+                tracing::subscriber::with_default(subscriber, || {
+                    warn_sync_failure(&error, retry_after);
+                });
+                let logs = std::fs::read_to_string(log.path()).unwrap();
+                assert_eq!(logs.lines().count(), 1, "{logs}");
+                for expected in ["WARN", "grpc_headers_inactivity", "grpc_code=4"] {
+                    assert!(logs.contains(expected), "missing {expected}: {logs}");
+                }
+                if retry_after.is_some() {
+                    for expected in [
+                        "automatic_retry=true",
+                        &format!("retry_after_seconds={seconds}"),
+                        "will retry automatically after backoff",
+                        "while serving and sync is needed",
+                        "SDK recovery may delay retry",
+                        "existing Base service remains available",
+                    ] {
+                        assert!(logs.contains(expected), "missing {expected}: {logs}");
+                    }
+                } else {
+                    assert!(logs.contains("automatic_retry=false"), "{logs}");
+                    assert!(logs.contains("will not retry automatically"), "{logs}");
+                    assert!(!logs.contains("retry_after_seconds"), "{logs}");
+                    assert!(!logs.contains("will retry automatically"), "{logs}");
+                }
+                for private in ["ERROR", "private-token", "private-path", "example.invalid"] {
+                    assert!(!logs.contains(private), "{logs}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn connection_details_survive_sync_context_without_logging_private_prose() {
         for (category, route, reason) in [
@@ -344,7 +407,7 @@ mod tests {
                 .with_ansi(false)
                 .with_writer(log.reopen().unwrap())
                 .finish();
-            tracing::subscriber::with_default(subscriber, || warn_sync_failure(&error));
+            tracing::subscriber::with_default(subscriber, || warn_sync_failure(&error, None));
             let logs = std::fs::read_to_string(log.path()).unwrap();
             for expected in [
                 "WARN",
@@ -352,8 +415,8 @@ mod tests {
                 reason,
                 route,
                 "connect",
-                "recoverable failures retry automatically",
-                "funding needs successful sync",
+                "automatic_retry=false",
+                "this one-pass command will not retry automatically",
             ] {
                 assert!(logs.contains(expected), "missing {expected}: {logs}");
             }
@@ -392,7 +455,7 @@ mod tests {
             .with_ansi(false)
             .with_writer(log.reopen().unwrap())
             .finish();
-        tracing::subscriber::with_default(subscriber, || warn_sync_failure(&error));
+        tracing::subscriber::with_default(subscriber, || warn_sync_failure(&error, None));
         let logs = std::fs::read_to_string(log.path()).unwrap();
         for field in [
             "elapsed_ms=120000",
@@ -450,7 +513,7 @@ mod tests {
                     .finish();
                 {
                     let _guard = tracing::subscriber::set_default(subscriber);
-                    warn_sync_failure(&error);
+                    warn_sync_failure(&error, None);
                 }
                 let logs = std::fs::read_to_string(log.path()).unwrap();
                 assert!(logs.contains(&format!(r#"pool="{pool_name}""#)), "{logs}");
@@ -544,7 +607,7 @@ mod tests {
                 .finish();
             {
                 let _guard = tracing::subscriber::set_default(subscriber);
-                warn_sync_failure(&error.context("private outer context"));
+                warn_sync_failure(&error.context("private outer context"), None);
             }
             let logs = std::fs::read_to_string(log.path()).unwrap();
             assert!(logs.contains(r#"category="sync_scan_failed""#), "{logs}");

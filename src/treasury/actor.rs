@@ -244,7 +244,10 @@ impl Treasury {
                         self.startup_discovery = false;
                         if let Err(error) = self.sync_for_observation(stop).await
                             && !stop.is_cancelled() {
-                                super::diagnostics::warn_sync_failure(&error);
+                                super::diagnostics::warn_sync_failure(
+                                    &error,
+                                    Some(self.observation.due().saturating_duration_since(tokio::time::Instant::now())),
+                                );
                         }
                     }
                 }

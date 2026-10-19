@@ -140,7 +140,14 @@ identify failures, degraded operation or actionable configuration problems.
 Waiting for confirmed spendable ZEC and funding deferred by a reported treasury
 sync failure are info events; their retry backoff and stored failure conditions
 remain intact. Treasury sync failures stay warnings with safe connection reasons
-and direct/Tor route details when available. Base RPC attempts and successful
+and direct/Tor route details when available. Background warnings report
+`automatic_retry=true` and `retry_after_seconds` from the existing observation
+schedule (60, 120, 240, then 300 seconds after consecutive scan failures). Retry
+continues while serving and sync is needed; SDK reconstruction can delay it.
+One-pass `wallet sync` warnings report `automatic_retry=false` and instruct the
+operator to rerun the command. Pepper Sync fetch spans are debug-only and do not
+emit raw returned errors; the sanitized application warning owns failure reporting.
+Base RPC attempts and successful
 provider failover are debug events with provider ordinals; an exhausted complete
 verification remains a warning. Selecting a configured discovery relay fallback
 is info; the actual paid relay attempt retains its warning.

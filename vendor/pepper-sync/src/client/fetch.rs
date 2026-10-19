@@ -162,7 +162,7 @@ where
     }
 }
 
-#[instrument(skip(client), name = "fetch::get_latest_block", err, level = "info")]
+#[instrument(skip(client), name = "fetch::get_latest_block", level = "debug")]
 async fn get_latest_block<C>(client: &mut C) -> Result<BlockId, tonic::Status>
 where
     C: Clone + Indexer + TransparentIndexer + Sync + Send + 'static,
@@ -260,7 +260,7 @@ where
         .await
 }
 
-#[instrument(skip(client), name = "fetch::get_tree_state", err, level = "info")]
+#[instrument(skip(client), name = "fetch::get_tree_state", level = "debug")]
 async fn get_tree_state<C>(
     client: &mut C,
     block_height: BlockHeight,

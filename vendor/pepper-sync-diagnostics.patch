@@ -293,3 +293,11 @@
 +        }
 +    }
 +}
+--- a/pepper-sync/src/client/fetch.rs
++++ b/pepper-sync/src/client/fetch.rs
+@@ -165 +165 @@
+-#[instrument(skip(client), name = "fetch::get_latest_block", err, level = "info")]
++#[instrument(skip(client), name = "fetch::get_latest_block", level = "debug")]
+@@ -263 +263 @@
+-#[instrument(skip(client), name = "fetch::get_tree_state", err, level = "info")]
++#[instrument(skip(client), name = "fetch::get_tree_state", level = "debug")]

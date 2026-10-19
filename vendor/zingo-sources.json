@@ -1,7 +1,7 @@
 {
   "revision": "c6381534f802b1022041beda4b01c106ad132329",
   "files": {
-    "pepper-sync-diagnostics.patch": "006d4e5bce511f99d0176302858ae8fe5f280defc1b1a42c2dd985dfddc40d0e",
+    "pepper-sync-diagnostics.patch": "2ff36bee0c3929746f033db68276c5044582d80b62ce8799029ccf1fbefb795e",
     "pepper-sync-tip-reorg.patch": "f9a8f2c926104e98351487180869099c290665cf65c74f6aef65977e9c0fcf7f",
     "pepper-sync/CHANGELOG.md": "bcff16e3a7a2f1124a6f5f8e0fcdcf10e43eaeb35bcc551d7a3269523c7591d5",
     "pepper-sync/Cargo.toml": "fd0ad988adfbf178ffac7840c32359c86d816fbe5dedf15ae518f5a6f1c9d0b4",
@@ -13,7 +13,7 @@
     "pepper-sync/diagrams/sync.mmd": "93d3a52048b1d467178b39385aef2e7c4d09747386ab86d47b189732a2724834",
     "pepper-sync/diagrams/verification.mmd": "5739d03395621497f8cdb9595eda2e600314012e3fd9a40fa442c178d3947f05",
     "pepper-sync/src/client.rs": "5f08d3e9e3ee6d027bb9e74b10b4afc9d492a628d5e179148b24108a105caa46",
-    "pepper-sync/src/client/fetch.rs": "7aa15dc86aa7d6bf2fb33b80ad93f56d54ceb7020d851e4d82b69fb7049f2678",
+    "pepper-sync/src/client/fetch.rs": "de4b141b09824da0c6c1cea20dca9b0178cdac43130dc8c8133bb2d611cba1eb",
     "pepper-sync/src/config.rs": "02a93d407f8424782dfdf19c18801b3153811b1960418dcfe2d8d8c18a2679a2",
     "pepper-sync/src/error.rs": "a60f3e5de2dd52941bea49e4553330771c9f47595d97c6df2f794596e3c41cc5",
     "pepper-sync/src/keys.rs": "3ec77b8a4cac585be83d3d7c9e60eb7c081b7bb809c93f6ccab4fa2843491d11",

@@ -41,7 +41,9 @@ Stop `serve` before running `wallet sync`: it acquires the same exclusive treasu
 ownership. Explicit sync performs one ZEC scan and one pass over existing eligible
 configured managed-USDC wallets plus outstanding accepted initial-funding
 recipients, including removed profiles. It neither allocates wallets nor starts
-funding or a background watcher. ZEC and Base run independently: a failed endpoint
+funding or a background watcher. A failed ZEC pass logs `automatic_retry=false`;
+rerun `wallet sync` to try again. Serving instead reports the existing retry
+backoff and retries while sync is needed. ZEC and Base run independently: a failed endpoint
 or missing asset setting does not suppress the other pass. Only treasury and
 relevant managed-Base settings are resolved; no provider catalogs, listener tokens,
 static signing keys or NEAR credentials are required. Treasury-only deployments
