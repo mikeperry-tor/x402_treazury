@@ -292,6 +292,14 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         TreasuryNetwork::Synthetic,
     )
     .unwrap();
+    // Keep paused time stable while SDK scans use their private runtime and
+    // Store publications finish on blocking workers.
+    let active = tokio::spawn(async {
+        loop {
+            tokio::task::yield_now().await;
+        }
+    });
+    tokio::time::pause();
     let task = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
     for wrong_binding in [false, true] {
         let mut rejected = request(&jobs[0], deadline);
@@ -365,6 +373,7 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         after.sync.unwrap().checked_at
     );
     net.chain.write().await.mine_mempool();
+    tokio::time::advance(Duration::from_secs(60)).await;
     assert!(
         handle
             .reconcile(first.operation_id.clone())
@@ -375,6 +384,7 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
     );
     pending(&store, first, prepared.bytes()).await;
     net.chain.write().await.mine_empty_blocks(1);
+    tokio::time::advance(Duration::from_secs(60)).await;
     assert!(matches!(
         handle.reconcile(first.operation_id.clone()).await.unwrap(),
         TransactionPresence::Confirmed { .. }
@@ -467,6 +477,7 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         .unwrap();
     net.chain.write().await.mine_mempool();
     net.chain.write().await.mine_empty_blocks(1);
+    tokio::time::advance(Duration::from_secs(60)).await;
     assert!(matches!(
         handle.reconcile(second_id.clone()).await.unwrap(),
         TransactionPresence::Confirmed { .. }
@@ -591,6 +602,8 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
     stop.cancel();
     drop(store);
     task.await.unwrap().unwrap();
+    tokio::time::resume();
+    active.abort();
 }
 
 #[tokio::test]

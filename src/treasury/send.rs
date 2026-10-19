@@ -16,7 +16,7 @@ use zingo_netutils::Indexer;
 
 impl TransactionPreparer for Treasury {
     async fn prepare(&mut self, request: PrepareRequest) -> Result<PreparedTransaction> {
-        self.prepare_with_observation(request, None).await
+        self.prepare_with_observation(request, None, None).await
     }
 }
 impl Treasury {
@@ -24,6 +24,7 @@ impl Treasury {
         &mut self,
         request: PrepareRequest,
         base: Option<crate::rotation::base::BaseRpc>,
+        stop: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<PreparedTransaction> {
         ensure!(
             self.healthy,
@@ -56,6 +57,9 @@ impl Treasury {
         let (treasury_id, observation_scope) = self
             .store
             .call(move |s| {
+                // Existing accepted ownership must be recognized before any
+                // binding/authority error can claim this request is unstarted.
+                s.require_unstarted_preparation(&id)?;
                 s.require_preparation_binding(
                     &id,
                     binding_pool.as_deref(),
@@ -66,7 +70,6 @@ impl Treasury {
                 .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
                 s.require_preparation_authority(&id, authority.as_ref())
                     .map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
-                s.require_unstarted_preparation(&id)?;
                 let (treasury_id, _, _) = s.funding_preparation_context()?;
                 let scope = if observe_destination {
                     let authority = authority
@@ -88,108 +91,67 @@ impl Treasury {
             .await?;
         let observation = base.zip(observation_scope);
         let identity = crate::network::IsolationId::treasury(&treasury_id);
+        // SDK selection is local. Capital waiting must not probe tips between
+        // shared scan ticks merely to learn that spendable funds are unchanged.
+        let mut selected = self.select_deposit(&request, amount).await?;
+        if let Some(stop) = stop {
+            let validation = self.can_reuse_sync(stop).await;
+            if !matches!(validation, Ok(true)) {
+                self.client
+                    .as_mut()
+                    .context("treasury client unavailable")?
+                    .clear_proposal()
+                    .await;
+                validation.map_err(|error| {
+                    error.context(crate::rotation::transaction::PreparationDeferred)
+                })?;
+                self.sync_once(stop).await.map_err(|error| {
+                    error.context(crate::rotation::transaction::PreparationDeferred)
+                })?;
+                // The proposal pause is released before scanning. Select exact
+                // inputs again against the changed canonical SDK snapshot.
+                selected = self.select_deposit(&request, amount).await?;
+            }
+        }
         // Read-only checks precede any reservation, library mutation or poisoning.
         let preflight: Result<_> = async {
             let mut indexer = crate::network::global()
                 .grpc(&identity, &settings.endpoint)
                 .await?;
-            let info = indexer
-                .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
-                .await
-                .map_err(|status| super::diagnostics::tip_failure(status, "preparation_tip"))?;
-            ensure!(
-                info.chain_name == self.network.rpc_name(),
-                "indexer is not on mainnet"
-            );
+            // The actor already validated the canonical network/anchor above.
+            // Direct preparation retains its own network validation.
+            if stop.is_none() {
+                let info = indexer
+                    .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
+                    .await
+                    .map_err(|status| super::diagnostics::tip_failure(status, "preparation_tip"))?;
+                ensure!(
+                    info.chain_name == self.network.rpc_name(),
+                    "indexer is not on mainnet"
+                );
+            }
             let instant = now()?;
             ensure!(request.deadline > instant, "funding_deadline_expired");
-            ensure!(self.client.is_some(), "treasury client unavailable");
             Ok(indexer)
         }
         .await;
-        let indexer =
-            preflight.map_err(|e| e.context(crate::rotation::transaction::PreparationDeferred))?;
-        // Proposal selection is read-only with respect to owned inputs and signed bytes.
+        let indexer = match preflight {
+            Ok(indexer) => indexer,
+            Err(error) => {
+                self.client
+                    .as_mut()
+                    .context("treasury client unavailable")?
+                    .clear_proposal()
+                    .await;
+                return Err(error.context(crate::rotation::transaction::PreparationDeferred));
+            }
+        };
         let client = self
             .client
             .as_mut()
             .context("treasury client unavailable")?;
         client.set_indexer(indexer);
-        let _pause = client
-            .pause_sync_scoped()
-            .map_err(|_| anyhow::anyhow!("cannot pause treasury sync"))?;
-        let payment = zcash_client_backend::zip321::Payment::new(
-            request.recipient.parse()?,
-            Some(amount),
-            None,
-            None,
-            None,
-            vec![],
-        )?;
-        let proposal = client
-            .propose_send(
-                zcash_client_backend::zip321::TransactionRequest::new(vec![payment])?,
-                zip32::AccountId::ZERO,
-            )
-            .await;
-        let proposal = match proposal {
-            Ok(proposal) => proposal,
-            Err(zingolib::wallet::error::ProposeSendError::Proposal(
-                zcash_client_backend::data_api::error::Error::InsufficientFunds { .. },
-            )) => {
-                return Err(anyhow::Error::new(
-                    crate::rotation::error::FundingCondition::InsufficientFunds,
-                )
-                .context(crate::rotation::transaction::PreparationDeferred));
-            }
-            Err(_) => {
-                return Err(anyhow::anyhow!("treasury proposal failed")
-                    .context(crate::rotation::transaction::PreparationDeferred));
-            }
-        };
-        let selected_proposal: Result<_> = async {
-        ensure!(
-            proposal.steps().len() == 1,
-            "multi-step deposits are unsupported"
-        );
-        let step = proposal.steps().first();
-        ensure!(
-            step.transparent_inputs().is_empty() && step.shielded_inputs().is_some(),
-            "deposit must use shielded inputs"
-        );
-        let fee = zingolib::data::proposal::total_fee(&proposal)?.into_u64();
-        let total = request
-            .amount_zatoshis
-            .checked_add(fee)
-            .context("source cost overflow")?;
-        if fee > request.max_fee_zatoshis || total > request.max_input_zatoshis {
-            tracing::warn!(
-                fee_zatoshis = fee,
-                fee_limit_zatoshis = request.max_fee_zatoshis,
-                total_zatoshis = total,
-                transfer_limit_zatoshis = request.max_input_zatoshis,
-                "funding proposal exceeds max_funding_transaction_fee_zec or max_funding_spend_zec; standard network fee was not overridden"
-            );
-            anyhow::bail!(crate::rotation::error::FundingCondition::CostLimit);
-        }
-        ensure!(
-            zingolib::data::proposal::total_payment_amount(&proposal)? == amount,
-            "proposal amount mismatch"
-        );
-        let selected = super::inputs::selected_inputs(&proposal)?;
-        let calculation = crate::rotation::store::preparation::CalculationInputs {
-            destination: request.recipient.clone(),
-            inputs: selected,
-        };
-        Ok((calculation, i64::try_from(total)?, fee))
-        }.await;
-        let (calculation, authorized_cost, fee) = match selected_proposal {
-            Ok(value) => value,
-            Err(error) => {
-                client.clear_proposal().await;
-                return Err(error.context(crate::rotation::transaction::PreparationDeferred));
-            }
-        };
+        let (calculation, authorized_cost, fee) = selected;
         // Spendability and actual fees are known before destination discovery.
         // This advisory one-pass read cannot gate valid preparation on RPC health;
         // its positive result consumes the claim checked again at acceptance.
@@ -299,6 +261,95 @@ impl Treasury {
     }
 }
 impl Treasury {
+    async fn select_deposit(
+        &mut self,
+        request: &PrepareRequest,
+        amount: Zatoshis,
+    ) -> Result<(
+        crate::rotation::store::preparation::CalculationInputs,
+        i64,
+        u64,
+    )> {
+        // SyncSession returns an offline client after stopping its isolated
+        // runtime; create/open/reconstruction also restore offline clients.
+        // Only that session launches SDK sync, so no scan can race selection.
+        let client = self
+            .client
+            .as_mut()
+            .context("treasury client unavailable")?;
+        let payment = zcash_client_backend::zip321::Payment::new(
+            request.recipient.parse()?,
+            Some(amount),
+            None,
+            None,
+            None,
+            vec![],
+        )?;
+        let proposal = client
+            .propose_send(
+                zcash_client_backend::zip321::TransactionRequest::new(vec![payment])?,
+                zip32::AccountId::ZERO,
+            )
+            .await;
+        let proposal = match proposal {
+            Ok(proposal) => proposal,
+            Err(zingolib::wallet::error::ProposeSendError::Proposal(
+                zcash_client_backend::data_api::error::Error::InsufficientFunds { .. },
+            )) => {
+                return Err(anyhow::Error::new(
+                    crate::rotation::error::FundingCondition::InsufficientFunds,
+                )
+                .context(crate::rotation::transaction::PreparationDeferred));
+            }
+            Err(_) => {
+                return Err(anyhow::anyhow!("treasury proposal failed")
+                    .context(crate::rotation::transaction::PreparationDeferred));
+            }
+        };
+        let selected_proposal: Result<_> = async {
+        ensure!(
+            proposal.steps().len() == 1,
+            "multi-step deposits are unsupported"
+        );
+        let step = proposal.steps().first();
+        ensure!(
+            step.transparent_inputs().is_empty() && step.shielded_inputs().is_some(),
+            "deposit must use shielded inputs"
+        );
+        let fee = zingolib::data::proposal::total_fee(&proposal)?.into_u64();
+        let total = request
+            .amount_zatoshis
+            .checked_add(fee)
+            .context("source cost overflow")?;
+        if fee > request.max_fee_zatoshis || total > request.max_input_zatoshis {
+            tracing::warn!(
+                fee_zatoshis = fee,
+                fee_limit_zatoshis = request.max_fee_zatoshis,
+                total_zatoshis = total,
+                transfer_limit_zatoshis = request.max_input_zatoshis,
+                "funding proposal exceeds max_funding_transaction_fee_zec or max_funding_spend_zec; standard network fee was not overridden"
+            );
+            anyhow::bail!(crate::rotation::error::FundingCondition::CostLimit);
+        }
+        ensure!(
+            zingolib::data::proposal::total_payment_amount(&proposal)? == amount,
+            "proposal amount mismatch"
+        );
+        let selected = super::inputs::selected_inputs(&proposal)?;
+        let calculation = crate::rotation::store::preparation::CalculationInputs {
+            destination: request.recipient.clone(),
+            inputs: selected,
+        };
+        Ok((calculation, i64::try_from(total)?, fee))
+        }.await;
+        match selected_proposal {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                client.clear_proposal().await;
+                Err(error.context(crate::rotation::transaction::PreparationDeferred))
+            }
+        }
+    }
     /// Explicit submission/rebroadcast only; no caller constructs a new transfer
     /// because a response was lost. The adapter must be a trusted configured sender.
     pub async fn submit_prepared(
@@ -370,6 +421,23 @@ impl Treasury {
         stop: &tokio_util::sync::CancellationToken,
     ) -> Result<TransactionPresence> {
         self.sync_for_command(stop).await?;
+        self.reconcile_scanned(id, sender, stop).await
+    }
+    pub(crate) async fn reconcile_for_observation(
+        &mut self,
+        id: String,
+        sender: &mut impl TransactionSubmission,
+        stop: &tokio_util::sync::CancellationToken,
+    ) -> Result<TransactionPresence> {
+        self.sync_for_observation(stop).await?;
+        self.reconcile_scanned(id, sender, stop).await
+    }
+    async fn reconcile_scanned(
+        &mut self,
+        id: String,
+        sender: &mut impl TransactionSubmission,
+        stop: &tokio_util::sync::CancellationToken,
+    ) -> Result<TransactionPresence> {
         let operation = id.clone();
         let prepared = self
             .store
@@ -548,7 +616,11 @@ mod tests {
                 .unwrap();
             assert!(!treasury.status().await.unwrap().outgoing_pending);
         }
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "rejected local SDK proposals must not probe unchanged chain tips"
+        );
         treasury.close().await.unwrap();
         let restored = Treasury::open(state, key, id).await.unwrap();
         assert_eq!(restored.addresses().await.unwrap(), addresses);

@@ -550,3 +550,99 @@ async fn automatic_shielding_never_accepts_unconfirmed_or_paused_inputs_and_acto
         .unwrap()
         .unwrap();
 }
+
+#[tokio::test]
+async fn shielding_callback_scans_are_consumed_before_unrelated_commands() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    struct AdvanceBeforeSubmit {
+        sender: submission::GrpcSubmission,
+        chain: Arc<tokio::sync::RwLock<zingolib::testutils::mock_indexer::MockChain>>,
+        lookups: Arc<AtomicUsize>,
+    }
+    impl TransactionSubmission for AdvanceBeforeSubmit {
+        async fn preflight(&mut self, tx: &PreparedTransaction, retry: bool) -> Result<()> {
+            self.sender.preflight(tx, retry).await
+        }
+        async fn submit(&mut self, tx: BroadcastTransaction) -> Result<SubmissionOutcome> {
+            self.sender.submit(tx).await
+        }
+        async fn lookup(&mut self, tx: &PreparedTransaction) -> Result<TransactionPresence> {
+            let result = self.sender.lookup(tx).await;
+            if self.lookups.fetch_add(1, Ordering::SeqCst) == 0 {
+                // Submission's actual canonical validation must now rescan.
+                self.chain.write().await.mine_empty_blocks(1);
+            }
+            result
+        }
+    }
+    let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
+    let addresses = transparent_addresses(&mut owner, 1).await;
+    let funding = faucet_funding_transaction(vec![(&addresses[0], 1_000_000, None)]).await;
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_block(vec![funding]);
+        chain.mine_empty_blocks(2);
+    }
+    let stop = CancellationToken::new();
+    owner.sync_once(&stop).await.unwrap();
+    let prepared = owner
+        .shield_address(addresses[0].clone(), None, 30_000, &stop)
+        .await
+        .unwrap();
+    owner.configure_automatic_shielding(30_000);
+    owner.observation = Default::default();
+    let lookups = Arc::new(AtomicUsize::new(0));
+    let sender = AdvanceBeforeSubmit {
+        sender: submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap(),
+        chain: net.chain.clone(),
+        lookups: lookups.clone(),
+    };
+    let store = owner.store_handle();
+    let (handle, commands) = actor::channel();
+    let task = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
+    loop {
+        let id = prepared.operation_id().to_owned();
+        if store
+            .call(move |s| Ok(s.operation(&id)?.attempts == 1))
+            .await
+            .unwrap()
+        {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    // Serialized commands acknowledge that the callback and each preceding
+    // wakeup have drained; none can turn its internal scan into another pass.
+    for _ in 0..3 {
+        assert!(
+            handle
+                .recover_funding("missing".into(), 1, false)
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    store
+        .call(move |s| {
+            assert_eq!(
+                s.prepared_bytes(prepared.operation_id())?.as_slice(),
+                prepared.bytes()
+            );
+            assert!(s.operation_pending(prepared.operation_id())?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    stop.cancel();
+    drop(handle);
+    drop(store);
+    task.await.unwrap().unwrap();
+}

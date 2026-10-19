@@ -996,7 +996,7 @@ impl Deployment {
                     ManagedSetup::StoreOnly { owner, .. } => ManagedRuntime::StoreOnly(owner),
                     ManagedSetup::Treasury(treasury) => {
                         let TreasurySetup {
-                            owner,
+                            mut owner,
                             base,
                             source,
                         } = *treasury;
@@ -1012,6 +1012,9 @@ impl Deployment {
                             funding: f.clone(),
                             max_network_fee: source.max_network_fee,
                         };
+                        owner.configure_funding_discovery(
+                            crate::rotation::funding::FundingBackend::allocation_groups(&backend),
+                        );
                         ManagedRuntime::Treasury(Box::new(TreasuryRuntime {
                             owner,
                             funding: (

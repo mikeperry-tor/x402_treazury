@@ -130,7 +130,7 @@ async fn expected_waits_are_info_but_retain_error_backoff_and_other_failures_war
             assert_eq!(record.condition, condition);
             assert_eq!(record.streak, 1);
             assert!(
-                (1010..=1015).contains(&record.due),
+                (1060..=1065).contains(&record.due),
                 "logging must not reset failure backoff"
             );
         }

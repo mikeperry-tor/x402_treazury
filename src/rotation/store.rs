@@ -13,6 +13,8 @@ pub(crate) mod test_support;
 #[cfg(test)]
 pub(crate) mod test_vfs;
 #[cfg(feature = "zcash")]
+mod treasury_observation;
+#[cfg(feature = "zcash")]
 mod treasury_reads;
 pub use capacity::AllocationKind;
 mod evidence;
@@ -218,6 +220,8 @@ pub struct Store {
     funding_conditions:
         std::collections::BTreeMap<String, (String, super::error::FundingCondition)>,
     group_gates: GroupGates,
+    #[cfg(feature = "zcash")]
+    treasury_changes: std::sync::Arc<tokio::sync::Notify>,
     db: Connection,
     // Keep ownership until SQLite has closed (fields drop in declaration order).
     _lock: ownership::Owner,
@@ -450,6 +454,8 @@ impl Store {
             #[cfg(test)]
             inventory_failure: Default::default(),
             group_gates: Default::default(),
+            #[cfg(feature = "zcash")]
+            treasury_changes: Default::default(),
             db,
             _lock: owner,
             key,
@@ -510,6 +516,8 @@ impl Store {
             #[cfg(test)]
             inventory_failure: Default::default(),
             group_gates: Default::default(),
+            #[cfg(feature = "zcash")]
+            treasury_changes: Default::default(),
             db,
             _lock: owner,
             key,
@@ -1130,6 +1138,8 @@ pub struct StoreHandle {
     evidence_namespace: Uuid,
     sender: tokio::sync::mpsc::Sender<Work>,
     group_gates: GroupGates,
+    #[cfg(feature = "zcash")]
+    treasury_changes: std::sync::Arc<tokio::sync::Notify>,
     balance_observers: observation::Observers,
     #[cfg(feature = "zcash")]
     funding_owner: std::sync::Arc<tokio::sync::Mutex<super::funding::scheduler::Owner>>,
@@ -1138,6 +1148,8 @@ impl StoreHandle {
     pub fn spawn(store: Store) -> (Self, tokio::task::JoinHandle<()>) {
         let evidence_namespace = store.evidence_namespace;
         let group_gates = store.group_gates.clone();
+        #[cfg(feature = "zcash")]
+        let treasury_changes = store.treasury_changes.clone();
         let (sender, mut receiver) = tokio::sync::mpsc::channel::<Work>(32);
         let task = tokio::task::spawn_blocking(move || {
             let mut store = store;
@@ -1150,6 +1162,8 @@ impl StoreHandle {
                 evidence_namespace,
                 sender,
                 group_gates,
+                #[cfg(feature = "zcash")]
+                treasury_changes,
                 balance_observers: Default::default(),
                 #[cfg(feature = "zcash")]
                 funding_owner: Default::default(),

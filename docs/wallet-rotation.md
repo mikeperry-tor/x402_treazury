@@ -178,7 +178,9 @@ links and scan coverage. Snapshot revision and the serialized actor bind mutatio
 to its owning SDK state. Cancellation cannot turn an interrupted scan into a
 completed observation. An unchanged completed scan can be reused within its owner
 after checking its exact canonical tip height/hash; restart or chain changes scan
-again. Independent maintenance runs every 60 seconds.
+again for an actual preparation or submission. Scheduled source observations share
+the last successful current-owner scan without fresh tip probes between due scans;
+see [wallet observation policy](#wallet-observation-policy).
 
 Status keeps `target_height`, scanned `height`, final `observed_tip_height` and
 the original `checked_at` for diagnostics. Completion never relabels observation
@@ -548,7 +550,9 @@ available while managed API calls and identity-bound probes return `wallet_not_r
 without provider I/O. No Base reconciliation runs through that invalid configuration;
 unsigned catalog/help operations remain independent. Paid relay startup, explicit
 bootstrap, config checking and qualification remain strict. The store-only runtime
-does not run source/swap observers; their unresolved obligations remain durable.
+does not reconstruct the SDK or run ZEC/source/swap observers, including startup
+ZEC discovery; their unresolved obligations remain durable and existing Base
+startup discovery still runs when its configuration is usable.
 
 ## Wallet observation policy
 
@@ -594,6 +598,49 @@ publish a positive observation or verify Store ownership defers source acceptanc
 including callers sharing that failed acquisition during its cooldown. Waiting for ZEC
 or rejecting an invalid proposal does not repeatedly probe Base destinations; no
 whole-inventory discovery barrier precedes an individual preparation.
+
+Available treasury serving starts with one background ZEC discovery request after
+listeners bind. A process lacking the SDK/source capability uses the store-only
+exception above. Startup failure alone creates no watcher. Further ZEC scans require
+current enabled unfilled funding claims under automatic-funding authority, or a
+validated unresolved source/shielding transaction. Allocating new reserve demand
+wakes discovery; known shortages keep shared scans running so later deposits and
+confirmations can supply spendable SDK funds. A fully funded idle treasury performs
+no incoming-transfer surveillance. Explicit `wallet sync` remains one requested pass.
+
+New-funding discovery demand comes from enabled current reserve slots and their
+exact pool, wallet and claim-generation bindings, rather than historical funding
+jobs. Replaced or disabled claims do not keep discovery running; validated accepted
+transactions retain their independent journal-based observation demand.
+
+Treasury scans recur no sooner than 60 seconds after completion, with independent
+error backoff up to 300 seconds. Waiting source operations reuse an applicable
+current-owner scan without extra tip probes; source and provider-status observations
+also retain their own minute floors and error backoff. Notifications and unrelated
+progress cannot shorten those intervals. Local quote, preparation and submission
+handoffs remain immediate.
+Immediate continuation follows an actual successful local result and current
+durable preparation facts; a display-phase change or successful no-op cannot
+shorten the source observation interval. Quote refresh creates a new operation
+identity whose initial work is eligible independently of the obsolete completion.
+SDK proposal selection runs locally before canonical
+validation; insufficient funds do not trigger intervening tip probes. A selected
+proposal still requires canonical validation, and is cleared and reselected if a
+new scan changes its snapshot. Explicit administration and actual submission/expiry
+release proofs keep their separate correctness checks.
+
+Positive destination credit and provider outcomes cannot finish a pending source
+transaction. Its original validated journal keeps observation demand across stale
+phases, disabled/removed profiles, cancellation and restart. Accepted unpublished
+calculations and invalid retained bytes keep their input fence, but do not request
+scans that cannot reconstruct or publish them. Such an owner also prevents new
+funding-demand scans whose calculations it blocks. Completed-result publication and
+SDK reconstruction retry locally at their own 60-second cadence, independently of
+scan scheduling. A successful needed persisted scan may recover owned transparent
+funds through automatic shielding under existing permission/fee checks; an accepted
+shielding transaction continues observation even if its original funding demand
+vanishes. Once source confirmation/expiry resolves, destination/provider waiting
+alone does not keep ZEC discovery running.
 
 ## Best-effort wallet rules
 

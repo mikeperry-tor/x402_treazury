@@ -20,6 +20,10 @@ pub struct RecoveryObservation {
     pub outcome: RecoveryOutcome,
     pub source_observed: bool,
 }
+struct ObservationContext {
+    scheduled: bool,
+    source_observed: bool,
+}
 
 pub(crate) fn needs_recovery(job: &FundingJob) -> bool {
     job.phase == FundingPhase::RecoveryRequired
@@ -69,7 +73,7 @@ impl Treasury {
         stop: &CancellationToken,
     ) -> Result<RecoveryOutcome> {
         Ok(self
-            .recover_funding_observed(job_id, max_attempts, allow_new_attempt, sender, stop)
+            .recover_funding_observed(job_id, max_attempts, allow_new_attempt, sender, stop, false)
             .await?
             .outcome)
     }
@@ -81,8 +85,12 @@ impl Treasury {
         allow_new_attempt: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
+        scheduled: bool,
     ) -> Result<RecoveryObservation> {
-        let mut source_observed = false;
+        let mut observation = ObservationContext {
+            scheduled,
+            source_observed: false,
+        };
         let result = self
             .recover_funding_job_inner(
                 job_id,
@@ -90,7 +98,7 @@ impl Treasury {
                 allow_new_attempt,
                 sender,
                 stop,
-                &mut source_observed,
+                &mut observation,
             )
             .await;
         let outcome = match result {
@@ -102,7 +110,7 @@ impl Treasury {
         };
         Ok(RecoveryObservation {
             outcome,
-            source_observed,
+            source_observed: observation.source_observed,
         })
     }
     async fn recover_funding_job_inner(
@@ -112,7 +120,7 @@ impl Treasury {
         allow_new_attempt: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
-        source_observed: &mut bool,
+        observation: &mut ObservationContext,
     ) -> Result<RecoveryOutcome> {
         use RecoveryOutcome::*;
         ensure!(self.healthy, "treasury requires reopen");
@@ -161,7 +169,7 @@ impl Treasury {
         let expiry = u64::from(operation.facts.expiry_height);
         if operation.attempts > 0 {
             if let Some(outcome) = self
-                .observe_recovery_source(operation, terminal, sender, stop, source_observed)
+                .observe_recovery_source(operation, terminal, sender, stop, observation)
                 .await?
             {
                 return Ok(outcome);
@@ -178,8 +186,22 @@ impl Treasury {
         if expiry == 0 {
             return Ok(OperatorRequired("transaction_has_no_consensus_expiry"));
         }
-        // Never-submitted work goes straight to the proof's own fresh scans.
-        // A preliminary scan only to forecast expiry repeats the same work.
+        // A scheduled first proof scan is also the next observation. Until due,
+        // an unburied saved height cannot justify another scan just to forecast
+        // expiry. Explicit recovery and an already buried expiry retain their
+        // two fresh scans, exact inputs and canonical release checks.
+        if observation.scheduled && !self.observation.ready() && self.observation.failed() {
+            return Ok(Waiting("waiting_for_fresh_canonical_sync"));
+        }
+        if observation.scheduled && operation.attempts == 0 && !self.observation.ready() {
+            let sync = self.store.call(|s| s.funding_sync_observation()).await?;
+            if sync
+                .height
+                .is_none_or(|height| height < expiry.saturating_add(u64::from(sync.confirmations)))
+            {
+                return Ok(Waiting("waiting_for_transaction_expiry"));
+            }
+        }
         self.recover_expired(operation_id, sender, stop).await?;
         let id = job.id.clone();
         let operation = job.operation_id.clone();
@@ -265,17 +287,21 @@ impl Treasury {
         terminal: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
-        source_observed: &mut bool,
+        observation: &mut ObservationContext,
     ) -> Result<Option<RecoveryOutcome>> {
         use RecoveryOutcome::*;
         let operation_id = operation.operation_id.clone();
         // Submitted/ambiguous work is observed, never resubmitted. Even expired
         // operations still require the caller's independent two-sync input proof.
-        *source_observed = true;
-        if let Err(error) = self
-            .reconcile_prepared(operation_id.clone(), sender, stop)
-            .await
-        {
+        observation.source_observed = true;
+        let result = if observation.scheduled {
+            self.reconcile_for_observation(operation_id.clone(), sender, stop)
+                .await
+        } else {
+            self.reconcile_prepared(operation_id.clone(), sender, stop)
+                .await
+        };
+        if let Err(error) = result {
             if error.downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>()
                 == Some(&crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending)
             {
@@ -398,7 +424,7 @@ mod tests {
             .unwrap();
         let stop = CancellationToken::new();
         let observation = owner
-            .recover_funding_observed(job.id.clone(), 1, true, &mut NoNetwork, &stop)
+            .recover_funding_observed(job.id.clone(), 1, true, &mut NoNetwork, &stop, true)
             .await
             .unwrap();
         assert!(
@@ -544,6 +570,98 @@ mod tests {
         (dir, owner, jobs)
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn buried_unsubmitted_source_cannot_bypass_failed_scan_backoff() {
+        let (dir, mut owner, jobs) = unfunded_recovery_fixture().await;
+        let job = jobs[0].clone();
+        let selected = job.clone();
+        owner.revision = owner
+            .store
+            .call(move |s| {
+                s.accept_preparation(&selected.operation_id, Some(&selected.pool_id), 60, None)?;
+                let revision = s.snapshot()?.0;
+                s.prepare_with_facts(
+                    &selected.operation_id,
+                    revision,
+                    b"fixture snapshot",
+                    b"original bytes",
+                    Some(crate::rotation::transaction::TransactionFacts {
+                        txid: "fixture".into(),
+                        expiry_height: 100,
+                        amount_zatoshis: 50,
+                        fee_zatoshis: 10,
+                        deadline: Some(10000),
+                    }),
+                )?;
+                let (revision, snapshot) = s.snapshot()?;
+                s.save_sync_snapshot(
+                    revision,
+                    &snapshot,
+                    Some(SyncObservation {
+                        phase: SyncPhase::Ready,
+                        last_error: None,
+                        snapshot_revision: revision,
+                        checked_at: Some(now()?),
+                        checkpoint_at: 0,
+                        scanned_blocks: 1,
+                        target_height: Some(500),
+                        height: Some(500),
+                        observed_tip_height: Some(500),
+                        confirmations: 3,
+                        confirmed_pool_balances_zatoshis: None,
+                        confirmed_shielded_zatoshis: 0,
+                        spendable_shielded_zatoshis: 0,
+                    }),
+                )
+            })
+            .await
+            .unwrap();
+        owner.observation.complete(false);
+        owner.observation.complete(false);
+        let due = owner.observation.due();
+        let retained = recovery_rows(dir.path(), true);
+        for seconds in [60, 59] {
+            tokio::time::advance(Duration::from_secs(seconds)).await;
+            let result = owner
+                .recover_funding_observed(
+                    job.id.clone(),
+                    1,
+                    false,
+                    &mut NoNetwork,
+                    &CancellationToken::new(),
+                    true,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                result.outcome,
+                RecoveryOutcome::Waiting("waiting_for_fresh_canonical_sync")
+            );
+            assert_eq!(owner.observation.due(), due);
+            owner.status().await.unwrap();
+            assert_eq!(recovery_rows(dir.path(), true), retained);
+        }
+        // Explicit submitted recovery retains canonical validation even during
+        // the scheduled cooldown. Missing settings identifies its attempted scan;
+        // cached observation would instead report observation unavailable.
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        db.execute(
+            "UPDATE treasury_operations SET attempts=1 WHERE id=?1",
+            [&job.operation_id],
+        )
+        .unwrap();
+        drop(db);
+        let error = owner
+            .recover_funding_job(job.id, 1, false, &mut NoNetwork, &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("sync endpoint not configured"),
+            "{error:#}"
+        );
+        owner.close().await.unwrap();
+    }
+
     fn recovery_rows(
         dir: &std::path::Path,
         financial_only: bool,
@@ -611,7 +729,7 @@ mod tests {
                 .unwrap();
             let before = recovery_rows(dir.path(), false);
             let result = owner
-                .recover_funding_observed(job.id.clone(), 0, true, &mut NoNetwork, &stop)
+                .recover_funding_observed(job.id.clone(), 0, true, &mut NoNetwork, &stop, true)
                 .await
                 .unwrap();
             assert_eq!(
@@ -643,7 +761,7 @@ mod tests {
             (true, "recovery_attempt_limit_reached"),
         ] {
             let observation = owner
-                .recover_funding_observed(job.id.clone(), 0, allowed, &mut NoNetwork, &stop)
+                .recover_funding_observed(job.id.clone(), 0, allowed, &mut NoNetwork, &stop, true)
                 .await
                 .unwrap();
             assert_eq!(
@@ -668,7 +786,7 @@ mod tests {
             assert_eq!(recovery_rows(dir.path(), true), financial_before);
         }
         let observation = owner
-            .recover_funding_observed(job.id.clone(), 1, true, &mut NoNetwork, &stop)
+            .recover_funding_observed(job.id.clone(), 1, true, &mut NoNetwork, &stop, true)
             .await
             .unwrap();
         assert_eq!(observation.outcome, RecoveryOutcome::Recovered);

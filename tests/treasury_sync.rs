@@ -405,23 +405,23 @@ async fn sync_empty_chain_persists_and_resumes_without_broadcast() {
             error.is::<x402_treazury::rotation::transaction::PreparationDeferred>(),
             "{error:#}"
         );
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string() == "treasury proposal failed"),
+            "{error:#}"
+        );
         {
             let observed = calls.lock().unwrap();
-            assert_eq!(observed.len(), before + 1);
-            assert_eq!(observed[before], "GetLightdInfo");
+            assert_eq!(
+                observed.len(),
+                before,
+                "an empty SDK proposal must not probe the indexer"
+            );
         }
-        assert_eq!(
-            treasury.status().await.unwrap().snapshot_revision,
-            status.snapshot_revision
-        );
-        assert!(
-            treasury
-                .status()
-                .await
-                .unwrap()
-                .treasury_operations
-                .is_empty()
-        );
+        let after = treasury.status().await.unwrap();
+        assert_eq!(after.snapshot_revision, status.snapshot_revision);
+        assert!(after.treasury_operations.is_empty() && !after.outgoing_pending);
     }
     treasury.close().await.unwrap();
     let mut restored = Treasury::open(dir.path().join("state"), dir.path().join("key"), id.clone())
@@ -1394,6 +1394,111 @@ async fn command_scan_defers_the_immediate_background_tick_without_extra_network
     owner.await.unwrap().unwrap();
     assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
     server.abort();
+}
+
+#[tokio::test]
+async fn actor_startup_is_finite_and_source_commands_share_its_success_or_failure() {
+    use x402_treazury::{
+        rotation::{store, transaction::PrepareRequest},
+        treasury::{actor, submission::GrpcSubmission},
+    };
+    for chain in ["main", "test"] {
+        let dir = tempfile::tempdir().unwrap();
+        let (endpoint, calls, server, _) = mock(chain).await;
+        let mut treasury = wallet(dir.path()).await;
+        treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3).unwrap());
+        let (handle, commands) = actor::channel();
+        let stop = CancellationToken::new();
+        let owner = tokio::spawn(treasury.run_commands(
+            commands,
+            GrpcSubmission::new(endpoint.clone(), endpoint).unwrap(),
+            stop.clone(),
+        ));
+        let expected = if chain == "main" {
+            SyncPhase::Ready
+        } else {
+            SyncPhase::Failed
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if store::status(&dir.path().join("state"))
+                    .unwrap()
+                    .sync
+                    .is_some_and(|sync| sync.phase == expected)
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let before = store::status(&dir.path().join("state")).unwrap();
+        let count = calls.lock().unwrap().len();
+        assert!(count > 0, "fresh startup must attempt discovery");
+        for _ in 0..3 {
+            assert!(handle.reconcile("absent".into()).await.is_err());
+            let error = handle
+                .prepare(PrepareRequest {
+                    managed_funding: None,
+                    operation_id: uuid::Uuid::new_v4().to_string(),
+                    pool_id: None,
+                    deadline: x402_treazury::rotation::base::now().unwrap() + 1000,
+                    recipient: "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F".into(),
+                    amount_zatoshis: 50_000,
+                    max_fee_zatoshis: 20_000,
+                    max_input_zatoshis: 70_000,
+                })
+                .await
+                .err()
+                .unwrap();
+            assert!(
+                error.is::<x402_treazury::rotation::transaction::PreparationDeferred>(),
+                "{error:#}"
+            );
+        }
+        assert_eq!(
+            calls.lock().unwrap().len(),
+            count,
+            "commands must share startup observation or its failure cooldown"
+        );
+        let after = store::status(&dir.path().join("state")).unwrap();
+        assert_eq!(before.snapshot_revision, after.snapshot_revision);
+        assert_eq!(
+            before.sync.unwrap().checked_at,
+            after.sync.unwrap().checked_at
+        );
+        assert!(after.treasury_operations.is_empty());
+        // No claims or accepted transactions need another scan. Neither a
+        // successful nor failed one-pass startup installs an idle watcher.
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(600)).await;
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            handle
+                .recover_funding("absent".into(), 3, false)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            calls.lock().unwrap().len(),
+            count,
+            "idle startup must remain finite"
+        );
+        stop.cancel();
+        owner.await.unwrap().unwrap();
+        assert!(
+            !calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|method| method.contains("Send"))
+        );
+        server.abort();
+        tokio::time::resume();
+    }
 }
 
 #[tokio::test]

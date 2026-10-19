@@ -100,7 +100,7 @@ impl FundingBackend for Fake {
     async fn ready(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
         anyhow::ensure!(
             self.funds_available,
-            "treasury_insufficient_spendable_funds"
+            x402_treazury::rotation::error::FundingCondition::InsufficientFunds
         );
         Ok(())
     }
@@ -627,8 +627,8 @@ async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_reco
     );
     assert!(status.treasury_operations.is_empty());
     let message = status.funding_jobs[0].last_error.as_deref().unwrap();
-    assert!(message.contains("refill paused before transaction preparation"));
-    assert!(message.contains("existing funded wallets remain usable"));
+    assert!(message.contains("waiting for confirmed spendable ZEC"));
+    assert!(message.contains("wallet status --config FILE"));
     assert_eq!(worker.backend.lock().await.sends, 0);
     worker.backend.lock().await.funds_available = true;
     for i in 2..8 {
@@ -675,6 +675,17 @@ async fn quote_and_prepared_validity_boundaries_are_exact() {
         );
         assert_eq!(status.treasury_operations.len(), usize::from(remaining > 0));
         assert_eq!(worker.backend.lock().await.sends, 0);
+        if remaining == 0 {
+            let replacement = status.funding_jobs[0].operation_id.clone();
+            // Refresh already replaced the operation. Its first unsigned step
+            // needs no handoff from the obsolete completion or later clock tick.
+            worker.tick(now + 100).await.unwrap();
+            let next = worker.store.call(|s| s.status()).await.unwrap();
+            assert_eq!(next.funding_jobs[0].operation_id, replacement);
+            assert_eq!(next.funding_jobs[0].phase, FundingPhase::Quoted);
+            assert_eq!(worker.backend.lock().await.quotes.load(Ordering::SeqCst), 2);
+            assert!(next.treasury_operations.is_empty());
+        }
         drop(worker);
         task.await.unwrap();
         let (_dir, worker, task) = fixture().await;
@@ -914,9 +925,26 @@ async fn pre_preparation_sync_failure_retries_same_quote_without_recovery_or_sen
             job.last_error
                 .as_ref()
                 .unwrap()
-                .contains("no calculation started")
+                .contains("treasury_preparation_deferred")
+        );
+        assert!(
+            job.last_error
+                .as_ref()
+                .unwrap()
+                .contains("existing work retained")
         );
         assert!(status.treasury_operations.is_empty());
+        let operation = job.operation_id.clone();
+        let id = job.id.clone();
+        worker
+            .store
+            .call(move |s| {
+                s.require_unstarted_preparation(&operation)?;
+                assert_eq!(s.funding_recovery_count(&id)?, 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
     }
     worker.backend.lock().await.defer_prepare = false;
     worker.tick(now + 100).await.unwrap();
@@ -1265,7 +1293,11 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
         .lines()
         // This fixture's focused job is a/small. WARN uses that readable
         // scope; raw job correlation is deliberately a separate DEBUG event.
-        .filter(|line| line.contains(&focus) || line.contains("wallet=a size=small"))
+        .filter(|line| {
+            line.contains(&focus)
+                || ((line.contains("wallet=a ") || line.contains("wallet=\"a\" "))
+                    && (line.contains("size=small ") || line.contains("size=\"small\" ")))
+        })
         .collect::<Vec<_>>()
         .join("\n");
     assert!(waiting.contains("zcash_confirmations_pending"));
@@ -1286,12 +1318,19 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
         .lines()
         // This fixture's focused job is a/small. WARN uses that readable
         // scope; raw job correlation is deliberately a separate DEBUG event.
-        .filter(|line| line.contains(&focus) || line.contains("wallet=a size=small"))
+        .filter(|line| {
+            line.contains(&focus)
+                || ((line.contains("wallet=a ") || line.contains("wallet=\"a\" "))
+                    && (line.contains("size=small ") || line.contains("size=\"small\" ")))
+        })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(failed.contains("WARN"));
-    assert!(failed.contains("Funding observation failed"));
-    assert!(!failed.contains("private upstream error"));
+    assert!(failed.contains("WARN"), "{output}");
+    assert!(
+        failed.contains("Wallet funding observation unavailable"),
+        "{output}"
+    );
+    assert!(!output.contains("private upstream error"));
     assert!(!failed.contains("source_confirmation_pending"));
     worker.backend.lock().await.reconcile_error = None;
     worker.tick(now + 8000).await.unwrap();
@@ -1383,7 +1422,7 @@ async fn repeated_quote_outages_do_not_consume_recovery_attempts_or_allocate_aga
 }
 
 #[tokio::test]
-async fn disabled_quote_observes_external_credit_and_closes_without_new_source_work() {
+async fn disabled_quote_closes_after_explicit_discovery_without_polling_or_new_source_work() {
     use x402_treazury::rotation::store::funding::FundingPhase;
     let (_dir, worker, task) = fixture().await;
     let now = x402_treazury::rotation::base::now().unwrap();
@@ -1396,12 +1435,53 @@ async fn disabled_quote_observes_external_credit_and_closes_without_new_source_w
         .call(move |s| s.disable_pool(&name))
         .await
         .unwrap();
-    worker.backend.lock().await.external_credit = true;
-    worker.backend.lock().await.chain_credit = true;
+    let credit_calls = worker.backend.lock().await.credit_calls.clone();
     worker.tick(now + 100).await.unwrap();
-    // The source lane may have captured the clean quote before credit published;
-    // the next bounded pass observes D and performs its guarded closure.
+    assert_eq!(
+        credit_calls.load(Ordering::SeqCst),
+        0,
+        "unaccepted disabled quotes do not poll Base"
+    );
+    assert_eq!(worker.backend.lock().await.sends, 0);
+    // Startup/explicit discovery owns this finite observation, independently of
+    // the funding coordinator's accepted-source-only credit lane.
+    use axum::{Json, Router, routing::post};
+    use serde_json::{Value, json};
+    let scalar_calls = Arc::new(AtomicUsize::new(0));
+    let calls = scalar_calls.clone();
+    let app = Router::new().route("/", post(move |Json(request): Json<Value>| {
+        let calls = calls.clone();
+        async move {
+            assert_eq!(request["method"], "eth_call");
+            assert_eq!(request["params"][1], "latest");
+            calls.fetch_add(1, Ordering::SeqCst);
+            Json(json!({"jsonrpc":"2.0", "id":request["id"], "result":format!("0x{:064x}", 5_000_000u64)}))
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = x402_treazury::rotation::base::BaseRpc::new(
+        &format!("http://{}/", listener.local_addr().unwrap()),
+        12,
+    )
+    .unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let manager = x402_treazury::rotation::manager::ManagedPool::new(
+        worker.store.clone(),
+        before.funding_jobs[0].pool_id.clone(),
+        base,
+        x402_treazury::payment::SpendPolicy {
+            max_atomic: Some(alloy_primitives::U256::from(1_000_000)),
+        },
+    )
+    .unwrap();
+    manager.reconcile().await.unwrap();
+    drop(manager);
+    assert_eq!(
+        scalar_calls.load(Ordering::SeqCst),
+        before.funding_jobs.len()
+    );
     worker.tick(now + 200).await.unwrap();
+    assert_eq!(credit_calls.load(Ordering::SeqCst), 0);
     let after = worker.store.call(|s| s.status()).await.unwrap();
     assert_eq!(after.funding_jobs[0].phase, FundingPhase::Complete);
     assert_eq!(
@@ -1413,6 +1493,7 @@ async fn disabled_quote_observes_external_credit_and_closes_without_new_source_w
     assert_eq!(worker.backend.lock().await.sends, 0);
     drop(worker);
     task.await.unwrap();
+    server.abort();
 }
 
 #[tokio::test]

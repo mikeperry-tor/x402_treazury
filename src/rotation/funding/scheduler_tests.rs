@@ -869,7 +869,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
     // More than RECORDS accepted credits must cross a minute cadence before
     // completed scheduling records can be evicted. This is a fixture allowance
     // for cache rollover, never a deadline for accepted runtime work.
-    let rollover_allowance = std::time::Duration::from_secs(CREDIT_POLL_SECONDS + 15);
+    let rollover_allowance = std::time::Duration::from_secs(OBSERVATION_POLL_SECONDS + 15);
     tokio::time::timeout(rollover_allowance, async {
         loop {
             if let Ok(lease) = store.funding_owner().try_lock_owned() {
@@ -1126,15 +1126,37 @@ async fn continuous_status_cadence_keeps_rolling_while_other_lanes_stay_owned() 
         .await
         .unwrap()
         .unwrap();
-    for _ in 0..2 {
-        assert_eq!(
-            tokio::time::timeout(std::time::Duration::from_secs(8), status_rx.recv())
+    assert_eq!(event(&mut status_rx).await, jobs[1].id);
+    // Persisted health is written after State::complete anchors the cooldown.
+    // Channel delivery and provider-observed publication happen before that point.
+    let focus = jobs[1].id.clone();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let id = focus.clone();
+            if store
+                .call(move |s| Ok(s.funding_job(&id)?.unwrap().next_poll > 0))
                 .await
                 .unwrap()
-                .unwrap(),
-            jobs[1].id
-        );
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::pause();
+    tokio::time::advance(std::time::Duration::from_secs(59)).await;
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
     }
+    assert!(
+        status_rx.try_recv().is_err(),
+        "provider polling has a minute floor"
+    );
+    tokio::time::advance(std::time::Duration::from_secs(3)).await;
+    tokio::time::resume();
+    assert_eq!(event(&mut status_rx).await, jobs[1].id);
     // The unprepared sibling owns source work but has no credit work yet.
     assert_eq!(credit_calls.load(Ordering::SeqCst), 1);
     stop.cancel();
@@ -1954,7 +1976,7 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
                 Source {
                     store: store.clone(),
                     reads: Reads {
-                        credits: Arc::new(Semaphore::new(64)),
+                        credits: Arc::new(Semaphore::new(if once { 64 } else { 0 })),
                         credit_calls: credits.clone(),
                         statuses,
                         status_gates: Default::default(),
@@ -1988,8 +2010,33 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
             } else {
                 assert_eq!(event(&mut source_events).await, jobs[1].id);
                 wait_until(|| credits.load(Ordering::SeqCst) >= 2).await;
-                let observed = event(&mut status_events).await;
-                assert!(jobs.iter().any(|job| job.id == observed));
+                let mut first_statuses = BTreeSet::new();
+                while first_statuses.len() < jobs.len() {
+                    let observed = event(&mut status_events).await;
+                    assert!(jobs.iter().any(|job| job.id == observed));
+                    assert!(first_statuses.insert(observed));
+                }
+                // Health publication follows State::complete; provider outcome
+                // publication alone does not establish the cooldown anchor.
+                let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        let published: i64 = db
+                            .query_row(
+                                "SELECT count(*) FROM funding_progress WHERE next_poll>0",
+                                [],
+                                |row| row.get(0),
+                            )
+                            .unwrap();
+                        if published == jobs.len() as i64 {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                drop(db);
                 let before = credits.load(Ordering::SeqCst);
                 while status_events.try_recv().is_ok() {}
                 store
@@ -2013,8 +2060,13 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
                 })
                 .await
                 .unwrap();
-                // The fast status lane resumes after the inventory outage,
-                // while credit keeps its independent minute cadence.
+                // Inventory recovery does not shorten the provider's minute
+                // interval. Its next due read still progresses independently of
+                // the held source and credit acquisitions.
+                assert!(status_events.try_recv().is_err());
+                tokio::time::pause();
+                tokio::time::advance(std::time::Duration::from_secs(61)).await;
+                tokio::time::resume();
                 let observed = event(&mut status_events).await;
                 assert!(jobs.iter().any(|job| job.id == observed));
                 assert_eq!(credits.load(Ordering::SeqCst), before);
@@ -2367,3 +2419,306 @@ mod credit_polling;
 
 #[path = "diagnostic_tests.rs"]
 mod diagnostics;
+
+#[test]
+fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let job = raw.funding_jobs().unwrap().remove(0);
+    let mut state = State::default();
+    let active = BTreeSet::new();
+    for kind in [Kind::Source, Kind::Status, Kind::Quote] {
+        let key = Key {
+            operation: job.operation_id.clone(),
+            kind,
+        };
+        assert_eq!(state.admit(&key, &job, 1000, &active), Some(true));
+        state.complete(&job, kind, 1000, RetrySchedule::Poll(1), None, None);
+        if kind != Kind::Quote {
+            assert_eq!(state.admit(&key, &job, 1059, &active), Some(false));
+            assert_eq!(state.admit(&key, &job, 1061, &active), Some(true));
+        }
+    }
+    let source = Key {
+        operation: job.operation_id.clone(),
+        kind: Kind::Source,
+    };
+    state.complete(
+        &job,
+        Kind::Source,
+        1100,
+        RetrySchedule::Poll(100),
+        Some("source observation unavailable".into()),
+        None,
+    );
+    let due = state.records[&source].due;
+    state.complete(&job, Kind::Status, 1101, RetrySchedule::Poll(1), None, None);
+    state.complete(&job, Kind::Quote, 1102, RetrySchedule::Poll(1), None, None);
+    state.advance_source(&job.operation_id, 1102);
+    assert_eq!(state.records[&source].due, due);
+    assert_eq!(state.records[&source].streak, 1);
+    assert_eq!(
+        state.records[&source].error.as_deref(),
+        Some("source observation unavailable")
+    );
+    assert_eq!(state.admit(&source, &job, due - 1, &active), Some(false));
+    // Only a successful completion of this exact source clears its failure.
+    state.complete(&job, Kind::Source, due, RetrySchedule::Poll(1), None, None);
+    state.advance_source(&job.operation_id, due);
+    assert_eq!(state.admit(&source, &job, due, &active), Some(true));
+}
+
+struct LocalHandoff {
+    store: StoreHandle,
+    reads: Reads,
+    events: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    commit_preparation: bool,
+}
+impl FundingBackend for LocalHandoff {
+    type Observations = Reads;
+    fn observations(&self) -> Reads {
+        self.reads.clone()
+    }
+    fn max_attempts(&self, _: &FundingJob) -> u32 {
+        3
+    }
+    async fn quote_prerequisite(&mut self, job: &FundingJob) -> Result<Quote> {
+        self.events.lock().unwrap().push("prerequisite");
+        let (id, operation, target) =
+            (job.id.clone(), job.operation_id.clone(), job.target.clone());
+        self.store
+            .call(move |s| s.select_quote_terms(&id, &operation, &target, &target))
+            .await?;
+        Ok(quote(job))
+    }
+    async fn prepare(&mut self, job: &FundingJob, _: &Quote) -> Result<()> {
+        self.events.lock().unwrap().push("prepare");
+        if !self.commit_preparation {
+            return Ok(());
+        }
+        let job = job.clone();
+        self.store
+            .call(move |s| {
+                s.accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)?;
+                let revision = s.snapshot()?.0;
+                s.prepare_with_facts(
+                    &job.operation_id,
+                    revision,
+                    b"next",
+                    b"signed",
+                    Some(TransactionFacts {
+                        txid: job.id.clone(),
+                        expiry_height: 100,
+                        amount_zatoshis: 50,
+                        fee_zatoshis: 10,
+                        deadline: Some(u64::MAX),
+                    }),
+                )?;
+                Ok(())
+            })
+            .await
+    }
+    async fn submit(&mut self, job: &FundingJob) -> Result<()> {
+        self.events.lock().unwrap().push("submit");
+        let job = job.clone();
+        self.store
+            .call(move |s| {
+                s.request_broadcast(&job.operation_id, now()?, 1, false)?;
+                s.reconcile_funding_phase(&job.id, &job.operation_id)
+            })
+            .await
+    }
+    async fn reconcile(&mut self, _: &FundingJob) -> Result<bool> {
+        self.events.lock().unwrap().push("source");
+        Ok(false)
+    }
+}
+
+#[tokio::test]
+async fn successful_quote_prepare_submit_handoffs_do_not_wait_for_observation_cooldown() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let mut jobs = raw.funding_jobs().unwrap();
+    let job = jobs.remove(0);
+    for other in jobs {
+        raw.record_credit(&other.wallet_id, "1", "fixture", 100)
+            .unwrap();
+    }
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (statuses, _status_events) = mpsc::unbounded_channel();
+    let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let worker = FundingWorker::new(
+        store.clone(),
+        LocalHandoff {
+            store: store.clone(),
+            events: events.clone(),
+            commit_preparation: true,
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(100)),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: true,
+                quotes: None,
+            },
+        },
+        1,
+    );
+    worker.tick(1000).await.unwrap();
+    assert_eq!(*events.lock().unwrap(), ["prerequisite"]);
+    worker.tick(1000).await.unwrap();
+    assert_eq!(*events.lock().unwrap(), ["prerequisite", "prepare"]);
+    worker.tick(1000).await.unwrap();
+    assert_eq!(
+        *events.lock().unwrap(),
+        ["prerequisite", "prepare", "submit"]
+    );
+    let before = events.lock().unwrap().len();
+    worker.tick(1059).await.unwrap();
+    assert_eq!(
+        events.lock().unwrap().len(),
+        before,
+        "accepted source waits at least a minute"
+    );
+    worker.tick(1061).await.unwrap();
+    assert_eq!(events.lock().unwrap().last(), Some(&"source"));
+    let operation = job.operation_id.clone();
+    store
+        .call(move |s| {
+            assert_eq!(s.operation(&operation)?.attempts, 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
+}
+
+#[tokio::test]
+async fn successful_no_progress_keeps_the_source_observation_floor() {
+    for blocked_by_owner in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut raw = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut raw,
+            "pool",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+        let mut jobs = raw.funding_jobs().unwrap();
+        let job = jobs.remove(0);
+        for other in jobs {
+            raw.record_credit(&other.wallet_id, "1", "fixture", 100)
+                .unwrap();
+        }
+        let (store, owner) = StoreHandle::spawn(raw);
+        let (statuses, _status_events) = mpsc::unbounded_channel();
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let worker = FundingWorker::new(
+            store.clone(),
+            LocalHandoff {
+                store: store.clone(),
+                events: events.clone(),
+                commit_preparation: false,
+                reads: Reads {
+                    credits: Arc::new(Semaphore::new(100)),
+                    credit_calls: Default::default(),
+                    statuses,
+                    status_gates: Default::default(),
+                    failed_job: Default::default(),
+                    processing: true,
+                    quotes: None,
+                },
+            },
+            1,
+        );
+        worker.tick(1000).await.unwrap();
+        if blocked_by_owner {
+            store
+                .call(|s| s.accept_preparation("unrelated-owned-calculation", None, 60, None))
+                .await
+                .unwrap();
+        }
+        // A blocked preparation and a backend's successful no-op are both
+        // successful local returns, but neither produced a signed source handoff.
+        worker.tick(1000).await.unwrap();
+        let expected = if blocked_by_owner {
+            vec!["prerequisite"]
+        } else {
+            vec!["prerequisite", "prepare"]
+        };
+        assert_eq!(*events.lock().unwrap(), expected);
+        {
+            let lease = store.funding_owner().lock_owned().await;
+            let state = lease.state.lock().unwrap();
+            let key = Key {
+                operation: job.operation_id.clone(),
+                kind: Kind::Source,
+            };
+            assert!(state.records[&key].due >= 1060);
+        }
+        for epoch in [1000, 1059] {
+            worker.tick(epoch).await.unwrap();
+            assert_eq!(*events.lock().unwrap(), expected);
+        }
+        worker.tick(1061).await.unwrap();
+        if blocked_by_owner {
+            assert_eq!(*events.lock().unwrap(), expected);
+        } else {
+            assert_eq!(
+                *events.lock().unwrap(),
+                ["prerequisite", "prepare", "prepare"]
+            );
+        }
+        let operation = job.operation_id.clone();
+        store
+            .call(move |s| {
+                s.require_unstarted_preparation(&operation)?;
+                assert!(!s.operation_pending(&operation)?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(worker);
+        drop(store);
+        owner.await.unwrap();
+    }
+}

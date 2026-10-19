@@ -37,6 +37,196 @@ async fn base_fixture(balance: u64) -> (BaseRpc, Arc<AtomicUsize>, tokio::task::
 }
 
 #[tokio::test]
+async fn preparation_validates_network_once_and_rechecks_current_authority() {
+    for actor in [false, true] {
+        for matching_chain in [false, true] {
+            check_preparation_probes(actor, matching_chain).await;
+        }
+    }
+}
+
+async fn check_preparation_probes(actor: bool, matching_chain: bool) {
+    let (dir, _net, mut owner, endpoint) = funded_fixture(2).await;
+    owner
+        .ensure_capacity_group(
+            "alpha".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let job = store
+        .call(|s| {
+            s.fill_funding_vacancies("alpha")?;
+            Ok(s.funding_jobs()?.remove(0))
+        })
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&store, vec![job.clone()], deadline).await;
+    let observed = owner.reusable_observation().await.unwrap().unwrap();
+    let height = u32::try_from(observed.height.unwrap()).unwrap();
+    let hash = owner
+        .client
+        .as_ref()
+        .unwrap()
+        .wallet()
+        .read()
+        .await
+        .wallet_blocks
+        .get(&height.into())
+        .unwrap()
+        .block_hash()
+        .0;
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = calls.clone();
+    let database = dir.path().join("state/state.sqlite");
+    let pool = job.pool_id.clone();
+    let app = Router::new().fallback(move |uri: axum::http::Uri| {
+        let calls = recorded.clone();
+        let database = database.clone();
+        let pool = pool.clone();
+        async move {
+            let method = uri.path().rsplit('/').next().unwrap().to_owned();
+            calls.lock().unwrap().push(method.clone());
+            let mut message = Vec::new();
+            match method.as_str() {
+                "GetLightdInfo" => {
+                    let chain = if matching_chain {
+                        TreasuryNetwork::Synthetic.rpc_name()
+                    } else {
+                        "main"
+                    };
+                    message.extend([0x22, chain.len() as u8]);
+                    message.extend(chain.as_bytes());
+                    message.push(0x38);
+                    protobuf_varint(u64::from(height), &mut message);
+                    if !actor && matching_chain {
+                        // Revoke current authority after the initial Store check.
+                        // No Store handle is retained by this endpoint fixture.
+                        rusqlite::Connection::open(database)
+                            .unwrap()
+                            .execute("UPDATE pools SET enabled=0 WHERE id=?1", [pool])
+                            .unwrap();
+                    }
+                }
+                "GetLatestBlock" => {
+                    assert!(actor && matching_chain);
+                    message.push(0x08);
+                    protobuf_varint(u64::from(height), &mut message);
+                    message.extend([0x12, hash.len() as u8]);
+                    message.extend(hash);
+                }
+                _ => panic!("unexpected preparation RPC: {method}"),
+            }
+            let body = [
+                vec![0],
+                (message.len() as u32).to_be_bytes().to_vec(),
+                message,
+            ]
+            .concat();
+            (
+                [("content-type", "application/grpc"), ("grpc-status", "0")],
+                body,
+            )
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    // Keep the actual same-owner scan revision and anchor; only redirect this
+    // fixture's validation endpoint, without configure_sync invalidating reuse.
+    owner.sync_settings.as_mut().unwrap().endpoint =
+        format!("http://{}", listener.local_addr().unwrap());
+    owner.startup_discovery = false;
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (base, base_calls, base_server) = base_fixture(1).await;
+    let mut remaining_owner = Some(owner);
+    let error = if actor {
+        let (handle, commands) = actor::channel();
+        let stop = CancellationToken::new();
+        let sender = submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap();
+        let task = tokio::spawn(remaining_owner.take().unwrap().run_commands(
+            commands,
+            sender,
+            stop.clone(),
+        ));
+        let error = handle
+            .prepare_funding(request(&job, deadline), base)
+            .await
+            .err()
+            .unwrap();
+        // A second local rejection remains available through the same healthy
+        // owner, without another canonical probe or accepted calculation.
+        let mut invalid = request(&job, deadline);
+        invalid.recipient = "invalid".into();
+        let rejected = handle.prepare(invalid).await.err().unwrap();
+        assert!(rejected.is::<PreparationDeferred>(), "{rejected:#}");
+        stop.cancel();
+        drop(handle);
+        (error, Some(task))
+    } else {
+        let owner = remaining_owner.as_mut().unwrap();
+        let error = owner.prepare(request(&job, deadline)).await.err().unwrap();
+        assert!(owner.healthy);
+        // Close only after checking the persistent ownership below.
+        (error, None)
+    };
+    assert!(error.0.is::<PreparationDeferred>(), "{:#}", error.0);
+    assert_eq!(
+        base_calls.load(Ordering::SeqCst),
+        usize::from(actor && matching_chain)
+    );
+    assert_eq!(
+        *calls.lock().unwrap(),
+        if actor && matching_chain {
+            vec!["GetLightdInfo", "GetLatestBlock"]
+        } else {
+            vec!["GetLightdInfo"]
+        }
+    );
+    store
+        .call(move |s| {
+            s.require_unstarted_preparation(&job.operation_id)?;
+            s.require_preparation_binding(
+                &job.operation_id,
+                Some(&job.pool_id),
+                DEPOSIT,
+                50_000,
+                deadline,
+            )?;
+            let facts = s.funding_facts(&job.id, &job.operation_id)?;
+            assert!(!facts.preparation_accepted && !facts.source_pending);
+            assert_eq!(facts.initial_credit_recorded, actor && matching_chain);
+            assert!(!s.status()?.outgoing_pending && s.status()?.treasury_operations.is_empty());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    if let Some(task) = error.1 {
+        task.await.unwrap().unwrap();
+    } else {
+        remaining_owner.unwrap().close().await.unwrap();
+    }
+    server.abort();
+    base_server.abort();
+}
+
+fn protobuf_varint(mut value: u64, output: &mut Vec<u8>) {
+    while value >= 128 {
+        output.push((value as u8 & 0x7f) | 0x80);
+        value >>= 7;
+    }
+    output.push(value as u8);
+}
+
+#[tokio::test]
 async fn destination_discovery_follows_sdk_spendability_and_prevents_another_deposit() {
     check_destination(false, false).await;
     check_destination(true, false).await;
@@ -221,5 +411,117 @@ async fn credit_reuses_destination_observation_without_restoring_a_journal_debit
     drop(backend);
     drop(store);
     owner.close().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn new_claim_resumes_shared_capital_discovery_and_detects_a_later_deposit() {
+    let (_dir, net, mut owner, endpoint) = funded_fixture_amount(2, 10_000).await;
+    owner
+        .ensure_capacity_group(
+            "alpha".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    owner.configure_funding_discovery(vec!["alpha".into()]);
+    let address = owner
+        .client
+        .as_ref()
+        .unwrap()
+        .unified_addresses_json()
+        .await[0]["encoded_address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let store = owner.store_handle();
+    let initial_revision = owner.revision;
+    let (base, calls, server) = base_fixture(0).await;
+    let (handle, commands) = actor::channel();
+    let stop = CancellationToken::new();
+    let sender = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint,
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    // Keep the test runtime active while SDK scans run on their private runtime;
+    // paused-time auto-advance must not race blocking Store/scan publication.
+    let active = tokio::spawn(async {
+        loop {
+            tokio::task::yield_now().await;
+        }
+    });
+    tokio::time::pause();
+    let observation_due = owner.observation.due();
+    let task = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
+    // Complete the finite startup request by observing its already-current scan.
+    tokio::task::yield_now().await;
+    let job = store
+        .call(|s| {
+            s.fill_funding_vacancies("alpha")?;
+            Ok(s.funding_jobs()?.remove(0))
+        })
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&store, vec![job.clone()], deadline).await;
+    let error = handle
+        .prepare_funding(request(&job, deadline), base.clone())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.downcast_ref::<crate::rotation::error::FundingCondition>(),
+        Some(&crate::rotation::error::FundingCondition::InsufficientFunds)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let deposit = faucet_funding_transaction(vec![(&address, 1_000_000, None)]).await;
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_block(vec![deposit]);
+        chain.mine_empty_blocks(2);
+    }
+    let before_due = observation_due
+        .checked_duration_since(tokio::time::Instant::now() + Duration::from_secs(1))
+        .expect("fixture setup must finish before the shared observation is due");
+    tokio::time::advance(before_due).await;
+    assert_eq!(
+        store
+            .call(|s| Ok(s.status()?.snapshot_revision))
+            .await
+            .unwrap(),
+        initial_revision
+    );
+    tokio::time::advance(Duration::from_secs(2)).await;
+    loop {
+        let ready = store
+            .call(|s| {
+                Ok(s.status()?.sync.is_some_and(|sync| {
+                    sync.phase == SyncPhase::Ready && sync.spendable_shielded_zatoshis == 1_010_000
+                }))
+            })
+            .await
+            .unwrap();
+        if ready {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    // The new claim's wakeup/capital wait discovered the deposit without an
+    // explicit sync command; immediate preparation uses actual SDK spendability.
+    handle
+        .prepare_funding(request(&job, deadline), base)
+        .await
+        .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    stop.cancel();
+    drop(handle);
+    drop(store);
+    task.await.unwrap().unwrap();
+    tokio::time::resume();
+    active.abort();
     server.abort();
 }

@@ -152,7 +152,7 @@ async fn accepted_work_resumes_credit_immediately_then_waits_a_minute_despite_si
             while status_events.try_recv().is_ok() {
                 statuses += 1;
             }
-            assert!(statuses > 1, "provider status continues independently");
+            assert_eq!(statuses, 1, "provider status retains its own minute floor");
         }
         worker.tick(1061).await.unwrap();
         assert_eq!(

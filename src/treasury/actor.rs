@@ -147,20 +147,16 @@ impl Treasury {
         submission: &mut impl TransactionSubmission,
         stop: &CancellationToken,
     ) -> Result<()> {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
-            super::publication::MAINTENANCE_SECONDS,
-        ));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut scheduled_sync = None;
+        let changed = self.store.treasury_changes();
         let mut observed_sync = None;
-        schedule_after_sync(&mut interval, &mut scheduled_sync, self.last_completed_sync);
         loop {
             if self.completed.is_some() {
                 tokio::select! {
                     _=stop.cancelled()=>break,
-                    _=interval.tick()=>{
-                        if self.publish_completed().await.is_err() { Self::warn_publication_pending(); }
-                    }
+                    _=tokio::time::sleep(std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS))=>{}
+                }
+                if self.publish_completed().await.is_err() {
+                    Self::warn_publication_pending();
                 }
                 if self.completed.is_some() {
                     continue;
@@ -178,12 +174,33 @@ impl Treasury {
                             category = "treasury_reconstruction_pending",
                             "treasury SDK reconstruction deferred; independent Base service remains available"
                         );
-                        tokio::select! { _=stop.cancelled()=>break, _=interval.tick()=>{} }
+                        tokio::select! { _=stop.cancelled()=>break, _=tokio::time::sleep(std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS))=>{} }
                         continue;
                     }
                     Err(error) => return Err(error),
                 }
             }
+            let requested = if self.startup_discovery {
+                Some(true)
+            } else {
+                let groups = self.funding_groups.clone();
+                crate::rotation::store::inventory::read_result(
+                    self.store
+                        .call(move |s| s.treasury_observation_needed(&groups))
+                        .await,
+                    &mut None,
+                )?
+            };
+            let due = if self.startup_discovery {
+                tokio::time::Instant::now()
+            } else if requested.is_none() {
+                // Unknown demand is not permission to scan. A read-only busy
+                // inventory defers reevaluation while accepted commands stay live.
+                tokio::time::Instant::now()
+                    + std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS)
+            } else {
+                self.observation.due()
+            };
             tokio::select! {
                 biased;
                 _ = stop.cancelled() => break,
@@ -192,35 +209,52 @@ impl Treasury {
                     match command {
                         #[cfg(test)]
                         Command::Interrupt(entered, release) => { let _ = entered.send(()); release.await.unwrap(); },
-                        Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_observed(id, max_attempts, allow_new_attempt, submission, stop).await); }
+                        Command::RecoverFunding(id, max_attempts, allow_new_attempt, reply) => { let _ = reply.send(self.recover_funding_observed(id, max_attempts, allow_new_attempt, submission, stop, true).await); }
 
                         Command::Refund(job, reply) => { let _ = reply.send(self.refund_address(job).await); }
                         Command::Sync(reply) => { let _ = reply.send(self.sync_once(stop).await); }
                         Command::Prepare(request, base, reply) => {
-                            let result = match self.sync_for_command(stop).await {
-                                Ok(()) if !stop.is_cancelled() => self.prepare_with_observation(*request, base).await,
-                                Ok(()) => Err(anyhow::anyhow!("treasury stopping")),
-                                Err(error) if self.healthy => Err(error.context(crate::rotation::transaction::PreparationDeferred)),
-                                Err(error) => Err(error),
+                            let operation = request.operation_id.clone();
+                            let result = match self.sync_for_observation(stop).await {
+                                Err(error) if !self.healthy => Err(error),
+                                _ if stop.is_cancelled() => Err(anyhow::anyhow!("treasury stopping")),
+                                // A missing reusable scan is not a new readiness
+                                // gate: local SDK selection may establish valid
+                                // work, whose canonical action checks stay immediate.
+                                _ => self.prepare_with_observation(*request, base, Some(stop)).await,
+                            };
+                            let result = match result {
+                                Err(error) if self.healthy && !error.is::<crate::rotation::transaction::PreparationDeferred>() => {
+                                    // Healthy SDK state alone cannot prove that
+                                    // this operation has no earlier accepted owner.
+                                    if self.store.call(move |s| s.require_unstarted_preparation(&operation)).await.is_ok() {
+                                        Err(error.context(crate::rotation::transaction::PreparationDeferred))
+                                    } else { Err(error) }
+                                }
+                                result => result,
                             };
                             let _ = reply.send(result);
                         }
                         Command::Submit(id, retry, reply) => { let _ = reply.send(self.submit_prepared(id, submission, retry, stop).await); }
-                        Command::Reconcile(id, reply) => { let _ = reply.send(self.reconcile_prepared(id, submission, stop).await); }
+                        Command::Reconcile(id, reply) => { let _ = reply.send(self.reconcile_for_observation(id, submission, stop).await); }
                     }
                 }
-                _ = interval.tick() => {
-                    if let Err(error) = self.sync_once(stop).await
-                        && !stop.is_cancelled() {
-                            super::diagnostics::warn_sync_failure(&error);
+                _ = tokio::time::sleep_until(due), if requested != Some(false) => {
+                    if requested == Some(true) {
+                        self.startup_discovery = false;
+                        if let Err(error) = self.sync_for_observation(stop).await
+                            && !stop.is_cancelled() {
+                                super::diagnostics::warn_sync_failure(&error);
+                        }
                     }
                 }
+                // Capacity traffic must not starve an already-due scan.
+                _ = changed.notified() => {},
             }
             if self.healthy
                 && self.last_completed_sync.is_some()
                 && self.last_completed_sync != observed_sync
             {
-                observed_sync = self.last_completed_sync;
                 if self
                     .maintain_owned_transparent(submission, stop)
                     .await
@@ -232,27 +266,12 @@ impl Treasury {
                         "accepted shielding remains owned; independent Base service remains available"
                     );
                 }
+                // Maintenance may itself complete canonical validation/proof
+                // scans. They are part of this pass, not another wakeup.
+                observed_sync = self.last_completed_sync;
             }
-            // Only an actual successfully persisted scan moves maintenance.
-            // Reused evidence, failed scans and unrelated commands do not.
-            schedule_after_sync(&mut interval, &mut scheduled_sync, self.last_completed_sync);
         }
         Ok(())
-    }
-}
-
-fn schedule_after_sync(
-    interval: &mut tokio::time::Interval,
-    scheduled: &mut Option<tokio::time::Instant>,
-    completed: Option<tokio::time::Instant>,
-) {
-    if let Some(completed) = completed
-        && Some(completed) != *scheduled
-    {
-        // Anchor to scan completion, not the end of the enclosing command.
-        // Long subsequent work can leave this deadline due already.
-        interval.reset_at(completed + interval.period());
-        *scheduled = Some(completed);
     }
 }
 
@@ -300,47 +319,6 @@ impl TreasuryCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[tokio::test(start_paused = true)]
-    async fn maintenance_cadence_tracks_only_actual_scan_completion() {
-        use futures_util::FutureExt;
-        use std::time::Duration;
-        let period = Duration::from_secs(10);
-        let mut interval = tokio::time::interval(period);
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut scheduled = None;
-        schedule_after_sync(&mut interval, &mut scheduled, None);
-        assert!(
-            interval.tick().now_or_never().is_some(),
-            "unsynced startup remains immediate"
-        );
-        tokio::time::advance(period).await;
-        let completed = tokio::time::Instant::now();
-        schedule_after_sync(&mut interval, &mut scheduled, Some(completed));
-        assert!(
-            interval.tick().now_or_never().is_none(),
-            "command scan replaces an overdue background tick"
-        );
-        tokio::time::advance(Duration::from_secs(9)).await;
-        // Failed/cancelled scans, cache hits and unrelated commands leave the
-        // last-success timestamp unchanged; none grants another ten seconds.
-        schedule_after_sync(&mut interval, &mut scheduled, Some(completed));
-        assert!(interval.tick().now_or_never().is_none());
-        tokio::time::advance(Duration::from_secs(1)).await;
-        assert!(interval.tick().now_or_never().is_some());
-        // Work after a scan may itself take longer than the cadence. Scheduling
-        // at command completion would incorrectly postpone already-due work.
-        let completed = tokio::time::Instant::now();
-        tokio::time::advance(period + Duration::from_secs(2)).await;
-        schedule_after_sync(&mut interval, &mut scheduled, Some(completed));
-        assert!(interval.tick().now_or_never().is_some());
-        // A genuinely new successful scan earns the next ordinary interval.
-        let completed = tokio::time::Instant::now();
-        schedule_after_sync(&mut interval, &mut scheduled, Some(completed));
-        assert!(interval.tick().now_or_never().is_none());
-        tokio::time::advance(period).await;
-        assert!(interval.tick().now_or_never().is_some());
-    }
-
     struct NoSubmission;
     impl TransactionSubmission for NoSubmission {
         async fn submit(
@@ -353,6 +331,143 @@ mod tests {
             panic!("unexpected lookup")
         }
     }
+
+    #[tokio::test]
+    async fn due_observation_precedes_ready_capacity_notifications() {
+        use futures_util::FutureExt;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = Treasury::create(
+            dir.path().join("state"),
+            dir.path().join("key"),
+            2_000_000,
+            Some(zeroize::Zeroizing::new(
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into(),
+            )),
+        )
+        .await
+        .unwrap();
+        crate::rotation::test_capacity::treasury_pair(&owner, "notifications", "5", None, 0)
+            .await
+            .unwrap();
+        owner.configure_funding_discovery(vec!["notifications".into()]);
+        owner.startup_discovery = false;
+        // Make the shared observation unambiguously overdue before starting the
+        // real owner, without waiting through the production minute interval.
+        tokio::time::pause();
+        owner.observation.complete(true);
+        tokio::time::advance(std::time::Duration::from_secs(61)).await;
+        tokio::time::resume();
+
+        let changed = owner.store.treasury_changes();
+        assert!(changed.notified().now_or_never().is_some());
+        changed.notify_one();
+        let pending_at_scan = Arc::new(AtomicBool::new(false));
+        let recorded = pending_at_scan.clone();
+        let stop = CancellationToken::new();
+        let request_stop = stop.clone();
+        let app = axum::Router::new().fallback(move || {
+            let changed = changed.clone();
+            let recorded = recorded.clone();
+            let stop = request_stop.clone();
+            async move {
+                // Both branches were ready. The scan must start without first
+                // consuming the permit that concurrent calls can keep refilling.
+                recorded.store(
+                    changed.notified().now_or_never().is_some(),
+                    Ordering::SeqCst,
+                );
+                stop.cancel();
+                (
+                    [("content-type", "application/grpc"), ("grpc-status", "14")],
+                    Vec::<u8>::new(),
+                )
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        owner.configure_sync(
+            super::super::SyncSettings::new(
+                format!("http://{}", listener.local_addr().unwrap()),
+                3,
+            )
+            .unwrap(),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (handle, commands) = channel();
+        owner
+            .run_commands(commands, NoSubmission, stop)
+            .await
+            .unwrap();
+        drop(handle);
+        server.abort();
+        assert!(
+            pending_at_scan.load(Ordering::SeqCst),
+            "capacity notifications must not run ahead of an already-due observation"
+        );
+    }
+
+    #[tokio::test]
+    async fn busy_demand_inventory_keeps_commands_and_accepted_input_ownership_live() {
+        use crate::rotation::store::inventory::Read;
+        for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut owner = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000, Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+            owner.startup_discovery = false;
+            owner.observation.complete(true);
+            owner.configure_sync(
+                super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
+            );
+            let store = owner.store.clone();
+            let revision = owner.revision;
+            store
+                .call(move |s| {
+                    s.accept_preparation("retained", None, 60, None)?;
+                    s.fail_next_inventory_read(Read::TreasuryDemand, code);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let (handle, commands) = channel();
+            let stop = CancellationToken::new();
+            let task = tokio::spawn(owner.run_commands(commands, NoSubmission, stop.clone()));
+            while store
+                .call(|s| Ok(s.inventory_fault_pending()))
+                .await
+                .unwrap()
+            {
+                tokio::task::yield_now().await;
+            }
+            assert!(
+                handle
+                    .recover_funding("missing".into(), 1, false)
+                    .await
+                    .is_err()
+            );
+            assert!(!stop.is_cancelled() && !task.is_finished());
+            store
+                .call(move |s| {
+                    assert_eq!(
+                        s.snapshot()?.0,
+                        revision,
+                        "unknown demand cannot authorize a scan"
+                    );
+                    assert!(s.require_unstarted_preparation("retained").is_err());
+                    assert!(s.abandon_unprepared("retained").is_err());
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            stop.cancel();
+            drop(handle);
+            drop(store);
+            task.await.unwrap().unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn dropped_receivers_preserve_mutations_but_shutdown_discards_queued_work() {
         for stopped in [false, true] {
@@ -556,6 +671,88 @@ mod tests {
                 .is_empty()
         );
         restored.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejected_accepted_preparation_never_reports_unstarted_or_releases_its_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000, Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+        owner.startup_discovery = false;
+        owner.observation.complete(true);
+        owner.configure_sync(
+            super::super::SyncSettings::new("http://127.0.0.1:1".into(), 3).unwrap(),
+        );
+        crate::rotation::test_capacity::treasury_pair(
+            &owner,
+            "accepted",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000u64)),
+            0,
+        )
+        .await
+        .unwrap();
+        let job = owner.status().await.unwrap().funding_jobs.remove(0);
+        let retained = job.clone();
+        let store = owner.store.clone();
+        store
+            .call(move |s| {
+                s.accept_preparation(&retained.operation_id, Some(&retained.pool_id), 60, None)
+            })
+            .await
+            .unwrap();
+        let (handle, commands) = channel();
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(owner.run_commands(commands, NoSubmission, stop.clone()));
+        for (recipient, pool, auto_fund) in [
+            ("invalid", job.pool_id.clone(), true),
+            (
+                "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F",
+                "wrong-pool".into(),
+                true,
+            ),
+            (
+                "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F",
+                job.pool_id.clone(),
+                false,
+            ),
+        ] {
+            let error = handle
+                .prepare(PrepareRequest {
+                    managed_funding: Some(crate::rotation::transaction::ManagedFundingAuthority {
+                        job_id: job.id.clone(),
+                        auto_fund,
+                        max_attempts: 1,
+                    }),
+                    operation_id: job.operation_id.clone(),
+                    pool_id: Some(pool),
+                    deadline: u64::MAX,
+                    recipient: recipient.into(),
+                    amount_zatoshis: 1,
+                    max_fee_zatoshis: 10000,
+                    max_input_zatoshis: 20000,
+                })
+                .await
+                .err()
+                .unwrap();
+            assert!(
+                !error.is::<crate::rotation::transaction::PreparationDeferred>(),
+                "{error:#}"
+            );
+        }
+        store
+            .call(move |s| {
+                assert!(s.require_unstarted_preparation(&job.operation_id).is_err());
+                assert!(s.abandon_unprepared(&job.operation_id).is_err());
+                assert!(s.require_preparation_available().is_err());
+                assert!(s.status()?.treasury_operations.is_empty());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        stop.cancel();
+        drop(handle);
+        drop(store);
+        task.await.unwrap().unwrap();
     }
 
     #[tokio::test]

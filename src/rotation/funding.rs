@@ -13,6 +13,7 @@ use std::future::Future;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) mod scheduler;
+use scheduler::Observation;
 
 /// An acquisition may supply its existing owner schedule instead of asking the
 /// operation scheduler to impose another network backoff.
@@ -189,7 +190,7 @@ impl<B: FundingBackend> FundingWorker<B> {
         &self,
         job: &FundingJob,
         clock: &TickClock,
-    ) -> Result<Option<<B::Observations as FundingObservations>::QuoteRequest>> {
+    ) -> Result<Observation<<B::Observations as FundingObservations>::QuoteRequest>> {
         use crate::treasury::recovery::RecoveryOutcome;
         use FundingPhase::*;
         // Recovery owns the ordinary submitted-source observation when eligible,
@@ -234,7 +235,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             .is_some_and(|result| result.source_observed);
         let recovery = recovery.map(|result| result.outcome);
         if matches!(recovery, Some(RecoveryOutcome::Recovered)) {
-            return Ok(None);
+            return Ok(Observation::None);
         }
         let facts = self.facts(job).await?;
         let mut observation_error = None;
@@ -256,7 +257,7 @@ impl<B: FundingBackend> FundingWorker<B> {
             .call(move |s| s.settle_funding_source(&id, &operation, phase_reconciliation_due))
             .await?
         else {
-            return Ok(None);
+            return Ok(Observation::None);
         };
         match recovery {
             Some(RecoveryOutcome::OperatorRequired(reason)) => {
@@ -271,7 +272,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                 return Err(error);
             }
             Some(RecoveryOutcome::Recovered | RecoveryOutcome::Waiting(_)) => {
-                return observation_error.map_or(Ok(None), Err);
+                return observation_error.map_or(Ok(Observation::None), Err);
             }
             None => {}
         }
@@ -308,9 +309,9 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .await?;
                 result?;
             }
-            return observation_error.map_or(Ok(None), Err);
+            return observation_error.map_or(Ok(Observation::None), Err);
         }
-        match current.phase {
+        let progress = match current.phase {
             Allocated if facts.new_funding_allowed => {
                 return self
                     .backend
@@ -318,7 +319,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                     .await
                     .quote_prerequisite(&current)
                     .await
-                    .map(Some);
+                    .map(Observation::Prerequisite);
             }
             Quoted if facts.new_funding_allowed => self.prepare_quoted(&current, clock).await?,
             Preparing => {
@@ -326,17 +327,26 @@ impl<B: FundingBackend> FundingWorker<B> {
                 let prepared = self.store.call(move |s| s.operation_pending(&id)).await?;
                 self.transition(&current, if prepared { Prepared } else { RecoveryRequired })
                     .await?;
+                if prepared {
+                    Observation::Prepared
+                } else {
+                    Observation::None
+                }
             }
-            _ => {}
-        }
+            _ => Observation::None,
+        };
         if let Some(error) = observation_error {
             return Err(error);
         }
-        Ok(None)
+        Ok(progress)
     }
     // Readiness, quote refresh and read-only proposal checks precede input
     // acceptance. Accepted ownership, rather than a display phase, fences retries.
-    async fn prepare_quoted(&self, job: &FundingJob, clock: &TickClock) -> Result<()> {
+    async fn prepare_quoted(
+        &self,
+        job: &FundingJob,
+        clock: &TickClock,
+    ) -> Result<Observation<<B::Observations as FundingObservations>::QuoteRequest>> {
         let quote = self.quote(job).await?;
         let id = job.id.clone();
         let operation = job.operation_id.clone();
@@ -348,16 +358,19 @@ impl<B: FundingBackend> FundingWorker<B> {
                 s.accepted_quote_suits_current_claim(&id, &operation)
             })
             .await?;
+        // Refresh assigns a new operation identity. Its first step is already
+        // eligible; the obsolete completion must not accelerate or publish it.
         if !suitable {
             let id = job.id.clone();
             let operation = job.operation_id.clone();
             return self
                 .store
                 .call(move |s| s.refresh_unprepared_quote_for_operation(&id, &operation))
-                .await;
+                .await
+                .map(|()| Observation::None);
         }
         if !self.store.call(|s| s.funding_source_ready()).await? {
-            return Ok(());
+            return Ok(Observation::None);
         }
         self.backend.lock().await.ready(job, &quote).await?;
         if quote.deadline <= clock.now() {
@@ -366,12 +379,13 @@ impl<B: FundingBackend> FundingWorker<B> {
             return self
                 .store
                 .call(move |s| s.refresh_unprepared_quote_for_operation(&id, &operation))
-                .await;
+                .await
+                .map(|()| Observation::None);
         }
         // The treasury owner commits PREPARING with selected input ownership
         // after read-only proposal checks and a current-authority recheck.
         self.backend.lock().await.prepare(job, &quote).await?;
-        Ok(())
+        Ok(Observation::Prepared)
     }
 
     async fn quote(&self, job: &FundingJob) -> Result<Quote> {

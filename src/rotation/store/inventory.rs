@@ -35,6 +35,7 @@ pub(crate) enum Read {
     WalletPage,
     FundingBoundary,
     FundingPage,
+    TreasuryDemand,
 }
 
 #[cfg(test)]

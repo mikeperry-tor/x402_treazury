@@ -357,11 +357,12 @@ Fresh allocations and unsigned funding quotes do not start Base credit polling.
 Actual preparation reads its exact destination once after the SDK provides a valid
 spendable proposal. Accepted preparation and signed or previously submitted work
 retain their own credit lane across restart, using the recipient acquisition's
-existing due time without another credit backoff or jitter. Recurring Base reads
-start at least 60 seconds after the preceding acquisition completes. Source
-reconciliation and NEAR status checks keep their independent configured cadence.
-This observation interval is not a settlement deadline and never stops observation
-of accepted financial work.
+existing due time without another credit backoff or jitter. Each recurring Base,
+source or NEAR status observation starts at
+least 60 seconds after the previous observation for that work completes, plus
+existing jitter where applicable. With default `poll_seconds = 5`, per-job jitter
+is at most five seconds. The floor is not a settlement deadline; canonical
+confirmation/expiry and first-positive credit retain their separate stop rules.
 
 `swap_timeout_seconds` is a health-warning threshold, default 1,800 seconds from
 the first durable broadcast intent, not an abort deadline. When exceeded,
@@ -579,13 +580,16 @@ Credit-persistence messages distinguish missing credit and local state failures
 from RPC access failures.
 An SDK proposal rejected for insufficient funds defers initial funding, while
 existing Base wallets remain usable. Background funding observations retain independent
-failure backoff up to five minutes, with per-job jitter for source and provider
-checks. Base credit uses the shared recipient acquisition schedule; cached errors
-do not count as new recurring observations. Successful observations reset only
-their own error streak: source and provider-status checks use the
-configured polling cadence (five seconds by default), while Base initial-credit
-checks retain their one-minute floor. Failed checks retain pending ownership. Saved estimates never grant payment
-authority or prohibit an otherwise authorized signing attempt.
+failure backoff bounded by five minutes, with existing per-job jitter for source
+and provider checks. Base credit uses the shared recipient acquisition schedule;
+cached errors do not count as new recurring observations. Successful observations
+reset only their own error streak. Each recurring source, provider
+status or Base credit check starts at least one minute after that work's previous
+check completes. `poll_seconds` controls local inventory/owner scheduling and
+jitter; it cannot authorize faster network observations. Successful local quote,
+preparation and submission handoffs remain immediate. Failed checks retain pending
+ownership. Saved estimates never grant payment authority or prohibit an otherwise
+authorized signing attempt.
 
 Unsigned `eth_chainId`, `eth_getBlockByNumber` and `eth_call` requests may retry
 once after a transport interruption, with a 200 ms delay inside the original

@@ -355,7 +355,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
             }
             ObservedCommand::RecoverFunding(id, _, false) if timed_out => {
                 assert_eq!(id, job.id);
-                assert!(result.unwrap().is_none());
+                assert!(matches!(result.unwrap(), Observation::None));
             }
             _ => panic!("wrong source command or duplicate ordinary observation"),
         }

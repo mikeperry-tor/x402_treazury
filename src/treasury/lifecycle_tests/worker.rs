@@ -179,17 +179,24 @@ impl TransactionSubmission for CountedSender {
         self.inner.lookup(tx).await
     }
 }
-async fn tick(worker: &FundingWorker<Backend>) {
-    // Respect the production one-second poll cadence between finite passes.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    tokio::time::timeout(Duration::from_secs(90), worker.tick(now().unwrap()))
+async fn tick(worker: &FundingWorker<Backend>, clock: (u64, tokio::time::Instant)) {
+    let instant = clock.0 + clock.1.elapsed().as_secs();
+    tokio::time::timeout(Duration::from_secs(90), worker.tick(instant))
         .await
         .unwrap()
         .unwrap();
 }
-async fn complete(worker: &FundingWorker<Backend>, net: &MockNet, count: usize) {
+async fn complete(
+    worker: &FundingWorker<Backend>,
+    net: &MockNet,
+    count: usize,
+    clock: (u64, tokio::time::Instant),
+) {
     for _ in 0..80 {
-        tick(worker).await;
+        // Drain quote/preparation/submission handoffs at the same instant.
+        for _ in 0..3 {
+            tick(worker, clock).await;
+        }
         let done = worker
             .store
             .call(move |s| {
@@ -206,6 +213,10 @@ async fn complete(worker: &FundingWorker<Backend>, net: &MockNet, count: usize) 
         let mut chain = net.chain.write().await;
         chain.mine_mempool();
         chain.mine_empty_blocks(1);
+        drop(chain);
+        // Recurring Source/Status/Credit and the shared Base observer all use
+        // this same Tokio elapsed time, including the poll=1 fixture's jitter.
+        tokio::time::advance(Duration::from_secs(61)).await;
     }
     panic!(
         "funding did not complete: {:?}",
@@ -342,9 +353,10 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         lookups: lookups.clone(),
     };
     let stop = CancellationToken::new();
+    let clock = (now().unwrap(), tokio::time::Instant::now());
     let actor = tokio::spawn(owner.run_commands(commands, sender, stop.clone()));
     let first = worker.clone();
-    let first = tokio::spawn(async move { tick(&first).await });
+    let first = tokio::spawn(async move { tick(&first, clock).await });
     tokio::time::timeout(Duration::from_secs(30), f.quotes_entered.acquire_many(2))
         .await
         .unwrap()
@@ -376,13 +388,23 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
             .await
             .unwrap();
     }
+    // Prerequisite dispatch keeps its ordinary reactor wake in real time.
+    // From quote release onward, keep the clock stable across SDK/Store work
+    // so local handoffs and recurring network observations can be distinguished.
+    let active = tokio::spawn(async {
+        loop {
+            tokio::task::yield_now().await;
+        }
+    });
+    tokio::time::pause();
+    let handoff_started = tokio::time::Instant::now();
     f.release_quotes.cancel();
     first.await.unwrap();
     for _ in 0..6 {
         if sends.load(Ordering::SeqCst) == 1 {
             break;
         }
-        tick(&worker).await;
+        tick(&worker, clock).await;
     }
     assert_eq!(
         sends.load(Ordering::SeqCst),
@@ -390,17 +412,14 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         "jobs: {:?}",
         store.call(|s| s.funding_jobs()).await.unwrap()
     );
-    // No new block or refund derivation: repeated scheduler passes reuse scans.
-    tick(&worker).await;
+    // Same-epoch handoffs reached submission without advancing a poll clock.
+    assert_eq!(handoff_started.elapsed(), Duration::ZERO);
+    // No new block or refund derivation: subminute passes reuse observations.
     let before = store.call(|s| s.treasury_sync_state()).await.unwrap();
     let observed = lookups.load(Ordering::SeqCst);
-    tokio::time::timeout(Duration::from_secs(30), async {
-        while lookups.load(Ordering::SeqCst) < observed + 2 {
-            tick(&worker).await;
-        }
-    })
-    .await
-    .unwrap();
+    tokio::time::advance(Duration::from_secs(59)).await;
+    tick(&worker, clock).await;
+    assert_eq!(lookups.load(Ordering::SeqCst), observed);
     let after = store.call(|s| s.treasury_sync_state()).await.unwrap();
     assert_eq!(before.snapshot_revision, after.snapshot_revision);
     assert_eq!(
@@ -408,7 +427,11 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         after.sync.unwrap().checked_at
     );
     assert_eq!(sends.load(Ordering::SeqCst), 1);
-    complete(&worker, &net, 2).await;
+    tokio::time::advance(Duration::from_secs(2)).await;
+    tick(&worker, clock).await;
+    assert_eq!(lookups.load(Ordering::SeqCst), observed + 1);
+    assert_eq!(sends.load(Ordering::SeqCst), 1);
+    complete(&worker, &net, 2, clock).await;
     assert_eq!(sends.load(Ordering::SeqCst), 2);
     let pool = store
         .call(|s| {
@@ -443,7 +466,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     assert_eq!(f.signed.lock().unwrap().len(), 1);
     // Actual signed admission consumes the reserve, then the same worker funds
     // exactly one replacement without resolving the old payment liability.
-    complete(&worker, &net, 3).await;
+    complete(&worker, &net, 3, clock).await;
     assert_eq!(f.quote_count.load(Ordering::SeqCst), 3);
     assert_eq!(sends.load(Ordering::SeqCst), 3);
     store
@@ -475,12 +498,14 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     drop(store);
     stop.cancel();
     actor.await.unwrap().unwrap();
+    tokio::time::resume();
+    active.abort();
 }
 
 #[tokio::test]
 async fn production_preparation_scans_new_deposit_without_a_readiness_balance_gate() {
     use crate::rotation::funding::FundingBackend;
-    let (_dir, net, owner, endpoint) = funded_fixture_amount(2, 10_000).await;
+    let (_dir, net, mut owner, endpoint) = funded_fixture_amount(2, 10_000).await;
     let address = owner
         .client
         .as_ref()
@@ -515,6 +540,9 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
         chain.mine_block(vec![deposit]);
         chain.mine_empty_blocks(2);
     }
+    // The fixture's earlier scan precedes this new deposit. Make the next
+    // shared observation due; scheduling floors are covered independently.
+    owner.observation = Default::default();
     let (handle, commands) = actor::channel();
     let mut backend = Backend {
         treasury: handle.clone(), store: store.clone(),
@@ -747,6 +775,9 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
         chain.mine_block(vec![deposit]);
         chain.mine_empty_blocks(2);
     }
+    // Explicit one-pass discovery makes the new deposit available. Shared
+    // automatic capital waiting is covered by the discovery lifecycle test.
+    handle.sync().await.unwrap();
     // A known fee rejection has the same unstarted semantics after new funds arrive.
     worker.backend.lock().await.max_network_fee = 1;
     let error = worker

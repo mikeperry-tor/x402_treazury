@@ -12,7 +12,9 @@ impl Treasury {
         stop: &CancellationToken,
     ) -> Result<()> {
         if let Some(id) = self.store.call(|s| s.jobless_pending_operation()).await? {
-            let presence = self.reconcile_prepared(id.clone(), sender, stop).await?;
+            let presence = self
+                .reconcile_for_observation(id.clone(), sender, stop)
+                .await?;
             if matches!(
                 presence,
                 TransactionPresence::Absent | TransactionPresence::Unknown

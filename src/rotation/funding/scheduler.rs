@@ -14,9 +14,9 @@ use std::{
 const CREDIT_READS: usize = 4;
 const STATUS_READS: usize = 4;
 const QUOTE_READS: usize = 4;
-// Destination settlement is asynchronous; repeat Base credit reads at most once
-// a minute per accepted operation, independently of source/provider progress.
-const CREDIT_POLL_SECONDS: u64 = 60;
+// Recurring source, provider and destination observations each retain their own
+// minute floor. Successful local preparation/submission handoffs remain immediate.
+const OBSERVATION_POLL_SECONDS: u64 = 60;
 // Bounds only cached scheduling metadata. Expired, inactive records can be
 // forgotten; in-flight ownership and an unelapsed backoff cannot be evicted.
 const RECORDS: usize = 256;
@@ -65,8 +65,9 @@ impl std::fmt::Display for AlreadyOwned {
 }
 impl std::error::Error for AlreadyOwned {}
 
-enum Observation<Q> {
+pub(super) enum Observation<Q> {
     None,
+    Prepared,
     Status(SwapStatus),
     Credit(CreditObservation),
     Prerequisite(Q),
@@ -588,12 +589,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                             epoch,
                             started: tokio::time::Instant::now(),
                         };
-                        let result = worker
-                            .source_step(&job, &source_clock)
-                            .await
-                            .map(|request| {
-                                request.map_or(Observation::None, Observation::Prerequisite)
-                            });
+                        let result = worker.source_step(&job, &source_clock).await;
                         Completion { job, kind, result }
                     });
                     flight.reads.push(
@@ -666,6 +662,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
 
         let mut prerequisite = None;
         let mut credit_due = None;
+        let prepared = matches!(&result, Ok(Observation::Prepared));
         let result = match result {
             Ok(Observation::Credit(observation)) => {
                 // Map from the existing monotonic root, rounding outward once.
@@ -680,7 +677,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     .call(move |s| s.record_provider_outcome(&id, &operation, &status, instant))
                     .await
             }
-            Ok(Observation::None) => Ok(()),
+            Ok(Observation::None | Observation::Prepared) => Ok(()),
             Ok(Observation::Prerequisite(request)) => {
                 prerequisite = Some((job.clone(), request));
                 Ok(())
@@ -711,6 +708,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             Kind::Source => job.phase.clone(),
             Kind::Quote => FundingPhase::Allocated,
         };
+        let successful = result.is_ok();
         let (id, operation) = (job.id.clone(), job.operation_id.clone());
         let completion = self
             .store
@@ -726,10 +724,26 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 s.finish_funding_if_proven(&id, &operation)?;
                 let current = s.funding_job(&id)?.context("funding job missing")?;
                 let facts = s.funding_facts(&id, &operation)?;
-                Ok(Some(applicable_work(&current, &facts)))
+                // Only these successful local publications advance
+                // the next source step. Provider/credit progress and arbitrary
+                // display-phase changes never shorten source observation waits.
+                let handoff = successful
+                    && facts.new_funding_allowed
+                    && match kind {
+                        Kind::Quote => {
+                            current.phase == FundingPhase::Quoted && !facts.preparation_accepted
+                        }
+                        Kind::Source => {
+                            prepared
+                                && facts.source_pending
+                                && facts.source_submission.as_deref() == Some("PREPARED")
+                        }
+                        _ => false,
+                    };
+                Ok(Some((applicable_work(&current, &facts), handoff)))
             })
             .await?;
-        let Some(applicable) = completion else {
+        let Some((applicable, handoff)) = completion else {
             return Ok(None);
         };
         let failure = result.err();
@@ -764,6 +778,9 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 error,
                 condition,
             );
+            if handoff {
+                state.advance_source(&job.operation_id, instant);
+            }
             let (next, streak, health) = state.health(&job.operation_id, instant, applicable);
             (
                 next,
@@ -812,6 +829,18 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
 }
 
 impl State {
+    /// A successful local handoff can advance an earlier successful source step,
+    /// never erase a source observation failure or its independent backoff.
+    fn advance_source(&mut self, operation: &str, now: u64) {
+        if let Some(record) = self.records.get_mut(&Key {
+            operation: operation.to_owned(),
+            kind: Kind::Source,
+        }) && record.error.is_none()
+            && record.streak == 0
+        {
+            record.due = record.due.min(now);
+        }
+    }
     fn report_phase(&mut self, operation: &str, phase: &FundingPhase) -> bool {
         let changed = !self.records.iter().any(|(key, record)| {
             key.operation == operation && record.reported_phase.as_ref() == Some(phase)
@@ -906,8 +935,8 @@ impl State {
                 let delay = poll
                     .saturating_mul(1u64 << record.streak.min(6))
                     .min(300)
-                    .max(if kind == Kind::Credit {
-                        CREDIT_POLL_SECONDS
+                    .max(if kind != Kind::Quote {
+                        OBSERVATION_POLL_SECONDS
                     } else if job.timed_out {
                         60
                     } else {

@@ -99,7 +99,13 @@ Deployment initialization checks managed connection settings before opening the
 treasury and installs qualification, funding-denial and pause restrictions before
 configuring pools. Initialization represents store-only ownership separately from
 a treasury paired with its funding runtime, so consumers cannot combine unrelated
-optional owners and capabilities. Shutdown drops dependent Store handles before
+optional owners and capabilities. Available treasury serving runs finite startup
+ZEC discovery behind bound listeners, then observes only current funding demand or
+validated pending source/shielding work. Store-only fallback retains existing Base
+capability and its finite startup pass, but does not reconstruct SDK/start ZEC or
+source/swap observers until restart restores that capability. Existing owners and
+journals implement the [wallet observation policy](wallet-rotation.md#wallet-observation-policy);
+publication/reconstruction retries remain separate local work. Shutdown drops dependent Store handles before
 closing the matching owner. Reused initialization receives binding-time funding
 restrictions before use. Setup and listener failures release relay-held store
 handles before waiting for treasury shutdown. Static signers are loaded only for effective selected bindings,

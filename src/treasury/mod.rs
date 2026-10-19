@@ -7,6 +7,7 @@ mod expiry;
 mod inputs;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod lifecycle_tests;
+mod observation;
 mod owned_transparent;
 mod publication;
 mod reconstruction;
@@ -63,6 +64,9 @@ pub struct Treasury {
     reusable_sync_revision: Option<i64>,
     // Scheduling only; never used to date or authorize spending evidence.
     last_completed_sync: Option<tokio::time::Instant>,
+    observation: observation::Schedule,
+    funding_groups: Vec<String>,
+    startup_discovery: bool,
 }
 /// Shared state remains exclusively owned when only SDK reconstruction fails.
 /// Serving can use that authenticated store independently of the SDK capability.
@@ -187,6 +191,9 @@ impl Treasury {
             automatic_shielding_fee: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
+            observation: Default::default(),
+            funding_groups: Vec::new(),
+            startup_discovery: true,
         })
     }
     pub async fn open(dir: PathBuf, key: PathBuf, id: String) -> Result<Self> {
@@ -260,6 +267,9 @@ impl Treasury {
             automatic_shielding_fee: None,
             reusable_sync_revision: None,
             last_completed_sync: None,
+            observation: Default::default(),
+            funding_groups: Vec::new(),
+            startup_discovery: true,
         })))
     }
     pub(crate) fn store_handle(&self) -> StoreHandle {
@@ -419,6 +429,11 @@ impl Treasury {
     /// Cancellation must be requested through `stop`, then this future awaited.
     /// Adapter errors are sanitized; endpoints are not persisted in status.
     pub async fn sync_once(&mut self, stop: &CancellationToken) -> Result<()> {
+        let result = self.scan_once(stop).await;
+        self.observation.complete(result.is_ok());
+        result
+    }
+    async fn scan_once(&mut self, stop: &CancellationToken) -> Result<()> {
         self.reusable_sync_revision = None;
         ensure!(
             self.healthy,
@@ -510,55 +525,6 @@ impl Treasury {
             tracing::debug!("treasury sync: wallet checkpoint saved after interruption or failure");
         }
         outcome
-    }
-    /// One owner periodically syncs while Base payment admission remains independent.
-    pub async fn run_sync(self, stop: CancellationToken) -> Result<()> {
-        tokio::spawn(self.run_sync_owned(stop))
-            .await
-            .context("treasury sync driver stopped")?
-    }
-    async fn run_sync_owned(mut self, stop: CancellationToken) -> Result<()> {
-        use futures_util::FutureExt;
-        while !stop.is_cancelled() {
-            if !self.healthy {
-                match self.reconstruct_sdk(&stop).await {
-                    Ok(()) => {}
-                    Err(_) if stop.is_cancelled() => break,
-                    Err(error) if reconstruction::retryable(&error) => {
-                        tracing::warn!(
-                            category = "treasury_reconstruction_pending",
-                            "treasury SDK reconstruction deferred; independent Base service remains available"
-                        );
-                        tokio::select! { _=stop.cancelled()=>break, _=tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS))=>{} }
-                        continue;
-                    }
-                    Err(error) => {
-                        stop.cancel();
-                        self.close().await?;
-                        return Err(error);
-                    }
-                }
-            }
-            match std::panic::AssertUnwindSafe(self.sync_once(&stop))
-                .catch_unwind()
-                .await
-            {
-                Ok(Err(error)) if !stop.is_cancelled() => diagnostics::warn_sync_failure(&error),
-                Err(_) => {
-                    self.healthy = false;
-                    tracing::warn!(
-                        category = "treasury_sync_interrupted",
-                        "treasury sync interrupted; reconstructing from committed state"
-                    );
-                }
-                _ => {}
-            }
-            tokio::select! {
-                _ = stop.cancelled() => break,
-                _ = tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS)) => {}
-            }
-        }
-        self.close().await
     }
     pub async fn close(self) -> Result<()> {
         // A response waiter cannot abandon accepted local publication.

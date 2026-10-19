@@ -1,4 +1,4 @@
-//! Reuse a completed scan only within its owner and against the unchanged chain.
+//! Shared observation reuse and canonical validation for new financial work.
 use super::*;
 
 impl Treasury {
@@ -13,19 +13,26 @@ impl Treasury {
         self.sync_once(stop).await
     }
 
-    async fn can_reuse_sync(&self, stop: &CancellationToken) -> Result<bool> {
+    pub(super) async fn reusable_observation(&self) -> Result<Option<SyncObservation>> {
         if !self.healthy || self.reusable_sync_revision != Some(self.revision) {
-            return Ok(false);
+            return Ok(None);
         }
         let saved = self.store.call(|s| s.treasury_sync_state()).await?;
         let Some(sync) = saved.sync else {
-            return Ok(false);
+            return Ok(None);
         };
         if saved.snapshot_revision != self.revision
             || !(sync.phase == SyncPhase::Ready && sync.snapshot_revision == self.revision)
         {
-            return Ok(false);
+            return Ok(None);
         }
+        Ok(Some(sync))
+    }
+
+    pub(super) async fn can_reuse_sync(&self, stop: &CancellationToken) -> Result<bool> {
+        let Some(sync) = self.reusable_observation().await? else {
+            return Ok(false);
+        };
         let Some(height) = sync.height.and_then(|h| u32::try_from(h).ok()) else {
             return Ok(false);
         };

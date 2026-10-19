@@ -64,7 +64,7 @@ as distinct responsibilities with their existing owners.
 
 | Trigger / work | Observation and cadence | Completion / stop rule |
 | --- | --- | --- |
-| Fresh managed serving startup | One background ZEC sync and one finite Base observation pass over existing eligible managed wallets and outstanding initial-funding recipients | Finish the pass; startup alone creates no recurring balance watcher |
+| Fresh managed serving startup with available treasury capability | One background ZEC sync and one finite Base observation pass over existing eligible managed wallets and outstanding initial-funding recipients | Finish the pass; startup alone creates no recurring balance watcher |
 | Preparing initial funding for a new wallet | Discover ZEC through the SDK owner and observe that exact destination's USDC before accepting a new source calculation; reuse applicable observations from the same work | Positive destination credit consumes the initial claim; otherwise current authority and actual SDK spendability govern preparation |
 | Waiting for capital/confirmations to fill enabled initial-funding claims | ZEC sync at least 60 seconds apart, with error backoff | Stop recurring discovery when no enabled funding demand or accepted treasury work still needs it |
 | Accepted initial funding without observed positive destination credit | Existing accepted-work Base credit check, immediate if the recipient observation is due, then at least 60 seconds apart | First positive credit permanently ends initial-credit polling for that wallet's claim |
@@ -149,6 +149,13 @@ polling must not drive extra full scans or tip probes between minute ticks merel
 to discover that nothing changed. Keep actual mutation/recovery correctness checks.
 
 ## Startup and CLI integration
+
+Preserve the existing unavailable-capability exception: when initialization selects
+`ManagedRuntime::StoreOnly` after source preflight or SDK reconstruction failure,
+existing Base discovery/service continues where configured, but there is no ZEC
+startup scan or source/swap observer until restart restores treasury capability.
+Retained financial ownership remains durable. Do not construct a new partial SDK
+runtime to bypass that boundary.
 
 Bind serving listeners before startup observations. Run discovery with existing
 background ownership so old usable payers and tools remain available during slow

@@ -1197,5 +1197,10 @@ challenge and enforces its spend cap before signing.
 
 `treasury.max_sync_age_seconds` and `funding.base_max_block_age_seconds` were removed.
 Remove these keys even if their old values were zero. Balances are advisory; SDK
-input selection and protocol deadlines govern spending. Treasury maintenance uses
-an independent 60-second cadence, without a replacement age setting.
+input selection and protocol deadlines govern spending. Treasury discovery is
+requested at available-capability startup, explicit sync, enabled funding demand
+and validated pending source/shielding work. Recurring observations have a
+60-second completion floor and independent error backoff up to 300 seconds; idle
+treasury performs no balance polling. Local configured polling/health thresholds do
+not shorten network cadence or delay valid preparation/submission handoffs. See the
+[wallet observation policy](wallet-rotation.md#wallet-observation-policy).
