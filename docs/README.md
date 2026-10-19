@@ -28,8 +28,9 @@ exceptions.
 The [live runbook](../tests/live/INTEGRATION.md) is the provider execution walkthrough;
 [testing](testing.md#qualification-status) states qualification limits.
 [Deferred plans](plans/deferred/) cover independent provider startup, polling,
-mutation testing, cover shaping, broader lifecycle/cover acceptance and managed
-wallet extensions. Plans grant no execution or spending authority.
+mutation testing, cover shaping, broader lifecycle/cover acceptance, managed
+wallet extensions and [post-merge Zcash isolation recovery](plans/deferred/zcash_isolation_retries.md).
+Plans grant no execution or spending authority.
 
 When implemented, move useful explanations into maintained guides, retain concrete
 unfinished work in a focused plan, fix links and remove the completed plan. Do not
