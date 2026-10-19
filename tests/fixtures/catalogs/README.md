@@ -59,3 +59,11 @@ reviewed informational fields through signing. Locus, Otto and SocialFetch also
 pin signing with top-level extensions omitted. Seller
 signatures and auth nonces are public fixture evidence, not buyer credentials;
 no live settlement or authentication success is implied.
+
+The RelayShield request fixture captures the vendor's public
+`https://api.relayshield.net/openapi.json` request catalog, retaining all operations
+and removing response documentation only. Its dedicated offline regression tests
+the exact main allowlist, exclusions, prices, representative routing, and collision-free
+composition with the authored phone companion. The companion's provenance and x402
+v1 limitation are documented in `providers/CAVEATS.md`; neither fixture qualifies
+funded settlement.

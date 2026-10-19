@@ -909,3 +909,26 @@ qualified. No paid delivery or Tor qualification has been performed. The discove
 adapter accepts only unsigned target GETs; enabling the provider as an MCP source
 also exposes the vendor's other target-method choices. See
 [relay configuration](../docs/configuration.md#paid-discovery-relay).
+
+## relayshield.toml — RelayShield
+
+The exact allowlist exposes 30 synchronous or immediately useful pay-per-call
+operations from the vendor OpenAPI catalog, plus lazy `llms.txt` help. Embedded
+`x-payment-info` prices are advisory; pricing probes are disabled. Account and
+metered routes are excluded. File scanning is excluded because its result-polling
+route is absent from the vendor catalog; URL scanning retains immediate heuristic
+signals, and its description identifies the unavailable asynchronous verdict.
+Bulk identity risk ($2.00) and campaign scanning ($5.50) exceed the default $1.00
+per-payment cap. The help document uses metered paths and includes extra routes;
+only selected MCP tools are callable.
+
+`relayshield/phone-reputation.toml` is an optional companion for the phone endpoint
+listed in vendor root discovery and help but absent from OpenAPI. Its local request
+schema is explicitly authored: the documented phone argument and unsigned x402 v1
+challenge input example inform the contract, rather than a vendor JSON Schema.
+The companion shares the `relayshield` prefix and omits help to coexist with the
+main source on one listener. Add both sources to expose phone reputation alongside
+the main catalog. The unsigned phone challenge uses x402 v1; the vendor OpenAPI
+advertises `x402_version: 2` for its payg operations. Live challenges determine
+the protocol. Offline catalog and signing regressions establish local
+compatibility only; no funded settlement or live Tor qualification is claimed.

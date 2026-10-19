@@ -13,5 +13,15 @@
     "provider": "curl",
     "config": "providers/curl/provider.toml",
     "reason": "Discovery relay contract pinned from vendor documentation; paid delivery and Tor behavior are not qualified. No paid request or budget authorized by this inventory."
+  },
+  {
+    "provider": "relayshield",
+    "config": "providers/relayshield.toml",
+    "reason": "Offline catalog contract only; no paid request or budget authorized. Live settlement and Tor behavior are not qualified."
+  },
+  {
+    "provider": "relayshield-phone-reputation",
+    "config": "providers/relayshield/phone-reputation.toml",
+    "reason": "Locally authored companion request schema and offline x402 v1 signing compatibility; no paid request or budget authorized. Live settlement and Tor behavior are not qualified."
   }
 ]

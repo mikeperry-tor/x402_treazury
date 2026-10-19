@@ -58,6 +58,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | OneShot | `oneshot.toml` | Synchronous web search and lazy help; async workflows excluded |
 | Otto | `otto.toml` | Vendor OpenAPI |
 | People Data Labs | `pdl.toml` | Vendor OpenAPI |
+| RelayShield | `relayshield.toml` | Vendor OpenAPI; optional authored `relayshield/phone-reputation.toml` companion |
 | RegimeShift | `regimeshift.toml` | Vendor OpenAPI |
 | SocialFetch | `socialfetch.toml` | Vendor tagged OpenAPI |
 | StableEnrich | `stableenrich.toml` | 32 synchronous JSON/image operations and lazy help; select upstreams by tag |

@@ -1,0 +1,112 @@
+# RelayShield — Threat, Breach & Identity Intelligence (https://api.relayshield.net)
+#
+# Usage:
+#   x402_treazury serve --provider providers/relayshield.toml
+#
+# Thirty x402 pay-per-call threat-intelligence POST endpoints under `/v1/payg/*`
+# ($0.05-$5.50 USDC on Base): email breach/infostealer/session/OAuth/identity-graph
+# exposure, real-time carrier SIM-swap detection, domain lookalike/ransomware/CVE/
+# secret/NHI/LLM-key/supply-chain risk, passive DNS/IP reputation, phishing-kit
+# fingerprinting, URL heuristics, and multi-chain wallet/token/NFT security screening.
+#
+# `include = ["/v1/payg"]` strips the `/v1/payg` path prefix from tool names
+# (`relayshield_breach`, `relayshield_sim_swap`, `relayshield_supply_chain`, etc.)
+# while keeping `/v1/payg/...` on the wire.
+#
+# Excluded routes:
+# - `/v1/metered/*`, `/v1/account/info`, `/v1/siem/configure`, and
+#   `/v1/webhook/configure`: API-key/Stripe-billed and account-administration routes
+#   without `x-payment-info`.
+# - `/v1/email-check`, `/v1/link-check`, and `/v1/wallet-risk`: unpriced teaser
+#   endpoints outside `/v1/payg` (`/v1/wallet-risk` also collides with
+#   `/v1/payg/wallet-risk`).
+# - `POST /v1/payg/scan-file`: submits a file URL for asynchronous VirusTotal
+#   scanning and returns only an `analysis_id` to poll, while
+#   `GET /v1/payg/result/{analysis_id}` is omitted from `openapi.json` and Treazury
+#   does not run async job-polling workflows.
+
+spec = "https://api.relayshield.net/openapi.json"
+name = "RelayShield"
+base_url = "https://api.relayshield.net"
+prefix = "relayshield"
+
+include = ["/v1/payg"]
+include_operations = [
+    "POST /v1/payg/breach",
+    "POST /v1/payg/bulk-identity-risk",
+    "POST /v1/payg/campaign-scan",
+    "POST /v1/payg/cert-expiry",
+    "POST /v1/payg/domain",
+    "POST /v1/payg/identity-graph",
+    "POST /v1/payg/identity-risk-score",
+    "POST /v1/payg/infostealer",
+    "POST /v1/payg/ip-intel",
+    "POST /v1/payg/llm-credential-exposure",
+    "POST /v1/payg/mcp-registry-risk",
+    "POST /v1/payg/nft-security",
+    "POST /v1/payg/nhi-exposure",
+    "POST /v1/payg/oauth-watchlist",
+    "POST /v1/payg/prompt-injection-breach",
+    "POST /v1/payg/ransomware-risk",
+    "POST /v1/payg/scamkit-fingerprint",
+    "POST /v1/payg/scamkit-match",
+    "POST /v1/payg/scan-url",
+    "POST /v1/payg/scan-wallet",
+    "POST /v1/payg/secret-scan",
+    "POST /v1/payg/secret-scan-text",
+    "POST /v1/payg/session-risk",
+    "POST /v1/payg/sim-swap",
+    "POST /v1/payg/supply-chain",
+    "POST /v1/payg/target-risk",
+    "POST /v1/payg/tech-stack-cve",
+    "POST /v1/payg/token-security",
+    "POST /v1/payg/wallet-risk",
+    "POST /v1/payg/wallet-screen-batch",
+]
+
+pricing_key = "x-payment-info"
+probe_pricing = false
+
+read_timeout_seconds = 90
+
+help_url = "https://api.relayshield.net/llms.txt"
+
+instructions_text = """
+RelayShield x402 threat, breach, and identity intelligence ($0.05-$5.50 USDC per call on Base):
+- Only the stateless `/v1/payg/*` x402 endpoints in the vendor's `openapi.json` are exposed here (`relayshield_*`). `POST /v1/payg/phone-reputation` ($0.05/call; omitted from the vendor's `openapi.json`) is available via the companion `providers/relayshield/phone-reputation.toml` (`relayshield_phone_reputation`). API-key `/v1/metered/*` routes, account/SIEM/webhook admin routes, unpriced `/v1/*` teaser checks, and `POST /v1/payg/scan-file` (async VirusTotal file job whose `GET /v1/payg/result/{analysis_id}` polling endpoint is absent from `openapi.json`) are excluded.
+- Several `/v1/payg/*` schemas omit `required` in `openapi.json` because they accept alternative inputs: supply `domain` or `ip` on `relayshield_ip_intel`; `vendor_domains` or `vendor_emails` on `relayshield_supply_chain`; `content` or `diff` on `relayshield_secret_scan_text`; `tech_stack` on `relayshield_tech_stack_cve` (`domain` references a stored account profile unavailable on stateless calls); `domain` (and/or `vendor_domains`) on `relayshield_secret_scan`, `relayshield_llm_credential_exposure`, and `relayshield_nhi_exposure`; `url` or `html` for kit fingerprinting, or `kind="malware"` with `signals` on `relayshield_scamkit_fingerprint`; and at least one indicator array on `relayshield_campaign_scan`.
+- `relayshield_bulk_identity_risk` ($2.00) and `relayshield_campaign_scan` ($5.50) exceed the default $1.00 per-call payment cap and require a higher `--max-payment` setting.
+- Call `relayshield_help` for the vendor's `llms.txt` reference (note that `llms.txt` lists `/v1/metered/*` paths and includes metered-only endpoints not present under `/v1/payg/*`).
+"""
+
+[overrides.relayshield_help]
+description = "Return RelayShield's llms.txt reference (endpoint summaries, request body examples, and pricing). Free, no upstream call once cached. Note: llms.txt writes paths under /v1/metered/* and lists some metered-only routes; only the exposed relayshield_* tools are callable here."
+
+[overrides.relayshield_ip_intel.params]
+domain = "Domain to look up for reputation and passive DNS resolution history (provide `domain` or `ip`)."
+ip = "IPv4/IPv6 address to look up for reputation and reverse passive DNS (provide `domain` or `ip`)."
+
+[overrides.relayshield_supply_chain.params]
+vendor_domains = "Up to 10 vendor domains to assess for combined breach, infostealer, and dark-web exposure (provide `vendor_domains` or `vendor_emails`)."
+vendor_emails = "Alternative: up to 10 vendor contact emails (domains extracted automatically; provide `vendor_domains` or `vendor_emails`)."
+
+[overrides.relayshield_secret_scan_text.params]
+content = "Raw file content to scan for leaked secrets (provide `content` or `diff`; mutually exclusive)."
+diff = "Unified diff where only added lines are scanned for leaked secrets (provide `content` or `diff`; mutually exclusive)."
+
+[overrides.relayshield_tech_stack_cve.params]
+tech_stack = "Required for stateless x402 calls: array of technology product names (e.g. [\"nginx\", \"PostgreSQL\", \"OpenSSL\"]) to check against CISA KEV and high-EPSS CVEs."
+domain = "Stored-profile domain lookup (requires an API-key account profile; pass `tech_stack` directly on stateless x402 calls)."
+
+[overrides.relayshield_secret_scan.params]
+domain = "Primary root domain to scan across public artifact sources (provide `domain` and/or `vendor_domains`)."
+
+[overrides.relayshield_llm_credential_exposure.params]
+domain = "Primary root domain to check for exposed LLM/AI API keys (provide `domain` and/or `vendor_domains`)."
+
+[overrides.relayshield_nhi_exposure.params]
+domain = "Primary root domain to check for exposed machine/CI-CD credentials in stealer logs (provide `domain` and/or `vendor_domains`)."
+
+[overrides.relayshield_scan_url]
+description = "Scan a URL (`http://` or `https://`) for phishing or malware using synchronous heuristic signals (Google Safe Browsing, RDAP domain age, and RelayShield IOC corpus `malware_families` attribution). Also returns a VirusTotal `analysis_id`, which cannot be polled through this catalog because `GET /v1/payg/result/{analysis_id}` is omitted from `openapi.json`. Cost: ~$0.05/call [spec]."
+

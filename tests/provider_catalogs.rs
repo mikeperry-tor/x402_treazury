@@ -682,3 +682,144 @@ async fn new_market_providers_keep_curated_routes_and_body_query_contracts() {
         }
     }
 }
+
+#[tokio::test]
+async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
+    use std::collections::BTreeSet;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/relayshield.toml"))
+        .await
+        .unwrap()
+        .settings;
+    assert_eq!(cfg.prefix.as_deref(), Some("relayshield"));
+    assert_eq!(cfg.pricing_key.as_deref(), Some("x-payment-info"));
+    assert!(!cfg.probe_pricing);
+    assert_eq!(cfg.read_timeout_seconds, Some(90.0));
+    let mut doc: Value =
+        serde_json::from_str(include_str!("fixtures/relayshield_openapi.json")).unwrap();
+    // The real omitted inventory and prospective routes stay excluded.
+    assert!(doc["paths"]["/v1/payg/scan-file"].is_object());
+    assert!(doc["paths"]["/v1/metered/breach"].is_object());
+    assert!(doc["paths"]["/v1/payg/phone-reputation"].is_null());
+    doc["paths"]["/v1/payg/new-admin-action"] =
+        serde_json::json!({"post":{"description":"new write"}});
+    let tools = catalog::build_tools(&cfg, &doc, "relayshield").unwrap();
+    let expected: BTreeSet<_> = [
+        "breach",
+        "bulk_identity_risk",
+        "campaign_scan",
+        "cert_expiry",
+        "domain",
+        "identity_graph",
+        "identity_risk_score",
+        "infostealer",
+        "ip_intel",
+        "llm_credential_exposure",
+        "mcp_registry_risk",
+        "nft_security",
+        "nhi_exposure",
+        "oauth_watchlist",
+        "prompt_injection_breach",
+        "ransomware_risk",
+        "scamkit_fingerprint",
+        "scamkit_match",
+        "scan_url",
+        "scan_wallet",
+        "secret_scan",
+        "secret_scan_text",
+        "session_risk",
+        "sim_swap",
+        "supply_chain",
+        "target_risk",
+        "tech_stack_cve",
+        "token_security",
+        "wallet_risk",
+        "wallet_screen_batch",
+        "help",
+    ]
+    .into_iter()
+    .map(|name| format!("relayshield_{name}"))
+    .collect();
+    assert_eq!(
+        tools
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect::<BTreeSet<_>>(),
+        expected
+    );
+    assert_eq!(tools.len(), 31);
+    for tool in tools.iter().filter(|tool| tool.help_url.is_none()) {
+        assert_eq!(tool.method, "POST");
+        assert!(tool.path.starts_with("/v1/payg/"));
+        assert!(tool.has_body);
+        let price = doc["paths"][&tool.path]["post"]["x-payment-info"]["price"]["amount"]
+            .as_str()
+            .unwrap();
+        assert!(
+            tool.description.contains(&format!("${price}")),
+            "{} price",
+            tool.name
+        );
+    }
+    let scan = tools
+        .iter()
+        .find(|tool| tool.name == "relayshield_scan_url")
+        .unwrap();
+    let args = serde_json::json!({"url":"https://example.com/"});
+    let route = scan
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.url, "https://api.relayshield.net/v1/payg/scan-url");
+    assert_eq!(route.body, Some(args));
+    assert!(route.query.is_empty());
+    assert!(scan.description.contains("cannot be polled"));
+
+    let companion = config::load(&root.join("providers/relayshield/phone-reputation.toml"))
+        .await
+        .unwrap()
+        .settings;
+    assert_eq!(companion.prefix, cfg.prefix);
+    assert_eq!(companion.base_url, cfg.base_url);
+    assert_eq!(companion.pricing_key, cfg.pricing_key);
+    assert_eq!(companion.read_timeout_seconds, cfg.read_timeout_seconds);
+    assert!(!companion.probe_pricing);
+    assert!(companion.help_url.is_none());
+    // Read the resolved relative local path, with no catalog HTTP request.
+    let phone_doc: Value =
+        serde_json::from_slice(&std::fs::read(&companion.spec).unwrap()).unwrap();
+    let phone_tools = catalog::build_tools(&companion, &phone_doc, "relayshield").unwrap();
+    assert_eq!(phone_tools.len(), 1);
+    let phone = &phone_tools[0];
+    assert_eq!(phone.name, "relayshield_phone_reputation");
+    assert_eq!(phone.input_schema["required"], serde_json::json!(["phone"]));
+    assert_eq!(phone.input_schema["properties"]["phone"]["type"], "string");
+    // The generic converter rebuilds root tool schemas; closure belongs to the
+    // authored request schema rather than the generated MCP schema.
+    assert_eq!(
+        phone_doc["paths"]["/v1/payg/phone-reputation"]["post"]["requestBody"]["content"]["application/json"]
+            ["schema"]["additionalProperties"],
+        false
+    );
+    assert!(phone.description.contains("$0.05"));
+    let args = serde_json::json!({"phone":"+14155552671"});
+    let route = phone
+        .route(
+            companion.base_url.as_ref().unwrap(),
+            args.as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(route.method, "POST");
+    assert_eq!(
+        route.url,
+        "https://api.relayshield.net/v1/payg/phone-reputation"
+    );
+    assert_eq!(route.body, Some(args));
+    assert!(route.query.is_empty());
+    let names: BTreeSet<_> = tools
+        .iter()
+        .chain(&phone_tools)
+        .map(|tool| &tool.name)
+        .collect();
+    assert_eq!(names.len(), tools.len() + phone_tools.len());
+}

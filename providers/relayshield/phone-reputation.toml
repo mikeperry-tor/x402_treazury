@@ -1,0 +1,32 @@
+# RelayShield Phone Reputation — Local Companion Specification (https://api.relayshield.net)
+#
+# Usage:
+#   x402_treazury serve --provider providers/relayshield/phone-reputation.toml
+#
+# Exposes `POST /v1/payg/phone-reputation` as `relayshield_phone_reputation`
+# ($0.05 USDC per call on Base): criminal marketplace phone reputation,
+# attack-graph pivots, Twilio Lookup v2 SIM/eSIM swap status (cached 24h), and
+# carrier line-type intelligence (`voip`, `mobile`, `landline`, etc.).
+#
+# This route is live on `https://api.relayshield.net` and listed in the vendor's
+# root discovery document and `llms.txt`, but omitted from the vendor's published
+# `https://api.relayshield.net/openapi.json`. Its unsigned challenge uses x402 v1;
+# the authored request schema is not a vendor-published schema. Payment support
+# is covered by offline signing tests, not funded settlement qualification.
+# `help_url` is intentionally omitted
+# here so this companion source can be mounted alongside `providers/relayshield.toml`
+# on the same MCP listener without colliding on `relayshield_help`.
+
+spec = "phone-reputation.openapi.json"
+name = "RelayShield Phone Reputation"
+base_url = "https://api.relayshield.net"
+prefix = "relayshield"
+
+include = ["/v1/payg"]
+include_operations = ["POST /v1/payg/phone-reputation"]
+
+pricing_key = "x-payment-info"
+probe_pricing = false
+
+read_timeout_seconds = 90
+

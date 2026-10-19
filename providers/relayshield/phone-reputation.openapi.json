@@ -1,0 +1,69 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "RelayShield Phone Reputation (Local Companion Specification)",
+    "description": "Locally authored OpenAPI 3.1 request catalog for RelayShield POST /v1/payg/phone-reputation, listed in https://api.relayshield.net/ payg_endpoints and https://api.relayshield.net/llms.txt but omitted from the vendor OpenAPI catalog. The phone argument models the documented phone lookup and unsigned x402 v1 challenge input example; that example is not a vendor-published JSON Schema. Live challenges remain authoritative for payment.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.relayshield.net",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/v1/payg/phone-reputation": {
+      "post": {
+        "operationId": "payg_phone_reputation",
+        "summary": "Check phone reputation, attack-graph pivots, SIM-swap status (24h cached), and carrier line type",
+        "description": "Check whether a phone number appears in criminal marketplace infrastructure or pivots to known scam wallets, phishing kits, or threat actors via RelayShield's threat-intelligence corpus, and whether its SIM/eSIM was recently swapped (`signals.sim_swap`, Twilio Lookup v2, cached 24h) alongside carrier line-type intelligence (`signals.line_type`, e.g. `voip`, `mobile`, `landline`). Returns a `high`/`medium`/`unknown` verdict (`level`), `flagged` boolean, timestamped `reasons`, and structured `signals`.",
+        "tags": [
+          "x402 pay-per-call"
+        ],
+        "security": [],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.05"
+          },
+          "protocols": [
+            "x402"
+          ],
+          "networks": [
+            "eip155:8453",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+          ]
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "phone"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "description": "Phone number in E.164 format (e.g. \"+14155552671\")."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Phone reputation, cached 24h SIM-swap status, line-type intelligence, and corpus sightings."
+          },
+          "402": {
+            "description": "Payment required: unsigned x402 v1 challenge observed in the PAYMENT-REQUIRED header."
+          }
+        }
+      }
+    }
+  }
+}
