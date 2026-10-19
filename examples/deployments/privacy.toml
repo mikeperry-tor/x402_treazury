@@ -58,7 +58,7 @@ base_rpc_url_env = "BASE_RPC_URL"
 [wallets.web]
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
-max_api_payment_usdc = "0.05"
+max_api_payment_usdc = "0.10"
 max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
 max_conversion_overhead_percent = 5
 
@@ -67,11 +67,12 @@ funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
 
 # Social, company and toolbox share this pool, reserve and Tor payer identities.
-# $0.10 permits single-company enrichment; larger PDL batches may exceed the cap.
+# The shared $0.50 per-payment cap covers the selected RelayShield tools.
+# Social and toolbox calls use this same cap; larger batches may still exceed it.
 [wallets.company]
 mode = "zcash_rotation"
 max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
-max_api_payment_usdc = "0.10"
+max_api_payment_usdc = "0.50"
 max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
 max_conversion_overhead_percent = 5
 
@@ -105,7 +106,7 @@ tags = ["Bluesky", "Facebook", "Instagram", "LinkedIn", "Reddit", "Telegram", "T
 exclude_tools = ["socialfetch_help"]
 
 # TeleSINT provides 18 stateless Telegram CTI and OSINT channel intelligence tools
-# ($0.01-$0.10, all within the $0.10 social/company payment cap), discovered on demand
+# ($0.01-$0.10, all within the $0.50 social/company payment cap), discovered on demand
 # via x402_treazury_tools_search (search for Telegram, telesint, or category names).
 [sources.telesint]
 extends = "../../providers/telesint.toml"
@@ -126,24 +127,24 @@ extends = "../../providers/exa.toml"
 instructions_text = "Use exa_search for web discovery and exa_contents for known URLs or document IDs. This source is shared by the web and company listeners, each with its own payment wallet. Prefer small result/page counts and highlights; charges vary with options and the live challenge is authoritative. For contents supply exactly one of urls or ids. Omit stream or set false: tools return completed responses. exa_help covers these selected endpoints; generic API-key and SDK setup is unnecessary."
 
 # Person lookups stay in the social context. Vendor-listed matches cost $0.28,
-# above the shared $0.10 cap; paid matches require a deliberate cap increase.
+# within the shared $0.50 cap for one matched result; use small batches.
 [sources.pdl_people]
 extends = "../../providers/pdl.toml"
-instructions_text = "People Data Labs person enrichment and structured person search support the social research context. Use known identifiers for enrichment and small result batches for search; preserve confidence and provenance. Vendor-listed matched results cost $0.28 each, above this example's shared $0.10 social/company payment cap. Paid matches require an operator to raise that cap; agents cannot change it. Do not interpret a rejected payment or failed lookup as evidence that a person does not exist."
+instructions_text = "People Data Labs person enrichment and structured person search support the social research context. Use known identifiers for enrichment and small result batches for search; preserve confidence and provenance. Vendor-listed matched results cost $0.28 each, within this example's shared $0.50 social/company payment cap for one result; larger batches may be refused. Do not interpret a rejected payment or failed lookup as evidence that a person does not exist."
 include_tools = ["pdl_person_*"]
 
 # Structured company discovery complements Deepline enrichment.
-# The PDL catalog lists $0.10 per company result, so larger batches exceed the
-# wallet cap.
+# The PDL catalog lists $0.10 per company result; prefer small batches under
+# the shared $0.50 per-payment cap.
 [sources.pdl_company]
 extends = "../../providers/pdl.toml"
-instructions_text = "Discover companies using People Data Labs structured company search. Prefer size=1: the catalog lists $0.10 per result, matching this example's company payment cap; larger batches may be refused. Paginate with scroll_token when needed. Use Deepline for company enrichment rather than searching again for details. Verify company identity before combining results across providers."
+instructions_text = "Discover companies using People Data Labs structured company search. Prefer size=1: the catalog lists $0.10 per result and this example's company payment cap is $0.50; larger batches may be refused. Paginate with scroll_token when needed. Use Deepline for company enrichment rather than searching again for details. Verify company identity before combining results across providers."
 include_tools = ["pdl_company_search"]
 
 # StableEnrich subsets retain the provider's reviewed synchronous operation
 # allowlist and omit its broad help. Each source inherits its listener's wallet.
 # Social estimates are $0.01-$0.05 per call. FullEnrich ($0.15), StableEnrich
-# PDL ($0.28), Whitepages ($0.22) and Lens ($0.20) exceed this context's cap.
+# PDL ($0.28), Whitepages ($0.22) and Lens ($0.20) remain outside this subset.
 [sources.social_stableenrich]
 extends = "../../providers/stableenrich.toml"
 include_tools = [
@@ -154,9 +155,9 @@ include_tools = [
   "stableenrich_minerva_validate_emails",
   "stableenrich_serper_people_image_search",
 ]
-instructions_text = "Social research through StableEnrich: search Reddit and retrieve post comments, resolve people with Minerva, enrich known profiles, check email database records and search for public headshots. Use small batches and preserve identity confidence, provenance and timestamps. An email database match is not proof of current deliverability; disambiguate names with known profile/company information before combining results or attributing images. Request content can identify people despite separate payment wallets. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Vendor prices are estimates; the live challenge and $0.10 shared social/company cap govern payment. Do not repeat a paid submission to retrieve pending results."
+instructions_text = "Social research through StableEnrich: search Reddit and retrieve post comments, resolve people with Minerva, enrich known profiles, check email database records and search for public headshots. Use small batches and preserve identity confidence, provenance and timestamps. An email database match is not proof of current deliverability; disambiguate names with known profile/company information before combining results or attributing images. Request content can identify people despite separate payment wallets. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Vendor prices are estimates; the live challenge and $0.50 shared social/company cap govern payment. Do not repeat a paid submission to retrieve pending results."
 
-# Company estimates are $0.0126-$0.08 per call, within the $0.10 cap.
+# Company estimates are $0.0126-$0.08 per call, within the $0.50 cap.
 # FullEnrich company search ($0.15) is omitted. Keep person/contact enrichment
 # on the social listener; Exa already supplies this listener's general web search.
 [sources.company_stableenrich]
@@ -173,7 +174,7 @@ include_tools = [
   "stableenrich_serper_news",
   "stableenrich_firecrawl_scrape",
 ]
-instructions_text = "Company research through StableEnrich: enrich organizations by domain or name/social URL, discover local businesses with Google Maps, retrieve place details, search company news and scrape company pages with Firecrawl. Verify returned domains and company identity before combining results; CompanyEnrich employees/revenue are ranges and funding totals may lag individual rounds. Prefer partial Maps results when sufficient; full results cost more. For Maps text-search pagination repeat the original search body with its pageToken. Check news dates and source provenance. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Use small batches; vendor prices are estimates and the live challenge and $0.10 company cap govern payment. Do not repeat a paid submission to retrieve pending results."
+instructions_text = "Company research through StableEnrich: enrich organizations by domain or name/social URL, discover local businesses with Google Maps, retrieve place details, search company news and scrape company pages with Firecrawl. Verify returned domains and company identity before combining results; CompanyEnrich employees/revenue are ranges and funding totals may lag individual rounds. Prefer partial Maps results when sufficient; full results cost more. For Maps text-search pagination repeat the original search body with its pageToken. Check news dates and source provenance. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Use small batches; vendor prices are estimates and the live challenge and $0.50 company cap govern payment. Do not repeat a paid submission to retrieve pending results."
 
 # Tool-name allowlists keep the company toolset small as upstream catalogs grow.
 # Broad vendor help tools are omitted to avoid suggesting unselected operations.
@@ -220,12 +221,13 @@ instructions_text = "US public-company research: resolve symbols with tickers, t
 
 # Multi-board job search (LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter,
 # Bayt, BDJobs, Naukri). Base price is $0.05 + $0.002 * len(sites) * maxResults,
-# so keeping len(sites) * maxResults <= 25 stays within the $0.10 company cap.
+# so len(sites) * maxResults <= 25 keeps an individual query at $0.10 or less
+# under the shared $0.50 cap; prefer small batches even with that headroom.
 # (hirescrape_linkedin's job-search modes from llms.txt are absent from its OpenAPI schema.)
 [sources.company_hirescrape]
 extends = "../../providers/hirescrape.toml"
 include_tools = ["hirescrape_jobs"]
-instructions_text = "Company hiring and job-opening research through HireScrape (hirescrape_jobs). Always specify 1-2 target job boards in sites (e.g. ['linkedin'] or ['linkedin', 'indeed']) and keep maxResults small so len(sites) * maxResults <= 25: the live x402 quote is $0.05 + $0.002 * len(sites) * maxResults, so larger queries or omitting sites (which defaults to all 8 boards) will exceed this example's $0.10 company payment cap."
+instructions_text = "Company hiring and job-opening research through HireScrape (hirescrape_jobs). Prefer 1-2 target job boards in sites (e.g. ['linkedin'] or ['linkedin', 'indeed']) and small maxResults: len(sites) * maxResults <= 25 keeps the advertised $0.05 + $0.002 * len(sites) * maxResults quote at $0.10 or less. Larger queries cost more; the live challenge and shared $0.50 company payment cap govern payment."
 
 # European and global business registries, German Handelsregister, one-call due
 # diligence ($0.10), EU VIES VAT validation, sanctions screening and domain intel.
@@ -239,14 +241,38 @@ include_tools = [
   "agosint_sanctions",
   "agosint_domain",
 ]
-instructions_text = "Company registry and compliance research through AgOSINT: look up legal entities across Czechia, Norway, UK, France, Finland, US SEC and GLEIF LEI (agosint_company, $0.02), German Handelsregister records and officers (agosint_company_de, keep limit <= 4 so $0.056 + $0.012 * (limit - 1) stays within the $0.10 cap), combined one-call due diligence (agosint_due_diligence, $0.10), EU VIES VAT validation (agosint_vat, $0.015), sanctions screening (agosint_sanctions, $0.015) and domain intelligence (agosint_domain, $0.015). For agosint_company and agosint_due_diligence pass exactly one of id, name, lei, vat, or domain (with country required for id or name); for agosint_sanctions pass name or wallet. Treazury handles x402 payment and never replays signed payments automatically."
+instructions_text = "Company registry and compliance research through AgOSINT: look up legal entities across Czechia, Norway, UK, France, Finland, US SEC and GLEIF LEI (agosint_company, $0.02), German Handelsregister records and officers (agosint_company_de, prefer limit <= 4 for small result batches; the advertised $0.056 + $0.012 * (limit - 1) price and live challenge remain subject to the $0.50 cap), combined one-call due diligence (agosint_due_diligence, $0.10), EU VIES VAT validation (agosint_vat, $0.015), sanctions screening (agosint_sanctions, $0.015) and domain intelligence (agosint_domain, $0.015). For agosint_company and agosint_due_diligence pass exactly one of id, name, lei, vat, or domain (with country required for id or name); for agosint_sanctions pass name or wallet. Treazury handles x402 payment and never replays signed payments automatically."
+
+# Company security research: eleven explicitly selected main-catalog tools plus
+# the local phone companion. Both inherit the existing company wallet; no new pool.
+[sources.company_relayshield]
+extends = "../../providers/relayshield.toml"
+include_tools = [
+  "relayshield_breach",
+  "relayshield_sim_swap",
+  "relayshield_infostealer",
+  "relayshield_identity_graph",
+  "relayshield_supply_chain",
+  "relayshield_ip_intel",
+  "relayshield_ransomware_risk",
+  "relayshield_secret_scan",
+  "relayshield_identity_risk_score",
+  "relayshield_tech_stack_cve",
+  "relayshield_wallet_risk",
+]
+instructions_text = "Company security and vendor due diligence through RelayShield (relayshield_*): email breach/infostealer exposure and identity pivots, vendor supply-chain risk, domain identity/ransomware risk, public credential exposure, IP intelligence, declared-stack vulnerabilities and counterparty wallet screening. Supply email for breach, infostealer and identity_graph; phone in E.164 format for sim_swap; vendor_domains or vendor_emails for supply_chain; domain or ip for ip_intel; domain for identity_risk_score and ransomware_risk; domain and/or vendor_domains for secret_scan; tech_stack directly for tech_stack_cve (domain references an unavailable account profile); and address for wallet_risk. The vendor documents SIM-swap carrier availability as degraded/unavailable; a failed lookup supplies no verdict. Phone reputation is available through the companion source. Preserve timestamps, coverage, null and degraded markers; missing findings are not proof of safety. Advertised selected-tool prices are $0.05-$0.40; live challenges and the shared $0.50 cap govern payment. Treazury handles x402 and does not automatically replay uncertain paid requests."
+
+[sources.company_relayshield_phone]
+extends = "../../providers/relayshield/phone-reputation.toml"
+include_tools = ["relayshield_phone_reputation"]
+instructions_text = "Use relayshield_phone_reputation for a company's known contact phone, supplied as phone in E.164 format. It returns phone reputation, attack-graph pivots and carrier line-type signals, with SIM-swap data cached for 24 hours rather than a fresh carrier check. Preserve checked/unknown markers and evidence timestamps; an absence of flags is not proof of safety. This locally authored companion covers a route omitted from the vendor OpenAPI catalog; Treazury handles its x402 v1 payment. Advertised cost is $0.05, subject to the live challenge and shared $0.50 cap. Do not automatically repeat an uncertain paid request."
 
 [sources.googletrends]
 extends = "../../providers/google-trends.toml"
 instructions_text = "Use Google Trends for aggregate keyword interest over time, by region, and related queries/topics in the web research context. Supply keyword and an ISO country code as required by the tools. This is aggregate trend data, not web search or evidence about a specific person's behavior. Treazury handles x402 payment; use the live challenge and configured cap for costs. google_trends_help describes this complete selected toolset."
 
-# GenuineGood is a grant discovery service. Only search and detail tools
-# fit within the $0.10 price cap.
+# GenuineGood is a grant discovery service. Keep its selected search and detail
+# tools for focused company grant research.
 [sources.genuinegood]
 extends = "../../providers/genuinegood.toml"
 include_tools = ["genuinegood_search_post", "genuinegood_detail_post"]
@@ -277,7 +303,7 @@ sources = ["social", "telesint", "pdl_people", "social_stableenrich"]
 listen = "127.0.0.1:6339"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint"]
+sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone"]
 
 # Start with discovery tools; agent-added APIs are persisted in the registry above.
 [servers.toolbox]

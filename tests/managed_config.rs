@@ -339,8 +339,8 @@ async fn privacy_example_exposes_reserves_and_per_operation_fee_defaults_offline
         shown["wallet_summary"]["initial_inventory_target_atomic"],
         "4000000"
     );
-    assert_eq!(shown["wallets"]["web"]["max_api_payment_usdc"], "0.05");
-    assert_eq!(shown["wallets"]["company"]["max_api_payment_usdc"], "0.10");
+    assert_eq!(shown["wallets"]["web"]["max_api_payment_usdc"], "0.10");
+    assert_eq!(shown["wallets"]["company"]["max_api_payment_usdc"], "0.50");
     for name in ["web", "company"] {
         assert_eq!(
             shown["wallets"][name]["reserves"]["small"]["funding_amount_usdc"],

@@ -63,12 +63,22 @@ and toolbox share a wallet and Tor payer identity; web uses a separate wallet:
 | --- | --- | --- |
 | Web | Exa, SocialFetch web/community tools, Google Trends | `http://127.0.0.1:6337/mcp` |
 | Social | SocialFetch social platforms, PDL people tools | `http://127.0.0.1:6338/mcp` |
-| Company | Exa, PDL company search, Otto financials/news, Claw402 startup/investor data, Deepline profiles/ads, x402stock disclosures, GenuineGood grants | `http://127.0.0.1:6339/mcp` |
+| Company | Exa, PDL company search, Otto financials/news, Claw402 startup/investor data, Deepline profiles/ads, x402stock disclosures, GenuineGood grants, RelayShield security and phone reputation | `http://127.0.0.1:6339/mcp` |
 | Toolbox | API discovery, direct calls and persistent agent-added tools | `http://127.0.0.1:6340/mcp` |
 
 SocialFetch's overlapping Reddit tools use different wallets on the web and social
 endpoints; Exa likewise uses separate wallets on web and company. Company tools
 are explicitly selected by name to keep the agent's context focused.
+
+The company endpoint adds 12 selected RelayShield security tools: email breach and
+infostealer checks, identity graphs, vendor supply-chain risk, IP intelligence,
+ransomware risk, public secret exposure, domain identity risk scores, declared-stack
+CVE checks, counterparty wallet risk, SIM-swap checks and phone reputation.
+Phone reputation uses a [local companion catalog](providers/relayshield/phone-reputation.toml)
+for the route missing from the vendor's main schema. Its SIM-swap signals are cached
+for 24 hours; the separate carrier SIM-swap endpoint is included but vendor-documented
+availability problems may prevent a result. Neither missing findings nor degraded
+results establish safety. See [RelayShield caveats](providers/CAVEATS.md#relayshieldtoml--relayshield).
 
 The social endpoint enables `discover_on_demand = true` because of its large
 number of tools. This [on-demand discovery mode](docs/agent-sources.md)
@@ -149,7 +159,8 @@ deposit ZEC before starting it or at any time afterward.
 > run alongside it. See the [wallet reference](docs/wallet-cli.md) for other commands.
 
 API payments are capped at
-**0.05 USDC for web** and **0.10 USDC for social/company**.
+**0.10 USDC for web** and **0.50 USDC for company, social and toolbox**,
+which share the company wallet. These are per-payment caps, not total budgets.
 
 ### 4. Fund the treasury and connect
 
@@ -202,9 +213,12 @@ To stop, press Ctrl-C once and allow the announced transaction-safety drain to f
 
 ## Using Expensive APIs
 
-The max API payments of the privacy example are set relatively low, which
-excludes some APIs in the set (especially company and grant data searches, which can run from $0.15 up to $5 each). Increse `max_api_payment_usdc` on the main wallet
-group definitions to allow larger API payments.
+The privacy example caps each web payment at $0.10 and each payment from the
+shared company/social/toolbox wallet at $0.50. The selected RelayShield tools
+advertise $0.05-$0.40 per call, within that shared cap. Larger company/grant
+queries and result batches can still exceed it. Increase `max_api_payment_usdc`
+on the relevant wallet group to authorize larger individual payments; live
+challenges determine the actual amount.
 
 If any of your APIs cost more than **$0.50 per call**, consider
 adding a large reserve wallet to that wallet group.
