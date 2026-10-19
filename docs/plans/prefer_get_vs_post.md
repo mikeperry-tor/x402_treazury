@@ -33,7 +33,10 @@ method-specific handoff restriction. The [selection and isolation decision](../a
 explains the accepted request and pooling tradeoffs.
 
 Unsigned handoff assumes the provider gates protected execution before its unpaid 402,
-as the existing unsigned-then-paid POST flow does. It is not general POST idempotency.
+as the existing unsigned-then-paid POST flow does. Under the project's
+[accepted unsigned x402 semantics](../architecture.md#unsigned-x402-requests-and-post-retries),
+POST alone does not prohibit an authorized unsigned retry or require a separate
+business-side-effect gate. It is not general POST idempotency.
 After signed journaling neither method gains replay, including settlement failure or
 output-conversion failure. Provider-specific incompatibility needs an explicit reviewed
 decision; catalog curation grants no transaction retry authority.

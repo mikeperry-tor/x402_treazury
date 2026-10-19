@@ -241,8 +241,9 @@ identities bound traversal without a retry-count ceiling or new allocation.
 Only a recognized structured insufficient-funds response to a managed signed
 request earns cross-wallet repetition. Each attempt retains its own authorization,
 possible charge and canonical outcome, even if a later one succeeds. A successful
-response, transport uncertainty or generic error earns no repetition. Schedule an
-ordinary advisory balance read after insufficiency without delaying fallback.
+signed response, signed transport uncertainty or generic signed error earns no
+repetition. Schedule an ordinary advisory balance read after insufficiency without
+delaying fallback.
 The [wallet observation policy](wallet-rotation.md#wallet-observation-policy)
 owns finite startup discovery and requested refresh scheduling; ordinary serving
 does not sweep idle managed USDC wallets. Shared scalar acquisition ownership is
@@ -270,6 +271,23 @@ selection mode. Revisit it only with an explicit change in priorities, a concret
 reuse contract, or evidence that warrants the transport/cover tradeoff. Such a revision
 must assess request counts, pooling, owned cleanup, cover qualification and Tor isolation
 evidence together; it cannot introduce signed replay.
+
+### Unsigned x402 requests and POST retries
+
+For this project's x402 pathways, protected execution is assumed to be gated on
+payment acceptance. An unsigned POST is eligible for an otherwise authorized
+unsigned retry on the same basis as GET; the method alone requires no additional
+provider idempotency proof or side-effect gate. Business side effects are not an
+additional retry-policy constraint for this use case. This is the accepted x402
+execution model, not a claim about arbitrary HTTP POST endpoints.
+
+Financial uncertainty remains distinct: a signed request may already have charged
+or executed even when its response fails. Generic HTTP errors, timeouts and output
+failures do not authorize another chargeable attempt. Preserve the separately
+specified structured insufficient-funds traversal and journal-before-disclosure
+rules for every authorization. Existing payer handoffs support POST; additional
+Tor circuit retries remain proposed in the
+[Tor isolation retry plan](plans/tor_isolation_retries.md).
 
 ## Where to change and verify behavior
 

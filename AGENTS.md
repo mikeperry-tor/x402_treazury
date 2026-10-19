@@ -39,8 +39,9 @@ Ordinary USDC payment selection treats balances and price hints as advisory;
 current payer ownership and amount authority govern signing. After recognized
 structured insufficient funds, try each existing
 eligible wallet once with its own challenge while balance reconciliation proceeds
-independently. Drop the unused error body. Each authorization remains potentially
-chargeable. Other uncertainty grants no automatic replay; never allocate wallets
+independently. Apply the [unsigned x402 GET/POST retry semantics](docs/architecture.md#unsigned-x402-requests-and-post-retries)
+when assessing method restrictions. Drop the unused error body. Each authorization
+remains potentially chargeable. Other uncertainty grants no automatic replay; never allocate wallets
 or wait for funding during this traversal.
 
 Journal before disclosure. Preserve exact accepted inputs, signed bytes, original

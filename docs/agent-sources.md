@@ -179,11 +179,14 @@ agent arguments. Redirects are not followed. Raw binary PNG/JPEG/WebP responses
 use the normal bounded image output path; JSON image mappings require a configured
 provider and are not inferred by raw calls.
 
-Both tools can spend Base USDC, and POST can mutate provider state. Directory
-verification and a valid payment challenge do not establish the request schema
-or guarantee useful output. A failed, timed-out or ambiguous call can already have
-paid or changed state: never automatically repeat it, because each invocation
-may authorize another payment.
+Both tools can spend Base USDC. Directory verification and a valid payment
+challenge do not establish the request schema or guarantee useful output.
+Unsigned x402 POST uses the same
+[accepted retry semantics](architecture.md#unsigned-x402-requests-and-post-retries)
+as GET; POST alone does not prohibit an authorized unsigned retry. A signed,
+timed-out or ambiguous paid attempt may already have charged: do not automatically
+repeat the logical call, because a new invocation may authorize another payment.
+Business side effects add no separate retry gate for this use case.
 
 Source management contributes eight definitions; searches return directory leads
 and selected tool signatures on demand. Registered tools, including persisted

@@ -27,9 +27,11 @@ obtains its own unsigned challenge and signs through the same wallet's transport
 and cover owner. Original business arguments/body remain unchanged, including
 supported POST requests. A recognized structured insufficient-funds response to a
 managed signed request can traverse the captured eligible inventory once. Each
-attempt retains its own authorization and possible charge. Other failures and
-successful responses earn no repetition. See the [best-effort wallet
-rules](wallet-rotation.md#best-effort-wallet-rules) and pinned public seller fixtures;
+attempt retains its own authorization and possible charge. Other signed failures and
+successful signed responses earn no repetition. Unsigned x402 POST follows the same
+[accepted retry semantics](architecture.md#unsigned-x402-requests-and-post-retries)
+as GET; HTTP method alone does not prohibit an authorized unsigned retry. See the
+[best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules) and pinned public seller fixtures;
 local fixture acceptance is not live-provider qualification.
 
 Accepted calls retain their application owner through all attempts, signed
