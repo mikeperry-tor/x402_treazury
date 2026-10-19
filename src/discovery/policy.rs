@@ -10,10 +10,6 @@ use std::{
 pub struct Policy {
     pub wallet: String,
     pub registry_file: Option<PathBuf>,
-    #[serde(default = "sources")]
-    pub max_sources: usize,
-    #[serde(default = "per_source")]
-    pub max_tools_per_source: usize,
     #[serde(default = "per_server")]
     pub max_tools_per_server: usize,
     #[serde(default = "bytes")]
@@ -31,14 +27,8 @@ pub struct Policy {
     #[serde(default)]
     pub allowed_origins: Vec<String>,
 }
-fn sources() -> usize {
-    16
-}
-fn per_source() -> usize {
-    100
-}
 fn per_server() -> usize {
-    200
+    512
 }
 fn bytes() -> usize {
     33554432
@@ -62,9 +52,7 @@ pub fn validate(config: &MetaConfig) -> Result<()> {
             "unknown source_management wallet"
         );
         ensure!(
-            (1..=1024).contains(&p.max_sources)
-                && (1..=10000).contains(&p.max_tools_per_source)
-                && (1..=10000).contains(&p.max_tools_per_server),
+            (1..=10000).contains(&p.max_tools_per_server),
             "invalid source management quota"
         );
         ensure!(

@@ -297,17 +297,12 @@ impl Manager {
         generation: u64,
     ) -> Result<CatalogSnapshot> {
         let live: Vec<_> = state.records.values().filter(|r| !r.removed).collect();
-        // Disabled records occupy registration quota, but a revoked quota must not prevent startup.
-        if live.iter().any(|r| r.disabled.is_none()) {
-            ensure!(
-                live.len() <= self.policy.max_sources,
-                "source_quota_exceeded"
-            );
-        }
-        ensure!(
-            live.iter().map(|r| r.document.len()).sum::<usize>() <= 128 * 1024 * 1024,
-            "registry_document_limit"
-        );
+        crate::limits::check(
+            live.iter().map(|r| r.document.len()).sum::<usize>(),
+            128 * 1024 * 1024,
+            "registry_document_limit",
+            "hardcoded_registry_document_bytes",
+        )?;
         let mut result = base.clone();
         result.generation = generation;
         let previous = self.catalog.read();
@@ -368,11 +363,14 @@ impl Manager {
                             .unwrap_or_else(|| Arc::new(OnceCell::new())),
                     });
                 }
-                ensure!(
-                    view.iter().filter(|t| t.source.is_some()).count()
-                        <= self.policy.max_tools_per_server,
-                    "server_tool_quota_exceeded"
-                );
+                if !cfg.discover_on_demand {
+                    crate::limits::check(
+                        view.iter().filter(|t| t.source.is_some()).count(),
+                        self.policy.max_tools_per_server,
+                        "server_tool_quota_exceeded",
+                        "max_tools_per_server",
+                    )?;
+                }
             }
         }
         Ok(result)
@@ -423,7 +421,7 @@ impl Manager {
                 if let Some(key) = oldest {
                     cache.remove(&key);
                 } else {
-                    anyhow::bail!("imports_busy");
+                    anyhow::bail!(crate::limits::busy("imports_busy", max));
                 }
             }
             cache
@@ -437,11 +435,13 @@ impl Manager {
                 // waiting for its result cannot starve independent imports.
                 let result = async {
                     let owner = self.owner_import.get(owner).ok_or("unknown_owner")?;
-                    let _owner = owner.try_acquire().map_err(|_| "owner_import_busy")?;
+                    let _owner = owner
+                        .try_acquire()
+                        .map_err(|_| crate::limits::busy("owner_import_busy", 1))?;
                     let _global = self
                         .global_import
                         .try_acquire()
-                        .map_err(|_| "imports_busy")?;
+                        .map_err(|_| crate::limits::busy("imports_busy", 4))?;
                     self.fetch_document(url)
                         .await
                         .map(Arc::new)
@@ -468,10 +468,12 @@ impl Manager {
         import::fetch(&self.policy, url).await
     }
     pub async fn invoke(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
-        ensure!(
-            serde_json::to_vec(&args)?.len() <= 65536,
-            "management_request_too_large"
-        );
+        crate::limits::check(
+            serde_json::to_vec(&args)?.len(),
+            65536,
+            "management_request_too_large",
+            "hardcoded_management_request_bytes",
+        )?;
         ensure!(
             self.enabled(owner) || self.accepts(owner),
             "source_management_disabled"
@@ -565,7 +567,7 @@ impl Manager {
             .mutations
             .clone()
             .try_acquire_owned()
-            .context("mutation_queue_full")?;
+            .map_err(|_| anyhow::anyhow!(crate::limits::busy("mutation_queue_full", 16)))?;
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -594,7 +596,12 @@ impl Manager {
                 .context("generation exhausted")?;
             let snapshot = this.snapshot(&state, &inner.base, state.generation)?;
             let result = this.result(&state.records[&id], &owner, &snapshot);
-            ensure!(state.receipts.len() < 10000, "idempotency_capacity_reached");
+            crate::limits::check(
+                state.receipts.len() + 1,
+                10000,
+                "idempotency_capacity_reached",
+                "hardcoded_mutation_receipts",
+            )?;
             state.receipts.insert(
                 receipt_key(&owner, &key)?,
                 Receipt {
@@ -659,10 +666,12 @@ pub(crate) fn search_catalog(
     name: &str,
     args: Value,
 ) -> Result<Value> {
-    ensure!(
-        serde_json::to_vec(&args)?.len() <= 65536,
-        "management_request_too_large"
-    );
+    crate::limits::check(
+        serde_json::to_vec(&args)?.len(),
+        65536,
+        "management_request_too_large",
+        "hardcoded_management_request_bytes",
+    )?;
     let q: Query = serde_json::from_value(args)?;
     let snapshot = catalog.read();
     let query = q.query.as_ref().map(|q| q.to_lowercase());
@@ -807,16 +816,17 @@ pub async fn maintain_cli(
         .context("revision exhausted")?;
     record.updated_at = epoch();
     let result = json!({"source_id":record.id,"server":owner,"revision":record.revision,"removed":record.removed});
-    ensure!(
+    crate::limits::check(
         state
             .records
             .values()
             .map(|r| r.document.len())
-            .sum::<usize>()
-            <= 128 * 1024 * 1024,
-        "registry_document_limit"
-    );
-    if refresh {
+            .sum::<usize>(),
+        128 * 1024 * 1024,
+        "registry_document_limit",
+        "hardcoded_registry_document_bytes",
+    )?;
+    if refresh && !cfg.servers[owner].discover_on_demand {
         let listener = &cfg.servers[owner];
         let mut tools = 0;
         for r in state
@@ -842,10 +852,12 @@ pub async fn maintain_cli(
                 }
             }
         }
-        ensure!(
-            tools <= policy.max_tools_per_server,
-            "server_tool_quota_exceeded"
-        );
+        crate::limits::check(
+            tools,
+            policy.max_tools_per_server,
+            "server_tool_quota_exceeded",
+            "max_tools_per_server",
+        )?;
     }
     state.generation = state
         .generation

@@ -12,6 +12,35 @@ pub fn help_default() -> usize {
     HELP_BYTES
 }
 
+/// Reject a resource bound with safe diagnostics, never caller-supplied content.
+pub(crate) fn check(
+    actual: usize,
+    limit: usize,
+    reason: &'static str,
+    setting: &'static str,
+) -> Result<()> {
+    if actual > limit {
+        tracing::warn!(
+            reason,
+            actual,
+            limit,
+            setting,
+            "resource limit exceeded; operation rejected"
+        );
+        bail!("{reason}: actual={actual}, limit={limit}, setting={setting}");
+    }
+    Ok(())
+}
+
+pub(crate) fn busy(reason: &'static str, limit: usize) -> &'static str {
+    tracing::warn!(
+        reason,
+        limit,
+        "resource capacity exhausted; operation rejected"
+    );
+    reason
+}
+
 #[derive(Debug)]
 pub(crate) struct DownloadLimit {
     pub kind: &'static str,

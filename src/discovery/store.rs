@@ -130,14 +130,27 @@ impl Store {
             .optional()?;
         let state: State = data
             .map(|s| {
-                ensure!(s.len() <= 256 * 1024 * 1024, "registry size limit");
+                crate::limits::check(
+                    s.len(),
+                    256 * 1024 * 1024,
+                    "registry size limit",
+                    "hardcoded_registry_state_bytes",
+                )?;
                 serde_json::from_str(&s).context("corrupt source registry")
             })
             .unwrap_or_else(|| Ok(State::default()))?;
-        ensure!(
-            state.records.len() <= 10000 && state.receipts.len() <= 10000,
-            "registry record limit"
-        );
+        crate::limits::check(
+            state.records.len(),
+            10000,
+            "registry record limit",
+            "hardcoded_registry_records",
+        )?;
+        crate::limits::check(
+            state.receipts.len(),
+            10000,
+            "registry record limit",
+            "hardcoded_mutation_receipts",
+        )?;
         for (id, r) in &state.records {
             ensure!(
                 id == &r.id && uuid::Uuid::parse_str(id).is_ok() && r.revision > 0,
@@ -152,7 +165,12 @@ impl Store {
     }
     pub fn save(&mut self, state: &State) -> Result<()> {
         let bytes = serde_json::to_string(state)?;
-        ensure!(bytes.len() <= 256 * 1024 * 1024, "registry size limit");
+        crate::limits::check(
+            bytes.len(),
+            256 * 1024 * 1024,
+            "registry size limit",
+            "hardcoded_registry_state_bytes",
+        )?;
         let tx = self.db.transaction()?;
         tx.execute("INSERT INTO snapshot(id,json) VALUES (1,?1) ON CONFLICT(id) DO UPDATE SET json=excluded.json",[bytes])?;
         tx.commit()?;

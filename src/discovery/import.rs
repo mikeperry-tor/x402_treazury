@@ -3,7 +3,7 @@ use crate::{
     catalog::{self, Config, ToolSpec},
     network::{self, IsolationId},
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
@@ -52,15 +52,32 @@ pub struct Built {
     pub tools: Vec<ToolSpec>,
     pub base: String,
 }
+fn rejected(reason: &'static str) -> anyhow::Error {
+    tracing::warn!(reason, "source import validation rejected");
+    anyhow::anyhow!(reason)
+}
+
+fn require(condition: bool, reason: &'static str) -> Result<()> {
+    if !condition {
+        return Err(rejected(reason));
+    }
+    Ok(())
+}
+
 pub fn endpoint(policy: &Policy, url: &str) -> Result<reqwest::Url> {
-    let u = network::public_url(url)?;
-    ensure!(
+    let u = network::public_url(url).inspect_err(|_| {
+        tracing::warn!(
+            reason = "public_destination_rejected",
+            "source import destination rejected"
+        );
+    })?;
+    require(
         policy.allowed_origins.is_empty()
             || policy
                 .allowed_origins
                 .contains(&u.origin().ascii_serialization()),
-        "destination origin not authorized"
-    );
+        "destination origin not authorized",
+    )?;
     Ok(u)
 }
 pub async fn fetch(policy: &Policy, url: &str) -> Result<Vec<u8>> {
@@ -78,13 +95,15 @@ async fn fetch_response(policy: &Policy, request: reqwest::RequestBuilder) -> Re
     let mut response = request
         .send()
         .await
-        .map_err(|_| anyhow::anyhow!("source_fetch_failed"))?;
+        .map_err(|error| fetch_error(error, "source_fetch_failed"))?;
     network::log_http(&response, "agent_import");
-    ensure!(
-        response.status().is_success(),
-        "source_http_{}",
-        response.status().as_u16()
-    );
+    if !response.status().is_success() {
+        tracing::warn!(
+            status = response.status().as_u16(),
+            "source import HTTP response rejected"
+        );
+        anyhow::bail!("source_http_{}", response.status().as_u16());
+    }
     if response
         .content_length()
         .is_some_and(|n| n > policy.max_spec_bytes as u64)
@@ -100,7 +119,7 @@ async fn fetch_response(policy: &Policy, request: reqwest::RequestBuilder) -> Re
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| anyhow::anyhow!("source_read_failed"))?
+        .map_err(|error| fetch_error(error, "source_read_failed"))?
     {
         if chunk.len() > policy.max_spec_bytes.saturating_sub(bytes.len()) {
             return Err(crate::limits::exceeded(
@@ -113,6 +132,22 @@ async fn fetch_response(policy: &Policy, request: reqwest::RequestBuilder) -> Re
         bytes.extend_from_slice(&chunk);
     }
     Ok(bytes)
+}
+
+fn fetch_error(error: reqwest::Error, stage: &'static str) -> anyhow::Error {
+    if error.is_timeout() {
+        tracing::warn!(
+            stage,
+            connection = error.is_connect(),
+            "source import transport timeout; operation rejected"
+        );
+    } else {
+        tracing::warn!(
+            stage,
+            "source import transport failed or destination rejected"
+        );
+    }
+    anyhow::anyhow!(stage)
 }
 #[cfg(test)]
 pub async fn fixture_fetch(policy: &Policy, url: &str) -> Result<Vec<u8>> {
@@ -155,14 +190,14 @@ fn inspect(
                 let reference = r
                     .as_str()
                     .filter(|r| r.starts_with("#/"))
-                    .context("external_reference_unsupported")?;
+                    .ok_or_else(|| rejected("external_reference_unsupported"))?;
                 let target = root
                     .pointer(&reference[1..])
-                    .context("unresolved_reference")?;
-                ensure!(
+                    .ok_or_else(|| rejected("unresolved_reference"))?;
+                require(
                     seen.insert(reference.to_owned()),
-                    "cyclic_reference_unsupported"
-                );
+                    "cyclic_reference_unsupported",
+                )?;
                 inspect(root, target, depth + 1, nodes, bytes, seen)?;
                 seen.remove(reference);
             }
@@ -204,20 +239,30 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
         )
         .context("spec_too_large"));
     }
-    ensure!(
+    crate::limits::check(
+        c.name.len(),
+        64,
+        "invalid source name",
+        "hardcoded_source_name_bytes",
+    )?;
+    require(
         !c.name.is_empty()
-            && c.name.len() <= 64
             && c.name
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
-        "invalid source name"
-    );
+        "invalid source name",
+    )?;
     let spec = endpoint(policy, &c.spec_url)?;
     let root = parse_document(bytes)?;
     let paths = root["paths"]
         .as_object()
         .context("OpenAPI paths required")?;
-    ensure!(paths.len() <= 10000, "operation_count_limit");
+    crate::limits::check(
+        paths.len(),
+        10000,
+        "operation_count_limit",
+        "hardcoded_path_count",
+    )?;
     let (base, base_url) = resolve_base(policy, c, &spec, &root)?;
     validate_paths(paths)?;
     let tools = selected_tools(c, id, &root, &base)?;
@@ -227,7 +272,8 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
 
 // Inspect reference expansion before deriving any catalog from untrusted JSON.
 fn parse_document(bytes: &[u8]) -> Result<Value> {
-    let root: Value = serde_json::from_slice(bytes).context("invalid OpenAPI JSON")?;
+    let root: Value =
+        serde_json::from_slice(bytes).map_err(|_| rejected("invalid OpenAPI JSON"))?;
     inspect(
         &root,
         &root,
@@ -236,12 +282,12 @@ fn parse_document(bytes: &[u8]) -> Result<Value> {
         &mut 0,
         &mut std::collections::BTreeSet::new(),
     )?;
-    ensure!(
+    require(
         root["openapi"]
             .as_str()
             .is_some_and(|v| v.starts_with("3.")),
-        "OpenAPI 3 JSON required"
-    );
+        "OpenAPI 3 JSON required",
+    )?;
     Ok(root)
 }
 
@@ -262,10 +308,10 @@ fn resolve_base(
             .to_string()
     };
     let base_url = endpoint(policy, &base)?;
-    ensure!(
+    require(
         base_url.query().is_none(),
-        "base_url must not contain query parameters"
-    );
+        "base_url must not contain query parameters",
+    )?;
     Ok((base, base_url))
 }
 
@@ -273,11 +319,11 @@ fn validate_paths(paths: &serde_json::Map<String, Value>) -> Result<()> {
     // Do not silently ignore per-operation server changes supported differently by providers.
     let mut operation_count = 0;
     for item in paths.values() {
-        ensure!(item.get("$ref").is_none(), "path references unsupported");
-        ensure!(
+        require(item.get("$ref").is_none(), "path references unsupported")?;
+        require(
             item.get("servers").is_none(),
-            "per-path servers unsupported"
-        );
+            "per-path servers unsupported",
+        )?;
         if let Some(obj) = item.as_object() {
             for (method, op) in obj {
                 if [
@@ -286,11 +332,16 @@ fn validate_paths(paths: &serde_json::Map<String, Value>) -> Result<()> {
                 .contains(&method.as_str())
                 {
                     operation_count += 1;
-                    ensure!(operation_count <= 10000, "operation_count_limit");
-                    ensure!(
+                    crate::limits::check(
+                        operation_count,
+                        10000,
+                        "operation_count_limit",
+                        "hardcoded_operation_count",
+                    )?;
+                    require(
                         op.get("servers").is_none(),
-                        "per-operation servers unsupported"
-                    );
+                        "per-operation servers unsupported",
+                    )?;
                 }
             }
         }
@@ -334,17 +385,20 @@ fn validate_tools(
     base: &str,
     base_url: &reqwest::Url,
 ) -> Result<()> {
-    ensure!(!tools.is_empty(), "no tools selected");
-    ensure!(
-        tools.len() <= policy.max_tools_per_source,
-        "source_tool_limit"
-    );
+    require(!tools.is_empty(), "no tools selected")?;
     for tool in tools {
-        ensure!(tool.name.len() <= 128, "tool_name_too_long");
-        ensure!(
-            serde_json::to_vec(&tool.input_schema)?.len() <= 262144,
-            "schema_size_limit"
-        );
+        crate::limits::check(
+            tool.name.len(),
+            512,
+            "tool_name_too_long",
+            "hardcoded_tool_name_bytes",
+        )?;
+        crate::limits::check(
+            serde_json::to_vec(&tool.input_schema)?.len(),
+            262144,
+            "schema_size_limit",
+            "hardcoded_schema_bytes",
+        )?;
         let url = if tool.path.starts_with("https://") || tool.path.starts_with("http://") {
             tool.path.clone()
         } else {
@@ -355,13 +409,13 @@ fn validate_tools(
             )
         };
         let url = endpoint(policy, &url)?;
-        ensure!(
+        require(
             url.origin() == base_url.origin()
                 || policy
                     .allowed_origins
                     .contains(&url.origin().ascii_serialization()),
-            "cross_origin_operation_rejected"
-        );
+            "cross_origin_operation_rejected",
+        )?;
     }
     Ok(())
 }

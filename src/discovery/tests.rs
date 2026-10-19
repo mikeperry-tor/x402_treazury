@@ -234,16 +234,10 @@ fn import_pipeline_preserves_origin_checks_and_validation_before_selection() {
             "{error}"
         );
     }
-    // Tool-count limits apply to the selected inventory, after document validation.
-    p.max_tools_per_source = 1;
+    // Selection still restricts the inventory without a per-source quota.
     assert_eq!(build(&p, &c, &spec()).unwrap().tools.len(), 1);
     c.selection.include.clear();
-    assert!(
-        build(&p, &c, &spec())
-            .unwrap_err()
-            .to_string()
-            .contains("source_tool_limit")
-    );
+    assert_eq!(build(&p, &c, &spec()).unwrap().tools.len(), 2);
 
     let cross_origin = json!({"openapi":"3.0.3", "servers":[{"url":"https://api.example.com"}],
         "paths":{"https://other.example.com/read":{"get":{}}}});
@@ -512,6 +506,22 @@ async fn public_transport_child() {
             .revision,
         2
     );
+    // On-demand listeners retain the same saved tools despite this eager-list quota.
+    config_value["servers"]["writer"]
+        .as_table_mut()
+        .unwrap()
+        .insert("discover_on_demand".into(), toml::Value::Boolean(true));
+    std::fs::write(&config, toml::to_string(&config_value).unwrap()).unwrap();
+    maintain_cli(&config, "writer", id, true).await.unwrap();
+    assert_eq!(
+        store::Store::open(&file, &[])
+            .unwrap()
+            .load()
+            .unwrap()
+            .records[id]
+            .revision,
+        3
+    );
     task.abort();
 }
 
@@ -725,22 +735,7 @@ async fn registry_persistence_is_operator_controlled_and_revocation_is_local() {
 }
 
 #[tokio::test]
-async fn quota_races_never_publish_partial_sources() {
-    let mut p = policy(None);
-    p.max_sources = 1;
-    let m = manager_with(p, listeners(false)).await;
-    seed(&m).await;
-    let args = json!({"spec_url":"https://api.example.com/openapi.json"});
-    let (a, b) = tokio::join!(
-        m.invoke("writer", "x402_treazury_source_add", args.clone()),
-        m.invoke("reader", "x402_treazury_source_add", args)
-    );
-    assert_ne!(a.is_ok(), b.is_ok());
-    assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
-    assert_eq!(
-        m.catalog.read().views.values().map(Vec::len).sum::<usize>(),
-        2
-    );
+async fn eager_endpoint_quota_never_publishes_partial_sources() {
     let mut p = policy(None);
     p.max_tools_per_server = 1;
     let m = manager_with(p, listeners(false)).await;
@@ -2236,4 +2231,78 @@ async fn accepted_static_publication_outlives_cancelled_waiter() {
             .iter()
             .any(|b| b.tool.name == "static_read")
     );
+}
+
+#[test]
+fn source_policy_removes_registration_and_source_tool_quotas() {
+    assert_eq!(policy(None).max_tools_per_server, 512);
+    for removed in ["max_sources", "max_tools_per_source"] {
+        let mut value = json!({"wallet":"shared"});
+        value[removed] = json!(1);
+        let error = serde_json::from_value::<policy::Policy>(value)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains(removed), "{error}");
+    }
+    let serialized = serde_json::to_value(policy(None)).unwrap();
+    assert!(serialized.get("max_sources").is_none());
+    assert!(serialized.get("max_tools_per_source").is_none());
+}
+
+#[tokio::test]
+async fn more_than_sixteen_sources_and_one_hundred_tools_are_accepted() {
+    let m = manager(None).await;
+    for index in 0..17 {
+        let url = format!("https://api.example.com/catalog-{index}.json");
+        let mut doc = spec();
+        if index == 0 {
+            doc["paths"] = json!({});
+            for tool in 0..101 {
+                doc["paths"][format!("/tool-{tool}")] = json!({"get":{}});
+            }
+        }
+        let cell = OnceCell::new();
+        cell.set(Fetched {
+            completed: Instant::now(),
+            result: Ok(Arc::new(serde_json::to_vec(&doc).unwrap())),
+        })
+        .unwrap();
+        m.fetches
+            .lock()
+            .unwrap()
+            .insert(url.clone(), Arc::new(cell));
+        m.invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"spec_url":url,"name":format!("source-{index}")}),
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), 17);
+    assert_eq!(m.catalog.read().views["writer"].len(), 101 + 16 * 2);
+}
+
+#[tokio::test]
+async fn on_demand_endpoint_bypasses_quota_on_add_restart_and_static_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("registry.sqlite");
+    let mut p = policy(Some(file));
+    p.max_tools_per_server = 1;
+    let mut configured = listeners(true);
+    configured.get_mut("writer").unwrap().discover_on_demand = true;
+    let m = manager_with(p.clone(), configured.clone()).await;
+    add(&m, "on-demand", "", "").await;
+    assert_eq!(m.catalog.read().views["writer"].len(), 2);
+    let base = m.static_snapshot().await.unwrap();
+    m.replace_static(base.generation, base).await.unwrap();
+    assert_eq!(m.catalog.read().views["writer"].len(), 2);
+    drop(m);
+    let restored = manager_with(p, configured).await;
+    assert_eq!(restored.catalog.read().views["writer"].len(), 2);
+    let found = restored
+        .invoke("writer", "x402_treazury_tools_search", json!({}))
+        .await
+        .unwrap();
+    assert_eq!(found["items"].as_array().unwrap().len(), 2);
 }

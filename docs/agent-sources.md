@@ -221,17 +221,25 @@ Descriptions and schemas are not silently truncated.
 
 ## Limits and network policy
 
-Default operator limits are 16 registrations across the deployment, 100 tools per
-source, 200 dynamic tools per endpoint and 32 MiB per specification. These defaults need not appear in ordinary configuration. Advanced overrides
-live in `[source_management]`: `max_sources`, `max_tools_per_source`,
-`max_tools_per_server`, `max_spec_bytes`, `max_response_bytes`, `max_help_bytes`,
+The default dynamic-tool quota is 512 tools per endpoint, controlled by
+`[source_management].max_tools_per_server`. Endpoints with
+`discover_on_demand = true` are exempt because API tools are omitted from their
+advertised inventory. The exemption applies to registration, startup restoration,
+static catalog publication and operator refresh. Eager endpoints count dynamic
+tools after endpoint filters; static tools do not consume this quota.
+There is no registration-count or per-source tool-count quota. The removed
+`max_sources` and `max_tools_per_source` settings are rejected as unknown fields;
+remove them from existing configuration.
+
+Specifications default to 32 MiB. Other advanced overrides in
+`[source_management]` are `max_spec_bytes`, `max_response_bytes`, `max_help_bytes`,
 `read_timeout_seconds`, and `allowed_origins`. The optional read-inactivity
 override replaces the network default (60 seconds in either transport). Spec and
 API responses have no total HTTP download deadline. `fetch_timeout_seconds` is a
 legacy alias.
 
-Source counts are bounded to 1024, tool counts to 10,000 and specifications to 64 MiB. Disabled registrations still occupy quota. Management
-requests have a 64 KiB limit; forwarded API calls retain normal API behavior. Import
+The endpoint tool quota accepts 1–10,000 and specifications up to 64 MiB.
+Management requests have a 64 KiB limit; forwarded API calls retain normal API behavior. Import
 concurrency is four process-wide and one per endpoint; at most 16 mutation jobs can
 be outstanding. Aliases share an active fetch without each consuming a permit.
 Active fetches cannot be evicted by retention age or completed-cache churn; a full
@@ -242,10 +250,16 @@ checks are serialized, so concurrent additions cannot publish partial sources.
 
 JSON/reference traversal remains bounded to depth 64, 500,000 expanded nodes and
 64 MiB of expanded string/key content. Import rejects over 10,000 operations,
-generated schemas above 256 KiB, names above 128 bytes, external/unresolved/cyclic
+generated schemas above 256 KiB, names above 512 bytes, external/unresolved/cyclic
 references, and per-path/operation server overrides. Accepted live documents total
 at most 128 MiB; serialized registry state is at most 256 MiB. Retained mutation
-receipts are bounded to 10,000. Limits reject visibly rather than trimming documents.
+receipts and stored registration records (including removed records) are bounded to
+10,000 on registry load; new additions also check receipt capacity. Resource-limit
+rejections emit WARN diagnostics with safe counts, thresholds and adjustment
+settings where applicable. Import saturation, transport timeouts and rejected destination/reference/server
+policies also warn.
+Limits reject visibly rather than trimming documents; warnings never include
+submitted names, URLs, schemas or upstream prose.
 
 Agent destinations require public HTTPS without userinfo or fragments. Local/special
 addresses, private names, redirects and local files are rejected. Direct connections
