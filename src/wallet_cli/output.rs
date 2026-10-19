@@ -114,14 +114,24 @@ pub(super) fn status(status: &Status) -> String {
             pool.funding_degraded
         )
         .unwrap();
-        writeln!(
-            text,
-            "    Wallets: {} retained, {} retired; reserve claims: {}",
-            pool.retained_wallets,
-            pool.retired_wallets,
-            pool.reserve_claims.len()
-        )
-        .unwrap();
+        for wallet in pool
+            .addresses
+            .iter()
+            .filter(|wallet| wallet.role != "RETIRED")
+        {
+            let balance = Some(wallet.confirmed_balance.as_str())
+                .filter(|value| !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
+                .and_then(|value| alloy_primitives::U256::from_str_radix(value, 10).ok())
+                .and_then(|value| alloy_primitives::utils::format_units(value, 6).ok())
+                .map_or_else(|| "unknown".into(), |value| format!("{value} USDC"));
+            writeln!(text, "    {}: estimated balance: {balance}", wallet.address).unwrap();
+        }
+        let retired = pool
+            .addresses
+            .iter()
+            .filter(|wallet| wallet.role == "RETIRED")
+            .count();
+        writeln!(text, "    Retired wallets: {retired}").unwrap();
     }
     writeln!(
         text,

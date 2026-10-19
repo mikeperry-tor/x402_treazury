@@ -23,6 +23,9 @@ x402_treazury wallet sync --config examples/deployments/privacy.local.toml
 `wallet init` prints the primary ZEC receive address and a prompt to send ZEC to
 it. `wallet sync` and `wallet status` show readable summaries by default, with
 saved balance observations distinguished from current spending authority.
+For each managed wallet group, the human summary lists every non-retired wallet's
+address and saved estimated balance in USDC (or `unknown`), followed by the number
+of retired wallets.
 Human status also shows the primary shielded ZEC receive address from the encrypted
 snapshot when the wallet key is available. If the key or snapshot cannot be read,
 status still shows saved metadata and explicitly marks the address unavailable.
