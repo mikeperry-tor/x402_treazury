@@ -43,6 +43,51 @@ fn bad(output: Output) -> String {
     assert!(!error.contains("panicked at"));
     error
 }
+
+#[tokio::test]
+async fn source_inspection_lists_saved_tools_without_tokens_catalog_fetches_or_registry_writes() {
+    use sha2::{Digest, Sha256};
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    // Inspection must not apply current admission policy or connect to this URL.
+    std::fs::write(dir.join("registry.toml"), "version=1\nservers={}\n[source_management]\nwallet='missing'\nregistry_file='registry.sqlite'\nallowed_origins=['https://different.example.com']\n").unwrap();
+    let id = "00000000-0000-0000-0000-000000000001";
+    let document = json!({"openapi":"3.0.3","servers":[{"url":"https://offline.invalid"}],"paths":{"/read":{"get":{"description":"PRIVATE_SCHEMA_SENTINEL"}},"/write":{"post":{}}}}).to_string();
+    let record = json!({"id":id,"owner":"toolbox","candidate":{"name":"demo","spec_url":"https://offline.invalid/openapi.json","lifetime":"persistent"},"targets":["toolbox"],"revision":2,"document":document,"hash":format!("{:x}",Sha256::digest(document.as_bytes())),"format":1,"accepted_at":1,"updated_at":2,"removed":false,"disabled":null});
+    let db = rusqlite::Connection::open(dir.join("registry.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE snapshot(id INTEGER PRIMARY KEY,json TEXT NOT NULL); PRAGMA user_version=1;",
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO snapshot VALUES(1,?1)",
+        [json!({"generation":2,"records":{id:record},"receipts":{}}).to_string()],
+    )
+    .unwrap();
+    let before = std::fs::read(dir.join("registry.sqlite")).unwrap();
+    let output = run(
+        dir,
+        &["sources", "inspect", "--config", "registry.toml"],
+        &[],
+    )
+    .await;
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE_SCHEMA_SENTINEL"));
+    let shown = good(output);
+    assert_eq!(shown["generation"], 2);
+    assert_eq!(shown["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(shown["sources"][0]["id"], id);
+    assert_eq!(
+        shown["sources"][0]["tools"],
+        json!([
+            {"name":"dyn_00000000000000000000000000000001_read","method":"GET","path":"/read"},
+            {"name":"dyn_00000000000000000000000000000001_write","method":"POST","path":"/write"}
+        ])
+    );
+    assert_eq!(std::fs::read(dir.join("registry.sqlite")).unwrap(), before);
+    assert!(!dir.join("registry.sqlite.owner.lock").exists());
+    assert!(!dir.join("state").exists());
+}
+
 #[tokio::test]
 async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive() {
     let tmp = tempfile::tempdir().unwrap();

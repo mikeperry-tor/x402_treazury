@@ -300,6 +300,18 @@ Registry files and sidecars cannot alias configuration or treasury paths.
 `config show` inspects configuration without opening registry state or secrets.
 `sources inspect --config FILE` reads saved registrations and never creates a missing
 registry. It does not require listener tokens, wallet keys or catalog requests.
+Each source includes `tools`, an array of generated `name`, HTTP `method` and
+`path` entries rebuilt from its accepted specification and saved selection.
+Disabled sources retain their saved inventory; removed sources have an empty list
+because removal clears the specification. An invalid saved catalog reports
+`tools: null` and `tools_error: "saved_catalog_invalid"` without hiding other
+sources or exposing specification/error prose. Existing registration metadata is
+preserved. Inspection can run while serving and does not acquire registry ownership.
+
+This is the saved registration inventory, before current listener filters; it does
+not assert that a tool is presently available or funded. Use
+`x402_treazury_tools_search` on the owning listener for its loaded tools, complete
+schemas and callable references.
 
 Stop serving before operator maintenance; exclusive registry ownership is enforced:
 

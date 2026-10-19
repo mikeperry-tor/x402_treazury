@@ -265,7 +265,7 @@ pub fn build(policy: &Policy, c: &Candidate, id: &str, bytes: &[u8]) -> Result<B
     )?;
     let (base, base_url) = resolve_base(policy, c, &spec, &root)?;
     validate_paths(paths)?;
-    let tools = selected_tools(c, id, &root, &base)?;
+    let tools = selected_tools(c, id, &root)?;
     validate_tools(policy, &tools, &base, &base_url)?;
     Ok(Built { tools, base })
 }
@@ -349,10 +349,15 @@ fn validate_paths(paths: &serde_json::Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
-fn selected_tools(c: &Candidate, id: &str, root: &Value, base: &str) -> Result<Vec<ToolSpec>> {
+/// Rebuild the saved registration's inventory without current admission policy,
+/// listener filtering, transports or payment credentials.
+pub(super) fn saved_tools(c: &Candidate, id: &str, bytes: &[u8]) -> Result<Vec<ToolSpec>> {
+    selected_tools(c, id, &parse_document(bytes)?)
+}
+
+fn selected_tools(c: &Candidate, id: &str, root: &Value) -> Result<Vec<ToolSpec>> {
     let cfg = Config {
         spec: c.spec_url.clone(),
-        base_url: Some(base.to_owned()),
         include: c.selection.include.clone(),
         exclude: c.selection.exclude.clone(),
         tags: c.selection.tags.clone(),

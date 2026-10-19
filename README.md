@@ -400,12 +400,18 @@ workflow are documented in [agent source management](docs/agent-sources.md#agent
 With `registry_file` set, accepted specifications are saved and restored on restart;
 without it, additions last only until the process exits.
 
-To view all saved API sources currently saved in `registry_file`:
+To view saved API sources and each source's tool names, HTTP methods and paths:
 
 ```sh
 target/release/x402_treazury sources inspect \
   --config path/to/deployment_config.toml
 ```
+
+Each source's `tools` list is rebuilt offline from its saved specification and
+selection, before current listener filters. Disabled sources still show their
+saved tools; removed sources have an empty list. An unreadable saved catalog has
+`tools: null` and a `tools_error` instead. For current callable tools and full
+schemas, use `x402_treazury_tools_search` on the owning MCP endpoint.
 
 Saved API specifications do
 not automatically follow vendor updates; they must be updated manually.

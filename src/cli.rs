@@ -74,7 +74,7 @@ pub enum Sources {
         #[arg(long)]
         source_id: String,
     },
-    /// Read persisted agent-added sources without fetching or modifying them.
+    /// List persisted agent-added sources and saved tools without fetching or modifying them.
     Inspect {
         #[arg(long, alias = "meta-config")]
         config: PathBuf,
