@@ -1,0 +1,53 @@
+# Synchronous x402 research subset of the vendor's mixed-protocol OpenAPI.
+spec = "https://vaaya.ai/openapi.json"
+name = "Vaaya"
+base_url = "https://vaaya.ai"
+prefix = "vaaya"
+include = ["/api/run/vaaya", "/api/run"]
+include_operations = [
+  "POST /api/run/vaaya/onesearch",
+  "POST /api/run/firecrawl/scrape",
+  "POST /api/run/firecrawl/map",
+  "POST /api/run/firecrawl/search",
+  "POST /api/run/serper/search",
+  "POST /api/run/serper/news",
+  "POST /api/run/edgar/fulltext",
+  "POST /api/run/edgar/filings",
+  "POST /api/run/edgar/document",
+  "POST /api/run/edgar/entities",
+  "POST /api/run/edgar/concept",
+  "POST /api/run/edgar/index",
+  "POST /api/run/courtlistener/cases",
+  "POST /api/run/courtlistener/dockets",
+  "POST /api/run/propublica/nonprofit_search",
+  "POST /api/run/propublica/nonprofit",
+  "POST /api/run/wayback/snapshots",
+  "POST /api/run/wayback/available",
+  "POST /api/run/wayback/fetch",
+  "POST /api/run/uspto/patents",
+  "POST /api/run/uspto/assignees",
+  "POST /api/run/gdelt/news",
+  "POST /api/run/gdelt/timeline",
+  "POST /api/run/fedreg/search",
+  "POST /api/run/fedreg/document",
+  "POST /api/run/fundable/company",
+  "POST /api/run/fundable/company-search",
+  "POST /api/run/fundable/investor-search",
+  "POST /api/run/signalbase/companies",
+  "POST /api/run/signalbase/funding",
+  "POST /api/run/signalbase/acquisitions",
+  "POST /api/run/signalbase/hiring",
+  "POST /api/run/signalbase/investors",
+  "POST /api/run/akta/product-reviews",
+  "POST /api/run/akta/headcount-trends",
+  "POST /api/run/akta/job-posts",
+  "POST /api/run/akta/social-posts",
+  "POST /api/run/theirstack/jobs",
+  "POST /api/run/theirstack/companies",
+  "POST /api/run/theirstack/technographics",
+  "POST /api/run/theirstack/tech-catalog",
+]
+pricing_key = "x-payment-info"
+probe_pricing = false
+help_url = "https://vaaya.ai/llms.txt"
+instructions_text = "Vaaya synchronous research: cited OneSearch, web search/scrape, public filings/courts/patents, company/funding intelligence and reviews. Treazury handles x402 USDC on Base without a Vaaya account or API key; MPP-only, async jobs, uploads, outreach, account state and payment forwarding are outside this selected toolset. Help describes a much broader account service. Send arguments as JSON body fields and preserve ok/data/charged_cents, partial results, source URLs and timestamps. Resolve legal entities/CIKs before combining EDGAR results; no autocomplete match does not prove an entity never registered. CourtListener RECAP coverage is incomplete; no hits are not proof of no litigation. Fundable company requires one of id/domain/linkedin/crunchbase; company-search requires one of name/domain/linkedin/crunchbase. Verify returned company identity: the vendor documents sampled entity mismatches and stale aggregate funding totals. TheirStack jobs requires a date or company condition, and technographics requires a company identifier even though schema required lists omit them; follow tool descriptions. TheirStack companies is advertised at $0.60, above the example company listener's $0.50 cap. All listed prices are estimates; live challenges and the configured payment cap govern signing. Treazury does not automatically download hosted assets or replay uncertain paid submissions."

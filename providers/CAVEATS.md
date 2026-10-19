@@ -2,8 +2,8 @@
 
 Use these notes alongside [provider definitions](README.md). Prices and vendor
 behavior describe the committed configuration and fixtures; live challenges remain
-authoritative. Tests pin 840 tool contracts across 20 providers and settings for all
-24 providers without contacting vendors.
+authoritative. Tests pin 966 tool contracts across 26 providers and settings for
+30 providers without contacting vendors.
 
 ## Reliability annotations
 
@@ -972,3 +972,95 @@ identity evidence. WHOIS, IP enrichment and reverse DNS largely overlap existing
 NetIntel/RelayShield selections; domain availability mostly serves naming work.
 The example company listener selects only `ipintel_ip_lookup` and
 `ipintel_satellite`, sharing its existing company wallet and payment cap.
+
+## newsgurus/provider.toml — News Gurus Intel API
+
+Uses `newsgurus/openapi.json`, a local OpenAPI projection of the vendor's
+`https://api.newsgurus.ai/x402/catalog`, with lazy vendor `llms.txt` help. It
+preserves all 49 catalog GET request contracts, descriptions, published prices
+and response examples. The provider selects 48 task-facing reads plus help;
+`/x402/agents/status` is omitted as a diagnostic. Prices use `x-payment-info`
+without startup probes. The vendor advertises x402 v2, USDC on Base; the payment
+challenge remains authoritative. No API key is required by this integration.
+
+The vendor's `/openapi.json` is already x402-focused, rather than a separate
+key-only inventory, but has only 39 paths: it substitutes sample `NVDA`, token
+and condition IDs for path templates, omits the eight fantasy and three
+`/api/v1` paid routes, and includes the catalog diagnostic. The x402 catalog is
+therefore the request source of truth. Its three `/api/v1` resources are
+explicitly sold via x402 despite also supporting subscriber credentials.
+The local projection copies Bazaar `pathParams`/`queryParams` properties and
+required lists into OpenAPI parameters; it uses each resource's actual GET
+method, never the generic Bazaar boilerplate's HEAD/DELETE alternatives. Refresh
+from `tests/fixtures/newsgurus_x402_catalog.json` and review the projection and
+full golden contract together; the regression compares every parameter schema.
+
+The guide still describes the legacy `X-PAYMENT` header alongside the v2 catalog;
+Treazury owns negotiation/signing. Free `/public/regime` and `/public/narratives`
+alternatives are advertised outside the selected paid catalog. Paid prices span
+$0.002–$5, with several sports/fantasy calls above the default $1 payment cap.
+No cap is raised for those tools. This is primarily derived trading intelligence,
+not a general news wire; keep confidence estimates, source dates and vendor
+opinions separate from primary evidence. The scoops example marks Business Wire
+coverage as `stub`; examples do not establish current freshness or completeness.
+
+Company candidates are `newsgurus_institutions_symbol` ($0.10: congressional
+trades and institutional 13F changes), `newsgurus_primary_scoops` ($0.02: primary
+filing/release snippets, but no company/ticker filter), and optionally
+`newsgurus_spaces_intel` ($0.02: ticker-filtered X Spaces summaries and quotes,
+with separately labeled `our_opinion`). Existing Otto/x402stock sources overlap
+filings/news; the $0.50 tearsheet is mainly a trading-signal bundle.
+
+## vaaya.toml — Vaaya
+
+Uses vendor `https://vaaya.ai/openapi.json` with an exact allowlist of 41
+synchronous research POST operations plus lazy `llms.txt` help. Selection covers
+OneSearch, web search/scrape, EDGAR, CourtListener, ProPublica, Wayback, USPTO,
+GDELT, Federal Register, Fundable, Signalbase, Akta and TheirStack. All selected
+operations are advertised in `https://vaaya.ai/.well-known/x402` and carry
+`x-payment-info` with x402, so no pricing probes are needed. Optional MPP offers
+on some selected actions do not require MPP when x402 is available.
+
+The captured discovery lists 252 entries but only 249 distinct x402 action URLs
+(AgentMail send/reply and Exa search are duplicated). OpenAPI has those 249 POST
+routes, two MPP-only generation routes and the catalog GET. The default omits
+MPP-only/media/upload workflows, asynchronous crawl/extract/render jobs,
+persistent memory/account state, messaging/purchases, the deprecated SuperSearch
+alias, and the $5 `vaaya/fetch` payment forwarder. The latter is labeled fixed
+price while its description promises actual variable upstream settlement.
+Do not infer executable x402 support from the broad account-oriented `llms.txt`.
+
+The request fixture and discovery snapshot were fetched directly from the live
+vendor after an operator firewall approval. The complete OpenAPI request fixture retains all paths,
+tags, descriptions, schemas and payment extensions, removing response
+documentation only. This does not qualify current availability, funded settlement
+or Tor behavior; refresh against live vendor documents when checking drift.
+
+The browser-cached catalog still listed Akta employee reviews and website
+traffic, but both were absent from the live OpenAPI and x402 discovery. They
+are excluded; cached documentation alone does not establish availability.
+
+Input guidance and data caveats:
+
+- Many schemas permit extra JSON fields; do not globally close the provider.
+  TheirStack jobs requires a date or company condition in prose, and
+  technographics requires an identifier despite omitted schema required lists.
+  TheirStack companies is $0.60, above the privacy example company's $0.50 cap.
+- Fundable company/company-search say supply one identifier but have no formal
+  `required`/`oneOf`. Preserve that schema and follow the tool guidance. The vendor
+  documents a sampled company mismatch (1/10) and lagging total funding values;
+  verify identity and favor dated source/deal evidence. Follow-up deals/investor-deals
+  actions mentioned in prose are absent from this x402 schema.
+- EDGAR autocomplete cannot prove an entity never registered, despite vendor
+  prose claiming it can. CourtListener RECAP has incomplete coverage; no hits
+  cannot establish absence of litigation. Preserve coverage and source dates.
+- Returned hosted assets remain links; the integration does not automatically
+  fetch them. Preserve the vendor's `ok`/`data`/`charged_cents` response envelope
+  and degraded/partial signals; uncertain paid submissions are not replayed.
+
+Strong company candidates are `vaaya_akta_headcount_trends` ($0.18),
+`vaaya_akta_product_reviews` ($0.11), `vaaya_courtlistener_cases` and
+`vaaya_courtlistener_dockets` ($0.01 each), and `vaaya_fundable_company_search` /
+`vaaya_fundable_company` ($0.01 / $0.10). Raw EDGAR and USPTO records add evidence
+beyond existing company summaries; Signalbase funding/acquisitions ($0.25 each)
+add event feeds. OneSearch ($0.05) is convenient but overlaps existing Exa search.

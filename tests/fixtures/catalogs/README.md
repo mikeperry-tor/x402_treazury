@@ -2,8 +2,8 @@
 
 The 14 legacy tool catalogs were captured from the independent Python implementation
 before its retirement and verified against Rust. Together with the reviewed Rust
-x402-list, Exa, OneShot, StableEnrich, Agent402 and AgentUtility catalogs, the 20 fixtures pin 840 tool names, full descriptions, schemas,
-methods, paths, parameter routes and help URLs. Settings snapshots cover all 24
+provider catalogs, the 26 fixtures pin 966 tool names, full descriptions, schemas,
+methods, paths, parameter routes and help URLs. Settings snapshots cover 30
 bundled providers, including those without offline specs.
 Local spec paths are relative to the repository root.
 
@@ -73,3 +73,20 @@ The IPIntel fixture captures `https://tools.ipintel.ai/openapi.json` using
 plus lazy help have a full golden contract. Focused tests preserve all prices,
 JSON body routing, DNS enums, nullable satellite dates and unrestricted validator
 JSON values, and exclude prospective methods/routes. No paid call was made.
+
+
+The NewsGurus raw x402 catalog fixture preserves the vendor's 49 resources. The
+locally authored `providers/newsgurus/openapi.json` projects its Bazaar path/query
+schemas and required lists into ordinary GET parameters and publishes static
+`x-payment-info` prices. A focused regression compares every parameter against
+the raw fixture. Its golden selects 48 task-facing reads plus help, omitting
+agent-status diagnostics and retaining real path templates instead of the
+vendor OpenAPI's concrete example ticker/token paths.
+
+The Vaaya fixture preserves all 252 paths from the live vendor OpenAPI,
+omitting response documentation via `snapshot_spec`. The companion discovery fixture
+contains 249 distinct x402 actions; the default golden pins 41 synchronous
+research calls plus help. Tests check discovery membership, x402 pricing,
+exclusions, JSON body filters and regex escaping. These fixtures do not qualify
+current availability, paid settlement or Tor access. See provider caveats for
+schema/prose gaps and data limitations.

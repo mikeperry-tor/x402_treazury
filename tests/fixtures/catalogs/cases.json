@@ -118,5 +118,15 @@
     "name": "ipintel",
     "provider": "providers/ipintel.toml",
     "spec": "tests/fixtures/ipintel_openapi.json"
+  },
+  {
+    "name": "newsgurus",
+    "provider": "providers/newsgurus/provider.toml",
+    "spec": null
+  },
+  {
+    "name": "vaaya",
+    "provider": "providers/vaaya.toml",
+    "spec": "tests/fixtures/vaaya_openapi.json"
   }
 ]

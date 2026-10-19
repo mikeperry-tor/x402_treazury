@@ -1,0 +1,60 @@
+# Local request projection of the vendor x402 catalog; see CAVEATS.md.
+spec = "openapi.json"
+name = "News Gurus Intel API"
+base_url = "https://api.newsgurus.ai"
+prefix = "newsgurus"
+include = ["/x402", ""]
+include_operations = [
+  "GET /x402/regime",
+  "GET /x402/brain/recent",
+  "GET /x402/brain/anomalies",
+  "GET /x402/signals/composite/{symbol}",
+  "GET /x402/signals/{symbol}",
+  "GET /x402/mlb/props-sheet",
+  "GET /x402/mlb/picks",
+  "GET /x402/options/flow",
+  "GET /x402/options/gex/{symbol}",
+  "GET /x402/darkpool/recent",
+  "GET /x402/congress/trades",
+  "GET /x402/futures/{symbol}",
+  "GET /x402/memecoin/verify/{mint}",
+  "GET /x402/memecoin/movers",
+  "GET /x402/stocks/rankings",
+  "GET /x402/prediction/markets",
+  "GET /x402/prediction/whales",
+  "GET /x402/prediction/whale-leaders",
+  "GET /x402/prediction/new-wallets",
+  "GET /x402/prediction/market-stats/{condition_id}",
+  "GET /x402/sentiment/{symbol}",
+  "GET /x402/macro/snapshot",
+  "GET /x402/btc/snapshot",
+  "GET /x402/institutions/recent",
+  "GET /x402/institutions/{symbol}",
+  "GET /x402/brain/decisions",
+  "GET /x402/brain/kelly",
+  "GET /x402/apex/signals",
+  "GET /x402/volatility/scan",
+  "GET /x402/launch-ta/{token}",
+  "GET /x402/satoshi/moves",
+  "GET /x402/narratives",
+  "GET /x402/sports/props",
+  "GET /x402/sports/edge-scan",
+  "GET /x402/tearsheet/{symbol}",
+  "GET /api/v1/signals",
+  "GET /api/v1/sentiment",
+  "GET /api/v1/brain/{symbol}",
+  "GET /x402/fantasy/draft-pick",
+  "GET /x402/fantasy/rankings",
+  "GET /x402/fantasy/draft-advisor",
+  "GET /x402/fantasy/lineup",
+  "GET /x402/fantasy/waivers",
+  "GET /x402/fantasy/trade",
+  "GET /x402/fantasy/streaming",
+  "GET /x402/fantasy/playoff",
+  "GET /x402/primary-scoops",
+  "GET /x402/spaces-intel",
+]
+pricing_key = "x-payment-info"
+probe_pricing = false
+help_url = "https://api.newsgurus.ai/llms.txt"
+instructions_text = "News Gurus x402 market intelligence: derived trading signals, institutional/congressional filings, primary-source scoops and X Spaces summaries, plus sports/fantasy research. Treazury handles x402 USDC on Base; no subscriber API key or manual payment headers are needed. Paths under /api/v1 are included only because the vendor explicitly advertises them in its x402 catalog. Supply ticker/token/path arguments separately; sample NVDA paths in the vendor OpenAPI are not fixed targets here. Preserve source timestamps, coverage, attribution and separately labeled our_opinion; vendor confidence scores and model output are not verified facts. primary_scoops is a broad feed without a company/ticker filter; spaces_intel supports ticker filtering. Public free regime/narratives alternatives exist outside this selected paid catalog. Advertised prices span $0.002-$5; some sports/fantasy calls exceed the default payment cap. Prices are estimates and the live challenge controls payment. Help covers the broader service. Do not automatically repeat uncertain paid submissions."

@@ -1,0 +1,1284 @@
+[
+  {
+    "name": "newsgurus_apex_signals",
+    "description": "News Gurus Intel API — APEX v10.2 confluence signals: symbol, long/short, score 0-5, entry, timeframe, momentum_surge. Example: BTC-USD long, score 4.0, entry 118250, 1H, momentum_surge 1. Five-source confluence (CLV, VSA, flow, CVDD, pivots) computed by the bot's live engine on crypto and equities; ?symbol= filter, ?limit= up to 50, newest first. Proprietary computation, no vendor passthrough. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/apex/signals",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "symbol": {
+          "description": "Optional symbol LIKE filter, e.g. BTC",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_api_v1_brain_symbol",
+    "description": "News Gurus Intel API — full SharedBrain intelligence context for one symbol: recent ideas, catalysts, and anomaly flags across 40+ data sources. Educational data, not financial advice. Cost: ~$0.02/call [spec].",
+    "method": "GET",
+    "path": "/api/v1/brain/{symbol}",
+    "input_schema": {
+      "properties": {
+        "symbol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "symbol": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_api_v1_sentiment",
+    "description": "News Gurus Intel API — aggregated market sentiment snapshot from social, news and options-flow sources, per symbol and market-wide. Educational data, not financial advice. Cost: ~$0.01/call [spec].",
+    "method": "GET",
+    "path": "/api/v1/sentiment",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_api_v1_signals",
+    "description": "News Gurus Intel API — market-wide active trading signals feed (all symbols, all signal types) with direction and confidence. Same data served to human subscribers; pay per call instead. Educational data, not financial advice. Cost: ~$0.01/call [spec].",
+    "method": "GET",
+    "path": "/api/v1/signals",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_brain_anomalies",
+    "description": "News Gurus Intel API — recent ANOMALY detections: pump/psyop mention spikes with no institutional confirmation, token rug precursors, coordinated wallet activity, data-integrity divergences. The bot's own risk filters, exposed as a feed. Educational data, not financial advice. Cost: ~$0.01/call [spec].",
+    "method": "GET",
+    "path": "/x402/brain/anomalies",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 10,
+          "maximum": 25,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_brain_decisions",
+    "description": "News Gurus Intel API — full LLM trade-reasoning chain: every routing decision with thesis, signal attribution, kelly_fraction, gate result and exit detail. Unique dataset: the AI's own trade logic, per decision. Optional ?symbol= / ?stage= filters. Educational data, not financial advice. Cost: ~$0.10/call [spec].",
+    "method": "GET",
+    "path": "/x402/brain/decisions",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 20,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stage": {
+          "description": "Optional stage filter",
+          "enum": [
+            "signal",
+            "gate",
+            "execution",
+            "exit",
+            "exited"
+          ],
+          "type": "string"
+        },
+        "symbol": {
+          "description": "Optional ticker filter",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "stage": "query",
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_brain_kelly",
+    "description": "News Gurus Intel API — Kelly-criterion outcome ledger: per-trade signal_type, pnl, r_multiple, kelly_fraction, narrative_score and llm_provider — the strategy's live performance history. Optional ?signal_type= filter for per-strategy slicing. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/brain/kelly",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "signal_type": {
+          "description": "Optional signal_type filter, e.g. options_flow",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "signal_type": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_brain_recent",
+    "description": "News Gurus Intel API — most recent cross-agent market intelligence ideas (institutional flow, options flow, on-chain, news catalysts) from a 40-source SharedBrain. Optional symbol filter, up to 25 ideas per call. X Space facts are included in ideas; our_opinion stays labeled and separate. Also returns top primary_scoops and spaces. Educational data, not financial advice. Cost: ~$0.005/call [spec].",
+    "method": "GET",
+    "path": "/x402/brain/recent",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 10,
+          "maximum": 25,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "symbol": {
+          "description": "Optional ticker filter, e.g. NVDA or BTC",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_btc_snapshot",
+    "description": "News Gurus Intel API — BTC one-call read: dormant/Satoshi-era wallet movement state, the five most recent dormant-wallet moves (BTC, USD value, years dormant), latest APEX BTC confluence signals and the market regime. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/btc/snapshot",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_congress_trades",
+    "description": "News Gurus Intel API — latest US congressional stock trades (STOCK Act): member, party, buy/sell, ticker, amount, dates. Example: R-TX member, Purchase NVDA, $15,001-$50,000, traded 2026-07-08, disclosed 2026-07-12. Optional ?symbol= filter. Per-call alternative to $25-75/mo congressional-data subscriptions; public disclosure data, no vendor licensing. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/congress/trades",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "symbol": {
+          "description": "Optional ticker filter",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_darkpool_recent",
+    "description": "News Gurus Intel API — recent dark-pool prints as derived signals: symbol, direction, strength, confidence, size_bucket. Example: AAPL bullish, strength 0.6, size_bucket large, 1D. Block/large/mid/small buckets flag institutional-scale accumulation or distribution without redistributing raw notional or price data. Lookback ?hours= (default 48). Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/darkpool/recent",
+    "input_schema": {
+      "properties": {
+        "hours": {
+          "default": 48,
+          "maximum": 168,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "hours": "query",
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_fantasy_draft_advisor",
+    "description": "News Gurus Intel API — live draft-room advisor (poll once per pick). Returns VBD pick recommendation with positional need analysis. Higher per-call price reflects real-time draft context. Params: sport, scoring_system, pick_number, total_rounds, total_teams. Advisory only. Educational data, not financial advice. Cost: ~$3/call [spec].",
+    "method": "GET",
+    "path": "/x402/fantasy/draft-advisor",
+    "input_schema": {
+      "properties": {
+        "pick_number": {
+          "type": "integer"
+        },
+        "scoring_system": {
+          "type": "string"
+        },
+        "sport": {
+          "type": "string"
+        },
+        "total_rounds": {
+          "type": "integer"
+        },
+        "total_teams": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pick_number",
+        "scoring_system",
+        "sport",
+        "total_rounds",
+        "total_teams"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "pick_number": "query",
+      "scoring_system": "query",
+      "sport": "query",
+      "total_rounds": "query",
+      "total_teams": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_fantasy_draft_pick",
+    "description": "News Gurus Intel API — fantasy draft-pick recommendation using Value-Based Drafting (VBD). Returns best available player by position, confidence, and roster need. Advisory only — the user clicks the pick. Params: sport, scoring_system, pick_number, total_rounds, total_teams. Educational data, not financial advice. Cost: ~$2/call [spec].",
+    "method": "GET",
+    "path": "/x402/fantasy/draft-pick",
+    "input_schema": {
+      "properties": {
+        "pick_number": {
+          "type": "integer"
+        },
+        "scoring_system": {
+          "type": "string"
+        },
+        "sport": {
+          "type": "string"
+        },
+        "total_rounds": {
+          "type": "integer"
+        },
+        "total_teams": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pick_number",
+        "scoring_system",
+        "sport",
+        "total_rounds",
+        "total_teams"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "pick_number": "query",
+      "scoring_system": "query",
+      "sport": "query",
+      "total_rounds": "query",
+      "total_teams": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_fantasy_lineup",
+    "description": "News Gurus Intel API — daily/weekly lineup optimizer (start/sit). Assigns starters and bench by projected pts, flagging bye weeks, injuries, and back-to-backs. Params: sport, scoring_system, roster_player_ids (comma-sep), game_date. Advisory only. Educational data, not financial advice. Cost: ~$1.50/call [spec].",
+    "method": "GET",
+    "path": "/x402/fantasy/lineup",
+    "input_schema": {
+      "properties": {
+        "game_date": {
+          "type": "string"
+        },
+        "roster_player_ids": {
+          "type": "string"
+        },
+        "scoring_system": {
+          "type": "string"
+        },
+        "sport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "game_date",
+        "roster_player_ids",
+        "scoring_system",
+        "sport"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "game_date": "query",
+      "roster_player_ids": "query",
+      "scoring_system": "query",
+      "sport": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_fantasy_playoff",
+    "description": "News Gurus Intel API — playoff-week schedule optimizer: ranks rostered players by NG playoff expected pts (projected pts × games in window) and surfaces waiver targets with favorable playoff schedules. Params: sport, scoring_system, roster_player_ids (comma-sep), playoff_weeks (comma-sep ints). Advisory only. Educational data, not financial advice. Cost: ~$2/call [spec].",
+    "method": "GET",
+    "path": "/x402/fantasy/playoff",
+    "input_schema": {
+      "properties": {
+        "available_fa_ids": {
+          "type": "string"
+        },
+        "playoff_weeks": {
+          "type": "string"
+        },
+        "roster_player_ids": {
+          "type": "string"
+        },
+        "scoring_system": {
+          "type": "string"
+        },
+        "sport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "playoff_weeks",
+        "roster_player_ids",
+        "scoring_system",
+        "sport"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "available_fa_ids": "query",
+      "playoff_weeks": "query",
+      "roster_player_ids": "query",
+      "scoring_system": "query",
+      "sport": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_fantasy_rankings",
+    "description": "News Gurus Intel API — fantasy player rankings exportable to Sleeper, Yahoo, ESPN, and Underdog. Sorted by NG projected pts. Params: sport, scoring_system, platform, limit. Advisory only. Educational data, not financial advice. Cost: ~$1/call [spec].",
+    "method": "GET",
+    "path": "/x402/fantasy/rankings",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "scoring_system": {
+          "type": "string"
+        },
+        "sport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "scoring_system",
+        "sport"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "platform": "query",
+      "scoring_system": "query",
+      "sport": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_fantasy_streaming",
+    "description": "News Gurus Intel API — streaming-slot planner: NBA games-played maximization, NHL goalie streaming (warns starter_unconfirmed), NFL bye coverage. Params: sport, scoring_system, available_player_ids, slot_position, window_days. Advisory only. Educational data, not financial advice. Cost: ~$1/call [spec].",
+    "method": "GET",
+    "path": "/x402/fantasy/streaming",
+    "input_schema": {
+      "properties": {
+        "available_player_ids": {
+          "type": "string"
+        },
+        "scoring_system": {
+          "type": "string"
+        },
+        "slot_position": {
+          "type": "string"
+        },
+        "sport": {
+          "type": "string"
+        },
+        "window_days": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "available_player_ids",
+        "scoring_system",
+        "slot_position",
+        "sport"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "available_player_ids": "query",
+      "scoring_system": "query",
+      "slot_position": "query",
+      "sport": "query",
+      "window_days": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_fantasy_trade",
+    "description": "News Gurus Intel API — trade analyzer: returns verdict (ACCEPT/COUNTER/DECLINE), net_value_change, and positional need analysis for any proposed trade. Params: sport, scoring_system, give_player_ids (comma-sep), get_player_ids (comma-sep). Advisory only. Educational data, not financial advice. Cost: ~$2/call [spec].",
+    "method": "GET",
+    "path": "/x402/fantasy/trade",
+    "input_schema": {
+      "properties": {
+        "get_player_ids": {
+          "type": "string"
+        },
+        "give_player_ids": {
+          "type": "string"
+        },
+        "scoring_system": {
+          "type": "string"
+        },
+        "sport": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "get_player_ids",
+        "give_player_ids",
+        "scoring_system",
+        "sport"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "get_player_ids": "query",
+      "give_player_ids": "query",
+      "scoring_system": "query",
+      "sport": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_fantasy_waivers",
+    "description": "News Gurus Intel API — waiver-wire / free-agent pickups ranked by NG ROS value. Filters out injured players. Params: sport, scoring_system, available_player_ids (comma-sep), weeks_remaining, target_positions (optional). Advisory only. Educational data, not financial advice. Cost: ~$1/call [spec].",
+    "method": "GET",
+    "path": "/x402/fantasy/waivers",
+    "input_schema": {
+      "properties": {
+        "available_player_ids": {
+          "type": "string"
+        },
+        "scoring_system": {
+          "type": "string"
+        },
+        "sport": {
+          "type": "string"
+        },
+        "target_positions": {
+          "type": "string"
+        },
+        "weeks_remaining": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "available_player_ids",
+        "scoring_system",
+        "sport"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "available_player_ids": "query",
+      "scoring_system": "query",
+      "sport": "query",
+      "target_positions": "query",
+      "weeks_remaining": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_futures_symbol",
+    "description": "News Gurus Intel API — crypto futures/derivatives read for one symbol (BTC, ETH, SOL, XRP...): latest APEX multi-source confluence signals (direction, score, momentum surge, timeframe) plus the current market regime. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/futures/{symbol}",
+    "input_schema": {
+      "properties": {
+        "symbol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "symbol": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_help",
+    "description": "Extended documentation for all newsgurus_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other newsgurus_* tools when unsure how to use them.",
+    "method": "GET",
+    "path": "https://api.newsgurus.ai/llms.txt",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false,
+    "help_url": "https://api.newsgurus.ai/llms.txt"
+  },
+  {
+    "name": "newsgurus_institutions_recent",
+    "description": "News Gurus Intel API — recent institutional 13F position moves across tracked funds: new / increased / decreased / sold positions with shares, value, portfolio weight and filing date. Optional ?symbol= filter. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/institutions/recent",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "symbol": {
+          "description": "Optional ticker filter",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "symbol": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_institutions_symbol",
+    "description": "News Gurus Intel API — one ticker's institutional picture: congressional trades + 13F fund moves in a single call. Example NVDA: J. Smith (D) Purchase $1,001-$15,000 on 2026-06-15; Vanguard Group increased. Public STOCK Act and SEC 13F filings merged by the bot; analyst-rating and fundamentals fields excluded (vendor licensing). Answers 'who is buying TICKER'. Educational data, not financial advice. Cost: ~$0.10/call [spec].",
+    "method": "GET",
+    "path": "/x402/institutions/{symbol}",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "symbol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "symbol": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_launch_ta_token",
+    "description": "News Gurus Intel API — VWAP/Bollinger/RSI/MACD confluence read on a fresh memecoin launch computed over GeckoTerminal OHLCV (public/keyless). Token = mint address or symbol. Optional ?chain= (default solana; solana/base/bsc/ethereum). Returns NG-derived bias/score/factors verdict only — raw candles are not redistributed. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/launch-ta/{token}",
+    "input_schema": {
+      "properties": {
+        "chain": {
+          "default": "solana",
+          "enum": [
+            "solana",
+            "base",
+            "bsc",
+            "ethereum"
+          ],
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "token"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "chain": "query",
+      "token": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_macro_snapshot",
+    "description": "News Gurus Intel API — macro one-call read: current market regime plus the latest Fed-speech, BIS, prediction-market and geopolitical intelligence entries from the macro agents. Educational data, not financial advice. Cost: ~$0.02/call [spec].",
+    "method": "GET",
+    "path": "/x402/macro/snapshot",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_memecoin_movers",
+    "description": "News Gurus Intel API — liquidity- and volume-gated memecoin movers for one chain (?chain= solana|base|bsc|ethereum): top gainers, losers and volume leaders with price, liquidity and 24h stats — wash-trade noise filtered out. Educational data, not financial advice. Cost: ~$0.02/call [spec].",
+    "method": "GET",
+    "path": "/x402/memecoin/movers",
+    "input_schema": {
+      "properties": {
+        "chain": {
+          "default": "solana",
+          "enum": [
+            "solana",
+            "base",
+            "bsc",
+            "ethereum"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "chain": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_memecoin_verify_mint",
+    "description": "News Gurus Intel API — token authenticity verdict for one Solana mint: 0-1 realness score, confidence, recommended action (PASS / SMALL_SNIPER / MONITOR / REJECT), rug-risk flags, psyop/pump detection and narrative tags, from a 6-probe on-chain+social verifier with creator rug-history. Returns found:false if the address has never been scanned. Educational data, not financial advice. Cost: ~$0.01/call [spec].",
+    "method": "GET",
+    "path": "/x402/memecoin/verify/{mint}",
+    "input_schema": {
+      "properties": {
+        "mint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mint"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "mint": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_mlb_picks",
+    "description": "News Gurus Intel API — condensed daily MLB picks: top-10 HR picks, top-10 hits+runs+RBIs picks, top SP strikeout plays, best matchups, F5 plays and slate risk flags. News Guru's derived picks/edges (park/weather/sim/Statcast used internally, not redistributed). Roster/injury/lineup verified. Headline plays only ($3/day). Entertainment/educational only, not betting advice. 21+. Cost: ~$3/call [spec].",
+    "method": "GET",
+    "path": "/x402/mlb/picks",
+    "input_schema": {
+      "properties": {
+        "date": {
+          "description": "YYYY-MM-DD or 'today' (default)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "date": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_mlb_props_sheet",
+    "description": "News Gurus Intel API — the FULL daily MLB props sheet: News Guru's derived HR & hits+runs+RBIs picks, batter-vs-pitcher matchups, SP strikeout plays, F5 plays, per-game model predictions and per-game props. Park/weather/sim/Statcast used internally — not redistributed. Roster/injury/lineup verified. One call = the whole day's sheet ($5/day). Entertainment/educational only, not betting advice. 21+. Cost: ~$5/call [spec].",
+    "method": "GET",
+    "path": "/x402/mlb/props-sheet",
+    "input_schema": {
+      "properties": {
+        "date": {
+          "description": "YYYY-MM-DD or 'today' (default)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "date": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_narratives",
+    "description": "News Gurus Intel API — NG-derived NARRATIVE_SYNTHESIS and CATALYST_CONVERGENCE from SharedBrain, plus X Spaces speaker theses (SPACES_THESIS). News Gurus opinion is not included. No raw vendor data. ?limit= caps each type separately. Educational data, not financial advice. Cost: ~$0.02/call [spec].",
+    "method": "GET",
+    "path": "/x402/narratives",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_options_flow",
+    "description": "News Gurus Intel API — recent unusual options-flow signals: sweep clusters and large-premium prints across the active equity universe, with direction, strength, confidence and a derived size_bucket (block/large/mid/small). The per-call alternative to $50-150/mo flow subscriptions. Lookback via ?hours= (default 24). Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/options/flow",
+    "input_schema": {
+      "properties": {
+        "hours": {
+          "default": 24,
+          "maximum": 168,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "hours": "query",
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_options_gex_symbol",
+    "description": "News Gurus Intel API — dealer-regime classification for one equity/ETF symbol: regime label (e.g. positive_gamma_pinning / negative_gamma_amplifying) and gamma_bias (positive/negative/neutral) for squeeze and volatility analysis. Raw gamma dollar exposures are not redistributed. Educational data, not financial advice. Cost: ~$0.10/call [spec].",
+    "method": "GET",
+    "path": "/x402/options/gex/{symbol}",
+    "input_schema": {
+      "properties": {
+        "symbol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "symbol": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_prediction_market_stats_condition_id",
+    "description": "News Gurus Intel API — aggregate wallet intelligence for one Polymarket market (by condition_id): unique wallets, buy/sell volume split, new-wallet count and volume share, and the top-10 buyers. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/prediction/market-stats/{condition_id}",
+    "input_schema": {
+      "properties": {
+        "condition_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "condition_id"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "condition_id": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_prediction_markets",
+    "description": "News Gurus Intel API — full Polymarket market landscape (up to 2000 markets): category-grouped odds, liquidity, volume and direction from the bot's Polymarket intelligence agents. Optional ?category= filter (sports/crypto/politics/macro/geopolitics/stocks/commodities/entertainment/other) and ?limit= (default 100, cap 2000). Educational data, not financial advice. Cost: ~$0.10/call [spec].",
+    "method": "GET",
+    "path": "/x402/prediction/markets",
+    "input_schema": {
+      "properties": {
+        "category": {
+          "description": "Optional filter: sports/crypto/politics/macro/geopolitics/stocks/commodities/entertainment/other",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 2000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "category": "query",
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_prediction_new_wallets",
+    "description": "News Gurus Intel API — first-time Polymarket bettor fills: fresh wallets taking positions, with fill size, side, outcome price and the wallet's rolling totals. The 'suspiciously confident new wallet' insider-pattern feed. Filter by ?condition_id= / ?side=. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/prediction/new-wallets",
+    "input_schema": {
+      "properties": {
+        "condition_id": {
+          "description": "Optional Polymarket condition_id filter",
+          "type": "string"
+        },
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "side": {
+          "enum": [
+            "BUY",
+            "SELL"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "condition_id": "query",
+      "limit": "query",
+      "side": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_prediction_whale_leaders",
+    "description": "News Gurus Intel API — Polymarket smart-money leaderboard: whale wallets ranked by informed score, win rate, realized PnL or volume, with specialization and average entry odds. Insider/algo detection per-call — elsewhere this data class sits behind $599/mo API plans. Educational data, not financial advice. Cost: ~$0.10/call [spec].",
+    "method": "GET",
+    "path": "/x402/prediction/whale-leaders",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 20,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_bets": {
+          "default": 5,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sort_by": {
+          "default": "informed_score",
+          "enum": [
+            "informed_score",
+            "win_rate",
+            "total_pnl_usdc",
+            "total_volume"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "min_bets": "query",
+      "sort_by": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_prediction_whales",
+    "description": "News Gurus Intel API — Polymarket flagged-wallet groupings + coordinated-betting cabal intel from the bot's on-chain wallet tracker: address, buy/sell volume, counts, markets touched, plus any known cabal cluster ideas. Raw public-chain-derived data — no upstream-license restriction. Optional ?limit= (default 25, cap 100). Educational data, not financial advice. Cost: ~$0.10/call [spec].",
+    "method": "GET",
+    "path": "/x402/prediction/whales",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_primary_scoops",
+    "description": "News Gurus Intel API — ranked primary-source scoops for a posting desk: SEC EDGAR 8-K items and Exhibit 99.1 figures, Form 4 insider prints, PR Newswire, GlobeNewswire, company IR RSS, and official BEA, BLS, Census, Fed, and Treasury releases. Each number is a verbatim snippet from the primary document. Filter since, min_score, event_type, not_yet_on_x. NOT_YET_ON_X ranks first. Educational data, not financial advice. Cost: ~$0.02/call [spec].",
+    "method": "GET",
+    "path": "/x402/primary-scoops",
+    "input_schema": {
+      "properties": {
+        "event_type": {
+          "description": "earnings, form4_insider, merger, guidance, macro_release, ...",
+          "type": "string"
+        },
+        "limit": {
+          "default": 15,
+          "maximum": 25,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_score": {
+          "default": 0,
+          "type": "number"
+        },
+        "not_yet_on_x": {
+          "default": false,
+          "type": "boolean"
+        },
+        "since": {
+          "description": "ISO timestamp, or a window like 30m or 2h",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "event_type": "query",
+      "limit": "query",
+      "min_score": "query",
+      "not_yet_on_x": "query",
+      "since": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_regime",
+    "description": "News Gurus Intel API — US equity + crypto market regime now: TRENDING, MEAN_REVERTING or VOL_EXPANSION with confidence. Example: {regime: TRENDING, confidence: 0.74, reason: 'ADX 31 + VIX compression', vix_spot: 14.2, adx: 31}. Derived by a 40-source trading bot, refreshed intraday. Cheapest first call on this API and the standard 'trend day or chop day' check before sizing any trade. Educational data, not financial advice. Cost: ~$0.002/call [spec].",
+    "method": "GET",
+    "path": "/x402/regime",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_satoshi_moves",
+    "description": "News Gurus Intel API — dormant/Satoshi-era BTC wallet movement feed: on-chain moves with BTC amount, years dormant and transaction timestamps (public on-chain — no upstream-license restriction). Optional ?limit= (default 25, cap 50). Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/satoshi/moves",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_sentiment_symbol",
+    "description": "News Gurus Intel API — per-symbol social sentiment: recent sentiment/retail signals (bullish vs bearish counts + net bias) merged with social-intelligence ideas (LunarCrush, StockTwits, Telegram, X) for one ticker. Educational data, not financial advice. Cost: ~$0.02/call [spec].",
+    "method": "GET",
+    "path": "/x402/sentiment/{symbol}",
+    "input_schema": {
+      "properties": {
+        "symbol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "symbol": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_signals_composite_symbol",
+    "description": "News Gurus Intel API — per-symbol conviction: 50 latest signals from 42 generators merged into bullish/bearish counts. Example NVDA: 12 signals, 8 bullish, 3 bearish, avg confidence 0.61, each typed (options_flow, dark_pool, congressional, technical). The only x402 API selling derived US-equity signals rather than raw quotes. Flagship read for 'what does the evidence say about TICKER right now'. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/signals/composite/{symbol}",
+    "input_schema": {
+      "properties": {
+        "symbol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "symbol": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_signals_symbol",
+    "description": "News Gurus Intel API — recent trading signals for one symbol (options flow, dark pool, technical, sentiment, congressional and more), with direction, strength, confidence and source agent. Lookback window via ?hours= (default 24). Educational data, not financial advice. Cost: ~$0.01/call [spec].",
+    "method": "GET",
+    "path": "/x402/signals/{symbol}",
+    "input_schema": {
+      "properties": {
+        "hours": {
+          "default": 24,
+          "maximum": 168,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "symbol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "hours": "query",
+      "symbol": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_spaces_intel",
+    "description": "News Gurus Intel API — X Spaces the listener captured (live captions or a replay transcript): summary, synopsis, speaker theses, tickers, verified verbatim quotes with caption timestamps, and a News Gurus opinion kept in our_opinion (labeled opinion, not a fact). Filters: since, host, ticker, limit. Does not post. Educational data, not financial advice. Cost: ~$0.02/call [spec].",
+    "method": "GET",
+    "path": "/x402/spaces-intel",
+    "input_schema": {
+      "properties": {
+        "host": {
+          "description": "Host X handle, with or without @",
+          "type": "string"
+        },
+        "include_transcript": {
+          "default": false,
+          "description": "Include the transcript body when the public-text screen leaves it unchanged",
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 10,
+          "maximum": 25,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "since": {
+          "description": "ISO timestamp, or a window like 30m, 2h, or 7d. Filters created_at.",
+          "type": "string"
+        },
+        "ticker": {
+          "description": "Cashtag or token, with or without $",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "host": "query",
+      "include_transcript": "query",
+      "limit": "query",
+      "since": "query",
+      "ticker": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_sports_edge_scan",
+    "description": "News Gurus Intel API — multi-sport prop-bet edge scan: NG-derived edge_pct, confidence, reasoning and recommended_action (STRONG_PLAY/PLAY/MONITOR/SKIP) across MLB, NBA, NFL props from the live Kalshi executor ledger and the player-prop intelligence agent. Model-owned fields only. Optional ?sport= filter (mlb/nba/nfl). Educational data, not financial advice. Cost: ~$0.008/call [spec].",
+    "method": "GET",
+    "path": "/x402/sports/edge-scan",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "sport": {
+          "description": "Optional filter: mlb, nba, nfl (omit for all)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query",
+      "sport": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_sports_props",
+    "description": "News Gurus Intel API — player prop edges from the player_prop_intelligence_agent: NG-derived edge_pct, fair_prob, market_prob, direction, and pick identifiers. Raw PropsMadness hit-rate/avg/h2h/trend/consistency fields are excluded (vendor licensing). Sorted by absolute edge_pct descending. Optional ?limit= (default 25, cap 50). Educational data, not financial advice. Cost: ~$0.10/call [spec].",
+    "method": "GET",
+    "path": "/x402/sports/props",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "limit": "query"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_stocks_rankings",
+    "description": "News Gurus Intel API — full quality-compounder rankings (high-margin / low-debt / high-cash / growing-revenue US equities + revenue-generating crypto protocols, percentile-scored) PLUS growth-stock LEAPS candidates, in one call. A whole ranked universe per request. Educational data, not financial advice. Cost: ~$0.25/call [spec].",
+    "method": "GET",
+    "path": "/x402/stocks/rankings",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "param_routes": {},
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_tearsheet_symbol",
+    "description": "News Gurus Intel API — one-call tearsheet for a ticker: regime, signal conviction, social sentiment, recent 13F moves. Example NVDA: regime TRENDING 0.74, 8 bullish / 3 bearish signals avg 0.64, sentiment net bullish, latest 13F moves. Pure composition of this API's derived reads (no raw vendor data), the single call an agent needs before a trade decision. Educational data, not financial advice. Cost: ~$0.50/call [spec].",
+    "method": "GET",
+    "path": "/x402/tearsheet/{symbol}",
+    "input_schema": {
+      "properties": {
+        "symbol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "type": "object"
+    },
+    "param_routes": {
+      "symbol": "path"
+    },
+    "has_body": false
+  },
+  {
+    "name": "newsgurus_volatility_scan",
+    "description": "News Gurus Intel API — VolatilityScanner per-symbol ATR%/volume squeeze scoring from the bot's live volatility_scores table: symbol, atr_pct, volume_usd, galaxy_score, composite_score, asset_class and rank. Optional ?asset_class= filter, ?limit= (default 25, cap 50), ordered by composite_score DESC. Proprietary News Guru computation. Educational data, not financial advice. Cost: ~$0.05/call [spec].",
+    "method": "GET",
+    "path": "/x402/volatility/scan",
+    "input_schema": {
+      "properties": {
+        "asset_class": {
+          "description": "Optional asset class filter, e.g. crypto or equity",
+          "type": "string"
+        },
+        "limit": {
+          "default": 25,
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "param_routes": {
+      "asset_class": "query",
+      "limit": "query"
+    },
+    "has_body": false
+  }
+]

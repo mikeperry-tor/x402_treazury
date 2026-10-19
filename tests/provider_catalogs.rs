@@ -73,7 +73,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
     let repo = root;
     let cases: Vec<Case> =
         serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    assert_eq!(cases.len(), 24);
+    assert_eq!(cases.len(), 26);
     let mut total = 0;
     for case in cases {
         let mut command = Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
@@ -107,7 +107,7 @@ fn bundled_catalogs_match_reviewed_tool_contracts() {
         }
         total += actual.len();
     }
-    assert_eq!(total, 875);
+    assert_eq!(total, 966);
 }
 
 #[tokio::test]
@@ -907,5 +907,208 @@ async fn ipintel_preserves_paid_post_contracts_and_arbitrary_json() {
     assert_eq!(
         find("ipintel_help").help_url.as_deref(),
         Some("https://tools.ipintel.ai/llms.txt")
+    );
+}
+
+#[tokio::test]
+async fn newsgurus_uses_catalog_templates_and_preserves_parameter_contracts() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/newsgurus/provider.toml"))
+        .await
+        .unwrap()
+        .settings;
+    assert!(!cfg.probe_pricing);
+    let raw: Value =
+        serde_json::from_str(include_str!("fixtures/newsgurus_x402_catalog.json")).unwrap();
+    let mut doc: Value =
+        serde_json::from_str(include_str!("../providers/newsgurus/openapi.json")).unwrap();
+    assert_eq!(doc["paths"].as_object().unwrap().len(), 49);
+    for resource in raw["resources"].as_array().unwrap() {
+        let path = resource["resource"].as_str().unwrap();
+        let op = &doc["paths"][path]["get"];
+        assert_eq!(op["description"], resource["description"]);
+        let properties =
+            &resource["extensions"]["bazaar"]["schema"]["properties"]["input"]["properties"];
+        let mut expected = vec![];
+        for (key, location) in [("pathParams", "path"), ("queryParams", "query")] {
+            if let Some(fields) = properties[key]["properties"].as_object() {
+                for (name, schema) in fields {
+                    let required = location == "path"
+                        || properties[key]["required"]
+                            .as_array()
+                            .is_some_and(|required| required.contains(&json!(name)));
+                    expected.push(
+                        json!({"name":name,"in":location,"required":required,"schema":schema}),
+                    );
+                }
+            }
+        }
+        let mut actual = op["parameters"].as_array().unwrap().clone();
+        expected.sort_by_key(|p| (p["in"].to_string(), p["name"].to_string()));
+        actual.sort_by_key(|p| (p["in"].to_string(), p["name"].to_string()));
+        assert_eq!(actual, expected, "{path}");
+        let price = op["x-payment-info"]["price"]["amount"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap();
+        assert_eq!(price, resource["price_usd"].as_f64().unwrap());
+    }
+    doc["paths"]["/x402/new-action"] = json!({"post":{"summary":"New action"}});
+    doc["paths"]["/x402/brain/recent"]["delete"] = json!({"summary":"New method"});
+    let tools = catalog::build_tools(&cfg, &doc, "newsgurus").unwrap();
+    assert_eq!(tools.len(), 49);
+    assert!(!tools.iter().any(|t| t.path == "/x402/agents/status"));
+    assert!(tools.iter().all(|t| t.method == "GET"));
+    let institutions = tools
+        .iter()
+        .find(|t| t.name == "newsgurus_institutions_symbol")
+        .unwrap();
+    let args = json!({"symbol":"MSFT","limit":3});
+    let route = institutions
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.url, "https://api.newsgurus.ai/x402/institutions/MSFT");
+    assert_eq!(route.query["limit"], 3);
+    assert!(route.body.is_none());
+    assert!(institutions.description.contains("$0.1"));
+    let brain = tools
+        .iter()
+        .find(|t| t.name == "newsgurus_api_v1_brain_symbol")
+        .unwrap();
+    assert_eq!(brain.path, "/api/v1/brain/{symbol}");
+    let fantasy = tools
+        .iter()
+        .find(|t| t.name == "newsgurus_fantasy_lineup")
+        .unwrap();
+    assert_eq!(
+        fantasy.input_schema["required"],
+        json!(["game_date", "roster_player_ids", "scoring_system", "sport"])
+    );
+    assert_eq!(
+        tools
+            .iter()
+            .find(|t| t.name == "newsgurus_help")
+            .unwrap()
+            .help_url,
+        cfg.help_url
+    );
+}
+
+#[tokio::test]
+async fn vaaya_selects_synchronous_x402_research_and_routes_json_filters() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/vaaya.toml"))
+        .await
+        .unwrap()
+        .settings;
+    assert!(!cfg.probe_pricing);
+    assert!(!cfg.allow_http1 && !cfg.allow_tls12);
+    assert!(cfg.additional_properties.is_none());
+    let mut doc: Value = serde_json::from_str(include_str!("fixtures/vaaya_openapi.json")).unwrap();
+    let discovery: Value =
+        serde_json::from_str(include_str!("fixtures/vaaya_x402_discovery.json")).unwrap();
+    assert_eq!(doc["paths"].as_object().unwrap().len(), 252);
+    doc["paths"]["/api/run/edgar/new-action"] = json!({"post":{"summary":"New action"}});
+    doc["paths"]["/api/run/edgar/entities"]["get"] = json!({"summary":"New method"});
+    let tools = catalog::build_tools(&cfg, &doc, "vaaya").unwrap();
+    assert_eq!(tools.len(), 42);
+    for tool in tools.iter().filter(|t| t.help_url.is_none()) {
+        assert_eq!(tool.method, "POST");
+        assert!(
+            discovery["resources"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(format!("https://vaaya.ai{}", tool.path)))
+        );
+        let payment = &doc["paths"][&tool.path]["post"]["x-payment-info"];
+        assert!(
+            payment["protocols"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p.get("x402").is_some())
+        );
+        assert!(tool.description.contains(&format!(
+                "${}",
+                payment["price"]["amount"]
+                    .as_str()
+                    .unwrap()
+                    .trim_end_matches('0')
+                    .trim_end_matches('.')
+            )));
+    }
+    for excluded in [
+        "/api/run/colors/generate",
+        "/api/run/cueframe/render",
+        "/api/run/vaaya/supersearch",
+        "/api/run/vaaya/fetch",
+        "/api/run/firecrawl/crawl",
+        "/api/run/firecrawl/extract",
+        "/api/run/agentmail/send",
+        "/api/run/akta/employee-reviews",
+        "/api/run/akta/website-traffic",
+    ] {
+        assert!(!tools.iter().any(|t| t.path == excluded));
+    }
+    let search = tools.iter().find(|t| t.name == "vaaya_onesearch").unwrap();
+    let args = json!({"query":"Acme filings","facets":["public-filings"],"fidelityRequired":true});
+    let route = search
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.url, "https://vaaya.ai/api/run/vaaya/onesearch");
+    assert_eq!(route.body, Some(args));
+    assert!(route.query.is_empty());
+    let companies = tools
+        .iter()
+        .find(|t| t.name == "vaaya_theirstack_companies")
+        .unwrap();
+    let args = json!({"limit":2,"company_domain_or":["example.com"],"job_filters":{"job_title_or":["Rust"]},"vendor_future_filter":true});
+    assert_eq!(
+        companies
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap()
+            .body,
+        Some(args)
+    );
+    let fulltext = tools
+        .iter()
+        .find(|t| t.name == "vaaya_edgar_fulltext")
+        .unwrap();
+    assert_eq!(
+        fulltext.input_schema["properties"]["startdt"]["pattern"],
+        r"^\d{4}-\d{2}-\d{2}$"
+    );
+    let funding = tools
+        .iter()
+        .find(|t| t.name == "vaaya_signalbase_funding")
+        .unwrap();
+    assert!(
+        funding.input_schema["properties"]["date_preset"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("last_30d"))
+    );
+    let scrape = tools
+        .iter()
+        .find(|t| t.name == "vaaya_firecrawl_scrape")
+        .unwrap();
+    assert_eq!(scrape.input_schema["properties"]["waitFor"]["minimum"], 0);
+    let fundable = tools
+        .iter()
+        .find(|t| t.name == "vaaya_fundable_company")
+        .unwrap();
+    assert!(fundable.description.contains("mismatched 1 of 10"));
+    assert_eq!(
+        tools
+            .iter()
+            .find(|t| t.name == "vaaya_help")
+            .unwrap()
+            .help_url,
+        cfg.help_url
     );
 }

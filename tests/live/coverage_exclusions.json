@@ -28,5 +28,15 @@
     "provider": "ipintel",
     "config": "providers/ipintel.toml",
     "reason": "Public request catalog and offline contracts only; no paid request or budget authorized. Live settlement and Tor behavior are not qualified."
+  },
+  {
+    "provider": "newsgurus",
+    "config": "providers/newsgurus/provider.toml",
+    "reason": "Public x402 catalog and offline request contracts only; no paid request or budget authorized. Live settlement and Tor behavior are not qualified."
+  },
+  {
+    "provider": "vaaya",
+    "config": "providers/vaaya.toml",
+    "reason": "Public x402 catalog and offline request contracts only; no paid request or budget authorized. Live settlement and Tor behavior are not qualified."
   }
 ]

@@ -56,6 +56,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Kronos | `kronos.toml` | Vendor OpenAPI |
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |
 | LoneStarOracle | `lonestar.toml` | Vendor unified OpenAPI |
+| News Gurus | `newsgurus/provider.toml` | Local projection of vendor x402 catalog; 48 paid reads plus lazy help |
 | OneShot | `oneshot.toml` | Synchronous web search and lazy help; async workflows excluded |
 | Otto | `otto.toml` | Vendor OpenAPI |
 | People Data Labs | `pdl.toml` | Vendor OpenAPI |
@@ -64,6 +65,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | SocialFetch | `socialfetch.toml` | Vendor tagged OpenAPI |
 | StableEnrich | `stableenrich.toml` | 32 synchronous JSON/image operations and lazy help; select upstreams by tag |
 | Straits | `straits/provider.toml` | Local `straits/openapi.json` |
+| Vaaya | `vaaya.toml` | 41 synchronous x402 research calls plus lazy help; mixed-protocol/media workflows excluded |
 | x402-list | `x402-list.toml` | Curated API-directory reads |
 | x402stock | `x402stock.toml` | Vendor OpenAPI |
 
@@ -78,8 +80,8 @@ have a generic description because their schemas are not modeled. Preserve the
 Locus gateway body rewrite and job exclusions, Straits free/premium split,
 Concordance POST pricing, and Glassnode's discovery workflow when editing them.
 
-`tests/provider_catalogs.rs` pins 875 tool definitions across the 24 providers
-with committed fixtures. `tests/config.rs` pins settings for 28 providers.
+`tests/provider_catalogs.rs` pins 966 tool definitions across the 26 providers
+with committed fixtures. `tests/config.rs` pins settings for 30 providers.
 Tests need no Python or live vendor access. See [provider caveats](CAVEATS.md)
 for route exclusions, pricing semantics and vendor-specific workflows.
 
