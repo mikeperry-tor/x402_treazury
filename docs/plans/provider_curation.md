@@ -2,7 +2,9 @@
 
 ## Intent and status
 
-Plan for implementation; no implementation steps are complete. The operator wants
+Implementation in progress. Baseline established at `05280d66f903e38b45b521d4b973f5e58529db53`
+(the plan-only commit after the original baseline). P1 audits and baseline checks
+are underway; G1 must close before runtime implementation. The operator wants
 provider defaults to expose supported functionality and newly arriving supported
 tools, rather than silently impose a maintainer's recommended subset. Separate
 recommendations from compatibility filtering, use recommendations explicitly in

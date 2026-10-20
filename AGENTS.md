@@ -33,6 +33,14 @@ USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
   recovery attempts. Disconnect, cancellation or cache eviction must not orphan
   accepted financial work, duplicate active I/O or report abandonment as success.
 
+Reusable providers should expose supported functionality; compatibility restrictions
+need concrete reasons. Keep editorial recommendations separate from defaults and
+require explicit deployment selection. Provider-specific regression storage needs a
+named quirk or failure, not a universal inventory/settings snapshot. Follow the
+[provider policy](providers/README.md#provider-policy) and
+[test policy](docs/testing.md#provider-regressions); the linked implementation plan
+identifies selection features that are still pending.
+
 ## Financial and execution boundaries
 
 Ordinary USDC payment selection treats balances and price hints as advisory;
@@ -152,7 +160,7 @@ links other maintained guides.
 | Network clients, HTTP/gRPC timeouts or Tor | [Network policy](docs/network-egress.md), [resource limits](docs/local-resource-limits.md) | `src/network.rs`, `tests/network_audit.rs`, `tests/TOR.md` |
 | Deployment startup, catalog publication or shutdown | [Runtime architecture](docs/architecture.md), [configuration](docs/configuration.md), [startup tests](tests/STARTUP.md) | `src/deployment/`, `src/server/`, `src/catalog_state.rs` |
 | Dynamic sources, directory tools, endpoint instructions or raw calls | [Agent source management](docs/agent-sources.md), [tool search matching](docs/agent-sources.md#tool-search-matching-and-results), [source details and URL discovery](docs/agent-sources.md#listing-and-url-discovery), [endpoint instruction placement](docs/agent-sources.md#endpoint-instruction-placement) | `src/discovery/`, `src/catalog_state.rs` |
-| Provider TOML, OpenAPI schemas, pricing, caching or relay | [Configuration](docs/configuration.md), [catalog architecture](docs/architecture.md#catalog-configuration-and-execution), [provider caveats](providers/CAVEATS.md) | `src/catalog.rs`, `src/config.rs`, `src/pricing/`, `src/http_cache.rs`, `src/discovery_relay.rs`; provider snapshots |
+| Provider TOML, OpenAPI schemas, pricing, caching or relay | [Configuration](docs/configuration.md), [catalog architecture](docs/architecture.md#catalog-configuration-and-execution), [provider policy](providers/README.md#provider-policy), [provider caveats](providers/CAVEATS.md), [provider regressions](docs/testing.md#provider-regressions) | `src/catalog.rs`, `src/config.rs`, `src/pricing/`, `src/http_cache.rs`, `src/discovery_relay.rs`; focused provider regressions |
 | MCP images, binary output or truncation | [Output boundaries](docs/architecture.md#mcp-and-output-boundaries), [download/display limits](docs/configuration.md#download-and-display-limits) | `src/output.rs`, `src/server.rs`, `tests/media.rs` |
 | Optional cover traffic | [Cover policy](docs/cover-traffic.md) | `src/cover/` |
 | Live integration, financial evidence or qualification reports | [Runbook](tests/live/INTEGRATION.md), [technical reference](tests/live/INTEGRATION_REFERENCE.md), [qualification status](docs/testing.md#qualification-status) | `examples/live_integration/driver.rs`, `tests/integration_preparation.rs` |

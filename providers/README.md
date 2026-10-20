@@ -90,14 +90,39 @@ Directory reads can become paid after a shared-IP free quota; the ordinary walle
 still applies. Listings do not guarantee compatible payment or supply executable API
 schemas. Pricing probes and directory writes are excluded.
 
-New provider defaults should select task-facing operations and omit health, status,
-account, administration and other diagnostic endpoints unless essential to an
-agent workflow. Use exact `include_operations` when only part of an API supports
-x402; this also prevents future vendor routes from silently expanding the catalog.
-Attach `help_url` when a single useful guide covers the selected toolset; help is
-fetched only on demand and cached for the process lifetime. Preserve complete
-selected-operation schemas and usage guidance instead of truncating them to save
-context. See Exa in [the caveats](CAVEATS.md) for this pattern.
+## Provider policy
+
+Reusable definitions should expose supported functionality, including newly added
+supported routes. Restrict catalogs for concrete authentication/payment, request,
+output/lifecycle or financial-authority incompatibilities. Diagnostic endpoints,
+compactness, price and overlap with another provider are editorial choices, not
+compatibility failures. Keep naming anchors when they determine generated names.
+Exact operation allowlists remain appropriate for verified payable islands in a
+mixed API; explain why path or tag exclusions cannot describe that boundary.
+
+Recommendations belong in explicit deployment selections, separate from reusable
+compatibility defaults. The provider-curation work is introducing advisory
+recommendations with explicit opt-in and default POST selection for same-path
+GET/POST twins before naming; these features are not implemented yet. Until then,
+existing provider selections below describe current behavior, including editorial
+subsets scheduled for normalization. See the
+[implementation plan](../docs/plans/provider_curation.md).
+
+Review method pairs using actual request, result and billing contracts. Uncertain
+or meaningfully different variants need a documented exception; similar names or
+prices alone do not establish equivalence. A catalog selection grants no payment
+retry authority; see the [unsigned request contract](../docs/architecture.md#unsigned-x402-requests-and-post-retries).
+
+Attach `help_url` when a useful guide covers the toolset; help is fetched on demand
+and cached for the process lifetime. Preserve complete request schemas and usage
+guidance. Provider-specific tests and fixtures need a concrete quirk, historical
+failure or authored transformation. Prefer small faithful inputs and assertions
+for that responsibility, with synthetic shared tests for generic behavior. A new
+provider requires neither a complete golden/settings snapshot nor paid
+qualification or an artificial qualification-exclusion record. Runtime local
+catalogs and payment evidence retain their own consumers and cannot be discarded
+as redundant test data. See [testing policy](../docs/testing.md#provider-regressions)
+and [fixture maintenance](../tests/fixtures/catalogs/README.md).
 
 Agent402 has a much larger catalog than most providers. Its default `tags = ["web"]`
 produces 48 API tools plus help in the fixture; `--tags data,crypto` replaces that

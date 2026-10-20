@@ -10,6 +10,23 @@ assertions; do not trim documentation or loosen expectations to obtain a pass.
 Discovery tests inject public-URL documents and localhost fixtures only under
 `cfg(test)`. Never add a production loopback bypass for fixture convenience.
 
+## Provider regressions
+
+Provider-specific regression storage should reproduce a named quirk, historical
+failure or authored catalog transformation. Use the smallest faithful input and
+assert the affected request schema, routing, filtering or output behavior. Generic
+parsing, composition and selection belong in shared synthetic tests. Cheap offline
+TOML validation should cover every bundled definition without freezing all settings
+or the current vendor inventory. Ordinary vendor prose does not need a snapshot.
+
+Existing blanket tool/settings snapshots are being audited under the
+[provider-curation plan](plans/provider_curation.md); their presence does not make
+them a requirement for new providers. Inspect every consumer before pruning inputs,
+including production local catalogs, discovery, media, payments and qualification.
+Preserve financial evidence. Provider existence neither requires paid qualification
+nor establishes support or current upstream health. Qualification must explicitly
+identify its selected requests, caps, authority and unobserved outcomes.
+
 ## Default development checks
 
 The default build includes Zcash. `scripts/zcash.sh` supplies the pinned Cargo
