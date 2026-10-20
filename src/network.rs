@@ -249,6 +249,15 @@ impl HttpTransport {
     pub fn selection(&self) -> SelectionPolicy {
         self.key.selection
     }
+    pub fn origin(&self) -> &str {
+        &self.key.origin
+    }
+    pub fn transport_policy(&self) -> HttpPolicy {
+        self.key.transport
+    }
+    pub fn public_only(&self) -> bool {
+        self.key.public_only
+    }
     pub fn read_timeout(&self) -> Duration {
         self.key.read_timeout
     }
@@ -1038,6 +1047,48 @@ impl Drop for QualificationProbes {
 #[cfg(test)]
 mod retention_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn fractional_millisecond_timeouts_separate_transports_and_cover_owners() {
+        let context = NetworkContext::new(NetworkPolicy::default()).unwrap();
+        let origin = "https://api.example.com";
+        let owner = IsolationId::discovery(origin).unwrap();
+        for selection in [SelectionPolicy::Legacy, SelectionPolicy::Participating] {
+            let acquire = |timeout| {
+                context
+                    .http_transport(
+                        &owner,
+                        origin,
+                        timeout,
+                        false,
+                        HttpPolicy::default(),
+                        selection,
+                    )
+                    .unwrap()
+            };
+            let first = acquire(Duration::from_micros(500));
+            let second = acquire(Duration::from_micros(501));
+            assert!(Arc::ptr_eq(&first, &acquire(Duration::from_micros(500))));
+            assert!(!Arc::ptr_eq(&first, &second));
+            assert_eq!(first.read_timeout(), Duration::from_micros(500));
+            assert_eq!(second.read_timeout(), Duration::from_micros(501));
+            // The pinned reqwest client's Debug exposes its actual configured
+            // read timeout, avoiding a scheduler-dependent submillisecond I/O test.
+            assert!(format!("{:?}", first.client).contains("read_timeout: 500µs"));
+            assert!(format!("{:?}", second.client).contains("read_timeout: 501µs"));
+            assert_ne!(
+                crate::cover::registry::Owner::from_transport(&first),
+                crate::cover::registry::Owner::from_transport(&second)
+            );
+            let candidate = if selection == SelectionPolicy::Participating {
+                context.http_candidate(&first).unwrap()
+            } else {
+                continue;
+            };
+            assert_eq!(candidate.read_timeout(), first.read_timeout());
+            assert!(format!("{:?}", candidate.client).contains("read_timeout: 500µs"));
+        }
+    }
 
     #[tokio::test]
     async fn interleaved_wallet_clients_preserve_frequent_provider_entry() {

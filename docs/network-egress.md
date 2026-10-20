@@ -48,7 +48,10 @@ consumption and publication even if its waiter disconnects. Logical probe owners
 and one-shot coalescing span the complete retry sequence without a second source gate.
 Remaining HTTP callers still acquire legacy deterministic transports until later
 consumer activation in the
-[Tor isolation retry plan](plans/tor_isolation_retries.md). Sync releases its
+[Tor isolation retry plan](plans/tor_isolation_retries.md), while `payment.rs`
+already pins its acquired `HttpTransport` record and scope-matched cover `Owner`
+from unsigned challenge through signing, signed dispatch and response body
+consumption. Sync releases its
 channels before tearing down its private runtime. Each cache retains at most 256
 entries and evicts one least-recently-used entry when admitting another. Access
 refreshes recency; interleaved wallet traversal does not flush frequently reused

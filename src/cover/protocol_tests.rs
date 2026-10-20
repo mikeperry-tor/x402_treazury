@@ -287,6 +287,7 @@ async fn http1_compatibility_keeps_real_calls_and_reports_cover_unavailable() {
     };
     let owner = registry::Owner {
         runtime: tokio::runtime::Handle::current().id(),
+        scope: identity.clone(),
         identity,
         origin: "https://api.example.com".into(),
         transport,

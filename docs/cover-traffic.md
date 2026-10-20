@@ -207,12 +207,17 @@ sample cache. Deterministic seeds belong only to fixtures.
 
 ## Identity, scheduling and payment safety
 
-Owners are keyed by runtime, actual EVM/discovery identity, exact origin, transport
-policy, effective timeout and public-destination policy. Conflicting settings for
-one owner fail validation. Calls sharing an owner attach to one bounded episode;
-additional calls do not extend its deadline or restart its volume budget. A
-rotation creates a new identity/pool. Old in-flight calls retain their original
-identity. Shared wallet bindings may share episodes across listeners.
+Owners are keyed by runtime, canonical EVM/discovery identity, effective isolation
+scope (`Owner::from_transport`), exact origin, transport policy, effective timeout
+and public-destination policy. Conflicting settings for one owner fail validation.
+Calls sharing an owner attach to one bounded episode; additional calls do not
+extend its deadline or restart its volume budget. Different effective scopes for
+the same canonical identity and origin cannot merge sessions or reuse
+qualification/negative capability; after transport record replacement or eviction,
+retained old sessions finish on their original client while new acquisitions attach
+only to their matching scope. A rotation creates a new identity/pool. Old in-flight
+calls retain their original identity. Shared wallet bindings may share episodes
+across listeners when they share the same effective scope.
 
 Every real physical request takes priority: outstanding cover streams are canceled
 and their local cleanup is awaited before dispatch. Cover stays paused through

@@ -234,10 +234,16 @@ or low estimates remain fallbacks. Actual challenge terms and pool/payer authori
 govern admission. See the [best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules).
 
 `src/payment.rs` binds each unsigned request, signed request and cover owner to the
-same EVM address. `src/network.rs` uses that identity for connection pooling and
-SOCKS isolation. If selection changes after a challenge, obtain another unsigned
-challenge through the next payer's transport. The captured inventory and attempted
-identities bound traversal without a retry-count ceiling or new allocation.
+same EVM address, pinning the acquired `HttpTransport` record and its effective
+isolation scope (`cover::registry::Owner::from_transport`) from unsigned challenge
+through admission, signing, signed dispatch and response body consumption.
+`src/network.rs` uses that canonical identity and effective scope for connection
+pooling and SOCKS isolation (with ordinary API acquisition still using legacy
+selection until participating unsigned status retries are activated in the
+[Tor isolation retry plan](plans/tor_isolation_retries.md)). If selection changes
+after a challenge, obtain another unsigned challenge through the next payer's
+transport. The captured inventory and attempted identities bound traversal without
+a retry-count ceiling or new allocation.
 
 Only a recognized structured insufficient-funds response to a managed signed
 request earns cross-wallet repetition. Each attempt retains its own authorization,

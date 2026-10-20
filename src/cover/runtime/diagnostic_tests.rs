@@ -29,20 +29,22 @@ async fn deadline_cleanup_reports_actual_capability_without_warn_on_available_sh
             .finish();
         async {
             let engine = Engine::new(Limits::default());
-            let owner = Owner {
-                runtime: tokio::runtime::Handle::current().id(),
-                identity: IsolationId::evm("0x0000000000000000000000000000000000000001").unwrap(),
-                origin: "https://api.example.com".into(),
-                transport: HttpPolicy::default(),
-                public_only: false,
-                read_timeout: std::time::Duration::from_secs(30),
-            };
+            let identity = IsolationId::evm("0x0000000000000000000000000000000000000001").unwrap();
+            let transport = crate::network::global()
+                .http_transport(
+                    &identity,
+                    "https://api.example.com",
+                    None,
+                    false,
+                    HttpPolicy::default(),
+                    crate::network::SelectionPolicy::Legacy,
+                )
+                .unwrap();
+            let owner = Owner::from_transport(&transport);
             let mut config = crate::cover::tests::example_config();
             // No task or network is launched by begin; invoke the real cleanup loop below.
             config.ranges_enabled = false;
-            let http = crate::network::global()
-                .http(&owner.identity, &owner.origin, None)
-                .unwrap();
+            let http = transport.client.clone();
             let call = engine
                 .begin(
                     owner.clone(),

@@ -9,14 +9,28 @@ use std::{
 };
 use tokio::time::Instant;
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Owner {
     pub runtime: tokio::runtime::Id,
     pub identity: IsolationId,
+    pub scope: IsolationId,
     pub origin: String,
     pub transport: HttpPolicy,
     pub public_only: bool,
     pub read_timeout: std::time::Duration,
+}
+impl Owner {
+    pub fn from_transport(transport: &crate::network::HttpTransport) -> Self {
+        Self {
+            runtime: tokio::runtime::Handle::current().id(),
+            identity: transport.identity.clone(),
+            scope: transport.scope.clone(),
+            origin: transport.origin().to_owned(),
+            transport: transport.transport_policy(),
+            public_only: transport.public_only(),
+            read_timeout: transport.read_timeout(),
+        }
+    }
 }
 #[derive(Clone, Debug)]
 pub enum Capability {
@@ -198,9 +212,11 @@ mod tests {
             max_owners: 2,
             ..Default::default()
         });
+        let identity = IsolationId::discovery("https://example.com").unwrap();
         let owner = Owner {
             runtime: tokio::runtime::Handle::current().id(),
-            identity: IsolationId::discovery("https://example.com").unwrap(),
+            scope: identity.clone(),
+            identity,
             origin: "https://example.com".into(),
             transport: Default::default(),
             public_only: false,
@@ -226,7 +242,15 @@ mod tests {
         );
         let mut other = owner.clone();
         other.identity = IsolationId::evm("0x0000000000000000000000000000000000000001").unwrap();
+        other.scope = other.identity.clone();
         assert!(r.attach(other, config.clone(), now, &mut rng).is_err());
+        let mut fresh_scope = owner.clone();
+        fresh_scope.scope = owner.identity.fresh_scope();
+        assert!(
+            r.attach(fresh_scope.clone(), config.clone(), now, &mut rng)
+                .is_err(),
+            "different effective scope must not merge into active episode under max_active_episodes=1"
+        );
         let state = r.owners.get_mut(&owner).unwrap();
         assert!(state.begin_qualification());
         assert!(!state.begin_qualification());
@@ -238,11 +262,26 @@ mod tests {
             e.detach(now);
             e.stop("deadline");
         }
-        let (c, fresh) = r.attach(owner.clone(), config, now, &mut rng).unwrap();
+        let (c, fresh) = r
+            .attach(owner.clone(), config.clone(), now, &mut rng)
+            .unwrap();
         assert!(fresh && !Arc::ptr_eq(&a, &c));
         assert!(matches!(
             r.owners[&owner].capability,
             Capability::Unavailable("range_ignored")
+        ));
+        {
+            let mut e = c.lock().unwrap();
+            e.detach(now);
+            e.stop("deadline");
+        }
+        let (d, fresh) = r
+            .attach(fresh_scope.clone(), config, now, &mut rng)
+            .unwrap();
+        assert!(fresh && !Arc::ptr_eq(&c, &d));
+        assert!(matches!(
+            r.owners[&fresh_scope].capability,
+            Capability::Unknown
         ));
     }
     #[test]

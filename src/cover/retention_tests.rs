@@ -9,9 +9,11 @@ fn local_client() -> reqwest::Client {
 }
 
 fn owner(name: &str) -> Owner {
+    let identity = IsolationId::treasury(name);
     Owner {
         runtime: tokio::runtime::Handle::current().id(),
-        identity: IsolationId::treasury(name),
+        scope: identity.clone(),
+        identity,
         origin: "https://api.example.com".into(),
         transport: HttpPolicy::default(),
         public_only: false,
@@ -337,4 +339,160 @@ async fn partial_qualification_preemption_and_shutdown_drain_keep_observed_bytes
         drop(call);
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn distinct_effective_scopes_isolate_sessions_and_drain_after_replacement() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let reads = Arc::new(AtomicUsize::new(0));
+    let seen = reads.clone();
+    let app = axum::Router::new().fallback(move |headers: axum::http::HeaderMap| {
+        let seen = seen.clone();
+        async move {
+            let ordinal = seen.fetch_add(1, Ordering::SeqCst);
+            if ordinal == 0 {
+                return axum::http::StatusCode::FORBIDDEN.into_response();
+            }
+            let raw = headers["range"]
+                .to_str()
+                .unwrap()
+                .strip_prefix("bytes=")
+                .unwrap();
+            let (a, b) = raw.split_once('-').unwrap();
+            let (a, b) = (a.parse::<usize>().unwrap(), b.parse::<usize>().unwrap());
+            (
+                axum::http::StatusCode::PARTIAL_CONTENT,
+                [
+                    ("content-range", format!("bytes {a}-{b}/16384")),
+                    ("content-length", format!("{}", b - a + 1)),
+                    ("etag", "\"v1\"".into()),
+                ],
+                vec![b'a'; b - a + 1],
+            )
+                .into_response()
+        }
+    });
+    use axum::response::IntoResponse;
+    let (addr, server) =
+        crate::test_tls::serve_with(app, &[&rustls::version::TLS13], &[b"h2"]).await;
+    let socks = crate::test_socks::Socks::start(
+        std::collections::BTreeMap::from([("api.example.com".into(), addr)]),
+        crate::test_socks::Fault::None,
+    )
+    .await;
+    let ctx = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(socks.address),
+        ..Default::default()
+    })
+    .unwrap()
+    .with_test_root(crate::test_tls::CA);
+    let identity = IsolationId::evm("0x0000000000000000000000000000000000000001").unwrap();
+    let initial = ctx
+        .http_participating(
+            &identity,
+            "https://api.example.com/v1",
+            None,
+            false,
+            HttpPolicy::default(),
+        )
+        .unwrap();
+    let candidate = ctx.http_candidate(&initial).unwrap();
+    assert_eq!(initial.identity, candidate.identity);
+    assert_ne!(initial.scope, candidate.scope);
+    let owner_initial = Owner::from_transport(&initial);
+    let owner_candidate = Owner::from_transport(&candidate);
+    assert_ne!(owner_initial, owner_candidate);
+
+    let engine = Engine::new(Limits::default());
+    let mut config = crate::cover::tests::example_config();
+    config.padding = None;
+    config.start_delay = toml::from_str("distribution='uniform'\nmin_ms=0\nmax_ms=0").unwrap();
+    config.request_gap = config.start_delay.clone();
+    config.tail = toml::from_str("distribution='uniform'\nmin_ms=50\nmax_ms=50").unwrap();
+    let config = Arc::new(config);
+
+    // First scope fails qualification (403); retain an active call on it while promoting candidate.
+    let mut call_initial = engine
+        .begin(
+            owner_initial.clone(),
+            config.clone(),
+            scope(),
+            initial.client.clone(),
+        )
+        .unwrap();
+    call_initial.response_headers();
+    engine.wait_experiment_idle().await;
+    assert!(matches!(
+        engine.registry.lock().unwrap().owners[&owner_initial].capability,
+        Capability::Unavailable("cover_forbidden")
+    ));
+
+    assert!(ctx.promote_http(&initial, &candidate));
+    let mut call_candidate = engine
+        .begin(
+            owner_candidate.clone(),
+            config.clone(),
+            scope(),
+            candidate.client.clone(),
+        )
+        .unwrap();
+    assert!(
+        !Arc::ptr_eq(&call_initial.session, &call_candidate.session),
+        "new scope must not merge into old scope's session"
+    );
+    call_candidate.response_headers();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while engine.metrics().qualified_ranges == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("candidate scope must qualify independently of initial scope refusal");
+    assert!(matches!(
+        engine.registry.lock().unwrap().owners[&owner_candidate].capability,
+        Capability::Available { .. }
+    ));
+
+    // Subsequent participating lookup reuses the promoted candidate scope and attaches to its session.
+    let next = ctx
+        .http_participating(
+            &identity,
+            "https://api.example.com/v1",
+            None,
+            false,
+            HttpPolicy::default(),
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(&next, &candidate));
+    let call_next = engine
+        .begin(
+            Owner::from_transport(&next),
+            config.clone(),
+            scope(),
+            next.client.clone(),
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(&call_candidate.session, &call_next.session));
+
+    // Old session finishes and drains after replacement without interfering with promoted scope.
+    call_initial.complete();
+    drop(call_initial);
+    drop(call_next);
+    drop(call_candidate);
+    engine.wait_experiment_idle().await;
+    let tokens = socks
+        .records
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|r| r.password.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        tokens.len(),
+        2,
+        "each effective scope must use its own SOCKS isolation token"
+    );
+    engine.shutdown().await;
+    server.abort();
 }

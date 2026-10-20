@@ -743,3 +743,146 @@ async fn qualified_a_b_c_traversal_uses_original_permit_and_retains_all_observat
         3
     );
 }
+
+#[tokio::test]
+async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_stay_single_shot() {
+    let status_override = Arc::new(Mutex::new(None::<StatusCode>));
+    let peers = Arc::new(Mutex::new(
+        Vec::<(SocketAddr, Method, String, Vec<u8>)>::new(),
+    ));
+    let signed_count = Arc::new(AtomicUsize::new(0));
+    let (status_state, peers_state, signed_state) =
+        (status_override.clone(), peers.clone(), signed_count.clone());
+    let app = Router::new().route(
+        "/pay",
+        any(
+            move |ConnectInfo(peer): ConnectInfo<SocketAddr>,
+                  method: Method,
+                  uri: Uri,
+                  headers: HeaderMap,
+                  body: Bytes| {
+                let status_state = status_state.clone();
+                let peers_state = peers_state.clone();
+                let signed_state = signed_state.clone();
+                async move {
+                    peers_state.lock().unwrap().push((
+                        peer,
+                        method,
+                        uri.to_string(),
+                        body.to_vec(),
+                    ));
+                    if let Some(status) = *status_state.lock().unwrap() {
+                        return (status, "upstream unsigned error").into_response();
+                    }
+                    if let Some(encoded) = headers.get("payment-signature") {
+                        let payload: Value =
+                            serde_json::from_slice(&STANDARD.decode(encoded.as_bytes()).unwrap())
+                                .unwrap();
+                        crate::test_signatures::recover_exact(&payload);
+                        signed_state.fetch_add(1, Ordering::SeqCst);
+                        return "paid".into_response();
+                    }
+                    // Evict the global HTTP cache during challenge delivery: the in-flight
+                    // PaidClient call must still dispatch its signed request on the exact
+                    // pinned transport and open connection.
+                    let factory = crate::network::global();
+                    for i in 0..260 {
+                        let id = crate::network::IsolationId::treasury(&format!("evict-{i}"));
+                        let _ = factory.http_transport(
+                            &id,
+                            &format!("http://127.0.0.1:{}", 10000 + i),
+                            None,
+                            false,
+                            Default::default(),
+                            crate::network::SelectionPolicy::Legacy,
+                        );
+                    }
+                    (
+                        StatusCode::PAYMENT_REQUIRED,
+                        [(
+                            "payment-required",
+                            STANDARD.encode(serde_json::to_vec(&challenge()).unwrap()),
+                        )],
+                        "{}",
+                    )
+                        .into_response()
+                }
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    let payer = Payer::new(&format!("{:064x}", 7), SpendPolicy::dollars("1").unwrap()).unwrap();
+    let identity = crate::network::IsolationId::evm(&payer.address).unwrap();
+    let client = PaidClient::new(payer);
+    let pre = crate::network::global()
+        .http_transport(
+            &identity,
+            &format!("{origin}/pay"),
+            None,
+            false,
+            Default::default(),
+            crate::network::SelectionPolicy::Legacy,
+        )
+        .unwrap();
+    assert_eq!(pre.selection(), crate::network::SelectionPolicy::Legacy);
+    assert_eq!(pre.identity, identity);
+    assert_eq!(pre.scope, identity);
+
+    for method in ["GET", "POST"] {
+        peers.lock().unwrap().clear();
+        let route = RoutedRequest {
+            method: method.into(),
+            url: format!("{origin}/pay"),
+            query: BTreeMap::from([("q".into(), json!("exact & value"))]),
+            body: (method == "POST").then(|| json!({"payload":[1,2,3]})),
+        };
+        let out = client.execute_response(route).await.unwrap();
+        assert_eq!(out.bytes, b"paid");
+        assert!(out.paid_submission);
+        let seen = peers.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(
+            seen[0].0, seen[1].0,
+            "challenge and signed request must reuse the pinned transport connection across cache eviction"
+        );
+        assert_eq!(seen[0].1, seen[1].1);
+        assert_eq!(seen[0].2, seen[1].2);
+        assert_eq!(seen[0].3, seen[1].3);
+    }
+    assert_eq!(signed_count.load(Ordering::SeqCst), 2);
+
+    for code in [
+        StatusCode::BAD_REQUEST,
+        StatusCode::FORBIDDEN,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::SERVICE_UNAVAILABLE,
+    ] {
+        *status_override.lock().unwrap() = Some(code);
+        for method in ["GET", "POST"] {
+            peers.lock().unwrap().clear();
+            let route = RoutedRequest {
+                method: method.into(),
+                url: format!("{origin}/pay"),
+                query: BTreeMap::new(),
+                body: (method == "POST").then(|| json!({"k":"v"})),
+            };
+            assert!(client.execute_response(route).await.is_err());
+            assert_eq!(
+                peers.lock().unwrap().len(),
+                1,
+                "unsigned {code} on {method} remains single-shot before T5 activation"
+            );
+        }
+    }
+    assert_eq!(signed_count.load(Ordering::SeqCst), 2);
+    server.abort();
+}

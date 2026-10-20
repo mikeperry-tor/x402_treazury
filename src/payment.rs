@@ -535,14 +535,14 @@ impl PaidClient {
             ),
             _ => None,
         };
-        let (response, mut cover) = loop {
+        let (response, mut cover, _transport) = loop {
             if !attempted.is_empty()
                 && let Some(context) = crate::qualification::payment_context()?
             {
                 context.check_retry_start().await?;
             }
             diagnostics::stage("transport_selection");
-            let (http, mut cover) = self
+            let (transport, mut cover) = self
                 .execution_transport(
                     &request,
                     unsigned_only,
@@ -552,7 +552,7 @@ impl PaidClient {
                 .await?;
             diagnostics::stage("unsigned_request");
             let (mut response, retry, receipt) =
-                unsigned_response(&http, &request, cover.as_ref()).await?;
+                unsigned_response(&transport, &request, cover.as_ref()).await?;
             diagnostics::response(&response);
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
                 diagnostics::stage("challenge_preparation");
@@ -578,7 +578,7 @@ impl PaidClient {
                 if let Some(pool) = &self.managed {
                     match pool
                         .pay_with_cover_observed(
-                            &http,
+                            &transport.client,
                             candidate.clone().expect("managed candidate"),
                             retry,
                             response,
@@ -644,7 +644,7 @@ impl PaidClient {
                 } else {
                     response = static_payment(
                         payer.as_deref(),
-                        &http,
+                        &transport,
                         retry,
                         response,
                         cover.as_ref(),
@@ -663,7 +663,7 @@ impl PaidClient {
             if let Some(call) = &mut cover {
                 call.response_headers();
             }
-            break (response, cover);
+            break (response, cover, transport);
         };
         diagnostics::stage("response_body");
         let result = self.response_output(response, paid_submission).await;
@@ -685,7 +685,10 @@ impl PaidClient {
         unsigned_only: bool,
         candidate: Option<&crate::rotation::manager::PaymentCandidateHandle>,
         payer: Option<&Payer>,
-    ) -> Result<(reqwest::Client, Option<crate::cover::runtime::Call>)> {
+    ) -> Result<(
+        Arc<crate::network::HttpTransport>,
+        Option<crate::cover::runtime::Call>,
+    )> {
         let identity = if unsigned_only {
             crate::network::IsolationId::discovery(request.url().as_str())?
         } else {
@@ -697,35 +700,34 @@ impl PaidClient {
             crate::network::IsolationId::evm(address)?
         };
         let factory = crate::network::global();
-        let http = factory.http_policy(
+        let transport = factory.http_transport(
             &identity,
             request.url().as_str(),
             self.timeout,
             self.public_only,
             self.transport,
+            crate::network::SelectionPolicy::Legacy,
         )?;
         let cover = self.cover.as_ref().and_then(|(config, scope)| {
-                let engine = factory.cover.as_ref()?;
-                let owner = crate::cover::registry::Owner {
-                    runtime: tokio::runtime::Handle::current().id(),
-                    identity: identity.clone(),
-                    origin: request.url().origin().ascii_serialization(),
-                    transport: self.transport,
-                    public_only: self.public_only,
-                    read_timeout: factory.read_timeout(self.timeout),
-                };
-                match engine.begin(owner, config.clone(), scope.clone(), http.clone()) {
-                    Ok(call) => Some(call),
-                    Err(error) => {
-                        tracing::warn!(listener = %scope.listener, source = %scope.source, "optional cover unavailable: {error}");
-                        None
-                    }
+            let engine = factory.cover.as_ref()?;
+            let owner = crate::cover::registry::Owner::from_transport(&transport);
+            match engine.begin(
+                owner,
+                config.clone(),
+                scope.clone(),
+                transport.client.clone(),
+            ) {
+                Ok(call) => Some(call),
+                Err(error) => {
+                    tracing::warn!(listener = %scope.listener, source = %scope.source, "optional cover unavailable: {error}");
+                    None
                 }
-            });
+            }
+        });
         if let Some(call) = &cover {
             call.prioritize().await;
         }
-        Ok((http, cover))
+        Ok((transport, cover))
     }
 
     async fn response_output(
@@ -801,7 +803,7 @@ pub(crate) async fn bound_challenge(
 // Capture receipt time before challenge handling, and release unsigned padding
 // before recording response protocol observations.
 async fn unsigned_response(
-    http: &reqwest::Client,
+    transport: &crate::network::HttpTransport,
     request: &reqwest::Request,
     cover: Option<&crate::cover::runtime::Call>,
 ) -> Result<(
@@ -819,7 +821,8 @@ async fn unsigned_response(
     if let Some(p) = &mut padding {
         p.dispatched();
     }
-    let response = http
+    let response = transport
+        .client
         .execute(unsigned)
         .await
         .map_err(reqwest::Error::without_url)?;
@@ -835,7 +838,7 @@ async fn unsigned_response(
 
 async fn static_payment(
     payer: Option<&Payer>,
-    http: &reqwest::Client,
+    transport: &crate::network::HttpTransport,
     retry: reqwest::Request,
     mut response: reqwest::Response,
     cover: Option<&crate::cover::runtime::Call>,
@@ -859,7 +862,8 @@ async fn static_payment(
     }
     progress.mark_possible();
     diagnostics::stage("signed_request");
-    let response = http
+    let response = transport
+        .client
         .execute(retry)
         .await
         .map_err(reqwest::Error::without_url)?;
