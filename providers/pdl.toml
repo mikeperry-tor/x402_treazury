@@ -3,7 +3,7 @@ spec = "https://stablepeopledata.dev/openapi.json"
 name = "People Data Labs"
 base_url = "https://stablepeopledata.dev"
 prefix = "pdl"
-include = ["/api/pdl"]
+include = ["/api/pdl", ""]
 pricing_key = "x-payment-info"
 additional_properties = false
 

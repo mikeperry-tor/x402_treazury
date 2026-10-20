@@ -55,13 +55,13 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Concordance | `concordance/provider.toml` | Local `concordance/openapi.json` |
 | Deepline | `deepline.toml` | Vendor OpenAPI |
 | Exa | `exa.toml` | Vendor OpenAPI; Search, Contents and lazy help only |
-| Genuine Good Grants | `genuinegood.toml` | Vendor OpenAPI |
+| Genuine Good Grants | `genuinegood.toml` | POST grant research; search/detail recommendations; bearer pass excluded |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
 | Google Trends | `google-trends.toml` | Vendor OpenAPI |
-| IPIntel.ai | `ipintel.toml` | 13 POST domain, DNS, IP, email, satellite and developer tools plus lazy help |
-| Kronos | `kronos.toml` | Vendor OpenAPI |
+| IPIntel.ai | `ipintel.toml` | Domain/DNS/IP, satellite and developer tools; core lookup recommendations |
+| Kronos | `kronos.toml` | Market data plus public status/methodology; existing names preserved |
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |
-| LoneStarOracle | `lonestar.toml` | Vendor unified OpenAPI |
+| LoneStarOracle | `lonestar.toml` | Full supported gateway, including public previews/feeds; research recommendations |
 | News Gurus | `newsgurus/provider.toml` | Local projection of vendor x402 catalog; 48 paid reads plus lazy help |
 | OneShot | `oneshot.toml` | Synchronous web search and lazy help; async workflows excluded |
 | Otto | `otto.toml` | Vendor OpenAPI |
@@ -73,7 +73,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Straits | `straits/provider.toml` | Local `straits/openapi.json` |
 | Vaaya | `vaaya.toml` | 46 synchronous x402 research calls plus lazy help; mixed-protocol/media workflows excluded |
 | x402-list | `x402-list.toml` | Curated API-directory reads |
-| x402stock | `x402stock.toml` | Vendor OpenAPI |
+| x402stock | `x402stock.toml` | Full supported market/economic catalog; compact research recommendations |
 
 Curl additionally pins the vendor-published OpenAPI response envelope for discovery
 relay use; see [relay configuration](../docs/configuration.md#paid-discovery-relay).
@@ -102,7 +102,10 @@ Reusable definitions should expose supported functionality, including newly adde
 supported routes. Restrict catalogs for concrete authentication/payment, request,
 output/lifecycle or financial-authority incompatibilities. Diagnostic endpoints,
 compactness, price and overlap with another provider are editorial choices, not
-compatibility failures. Keep naming anchors when they determine generated names.
+compatibility failures. Keep naming anchors when they determine generated names. Add an empty root
+fallback when paths outside an anchor were hidden only for convenience; retain a
+namespace restriction only for an identified support boundary such as x402 versus
+MPP authentication. Recommendations cannot restore routes hidden by path filters.
 Exact operation allowlists remain appropriate for verified payable islands in a
 mixed API; explain why path or tag exclusions cannot describe that boundary.
 

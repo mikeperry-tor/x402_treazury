@@ -3,7 +3,7 @@ spec = "https://api.brazilayer.com/openapi.json"
 name = "Brazilayer — Brazilian Company Data (CNPJ)"
 base_url = "https://api.brazilayer.com"
 prefix = "brazilayer"
-include = ["/v1"]
+include = ["/v1", ""]
 instructions_text = "Official Brazilian registry and market data: Receita Federal CNPJ registry, CVM fund disclosures, BACEN authorizations, PNCP tenders, sanctions lists, EUDR deforestation, commodity/macros feeds. Response keys use Portuguese legal terms (razao_social, situacao_cadastral, ...). Paid calls settle x402 USDC on Base; each tool states its price ($0.001–$0.10 per call). Validate a CNPJ free with brazilayer_ferramentas_cnpj__valor_ before any paid lookup — an invalid CNPJ never resolves anywhere. The twelve *_amostra tools are free shape samples of each dataset. brazilayer_cnpj_busca and brazilayer_cnpj_socio__busca require at least one filter; result totals cap at the string \"10000+\". brazilayer_pacotes__brasil bundles the 13 parameter-free endpoints in one call for $0.09."
 
 help_url = "https://api.brazilayer.com/llms.txt"

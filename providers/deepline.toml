@@ -3,6 +3,6 @@ spec = "https://stable-deepline.dev/openapi.json"
 name = "Deepline GTM"
 base_url = "https://stable-deepline.dev"
 prefix = "deepline"
-include = ["/api"]
+include = ["/api", ""]
 pricing_key = "x-payment-info"
 additional_properties = false

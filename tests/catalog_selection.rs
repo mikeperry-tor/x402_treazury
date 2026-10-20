@@ -141,6 +141,9 @@ async fn captured_method_pairs_keep_post_body_contracts_and_canonical_names() {
         )
         .unwrap();
         let canonical = build_tools(&cfg, &doc, provider).unwrap();
+        if provider == "genuinegood" {
+            assert!(!canonical.iter().any(|t| t.path == "/v1/grants/pass"));
+        }
         cfg.prefer_post = false;
         let twins = build_tools(&cfg, &doc, provider).unwrap();
         for path in paths {

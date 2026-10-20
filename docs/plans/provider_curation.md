@@ -5,7 +5,9 @@
 Implementation in progress. Baseline established at `05280d66f903e38b45b521d4b973f5e58529db53`
 (the plan-only commit after the original baseline). P1 is complete and G1 independently closed. C2.2 (`4dccbe6`) implements POST
 preference; C2.3 adds advisory recommendations, explicit selection and operator
-inspection. G2 must review both before P3. The operator wants
+inspection. G2 independently closed at `74c7d21`; C3.1 now normalizes the fifteen
+ordinary-provider definitions and their focused tests/docs. C3.1 validation passed;
+its exact committed SHA awaits independent review before C3.2. The operator wants
 provider defaults to expose supported functionality and newly arriving supported
 tools, rather than silently impose a maintainer's recommended subset. Separate
 recommendations from compatibility filtering, use recommendations explicitly in
@@ -102,6 +104,17 @@ Ordered provider ownership (each definition occurs exactly once):
   concordance/provider.toml and authored schema; curl, glassnode, locus,
   newsgurus, straits provider.toml/local schemas; relayshield phone companion.
   Own projection/enrichment fidelity, namespace preservation and docs/tests.
+
+C3.1 removes editorial operation/public-read exclusions and retains only the
+Arkham SIWX routes, GenuineGood bearer pass, TeleSINT watch ownership and AgOSINT
+MPP rail boundaries. Naming anchors retain root fallbacks, including AgOSINT
+public discovery. Actual Rust offline inventories cover twelve available inputs
+(three are selected qualification subsets): Kronos adds four public reads,
+LoneStar adds thirty-one public reads, and existing names are unchanged. No full
+inventory is claimed for AgOSINT, Datakoot or TeleSINT. Two shared provider-policy
+tests, four method-selection tests, the IPIntel quirk test and recursive offline
+TOML validation execute successfully; before/after evidence is under ignored
+`target/provider-curation/`. No paid endpoint or qualification was run.
 
 No child splits are currently needed. C3.3 closes the provider boundary before
 C4.1 privacy adoption. Acceptance includes before/after inventories under target,

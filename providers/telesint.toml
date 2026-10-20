@@ -1,28 +1,10 @@
-# Stateless paid CTI and OSINT operations; excludes free /status and wallet-bound /watch/* routes.
+# Stateless CTI and OSINT; wallet-owned watch state is incompatible with rotating payers.
 spec = "https://telesint-api.onrender.com/openapi.json"
 name = "TeleSINT"
 base_url = "https://telesint-api.onrender.com"
 prefix = "telesint"
-include_operations = [
-  "GET /actor",
-  "GET /artifact",
-  "GET /asn",
-  "GET /breach",
-  "GET /c2",
-  "GET /claim-check",
-  "GET /darkweb",
-  "GET /feed",
-  "GET /intent",
-  "GET /ioc",
-  "GET /malware",
-  "GET /preparation",
-  "GET /ransomware",
-  "GET /search",
-  "GET /source",
-  "GET /target-mentions",
-  "GET /velocity",
-  "GET /vulnerability",
-]
+recommended_tools = ["telesint_actor", "telesint_artifact", "telesint_asn", "telesint_breach", "telesint_c2", "telesint_claim_check", "telesint_darkweb", "telesint_feed", "telesint_intent", "telesint_ioc", "telesint_malware", "telesint_preparation", "telesint_ransomware", "telesint_search", "telesint_source", "telesint_target_mentions", "telesint_velocity", "telesint_vulnerability", "telesint_help"]
+exclude = ["/watch"]
 pricing_key = "x-payment-info"
 probe_pricing = false
 read_timeout_seconds = 90

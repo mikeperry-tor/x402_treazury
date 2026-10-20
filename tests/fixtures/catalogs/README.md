@@ -87,10 +87,10 @@ v1 limitation are documented in `providers/CAVEATS.md`; neither fixture qualifie
 funded settlement.
 
 The IPIntel fixture captures `https://tools.ipintel.ai/openapi.json` using
-`snapshot_spec`, removing response documentation only. Its 13 POST operations
-plus lazy help have a full golden contract. Focused tests preserve all prices,
-JSON body routing, DNS enums, nullable satellite dates and unrestricted validator
-JSON values, and exclude prospective methods/routes. No paid call was made.
+`snapshot_spec`, removing response documentation only. Focused tests preserve DNS enum arrays and JSON routing, nullable satellite dates,
+unrestricted validator JSON, the HTTP method enum and JWT interpretation. Shared
+selection tests establish new-route visibility; no inventory count or all-prices
+snapshot is required. No paid call was made.
 
 
 The NewsGurus raw x402 catalog fixture preserves the vendor's 49 resources. The

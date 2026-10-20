@@ -1,19 +1,11 @@
-# Live European/global OSINT registry fan-out over /x402/*; duplicate /mpp/* routes and /endpoints are excluded.
+# Registry fan-out: /x402 anchors names; MPP aliases are the unsupported payment rail.
 spec = "https://agosint.shveik.dev/openapi.json"
 name = "AgOSINT"
 # Pin root base_url because servers[0] in the vendor spec appends /v1, which breaks /x402/* paths.
 base_url = "https://agosint.shveik.dev"
 prefix = "agosint"
-include = ["/x402"]
-include_operations = [
-  "POST /x402/company",
-  "POST /x402/company-de",
-  "POST /x402/domain",
-  "POST /x402/due-diligence",
-  "POST /x402/network",
-  "POST /x402/sanctions",
-  "POST /x402/vat",
-]
+include = ["/x402", ""]
+exclude = ["/mpp"]
 pricing_key = "x-payment-info"
 probe_pricing = false
 read_timeout_seconds = 120

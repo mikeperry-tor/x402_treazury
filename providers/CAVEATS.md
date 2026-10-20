@@ -20,13 +20,13 @@ compatibility blocker.
 | --- | --- |
 | AgentFund, Brazilayer, Deepline, PDL | Gateway/path name anchors and request guidance; no identified editorial operation restriction. |
 | botsmith, Google Trends | Ordinary catalog; probes or structured price/offer metadata have separate contracts. |
-| AgOSINT | `/x402` gateway versus MPP; root base URL repairs upstream `/v1` server prefix. Captured operation freeze is editorial. |
+| AgOSINT | `/mpp` is the unsupported payment rail; `/x402` anchors names while public discovery remains visible. Root base URL repairs upstream `/v1`. |
 | Arkham | Three discovery routes demand SIWX; ordinary paid routes remain usable. |
-| Datakoot, IPIntel | Exact current inventories are editorial freezes, not new-route support boundaries. |
+| Datakoot, IPIntel | Supported catalogs are open to new routes; request guidance and output interpretation remain provider-specific. |
 | GenuineGood | Bearer-token pass purchase unusable here; ordinary grant reads include expensive calls subject to payment caps. |
 | Kronos | Path name anchor; disabled probes reflect observed discovery slowness, not a tool gate. |
-| LoneStarOracle, x402stock | Public read exclusions are editorial; unpriced/preview/data overlap is not incompatibility. |
-| TeleSINT | `/watch` owns persistent wallet state; `/status` exclusion and fixed inventory are editorial. |
+| LoneStarOracle, x402stock | Public previews, feeds and overlapping data remain available; compact research advice requires explicit opt-in. |
+| TeleSINT | `/watch` owns persistent wallet state and remains excluded. Public status and new stateless operations remain visible. |
 | Agent402 | Preserve wallet-owned and actual execution boundaries. JSON/base64 media, PNG/JPEG modes, planning and human onramp links are usable; raw speech and multipart transcription are unsupported. Compact tags/inventory are editorial. |
 | BlockRun | Restrict async jobs, unsupported binary output, wallet-owned lifecycle and fund submission. Valid fixed-symbol paths are usable literally; zero placeholders retain an unverified intended-target limitation. |
 | Claw402 | Market-read subset is editorial. Sparse RootData schemas allow JSON body passthrough; see contracts below. Image result envelope remains unverified. |
@@ -182,18 +182,23 @@ process lifetime.
 
 ## x402stock.toml — x402stock.xyz
 
-US stocks/ETFs/options, forex, crypto & on-chain perps, energy commodities,
-macro (Fed, CPI, Treasury, World Bank), SEC filings, congressional trades —
-142 GET tools. 140 ops publish a flat USD price via the `x-payment-info`
-extension ($0.01–$0.75 at time of writing), surfaced by `pricing_key`; two
-genuinely free endpoints (`market-status`, `market-holidays`) answer `200`
-unpaid and are the only ops probed at boot. The spec's second server
-(`agents.x402stock.xyz`) is an MPP/Tempo pay-host — the conf pins `base_url`
-to the direct x402/USDC-on-Base host. `POST /api/v1/feedback` is excluded
-(a vendor feedback form, not data). Guidance: the vendor's 27KB `llms.txt`
-is served via `x402stock_help()` (`help_url`) — far too long for
-`instructions_text`, which instead summarizes path-placeholder handling,
-the `{ticker, data, source, as_of}` response shape, and the 402/retry flow.
+Market, economic, SEC and congressional-trade data use the direct
+`https://x402stock.xyz` x402/USDC-on-Base host; the alternate
+`agents.x402stock.xyz` server is an MPP/Tempo pay host. `/api/v1` shortens
+existing names, with an empty fallback for other paths. Public macro, filings,
+perps, snapshots, market-status and holiday routes are available rather than
+hidden for overlap or compactness. Feedback is not excluded merely because it
+is a write; no wallet-owned or unsupported-auth contract is established for it.
+
+`recommended_tools` suggests symbol discovery, company overview/disclosures and
+the FOMC calendar, plus help. This advice does not limit the default catalog or
+raise payment caps. Prices come from vendor metadata or eligible unsigned probes;
+restored routes without embedded pricing can now participate in that existing
+probe policy. Vendor `llms.txt` help remains lazy. Source instructions preserve
+path placeholders and the `{ticker, data, source, as_of}` result convention.
+Only a selected calendar request schema is retained for offline qualification;
+the current complete spec/guide could not be retrieved during this audit. Neither
+that schema nor the configured URL establishes current upstream availability.
 
 ## google-trends.toml — Google Trends SEO keyword data (x402 Atlas)
 
@@ -256,14 +261,19 @@ signals/price/ohlc/volatility/liquidation maps (`{asset}` paths, 16 spot
 assets + HYPE derivatives-only), market-wide overview/scan/funding extremes,
 BTC/ETH options (GEX, IV surface, implied probabilities), ML forecasts
 ($0.05) with a **free** `kronos_track_record` accuracy audit, macro context,
-and the $0.10 all-in-one `briefing`. The include anchors on `/api/v1` so the
-`v1` path segment never leaks into tool names (the vendor's free `/api/stats`,
-`/api/health`, `/api/methodology` top-level routes are not exposed). Prices
+and the $0.10 all-in-one `briefing`. The `/api/v1` anchor keeps existing tool names short. Prices
 live in vendor prose (the spec's `x-x402` extension has the wrong shape for
 `pricing_key`). Startup probes are disabled (`probe_pricing = false`) because
 pricing discovery was repeatedly slow; a deployment source may explicitly
 re-enable them. Vendor prose and the free `kronos_track_record` override remain.
 Actual paid calls still use the live challenge and enforce spend caps.
+
+The `/api/v1` anchor preserves existing names; an empty fallback exposes the
+public `/api/health`, `/api/stats`, `/api/methodology` and discovery manifest.
+These are not authentication boundaries. The saved full input is also an
+explicit runtime source in the live-Tor example, so it is retained independently
+of regression pruning. A cached primary OpenAPI document supported this public-route distinction;
+it is not a current health check.
 
 ## concordance.toml — Concordance (concordancehq.duckdns.org)
 
@@ -360,8 +370,9 @@ plus `genuinegood_help()` without redundant method suffixes. Every op publishes 
 USDC on Base), so prices render from the **live vendor spec** and boots make
 zero probe requests; the vendor prose states no dollar amounts, so the
 rendered price line survives the dedupe and each tool shows its price exactly
-once. The include anchors on `/v1/grants` so the path prefix never leaks into
-tool names; POST bodies are inline with real constraints and the schemas are
+once. The `/v1/grants` naming anchor preserves existing names, with a root fallback
+for other supported paths. Search/detail/help recommendations are advisory;
+fit, brief and preflight remain available by default. POST bodies are inline with real constraints and the schemas are
 closed via `additional_properties = false`. Caveats:
 
 - `/v1/grants/pass` ($15 non-renewing 30-day pass) is **excluded on
@@ -451,22 +462,19 @@ challenge descriptions client-side, so they settle like the rest.
 
 ## lonestar.toml — LoneStarOracle catalog (lonestaroracle.xyz)
 
-The provider reads the vendor's **unified spec** (one fetch, `openapi.json`, root server =
-`https://lonestaroracle.xyz/api`). The gateway proxies every service
-payment-gated — verified 402-identical to the per-service subdomains — so no
-per-op URL handling is needed (the spec's `x-direct-url` extension is
-informational). 96 API tools plus help over 71 services; the vendor's `authMode: free`
-markers render as "Free — no payment required (vendor spec)." via the
-server's pricing-renderer, and the audit POSTs' `$ref` bodies deref through
-the shared flatteners. Zero boot probes (every op is spec-classified).
-Exclusions: curated suffix rules (demos, previews,
-per-service `/feed` pages, subscription management, unpriced LeaseEdge
-extras) are spelled out as 31 concrete paths — new vendor preview/feed routes
-would appear as tools until the list is extended. Select subsets with source
-path filters or listener `include_tools`/`exclude_tools` patterns; legacy curated
-`--groups` aliases are not supported. `help_url` serves the vendor `llms.txt`
-(one-fetch catalog, per-service prices, subscribe notes) as
-`lonestar_help()`.
+The unified [OpenAPI](https://lonestaroracle.xyz/openapi.json) uses the
+`https://lonestaroracle.xyz/api` gateway. Original service paths stay on the wire;
+`x-direct-url` is informational. The captured gateway metadata classifies prices
+and free hints, while live challenges remain authoritative. Authored overrides
+and local-reference request conversion remain unchanged.
+
+Public demos, previews, feed pages, refinery data, lease-auction/portfolio reads
+and audit-target listings are included. Their former omission was editorial;
+no subscription-management or wallet-owned contract appears in those captured
+requests. Recommendations suggest macro/rates, news and token research plus help,
+without hiding other supported tools. The guide remains lazy. Current public
+schema/help retrieval was unavailable during this audit; saved request contracts
+and historical unsigned observations do not qualify present service behavior.
 
 ## glassnode/ — Glassnode x402 gateway (x402.glassnode.com)
 
@@ -1046,13 +1054,13 @@ compatibility only; no funded settlement or live Tor qualification is claimed.
 
 ## ipintel.toml — IPIntel.ai
 
-Uses the vendor's live `https://tools.ipintel.ai/openapi.json` and lazy
-`https://tools.ipintel.ai/llms.txt`. The exact allowlist selects all 13 current
-POST operations plus help. Each operation has structured `x-payment-info`, so
-pricing probes are disabled. The request fixture retains complete request
-schemas, descriptions, tags and extensions; no local schema repair is needed.
-Published payment metadata advertises x402 v2, USDC on Base. Offline catalog
-coverage does not qualify paid settlement or Tor access.
+Uses vendor [OpenAPI](https://tools.ipintel.ai/openapi.json) and lazy
+[help](https://tools.ipintel.ai/llms.txt), without freezing the captured operation
+inventory. Recommendations cover DNS, IP, domain health and WHOIS lookups plus
+help; satellite and developer utilities remain available by default. Structured
+prices disable probing. Captured schemas retain nullability, enums and arbitrary
+validator JSON without a local repair. Public document retrieval was unavailable
+in this audit; local tests do not qualify current availability, settlement or Tor.
 
 Observed documentation oddities and interpretation boundaries:
 
@@ -1073,16 +1081,6 @@ Observed documentation oddities and interpretation boundaries:
   utilities are paid remote computations often better performed locally. The
   validator's `data` property deliberately accepts any JSON value.
 
-For the company listener in `examples/deployments/privacy.toml`, the strongest
-additions would be `ipintel_domain_health` ($0.001) and `ipintel_dns_lookup`
-($0.001): email-domain configuration plus raw DNS evidence complement its current
-selected tools. `ipintel_satellite` ($0.09) is an optional physical-site research
-specialist, requiring known coordinates and careful scene interpretation.
-`ipintel_email_validate` ($0.004) is optional contact hygiene rather than company
-identity evidence. WHOIS, IP enrichment and reverse DNS largely overlap existing
-NetIntel/RelayShield selections; domain availability mostly serves naming work.
-The example company listener selects only `ipintel_ip_lookup` and
-`ipintel_satellite`, sharing its existing company wallet and payment cap.
 
 ## newsgurus/provider.toml — News Gurus Intel API
 
@@ -1201,6 +1199,47 @@ Description prices are inconsistent with structured prices: Tako search/answer/
 contents prose quotes about $0.012/$0.018/$0.002, while `x-payment-info` advertises
 $0.03/$0.03/$0.05; RecallRadar search/get prose quotes $0.10/$0.025 while structured
 prices are $0.12/$0.03. Use the structured estimates and live payment challenge.
+
+## agosint.toml — AgOSINT
+
+The configured [OpenAPI](https://agosint.shveik.dev/openapi.json) and
+[guide](https://agosint.shveik.dev/llms.txt) distinguish `/x402` from duplicate
+MPP routes. Exclude the `/mpp` subtree, keep `/x402` as a naming anchor and
+retain a root fallback for public `/endpoints` discovery and new public reads. The root `base_url` repairs the vendor server's
+extra `/v1` prefix. Company/due-diligence requests require exactly one lookup key;
+id/name also require country. Network uses ip or asn; sanctions uses name or
+wallet. Invalid inputs may still receive a quote before a paid validation error,
+so preserve input guidance. Long registry fan-out is synchronous work, not proof
+of a polling lifecycle. Public documents could not be retrieved during this audit;
+there is no full offline provider capture or new settlement qualification.
+
+## datakoot.toml — Datakoot
+
+The [x402 OpenAPI](https://x402.datakoot.com/openapi.json) supplies public-data
+and Koot synthesis requests. `/api` is a naming anchor with a root fallback;
+the former exact inventory no longer freezes newly supported operations. Help
+uses the [apex guide](https://datakoot.com/llms.txt), rather than the x402 host's
+historically missing guide. Preserve alternate CVE/dependency input guidance,
+US-only location coverage and operation-level estimates that differ from the
+top-level summary. No recommendation list is needed for its coherent supported
+catalog. Current document retrieval was unavailable and no full offline capture
+is bundled; definitions are not evidence of funded delivery.
+
+## telesint.toml — TeleSINT
+
+Wallet-owned `/watch` state is excluded because managed payer rotation cannot
+preserve its ownership. Public `/status` and new stateless intelligence routes
+remain available. Recommendations select the established stateless intelligence
+queries and their artifact/result flow plus help; opt-in deliberately omits status
+without hiding it in the reusable default. `preparation` and `velocity` need a
+scope parameter; `claim-check` needs id or text. Their documented HTTP 200 guidance
+errors can still consume payment, so retained overrides explain the actual inputs.
+
+Help uses [SKILL.md](https://telesint-api.onrender.com/SKILL.md) because the captured
+`llms.txt` was truncated. Follow OpenAPI names/enums where guide prose differs.
+The [schema](https://telesint-api.onrender.com/openapi.json) and guide were
+unavailable to fresh inspection, and no complete provider capture is bundled.
+Synthetic selection tests establish local policy only, not vendor delivery.
 
 ## hirescrape.toml — HireScrape
 

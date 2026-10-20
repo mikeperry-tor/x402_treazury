@@ -8,7 +8,7 @@ name = "Kronos Crypto Data"
 probe_pricing = false
 base_url = "https://kronossignals.com"
 prefix = "kronos"
-include = ["/api/v1"]
+include = ["/api/v1", ""]
 instructions_text = "Kronos pay-per-call crypto market data (x402 USDC on Base; most calls $0.02-$0.10 — each tool's description states its price). {asset} paths take any of the 16 spot assets BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/LTC/TRX/BCH/ATOM/NEAR/APT; perp markets also cover HYPE (derivatives only). kronos_track_record is free — audit the served model's live accuracy there before paying for forecasts. All output is informational only, not financial advice."
 
 help_url = "https://kronossignals.com/llms.txt"

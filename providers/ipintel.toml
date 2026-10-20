@@ -1,23 +1,9 @@
-# Exact task-facing inventory; future vendor routes require explicit review.
+# Domain, DNS, IP, satellite and developer tools; recommendations do not restrict availability.
 spec = "https://tools.ipintel.ai/openapi.json"
 name = "IPIntel.ai"
 base_url = "https://tools.ipintel.ai"
 prefix = "ipintel"
-include_operations = [
-  "POST /dns-lookup",
-  "POST /reverse-dns",
-  "POST /ip-lookup",
-  "POST /domain-health",
-  "POST /whois-lookup",
-  "POST /satellite",
-  "POST /domain-availability",
-  "POST /json-schema-validator",
-  "POST /jwt-decode",
-  "POST /base64-encode",
-  "POST /base64-decode",
-  "POST /email-validate",
-  "POST /http-latency",
-]
+recommended_tools = ["ipintel_dns_lookup", "ipintel_ip_lookup", "ipintel_domain_health", "ipintel_whois_lookup", "ipintel_help"]
 pricing_key = "x-payment-info"
 probe_pricing = false
 help_url = "https://tools.ipintel.ai/llms.txt"
