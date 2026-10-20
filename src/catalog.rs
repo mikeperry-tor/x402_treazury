@@ -673,9 +673,10 @@ async fn fetch_catalog_origin(
             Err(err)
                 if attempt < max_attempts && crate::network::eligible_retry_transport(&err) =>
             {
-                tracing::debug!(
+                tracing::info!(
                     stage = "catalog",
                     attempt,
+                    max_attempts,
                     "Catalog origin transport failed; retrying on fresh Tor isolation scope"
                 );
                 continue;
@@ -704,9 +705,10 @@ async fn fetch_catalog_origin(
                 .expect_err("non-success status")
                 .without_url();
             if attempt < max_attempts && crate::network::eligible_retry_status(status) {
-                tracing::debug!(
+                tracing::info!(
                     stage = "catalog",
                     attempt,
+                    max_attempts,
                     http_status = status.as_u16(),
                     "Catalog origin HTTP status eligible for retry on fresh Tor isolation scope"
                 );
@@ -727,9 +729,10 @@ async fn fetch_catalog_origin(
                         .downcast_ref::<reqwest::Error>()
                         .is_some_and(crate::network::eligible_retry_transport) =>
             {
-                tracing::debug!(
+                tracing::info!(
                     stage = "catalog",
                     attempt,
+                    max_attempts,
                     "Catalog origin body read failed; retrying on fresh Tor isolation scope"
                 );
                 continue;

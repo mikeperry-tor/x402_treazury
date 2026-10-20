@@ -480,7 +480,7 @@ policy; explicit cleartext HTTP remains unchanged. See the
 Pool keys include protocol permissions as well as origin, isolation identity,
 timeout, runtime and public-destination policy. Catalog/pricing caches also
 separate differing protocol permissions. HTTP/2 streams within a connection share
-one SOCKS identity; they cannot cross wallet/discovery boundaries. INFO response
+one SOCKS identity; they cannot cross wallet/discovery boundaries. DEBUG response
 logs record HTTP version and request stage, without URLs or credentials. TLS
 versions are enforced through minimum-version settings, not inferred from HTTP.
 

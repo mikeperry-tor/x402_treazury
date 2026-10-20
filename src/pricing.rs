@@ -460,9 +460,10 @@ async fn probe_network(
         {
             Ok(response) => response,
             Err(e) if attempt < max_attempts && crate::network::eligible_retry_transport(&e) => {
-                tracing::debug!(
+                tracing::info!(
                     stage = "pricing",
                     attempt,
+                    max_attempts,
                     "Pricing probe transport failed; retrying on fresh Tor isolation scope"
                 );
                 continue;
@@ -485,9 +486,10 @@ async fn probe_network(
                 .map(crate::network::RetryAfter::after);
             drop(response);
             if attempt < max_attempts && crate::network::eligible_retry_status(http_status) {
-                tracing::debug!(
+                tracing::info!(
                     stage = "pricing",
                     attempt,
+                    max_attempts,
                     http_status = status,
                     "Pricing probe HTTP status eligible for retry on fresh Tor isolation scope"
                 );

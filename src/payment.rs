@@ -780,6 +780,7 @@ impl PaidClient {
             diagnostics::stage("transport_selection");
             let transport = factory.http_attempt(&selected, attempt)?;
             let mut cover = self.begin_cover(&transport).await;
+            diagnostics::unsigned_attempt(attempt, max_attempts);
             diagnostics::stage("unsigned_request");
             let (response, retry, receipt) = match unsigned_response(
                 &transport,
@@ -798,7 +799,7 @@ impl PaidClient {
                             .is_some_and(crate::network::tls_failure) =>
                 {
                     drop(cover);
-                    tracing::warn!(
+                    tracing::info!(
                         stage = "unsigned_request",
                         attempt,
                         max_attempts,
@@ -829,7 +830,7 @@ impl PaidClient {
                 if retry_after.is_some() {
                     crate::qualification::check_retry_authority().await?;
                 }
-                tracing::warn!(
+                tracing::info!(
                     stage = "unsigned_request",
                     attempt,
                     max_attempts,

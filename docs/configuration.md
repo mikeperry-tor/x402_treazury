@@ -873,7 +873,7 @@ rotation never reuses the previous wallet's TLS connection. Server limits and
 connection closure can require additional connections. Protocol changes do not
 add signed-payment retries.
 
-INFO logs report the actual response `http_version` and stage (catalog, pricing,
+DEBUG logs report the actual response `http_version` and stage (catalog, pricing,
 help, agent import, payment challenge/result), without URLs or payment credentials.
 This is HTTP version telemetry, not negotiated TLS-version telemetry; a successful
 strict HTTPS handshake enforces the TLS 1.3 minimum. Provider compatibility has

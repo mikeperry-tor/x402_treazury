@@ -147,7 +147,14 @@ challenge, extension values, signed bytes or upstream error prose is logged.
 
 Accepted payment work logs its terminal result inside its retained owner, even
 after caller cancellation: completion is INFO, failure is WARN with a fixed
-failure kind, execution stage and `authorization_may_charge`. That flag records
+failure kind, execution stage, unsigned attempt number/maximum when available,
+and `authorization_may_charge`. Counts describe dispatches in the latest payer's
+unsigned sequence and reset when managed wallet traversal changes payer; they are
+not a cumulative call limit. Transport failures include a fixed `transport_reason`
+(TLS, connection timeout, read inactivity, connection, body, decode, request
+construction or other transport), typed I/O kind and numeric OS error when available;
+error prose and URLs remain excluded. The replay caution appears only when an
+authorization may charge. That flag records
 possible financial liability, not confirmed settlement. `last_http_status`, when
 present, is the most recently observed response status; a later signing or
 transport failure can follow an unsigned 402. Recoverable payer handoffs and
@@ -175,7 +182,11 @@ emit raw returned errors; the sanitized application warning owns failure reporti
 Base RPC attempts and successful
 provider failover are debug events with provider ordinals; an exhausted complete
 verification remains a warning. Selecting a configured discovery relay fallback
-is info; the actual paid relay attempt retains its warning.
+and actual paid relay attempts are info. Unsigned API and catalog/pricing Tor
+retry events are info, with attempt and maximum counts; terminal payment failures
+remain warnings. Relay pre-submission retry availability is info, but each failed
+relay payment call still warns before the separate discovery workflow considers
+another attempt.
 
 Sanitize Zingolib errors before logging or persistence. Retain fixed categories
 and typed reasons, numeric gRPC codes and fixed status names when available, never

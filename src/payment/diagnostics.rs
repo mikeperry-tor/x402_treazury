@@ -7,6 +7,8 @@ use std::{cell::Cell, future::Future};
 struct Observation {
     stage: &'static str,
     last_http_status: Option<u16>,
+    unsigned_attempt: Option<usize>,
+    max_unsigned_attempts: Option<usize>,
 }
 tokio::task_local! {
     static OBSERVATION: Cell<Observation>;
@@ -19,6 +21,8 @@ pub(crate) async fn scope<T>(work: impl Future<Output = T>) -> T {
             Cell::new(Observation {
                 stage: "preparation",
                 last_http_status: None,
+                unsigned_attempt: None,
+                max_unsigned_attempts: None,
             }),
             work,
         )
@@ -40,6 +44,37 @@ pub(crate) fn stage(stage: &'static str) {
     });
 }
 
+pub(crate) fn unsigned_attempt(attempt: usize, max_attempts: usize) {
+    let _ = OBSERVATION.try_with(|cell| {
+        cell.set(Observation {
+            unsigned_attempt: Some(attempt),
+            max_unsigned_attempts: Some(max_attempts),
+            ..cell.get()
+        });
+    });
+}
+
+/// Fixed categories only: error display/source text can contain credentials.
+fn transport_reason(error: &reqwest::Error) -> &'static str {
+    if crate::network::tls_failure(error) {
+        "tls_failure"
+    } else if error.is_timeout() && error.is_connect() {
+        "connection_timeout"
+    } else if error.is_timeout() {
+        "read_inactivity"
+    } else if error.is_connect() {
+        "connection"
+    } else if error.is_body() {
+        "body"
+    } else if error.is_decode() {
+        "decode"
+    } else if error.is_builder() {
+        "request_construction"
+    } else {
+        "transport"
+    }
+}
+
 pub(crate) fn response(response: &reqwest::Response) {
     let _ = OBSERVATION.try_with(|cell| {
         cell.set(Observation {
@@ -58,19 +93,48 @@ pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress) {
         Err(error) if error.is::<reqwest::Error>() => "http_transport_or_body",
         _ => "operation",
     };
-    emit(result.is_ok(), kind, progress);
+    let transport = result
+        .as_ref()
+        .err()
+        .and_then(|error| error.downcast_ref::<reqwest::Error>());
+    emit(result.is_ok(), kind, transport, progress);
 }
 
 /// Direct callers own body consumption; observe only the returned headers here.
 pub(crate) fn finish_response(response: &reqwest::Response, progress: &SubmissionProgress) {
     self::response(response);
-    emit(response.status().is_success(), "http_status", progress);
+    emit(
+        response.status().is_success(),
+        "http_status",
+        None,
+        progress,
+    );
 }
 
-fn emit(success: bool, failure_kind: &'static str, progress: &SubmissionProgress) {
+fn emit(
+    success: bool,
+    failure_kind: &'static str,
+    transport: Option<&reqwest::Error>,
+    progress: &SubmissionProgress,
+) {
     let observation = OBSERVATION.with(Cell::get);
     let stage = observation.stage;
     let last_http_status = observation.last_http_status;
+    let unsigned_attempt = observation.unsigned_attempt;
+    let max_unsigned_attempts = observation.max_unsigned_attempts;
+    let transport_reason = transport.map(transport_reason);
+    let io = transport.and_then(|error| {
+        let mut cause = std::error::Error::source(error);
+        while let Some(error) = cause {
+            if let Some(io) = error.downcast_ref::<std::io::Error>() {
+                return Some(io);
+            }
+            cause = error.source();
+        }
+        None
+    });
+    let io_kind = io.map(std::io::Error::kind);
+    let os_error = io.and_then(std::io::Error::raw_os_error);
     let authorization_may_charge = progress.possible();
     if success {
         tracing::info!(
@@ -84,8 +148,85 @@ fn emit(success: bool, failure_kind: &'static str, progress: &SubmissionProgress
             stage,
             last_http_status,
             failure_kind,
+            transport_reason,
+            io_kind = ?io_kind,
+            os_error,
+            unsigned_attempt,
+            max_unsigned_attempts,
             authorization_may_charge,
-            "Payment call failed; do not automatically repeat a call whose authorization may charge"
+            "{}",
+            if authorization_may_charge {
+                "Payment call failed; do not automatically repeat a call whose authorization may charge"
+            } else {
+                "Payment call failed before any potentially chargeable authorization"
+            }
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tracing::instrument::WithSubscriber;
+
+    #[tokio::test]
+    async fn transport_failure_reports_safe_cause_and_preserves_charge_caution() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let error = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/private-path?token=private-token"))
+            .send()
+            .await
+            .unwrap_err();
+        assert_eq!(transport_reason(&error), "connection");
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        scope(async {
+            stage("unsigned_request");
+            unsigned_attempt(1, 3);
+            let result: Result<()> = Err(error.into());
+            finish(&result, &SubmissionProgress::default());
+            let progress = SubmissionProgress::default();
+            progress.mark_possible();
+            finish(&result, &progress);
+        })
+        .with_subscriber(subscriber)
+        .await;
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
+        assert_eq!(warnings.len(), 2, "{logs}");
+        for expected in [
+            "http_transport_or_body",
+            "transport_reason=\"connection\"",
+            "ConnectionRefused",
+            "unsigned_attempt=1",
+            "max_unsigned_attempts=3",
+            "authorization_may_charge=false",
+        ] {
+            assert!(warnings[0].contains(expected), "{logs}");
+        }
+        assert!(
+            !warnings[0].contains("do not automatically repeat"),
+            "{logs}"
+        );
+        assert!(
+            warnings[1].contains("authorization_may_charge=true"),
+            "{logs}"
+        );
+        assert!(
+            warnings[1].contains("do not automatically repeat"),
+            "{logs}"
+        );
+        for private in ["private-path", "private-token", &address.to_string()] {
+            assert!(!logs.contains(private), "{logs}");
+        }
     }
 }

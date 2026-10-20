@@ -532,7 +532,7 @@ impl Relay {
             .or_insert((0, Instant::now()));
         attempt.0 += 1;
         attempt.1 = Instant::now();
-        tracing::warn!(
+        tracing::info!(
             "Using configured paid discovery relay; target content and headers are supplied by relay"
         );
         let started = Instant::now();
@@ -600,12 +600,13 @@ impl Relay {
             }
             Err(error) if !progress.possible() => {
                 state.stopped = false;
-                tracing::warn!(
-                    scope = "pre_submission",
-                    "Discovery relay failed before paid intent; target retries bounded, unrelated targets remain enabled"
-                );
                 let (attempts, last) = state.attempts.get(&key).expect("recorded relay attempt");
                 if *attempts < 3 {
+                    tracing::info!(
+                        attempt = attempts,
+                        max_attempts = 3,
+                        "Discovery relay failed before paid intent; retry available, unrelated targets remain enabled"
+                    );
                     Err(error.context(RetryDisposition::Backoff(
                         std::time::Duration::from_secs(1).saturating_sub(last.elapsed()),
                     )))

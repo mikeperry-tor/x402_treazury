@@ -1291,7 +1291,43 @@ async fn tor_unsigned_retry_child() {
         query: BTreeMap::new(),
         body: Some(json!({"exhaust":true})),
     };
-    assert!(client.execute_response(make_route()).await.is_err());
+    use tracing::instrument::WithSubscriber;
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    assert!(
+        client
+            .execute_response(make_route())
+            .with_subscriber(subscriber)
+            .await
+            .is_err()
+    );
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    let retries: Vec<_> = logs
+        .lines()
+        .filter(|line| line.contains("Retrying unsigned API request"))
+        .collect();
+    assert_eq!(retries.len(), 2, "{logs}");
+    assert!(
+        retries
+            .iter()
+            .all(|line| line.contains("INFO") && line.contains("max_attempts=3")),
+        "{logs}"
+    );
+    let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
+    assert_eq!(warnings.len(), 1, "{logs}");
+    for expected in [
+        "unsigned_attempt=3",
+        "max_unsigned_attempts=3",
+        "authorization_may_charge=false",
+        "last_http_status=503",
+    ] {
+        assert!(warnings[0].contains(expected), "{logs}");
+    }
+    assert!(!logs.contains("do not automatically repeat"), "{logs}");
     assert_eq!(
         script_a.observed.lock().unwrap().len(),
         3,
