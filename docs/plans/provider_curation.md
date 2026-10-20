@@ -67,8 +67,13 @@ fresh source-matched complexity has no advisory warnings. C5.3c
 approval, closing P5. C6.1 reconciles the provider index/caveats in place against
 all approved minimized source inputs, preserves concrete schema/payment/lifecycle
 guidance and removes stale editorial inventories and pending-feature prose.
-Documentation-only index/link/reference validation and exact-SHA review precede
-C6.2 shared-policy consolidation and final cleanup.
+C6.1 (`191e2c853b4e4d9433e1725d93b1dd0e74ad6e8a`) received independent
+exact-SHA approval. C6.2 completes the permanent AGENTS/provider/testing links,
+removes stale snapshot/pending-feature guidance and consolidates shared challenge
+extension/opaque-offer metadata semantics in architecture. The existing code and
+admission tests correct pre-branch stale metadata type/whitelist claims without
+runtime changes. Link/reference validation passes; exact-SHA review, full required
+checks and cumulative G4 remain pending before plan removal.
 Source-matched complexity against `05280d6` reports no advisory regressions; preset
 CogC/CycC fell 6/14 to 5/12 and scope 9/10 to 3/5 by removing responsibilities. Actual
 inventories for all eight local inputs originally showed no removed or renamed

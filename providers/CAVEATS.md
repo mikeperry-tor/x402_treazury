@@ -101,13 +101,10 @@ tag filters remove untagged help; source/CLI tag selection retains configured
 help. Include help explicitly in tool-name selections where desired. Definitions
 without a verified standalone guide retain their embedded/authored guidance.
 
-Media and async constraints are described below and in the artifact/polling plans. Top-level extension stripping is
-not universal managed compatibility. Agent402's `outputSchema` is accepted as
-opaque object/boolean metadata and preserved without evaluation or reference
-fetching. Exa Search/Contents pricing and offer labels, and all four Google
-Trends routes' merchant/tier labels, are accepted with type checks and preserved
-in the outgoing offer. Atomic amounts and signing mechanisms remain strictly
-validated. Local compatibility fixtures do not prove live settlement.
+Media and async constraints are described below and in the artifact/polling plans.
+[Challenge-extension and offer-metadata handling](../docs/architecture.md#payment-extensions-and-offer-metadata)
+is shared policy; extension omission alone does not establish provider support.
+The observations below describe captured contracts, not live settlement.
 
 ## socialfetch.toml — SocialFetch
 
@@ -815,17 +812,11 @@ Base USDC exact pricing of 6000 atomic units ($0.006), alongside a Solana offer.
 The guide's `X-PAYMENT` wording is stale for that sample. Treazury retains its
 Base USDC asset/network policy; it does not add Solana support.
 
-The sampled challenge includes `bazaar` and `builder-code` extensions. Managed
-`zcash_rotation` payments strip top-level extensions before signing, warn with
-extension names only, and attempt one ordinary Base USDC payment. Providers
-requiring extension echoes may reject it. Failure messages explain the omission;
-submitted authorizations remain reserved until chain reconciliation and are never
-automatically replayed. Stripping does not prevent the seller/facilitator from
-adding its own settlement attribution. Static SDK extension handling is unchanged.
-The captured challenge is tested against local static and managed payer/seller
-fixtures, including Base selection, one signed retry and managed extension removal.
-Rejection/restart tests verify retained reservations. These are not live funded
-settlement qualification or proof about every endpoint.
+The sampled challenge includes `bazaar` and `builder-code` extensions.
+[Shared extension handling](../docs/architecture.md#payment-extensions-and-offer-metadata)
+applies. Local static and managed payer/seller fixtures verify selection, signing,
+extension omission and retained reservations through rejection/restart. They do
+not qualify funded settlement or every endpoint.
 
 Startup pricing probes are disabled. Prices are frozen vendor estimates, while
 live challenges and the existing per-payment cap remain authoritative. Some
@@ -955,10 +946,9 @@ Additional extension semantics:
   not implement that benefit or same-wallet job polling. [SIWX specification](https://github.com/x402-foundation/x402/blob/main/specs/extensions/sign-in-with-x.md)
   and [Otto full guide](https://x402.ottoai.services/llms-full.txt).
 
-Managed mode strips all top-level extensions and attempts a supported ordinary
-payment. It does not sign authentication challenges, verify signed offers, add
-idempotency keys, or promise that servers accept omission. Static SDK handling is
-separate. Ten raw unsigned challenges are pinned in
+[Shared challenge handling](../docs/architecture.md#payment-extensions-and-offer-metadata)
+distinguishes extension omission from offer annotations and payment authority.
+Ten raw unsigned challenges are pinned in
 [provider_payment_challenges.json](../tests/fixtures/provider_payment_challenges.json).
 They contain public seller offers/challenges, not buyer keys or payment signatures.
 The managed regression checks local signing or refusal, not live settlement.
@@ -971,17 +961,15 @@ Offer metadata is distinct from top-level extensions:
 | --- | --- | --- |
 | Agent402 | `accepts[].outputSchema` on the exact Base offer | Accepted as opaque object/boolean JSON Schema and echoed unchanged. Its contents never affect payment terms; the alternative Base `upto`/Permit2 offer remains unsupported. |
 | Exa | `extra.breakdown`, `extra.totalUsd`, `extra.acceptId` | Reviewed informational fields accepted and echoed unchanged on ordinary Base EIP-3009 offers. GatewayWalletBatched remains unsupported. Search and Contents challenges are pinned. |
-| Google Trends | `extra.merchant`, `extra.tier` | Reviewed string labels accepted and echoed unchanged. Challenges for trend, interest-by-region, related-queries and related-topics are pinned. |
+| Google Trends | `extra.merchant`, `extra.tier` | Sampled labels accepted and echoed unchanged. Challenges for trend, interest-by-region, related-queries and related-topics are pinned. |
 | Locus | Ordinary EIP-3009 plus GatewayWalletBatched alternatives | Local fixture selects ordinary USDC and strips top-level extensions. |
 | Otto | Ordinary EIP-3009 plus Permit2 alternatives | Local fixture selects ordinary USDC and strips top-level extensions. |
 
-Managed admission accepts the five reviewed informational fields with type checks:
-string labels, nonnegative numeric total and a map of nonnegative numeric price
-components. These annotations never determine spending limits or signing; atomic
-`amount` remains authoritative. The SDK must preserve the accepted offer exactly.
-Unknown fields and unsupported mechanisms still fail closed. Local signing regressions do not prove live settlement.
-OpenAPI `x-*` annotations (pricing, discovery, lifecycle, etc.) are yet another
-category; they are not themselves x402 challenge extensions.
+Informational annotations remain opaque and preserved under the
+[shared admission rules](../docs/architecture.md#payment-extensions-and-offer-metadata).
+The table records sampled provider fields. Atomic payment authority and
+unsupported mechanisms retain their independent checks.
+Local signing regressions do not prove live settlement.
 
 ## Curl HTTP Request
 

@@ -340,6 +340,32 @@ validation before promotion; [network policy](network-egress.md) describes its
 separate direct behavior, strict evidence fallback and scalar fallback. Transport
 scope never becomes financial endpoint provenance or settlement authority.
 
+### Payment extensions and offer metadata
+
+Managed payments remove advertised top-level challenge extensions before
+validating and signing a supported ordinary offer. Diagnostics identify extension
+names without logging their contents. Omission implements neither wallet
+ownership authentication nor seller-receipt verification or vendor idempotency
+keys; a provider may reject it. Static SDK extension handling is separate.
+Omission grants no additional replay authority; the
+[unsigned request and financial uncertainty rules](#unsigned-x402-requests-and-post-retries)
+still apply.
+
+Offer annotations are distinct from top-level extensions. Informational fields,
+including vendor annotations and display prices, remain opaque and are preserved
+in the accepted offer. `outputSchema` must be an object or boolean; its contents
+are not evaluated and references are not fetched.
+
+Admission validates the actual network, asset, payee, atomic amount, transfer
+mechanism and USDC domain. Duplicated or conflicting authority fields in `extra`
+and unsupported transfer/flow mechanisms are rejected. Display prices and nested annotations
+cannot override these checks or the payment cap. SDK serialization must preserve
+the selected offer, and the signed authorization uses its atomic amount.
+OpenAPI `x-*` pricing/discovery annotations belong to catalog interpretation;
+they are not themselves x402 challenge extensions. Local signing fixtures verify
+these boundaries without qualifying upstream delivery or live settlement.
+Provider-specific observations belong in [provider caveats](../providers/CAVEATS.md#payment-extension-and-offer-boundaries).
+
 ## Where to change and verify behavior
 
 Keep provider-specific schema/selection fixes in provider TOML or curated specs

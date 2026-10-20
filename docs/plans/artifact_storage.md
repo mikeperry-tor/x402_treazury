@@ -239,7 +239,8 @@ storage failure and retrieval makes zero vendor calls. Test direct and fallback 
 tools identically. For URL capture, prove original-wallet SOCKS identity after rotation,
 remote DNS, no direct fallback and no authentication forwarding across origins.
 
-Run targeted suites in both feature modes sequentially, default all-target regression,
-Clippy, formatting and network-audit checks. Refresh provider goldens after reviewing
-complete contracts. A release requires demonstrated retrieval in supported clients,
+Run focused provider request/output regressions against faithful fixtures, then
+default all-target, Clippy, formatting and network-audit checks. Reduced-feature
+validation requires an explicit request and runs sequentially when requested.
+A release requires demonstrated retrieval in supported clients,
 documented disk/retention behavior, and explicit errors/logs for every enforced bound.

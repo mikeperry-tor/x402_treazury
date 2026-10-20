@@ -34,8 +34,8 @@ Use `scripts/zcash.sh test --test provider_catalogs --test config` from the repo
 root. Tests use no Python, credentials or live vendors. Review input/schema/routing
 changes together; never regenerate snapshots merely to obtain a passing result.
 Preserve full inputs only where a concrete comparison needs the entire inventory.
-The following capture notes describe existing inputs and current assertions;
-selection/count claims are being normalized with their owning implementation.
+The following notes describe scoped inputs, their concrete consumers and refresh
+basis.
 
 ## Reviewed request and method contracts
 

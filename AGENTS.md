@@ -33,13 +33,15 @@ USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
   recovery attempts. Disconnect, cancellation or cache eviction must not orphan
   accepted financial work, duplicate active I/O or report abandonment as success.
 
-Reusable providers should expose supported functionality; compatibility restrictions
-need concrete reasons. Keep editorial recommendations separate from defaults and
-require explicit deployment selection. Provider-specific regression storage needs a
-named quirk or failure, not a universal inventory/settings snapshot. Follow the
-[provider policy](providers/README.md#provider-policy) and
-[test policy](docs/testing.md#provider-regressions); the linked implementation plan
-identifies selection features that are still pending.
+Reusable providers expose supported functionality, with concrete reasons for
+compatibility restrictions. Same-path GET/POST twins default to POST before naming;
+review actual method contracts and document necessary opt-outs. Recommendations
+remain advisory until explicit opt-in. Provider-specific regression storage
+needs a named quirk, failure or authored transformation; use small faithful inputs
+and shared synthetic tests instead of universal inventory/settings snapshots. Follow
+the [provider policy](providers/README.md#provider-policy),
+[selection semantics](docs/configuration.md) and
+[test policy](docs/testing.md#provider-regressions).
 
 ## Financial and execution boundaries
 
