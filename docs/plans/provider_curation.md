@@ -42,7 +42,16 @@ for their actual consumers. Independent object/reference review passed; complete
 generated ToolSpec equality passed for 28 default and 40 dual-method retained
 tools, preserving names, schemas and routing. Four focused request/method,
 NetIntel and authority-boundary tests passed, including the independent paid
-preset check. No Rust source changed. Exact-SHA review is pending before C5.3b.
+preset check. No Rust source changed. C5.3a (`3aae8265b46be25226f9360325f190670fb8361c`)
+received independent exact-SHA approval. C5.3b scopes nine concrete compatibility
+inputs, preserves all refined JSON/media/public-read and actual negative witnesses,
+and removes the unconsumed Vaaya directory capture. Independent complete-object,
+reference, source-metadata and security-scheme checks pass; all 117 retained
+generated ToolSpecs match the full inputs. Twelve focused checks passed; a
+precommit review found the distinct RelayShield account absence check had become
+vacuous, so its original authenticated operation was restored and both affected
+checks passed again. Fresh source-matched complexity reports no advisory
+regressions. Exact-SHA review is pending before C5.3c.
 Source-matched complexity against `05280d6` reports no advisory regressions; preset
 CogC/CycC fell 6/14 to 5/12 and scope 9/10 to 3/5 by removing responsibilities. Actual
 inventories for all eight local inputs originally showed no removed or renamed

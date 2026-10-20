@@ -1,1 +1,447 @@
-{"components":{"securitySchemes":{}},"info":{"contact":{"email":"support@ipintel.ai"},"description":"Pay-per-call x402 APIs for satellite observation, DNS lookup, domain health checks, reverse DNS, WHOIS lookup, domain availability checks, JSON Schema validation, JWT decoding, Base64 encoding/decoding, and HTTP latency checks. Designed for autonomous agents, developers, domain diagnostics, registration availability checks, API testing, structured output validation, token inspection, data transformation, uptime checks, and HTTP latency diagnostics.","title":"IPIntel.ai x402 Tools API","version":"1.0.0","x-guidance":"Use POST /satellite to generate a structured satellite observation package for coordinates and radius, POST /dns-lookup to fetch DNS records, POST /domain-health to check DNS/email configuration, POST /reverse-dns to resolve PTR hostnames for IP addresses, POST /whois-lookup to retrieve WHOIS domain registration data, and POST /domain-availability to check whether a domain is registered or likely available for registration. Endpoints cost from $0.001 to $0.17.","x-logo":{"altText":"IPIntel.ai","url":"https://tools.ipintel.ai/favicon.png"}},"openapi":"3.1.0","paths":{"/base64-decode":{"post":{"description":"Base64 Decode API. Decode standard or URL-safe Base64 and return UTF-8 text when possible, hex output, validity, and output length. Useful for agents, developers, token inspection, API debugging, decoding workflows, data transformation, and automation tasks. Paid per call via x402.","operationId":"base64Decode","requestBody":{"content":{"application/json":{"example":{"url_safe":false,"value":"aGVsbG8="},"schema":{"additionalProperties":false,"properties":{"url_safe":{"description":"Whether the input uses URL-safe Base64","type":"boolean"},"value":{"description":"Base64 value to decode","type":"string"}},"required":["value"],"type":"object"}}},"required":true},"security":[],"summary":"Base64 Decode API","tags":["base64","base64-decode","decoding","url-safe-base64","token-inspection","data-transform","developer-tools","api-testing"],"x-payment-info":{"price":{"amount":"0.001","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/base64-encode":{"post":{"description":"Base64 Encode API. Encode plain text into standard or URL-safe Base64 and return structured JSON with input length and encoded output. Useful for agents, developers, API testing, token workflows, data transformation, encoding workflows, and automation tasks. Paid per call via x402.","operationId":"base64Encode","requestBody":{"content":{"application/json":{"example":{"url_safe":false,"value":"hello"},"schema":{"additionalProperties":false,"properties":{"url_safe":{"description":"Whether to return URL-safe Base64 without padding","type":"boolean"},"value":{"description":"String value to encode","type":"string"}},"required":["value"],"type":"object"}}},"required":true},"security":[],"summary":"Base64 Encode API","tags":["base64","base64-encode","encoding","url-safe-base64","data-transform","developer-tools","api-testing"],"x-payment-info":{"price":{"amount":"0.001","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/dns-lookup":{"post":{"description":"DNS Lookup API. Resolve domain DNS records and receive structured JSON with A, AAAA, MX, NS, TXT, CAA, and SOA records. Useful for agents, developers, domain diagnostics, email setup checks, DNS troubleshooting, and infrastructure investigation. Paid per call via x402.","operationId":"dnsLookup","requestBody":{"content":{"application/json":{"example":{"domain":"example.com","types":["A","MX","NS","TXT"]},"schema":{"additionalProperties":false,"properties":{"domain":{"description":"Domain name to query, for example example.com","type":"string"},"types":{"description":"Optional DNS record types to return","items":{"enum":["A","AAAA","MX","NS","TXT","CAA","SOA"],"type":"string"},"type":"array"}},"required":["domain"],"type":"object"}}},"required":true},"security":[],"summary":"DNS Lookup API","tags":["dns-lookup","domain-intelligence","mx-records","txt-records","developer-tools"],"x-payment-info":{"price":{"amount":"0.001","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/domain-availability":{"post":{"description":"Domain Availability Check API. Check whether a domain name is registered or likely available for registration. Uses RDAP registry data plus DNS fallback signals and returns a machine-readable availability verdict. Useful for AI agents, startup naming, brand checks, registrar pre-checks, domain search workflows, and domain intelligence automation. Paid per call via x402.","operationId":"domainAvailability","requestBody":{"content":{"application/json":{"example":{"domain":"example.com"},"schema":{"additionalProperties":false,"properties":{"domain":{"description":"Domain name to check, for example example.com","type":"string"}},"required":["domain"],"type":"object"}}},"required":true},"security":[],"summary":"Domain Availability Check API","tags":["domain-availability","domain-search","domain-intelligence","whois","rdap","registrar","dns","startup-naming","brand-check"],"x-payment-info":{"price":{"amount":"0.002","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/domain-health":{"post":{"description":"Domain Health Check API. Check domain DNS, MX, SPF, DMARC, and email configuration health and receive a structured JSON score with issues and recommendations. Useful for agents, developers, email deliverability checks, domain diagnostics, infrastructure investigation, and security workflows. Paid per call via x402.","operationId":"domainHealth","requestBody":{"content":{"application/json":{"example":{"domain":"ipintel.ai"},"schema":{"additionalProperties":false,"properties":{"domain":{"description":"Domain name to analyze","type":"string"}},"required":["domain"],"type":"object"}}},"required":true},"security":[],"summary":"Domain Health Check API","tags":["domain-health","dns-lookup","spf","dmarc","email-security"],"x-payment-info":{"price":{"amount":"0.001","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/email-validate":{"post":{"description":"Email validation for syntax, DNS/MX, disposable domain, role-based address, free provider and provider-typo checks. Returns normalized email, deliverability verdict, risk score, typo suggestion and structured validation flags for agents processing leads, signups and contact data.","operationId":"emailValidate","requestBody":{"content":{"application/json":{"example":{"email":"test@gmial.com"},"schema":{"additionalProperties":false,"properties":{"email":{"description":"Email address to validate.","type":"string"}},"required":["email"],"type":"object"}}},"required":true},"security":[],"summary":"Email Validate API","tags":["email-validation","deliverability","lead-verification","contact-data","risk-scoring"],"x-payment-info":{"price":{"amount":"0.004","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/http-latency":{"post":{"description":"IPIntel.ai x402 Tools is a pay-per-call collection of agent-ready APIs for domain intelligence, DNS lookup, reverse DNS, WHOIS lookup, domain availability checks, domain health checks, JSON Schema validation, JWT decoding, Base64 encoding/decoding, and HTTP diagnostics. This endpoint specifically measures HTTP response latency for a URL from the Cloudflare Worker edge location that handled the request. Returns status code, response time, redirect location, content type, Cloudflare colo metadata, and basic response headers. Useful for agents, developers, uptime checks, API diagnostics, website monitoring, HTTP troubleshooting, and latency checks. This is an HTTP HEAD latency check, not ICMP ping. Paid per call via x402.","operationId":"httpLatency","requestBody":{"content":{"application/json":{"example":{"url":"https://example.com"},"schema":{"additionalProperties":false,"properties":{"method":{"description":"HTTP method to use. Defaults to HEAD.","enum":["HEAD","GET"],"type":"string"},"url":{"description":"HTTP or HTTPS URL to check","type":"string"}},"required":["url"],"type":"object"}}},"required":true},"security":[],"summary":"HTTP Latency Check API","tags":["http-latency","latency-check","uptime-check","website-monitoring","api-diagnostics","developer-tools","cloudflare-worker"],"x-payment-info":{"price":{"amount":"0.001","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/ip-lookup":{"post":{"description":"IP Lookup API. Enrich an IPv4 or IPv6 address with geolocation, ASN, ISP, organization, reverse DNS, timezone, and proxy/mobile/hosting indicators. Useful for security, fraud checks, abuse triage, bot detection, traffic enrichment, and infrastructure investigation. Paid per call via x402.","operationId":"ipLookup","requestBody":{"content":{"application/json":{"example":{"ip":"8.8.8.8"},"schema":{"additionalProperties":false,"properties":{"ip":{"description":"IPv4 or IPv6 address to enrich, for example 8.8.8.8","type":"string"}},"required":["ip"],"type":"object"}}},"required":true},"security":[],"summary":"IP Lookup API","tags":["ip-lookup","ip-geolocation","asn","isp","reverse-dns","proxy-detection","hosting-detection","fraud-check","security","developer-tools"],"x-payment-info":{"price":{"amount":"0.003","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/json-schema-validator":{"post":{"description":"JSON Schema Validator API. Validate JSON data against a JSON Schema and receive structured valid/invalid results with detailed validation errors. Supports common JSON Schema features including type, required, properties, additionalProperties, enum, const, items, string lengths, patterns, and numeric bounds. Useful for agents, developers, API testing, structured output validation, schema checks, and automation workflows. Paid per call via x402.","operationId":"jsonSchemaValidator","requestBody":{"content":{"application/json":{"example":{"data":{"name":"Niki"},"schema":{"properties":{"name":{"type":"string"}},"required":["name"],"type":"object"}},"schema":{"additionalProperties":false,"properties":{"data":{"description":"JSON value to validate against the schema"},"schema":{"description":"JSON Schema object","type":"object"}},"required":["schema","data"],"type":"object"}}},"required":true},"security":[],"summary":"JSON Schema Validator API","tags":["json-schema","json-validator","schema-validation","structured-output","developer-tools","api-testing","automation"],"x-payment-info":{"price":{"amount":"0.001","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/jwt-decode":{"post":{"description":"JWT Decode API. Decode JWT header and payload without verifying the signature. Returns algorithm, claims, expiration, issued-at, not-before timestamps, and token validity hints. Useful for agents, developers, authentication debugging, token inspection, API testing, and security workflows. Paid per call via x402.","operationId":"jwtDecode","requestBody":{"content":{"application/json":{"example":{"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.signature"},"schema":{"additionalProperties":false,"properties":{"token":{"description":"JWT token to decode","type":"string"}},"required":["token"],"type":"object"}}},"required":true},"security":[],"summary":"JWT Decode API","tags":["jwt","jwt-decode","token-inspection","auth-debugging","developer-tools","api-testing","security"],"x-payment-info":{"price":{"amount":"0.001","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/reverse-dns":{"post":{"description":"Reverse DNS Lookup API. Look up PTR records for an IP address and receive reverse DNS hostname data in structured JSON. Useful for agents, developers, IP enrichment, network diagnostics, infrastructure investigation, abuse analysis, and security workflows. Paid per call via x402.","operationId":"reverseDns","requestBody":{"content":{"application/json":{"example":{"ip":"8.8.8.8"},"schema":{"additionalProperties":false,"properties":{"ip":{"description":"IPv4 or IPv6 address to reverse-resolve","type":"string"}},"required":["ip"],"type":"object"}}},"required":true},"security":[],"summary":"Reverse DNS Lookup API","tags":["reverse-dns","ptr-record","ip-lookup","dns","developer-tools"],"x-payment-info":{"price":{"amount":"0.001","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/satellite":{"post":{"description":"Satellite Observation API. Turn coordinates into a ready-to-use satellite observation for AI agents. Submit latitude, longitude, radius and mode to inspect any location on Earth, verify what is there, monitor change over time, compare before/after events, detect water or vegetation signals, review land surface conditions, check thermal-style anomalies, or switch to cloud-independent Radar when optical views are limited. Built for geospatial agents, OSINT workflows, location intelligence, environmental monitoring, disaster/event analysis, remote asset inspection, infrastructure checks, field reports, and automated due diligence. The response includes satellite image links and structured machine-readable observations that an agent can use directly in a report, decision workflow, or follow-up investigation. Paid per call via x402.","operationId":"satellite","requestBody":{"content":{"application/json":{"example":{"date":null,"date_tolerance_days":30,"fallback":true,"lat":43.2141,"lon":27.9147,"max_cloud_cover":30,"mode":"water","orbit_direction":"ASCENDING","radius_m":1000},"schema":{"additionalProperties":false,"properties":{"date":{"default":null,"description":"Requested date in YYYY-MM-DD format. Null means latest suitable scene.","format":"date","type":["string","null"]},"date_tolerance_days":{"default":30,"description":"Allowed date search tolerance in days.","maximum":60,"minimum":0,"type":"integer"},"fallback":{"default":true,"description":"Allow nearest or best available scene when exact criteria are unavailable.","type":"boolean"},"lat":{"description":"Latitude of the observation center.","maximum":90,"minimum":-90,"type":"number"},"lon":{"description":"Longitude of the observation center.","maximum":180,"minimum":-180,"type":"number"},"max_cloud_cover":{"default":20,"description":"Maximum scene-level cloud cover for optical modes. Ignored for radar.","maximum":100,"minimum":0,"type":"number"},"mode":{"default":"true_color","description":"Observation mode: true_color, vegetation, water, thermal, or Radar.","enum":["true_color","vegetation","water","thermal","radar"],"type":"string"},"orbit_direction":{"default":"ASCENDING","description":"Radar mode only. Keep fixed for stable radar time comparisons.","enum":["ASCENDING","DESCENDING"],"type":"string"},"radius_m":{"default":3000,"description":"Observation radius in meters.","maximum":5000,"minimum":100,"type":"integer"}},"required":["lat","lon"],"type":"object"}}},"required":true},"security":[],"summary":"Satellite Observation API","tags":["satellite","earth-observation","geospatial","osint","radar"],"x-payment-info":{"price":{"amount":"0.09","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}},"/whois-lookup":{"post":{"description":"WHOIS Lookup API. Retrieve domain registration data including registrar, WHOIS server, creation date, expiration date, updated date, nameservers, domain status, and privacy/redaction signals. Useful for agents, developers, domain intelligence, expiry checks, registrar lookup, ownership investigation, and security workflows. Paid per call via x402.","operationId":"whoisLookup","requestBody":{"content":{"application/json":{"example":{"domain":"example.com"},"schema":{"additionalProperties":false,"properties":{"domain":{"description":"Domain name to query, for example example.com","type":"string"}},"required":["domain"],"type":"object"}}},"required":true},"security":[],"summary":"WHOIS Lookup API","tags":["whois","domain-lookup","domain-intelligence","registrar","developer-tools"],"x-payment-info":{"price":{"amount":"0.005","currency":"USD","mode":"fixed"},"protocols":[{"x402":{"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","network":"eip155:8453","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","scheme":"exact","version":2}}]}}}},"servers":[{"url":"https://tools.ipintel.ai"}],"x-discovery":{"contact":"support@ipintel.ai","payTo":"0x0550779CFBc832657A8BB46BAC9f359A5ad038B8","provider":"IPIntel.ai"}}
+{
+  "info": {
+    "contact": {
+      "email": "support@ipintel.ai"
+    },
+    "description": "Pay-per-call x402 APIs for satellite observation, DNS lookup, domain health checks, reverse DNS, WHOIS lookup, domain availability checks, JSON Schema validation, JWT decoding, Base64 encoding/decoding, and HTTP latency checks. Designed for autonomous agents, developers, domain diagnostics, registration availability checks, API testing, structured output validation, token inspection, data transformation, uptime checks, and HTTP latency diagnostics.",
+    "title": "IPIntel.ai x402 Tools API",
+    "version": "1.0.0",
+    "x-guidance": "Use POST /satellite to generate a structured satellite observation package for coordinates and radius, POST /dns-lookup to fetch DNS records, POST /domain-health to check DNS/email configuration, POST /reverse-dns to resolve PTR hostnames for IP addresses, POST /whois-lookup to retrieve WHOIS domain registration data, and POST /domain-availability to check whether a domain is registered or likely available for registration. Endpoints cost from $0.001 to $0.17.",
+    "x-logo": {
+      "altText": "IPIntel.ai",
+      "url": "https://tools.ipintel.ai/favicon.png"
+    }
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/dns-lookup": {
+      "post": {
+        "description": "DNS Lookup API. Resolve domain DNS records and receive structured JSON with A, AAAA, MX, NS, TXT, CAA, and SOA records. Useful for agents, developers, domain diagnostics, email setup checks, DNS troubleshooting, and infrastructure investigation. Paid per call via x402.",
+        "operationId": "dnsLookup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "domain": "example.com",
+                "types": [
+                  "A",
+                  "MX",
+                  "NS",
+                  "TXT"
+                ]
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "domain": {
+                    "description": "Domain name to query, for example example.com",
+                    "type": "string"
+                  },
+                  "types": {
+                    "description": "Optional DNS record types to return",
+                    "items": {
+                      "enum": [
+                        "A",
+                        "AAAA",
+                        "MX",
+                        "NS",
+                        "TXT",
+                        "CAA",
+                        "SOA"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "domain"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [],
+        "summary": "DNS Lookup API",
+        "tags": [
+          "dns-lookup",
+          "domain-intelligence",
+          "mx-records",
+          "txt-records",
+          "developer-tools"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.001",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "network": "eip155:8453",
+                "payTo": "0x0550779CFBc832657A8BB46BAC9f359A5ad038B8",
+                "scheme": "exact",
+                "version": 2
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/http-latency": {
+      "post": {
+        "description": "IPIntel.ai x402 Tools is a pay-per-call collection of agent-ready APIs for domain intelligence, DNS lookup, reverse DNS, WHOIS lookup, domain availability checks, domain health checks, JSON Schema validation, JWT decoding, Base64 encoding/decoding, and HTTP diagnostics. This endpoint specifically measures HTTP response latency for a URL from the Cloudflare Worker edge location that handled the request. Returns status code, response time, redirect location, content type, Cloudflare colo metadata, and basic response headers. Useful for agents, developers, uptime checks, API diagnostics, website monitoring, HTTP troubleshooting, and latency checks. This is an HTTP HEAD latency check, not ICMP ping. Paid per call via x402.",
+        "operationId": "httpLatency",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "url": "https://example.com"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "method": {
+                    "description": "HTTP method to use. Defaults to HEAD.",
+                    "enum": [
+                      "HEAD",
+                      "GET"
+                    ],
+                    "type": "string"
+                  },
+                  "url": {
+                    "description": "HTTP or HTTPS URL to check",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [],
+        "summary": "HTTP Latency Check API",
+        "tags": [
+          "http-latency",
+          "latency-check",
+          "uptime-check",
+          "website-monitoring",
+          "api-diagnostics",
+          "developer-tools",
+          "cloudflare-worker"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.001",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "network": "eip155:8453",
+                "payTo": "0x0550779CFBc832657A8BB46BAC9f359A5ad038B8",
+                "scheme": "exact",
+                "version": 2
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/json-schema-validator": {
+      "post": {
+        "description": "JSON Schema Validator API. Validate JSON data against a JSON Schema and receive structured valid/invalid results with detailed validation errors. Supports common JSON Schema features including type, required, properties, additionalProperties, enum, const, items, string lengths, patterns, and numeric bounds. Useful for agents, developers, API testing, structured output validation, schema checks, and automation workflows. Paid per call via x402.",
+        "operationId": "jsonSchemaValidator",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "data": {
+                  "name": "Niki"
+                },
+                "schema": {
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "type": "object"
+                }
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "data": {
+                    "description": "JSON value to validate against the schema"
+                  },
+                  "schema": {
+                    "description": "JSON Schema object",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "schema",
+                  "data"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [],
+        "summary": "JSON Schema Validator API",
+        "tags": [
+          "json-schema",
+          "json-validator",
+          "schema-validation",
+          "structured-output",
+          "developer-tools",
+          "api-testing",
+          "automation"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.001",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "network": "eip155:8453",
+                "payTo": "0x0550779CFBc832657A8BB46BAC9f359A5ad038B8",
+                "scheme": "exact",
+                "version": 2
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/jwt-decode": {
+      "post": {
+        "description": "JWT Decode API. Decode JWT header and payload without verifying the signature. Returns algorithm, claims, expiration, issued-at, not-before timestamps, and token validity hints. Useful for agents, developers, authentication debugging, token inspection, API testing, and security workflows. Paid per call via x402.",
+        "operationId": "jwtDecode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjMifQ.signature"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "token": {
+                    "description": "JWT token to decode",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [],
+        "summary": "JWT Decode API",
+        "tags": [
+          "jwt",
+          "jwt-decode",
+          "token-inspection",
+          "auth-debugging",
+          "developer-tools",
+          "api-testing",
+          "security"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.001",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "network": "eip155:8453",
+                "payTo": "0x0550779CFBc832657A8BB46BAC9f359A5ad038B8",
+                "scheme": "exact",
+                "version": 2
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/satellite": {
+      "post": {
+        "description": "Satellite Observation API. Turn coordinates into a ready-to-use satellite observation for AI agents. Submit latitude, longitude, radius and mode to inspect any location on Earth, verify what is there, monitor change over time, compare before/after events, detect water or vegetation signals, review land surface conditions, check thermal-style anomalies, or switch to cloud-independent Radar when optical views are limited. Built for geospatial agents, OSINT workflows, location intelligence, environmental monitoring, disaster/event analysis, remote asset inspection, infrastructure checks, field reports, and automated due diligence. The response includes satellite image links and structured machine-readable observations that an agent can use directly in a report, decision workflow, or follow-up investigation. Paid per call via x402.",
+        "operationId": "satellite",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "date": null,
+                "date_tolerance_days": 30,
+                "fallback": true,
+                "lat": 43.2141,
+                "lon": 27.9147,
+                "max_cloud_cover": 30,
+                "mode": "water",
+                "orbit_direction": "ASCENDING",
+                "radius_m": 1000
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "date": {
+                    "default": null,
+                    "description": "Requested date in YYYY-MM-DD format. Null means latest suitable scene.",
+                    "format": "date",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "date_tolerance_days": {
+                    "default": 30,
+                    "description": "Allowed date search tolerance in days.",
+                    "maximum": 60,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "fallback": {
+                    "default": true,
+                    "description": "Allow nearest or best available scene when exact criteria are unavailable.",
+                    "type": "boolean"
+                  },
+                  "lat": {
+                    "description": "Latitude of the observation center.",
+                    "maximum": 90,
+                    "minimum": -90,
+                    "type": "number"
+                  },
+                  "lon": {
+                    "description": "Longitude of the observation center.",
+                    "maximum": 180,
+                    "minimum": -180,
+                    "type": "number"
+                  },
+                  "max_cloud_cover": {
+                    "default": 20,
+                    "description": "Maximum scene-level cloud cover for optical modes. Ignored for radar.",
+                    "maximum": 100,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "mode": {
+                    "default": "true_color",
+                    "description": "Observation mode: true_color, vegetation, water, thermal, or Radar.",
+                    "enum": [
+                      "true_color",
+                      "vegetation",
+                      "water",
+                      "thermal",
+                      "radar"
+                    ],
+                    "type": "string"
+                  },
+                  "orbit_direction": {
+                    "default": "ASCENDING",
+                    "description": "Radar mode only. Keep fixed for stable radar time comparisons.",
+                    "enum": [
+                      "ASCENDING",
+                      "DESCENDING"
+                    ],
+                    "type": "string"
+                  },
+                  "radius_m": {
+                    "default": 3000,
+                    "description": "Observation radius in meters.",
+                    "maximum": 5000,
+                    "minimum": 100,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "lat",
+                  "lon"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [],
+        "summary": "Satellite Observation API",
+        "tags": [
+          "satellite",
+          "earth-observation",
+          "geospatial",
+          "osint",
+          "radar"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.09",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "network": "eip155:8453",
+                "payTo": "0x0550779CFBc832657A8BB46BAC9f359A5ad038B8",
+                "scheme": "exact",
+                "version": 2
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://tools.ipintel.ai"
+    }
+  ],
+  "x-discovery": {
+    "contact": "support@ipintel.ai",
+    "payTo": "0x0550779CFBc832657A8BB46BAC9f359A5ad038B8",
+    "provider": "IPIntel.ai"
+  },
+  "x-treazury-fixture-scope": {
+    "source": "Captured vendor OpenAPI catalog; original selected documentation preserved",
+    "baseline": "74602900924645b981976ea8c6fece11998df24a",
+    "retained_paths": [
+      "/dns-lookup",
+      "/http-latency",
+      "/json-schema-validator",
+      "/jwt-decode",
+      "/satellite"
+    ],
+    "purpose": "Focused authentication, lifecycle, request and output compatibility contracts; selected preset schemas where consumed",
+    "complete_path_objects_and_local_ref_closure": true
+  }
+}

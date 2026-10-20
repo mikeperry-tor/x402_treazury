@@ -66,28 +66,34 @@ sibling would rename a selected tool. Fixture size never justifies trimming
 schema properties or vendor prose. None of these inputs grants paid execution
 or establishes current upstream health.
 
-The Exa request fixture was captured from `https://api.exa.ai/openapi.json` on
-2026-10-03 with the Rust `snapshot_spec` utility. It retains all 64 operations so
-the exact two-operation allowlist is tested against the real excluded inventory.
-Only response documentation is removed. Exa's root `oneOf` for `ids` versus `urls`
-is preserved; six Locus tools likewise retain their existing `anyOf` address
-alternatives after flattening. Neither change adds or rewrites HTTP parameters.
+## Compatibility witnesses
 
-The OneShot fixture was captured from `https://win.oneshotagent.com/openapi.json`
-on 2026-10-03 using `snapshot_spec`. It retains all 147 operations (omitting
-response documentation) to pin exclusions as well as synchronous search. The
-selected request schema is unchanged; no OneShot-specific schema repair is needed.
+The following scoped vendor captures retain complete original path objects,
+source metadata and transitive local reference closure. Their scope annotations
+identify the exact pre-pruning capture basis. They reproduce concrete contracts,
+not the current vendor's whole inventory:
 
-The StableEnrich fixture was captured from `https://stableenrich.dev/openapi.json`
-on 2026-10-03 using `snapshot_spec`. All 38 operations are retained to verify the
-specific lifecycle exclusions, tag selection and request
-routing. The additional help tool reads the vendor's unified `llms.txt` lazily.
+| Input and original source | Regression responsibility |
+| --- | --- |
+| Exa — `https://api.exa.ai/openapi.json` | Search/Contents alternatives, nested bodies and streaming guidance; real authenticated answer/batch submission/result witnesses. |
+| OneShot — `https://win.oneshotagent.com/openapi.json` | Synchronous search and all eleven reviewed public GETs; actual authenticated research submission/result chain. |
+| StableEnrich — `https://stableenrich.dev/openapi.json` | Six actual lifecycle submission/result contracts; Maps query/nested JSON, streaming guidance, Solar image/link metadata and reviewed Exa search. |
+| Agent402 — `https://agent402.tools/openapi.json` | PNG/JPEG guidance, all reviewed JSON/base64 PDF/audio/video/skill/LinkedIn/favicon positives, image mappings, public feedback child, planning/onramp links, exact raw-speech/multipart and owned/execution negatives, reviewed DNS query. |
+| BlockRun — `https://blockrun.ai/api/openapi` | Fixed BTC/XAU/EUR/BTCUSDT targets, hosted synchronous audio, phone lookup versus ownership, real hybrid/async media, sandbox and trade authority boundaries, invalid zero-token target. |
+| Claw402 — `https://claw402.ai/openapi.json` | Four sparse/open RootData bodies preserve prose-guided arguments; price-ranking query/tag selection. |
+| IPIntel — `https://tools.ipintel.ai/openapi.json` | DNS enum arrays, nullable satellite dates, arbitrary validator JSON, HTTP method enum and unverified JWT interpretation. |
+| RelayShield — `https://api.relayshield.net/openapi.json` | Three original keyless checks, scan immediate-result versus missing poll contract, account/metered auth negatives and the privacy view's exact selected security requests. |
+| Vaaya — `https://vaaya.ai/openapi.json` | Real mixed CRW extraction/result, MPP/upload/owned/project/message/forwarding negatives; Firecrawl JSON wrappers, hosted chart/image positives, open bodies, date/enum constraints and complete Tako/RecallRadar research chains with conflicting price prose. |
 
-The Agent402 fixture was captured from `https://agent402.tools/openapi.json` on
-2026-10-03 using `snapshot_spec`. It retains all 607 operations and 24 tags while
-omitting response documentation. Focused tests exercise supported JSON/base64 media, exact feedback parent exclusions
-with public child preservation, query routing, nested gateway bodies and existing
-image mappings. Full-inventory snapshots are not compatibility contracts.
+Refresh from the original vendor document and select complete path objects and
+reference closure. Keep required fields, descriptions and original operation
+identities intact; no expected schema is generated from case arguments. Compare
+retained generated method/path/name and complete tool contracts before and after
+subsetting, preserving any collision witnesses. Tests deliberately include
+synthetic future routes separately from captured vendor facts. JSON/base64 media
+remain ordinary JSON text unless an existing explicit image mapping applies;
+hosted URLs are not fetched automatically. No fixture establishes live availability,
+settlement, current prices or Tor qualification.
 
 The AgentUtility runtime catalog preserves all original request contracts, unioned
 upstream/registry/cluster tags and alias/payment provenance. Tiny canonical/alias
@@ -96,20 +102,9 @@ regressions exercise JSON modes, exact full-oneOf conversion losses, remote watc
 ownership and existing satellite extraction. No full output/settings golden or
 research tagging is required.
 
-The RelayShield request fixture captures the vendor's public
-`https://api.relayshield.net/openapi.json` request catalog, retaining all operations
-and removing response documentation only. Its dedicated offline regression tests
-the exact main allowlist, exclusions, prices, representative routing, and collision-free
-composition with the authored phone companion. The companion's provenance and x402
-v1 limitation are documented in `providers/CAVEATS.md`; neither fixture qualifies
-funded settlement.
-
-The IPIntel fixture captures `https://tools.ipintel.ai/openapi.json` using
-`snapshot_spec`, removing response documentation only. Focused tests preserve DNS enum arrays and JSON routing, nullable satellite dates,
-unrestricted validator JSON, the HTTP method enum and JWT interpretation. Shared
-selection tests establish new-route visibility; no inventory count or all-prices
-snapshot is required. No paid call was made.
-
+RelayShield's authored phone companion remains a production request definition,
+with separate provenance and x402 v1 limitations in `providers/CAVEATS.md`.
+Its schema is not reconstructed from the vendor capture and is not pruned.
 
 The NewsGurus raw x402 catalog fixture preserves the vendor's 49 resources. The
 locally authored `providers/newsgurus/openapi.json` projects its Bazaar path/query
@@ -118,19 +113,12 @@ schemas and required lists into ordinary GET parameters and publishes static
 the raw fixture. The status contract is exposed with its original URL and price; real Bazaar path
 templates remain intact rather than being replaced by concrete example tickers.
 
-The Vaaya fixture preserves all 252 paths from the live vendor OpenAPI,
-omitting response documentation via `snapshot_spec`. The companion discovery fixture
-contains 249 distinct x402 actions. Focused tests check support boundaries,
-restored public research and JSON contracts, body filters and regex escaping. These fixtures do not qualify
-current availability, paid settlement or Tor access. See provider caveats for
-schema/prose gaps and data limitations.
-
-Tako search/answer/contents and RecallRadar search/get extend the Vaaya default
-with synchronous research chains. The routing regression preserves RecallRadar's
-open, property-free input schema while sending its documented `q` in the JSON
-body, and verifies all five routes and structured estimates despite lower prices
-in vendor prose. The company deployment selects these and focused company/public
-record tools, inheriting its existing wallet and cap.
+Vaaya's unconsumed whole-directory discovery capture is removed; no regression
+claims complete action-directory equality. The OpenAPI witnesses independently
+preserve wrapper, schema and workflow contracts. RecallRadar's property-free
+request body stays open while its documented `q` is sent in JSON; Tako and
+RecallRadar structured estimates remain distinct from lower description prices.
+The privacy example's wallet and cap remain unchanged.
 
 The NetIntel fixture is a faithful eight-path primary-schema subset for three
 POST-preferred pairs (URL secrets and JSON arrays), compatible chat/embedding

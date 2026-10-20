@@ -117,6 +117,13 @@ async fn exa_curates_paid_operations_and_preserves_request_contracts() {
         tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
         ["exa_contents", "exa_search", "exa_help"]
     );
+    for path in ["/answer", "/batches", "/batches/{id}"] {
+        assert!(
+            doc["paths"][path].is_object(),
+            "missing auth/job witness {path}"
+        );
+        assert!(!tools.iter().any(|t| t.path == path));
+    }
     let contents = &tools[0];
     assert_eq!(
         contents.input_schema["oneOf"],
@@ -212,6 +219,29 @@ async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() 
             |t| t.path.contains("/jobs") || (t.path == "/v1/tools/search" && t.method == "GET")
         )
     );
+    for path in [
+        "/.well-known/acp/manifest.json",
+        "/health",
+        "/v1/soul",
+        "/v1/soul/browse",
+        "/v1/soul/search",
+        "/v1/soul/service-types",
+        "/v1/soul/stats",
+        "/v1/soul/templates",
+        "/v1/soul/{wallet}",
+        "/v1/stats",
+        "/v1/status",
+    ] {
+        assert!(doc["paths"][path].is_object());
+        assert!(
+            tools.iter().any(|t| t.path == path && t.method == "GET"),
+            "{path}"
+        );
+    }
+    for path in ["/v1/tools/research", "/v1/requests/{id}"] {
+        assert!(doc["paths"][path].is_object());
+        assert!(!tools.iter().any(|t| t.path == path));
+    }
     let search = tools.iter().find(|t| t.name == "oneshot_search").unwrap();
     assert_eq!(search.input_schema["required"], json!(["query"]));
     assert_eq!(search.input_schema["properties"]["query"]["minLength"], 1);
@@ -285,6 +315,13 @@ async fn stableenrich_keeps_sync_images_and_json_without_async_workflows() {
     ] {
         assert!(doc["paths"][path].is_object());
         assert!(!tools.iter().any(|t| t.path == path), "{path}");
+    }
+    for path in [
+        "/api/google-maps/solar/rgb-image",
+        "/api/google-maps/solar/data-layers",
+    ] {
+        let tool = tools.iter().find(|t| t.path == path).unwrap();
+        assert!(tool.response_mapping.is_none()); // Hosted URLs remain ordinary JSON metadata.
     }
     let details = tools
         .iter()
@@ -366,6 +403,20 @@ async fn agent402_exposes_supported_media_json_and_preserves_request_contracts()
     for path in [
         "/api/future-public-read",
         "/api/image-resize",
+        "/api/image-convert",
+        "/api/image-thumbnail",
+        "/api/pdf-extract-pages",
+        "/api/pdf-rotate",
+        "/api/images-to-pdf",
+        "/api/audio-normalize",
+        "/api/tts",
+        "/api/tts-hd",
+        "/api/tts-lite",
+        "/v1/videos/generations",
+        "/api/favicon-grab",
+        "/v1/linkedin-article",
+        "/api/skill/pdf-pipeline",
+        "/api/decide",
         "/api/pdf-merge",
         "/api/audio-convert",
         "/api/onramp-link",
@@ -378,11 +429,38 @@ async fn agent402_exposes_supported_media_json_and_preserves_request_contracts()
         "/api/feedback",
         "/api/testnet-fund",
         "/api/my-usage",
+        "/api/memory",
+        "/api/decide/execute",
         "/v1/audio/speech",
         "/v1/audio/transcriptions",
+        "/v1/pro/audio/transcriptions",
     ] {
+        assert!(
+            doc["paths"][path].is_object(),
+            "missing negative witness {path}"
+        );
         assert!(!tools.iter().any(|t| t.path == path), "unsupported {path}");
     }
+    for path in [
+        "/api/image-resize",
+        "/api/image-convert",
+        "/api/image-thumbnail",
+    ] {
+        let tool = tools.iter().find(|t| t.path == path).unwrap();
+        assert!(
+            tool.input_schema["properties"]["format"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("Choose png or jpeg")
+        );
+    }
+    let messages = tools.iter().find(|t| t.path == "/v1/messages").unwrap();
+    assert!(
+        messages.input_schema["properties"]["stream"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("false")
+    );
     let search = tools.iter().find(|t| t.name == "agent402_search").unwrap();
     let routed = search
         .route(
@@ -404,11 +482,19 @@ async fn agent402_exposes_supported_media_json_and_preserves_request_contracts()
             .body,
         Some(args)
     );
-    for name in ["agent402_images_generations", "agent402_image_crop"] {
+    for path in [
+        "/api/image-crop",
+        "/api/image-gen",
+        "/api/image-gen-hd",
+        "/api/image-gen-premium",
+        "/v1/images/generations",
+        "/v1/images/fast",
+        "/v1/images/pro",
+    ] {
         assert!(
             tools
                 .iter()
-                .find(|t| t.name == name)
+                .find(|t| t.path == path)
                 .unwrap()
                 .response_mapping
                 .is_some()
@@ -612,7 +698,23 @@ async fn blockrun_fixed_targets_and_hosted_audio_preserve_boundaries() {
             .unwrap()
             .contains("false")
     );
-    for path in ["/api/v1/images/generations", "/api/v1/images/image2image"] {
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.path == "/api/v1/phone/lookup" && t.has_body)
+    );
+    for path in [
+        "/api/v1/images/generations",
+        "/api/v1/images/image2image",
+        "/api/v1/audio/generations",
+        "/api/v1/videos/generations",
+        "/api/v1/modal/sandbox/create",
+        "/api/v1/modal/sandbox/status",
+        "/api/v1/phone/numbers/buy",
+        "/api/v1/zerox/gasless/submit",
+        "/api/v1/pm/polymarket/candlesticks/token/0",
+    ] {
+        assert!(doc["paths"][path].is_object());
         assert!(!tools.iter().any(|t| t.path == path), "{path}");
     }
     assert!(
@@ -751,6 +853,7 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
     // Actual lifecycle/authenticated contracts stay excluded; new compatible checks remain visible.
     assert!(doc["paths"]["/v1/payg/scan-file"].is_object());
     assert!(doc["paths"]["/v1/metered/breach"].is_object());
+    assert!(doc["paths"]["/v1/account/info"].is_object());
     assert!(doc["paths"]["/v1/payg/phone-reputation"].is_null());
     doc["paths"]["/v1/payg/new-public-check"] =
         serde_json::json!({"post":{"description":"new supported request"}});
@@ -1046,7 +1149,12 @@ async fn vaaya_selects_synchronous_x402_research_and_routes_json_filters() {
         "/api/run/colors/generate",
         "/api/run/cueframe/render",
         "/api/run/agentmail/send",
+        "/api/run/crw/extract",
+        "/api/run/crw/extract_status",
+        "/api/run/files/upload",
+        "/api/run/vaaya/fetch",
     ] {
+        assert!(doc["paths"][excluded].is_object());
         assert!(!tools.iter().any(|t| t.path == excluded));
     }
     for (path, args) in [
@@ -1195,6 +1303,11 @@ async fn vaaya_tako_and_recallradar_keep_research_bodies_and_structured_prices()
     assert_eq!(search.input_schema["required"], json!(["query"]));
     assert_eq!(search.input_schema["properties"]["effort"]["const"], "fast");
     assert!(tools.iter().any(|t| t.path == "/api/run/tako/visualize"));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.path == "/api/run/tako/thinviz-create")
+    );
 }
 
 #[tokio::test]

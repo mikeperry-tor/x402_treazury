@@ -506,8 +506,10 @@ through the templated tool.
 
 ## exa.toml — Exa Search and Contents
 
-The [vendor spec](https://api.exa.ai/openapi.json) contains 64 operations in the
-2026-10-03 fixture. Only `POST /search` and `POST /contents` support x402 according
+The [vendor spec](https://api.exa.ai/openapi.json) also describes the wider
+authenticated API. The scoped request fixture retains Search/Contents and actual
+authenticated answer/batch witnesses. Only `POST /search` and `POST /contents`
+support x402 according
 to Exa's [unified x402 guide](https://exa.ai/docs/integrations/payments/x402/quickstart.md).
 An exact method/path allowlist exposes `exa_search`, `exa_contents` and lazy
 `exa_help`. Account/team inspection, monitors, recurring jobs, batches, Agent,
