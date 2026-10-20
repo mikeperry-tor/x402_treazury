@@ -71,7 +71,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
             .get_tool("x402_treazury_source_add")
             .is_none()
     );
-    let reference = m.tool_reference("writer", &m.catalog.read().views["writer"][0]);
+    let reference = m.catalog.read().views["writer"][0].tool.name.clone();
     for limit in [0, 2, 3, 4] {
         let mut s = s.clone();
         s.max_response_chars = Some(limit);
@@ -82,7 +82,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
                 call(
                     &base,
                     "x402_treazury_tool_call",
-                    json!({"tool_ref":reference,"arguments":args}),
+                    json!({"tool_id":reference,"arguments":args}),
                 )
                 .await
             } else {
@@ -152,7 +152,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
                 call(
                     &base,
                     "x402_treazury_tool_call",
-                    json!({"tool_ref":reference,"arguments":{"id":"error"}}),
+                    json!({"tool_id":reference,"arguments":{"id":"error"}}),
                 )
                 .await
             } else {
@@ -210,17 +210,14 @@ async fn registered_source_mutation_preserves_captured_paid_invocations() {
             let s = server(&m, "writer");
             let (base, task) =
                 listen(crate::server::http_app(s.clone(), "test-token".into())).await;
-            let reference = m.tool_reference(
-                "writer",
-                crate::catalog_state::find(&m.catalog.read(), "writer", &name).unwrap(),
-            );
+            let reference = name.clone();
             let (url, n, pending_reference) = (base.clone(), name.clone(), reference.clone());
             let pending = tokio::spawn(async move {
                 if fallback {
                     call(
                         &url,
                         "x402_treazury_tool_call",
-                        json!({"tool_ref":pending_reference,"arguments":{}}),
+                        json!({"tool_id":pending_reference,"arguments":{}}),
                     )
                     .await
                 } else {
@@ -249,7 +246,7 @@ async fn registered_source_mutation_preserves_captured_paid_invocations() {
                 call(
                     &base,
                     "x402_treazury_tool_call",
-                    json!({"tool_ref":reference,"arguments":{}})
+                    json!({"tool_id":reference,"arguments":{}})
                 )
                 .await["isError"],
                 true

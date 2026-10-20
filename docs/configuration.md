@@ -195,7 +195,7 @@ and HTTP/2 authority validation still follow the MCP library's protocol rules.
 
 To reduce the initial tool context for a listener, add `discover_on_demand = true`
 to its `[servers.NAME]` table (default: `false`). It advertises only search/call
-wrappers, or all eight management wrappers when `source_management = true`.
+wrappers, or all six management wrappers when `source_management = true`.
 Search returns complete tool descriptions and schemas, five results at a time by
 default. Filters, payment routing, source permissions, and startup catalog loading
 are unchanged. Queries use BM25 keyword ranking over names, descriptions and
@@ -635,20 +635,27 @@ same endpoint share one import slot. Concurrent additions publish complete snaps
 repeat a busy or lost add with the same specification URL. Duplicate URLs return the
 existing registration on that endpoint. See the [agent source guide](agent-sources.md).
 
-`x402_treazury_source_url_info` discovers candidate specification and documentation
-URLs from exactly one directory slug or HTTPS API base URL. Only the slug's
-ordinary directory lookup can incur a charge. Provider HEAD/GET probes stay unsigned,
-use the resolved wallet's pinned isolation identity, and enforce allowed origins
-and existing spec/help download limits. An unavailable managed wallet identity
-fails without allocation or funding.
+`x402_treazury_source_details` inspects directory metadata and discovers working
+specification/documentation URLs from exactly one directory slug or HTTPS API base
+URL. A slug causes one ordinary potentially paid directory lookup; a base URL skips
+it. Results retain the listing alongside URL-discovery status, even when a missing
+or rejected API base or unavailable identity prevents probing. Provider HEAD/GET
+probes stay unsigned and use the existing wallet identity and spec/help limits.
+No wallet is allocated or funded for probes.
 
-Source-management-enabled listeners also expose `x402_treazury_raw_get` and
-`x402_treazury_raw_post` for documented public HTTPS endpoints without registering
-an OpenAPI catalog. They use the same resolved wallet, `allowed_origins`, response
-limits and network policy as imported APIs. These management tools are independent
-of API tool-name filters; enabling source management authorizes direct calls within
-that origin policy. POST accepts JSON only; neither tool accepts agent headers or
-payment settings.
+`x402_treazury_raw_call` calls any documented public HTTPS x402 API URL without
+registering an OpenAPI catalog. It takes a required HTTP `method`, `url`, optional
+`query` and optional JSON `body`; omitted body and explicit JSON null are distinct.
+It uses the same resolved wallet, ordinary payment admission, allowed origins,
+response limits and network factory as imported APIs. It is independent of API
+tool-name filters and accepts no agent headers, wallet or payment settings.
+
+Registration returns a readable name, prefix, tool count, status and next step.
+An omitted name defaults to its specification hostname with collision suffixes.
+Search filters use optional `source_name`; calls use stable readable `tool_id`
+names resolved against the current endpoint catalog. Internal source UUIDs,
+revisions and operator registry inspection remain available. Legacy registration
+receipt fields are ignored; source records remain durable before publication.
 
 The stable `x402_treazury_tools_search` and `x402_treazury_tool_call` tools let clients use new
 APIs even when they cache their initial tool list. HTTP remains stateless and does

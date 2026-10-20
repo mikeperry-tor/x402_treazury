@@ -4,12 +4,12 @@ For a smaller initial MCP tool list, set `discover_on_demand = true` in a
 `[servers.NAME]` table. This is independent of `source_management` and defaults to
 `false`. Static listeners advertise just `x402_treazury_tools_search` and
 `x402_treazury_tool_call`; listeners with source management enabled advertise all
-eight management tools. API tools, including subsequently registered tools, stay
+six management tools. API tools, including subsequently registered tools, stay
 out of `tools/list`.
 
 Agents search the listener's catalog with `x402_treazury_tools_search`, receive
 complete descriptions and input schemas, and invoke a result through
-`x402_treazury_tool_call` using its opaque `tool_ref` and `arguments`. On-demand
+`x402_treazury_tool_call` using its readable `tool_id` and `arguments`. On-demand
 search defaults to five results per page; `query`, `limit` (1–100), and `cursor`
 support targeted discovery and pagination. A broad search can still return large
 schemas. By default, provider instructions remain available in the initialization response.
@@ -18,9 +18,10 @@ This setting changes tool advertising, not loading or access: all configured
 catalogs still load, with remote catalogs published after listeners bind during
 ordinary deployment serving. Filters and wallet bindings still apply, and existing direct
 tool calls remain supported. It grants no source registration permissions and
-requires no source-management wallet or registry for static listeners. References
-are bound to the listener and process, and dynamic references also bind the source
-revision; search again after a restart or stale-reference error. Inspection and
+requires no source-management wallet or registry for static listeners. Tool IDs are
+exact endpoint-local names, reusable across turns, reconnects and restarts while
+the tool remains available. Calls resolve the current definition and wallet binding,
+including after a source refresh or re-addition with the same tool name. Inspection and
 qualification retain the complete inventory and validate full schemas. Restart the
 server and reconnect clients after changing the setting to refresh cached lists.
 
@@ -44,8 +45,8 @@ A nonblank query without alphanumeric terms can only match a literal substring;
 it never silently becomes a full-catalog enumeration.
 
 Omit `query`, or pass empty/whitespace text, to enumerate every tool in the selected
-scope in catalog order. Omit both `source_name` and `source_id` to search configured
-and registered APIs together. Set one to restrict registered-source search. Results
+scope in catalog order. Omit `source_name` to search configured and registered APIs together. Set it to
+a registration name to restrict the search to that source. Results
 are paginated: pass the returned `next_cursor` with the same query and source filter
 until it is null. On-demand discovery defaults to five results per page; ordinary
 source-management search defaults to twenty. `limit` accepts 1–100 in either mode.
@@ -54,7 +55,7 @@ Each response includes:
 
 | Field | Meaning |
 | --- | --- |
-| `items` | This page's matching tool references, descriptions and complete schemas. |
+| `items` | This page's matching tool IDs, descriptions and complete schemas. |
 | `available` | Visible tools after endpoint and optional source filtering, before query matching. |
 | `total` | All query matches before pagination, independent of page size. |
 | `next_cursor` | Opaque continuation, or null on the last page. |
@@ -73,8 +74,7 @@ or unrelated tools cannot influence relevance or counts. It builds no persistent
 index, cache or background job and makes no provider requests. BM25 uses `k1=1.2`,
 `b=0.75` and positive IDF `ln(1 + (N - df + 0.5)/(df + 0.5))`, as documented by
 [Lucene BM25Similarity](https://lucene.apache.org/core/9_12_3/core/org/apache/lucene/search/similarities/BM25Similarity.html).
-Complete descriptions, schemas, references and payment bindings are preserved;
-only discovery matching/order and result diagnostics change.
+Ranking preserves complete descriptions, schemas and payment bindings.
 
 ## External directory matching
 
@@ -189,173 +189,142 @@ not removed by API filters.
 
 | Tool | Arguments |
 | --- | --- |
-| `x402_treazury_sources_search` | Optional `mode`: `browse` (default) or `best`. Both accept `q`, `category`; the server always sets `network=BSE`. Browse supports pagination and directory filters; best supports ranking preferences and a result limit. |
-| `x402_treazury_source_details` | Required directory `slug` from search. Returns advertised endpoints, pricing and reliability; this is not a registered `source_id`. |
-| `x402_treazury_source_url_info` | Exactly one directory `slug` or public HTTPS `base_url`; checks common specification and documentation URLs. |
-| `x402_treazury_raw_get` | Required public HTTPS `url`; optional `query` object. Direct GET, including automatic x402 payment when required. |
-| `x402_treazury_raw_post` | Required public HTTPS `url` and JSON `body`; optional `query` object. Direct POST, including automatic x402 payment when required. |
-| `x402_treazury_source_add` | Required `spec_url`; optional `name`. |
-| `x402_treazury_tools_search` | Optional `query`, `source_name` (or `source_id`, mutually exclusive), `cursor`, `limit`. |
-| `x402_treazury_tool_call` | Required `tool_ref` and `arguments`. |
+| `x402_treazury_sources_search` | Optional `mode`: `browse` (default) or `best`, with upstream query/filter/ranking arguments. Server sets `network=BSE`. |
+| `x402_treazury_source_details` | Exactly one directory `slug` or public HTTPS `base_url`. Returns listing metadata and discovers working specification/documentation URLs. |
+| `x402_treazury_source_add` | Required public OpenAPI 3 JSON `spec_url`; optional readable `name`. |
+| `x402_treazury_raw_call` | Required `method` and public HTTPS `url`; optional `query` object and JSON `body`. |
+| `x402_treazury_tools_search` | Optional `query`, registered `source_name`, `cursor`, `limit`. |
+| `x402_treazury_tool_call` | Required readable `tool_id` and `arguments`. |
 
-Directory search and service details are provided automatically, using embedded reviewed schemas
-and the live x402 List API. It needs no static source or tool selector, and startup
-does not fetch its catalog or probe its prices. Both tools use the endpoint's
-source-management wallet (including its explicit listener override), normal response
-handling and payment admission, and the configured direct/Tor network policy. The
-bundled directory can charge after its shared-IP quota. Results are leads, not
-payment/delivery guarantees, and may lack an OpenAPI URL. Specification discovery
-and validation belong to `source_url_info` and `source_add`, not the agent's web
-or raw-request tools.
-
-Browse dispatches to `GET /services`, with `page` and `per_page`. Best dispatches
-to `GET /best`, with `prefer` (`balanced`, `cheapest`, `fastest`, or
-`most_reliable`), `max_price_usd`, `require_verified`, `limit` (1–20), and
+Directory search uses embedded reviewed schemas and the live x402 List API. It
+requires no static directory source or startup catalog fetch. Browse dispatches to
+`GET /services`, with `page`, `per_page` and directory filters. Best dispatches to
+`GET /best`, with `prefer` (`balanced`, `cheapest`, `fastest`, `most_reliable`),
+`max_price_usd`, `require_verified`, `limit` (1–20) and
 `include_facilitator_context`. For example:
 `{"mode":"best","q":"weather","prefer":"cheapest","limit":3}`.
-The price filter is a directory recommendation filter, not a payment cap.
-The built-in search hides the network parameter and always sends `network=BSE` in both modes.
-Agent-supplied `network` arguments are rejected before I/O.
-The local `mode` selector is never sent upstream; unsupported or mixed-mode arguments
-fail before network I/O. Each call selects exactly one directory operation and preserves
-its response, including ranking information. Details dispatches to
-`GET /services/{slug}`; use `{"slug":"<slug from search>"}` to inspect a candidate
-before locating its published specification and adding it. `source_details` returns
-listing metadata, not the provider's OpenAPI document. Use `source_url_info` with
-its slug or known API base to check common locations, then pass a returned
-`verified_openapi` URL directly to `source_add`. The server downloads and validates
-the specification; the agent must not fetch, read or verify large OpenAPI documents
-or full API directory JSON using web/raw tools.
+The price filter controls recommendations, not payment admission. The local mode
+selector is stripped; invalid or mixed-mode fields fail before I/O. Each search
+makes one directory request. Reads share an IP-level free quota and may charge
+through the endpoint's source-management wallet and ordinary payment checks.
+Cite x402-list.com for its CC BY 4.0 directory data. Results are discovery leads,
+not executable schemas or delivery/payment guarantees.
 
-If common locations yield nothing, concise provider documentation or `llms.txt`
-may supply a published specification link. Pass that URL directly to `source_add`
-for server-side validation without opening the specification. Never invent URLs
-or derive request schemas from prose. If no published spec can be found, use
-`raw_get` or `raw_post` only with a documented endpoint, method and arguments.
-After registration, optionally restrict `tools_search` with `source_name` set to
-the returned `name` and a targeted query. Omit both `source_name` and `source_id`
-to search all available API tools on the endpoint, including configured APIs and
-all added sources. Results are paginated; the filter is optional in both ordinary
-and on-demand listing modes. Invoke the chosen `tool_ref` through `tool_call`.
+### Listing and URL discovery
 
-Use `x402_treazury_source_url_info` to locate documents without manual URL guessing:
+`source_details` helps discover working OpenAPI, x402 discovery and LLM
+documentation URLs. With a directory `slug`, it fetches that service's listing once,
+then probes common URLs under its API base, origin root and allowed website origin.
+With `base_url`, it skips the directory lookup. A slug is the external directory's
+service identifier, not a local registration name or UUID.
 
-```json
-{"slug":"vendor-slug-from-search"}
-```
+The response contains `listing` (the exact parsed directory response, or null for a
+base URL) and `url_discovery`. Discovery includes an overall `status`, per-URL
+`results`, and available base/website metadata. A received directory response is
+preserved when discovery cannot proceed, including missing/rejected API bases or an
+unavailable documentation identity. Non-JSON directory output is preserved as text
+with `directory_response_not_json`; the tool does not automatically repeat a paid
+lookup. Directory request failures propagate through ordinary response handling.
 
-Or bypass the directory lookup when you already know the API base:
+Provider probes use unsigned HEAD followed by bounded GET for successful or
+unsupported HEAD responses. They never pay a provider's 402 and never follow
+redirects. Candidate URLs are fixed and deduplicated, with four probes in flight.
+Existing spec/help byte and response-read-inactivity limits apply. Results include
+URL, candidate kind, HTTP statuses, content type and outcome; document contents stay
+server-side. `verified_openapi` means structural OpenAPI 3 JSON checks passed;
+`source_add` still performs full import validation. `documentation_found` points to
+concise documentation; `directory_json_unverified` is only an unverified lead.
+Other statuses expose missing, redirected, blocked, invalid, oversized or unavailable
+candidates. Nothing found does not prove the API is unusable.
 
-```json
-{"base_url":"https://api.example.com/v1"}
-```
+Probes share a pinned existing source-management wallet isolation identity, including
+listener overrides and Tor remote DNS. Identity selection does not allocate, fund or
+promote a wallet. Directory and probe work remain owned through caller cancellation.
+No new discovery cache or registration is created.
 
-Exactly one input is required. Slugs resolve through the ordinary x402 List details
-call, including its payment policy and attribution. Base URLs require public HTTPS
-without credentials, fragments or queries. The tool checks these relative paths
-under the API base, its origin root, and an allowed website origin from directory
-details: `openapi.json`, `api/openapi.json`, `.well-known/openapi.json`, `swagger.json`,
-`.well-known/x402`, `discovery/resources`, `llms.txt`, and `llms-full.txt`.
-Candidates are deduplicated: at most 24 documents, with four requests in flight per
-lookup. These bounds limit speculative requests and simultaneous document buffers;
-there is no separate whole-lookup deadline. This is not an exhaustive crawler.
+If you already know a published OpenAPI URL, pass it directly to `source_add`;
+`source_details` is optional. Otherwise it can locate a specification or concise
+provider documentation with a published link. Do not download large OpenAPI
+specifications or full API directories into agent context: import them server-side,
+then retrieve relevant tool schemas with `tools_search`. Never invent specification
+URLs or paid request arguments. If no specification exists, a documented API can be
+called with `raw_call` without registration.
 
-HEAD successes and HEAD 405/501 responses get an unsigned GET. HEAD or GET 402s
-are reported without signing or paying, and redirects are not followed. GET bodies
-use `max_spec_bytes` for JSON candidates and `max_help_bytes` for documentation,
-with the existing source-management read-inactivity policy. Checks share one pinned
-existing wallet isolation identity, including listener overrides; Tor uses that
-wallet's SOCKS identity with remote DNS. Managed identity selection does not
-promote wallets, allocate funds, or require a new spending reservation. It fails
-explicitly if no eligible existing identity is available.
+### Direct calls to x402 URLs
 
-Each result includes URL, candidate kind, available HEAD/GET statuses, content type,
-and an outcome. `verified_openapi` means OpenAPI 3 JSON structure was checked;
-`source_add` still performs full import validation. `documentation_found` means
-nonempty Markdown-style text was found. `directory_json_unverified` means JSON was
-found at a directory candidate, without verifying its protocol schema. Other
-outcomes preserve unverified content, invalid documents, HTTP failures, blocked
-access, redirects, missing documents, transport failures and explicit byte-limit
-rejections. Disallowed website origins are reported as skipped. No document prose
-is returned or treated as authority. Nothing found does not mean the API is unusable.
+`raw_call` calls any documented public HTTPS x402 API URL. Supply its exact HTTP
+`method`, optional `query` parameters and optional JSON `body`. The method is
+validated as an HTTP token and forwarded without changing its spelling. Query
+values can be strings, numbers, booleans or arrays of those scalars; arrays repeat
+the key. They are URL-encoded and appended to any existing URL query. A supplied
+body is sent exactly as JSON with `Content-Type: application/json`, including
+explicit `null`; omission sends no body. The wrapper adds no method/body policy.
 
-Direct GET/POST tools are available only when this listener enables
-`source_management`; `discover_on_demand` alone does not enable them. They use the
-same resolved source-management wallet, including a listener wallet override, with
-normal payment admission, cancellation ownership, public-destination checks,
-`allowed_origins`, direct/Tor transport (including participating Tor unsigned
-status retries and conditional scope promotion shared with generated MCP tools,
-dynamic `tool_call` and directory tools) and source-management response limits.
-`source_url_info` and `source_add` keep their existing single-scope discovery
-and import transport policies.
-They create no registrations or per-endpoint wallets. API tool-name filters do not
-restrict these management tools: enabling source management permits direct calls
-to documented public HTTPS endpoints within the configured origin policy.
+The tool requires source management and uses its resolved wallet, ordinary payment
+admission, configured direct/Tor transport and response limits. It creates no
+registration or wallet. API tool-name filters do not restrict it. Existing public
+HTTPS, no-URL-credentials, origin and redirect checks remain server responsibilities;
+headers, wallet selectors and payment settings are not agent arguments. Binary
+PNG/JPEG/WebP output uses the normal bounded image path; JSON image mappings require
+a configured provider and are not inferred by raw calls.
 
-Use direct calls for a one-off request or a documented API without a published
-OpenAPI document; prefer registration for reusable tool schemas. Query values can
-be strings, numbers, booleans or arrays of those values (arrays repeat the key).
-They are URL-encoded and appended to any existing URL query. POST sends the exact
-JSON value supplied as `body` with `Content-Type: application/json`; GET accepts
-no body. Headers, credentials, wallet selectors and payment settings are not
-agent arguments. Redirects are not followed. Raw binary PNG/JPEG/WebP responses
-use the normal bounded image output path; JSON image mappings require a configured
-provider and are not inferred by raw calls.
+Calls can spend Base USDC and can change provider state. Follow the documented
+method and arguments. Directory verification and a payment challenge do not prove
+a request schema or guarantee useful output. Unsigned requests retain the
+[accepted retry semantics](architecture.md#unsigned-x402-requests-and-post-retries).
+A signed, timed-out or ambiguous call may already have charged or acted; a new
+invocation is a new logical call and may authorize another payment.
 
-Both tools can spend Base USDC. Directory verification and a valid payment
-challenge do not establish the request schema or guarantee useful output.
-Unsigned x402 POST uses the same
-[accepted retry semantics](architecture.md#unsigned-x402-requests-and-post-retries)
-as GET; POST alone does not prohibit an authorized unsigned retry. A signed,
-timed-out or ambiguous paid attempt may already have charged: do not automatically
-repeat the logical call, because a new invocation may authorize another payment.
-Business side effects add no separate retry gate for this use case.
+### Registration and tool invocation
 
-Source management contributes eight definitions; searches return directory leads
-and selected tool signatures on demand. Registered tools, including persisted
-registrations restored at startup, are also advertised by `tools/list`, so clients
-that include their entire tool inventory may expand the prompt. The stable search/call pair also works with clients that cache their initial
-inventory. The built-in directory is not exposed as additional `x402_list_*` tools.
-An explicit x402-list provider remains available for its broader API surface.
+`source_add` fetches and fully validates a public HTTPS OpenAPI 3 JSON document.
+The API base comes from the first root OpenAPI server, resolving relative URLs
+against the specification URL. It returns only `name`, `tool_prefix`, filtered
+`tool_count`, `status` and `next`; disabled registrations also include `reason`.
+Registration never funds wallets or probes prices.
 
-Add accepts a public HTTPS OpenAPI 3 JSON document. The API address comes from the
-first root OpenAPI server, resolving relative addresses against the specification
-URL. Optional names are ASCII labels of at most 64 letters/digits/underscores/hyphens;
-`__` is reserved as the source/operation delimiter and is rejected within names.
-Names are preserved exactly, are case-sensitive and must be unique within an endpoint,
-including disabled registrations. Omission produces a stable URL-derived label.
-Choose a readable name such as `netintel`: its tools use `dyn_netintel__<operation>`.
-Operation suffixes still come from normalized OpenAPI paths, with method or numerical
-suffixes where needed to distinguish operations within one source.
-Unsupported saved names remain disabled on restore while unrelated registrations
-remain available. A name containing the reserved `__` separator produces an explicit error and a WARN diagnostic when rejected, including
-during restore and offline inspection. Unknown fields fail. There is no
-preview, scope, lifetime, selection or mutation-key argument.
+Names preserve case and allow at most 64 ASCII letters/digits/underscores/hyphens;
+`__` is reserved as the source/operation separator. Explicit names must be unique
+within the endpoint, including disabled registrations and configured source names.
+When omitted, a readable hostname-derived name is generated (for example
+`api-example-com`), with a numeric suffix such as `-2` if occupied. Name allocation
+and duplicate-URL checks share the existing publication lock. Choose `netintel` to
+produce `dyn_netintel__<operation>` tools; operation suffixes use normalized OpenAPI
+paths, adding method/numeric suffixes where necessary.
 
-Add validates before publication and returns `name`, `tool_prefix` (for example
-`dyn_netintel__`), a source ID, revision and filtered tool count. Agents can search
-with the name and call the returned reference without using the source ID.
-The canonical specification URL identifies an existing registration within the
-endpoint. A repeated add returns that registration without fetching again, regardless
-of the supplied label. Concurrent additions recheck duplicates under the publication
-lock. Busy errors can be retried with the same URL. An operator can remove a source
-and subsequently allow it to be added again with a new source UUID.
+The canonical specification URL identifies an existing live registration within the
+endpoint. Repeated additions return it without fetching again, regardless of a new
+requested label. Concurrent additions recheck under the publication lock. Busy
+errors can be retried with the same URL. Persistence follows operator configuration.
+Durable source records, UUIDs, revisions, hashes and tombstones remain internal and
+available through operator inspection; no registration-result receipt ledger is
+needed. Old registry receipt fields are ignored on read and omitted on later saves.
+These were registration bookkeeping, not payment or financial journals.
 
-Tool search returns complete descriptions and schemas plus an opaque `tool_ref`.
-Pass that reference unchanged to tool call with arguments matching its schema.
-References bind the endpoint, running catalog instance, tool name and source revision;
-a stale or foreign reference fails before HTTP. Search again after restart. Tools
-cannot use this path to recursively invoke management commands.
+Search with optional `source_name` and a targeted query, or omit the source filter
+to search all available endpoint tools. Results contain readable `tool_id`, complete
+`description` and `input_schema`. Invoke `tool_call` with that ID and matching
+`arguments`. The server resolves the currently visible bound tool and captures its
+route, payer and internal source identity before executing. Names are local to the
+selected MCP endpoint; the same name on another endpoint resolves that endpoint's
+tool. Removed, hidden or filtered tools fail before provider I/O. Management tools
+cannot be recursively invoked through this API-tool lookup.
 
-HTTP is stateless and does not advertise list-change notifications. Stable search/call
-tools work with clients that cache their initial tool list. Clients that refresh
-`tools/list` can also invoke normal `dyn_<name>__*` tools. Each call retains its captured
-route and payer for its entire lifetime.
+Tool IDs are reusable across turns and restarts while present. Refreshing or
+re-adding a source with the same tool name intentionally selects its current
+operation; search again when you need the current schema. Accepted calls retain
+their captured binding even during publication/removal. Existing direct MCP tool
+calls use the same name-based semantics. API responses and payment admission remain
+unchanged.
 
-Search pages default to 20 and allow at most 100 entries. MCP tool-list pages also
-contain at most 100 entries on enabled endpoints. Cursors bind the running catalog,
-endpoint, query and generation; restart a search when its cursor becomes stale.
-Descriptions and schemas are not silently truncated.
+Source management contributes six definitions. Eager endpoints also advertise
+registered API tools, including restored registrations; `discover_on_demand` keeps
+those API definitions out of `tools/list`. HTTP is stateless and does not advertise
+list-change notifications, so clients may cache their inventory. Search/call remains
+usable with that cached inventory. Search cursors bind the running catalog,
+endpoint, query/filter and generation; stale cursors require restarting pagination.
+Tool-list pages contain at most 100 entries on enabled endpoints. Descriptions and
+schemas are not silently truncated.
 
 ## Limits and network policy
 
@@ -390,9 +359,10 @@ JSON/reference traversal remains bounded to depth 64, 500,000 expanded nodes and
 64 MiB of expanded string/key content. Import rejects over 10,000 operations,
 generated schemas above 256 KiB, names above 512 bytes, external/unresolved/cyclic
 references, and per-path/operation server overrides. Accepted live documents total
-at most 128 MiB; serialized registry state is at most 256 MiB. Retained mutation
-receipts and stored registration records (including removed records) are bounded to
-10,000 on registry load; new additions also check receipt capacity. Resource-limit
+at most 128 MiB; serialized registry state is at most 256 MiB. Stored registration
+records, including removed records, are governed by that same serialized byte bound
+on save and load. Record/receipt counts introduce no separate admission or reload
+gate. Resource-limit
 rejections emit WARN diagnostics with safe counts, thresholds and adjustment
 settings where applicable. Import saturation, transport timeouts and rejected destination/reference/server
 policies also warn.
@@ -430,7 +400,7 @@ for connection, cover-state and Tor reuse limitations.
 ## Persistence and operator maintenance
 
 The separate owner-only SQLite registry holds accepted specification bytes, hashes,
-source UUIDs, endpoint ownership, revisions, receipts and tombstones. It contains no
+source UUIDs, endpoint ownership, revisions and tombstones. It contains no
 wallet keys, but URLs and documents can reveal operator interests. Back it up while
 serving is stopped. Never delete or replace its ownership sidecar while serving.
 Registry files and sidecars cannot alias configuration or treasury paths.
@@ -449,7 +419,7 @@ preserved. Inspection can run while serving and does not acquire registry owners
 This is the saved registration inventory, before current listener filters; it does
 not assert that a tool is presently available or funded. Use
 `x402_treazury_tools_search` on the owning listener for its loaded tools, complete
-schemas and callable references.
+schemas and callable tool IDs.
 
 Stop serving before operator maintenance; exclusive registry ownership is enforced:
 

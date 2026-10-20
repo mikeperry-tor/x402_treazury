@@ -270,7 +270,7 @@ caller disconnected or authorize replay of uncertain paid work.
 An x402 challenge and its single signed attempt are separate requests, each
 subject to connection and read-inactivity limits. In Tor mode, participating
 API clients (`PaidClient::new`, `PaidClient::managed`, and `PaidClient::unsigned`,
-covering generated MCP tools, directory tools and `raw_get`/`raw_post`) may try
+covering generated MCP tools, directory tools and `raw_call`) may try
 up to three isolation scopes (`1` selected plus up to `2` private candidates) on
 unsigned HTTP `400`, `403`, `429`, and `503` while keeping the canonical payer
 pinned, honoring valid `Retry-After` headers on `429` and `503`, and conditionally
@@ -433,19 +433,21 @@ such rules globally on a user's machine as part of an application test.
 
 ## Agent-selected destinations
 
-`source_url_info` makes unsigned HEAD requests and bounded GET validations for a
+`source_details` fetches at most one directory listing when given a slug, then
+makes unsigned HEAD requests and bounded GET validations for a
 fixed, deduplicated set of specification/directory/LLM-documentation candidates.
 At most 24 candidates and four concurrent requests limit speculative network traffic
 and simultaneous document buffers. It uses the source-management wallet's existing
 isolation identity, pinned for the batch, with public destination/origin checks.
-Managed identity selection is read-only; no funding or allocation occurs. Only a
-slug's directory lookup uses ordinary payment handling. Provider probes never sign,
+Managed identity selection is read-only; no funding or allocation occurs. A base-URL
+input skips the directory lookup. Only a
+slug's directory lookup uses ordinary payment handling. The listing remains in the
+response if optional URL discovery cannot proceed. Provider probes never sign,
 never follow redirects and use existing spec/help byte and response-inactivity limits.
 
 
-Dynamic imports and paid API calls, including source-management `raw_get` and
-`raw_post`, use the same factory with a `public_only` pool
-key. HTTPS, no credentials/fragments, public literal addresses and public hostnames
+Dynamic imports and paid API calls, including source-management `raw_call`, use the
+same factory with a `public_only` pool key. HTTPS, no credentials/fragments, public literal addresses and public hostnames
 are required. In direct mode, a custom resolver rejects the entire result if any
 answer is non-public, and returns only that validated set to the connector. Cached
 connections already target validated addresses; each new DNS lookup repeats the check.

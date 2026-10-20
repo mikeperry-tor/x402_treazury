@@ -230,6 +230,17 @@ pub fn matches(name: &str, include: &[String], exclude: &[String]) -> Result<boo
     };
     Ok((include.is_empty() || any(include)?) && !any(exclude)?)
 }
+/// Readable default; collision suffixes are allocated under the registration lock.
+pub(super) fn default_source_name(spec_url: &str) -> String {
+    let url = reqwest::Url::parse(spec_url).expect("validated specification URL");
+    url.host_str()
+        .unwrap_or("api")
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .take(64)
+        .collect()
+}
+
 /// Source names are used verbatim; reserve the source/operation delimiter.
 pub(super) fn validate_source_name(name: &str) -> Result<()> {
     require(

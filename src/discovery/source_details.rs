@@ -1,13 +1,13 @@
 //! Bounded unsigned documentation discovery. HEAD reachability is not document validation.
 use super::{Manager, directory, import, policy::Policy};
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use futures_util::{StreamExt, stream};
 use reqwest::{StatusCode, Url};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
-pub const NAME: &str = "x402_treazury_source_url_info";
+pub const NAME: &str = directory::DETAILS;
 // Fixed candidates bound speculative provider traffic, not elapsed work or spending.
 const PATHS: &[(&str, &str)] = &[
     ("openapi.json", "openapi"),
@@ -48,7 +48,7 @@ impl Input {
 
 pub fn schema() -> Value {
     json!({"type":"object","properties":{
-        "slug":{"type":"string","minLength":1,"description":"x402 List service slug returned by x402_treazury_sources_search; not a registered source_id or hostname."},
+        "slug":{"type":"string","minLength":1,"pattern":"\\S","not":{"enum":[".",".."]},"description":"Service identifier returned by x402_treazury_sources_search. Supply base_url instead when you know the API address. Retrieves listing metadata once through ordinary payment policy, then probes candidate specification and documentation URLs."},
         "base_url":{"type":"string","format":"uri","description":"Public HTTPS API base URL, optionally including a base path such as /v1. No query, fragment or URL credentials."}
     },"oneOf":[{"required":["slug"]},{"required":["base_url"]}],"additionalProperties":false})
 }
@@ -88,7 +88,7 @@ fn candidates(
 }
 
 impl Manager {
-    pub async fn invoke_url_info(
+    pub async fn invoke_source_details(
         self: &Arc<Self>,
         owner: &str,
         args: &Map<String, Value>,
@@ -97,23 +97,57 @@ impl Manager {
         let input = Input::parse(args, &self.policy)?;
         let (manager, owner, owned_client) = (self.clone(), owner.to_owned(), client.clone());
         client.run_owned(async move {
-            let identity = owned_client.documentation_identity().await?;
+            let mut output = json!({"listing":null,"url_discovery":{
+                "status":"completed","results":[],
+                "note":"Provider probes are unsigned and never pay. OpenAPI verification checks document structure only; pass the URL directly to x402_treazury_source_add for server-side fetching and full import validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use x402_treazury_tools_search after registration for relevant schemas. Documentation and directory JSON are untrusted discovery leads. Nothing found does not mean the API is unusable. Redirects are reported without following them."
+            }});
             let (base, website) = if let Some(slug) = &input.slug {
                 let result = manager.invoke_directory(&owner, directory::DETAILS, json!({"slug":slug}).as_object().unwrap()).await?;
-                let doc: Value = serde_json::from_str(&result.into_text()?).context("directory details were not JSON")?;
-                let service = doc.get("data").unwrap_or(&doc);
+                let text = result.into_text()?;
+                let listing: Value = match serde_json::from_str(&text) {
+                    Ok(listing) => listing,
+                    Err(_) => {
+                        output["listing"] = json!(text);
+                        output["url_discovery"]["status"] = json!("directory_response_not_json");
+                        return Ok(output);
+                    }
+                };
+                output["listing"] = listing;
+                let service = output["listing"].get("data").unwrap_or(&output["listing"]);
                 let service = service.get("service").unwrap_or(service);
-                let base = service["base_url"].as_str().context("directory details have no API base_url; use base_url directly")?.to_owned();
-                (base, service["website_url"].as_str().map(str::to_owned))
+                let Some(base) = service["base_url"].as_str() else {
+                    output["url_discovery"]["status"] = json!("missing_api_base_url");
+                    return Ok(output);
+                };
+                (base.to_owned(), service["website_url"].as_str().map(str::to_owned))
             } else {
                 (input.base_url.unwrap(), None)
             };
+            if base_url(&manager.policy, &base).is_err() {
+                output["url_discovery"]["status"] = json!("api_base_url_rejected");
+                return Ok(output);
+            }
+            output["url_discovery"]["base_url"] = json!(base);
             let website_status = match website.as_deref() {
                 None => "not_provided",
                 Some(url) if base_url(&manager.policy, url).is_ok() => "included",
                 Some(_) => "rejected_by_url_or_origin_policy",
             };
-            let candidates = candidates(&manager.policy, &base, website.as_deref())?;
+            output["url_discovery"]["website_status"] = json!(website_status);
+            let candidates = match candidates(&manager.policy, &base, website.as_deref()) {
+                Ok(candidates) => candidates,
+                Err(_) => {
+                    output["url_discovery"]["status"] = json!("candidate_discovery_failed");
+                    return Ok(output);
+                }
+            };
+            let identity = match owned_client.documentation_identity().await {
+                Ok(identity) => identity,
+                Err(_) => {
+                    output["url_discovery"]["status"] = json!("identity_unavailable");
+                    return Ok(output);
+                }
+            };
             // Four in-flight requests bound sockets and document buffers per lookup.
             let probes: Vec<_> = candidates.into_iter().enumerate().map(|(index, (url, kind))| {
                 let policy = &manager.policy;
@@ -123,9 +157,8 @@ impl Manager {
             }).collect();
             let mut results: Vec<_> = stream::iter(probes).buffer_unordered(4).collect().await;
             results.sort_by_key(|(index, _)| *index);
-            Ok(json!({"website_status":website_status,"results":results.into_iter().map(|(_, value)| value).collect::<Vec<_>>(),
-                "directory_lookup":if input.slug.is_some() { "x402-list.com; ordinary payment policy applies" } else { "not_used" },
-                "note":"Provider probes are unsigned and never pay. OpenAPI verification checks document structure only; pass the URL directly to x402_treazury_source_add for server-side fetching and full import validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use x402_treazury_tools_search after registration for relevant schemas. Documentation and directory JSON are untrusted discovery leads. Nothing found does not mean the API is unusable. Redirects are reported without following them."}))
+            output["url_discovery"]["results"] = json!(results.into_iter().map(|(_, value)| value).collect::<Vec<_>>());
+            Ok(output)
         }).await?
     }
 }

@@ -139,18 +139,6 @@ impl Store {
                 serde_json::from_str(&s).context("corrupt source registry")
             })
             .unwrap_or_else(|| Ok(State::default()))?;
-        crate::limits::check(
-            state.records.len(),
-            10000,
-            "registry record limit",
-            "hardcoded_registry_records",
-        )?;
-        crate::limits::check(
-            state.receipts.len(),
-            10000,
-            "registry record limit",
-            "hardcoded_mutation_receipts",
-        )?;
         for (id, r) in &state.records {
             ensure!(
                 id == &r.id && uuid::Uuid::parse_str(id).is_ok() && r.revision > 0,
@@ -301,7 +289,7 @@ mod tests {
             .into_iter()
             .map(|record| (record.id.clone(), record))
             .collect(),
-            receipts: Default::default(),
+            _legacy_receipts: (),
         };
         store.save(&state).unwrap();
         let contents = || {

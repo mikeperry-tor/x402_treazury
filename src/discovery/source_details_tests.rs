@@ -1,5 +1,5 @@
 use super::*;
-use crate::discovery::url_info;
+use crate::discovery::source_details;
 use rmcp::ServerHandler;
 
 #[tokio::test]
@@ -10,10 +10,10 @@ async fn input_and_listener_authority_precede_io() {
     for demand in [false, true] {
         let mut s = server(&m, "hidden");
         s.discover_on_demand = demand;
-        assert!(s.get_tool(url_info::NAME).is_none());
+        assert!(s.get_tool(source_details::NAME).is_none());
         assert!(
             s.invoke_output(
-                url_info::NAME,
+                source_details::NAME,
                 json!({"base_url":"https://api.example.com"})
                     .as_object()
                     .unwrap()
@@ -21,7 +21,11 @@ async fn input_and_listener_authority_precede_io() {
             .await
             .is_err()
         );
-        assert!(server(&m, "writer").get_tool(url_info::NAME).is_some());
+        assert!(
+            server(&m, "writer")
+                .get_tool(source_details::NAME)
+                .is_some()
+        );
     }
     for args in [
         json!({}),
@@ -37,7 +41,7 @@ async fn input_and_listener_authority_precede_io() {
         json!({"base_url":"https://other.example.com"}),
     ] {
         assert!(
-            m.invoke_url_info("writer", args.as_object().unwrap())
+            m.invoke_source_details("writer", args.as_object().unwrap())
                 .await
                 .is_err(),
             "{args}"
@@ -45,15 +49,84 @@ async fn input_and_listener_authority_precede_io() {
     }
 }
 
+#[tokio::test]
+async fn directory_listing_survives_unavailable_url_discovery() {
+    use axum::{extract::Path, response::IntoResponse, routing::get};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let (base, task) = listen(axum::Router::new().route(
+        "/services/{slug}",
+        get(move |Path(slug): Path<String>| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            async move {
+                match slug.as_str() {
+                    "missing" => axum::Json(json!({"data":{"service":{"name":"Retained", "endpoints":[{"path":"/read"}]}},"meta":{"original":true}})).into_response(),
+                    "rejected" => axum::Json(json!({"service":{"base_url":"https://127.0.0.1/private"},"original":true})).into_response(),
+                    "identity" => axum::Json(json!({"base_url":"https://api.example.com/v1","original":true})).into_response(),
+                    "malformed" => "Original non-JSON directory response".into_response(),
+                    _ => panic!("unexpected directory request"),
+                }
+            }
+        }),
+    )).await;
+    // A free directory response can be received without a documentation wallet.
+    // The optional probe identity must not hide the already received listing.
+    let m = Manager::new(
+        policy(None),
+        listeners(false),
+        BTreeMap::from([("shared".into(), PaidClient::unsigned())]),
+        Arc::new(CatalogState::default()),
+        vec![],
+    )
+    .await
+    .unwrap();
+    *m.fixture_directory.lock().unwrap() = Some(base);
+    for (slug, status, listing) in [
+        (
+            "missing",
+            "missing_api_base_url",
+            json!({"data":{"service":{"name":"Retained", "endpoints":[{"path":"/read"}]}},"meta":{"original":true}}),
+        ),
+        (
+            "rejected",
+            "api_base_url_rejected",
+            json!({"service":{"base_url":"https://127.0.0.1/private"},"original":true}),
+        ),
+        (
+            "identity",
+            "identity_unavailable",
+            json!({"base_url":"https://api.example.com/v1","original":true}),
+        ),
+        (
+            "malformed",
+            "directory_response_not_json",
+            json!("Original non-JSON directory response"),
+        ),
+    ] {
+        let result = m
+            .invoke_source_details("writer", json!({"slug":slug}).as_object().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(result["listing"], listing);
+        assert_eq!(result["url_discovery"]["status"], status);
+        assert_eq!(result["url_discovery"]["results"], json!([]));
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    assert!(m.inner.lock().unwrap().state.records.is_empty());
+    task.abort();
+}
+
 #[test]
 fn unsigned_probes_validate_content_and_use_wallet_tor_isolation() {
-    if std::env::var_os("TREAZURY_URL_INFO_CHILD").is_some() {
+    if std::env::var_os("TREAZURY_SOURCE_DETAILS_CHILD").is_some() {
         tokio::runtime::Runtime::new().unwrap().block_on(fixture());
         return;
     }
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "discovery::tests::url_info_tests::unsigned_probes_validate_content_and_use_wallet_tor_isolation", "--nocapture"])
-        .env("TREAZURY_URL_INFO_CHILD", "1").output().unwrap();
+        .args(["--exact", "discovery::tests::source_details_tests::unsigned_probes_validate_content_and_use_wallet_tor_isolation", "--nocapture"])
+        .env("TREAZURY_SOURCE_DETAILS_CHILD", "1").output().unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",
@@ -154,11 +227,28 @@ async fn fixture() {
         ("reader", json!({"slug":"vendor"})),
     ] {
         let output = server(&m, owner)
-            .invoke(url_info::NAME, args.as_object().unwrap())
+            .invoke(source_details::NAME, args.as_object().unwrap())
             .await
             .unwrap();
         let doc: Value = serde_json::from_str(&output).unwrap();
-        let results = doc["results"].as_array().unwrap();
+        assert_eq!(doc["url_discovery"]["status"], "completed");
+        if args.get("slug").is_some() {
+            assert_eq!(
+                doc["listing"]["data"]["base_url"],
+                "https://api.example.com/v1"
+            );
+        } else {
+            assert!(doc["listing"].is_null());
+        }
+        assert_eq!(
+            doc["url_discovery"]["website_status"],
+            if args.get("slug").is_some() {
+                "rejected_by_url_or_origin_policy"
+            } else {
+                "not_provided"
+            }
+        );
+        let results = doc["url_discovery"]["results"].as_array().unwrap();
         assert_eq!(results.len(), 16);
         let result = |path: &str| {
             results

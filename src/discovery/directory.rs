@@ -76,15 +76,6 @@ pub fn search_schema() -> Value {
     })
 }
 
-pub fn details_schema() -> Value {
-    let mut schema = tool("/services/{slug}").input_schema.clone();
-    schema["additionalProperties"] = json!(false);
-    schema["properties"]["slug"]["minLength"] = json!(1);
-    schema["properties"]["slug"]["pattern"] = json!("\\S");
-    schema["properties"]["slug"]["not"] = json!({"enum":[".", ".."]});
-    schema
-}
-
 /// Validate before provider I/O, strip the local selector, and dispatch exactly once.
 pub fn request(
     name: &str,

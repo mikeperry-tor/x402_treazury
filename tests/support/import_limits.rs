@@ -513,12 +513,13 @@ async fn reserved_source_delimiter_warns_for_add_inspection_and_restore() {
         "{logs}"
     );
     let added = add(&m, "valid", "", "").await;
+    let id = registered_id(&m, &added);
     m.inner
         .lock()
         .unwrap()
         .state
         .records
-        .get_mut(added["source_id"].as_str().unwrap())
+        .get_mut(&id)
         .unwrap()
         .candidate
         .name = "PRIVATE__LABEL".into();

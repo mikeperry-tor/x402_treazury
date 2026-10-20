@@ -1,17 +1,17 @@
 //! Direct, documented API calls under endpoint-local source-management authority.
 use super::{Manager, import};
 use crate::{catalog::RoutedRequest, output::ToolOutput};
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
-pub const GET: &str = "x402_treazury_raw_get";
-pub const POST: &str = "x402_treazury_raw_post";
+pub const NAME: &str = "x402_treazury_raw_call";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Arguments {
+    method: String,
     url: String,
     #[serde(default)]
     query: BTreeMap<String, Value>,
@@ -19,39 +19,20 @@ struct Arguments {
     body: Value,
 }
 
-pub fn schema(post: bool) -> Value {
+pub fn schema() -> Value {
     let scalar = json!({"type":["string","number","boolean"]});
-    let mut properties = json!({
-        "url":{"type":"string","format":"uri","description":"Documented public HTTPS API endpoint. No URL credentials or fragments. Existing query parameters are preserved."},
-        "query":{"type":"object","description":"Optional query parameters, appended to the URL and URL-encoded. Scalars become strings; arrays repeat the parameter name. Do not repeat parameters already in the URL unless the API requires it.","additionalProperties":{"oneOf":[scalar.clone(),{"type":"array","items":scalar}]}}
-    });
-    let mut required = vec!["url"];
-    if post {
-        properties["body"] = json!({"description":"Required JSON request body, sent as application/json. Follow the provider's documented structure; JSON null is allowed."});
-        required.push("body");
-    }
-    json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
+    json!({"type":"object","properties":{
+        "method":{"type":"string","description":"Documented HTTP method, such as GET, POST, PUT, PATCH, DELETE, HEAD or OPTIONS. Use the provider's exact method."},
+        "url":{"type":"string","format":"uri","description":"Any documented public HTTPS x402 API URL. No URL credentials or fragments. Existing query parameters are preserved."},
+        "query":{"type":"object","description":"Optional query parameters, appended to the URL and URL-encoded. Scalars become strings; arrays repeat the parameter name. Do not repeat parameters already in the URL unless the API requires it.","additionalProperties":{"oneOf":[scalar.clone(),{"type":"array","items":scalar}]}},
+        "body":{"description":"Optional JSON request body, sent as application/json exactly as supplied. Omit when the documented request has no body; explicit null sends JSON null."}
+    },"required":["method","url"],"additionalProperties":false})
 }
 
-fn request(manager: &Manager, name: &str, args: &Map<String, Value>) -> Result<RoutedRequest> {
-    let method = match name {
-        GET => {
-            ensure!(
-                !args.contains_key("body"),
-                "x402_treazury_raw_get does not accept a body"
-            );
-            "GET"
-        }
-        POST => {
-            ensure!(
-                args.contains_key("body"),
-                "x402_treazury_raw_post requires a JSON body"
-            );
-            "POST"
-        }
-        _ => bail!("unknown raw request tool"),
-    };
+fn request(manager: &Manager, args: &Map<String, Value>) -> Result<RoutedRequest> {
     let input: Arguments = serde_json::from_value(Value::Object(args.clone()))?;
+    let method =
+        reqwest::Method::from_bytes(input.method.as_bytes()).context("invalid HTTP method")?;
     let url = import::endpoint(&manager.policy, &input.url)?;
     let scalar = |v: &Value| v.is_string() || v.is_number() || v.is_boolean();
     for value in input.query.values() {
@@ -61,22 +42,17 @@ fn request(manager: &Manager, name: &str, args: &Map<String, Value>) -> Result<R
         );
     }
     Ok(RoutedRequest {
-        method: method.into(),
+        method: method.to_string(),
         url: url.into(),
         query: input.query,
-        body: (method == "POST").then_some(input.body),
+        body: args.contains_key("body").then_some(input.body),
     })
 }
 
 impl Manager {
-    pub async fn invoke_raw(
-        &self,
-        owner: &str,
-        name: &str,
-        args: &Map<String, Value>,
-    ) -> Result<ToolOutput> {
+    pub async fn invoke_raw(&self, owner: &str, args: &Map<String, Value>) -> Result<ToolOutput> {
         ensure!(self.enabled(owner), "source_management_disabled");
-        let route = request(self, name, args)?;
+        let route = request(self, args)?;
         self.source_client(owner)?
             .with_source_identity("builtin:raw")
             .public_destinations()

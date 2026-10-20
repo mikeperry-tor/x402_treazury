@@ -5,9 +5,9 @@ pub mod policy;
 mod publication;
 pub(crate) mod raw;
 mod relevance;
+pub(crate) mod source_details;
 mod store;
 pub mod tools;
-pub(crate) mod url_info;
 use crate::{
     catalog_state::{BoundTool, CatalogSnapshot, CatalogState},
     deployment::ListenerConfig,
@@ -46,19 +46,24 @@ struct Record {
     removed: bool,
     disabled: Option<String>,
 }
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Receipt {
-    hash: String,
-    result: Value,
-    persistent: bool,
-}
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct State {
     generation: u64,
     records: BTreeMap<String, Record>,
-    receipts: BTreeMap<String, Receipt>,
+    // Read old registration snapshots without retaining their unused result ledger.
+    #[serde(
+        default,
+        rename = "receipts",
+        deserialize_with = "ignore_registration_receipts",
+        skip_serializing
+    )]
+    _legacy_receipts: (),
+}
+fn ignore_registration_receipts<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<(), D::Error> {
+    serde::de::IgnoredAny::deserialize(deserializer).map(|_| ())
 }
 struct Inner {
     base: CatalogSnapshot,
@@ -102,7 +107,6 @@ struct Add {
 #[serde(default, deny_unknown_fields)]
 struct Query {
     source_name: Option<String>,
-    source_id: Option<String>,
     query: Option<String>,
     cursor: Option<String>,
     limit: Option<usize>,
@@ -110,7 +114,7 @@ struct Query {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Call {
-    pub tool_ref: String,
+    pub tool_id: String,
     pub arguments: serde_json::Map<String, Value>,
 }
 impl Manager {
@@ -118,9 +122,6 @@ impl Manager {
         self.listeners
             .get(owner)
             .is_some_and(|l| l.source_management)
-    }
-    pub fn accepts(&self, owner: &str) -> bool {
-        self.enabled(owner)
     }
     fn targets(&self, owner: &str, c: &Candidate) -> Result<Vec<String>> {
         ensure!(self.enabled(owner), "source_management_disabled");
@@ -139,12 +140,9 @@ impl Manager {
         );
         Ok(vec![owner.into()])
     }
-    pub fn tool_reference(&self, owner: &str, bound: &BoundTool) -> String {
-        catalog_reference(&self.catalog, owner, bound)
-    }
-    pub fn find_reference(&self, owner: &str, reference: &str) -> Result<BoundTool> {
+    pub fn find_tool(&self, owner: &str, tool_id: &str) -> Result<BoundTool> {
         ensure!(self.enabled(owner), "source_management_disabled");
-        find_catalog_reference(&self.catalog, owner, reference)
+        find_catalog_tool(&self.catalog, owner, tool_id)
     }
 
     fn source_client(&self, owner: &str) -> Result<PaidClient> {
@@ -371,22 +369,19 @@ impl Manager {
         Ok(result)
     }
     fn result(&self, r: &Record, caller: &str, snapshot: &CatalogSnapshot) -> Value {
-        let targets: Vec<_> = r
-            .targets
-            .iter()
-            .filter(|t| r.owner == caller || t.as_str() == caller)
-            .cloned()
-            .collect();
-        let wallets: BTreeMap<_, _> = targets
-            .iter()
-            .filter_map(|t| {
-                self.listeners
-                    .get(t)
-                    .map(|listener| (t.clone(), policy::wallet(&self.policy, listener).to_owned()))
-            })
-            .collect();
-        json!({"source_id":r.id,"name":r.candidate.name,"tool_prefix":import::tool_prefix(&r.candidate.name).ok(),"revision":r.revision,"catalog_generation":snapshot.generation,"targets":targets,"lifetime":r.candidate.lifetime,"disabled":r.disabled,"removed":r.removed,"wallet_profiles":wallets,"readiness":"payment readiness checked at invocation; registration does not fund wallets","spec_hash":r.hash,"accepted_at":r.accepted_at,"updated_at":r.updated_at,"tool_count":snapshot.views.get(caller).into_iter().flatten().filter(|t|t.source.as_ref().is_some_and(|s|s.0==r.id)).count(),"next":"Search with x402_treazury_tools_search using source_name=name, then pass the returned tool_ref to x402_treazury_tool_call. Tool filters use tool_prefix followed by *, never the source ID."})
+        let mut result = json!({
+            "name": r.candidate.name,
+            "tool_prefix": import::tool_prefix(&r.candidate.name).ok(),
+            "tool_count": snapshot.views.get(caller).into_iter().flatten().filter(|t| t.source.as_ref().is_some_and(|s| s.0 == r.id)).count(),
+            "status": if r.disabled.is_some() { "disabled" } else { "available" },
+            "next": "Search tools with source_name=name, then invoke tool_id with arguments through x402_treazury_tool_call."
+        });
+        if let Some(reason) = &r.disabled {
+            result["reason"] = json!(reason);
+        }
+        result
     }
+
     async fn document(&self, owner: &str, url: &str, refresh: bool) -> Result<Arc<Vec<u8>>> {
         let canonical = import::endpoint(&self.policy, url)?.to_string();
         let url = canonical.as_str();
@@ -469,10 +464,7 @@ impl Manager {
             "management_request_too_large",
             "hardcoded_management_request_bytes",
         )?;
-        ensure!(
-            self.enabled(owner) || self.accepts(owner),
-            "source_management_disabled"
-        );
+        ensure!(self.enabled(owner), "source_management_disabled");
         match name {
             "x402_treazury_source_add" => self.add_source(owner, args).await,
             "x402_treazury_tools_search" => self.search_tools(owner, name, args),
@@ -483,7 +475,7 @@ impl Manager {
         let mut a: Add = serde_json::from_value(args)?;
         ensure!(self.enabled(owner), "source_management_disabled");
         a.spec_url = import::endpoint(&self.policy, &a.spec_url)?.to_string();
-        let removed = {
+        {
             let inner = self.inner.lock().unwrap();
             if let Some(r) = inner
                 .state
@@ -493,19 +485,12 @@ impl Manager {
             {
                 return Ok(self.result(r, owner, &self.catalog.read()));
             }
-            inner
-                .state
-                .records
-                .values()
-                .filter(|r| r.owner == owner && r.removed && r.candidate.spec_url == a.spec_url)
-                .count()
-        };
-        let args = serde_json::to_value(&a)?;
-        let key = format!("add:{}:{removed}", hash(a.spec_url.as_bytes()));
+        }
+        let generated_name = a.name.is_none();
         let candidate = Candidate {
             name: a
                 .name
-                .unwrap_or_else(|| format!("api_{}", &hash(a.spec_url.as_bytes())[..16])),
+                .unwrap_or_else(|| import::default_source_name(&a.spec_url)),
             spec_url: a.spec_url,
             base_url: None,
             selection: Selection::default(),
@@ -517,7 +502,9 @@ impl Manager {
                 Lifetime::Process
             },
         };
-        self.targets(owner, &candidate)?;
+        if !generated_name {
+            self.targets(owner, &candidate)?;
+        }
         let document = self.document(owner, &candidate.spec_url, false).await?;
         let id = Uuid::new_v4().to_string();
         import::build(&self.policy, &candidate, &document)?;
@@ -535,28 +522,22 @@ impl Manager {
             removed: false,
             disabled: None,
         };
-        self.commit(owner.to_owned(), key, args, record).await
+        self.commit(owner.to_owned(), generated_name, record).await
     }
 
     fn search_tools(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
-        let mut query: Query = serde_json::from_value(args)?;
-        ensure!(
-            query.source_name.is_none() || query.source_id.is_none(),
-            "source_name_and_source_id_are_exclusive"
-        );
-        if let Some(name) = query.source_name.take() {
-            import::validate_source_name(&name)?;
-            query.source_id = Some(
+        let query: Query = serde_json::from_value(args)?;
+        if let Some(name) = &query.source_name {
+            import::validate_source_name(name)?;
+            ensure!(
                 self.inner
                     .lock()
                     .unwrap()
                     .state
                     .records
                     .values()
-                    .find(|r| !r.removed && r.owner == owner && r.candidate.name == name)
-                    .context("source_name_unknown")?
-                    .id
-                    .clone(),
+                    .any(|r| !r.removed && r.owner == owner && &r.candidate.name == name),
+                "source_name_unknown"
             );
         }
         search_catalog_query(&self.catalog, owner, name, query)
@@ -565,8 +546,7 @@ impl Manager {
     async fn commit(
         self: &Arc<Self>,
         owner: String,
-        key: String,
-        args: Value,
+        generated_name: bool,
         mut record: Record,
     ) -> Result<Value> {
         #[cfg(test)]
@@ -594,6 +574,22 @@ impl Manager {
                 return Ok(this.result(r, &owner, &this.catalog.read()));
             }
             let mut state = inner.state.clone();
+            if generated_name {
+                let base = record.candidate.name.clone();
+                let mut suffix = 1usize;
+                while this.listeners[&owner]
+                    .sources
+                    .contains(&record.candidate.name)
+                    || state.records.values().any(|r| {
+                        !r.removed && r.owner == owner && r.candidate.name == record.candidate.name
+                    })
+                {
+                    suffix += 1;
+                    let tail = format!("-{suffix}");
+                    record.candidate.name =
+                        format!("{}{}", &base[..base.len().min(64 - tail.len())], tail);
+                }
+            }
             ensure!(
                 !state.records.values().any(|r| !r.removed
                     && r.owner == owner
@@ -602,7 +598,6 @@ impl Manager {
             );
             record.targets = this.targets(&owner, &record.candidate)?;
             let id = record.id.clone();
-            let persistent = record.candidate.lifetime == Lifetime::Persistent;
             state.records.insert(id.clone(), record);
             state.generation = state
                 .generation
@@ -611,26 +606,11 @@ impl Manager {
                 .context("generation exhausted")?;
             let snapshot = this.snapshot(&state, &inner.base, state.generation)?;
             let result = this.result(&state.records[&id], &owner, &snapshot);
-            crate::limits::check(
-                state.receipts.len() + 1,
-                10000,
-                "idempotency_capacity_reached",
-                "hardcoded_mutation_receipts",
-            )?;
-            state.receipts.insert(
-                receipt_key(&owner, &key)?,
-                Receipt {
-                    hash: hash(&serde_json::to_vec(&args)?),
-                    result: result.clone(),
-                    persistent,
-                },
-            );
             if let Some(store) = &mut inner.store {
                 let mut saved = state.clone();
                 saved
                     .records
                     .retain(|_, r| r.candidate.lifetime == Lifetime::Persistent);
-                saved.receipts.retain(|_, r| r.persistent);
                 store.save(&saved)?;
             }
             #[cfg(test)]
@@ -654,26 +634,12 @@ impl Manager {
         .await?
     }
 }
-pub(crate) fn catalog_reference(catalog: &CatalogState, owner: &str, bound: &BoundTool) -> String {
-    hash(
-        &serde_json::to_vec(&(catalog.instance(), owner, &bound.tool.name, &bound.source))
-            .expect("serializable tool reference"),
-    )
-}
-pub(crate) fn find_catalog_reference(
+pub(crate) fn find_catalog_tool(
     catalog: &CatalogState,
     owner: &str,
-    reference: &str,
+    tool_id: &str,
 ) -> Result<BoundTool> {
-    let snapshot = catalog.read();
-    snapshot
-        .views
-        .get(owner)
-        .into_iter()
-        .flatten()
-        .find(|b| catalog_reference(catalog, owner, b) == reference)
-        .cloned()
-        .context("tool_reference_stale_or_unknown: search tools again")
+    crate::catalog_state::find(&catalog.read(), owner, tool_id).cloned()
 }
 pub(crate) fn search_catalog(
     catalog: &CatalogState,
@@ -706,9 +672,14 @@ fn search_catalog_query(
         .into_iter()
         .flatten()
         .filter(|t| {
-            q.source_id
-                .as_ref()
-                .is_none_or(|id| t.source.as_ref().is_some_and(|s| &s.0 == id))
+            q.source_name.as_ref().is_none_or(|name| {
+                t.source.is_some()
+                    && t.tool
+                        .name
+                        .strip_prefix("dyn_")
+                        .and_then(|n| n.rsplit_once("__"))
+                        .is_some_and(|(registered, _)| registered == name)
+            })
         })
         .collect();
     let available = candidates.len();
@@ -716,10 +687,7 @@ fn search_catalog_query(
         .into_iter()
         .map(|t| {
             json!({
-                "tool_ref": catalog_reference(catalog, owner, t),
                 "tool_id": t.tool.name,
-                "source_id": t.source.as_ref().map(|s| &s.0),
-                "revision": t.source.as_ref().map_or(0, |s| s.1),
                 "description": t.tool.description,
                 "input_schema": t.tool.input_schema
             })
@@ -733,7 +701,7 @@ fn search_catalog_query(
         &format!(
             "{}:{owner}:{name}:{:?}:{:?}",
             catalog.instance(),
-            q.source_id,
+            q.source_name,
             q.query
         ),
     )
@@ -743,13 +711,6 @@ fn epoch() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-fn receipt_key(owner: &str, key: &str) -> Result<String> {
-    ensure!(
-        !key.is_empty() && key.len() <= 256,
-        "invalid idempotency key"
-    );
-    Ok(format!("{}:{owner}{key}", owner.len()))
 }
 fn page(
     values: Vec<Value>,

@@ -118,10 +118,10 @@ impl Server {
                 "x402_treazury_tool_call" => {
                     let call: crate::discovery::Call =
                         serde_json::from_value(serde_json::Value::Object(args.clone()))?;
-                    let bound = crate::discovery::find_catalog_reference(
+                    let bound = crate::discovery::find_catalog_tool(
                         &self.catalog,
                         &self.catalog_server,
-                        &call.tool_ref,
+                        &call.tool_id,
                     )?;
                     return Ok(self.limit(bound.invoke_output(&call.arguments).await?));
                 }
@@ -137,28 +137,24 @@ impl Server {
                     .any(|t| t.name == name),
                 "unknown tool"
             );
-            if matches!(
-                name,
-                "x402_treazury_sources_search" | "x402_treazury_source_details"
-            ) {
+            if name == "x402_treazury_sources_search" {
                 return Ok(self.limit(
                     manager
                         .invoke_directory(&self.catalog_server, name, args)
                         .await?,
                 ));
             }
-            if name == crate::discovery::url_info::NAME {
+            if name == crate::discovery::source_details::NAME {
                 return Ok(
                     self.limit(crate::output::ToolOutput::text(serde_json::to_string(
-                        &manager.invoke_url_info(&self.catalog_server, args).await?,
+                        &manager
+                            .invoke_source_details(&self.catalog_server, args)
+                            .await?,
                     )?)),
                 );
             }
-            if matches!(
-                name,
-                crate::discovery::raw::GET | crate::discovery::raw::POST
-            ) {
-                return Ok(self.limit(manager.invoke_raw(&self.catalog_server, name, args).await?));
+            if name == crate::discovery::raw::NAME {
+                return Ok(self.limit(manager.invoke_raw(&self.catalog_server, args).await?));
             }
             if name != "x402_treazury_tool_call" {
                 return Ok(crate::output::ToolOutput::text(serde_json::to_string(
@@ -173,7 +169,7 @@ impl Server {
             }
             let call: crate::discovery::Call =
                 serde_json::from_value(serde_json::Value::Object(args.clone()))?;
-            let bound = manager.find_reference(&self.catalog_server, &call.tool_ref)?;
+            let bound = manager.find_tool(&self.catalog_server, &call.tool_id)?;
             return Ok(self.limit(bound.invoke_output(&call.arguments).await?));
         }
         let snapshot = self.catalog.read();
@@ -228,7 +224,7 @@ impl ServerHandler for Server {
             .unwrap_or(&self.instructions);
         let mut instructions = pricing_instructions(authored.as_deref());
         if self.discover_on_demand {
-            instructions.push_str("\n\nAPI tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a small limit (default 5) to read complete descriptions and input schemas, then pass the returned tool_ref and arguments to x402_treazury_tool_call. Discovery and calls stay within this listener's configured tools and wallets.");
+            instructions.push_str("\n\nAPI tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a small limit (default 5) to read complete descriptions and input schemas, then pass the returned tool_id and arguments to x402_treazury_tool_call. Discovery and calls stay within this listener's configured tools and wallets.");
         }
         if self.catalog.publication_failed() {
             instructions.push_str("\n\nDeferred catalog publication has stopped. Sources listed as PENDING are unavailable until restart.");
@@ -270,7 +266,7 @@ impl ServerHandler for Server {
         let dynamic = self
             .discovery
             .as_ref()
-            .is_some_and(|m| m.accepts(&self.catalog_server));
+            .is_some_and(|m| m.enabled(&self.catalog_server));
         let prefix = format!(
             "{}:{}:{}:",
             self.catalog.instance(),

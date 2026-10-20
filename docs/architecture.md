@@ -115,7 +115,11 @@ are initialized, loading shuts down the retained owner before returning an error
 
 `src/catalog_state.rs` publishes immutable snapshots. A tool invocation captures
 its route, output policy and payer binding so a concurrent catalog replacement
-cannot redirect an in-flight call. Listener filters constrain invocation as well
+cannot redirect an in-flight call. Search/call uses the readable endpoint-local
+tool name, resolving its current visible binding at invocation; restarts do not
+invalidate the name. Dynamic source UUID/revision still owns execution isolation,
+not an agent-supplied handle. Registration deduplicates canonical specification
+URLs under the publication lock, without a separate result-receipt ledger. Listener filters constrain invocation as well
 as listing. Agent-added sources use the same execution path; see
 [agent source management](agent-sources.md) for endpoint-local registration, persistence and refresh.
 Ordinary serving publishes available local tools before running remote catalog
@@ -256,7 +260,7 @@ isolation scope (`cover::registry::Owner::from_transport`) from unsigned challen
 through admission, signing, signed dispatch and response body consumption.
 `src/network.rs` uses that canonical identity and effective scope for connection
 pooling and SOCKS isolation. Participating API clients (generated MCP tools,
-static/managed payers, directory tools and `raw_get`/`raw_post`) may try up to 3
+static/managed payers, directory tools and `raw_call`) may try up to 3
 Tor isolation scopes on unsigned HTTP `400`, `403`, `429`, and `503` (honoring
 valid `Retry-After` headers on `429`/`503`) with the same pinned payer, and
 conditionally promote a winning candidate after valid `402` challenge validation

@@ -1052,9 +1052,9 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
     let pay = items.iter().find(|t| t["tool_id"] == "alpha_pay").unwrap();
     let bad = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_source_add","arguments":{"spec_url":"https://example.com/spec"}})).await;
     assert_eq!(bad["result"]["isError"], true);
-    let cross = rpc(&http,ordinary,"beta-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_ref":pay["tool_ref"],"arguments":{}}})).await;
+    let cross = rpc(&http,ordinary,"beta-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":pay["tool_id"],"arguments":{}}})).await;
     assert_eq!(cross["result"]["isError"], true);
-    let result = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_ref":pay["tool_ref"],"arguments":{"q":"kept"}}})).await;
+    let result = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":pay["tool_id"],"arguments":{"q":"kept"}}})).await;
     assert_ne!(result["result"]["isError"], true);
     let paid: Value =
         serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -1068,7 +1068,7 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
         .iter()
         .find(|t| t["tool_id"] == "alpha_expensive")
         .unwrap();
-    let denied = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_ref":expensive["tool_ref"],"arguments":{}}})).await;
+    let denied = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":expensive["tool_id"],"arguments":{}}})).await;
     assert_eq!(denied["result"]["isError"], true);
     assert_eq!(state.signed.load(Ordering::SeqCst), 1);
     stop.cancel();
@@ -1325,7 +1325,7 @@ async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() 
             assert_eq!(
                 expected_tools.len(),
                 if management {
-                    8
+                    6
                 } else if on_demand {
                     2
                 } else {

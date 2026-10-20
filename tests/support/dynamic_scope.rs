@@ -147,7 +147,15 @@ async fn scope_child() {
             )
             .await
             .unwrap();
-        assert_eq!(added["targets"], json!([owner]));
+        assert_eq!(added["name"], "scoped");
+        let inner = m.inner.lock().unwrap();
+        let registration = inner
+            .state
+            .records
+            .values()
+            .find(|record| record.owner == owner)
+            .unwrap();
+        assert_eq!(registration.targets, [owner]);
     }
     // Help and pricing are discovery traffic even when invoked from a paid binding.
     let mut help = m.catalog.read().views["writer"]
@@ -194,7 +202,7 @@ async fn scope_child() {
             .unwrap()
             .clone();
         let name = bound.tool.name.clone();
-        let reference = m.tool_reference(id, &bound);
+        let reference = bound.tool.name.clone();
         let (url, t) = listen(crate::server::http_app(
             server(&m, id),
             format!("{id}-token"),
@@ -204,7 +212,7 @@ async fn scope_child() {
         let client = direct.discovery(&url, Duration::from_secs(3)).unwrap();
         for fallback in [false, true] {
             let params = if fallback {
-                json!({"name":"x402_treazury_tool_call","arguments":{"tool_ref":reference,"arguments":{}}})
+                json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":reference,"arguments":{}}})
             } else {
                 json!({"name":name,"arguments":{}})
             };
@@ -231,26 +239,15 @@ async fn scope_child() {
     assert_eq!(requests.load(Ordering::SeqCst), 12);
     assert_eq!(signatures.lock().unwrap().len(), 6);
     let before = requests.load(Ordering::SeqCst);
-    // Names can match across independently owned registrations. References cannot.
-    let writer_bound = m.catalog.read().views["writer"]
-        .iter()
-        .find(|b| b.tool.name == name)
-        .unwrap()
-        .clone();
-    let reader_bound = m.catalog.read().views["reader"]
-        .iter()
-        .find(|b| b.tool.name == name)
-        .unwrap()
-        .clone();
-    let foreign_reference = m.tool_reference("writer", &writer_bound);
-    assert_ne!(foreign_reference, m.tool_reference("reader", &reader_bound));
+    // The same readable name resolves through each authenticated owner's current binding.
+    let writer_bound = m.find_tool("writer", &name).unwrap();
+    let reader_bound = m.find_tool("reader", &name).unwrap();
+    assert_ne!(writer_bound.source, reader_bound.source);
     assert!(
         server(&m, "reader")
             .invoke(
                 "x402_treazury_tool_call",
-                json!({"tool_ref":foreign_reference,"arguments":{}})
-                    .as_object()
-                    .unwrap()
+                json!({"tool_ref":name,"arguments":{}}).as_object().unwrap()
             )
             .await
             .is_err()
