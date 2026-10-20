@@ -89,10 +89,11 @@ registry_file = "../../state/privacy-sources.sqlite"
 # Source instructions_text is agent-facing guidance. Each MCP server listener
 # combines instructions from sources with selected tools into the MCP server's
 # instructions for the agent, labeled with [source_id], and appends a
-# pricing caveat. For example, social contributes [social] only to servers.social.
-# A local value REPLACES the provider's inherited instructions_text; there is no
-# automatic append. Keep relevant provider constraints when tailoring the text.
-# Tool descriptions are configured separately through source overrides.
+# pricing caveat. An endpoint instructions_text replaces this composed guidance.
+# Social keeps its capability list only in discovery search help below, with a
+# short initialization message for clients that forward server instructions.
+# Source-local instructions_text replaces inherited provider guidance; tool
+# descriptions are configured separately through source overrides.
 
 # SocialFetch appears in two contexts with overlapping Reddit coverage,
 # demonstrating that even the same provider/tool can use different payers.
@@ -101,7 +102,6 @@ registry_file = "../../state/privacy-sources.sqlite"
 
 [sources.social]
 extends = "../../providers/socialfetch.toml"
-instructions_text = "Research people and communities using SocialFetch tools for Bluesky, Facebook, Instagram, LinkedIn, Reddit, Telegram, Threads, TikTok, Truth Social, Twitter (X), and Yelp, alongside TeleSINT (telesint_*) for Telegram cyber threat intelligence and conflict/geopolitical OSINT channels. This listener uses on-demand tool discovery: search x402_treazury_tools_search for the platform name (use Twitter for X, or search Telegram / telesint for Telegram channel and threat-intel calls) and inspect the returned descriptions and schemas, then invoke the selected tool_ref with x402_treazury_tool_call. This source belongs to the social research context; overlapping Reddit tools on the web listener use a separate payment wallet. Request content can still identify or correlate activity. LinkedIn tool names distinguish v1 (socialfetch_linkedin_) and v2 (socialfetch_v2_linkedin_); preserve argument casing. Preserve lookupStatus, partial-result and provenance fields; an incomplete lookup is not proof of absence."
 tags = ["Bluesky", "Facebook", "Instagram", "LinkedIn", "Reddit", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Yelp"]
 exclude_tools = ["socialfetch_help"]
 
@@ -111,7 +111,6 @@ exclude_tools = ["socialfetch_help"]
 [sources.telesint]
 extends = "../../providers/telesint.toml"
 exclude_tools = ["telesint_help"]
-instructions_text = "Telegram cyber threat intelligence and conflict/geopolitical OSINT via TeleSINT (telesint_*): search x402_treazury_tools_search for Telegram, telesint, or specific categories (ioc, c2, actor, breach, vulnerability, darkweb, ransomware, intent, malware, feed, artifact, asn, source, preparation, velocity, target_mentions, claim_check) and call the returned tool_ref with x402_treazury_tool_call. Always supply at least one scope parameter on telesint_preparation and telesint_velocity (organization, sector, country, actor, or vendor) and id or text on telesint_claim_check so calls do not return a paid HTTP 200 guidance error. Wallet-bound /watch/* tools are excluded."
 
 [sources.webinfo]
 extends = "../../providers/socialfetch.toml"
@@ -130,7 +129,6 @@ instructions_text = "Use exa_search for web discovery and exa_contents for known
 # within the shared $0.50 cap for one matched result; use small batches.
 [sources.pdl_people]
 extends = "../../providers/pdl.toml"
-instructions_text = "People Data Labs person enrichment and structured person search support the social research context. Use known identifiers for enrichment and small result batches for search; preserve confidence and provenance. Vendor-listed matched results cost $0.28 each, within this example's shared $0.50 social/company payment cap for one result; larger batches may be refused. Do not interpret a rejected payment or failed lookup as evidence that a person does not exist."
 include_tools = ["pdl_person_*"]
 
 # Structured company discovery complements Deepline enrichment.
@@ -155,7 +153,6 @@ include_tools = [
   "stableenrich_minerva_validate_emails",
   "stableenrich_serper_people_image_search",
 ]
-instructions_text = "Social research through StableEnrich: search Reddit and retrieve post comments, resolve people with Minerva, enrich known profiles, check email database records and search for public headshots. Use small batches and preserve identity confidence, provenance and timestamps. An email database match is not proof of current deliverability; disambiguate names with known profile/company information before combining results or attributing images. Request content can identify people despite separate payment wallets. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Vendor prices are estimates; the live challenge and $0.50 shared social/company cap govern payment. Do not repeat a paid submission to retrieve pending results."
 
 # Company estimates are $0.0126-$0.08 per call, within the $0.50 cap.
 # FullEnrich company search ($0.15) is omitted. Keep person/contact enrichment
@@ -347,8 +344,21 @@ wallet = "web"
 sources = ["exa", "webinfo", "googletrends"]
 
 [servers.social]
-# Keep this large catalog out of the initial tool list; discover schemas as needed.
+# Keep platform coverage in search help, including for clients that omit server instructions.
 discover_on_demand = true
+instructions_text = "Social research endpoint. Discover an operation and inspect its schema before calling it."
+discovery_search_tool_instructions_text = """
+Social tool keywords to search for:
+- SocialFetch: `Bluesky`, `Facebook`, `Instagram`, `LinkedIn`, `Reddit`, `Telegram`,
+  `Threads`, `TikTok`, `truthsocial` (Truth Social), `Twitter` (X), `Yelp`.
+- TeleSINT (Telegram OSINT): `telesint`, `telesint_search`, `telesint_ioc`, `telesint_c2`,
+  `telesint_actor`, `telesint_breach`, `telesint_vulnerability`, `telesint_darkweb`,
+  `telesint_ransomware`, `telesint_intent`, `telesint_malware`, `telesint_feed`,
+  `telesint_artifact`, `telesint_asn`, `telesint_source`, `telesint_preparation`,
+  `telesint_velocity`, `telesint_target_mentions`, `telesint_claim_check`.
+- People data: `person` (person enrichment and search), `stableenrich`
+  (person resolution, enrichment, and email checks).
+"""
 listen = "127.0.0.1:6338"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"

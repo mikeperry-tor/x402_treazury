@@ -381,6 +381,41 @@ async fn privacy_example_enables_source_wallet_discovery_offline() {
         shown["wallet_bindings"]["company"]["exa"]["wallet"],
         "company"
     );
+    let social = &shown["servers"]["social"];
+    assert_eq!(social["discover_on_demand"], true);
+    let instructions = social["instructions_text"].as_str().unwrap();
+    let search = social["discovery_search_tool_instructions_text"]
+        .as_str()
+        .unwrap();
+    for platform in shown["sources"]["social"]["settings"]["tags"]
+        .as_array()
+        .unwrap()
+    {
+        let platform = platform.as_str().unwrap();
+        assert!(
+            search.contains(platform),
+            "missing discovery coverage: {platform}"
+        );
+        assert!(
+            !instructions.contains(platform),
+            "duplicated initialization coverage: {platform}"
+        );
+    }
+    assert!(search.starts_with("Social tool keywords to search for:"));
+    for keyword in [
+        "truthsocial",
+        "telesint",
+        "pdl_person",
+        "stableenrich_reddit",
+        "stableenrich_minerva",
+        "stableenrich_serper_people_image_search",
+    ] {
+        assert!(
+            search.contains(keyword),
+            "missing social search keyword: {keyword}"
+        );
+    }
+    assert!(social["sources_search_tool_instructions_text"].is_null());
 }
 
 #[tokio::test]
