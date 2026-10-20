@@ -44,16 +44,16 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | NetIntel | `netintel.toml` | Canonical POST/body contracts and image data-URI mapping |
 | TeleSINT | `telesint.toml` | Stateless Telegram intelligence; watch ownership unsupported |
 | RelayShield phone | `relayshield/phone-reputation.toml` | Authored vendor-omitted request contract |
-| AgentFund | `agentfund.toml` | Vendor OpenAPI |
+| AgentFund | `agentfund.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | AgentUtility | `agentutility/provider.toml` | Full supported aliases/catalog; advisory research recommendations; enriched provenance |
 | Arkham | `arkham.toml` | Vendor OpenAPI |
 | BlockRun | `blockrun.toml` | Synchronous catalog with fixed-symbol reads; async jobs/ownership excluded |
 | Claw402 | `claw402.toml` | Full catalog, advisory market reads, sparse RootData JSON bodies |
-| botsmith | `botsmith.toml` | Vendor OpenAPI |
-| Brazilayer | `brazilayer.toml` | Vendor OpenAPI |
+| botsmith | `botsmith.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
+| Brazilayer | `brazilayer.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | Curl HTTP Request | `curl/provider.toml` | Local schema; POST `/curl` returns status, headers and body text; advertised $0.01 |
 | Concordance | `concordance/provider.toml` | Local `concordance/openapi.json` |
-| Deepline | `deepline.toml` | Vendor OpenAPI |
+| Deepline | `deepline.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | Exa | `exa.toml` | Vendor OpenAPI; Search, Contents and lazy help only |
 | Genuine Good Grants | `genuinegood.toml` | POST grant research; search/detail recommendations; bearer pass excluded |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
@@ -62,10 +62,10 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Kronos | `kronos.toml` | Market data plus public status/methodology; existing names preserved |
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |
 | LoneStarOracle | `lonestar.toml` | Full supported gateway, including public previews/feeds; research recommendations |
-| News Gurus | `newsgurus/provider.toml` | Local projection of vendor x402 catalog; 48 paid reads plus lazy help |
+| News Gurus | `newsgurus/provider.toml` | Vendor x402 catalog projection, including agent-status; lazy help |
 | OneShot | `oneshot.toml` | Synchronous search and public discovery; authenticated jobs excluded |
 | Otto | `otto.toml` | Vendor OpenAPI |
-| People Data Labs | `pdl.toml` | Vendor OpenAPI |
+| People Data Labs | `pdl.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | RelayShield | `relayshield.toml` | Vendor OpenAPI; optional authored `relayshield/phone-reputation.toml` companion |
 | RegimeShift | `regimeshift.toml` | Vendor OpenAPI |
 | SocialFetch | `socialfetch.toml` | Vendor tagged OpenAPI |
@@ -78,13 +78,13 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 Curl additionally pins the vendor-published OpenAPI response envelope for discovery
 relay use; see [relay configuration](../docs/configuration.md#paid-discovery-relay).
 
-The five authored local catalogs are OpenAPI 3.1 request definitions, explicitly
-labeled as local rather than vendor-published. They preserve the supported routes,
-tags, descriptions, parameters, request bodies and embedded prices from the
-Python reference digests. Prices use the `x-payment-info` extension. Responses
-have a generic description because their schemas are not modeled. Preserve the
-Locus gateway body rewrite and job exclusions, Straits free/premium split,
-Concordance POST pricing, and Glassnode's discovery workflow when editing them.
+Authored local catalogs are explicitly labeled rather than presented as vendor
+OpenAPI documents. Preserve complete documented request contracts, source
+provenance and intentional enrichment, including `x-payment-info` price hints.
+Generic response placeholders are not authoritative schemas; captured public
+discovery objects retain their original documentation. The Locus gateway body
+rewrite and job exclusions, Straits free/premium resources, Concordance pricing
+and Glassnode metadata-to-metric workflow each have concrete consumers.
 
 `tests/provider_catalogs.rs` checks concrete provider contracts and
 `tests/config.rs` validates all definitions offline without settings snapshots.
@@ -119,10 +119,7 @@ replace advice when overriding the source prefix, and omit advice when the entir
 catalog is the appropriate choice. `catalog tools --all-tools` inspects without
 advice selection while retaining ordinary filters. See the
 [selection semantics](../docs/configuration.md) for empty/stale advice and offline
-metadata inspection. Until provider normalization,
-existing provider selections below describe current behavior, including editorial
-subsets scheduled for normalization. See the
-[implementation plan](../docs/plans/provider_curation.md).
+metadata inspection.
 
 Review method pairs using actual request, result and billing contracts. Uncertain
 or meaningfully different variants need a documented exception; similar names or
@@ -205,7 +202,7 @@ audio/video, retrieval and optional asset capture.
 See the [provider caveats](CAVEATS.md) for media exclusions, deferred jobs, sampled payment extensions and help coverage.
 
 Apollo via Locus was reviewed but has no enabled provider definition. Its
-integration blocker and unsigned Tor results are documented in
+request-ID retry/recovery uncertainty is documented in
 [provider caveats](CAVEATS.md). A public x402 quote
 is not sufficient evidence that a useful paid call is supported.
 

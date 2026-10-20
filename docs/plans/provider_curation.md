@@ -62,8 +62,13 @@ public demos, SocialFetch CLI, generic snapshot transformation and offline prese
 The new Locus comparison was independently corrected to full schema minus dialect
 plus required-body flag: source-only media examples remain intact outside the
 authored projection. Credit case data replaces an unnecessary nested conditional;
-fresh source-matched complexity has no advisory warnings. Exact-SHA review is
-pending before C6.1.
+fresh source-matched complexity has no advisory warnings. C5.3c
+(`e202f8593bc595aa10708510a382c464883324ad`) received independent exact-SHA
+approval, closing P5. C6.1 reconciles the provider index/caveats in place against
+all approved minimized source inputs, preserves concrete schema/payment/lifecycle
+guidance and removes stale editorial inventories and pending-feature prose.
+Documentation-only index/link/reference validation and exact-SHA review precede
+C6.2 shared-policy consolidation and final cleanup.
 Source-matched complexity against `05280d6` reports no advisory regressions; preset
 CogC/CycC fell 6/14 to 5/12 and scope 9/10 to 3/5 by removing responsibilities. Actual
 inventories for all eight local inputs originally showed no removed or renamed

@@ -9,17 +9,17 @@ documentation cannot be reached, retain the capture basis and explicit uncertain
 
 ## Compatibility and editorial selection
 
-The [provider policy](README.md#provider-policy) governs additions. Existing compact
-allowlists and tag selections are being normalized; the table distinguishes actual
-support boundaries from editorial defaults without claiming that pending selection
-features already run. Path `include` values also anchor names and must not be
-removed blindly. Price, a diagnostic label or a hosted asset link alone is not a
-compatibility blocker.
+The [provider policy](README.md#provider-policy) separates compatibility from
+advice. Definitions expose supported functionality; recommendations require
+explicit opt-in. Path `include` values can anchor names, so preserve them while
+adding a root fallback for editorial omissions. Restrictions below describe
+concrete support boundaries. Price, diagnostics, overlap and hosted asset links
+alone do not establish incompatibility.
 
 | Definition(s) | Boundary or integration contract |
 | --- | --- |
-| AgentFund, Brazilayer, Deepline, PDL | Gateway/path name anchors and request guidance; no identified editorial operation restriction. |
-| botsmith, Google Trends | Ordinary catalog; probes or structured price/offer metadata have separate contracts. |
+| AgentFund, Brazilayer, Deepline, PDL | Gateway/path name anchors and request guidance; no additional compatibility restriction identified. |
+| botsmith, Google Trends | No additional compatibility restriction identified; probes and structured price/offer metadata have separate contracts. |
 | AgOSINT | `/mpp` is the unsupported payment rail; `/x402` anchors names while public discovery remains visible. Root base URL repairs upstream `/v1`. |
 | Arkham | Three discovery routes demand SIWX; ordinary paid routes remain usable. |
 | Datakoot, IPIntel | Supported catalogs are open to new routes; request guidance and output interpretation remain provider-specific. |
@@ -42,12 +42,12 @@ compatibility blocker.
 | Vaaya | Exclude specific MPP-only, upload/async, persistent account, message/purchase and payment-forwarding contracts. Broad research subset is editorial; complete result chains matter. |
 | x402-list | Broader public GET catalog is compatible; ownership/reissue and submit conversion loss have explicit boundaries; assessment and suggestions remain available. Embedded directory is a separate intentional three-read consumer contract. |
 | AgentUtility | Preserve enrichment/alias provenance. One-shot browser, IPFS and QR return ordinary JSON, including encoded media. Persistent watch ownership and six full oneOf conversion losses require restrictions; optional formats do not justify whole-family suppression. |
-| Concordance | Preserve authored price/ref enrichment; free catalog discovery completes series lookup and was omitted only for compactness. |
-| Curl | Authored request/response relay contract; single-operation list is redundant. |
+| Concordance | Preserve authored price/ref enrichment; free catalog discovery completes series lookup. |
+| Curl | Authored request/response relay contract; the relay accepts unsigned upstream GET requests. |
 | Glassnode | Authored metadata-to-metric workflow; deeper bulk paths cannot be addressed by the current gateway template. |
 | Locus | Authored list/call gateway covers all 114 free REST duals; two public unified discovery manifests are separate compatible contracts. Batch/update job lifecycle remains unsupported. |
-| News Gurus | Bazaar projection preserves real templates; agent-status omission is editorial. |
-| Straits | Authored free/premium contracts, IMO templates and CSV/JSON outputs; preserve naming anchors. |
+| News Gurus | Bazaar projection preserves real templates and includes agent-status; advice is separate from compatibility. |
+| Straits | Authored free/premium contracts, historical feeds and JSON/CSV/RSS/HTML outputs; ordinary vessel collision naming. |
 | RelayShield phone companion | Authored vendor-omitted endpoint, with separate payment/version and unknown-result limitations. |
 
 ### Same-path method contracts
@@ -96,12 +96,10 @@ changing selection or permitting retries. See [qualification limits](../docs/tes
 
 ## Help and compatibility
 
-Lazy help is configured for 21 providers. New guides cover botsmith (free JSON
-catalog), Brazilayer, Kronos, Otto (full manifest), RegimeShift (gateway quickstart),
-SocialFetch and x402-list. AgentFund, PDL and Deepline have no verified standalone
-text guide at their obvious URLs; retain their existing embedded/authored guidance.
-All help remains lazy and process-cached. Positive listener tag filters remove
-untagged help; explicitly include help in tool-name selections where desired.
+Configured help is fetched on demand and cached per process. Positive listener
+tag filters remove untagged help; source/CLI tag selection retains configured
+help. Include help explicitly in tool-name selections where desired. Definitions
+without a verified standalone guide retain their embedded/authored guidance.
 
 Media and async constraints are described below and in the artifact/polling plans. Top-level extension stripping is
 not universal managed compatibility. Agent402's `outputSchema` is accepted as
@@ -150,7 +148,7 @@ scripts/zcash.sh run --example snapshot_spec -- \
 
 ## deepline.toml — Deepline GTM (stable-deepline.dev)
 
-GTM contact lookup: 11 POST tools mirroring the vendor's OpenAPI spec —
+GTM contact lookup: POST tools mirroring the vendor's OpenAPI spec —
 prices via `x-payment-info`, requireds, the ads `platform`/`media_type`
 enums, waterfall-provider detail in summaries. Tool schemas are closed via
 `additional_properties = false`. Waterfall endpoints are slow — run with
@@ -162,7 +160,7 @@ x402_treazury serve --provider providers/deepline.toml --timeout 120
 
 ## pdl.toml — People Data Labs (stablepeopledata.dev)
 
-Person/company enrich + search (4 POST tools). The spec carries prices
+Person/company enrich and search. The spec carries prices
 (dynamic `min`/`max` for the size-scaled search endpoints) and full param
 docs; `overrides` restores the two semantic notes the spec lacks — "free on
 no match" on the enrich tools and "free when the result set is empty /
@@ -211,7 +209,7 @@ spec; `help_url` serves the vendor `llms.txt` via `google_trends_help()`.
 ## arkham.toml — Arkham Intel x402 rail (api.arkm.com/x402)
 
 Blockchain-intelligence API (address/entity intelligence, balances, flows,
-HyperCore): 89 paid POST endpoints exposed (parameters go in the JSON body).
+HyperCore): paid POST requests put parameters in the JSON body.
 Every paid operation carries an `x-payment-info` block, which `pricing_key`
 surfaces into tool descriptions — prices mirror the classic credit weights at
 **$0.20 per credit**, so no probing happens (these are POST routes anyway,
@@ -254,7 +252,7 @@ x402_treazury serve --provider providers/regimeshift.toml --timeout 320
 
 ## kronos.toml — Kronos Crypto Data (kronossignals.com)
 
-Crypto market data for trading agents: 36 GET tools under `/api/v1` — per-asset
+Crypto market data under `/api/v1` includes per-asset
 signals/price/ohlc/volatility/liquidation maps (`{asset}` paths, 16 spot
 assets + HYPE derivatives-only), market-wide overview/scan/funding extremes,
 BTC/ETH options (GEX, IV surface, implied probabilities), ML forecasts
@@ -275,7 +273,7 @@ it is not a current health check.
 
 ## concordance.toml — Concordance (concordancehq.duckdns.org)
 
-Cross-source research aggregator: 18 refreshed-on-schedule free and keyed
+Cross-source research aggregator combining refreshed-on-schedule free and keyed
 sources (SEC EDGAR, FRED, World Bank, UN Comtrade, GDELT news, CourtListener,
 govinfo, arXiv/CORE, Hacker News, Stack Exchange, Wikipedia, weather,
 DefiLlama, finnhub/twelvedata/polygon quotes) surfaced as six paid POST tools
@@ -301,7 +299,7 @@ funded completion claims.
 
 ## agentfund.toml — AgentFund US Economic, SEC & On-Chain Data (x402.agentfund.net)
 
-The cleanest spec in this directory: 21 POST tools under `/x402` — US macro
+POST tools under `/x402` cover US macro
 (Treasury curve with computed 2s10s/3m10y spreads, BLS CPI, jobs, PCE, GDP,
 retail sales, housing starts, EIA energy, release calendar), SEC EDGAR
 (insider Form 4, XBRL financials, 13F holdings, filings feed, full-text
@@ -329,7 +327,7 @@ original payment tx hash; vendor-capped at $0.01). Every op carries a
 correct-shape `x-payment-info` (fixed and dynamic min/max entries), so
 prices render from the **live vendor spec** with zero probes and no pricing
 overrides; where the vendor prose already states its own price the rendered
-line dedupes away (31 tools at time of writing) — every tool still shows a
+line dedupes away — every tool still shows a
 price exactly once. Absolute `servers` URL, inline POST bodies. Lazy help reads
 `https://x402.ottoai.services/llms-full.txt`, the consolidated guide rather than its
 link index. It includes excluded execution routes and SIWX re-access that Treazury
@@ -340,11 +338,11 @@ does not implement; the help description makes those boundaries explicit. Caveat
   `/deposit`, `/withdraw` — plus the `/full-auto` spending router by path.
   Either would let an agent move or commit the server wallet's funds;
   re-add them only deliberately. Category subsets can be mounted per server
-  with `--tags` (eight tags, `catalog tags` inventories them).
+  with `--tags`; `catalog tags` inventories them.
 - `/video-gen` is dynamically priced **$0.46–$4.60/call**; the default
   `X402_MAX_PRICE_USD=1.00` cap rejects the expensive end pre-sign.
-- 68 of 88 services also quote Solana; the live 402 `accepts[]` is
-  authoritative and Base-USDC exists on every route. Permit2/`upto` accepts
+- Some services also quote Solana; the live challenge `accepts[]` is
+  authoritative for available payment rails. Permit2/`upto` accepts
   need the one-time USDC allowance documented in the repo README.
 
 ## brazilayer.toml — Brazilayer registry & market data (api.brazilayer.com)
@@ -352,7 +350,7 @@ does not implement; the help description makes those boundaries explicit. Caveat
 Official Brazilian registry and market feeds: Receita Federal CNPJ registry
 (registration, partners, sanctions/integrity screening, Central Bank and CVM
 checks), PNCP public tenders, EUDR deforestation profiles, and
-commodity/macro/news datasets — **53 GET tools**; response keys use Portuguese
+commodity/macro/news datasets; response keys use Portuguese
 legal terms (`razao_social`, `situacao_cadastral`, …). Every paid route states
 its price in prose ($0.001–$0.10); the ten routes sharing one
 `components/parameters` `$ref` for `{cnpj}` get that path argument through the
@@ -399,8 +397,8 @@ closed via `additional_properties = false`. Caveats:
 
 ## locus.toml — Locus US property & public-records context (api.locus.report)
 
-The curated `providers/locus/openapi.json` exposes **108 paid POST tools**, a
-two-tool free gateway, two public discovery manifests and a help tool. Prices are
+The authored `providers/locus/openapi.json` exposes paid POST resources, a
+free list/call gateway, public discovery manifests and lazy help. Prices are
 embedded from the spec's `x-payment-info.price` blocks ($0.01–$2.49 per call),
 so boots make zero probe requests (`probe_pricing` is false), plus a **two-tool
 free gateway** mirroring the vendor's own remote-MCP shape: `locus_list`
@@ -430,8 +428,8 @@ cannot expose — is rewritten into that flat form). Design notes:
   review. See the deferred polling plan. Response headers (X-Locus-Report-*) are
   not surfaced over MCP.
 - Satellite `includeImagery=true` returns optional base64 fields without a configured
-  image mapping. Use the metadata default until optional extraction is implemented;
-  flyer/image URLs remain JSON metadata, with no automatic capture.
+  image mapping. Encoded fields remain ordinary JSON; no automatic extraction
+  or hosted-image fetch is implied.
 - Slow: place-report can take tens of seconds, environmental-context 60–90s.
 
 ```bash
@@ -479,8 +477,8 @@ and free hints, while live challenges remain authoritative. Authored overrides
 and local-reference request conversion remain unchanged.
 
 Public demos, previews, feed pages, refinery data, lease-auction/portfolio reads
-and audit-target listings are included. Their former omission was editorial;
-no subscription-management or wallet-owned contract appears in those captured
+and audit-target listings are included. No subscription-management or wallet-owned
+contract appears in those captured
 requests. Recommendations suggest macro/rates, news and token research plus help,
 without hiding other supported tools. The guide remains lazy. Current public
 schema/help retrieval was unavailable during this audit; saved request contracts
@@ -638,7 +636,7 @@ Excluded operations:
 | --- | --- |
 | Hunter email-verifier POST and jobs GET | May return a job even when most calls complete immediately; free polls require same-wallet SIWX authentication |
 | Cloudflare crawl POST and jobs GET | Returns a signed JWT token; free polling also requires same-wallet SIWX |
-| Aerial View render-video and lookup-video | Asynchronous render/paid-poll pair; excluded together pending lifecycle and cumulative-cost support |
+| Aerial View render-video and lookup-video | Asynchronous render/paid-poll pair; excluded because same-payer/auth/job ownership and paid retrieval require a separate lifecycle contract |
 
 The spec lists 200/402 even for operations whose guide documents 202. Hunter's
 `jobs/{jobId}` route also omits its path-parameter declaration. These defects affect
@@ -794,7 +792,7 @@ schemas never replace the fuller OpenAPI contracts. The Rust
 consistency; it has no recommendation or research-tag responsibility.
 
 The full supported catalog, including compatible aliases, is available by default.
-The former fifteen research tools plus help are advisory `recommended_tools`;
+Research tools and help are advisory `recommended_tools`;
 operators can explicitly opt in or select source cluster tags such as `web-probe`,
 `wordmint` or `edge-finance`. Listener filters can only narrow loaded sources.
 Aliases are distinct original HTTP paths and retain their own request, price and
@@ -924,16 +922,15 @@ are not independently qualified. Startup pricing discovery is disabled because
 prices are embedded. Help includes broader routes and manual retry suggestions;
 Treazury retains its own payment uncertainty/no-replay rules.
 
-Both selected unsigned challenges used Base USDC v2 exact with `bazaar` metadata.
-Catalog/help/challenges passed through the actual strict HTTP/2 + TLS 1.3 Tor
-network factory. No payment or settlement was tested, and no reliability tag is
-justified by this small successful sample.
+Schema inspection and unsigned challenge observations do not qualify payment,
+settlement or current network availability. See the maintained
+[qualification boundary](../docs/testing.md#qualification-status).
 
 ## Reviewed but unavailable: Apollo
 
-Apollo has no active TOML definition; request-ID retry/recovery handling needs
-verification before integration. Catalog/quote availability
-through Tor does not resolve this application-level limitation.
+Apollo has no active provider definition. Request-ID retry/recovery semantics
+require independent verification before integration; catalog/quote availability
+does not resolve that uncertainty.
 
 ## Payment extension and offer boundaries
 
@@ -1059,14 +1056,14 @@ Observed documentation oddities and interpretation boundaries:
 
 Uses `newsgurus/openapi.json`, a local OpenAPI projection of the vendor's
 `https://api.newsgurus.ai/x402/catalog`, with lazy vendor `llms.txt` help. It
-preserves all 49 catalog GET request contracts, descriptions, published prices
-and response examples. The provider selects 48 task-facing reads plus help;
-`/x402/agents/status` is omitted as a diagnostic. Prices use `x-payment-info`
+preserves the captured catalog GET request contracts, descriptions, published
+prices and response examples, including `/x402/agents/status`. Recommendations
+remain separate from compatibility selection. Prices use `x-payment-info`
 without startup probes. The vendor advertises x402 v2, USDC on Base; the payment
 challenge remains authoritative. No API key is required by this integration.
 
 The vendor's `/openapi.json` is already x402-focused, rather than a separate
-key-only inventory, but has only 39 paths: it substitutes sample `NVDA`, token
+key-only inventory, but substitutes sample `NVDA`, token
 and condition IDs for path templates, omits the eight fantasy and three
 `/api/v1` paid routes, and includes the catalog diagnostic. The x402 catalog is
 therefore the request source of truth. Its three `/api/v1` resources are
@@ -1085,15 +1082,8 @@ alternatives are advertised outside the selected paid catalog. Paid prices span
 $0.002–$5, with several sports/fantasy calls above the default $1 payment cap.
 No cap is raised for those tools. This is primarily derived trading intelligence,
 not a general news wire; keep confidence estimates, source dates and vendor
-opinions separate from primary evidence. The scoops example marks Business Wire
-coverage as `stub`; examples do not establish current freshness or completeness.
-
-Company candidates are `newsgurus_institutions_symbol` ($0.10: congressional
-trades and institutional 13F changes), `newsgurus_primary_scoops` ($0.02: primary
-filing/release snippets, but no company/ticker filter), and optionally
-`newsgurus_spaces_intel` ($0.02: ticker-filtered X Spaces summaries and quotes,
-with separately labeled `our_opinion`). Existing Otto/x402stock sources overlap
-filings/news; the $0.50 tearsheet is mainly a trading-signal bundle.
+opinions separate from primary evidence. `primary_scoops` has no company/ticker
+filter. The scoops example marks Business Wire coverage as `stub`; examples do not establish current freshness or completeness.
 
 ## vaaya.toml — Vaaya
 
@@ -1121,7 +1111,6 @@ Input guidance and data caveats:
 - Many schemas permit extra JSON fields; do not globally close the provider.
   TheirStack jobs requires a date or company condition in prose, and
   technographics requires an identifier despite omitted schema required lists.
-  TheirStack companies is $0.60, above the privacy example company's $0.50 cap.
 - Fundable company/company-search say supply one identifier but have no formal
   `required`/`oneOf`. Preserve that schema and follow the tool guidance. The vendor
   documents a sampled company mismatch (1/10) and lagging total funding values;
@@ -1134,27 +1123,14 @@ Input guidance and data caveats:
   fetch them. Preserve the vendor's `ok`/`data`/`charged_cents` response envelope
   and degraded/partial signals; uncertain paid submissions are not replayed.
 
-Strong company candidates are `vaaya_akta_headcount_trends` ($0.18),
-`vaaya_akta_product_reviews` ($0.11), `vaaya_courtlistener_cases` and
-`vaaya_courtlistener_dockets` ($0.01 each), and `vaaya_fundable_company_search` /
-`vaaya_fundable_company` ($0.01 / $0.10). Raw EDGAR and USPTO records add evidence
-beyond existing company summaries; Signalbase funding/acquisitions ($0.25 each)
-add event feeds. OneSearch ($0.05) is convenient but overlaps existing Exa search.
+The privacy example chooses a company-research view through listener selectors
+and its existing wallet/payment cap; provider compatibility is independent of that
+selection. Coverage depends on indexed profiles, products and public records.
+CourtListener's `q` remains required even with `party_name`; EDGAR XBRL concepts
+principally serve public-company financial reporting.
 
-The example company listener in `examples/deployments/privacy.toml` selects 26
-Vaaya tools: Fundable company search/profile; CourtListener opinions/dockets;
-Akta headcount/product reviews; TheirStack technographics/keyword lookup;
-Signalbase funding/acquisitions; all six EDGAR reads; USPTO assignees/patents;
-Wayback snapshots/availability/fetch; Tako search/answer/contents; and RecallRadar
-search/get. They share its existing company wallet and payment cap. These
-sources are not restricted to listed companies: coverage depends on indexed
-profiles, products or public records. CourtListener's `q` remains required even
-when supplying `party_name`; EDGAR XBRL concepts principally serve public-company
-financial reporting.
-
-Tako research and RecallRadar have no known synchronous JSON/x402 compatibility
-blocker; their original omission was a compact catalog choice. The provider
-includes the complete search/result research chains. Tako JSON chart creation remains available alongside research reads. RecallRadar search advertises `q` in prose
+Tako research and RecallRadar expose synchronous JSON/x402 search/result research
+chains. Tako JSON chart creation remains available alongside research reads. RecallRadar search advertises `q` in prose
 ("Query params") but publishes an open JSON request body with no declared
 properties. Pass `q` in the POST JSON body; the provider deliberately preserves
 the upstream schema rather than closing it. Its get route requires a returned
@@ -1183,7 +1159,7 @@ there is no full offline provider capture or new settlement qualification.
 
 The [x402 OpenAPI](https://x402.datakoot.com/openapi.json) supplies public-data
 and Koot synthesis requests. `/api` is a naming anchor with a root fallback;
-the former exact inventory no longer freezes newly supported operations. Help
+new supported operations remain visible. Help
 uses the [apex guide](https://datakoot.com/llms.txt), rather than the x402 host's
 historically missing guide. Preserve alternate CVE/dependency input guidance,
 US-only location coverage and operation-level estimates that differ from the
