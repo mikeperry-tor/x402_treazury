@@ -127,7 +127,12 @@ status in `_meta["x402_treazury/catalog"]`, alongside tools from that snapshot.
 Endpoint `instructions_text` replaces authored source guidance before generated
 availability/conflict notices are appended, including during deferred rebuilds.
 Search-tool instruction fields decorate only exposed wrappers, consistently with
-inspection inventory; they do not change tool access or payment authority. See
+inspection inventory; they do not change tool access or payment authority.
+Source-management tool-search descriptions derive their registered-source summary
+from visible dynamic tool names in the captured listener snapshot, without another
+registry read or cache. These names follow the validated `dyn_<name>__<slug>`
+contract; splitting the final delimiter preserves trailing source underscores.
+Client-cached descriptions are not live inventories. See
 [endpoint instruction placement](agent-sources.md#endpoint-instruction-placement).
 Clients must inspect this metadata; it does not imply a UI notification. Unsigned
 dependency waits add no timer or

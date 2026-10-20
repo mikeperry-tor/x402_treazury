@@ -2569,6 +2569,10 @@ async fn source_names_are_verbatim_unique_and_race_safe() {
                 .starts_with(&format!("dyn_{name}__"))
         }));
     }
+    assert_eq!(
+        tools::registered_source_names(&m.catalog.read().views["writer"]),
+        ["-", "Acme-IP", "Acme_IP", "_", "acme_", "acme_ip"]
+    );
     assert!(
         register_spec(&m, "writer", "acme__ip", "invalid.json", spec())
             .await
@@ -2630,6 +2634,10 @@ async fn restore_unsupported_names_disables_only_the_affected_source() {
     );
     assert_eq!(m.catalog.read().views["writer"].len(), 2);
     assert_eq!(m.catalog.read().views["reader"].len(), 2);
+    assert_eq!(
+        tools::registered_source_names(&m.catalog.read().views["writer"]),
+        ["healthy"]
+    );
 }
 
 #[tokio::test]
@@ -2680,4 +2688,194 @@ async fn source_name_search_preserves_request_boundary_and_cursor_scope() {
         )
         .unwrap();
     assert_ne!(first["items"][0]["tool_id"], second["items"][0]["tool_id"]);
+}
+
+#[tokio::test]
+async fn discovery_help_lists_endpoint_snapshot_sources_across_publication_and_restart() {
+    use rmcp::ServerHandler;
+    for on_demand in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("registry.sqlite");
+        let config = operator_config(dir.path(), &file);
+        let p = policy(Some(file));
+        let mut configured = listeners(true);
+        configured.get_mut("writer").unwrap().discover_on_demand = on_demand;
+        configured.get_mut("writer").unwrap().exclude_tools = vec!["dyn_Filtered__*".into()];
+        let m = manager_with(p.clone(), configured.clone()).await;
+        let mut base = m.static_snapshot().await.unwrap();
+        let static_tools = crate::catalog::build_tools(
+            &crate::catalog::Config {
+                include_tools: vec!["static_read".into()],
+                ..Default::default()
+            },
+            &spec(),
+            "static",
+        )
+        .unwrap();
+        for owner in ["writer", "hidden"] {
+            base.views
+                .get_mut(owner)
+                .unwrap()
+                .extend(crate::catalog_state::bind(
+                    static_tools
+                        .iter()
+                        .map(|tool| (tool.clone(), payer(), "https://api.example.com".into()))
+                        .collect(),
+                ));
+        }
+        m.replace_static(base.generation, base).await.unwrap();
+        // A global Manager must not divert static on-demand listeners into its
+        // source-management permission checks.
+        let mut static_endpoint = server(&m, "hidden");
+        static_endpoint.discover_on_demand = true;
+        let found = static_endpoint
+            .invoke("x402_treazury_tools_search", &Default::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&found).unwrap()["items"][0]["tool_id"],
+            "static_read"
+        );
+        drop(static_endpoint);
+        let mut endpoint = server(&m, "writer");
+        endpoint.discover_on_demand = on_demand;
+        endpoint.discovery_search_tool_instructions_text =
+            Some("Writer capability guidance".into());
+        let empty = endpoint
+            .get_tool("x402_treazury_tools_search")
+            .unwrap()
+            .description
+            .unwrap();
+        assert!(empty.contains("description snapshot: none."));
+        assert!(empty.contains("clients may cache it"));
+        assert!(empty.contains("not updated dynamically"));
+        let first = register_spec(&m, "writer", "Zed_", "zed.json", spec())
+            .await
+            .unwrap();
+        let captured = m.catalog.read();
+        register_spec(&m, "writer", "Alpha-IP", "alpha.json", spec())
+            .await
+            .unwrap();
+        register_spec(&m, "reader", "Other", "other.json", spec())
+            .await
+            .unwrap();
+        register_spec(&m, "writer", "Filtered", "filtered.json", spec())
+            .await
+            .unwrap();
+        assert_eq!(
+            tools::registered_source_names(&captured.views["writer"]),
+            ["Zed_"]
+        );
+        assert_eq!(
+            tools::registered_source_names(&m.catalog.read().views["writer"]),
+            ["Alpha-IP", "Zed_"]
+        );
+        assert_eq!(
+            tools::registered_source_names(&m.catalog.read().views["reader"]),
+            ["Other"]
+        );
+        let description = endpoint
+            .get_tool("x402_treazury_tools_search")
+            .unwrap()
+            .description
+            .unwrap();
+        assert!(description.contains("description snapshot: Alpha-IP, Zed_."));
+        assert!(!description.contains("Other"));
+        assert!(!description.contains("Filtered"));
+        assert!(description.ends_with("Writer capability guidance"));
+        assert!(!empty.contains("Alpha-IP"));
+        let base = m.static_snapshot().await.unwrap();
+        m.replace_static(base.generation, base).await.unwrap();
+        assert_eq!(
+            endpoint
+                .get_tool("x402_treazury_tools_search")
+                .unwrap()
+                .description
+                .unwrap(),
+            description
+        );
+        let (url, http_task) =
+            listen(crate::server::http_app(endpoint.clone(), "fixture".into())).await;
+        let listed = rpc(&url, "fixture", "tools/list", json!({})).await;
+        let listed_search = listed["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "x402_treazury_tools_search")
+            .unwrap();
+        assert_eq!(listed_search["description"], description.as_ref());
+        let all = endpoint
+            .invoke("x402_treazury_tools_search", &Default::default())
+            .await
+            .unwrap();
+        let all: Value = serde_json::from_str(&all).unwrap();
+        let names: BTreeSet<_> = all["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["tool_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "static_read",
+                "dyn_Alpha-IP__read",
+                "dyn_Alpha-IP__write",
+                "dyn_Zed___read",
+                "dyn_Zed___write"
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert!(
+            !endpoint
+                .get_tool(directory::SEARCH)
+                .unwrap()
+                .description
+                .unwrap()
+                .contains("Registered sources with searchable tools")
+        );
+        let found = endpoint
+            .invoke(
+                "x402_treazury_tools_search",
+                &serde_json::from_value(json!({"source_name":"Alpha-IP"})).unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&found).unwrap()["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        http_task.abort();
+        let _ = http_task.await;
+        drop(endpoint);
+        drop(m);
+        let restored = manager_with(p.clone(), configured.clone()).await;
+        assert_eq!(
+            tools::registered_source_names(&restored.catalog.read().views["writer"]),
+            ["Alpha-IP", "Zed_"]
+        );
+        drop(restored);
+        maintain_cli(
+            &config,
+            "writer",
+            first["source_id"].as_str().unwrap(),
+            false,
+        )
+        .await
+        .unwrap();
+        let removed = manager_with(p, configured).await;
+        let description = server(&removed, "writer")
+            .get_tool("x402_treazury_tools_search")
+            .unwrap()
+            .description
+            .unwrap();
+        assert!(description.contains("description snapshot: Alpha-IP."));
+        assert!(!description.contains("Zed_"));
+        assert!(!description.contains("Filtered"));
+        assert!(!description.contains("Other"));
+    }
 }

@@ -647,6 +647,7 @@ impl Deployment {
                     s.discover_on_demand,
                     s.discovery_search_tool_instructions_text.as_deref(),
                     s.sources_search_tool_instructions_text.as_deref(),
+                    &[],
                 ),
                 tools: self.selected[name]
                     .iter()

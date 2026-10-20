@@ -97,12 +97,20 @@ impl Server {
                     let mut args = args.clone();
                     args.entry("limit".to_owned())
                         .or_insert(serde_json::json!(5));
-                    let result = crate::discovery::search_catalog(
-                        &self.catalog,
-                        &self.catalog_server,
-                        name,
-                        serde_json::Value::Object(args),
-                    )?;
+                    let args = serde_json::Value::Object(args);
+                    let result = match self
+                        .discovery
+                        .as_ref()
+                        .filter(|m| m.enabled(&self.catalog_server))
+                    {
+                        Some(manager) => manager.invoke(&self.catalog_server, name, args).await?,
+                        None => crate::discovery::search_catalog(
+                            &self.catalog,
+                            &self.catalog_server,
+                            name,
+                            args,
+                        )?,
+                    };
                     return Ok(crate::output::ToolOutput::text(serde_json::to_string(
                         &result,
                     )?));
@@ -124,7 +132,9 @@ impl Server {
             && name.starts_with("x402_treazury_")
         {
             anyhow::ensure!(
-                self.management_tools().iter().any(|t| t.name == name),
+                self.management_tools(&self.catalog.read())
+                    .iter()
+                    .any(|t| t.name == name),
                 "unknown tool"
             );
             if matches!(
@@ -172,7 +182,7 @@ impl Server {
             .await?;
         Ok(self.limit(text))
     }
-    fn management_tools(&self) -> Vec<Tool> {
+    fn management_tools(&self, snapshot: &CatalogSnapshot) -> Vec<Tool> {
         crate::discovery::tools::listener_definitions(
             self.discovery
                 .as_ref()
@@ -180,6 +190,13 @@ impl Server {
             self.discover_on_demand,
             self.discovery_search_tool_instructions_text.as_deref(),
             self.sources_search_tool_instructions_text.as_deref(),
+            &crate::discovery::tools::registered_source_names(
+                snapshot
+                    .views
+                    .get(&self.catalog_server)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+            ),
         )
     }
 
@@ -221,10 +238,14 @@ impl ServerHandler for Server {
         info
     }
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        if let Some(tool) = self.management_tools().into_iter().find(|t| t.name == name) {
+        let snapshot = self.catalog.read();
+        if let Some(tool) = self
+            .management_tools(&snapshot)
+            .into_iter()
+            .find(|t| t.name == name)
+        {
             return Some(tool);
         }
-        let snapshot = self.catalog.read();
         catalog_state::find(&snapshot, &self.catalog_server, name)
             .ok()
             .map(|t| Self::definition(&t.tool))
@@ -235,7 +256,7 @@ impl ServerHandler for Server {
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
         let snapshot = self.catalog.read();
-        let mut tools = self.management_tools();
+        let mut tools = self.management_tools(&snapshot);
         if !self.discover_on_demand {
             tools.extend(
                 snapshot

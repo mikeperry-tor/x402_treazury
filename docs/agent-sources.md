@@ -64,6 +64,19 @@ Clients may cache tool descriptions. Restart/reconnect or refresh tools after
 configuration changes; description changes do not promise a live model-context
 update. Detailed source instructions are not automatically copied to search tools.
 
+With source management enabled, `tools_search` help also lists registered source
+names that have searchable tools on this endpoint in the description's catalog
+snapshot (`none` when there are no such sources). Names retain their original case,
+hyphens and underscores and are sorted and deduplicated. Disabled, removed and
+fully filtered registrations do not appear, nor do other listeners' registrations.
+The summary is generated on each tool lookup/list request from the same immutable
+snapshot as the tool list, including after registry restore or static publication.
+It adds no registry read, provider request or cache. Inspection inventory describes
+configured tools, without loading the runtime registry.
+The help warns that the list is not updated dynamically in the client's context
+and may be cached; search results reflect current availability. The external
+`sources_search` description does not receive this installed-source list.
+
 
 Enable `source_management = true` on an HTTP deployment endpoint to let its agents
 search the built-in x402 List directory, add public OpenAPI APIs, inspect tool signatures and
@@ -155,9 +168,11 @@ may supply a published specification link. Pass that URL directly to `source_add
 for server-side validation without opening the specification. Never invent URLs
 or derive request schemas from prose. If no published spec can be found, use
 `raw_get` or `raw_post` only with a documented endpoint, method and arguments.
-After registration, use `tools_search` with `source_name` set to the returned `name` and a targeted
-query to retrieve only relevant tool schemas, then invoke the chosen `tool_ref`
-through `tool_call`.
+After registration, optionally restrict `tools_search` with `source_name` set to
+the returned `name` and a targeted query. Omit both `source_name` and `source_id`
+to search all available API tools on the endpoint, including configured APIs and
+all added sources. Results are paginated; the filter is optional in both ordinary
+and on-demand listing modes. Invoke the chosen `tool_ref` through `tool_call`.
 
 Use `x402_treazury_source_url_info` to locate documents without manual URL guessing:
 
