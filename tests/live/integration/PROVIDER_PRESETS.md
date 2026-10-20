@@ -84,6 +84,10 @@ outer MCP success, body checks and canonical payment debit remain separate gates
 The offline preset test checks the exact paid request/argument/reservation mapping
 against the independent request fixture, validates all tools and arguments against committed
 catalogs and listener allowlists, and verifies $4.40 reservations with no new funding.
+Its selected remote sources have an explicit test-only captured-input map; the
+seven local sources use resolved production catalogs, including the preserved
+Kronos/RegimeShift snapshots. The test does not depend on the generated catalog
+case index, and adding unrelated provider definitions does not expand paid scope.
 It needs no keys, state or live endpoints. Local synthetic tests cover assertion
 evaluation; none of these checks claim a fresh funded or Tor-qualified sweep.
 

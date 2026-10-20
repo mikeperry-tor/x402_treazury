@@ -4,8 +4,8 @@ Use the [reusable integration runner](INTEGRATION.md) for prepared, supervised
 MCP provider tests. This unsigned preflight remains a separate raw-HTTP diagnostic;
 [testing](../../docs/testing.md) describes qualification boundaries.
 
-`preflight.json` is a reviewed diagnostic request manifest covering every bundled
-provider plus Exa Contents and the remaining three Google Trends routes. It is
+`preflight.json` is a reviewed diagnostic request manifest for its explicitly listed
+providers, including Exa Contents and all four Google Trends routes. It is
 not the funded MCP execution manifest. Requests are public read operations; POST
 bodies are API reads, not job creation or account mutation. No secrets belong here.
 
@@ -61,4 +61,5 @@ for the coverage map. Use [INTEGRATION.md](INTEGRATION.md) for funded execution,
 [provider presets](integration/PROVIDER_PRESETS.md) for the sweep, and
 [scenario presets](integration/SCENARIO_PRESETS.md) for concurrency/rotation.
 [Coverage selection](coverage.json) and [exclusions](coverage_exclusions.json)
-account for every bundled provider; they are inputs, not current availability reports.
+record the reviewed scope and reasons. New bundled definitions need neither a paid
+case nor an exclusion row. These records are inputs, not current availability reports.

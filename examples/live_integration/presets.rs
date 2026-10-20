@@ -124,37 +124,41 @@ mod tests {
         let sources: BTreeSet<_> = manifest.cases.iter().map(|c| c.source.as_str()).collect();
         assert_eq!(sources.len(), 23);
 
-        let frozen: Value =
-            serde_json::from_str(include_str!("../../tests/fixtures/catalogs/cases.json")).unwrap();
-        let mut fixtures: BTreeMap<String, PathBuf> = frozen
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|v| {
-                v["spec"]
-                    .as_str()
-                    .map(|p| (v["name"].as_str().unwrap().replace('-', "_"), root.join(p)))
-            })
-            .collect();
-        for (source, file) in [
-            ("arkham", "arkham"),
-            ("botsmith", "botsmith"),
-            ("google_trends", "google-trends"),
-            ("x402stock", "x402stock"),
-        ] {
-            fixtures.insert(
-                source.into(),
-                root.join(format!("tests/live/fixtures/{file}.json")),
-            );
-        }
+        // Only remote sources selected by this reviewed preset need test inputs.
+        // Local production catalogs (including Kronos/RegimeShift) resolve directly.
+        let fixtures = BTreeMap::from([
+            ("agent402", "tests/fixtures/agent402_openapi.json"),
+            ("agentfund", "tests/fixtures/agentfund_openapi.json"),
+            ("arkham", "tests/live/fixtures/arkham.json"),
+            ("botsmith", "tests/live/fixtures/botsmith.json"),
+            ("brazilayer", "tests/fixtures/brazilayer_openapi.json"),
+            ("deepline", "tests/fixtures/deepline_openapi.json"),
+            ("exa", "tests/fixtures/exa_openapi.json"),
+            ("genuinegood", "tests/fixtures/genuinegood_openapi.json"),
+            ("google_trends", "tests/live/fixtures/google-trends.json"),
+            ("lonestar", "tests/fixtures/lonestar_unified_openapi.json"),
+            ("otto", "tests/fixtures/otto_openapi.json"),
+            ("pdl", "tests/fixtures/pdl_openapi.json"),
+            ("socialfetch", "tests/fixtures/socialfetch_openapi.json"),
+            ("stableenrich", "tests/fixtures/stableenrich_openapi.json"),
+            ("x402_list", "tests/fixtures/x402_list_openapi.json"),
+            ("x402stock", "tests/live/fixtures/x402stock.json"),
+        ]);
         let mut tools = BTreeMap::new();
         for source in sources {
             let settings: Config =
                 serde_json::from_value(config["sources"][source]["settings"].clone()).unwrap();
-            let path = fixtures
-                .get(source)
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from(&settings.spec));
+            let path = fixtures.get(source).map_or_else(
+                || {
+                    let path = PathBuf::from(&settings.spec);
+                    assert!(
+                        path.is_absolute(),
+                        "selected remote source {source} needs an explicit offline input"
+                    );
+                    path
+                },
+                |fixture| root.join(fixture),
+            );
             assert!(path.is_file(), "missing offline catalog for {source}");
             let document: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
             let generated =

@@ -392,6 +392,10 @@ wallet scope, single-use cases, finite authority and observation windows. The
 [provider preset](../tests/live/integration/PROVIDER_PRESETS.md) retains 23 providers,
 22 independently reviewed paid requests, one unsigned directory call and 40 help
 calls. Presets are inputs, not proof of live feasibility or permission to spend.
+Coverage records describe this selected scope; adding a bundled provider requires
+neither a paid case nor an exclusion record. Offline preset validation uses
+explicit captured inputs for its selected remote sources and resolved production
+local catalogs, independently of generated catalog snapshots.
 [Deferred acceptance](plans/deferred/live_integration_acceptance.md) specifies the
 remaining lifecycle and cover gates.
 
@@ -399,7 +403,7 @@ remaining lifecycle and cover gates.
 
 | Contract | Maintained tests |
 | --- | --- |
-| Every provider is selected or explicitly excluded | `tests/provider_catalogs.rs::live_provider_scope_accounts_for_every_bundled_definition` |
+| Recorded scope has valid, unique configs and matches the reviewed paid preset | `tests/provider_catalogs.rs::reviewed_provider_scope_matches_explicit_paid_preset` |
 | Qualification schema rejection order, recursion/node boundaries and shared alternative work limits | `examples/live_integration/schema.rs` tests through public `validate` |
 | Exact reviewed requests, caps, schemas and wallet arrangements | `examples/live_integration/presets.rs` and independent request fixtures |
 | Authenticated MCP single-attempt fixtures sign exactly once | `tests/server.rs::authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result`, `tests/payments.rs` |

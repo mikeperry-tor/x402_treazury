@@ -22,8 +22,10 @@ Retain inputs by responsibility:
 Production local catalogs under `providers/` and the Kronos/RegimeShift inputs in
 `examples/live-tor-providers.toml` are runtime inputs. Preserve them independently
 of test pruning. Check consumers in discovery, media, payment, startup, examples
-and qualification before deletion. `cases.json` still feeds the offline qualification preset test and the ignored
-startup benchmark; migrate both before removing it. Captured Apollo and Straits test inputs have no code consumer. Concordance source
+and qualification before deletion. The offline qualification preset uses an explicit
+selected-source input map in `examples/live_integration/presets.rs` and resolved
+local production catalogs. `cases.json` still feeds the ignored startup benchmark;
+migrate that consumer before removing it. Captured Apollo and Straits test inputs have no code consumer. Concordance source
 objects and Locus free-gateway/discovery contracts now have focused fidelity
 consumers. Their distinct production local catalogs remain necessary.
 

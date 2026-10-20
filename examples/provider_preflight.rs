@@ -154,37 +154,23 @@ async fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn manifest_covers_every_provider() {
+    #[tokio::test]
+    async fn selected_manifest_is_valid_offline() {
         let cases: Vec<Case> =
             serde_json::from_str(include_str!("../tests/live/preflight.json")).unwrap();
-        fn collect(path: &std::path::Path, paths: &mut std::collections::BTreeSet<PathBuf>) {
-            for entry in std::fs::read_dir(path).unwrap() {
-                let p = entry.unwrap().path();
-                if p.is_dir() {
-                    collect(&p, paths);
-                } else if p.extension().is_some_and(|e| e == "toml") {
-                    paths.insert(p);
-                }
-            }
+        assert!(!cases.is_empty());
+        let mut identities = std::collections::BTreeSet::new();
+        for case in &cases {
+            assert!(!case.provider.is_empty() && identities.insert(&case.provider));
+            assert!(
+                matches!(case.method.as_str(), "GET" | "POST")
+                    && case.url.starts_with("https://")
+                    && !case.url.contains('@'),
+                "invalid unsigned case: {}",
+                case.provider
+            );
+            config::load(&case.config).await.unwrap();
         }
-        let mut expected = std::collections::BTreeSet::new();
-        collect(std::path::Path::new("providers"), &mut expected);
-        assert_eq!(
-            cases
-                .iter()
-                .map(|c| c.config.clone())
-                .collect::<std::collections::BTreeSet<_>>(),
-            expected
-        );
-        assert_eq!(
-            cases
-                .iter()
-                .map(|c| &c.provider)
-                .collect::<std::collections::BTreeSet<_>>()
-                .len(),
-            cases.len()
-        );
     }
     #[test]
     fn price_threshold_is_exact_and_unknown_is_not_free() {

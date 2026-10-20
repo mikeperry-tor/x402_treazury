@@ -2,24 +2,9 @@
 use serde_json::Value;
 use std::path::Path;
 #[test]
-fn live_provider_scope_accounts_for_every_bundled_definition() {
+fn reviewed_provider_scope_matches_explicit_paid_preset() {
     use std::collections::BTreeSet;
-    fn definitions(root: &Path, dir: &Path, found: &mut BTreeSet<String>) {
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                definitions(root, &path, found);
-            } else if path
-                .extension()
-                .is_some_and(|extension| extension == "toml")
-            {
-                found.insert(path.strip_prefix(root).unwrap().to_str().unwrap().into());
-            }
-        }
-    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut bundled = BTreeSet::new();
-    definitions(root, &root.join("providers"), &mut bundled);
     let coverage: Vec<Value> = serde_json::from_str(include_str!("live/coverage.json")).unwrap();
     let exclusions: Vec<Value> =
         serde_json::from_str(include_str!("live/coverage_exclusions.json")).unwrap();
@@ -35,7 +20,12 @@ fn live_provider_scope_accounts_for_every_bundled_definition() {
     let mut paid = BTreeSet::new();
     for row in coverage.iter().chain(&exclusions) {
         assert!(!row["reason"].as_str().unwrap().trim().is_empty());
-        assert!(accounted.insert(row["config"].as_str().unwrap().to_owned()));
+        let config = row["config"].as_str().unwrap();
+        assert!(
+            root.join(config).is_file(),
+            "missing scoped config {config}"
+        );
+        assert!(accounted.insert(config));
         if let Some(case) = row["case"].as_str() {
             assert!(
                 cases.contains(case),
@@ -44,10 +34,6 @@ fn live_provider_scope_accounts_for_every_bundled_definition() {
             assert!(paid.insert(case));
         }
     }
-    assert_eq!(
-        bundled, accounted,
-        "new providers require explicit scope review"
-    );
     let selected: BTreeSet<_> = cases
         .into_iter()
         .filter(|id| id.starts_with("sweep_"))

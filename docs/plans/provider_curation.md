@@ -16,11 +16,21 @@ providers and their consumers. Offline validation passed: 19 focused provider te
 all 37 provider definitions. C3.2 (`8a23038` plus test-boundary fixup `f880b27`) received independent
 exact-SHA approval. C3.3 implements local projection/provider normalization;
 validation passed (23 provider regressions, two generator tests, eight config
-tests including all 37 definitions). Its exact-SHA review passed. A subsequent projection audit reopened affected G3:
+tests including all 37 definitions). C3.3 (`2fc5634`) received independent exact-SHA approval.
+C4.1 (`47c4d4c9276326afc65aec09ae28b9fbfbf7c0ef`) explicit privacy
+recommendation adoption received independent exact-SHA approval. A subsequent projection audit reopened affected G3:
 the Straits fixup restores fifteen documented free resources, retains retired feeds
 as historical data and migrates the sole paid-vessels collision name through existing
-naming semantics. Focused offline validation and exact-fixup review are required
-before resuming P5. Actual
+naming semantics. Focused offline validation passed; independent exact-SHA review
+approved fixup `74602900924645b981976ea8c6fece11998df24a` and affected G3
+reclosed. C5.1 replaces the offline preset's generated-case-index dependency
+with sixteen explicit remote inputs and seven resolved local inputs. Selected
+scope checks retain valid unique configs, nonempty reasons and the exact 22 paid
+cases, while removing universal provider accounting. Three focused tests passed:
+selected scope and both offline preset tests, preserving 63 requests, $4.40
+reservation and zero new funding. Exact-SHA review is pending before C5.2.
+Source-matched complexity against `05280d6` reports no advisory regressions; preset
+CogC/CycC fell 6/14 to 5/12 and scope 9/10 to 3/5 by removing responsibilities. Actual
 inventories for all eight local inputs originally showed no removed or renamed
 existing tools. The later Straits correction adds fifteen resources and changes only
 the paid vessel tool from `straits_vessels` to `straits_vessels_get`; no active
