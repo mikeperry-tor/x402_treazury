@@ -177,6 +177,44 @@ Unknown exact names fail catalog loading; unmatched wildcard patterns emit a
 warning, and an empty final toolset fails. Server filters further narrow each
 listener's inventory and cannot restore excluded source tools.
 
+Provider/source `recommended_tools` is advisory metadata using the same generated-name
+selector syntax. The full compatible catalog remains visible unless the source
+explicitly sets `use_recommended_tools = true` (default false):
+
+```toml
+[sources.research]
+extends = "../../providers/otto.toml"
+recommended_tools = ["otto_equity_intel", "otto_financial_statements", "otto_help"]
+use_recommended_tools = true
+```
+
+Recommendation, inclusion and exclusion selectors all validate against the same
+compatible inventory after names and help are generated. Opt-in intersects advice
+with the ordinary source filters; exclusions win, and listener filters narrow the
+result further. Selection never renames siblings or changes source/wallet identity.
+Include help deliberately. An opted-in missing, empty or entirely unmatched list
+fails; unmatched exact recommendations fail when opted in, while unmatched wildcards
+warn. Unused stale advice warns without hiding compatible tools. Malformed selector
+syntax or field types remain configuration errors even when advice is unused.
+
+Lists replace on inheritance, and `recommended_tools = []` clears advice. Names are
+not rewritten when a source changes its prefix: replace inherited advice with the
+new generated names or disable opt-in. A provider that recommends its entire
+compatible catalog can omit advice and leave opt-in disabled rather than enumerate
+today's inventory.
+
+`catalog tools` JSON marks every tool with `recommended: true` or `false`; these
+markers are operator metadata and never modify MCP schemas or descriptions.
+`catalog tools --all-tools` bypasses only recommendation opt-in, after typed
+configuration resolution, and conflicts with `--discover-pricing`. Ordinary path,
+operation, tag, source-name and listener filters remain effective. Clear those
+filters explicitly in a separate inspection configuration to inspect a broader
+compatible inventory; set `prefer_post = false` to inspect both method twins.
+This inspection never initiates extra pricing probes or changes serving selection.
+Offline `config show` reports effective advice, opt-in and field origins without
+catalogs or secrets; inventory-dependent errors (including empty opt-in) are
+reported when loading a catalog.
+
 Composition follows the ordinary replacement rule: omitted lists inherit,
 present lists replace, and `[]` clears. To select tools outside an inherited
 `include_operations` allowlist, explicitly clear or replace that allowlist too.

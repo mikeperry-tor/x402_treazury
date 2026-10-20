@@ -36,7 +36,15 @@ fixture utility is `examples/snapshot_spec.rs`. Tests pin generated contracts
 against `tests/fixtures/`. Operation validation and stable sorting precede path,
 method and tag selection; exact same-path GET/POST pairs then retain POST by default (`prefer_post` can
 disable this). Only surviving operations contribute to name collisions.
-Tool-name filters apply after collision resolution. Digest metadata copying and
+Tool-name filters apply after collision resolution. Recommendation metadata is
+advisory until provider/source `use_recommended_tools` opts in. Include, exclude
+and recommendation selectors validate against the same compatible named inventory
+including help, then a single intersection selects tools. Listeners narrow that
+result; pricing rebuilds use the same selection. Empty active advice fails without
+expansion, while unused stale advice only warns. Operator inventories add
+recommendation markers separately from `ToolSpec` and MCP publication. Explicit
+`catalog tools --all-tools` bypasses only advice after typed configuration resolution,
+retains ordinary filters, and cannot run pricing discovery. Digest metadata copying and
 OpenAPI operation conversion remain separate; conversion retains operation-level
 parameters and the existing reference-resolution rules. Input construction collects
 parameters before merging body properties; renamed body arguments retain their

@@ -750,6 +750,7 @@ discover_on_demand=true
             true,
             BTreeMap::from([("a".into(), relay.clone()), ("b".into(), relay)]),
             true,
+            false,
         )
         .await
         .unwrap();

@@ -176,7 +176,7 @@ fn unmatched_wildcards_warn_while_other_matches_remain_usable() {
         "api_person"
     );
     let evidence = std::fs::read_to_string(log.path()).unwrap();
-    assert!(evidence.contains("Provider tool pattern matches nothing"));
+    assert!(evidence.contains("Provider tool selector matches nothing"));
     assert!(evidence.contains("missing_*"));
     assert!(evidence.contains("absent_*"));
 }

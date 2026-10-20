@@ -130,6 +130,7 @@ type DownloadResult = std::result::Result<Download, SharedFailure>;
 #[derive(Default)]
 struct Downloads {
     defer: bool,
+    all_tools: bool,
     relay: crate::discovery_relay::Relays,
     entries: Mutex<BTreeMap<DownloadKey, Arc<OnceCell<DownloadResult>>>>,
     cache_directory: Option<std::path::PathBuf>,
@@ -247,6 +248,7 @@ pub(super) async fn load(
     warn: bool,
     relay: crate::discovery_relay::Relays,
     defer: bool,
+    all_tools: bool,
 ) -> Result<(
     BTreeMap<String, Source>,
     BTreeMap<String, String>,
@@ -259,6 +261,7 @@ pub(super) async fn load(
     tracing::info!(target: "x402_treazury::startup", total, concurrency = limit, defer_relay = defer, "Loading initial catalogs");
     let downloads = Downloads {
         defer,
+        all_tools,
         relay,
         gate: Some(Arc::new(tokio::sync::Semaphore::new(limit))),
         direct_warm_target: None,
@@ -399,6 +402,9 @@ impl Source {
             .await
             .with_context(|| format!("source {id}"))?
             .settings;
+        if downloads.all_tools {
+            cfg.use_recommended_tools = false;
+        }
         cfg.discovery_source = Some(id.to_owned());
         cfg.discovery_relay = downloads.relay.get(id).cloned();
         cfg.http_cache_directory = downloads.cache_directory.clone();
@@ -651,6 +657,7 @@ pub(super) async fn warm(
 ) -> Result<Vec<super::cache_warm::CacheWarmSource>> {
     let downloads = Downloads {
         defer: false,
+        all_tools: false,
         relay,
         gate: Some(Arc::new(tokio::sync::Semaphore::new(
             config.startup.catalog_concurrency,

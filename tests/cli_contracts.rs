@@ -902,3 +902,159 @@ async fn standalone_modes_preserve_inspection_and_unsigned_probe_order() {
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn recommendation_inspection_is_explicit_typed_and_never_widens_ordinary_filters() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    std::fs::write(
+        dir.join("api.json"),
+        json!({"paths":{"/read":{"get":{}},"/other":{"get":{}},"/hidden":{"get":{}}}}).to_string(),
+    )
+    .unwrap();
+    let provider = "spec='api.json'\nbase_url='https://offline.invalid'\nprefix='api'\nrecommended_tools=['api_read']\nuse_recommended_tools=true\nexclude_tools=['api_hidden']\n";
+    std::fs::write(dir.join("provider.toml"), provider).unwrap();
+    let selected = good(
+        run(
+            dir,
+            &["catalog", "tools", "--provider", "provider.toml"],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(selected.as_array().unwrap().len(), 1);
+    assert_eq!(selected[0]["name"], "api_read");
+    assert_eq!(selected[0]["recommended"], true);
+    let all = good(
+        run(
+            dir,
+            &[
+                "catalog",
+                "tools",
+                "--provider",
+                "provider.toml",
+                "--all-tools",
+            ],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(all.as_array().unwrap().len(), 2);
+    assert!(
+        all.as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "api_other" && t["recommended"] == false)
+    );
+    let conflict = bad(run(
+        dir,
+        &[
+            "catalog",
+            "tools",
+            "--provider",
+            "provider.toml",
+            "--all-tools",
+            "--discover-pricing",
+        ],
+        &[],
+    )
+    .await);
+    assert!(conflict.contains("cannot be used with"));
+    std::fs::write(dir.join("deployment.toml"), "version=1\n[sources.api]\nextends='provider.toml'\n[wallets.w]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.main]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='w'\nsources=['api']\nexclude_tools=['api_other']").unwrap();
+    let all = good(
+        run(
+            dir,
+            &[
+                "catalog",
+                "tools",
+                "--config",
+                "deployment.toml",
+                "--all-tools",
+            ],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(all[0]["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(all[0]["tools"][0]["name"], "api_read");
+    // Offline config inspection reports empty advice without trying the spec;
+    // catalog inspection diagnoses it, and all-tools can inspect the inventory.
+    std::fs::write(
+        dir.join("provider.toml"),
+        provider.replace("['api_read']", "[]"),
+    )
+    .unwrap();
+    let shown = good(run(dir, &["config", "show", "--provider", "provider.toml"], &[]).await);
+    assert_eq!(shown["settings"]["use_recommended_tools"], true);
+    assert_eq!(shown["settings"]["recommended_tools"], json!([]));
+    assert!(
+        bad(run(
+            dir,
+            &["catalog", "tools", "--provider", "provider.toml"],
+            &[]
+        )
+        .await)
+        .contains("no tools matched recommended_tools")
+    );
+    assert_eq!(
+        good(
+            run(
+                dir,
+                &[
+                    "catalog",
+                    "tools",
+                    "--provider",
+                    "provider.toml",
+                    "--all-tools"
+                ],
+                &[]
+            )
+            .await
+        )
+        .as_array()
+        .unwrap()
+        .len(),
+        2
+    );
+    // Bypass is applied only to typed configuration, never to raw TOML values.
+    std::fs::write(
+        dir.join("provider.toml"),
+        provider.replace(
+            "use_recommended_tools=true",
+            "use_recommended_tools='malformed'",
+        ),
+    )
+    .unwrap();
+    assert!(
+        bad(run(
+            dir,
+            &[
+                "catalog",
+                "tools",
+                "--provider",
+                "provider.toml",
+                "--all-tools"
+            ],
+            &[]
+        )
+        .await)
+        .contains("boolean")
+    );
+    std::fs::write(
+        dir.join("provider.toml"),
+        provider
+            .replace("api_read", "stale_name")
+            .replace("use_recommended_tools=true", "use_recommended_tools=false"),
+    )
+    .unwrap();
+    let unused = run(
+        dir,
+        &["catalog", "tools", "--provider", "provider.toml"],
+        &[],
+    )
+    .await;
+    assert!(
+        String::from_utf8_lossy(&unused.stderr).contains("Provider tool selector matches nothing")
+    );
+    assert_eq!(good(unused).as_array().unwrap().len(), 2);
+}

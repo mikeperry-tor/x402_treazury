@@ -111,6 +111,7 @@ async fn serving_preflight_rejects_credentials_and_providers_before_state_or_req
             &path,
             true,
             Some((&env, FundingRestriction::Ordinary)),
+            false,
         )
         .await
         {
@@ -286,6 +287,7 @@ async fn relay_setup_failure_after_initialization_releases_treasury_without_allo
         &path,
         true,
         Some((&env(), FundingRestriction::DenyNewFunding)),
+        false,
     )
     .await
     {

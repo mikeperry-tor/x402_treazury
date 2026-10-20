@@ -124,6 +124,7 @@ pub struct Inventory {
 #[derive(Serialize)]
 pub struct InventoryTool {
     pub source: String,
+    pub recommended: bool,
     #[serde(flatten)]
     pub tool: ToolSpec,
 }
@@ -419,12 +420,16 @@ impl Deployment {
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
-        Self::load_with_warnings(path, false, None).await
+        Self::load_with_warnings(path, false, None, false).await
+    }
+    /// Strict operator inspection; bypassing advice retains all ordinary filters.
+    pub async fn load_for_inspection(path: &Path, all_tools: bool) -> Result<Self> {
+        Self::load_with_warnings(path, false, None, all_tools).await
     }
     /// Warn for listener-bound sources before catalog I/O, including failed fetches.
     /// Keyless serving keeps provider warnings but cannot bootstrap or pay a relay.
     pub async fn load_for_unsigned_serving(path: &Path) -> Result<Self> {
-        Self::load_with_warnings(path, true, None).await
+        Self::load_with_warnings(path, true, None, false).await
     }
     pub async fn load_for_serving(path: &Path) -> Result<Self> {
         Self::load_for_serving_with_relay(path, &std::env::vars().collect(), Default::default())
@@ -435,7 +440,7 @@ impl Deployment {
         env: &BTreeMap<String, String>,
         restriction: crate::rotation::restriction::FundingRestriction,
     ) -> Result<Self> {
-        Self::load_with_warnings(path, true, Some((env, restriction))).await
+        Self::load_with_warnings(path, true, Some((env, restriction)), false).await
     }
     fn validate_listener_credentials(&self, env: &BTreeMap<String, String>) -> Result<()> {
         for server in self.config.servers.values().filter(|s| s.auth) {
@@ -524,6 +529,7 @@ impl Deployment {
             &BTreeMap<String, String>,
             crate::rotation::restriction::FundingRestriction,
         )>,
+        all_tools: bool,
     ) -> Result<Self> {
         let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
             .context("invalid meta-config")?;
@@ -579,8 +585,15 @@ impl Deployment {
                 .await?;
             let config = &deployment.config;
             let wallet_resolution = &deployment.wallet_resolution;
-            let (sources, unavailable_sources, pending_sources) =
-                startup::load(config, path, warn, relay, deployment.defer_discovery).await?;
+            let (sources, unavailable_sources, pending_sources) = startup::load(
+                config,
+                path,
+                warn,
+                relay,
+                deployment.defer_discovery,
+                all_tools,
+            )
+            .await?;
             let mut selected = BTreeMap::new();
             let mut conflicts = BTreeMap::new();
             for (name, server) in &config.servers {
@@ -627,6 +640,19 @@ impl Deployment {
         &self.wallet_resolution.summary
     }
     pub fn inventory(&self) -> Vec<Inventory> {
+        let recommendations: BTreeMap<_, _> = self
+            .sources
+            .iter()
+            .map(|(id, source)| {
+                (
+                    id.clone(),
+                    source
+                        .config
+                        .recommendation_matcher()
+                        .expect("loaded source recommendation selectors are validated"),
+                )
+            })
+            .collect();
         self.config
             .servers
             .iter()
@@ -653,6 +679,7 @@ impl Deployment {
                     .iter()
                     .map(|(source, tool)| InventoryTool {
                         source: source.clone(),
+                        recommended: recommendations[source](&tool.name),
                         tool: tool.clone(),
                     })
                     .collect(),

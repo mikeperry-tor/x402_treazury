@@ -27,6 +27,15 @@ qualification retain the complete inventory and validate full schemas. Restart t
 server and reconnect clients after changing the setting to refresh cached lists.
 
 
+Static provider/source `recommended_tools` metadata narrows catalogs only with
+explicit `use_recommended_tools = true`; listener filters still apply. Advice
+uses each source's actual generated names without prefix rewriting. Operator
+`catalog tools --all-tools` bypasses advice selection for inspection only and
+retains ordinary filters. Recommendation markers do not change MCP descriptions,
+source owners, payer bindings or invocation identity. Static advice is not inherited
+by agent-imported specifications, and raw calls retain their separate authority.
+See [catalog selection](configuration.md) for composition and stale-advice behavior.
+
 ## Tool search matching and results
 
 `x402_treazury_tools_search.query` performs lexical BM25 keyword retrieval over

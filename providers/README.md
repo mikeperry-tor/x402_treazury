@@ -108,8 +108,14 @@ mixed API; explain why path or tag exclusions cannot describe that boundary.
 
 Recommendations belong in explicit deployment selections, separate from reusable
 compatibility defaults. Default selection collapses same-path GET/POST twins to POST before naming.
-The provider-curation work is introducing advisory recommendations with explicit
-opt-in; recommendation metadata is not implemented yet. Until normalization,
+Provider/source `recommended_tools` carries advisory generated-name selectors;
+`use_recommended_tools = true` explicitly selects that advice and intersects ordinary
+filters. Omission leaves the compatible catalog visible. Include help deliberately,
+replace advice when overriding the source prefix, and omit advice when the entire
+catalog is the appropriate choice. `catalog tools --all-tools` inspects without
+advice selection while retaining ordinary filters. See the
+[selection semantics](../docs/configuration.md) for empty/stale advice and offline
+metadata inspection. Until provider normalization,
 existing provider selections below describe current behavior, including editorial
 subsets scheduled for normalization. See the
 [implementation plan](../docs/plans/provider_curation.md).

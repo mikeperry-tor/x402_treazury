@@ -183,6 +183,9 @@ pub struct Tools {
     /// Run unsigned startup pricing discovery; respects source probe opt-outs.
     #[arg(long)]
     discover_pricing: bool,
+    /// Inspect tools without applying recommendation opt-in; ordinary filters remain.
+    #[arg(long, conflicts_with = "discover_pricing")]
+    all_tools: bool,
 }
 
 #[derive(ClapArgs)]
@@ -308,6 +311,7 @@ impl From<Catalog> for Args {
             Catalog::Tools(tools) => Self {
                 list_tools: true,
                 discover_pricing: tools.discover_pricing,
+                all_tools: tools.all_tools,
                 ..tools.input.into()
             },
             Catalog::Tags(input) => Self {

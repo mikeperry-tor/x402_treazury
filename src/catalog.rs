@@ -135,6 +135,9 @@ pub struct Config {
     pub include_tools: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub exclude_tools: Vec<String>,
+    /// Advisory generated-name selectors; selection requires explicit opt-in.
+    pub recommended_tools: Vec<String>,
+    pub use_recommended_tools: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include_operations: Vec<String>,
     /// Internal escape hatch for integrations that need both same-path methods.
@@ -157,6 +160,16 @@ pub struct Config {
 }
 
 impl Config {
+    /// Compile advice once for an operator inventory; tool contracts stay unchanged.
+    pub fn recommendation_matcher(&self) -> Result<impl Fn(&str) -> bool> {
+        let patterns = self
+            .recommended_tools
+            .iter()
+            .map(|selector| crate::deployment::pattern(selector))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(move |name: &str| patterns.iter().any(|pattern| pattern.is_match(name)))
+    }
+
     pub fn transport(&self) -> crate::network::HttpPolicy {
         crate::network::HttpPolicy {
             allow_http1: self.allow_http1,
@@ -195,6 +208,8 @@ impl Default for Config {
             exclude: vec![],
             include_tools: vec![],
             exclude_tools: vec![],
+            recommended_tools: vec![],
+            use_recommended_tools: false,
             include_operations: vec![],
             prefer_post: true,
             tags: vec![],
@@ -213,6 +228,14 @@ impl Default for Config {
             max_description_chars: None,
         }
     }
+}
+
+/// Operator-only metadata; MCP publication continues to use ToolSpec directly.
+#[derive(Serialize)]
+pub struct ToolInspection<'a> {
+    #[serde(flatten)]
+    pub tool: &'a ToolSpec,
+    pub recommended: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1220,12 +1243,13 @@ pub fn build_tools_with_prices(
 }
 
 fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>) -> Result<()> {
-    let compile = |selectors: &[String]| -> Result<Vec<regex::Regex>> {
+    // Every selector sees the same compatible named inventory, including help.
+    let compile = |selectors: &[String], advisory: bool| -> Result<Vec<regex::Regex>> {
         selectors.iter().map(|selector| {
             let pattern = crate::deployment::pattern(selector)?;
             if !tools.iter().any(|tool| pattern.is_match(&tool.name)) {
-                if selector.contains(['*', '?']) {
-                    tracing::warn!(selector, "Provider tool pattern matches nothing");
+                if advisory || selector.contains(['*', '?']) {
+                    tracing::warn!(selector, advisory, "Provider tool selector matches nothing");
                 } else {
                     bail!("unknown provider tool selector {selector}; check path, operation and tag filters");
                 }
@@ -1233,11 +1257,21 @@ fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>) -> Result<()> {
             Ok(pattern)
         }).collect()
     };
-    let include = compile(&cfg.include_tools)?;
-    let exclude = compile(&cfg.exclude_tools)?;
+    let include = compile(&cfg.include_tools, false)?;
+    let exclude = compile(&cfg.exclude_tools, false)?;
+    let recommended = compile(&cfg.recommended_tools, !cfg.use_recommended_tools)?;
+    if cfg.use_recommended_tools {
+        ensure!(
+            tools
+                .iter()
+                .any(|tool| recommended.iter().any(|p| p.is_match(&tool.name))),
+            "no tools matched recommended_tools; supply recommendations or disable use_recommended_tools"
+        );
+    }
     tools.retain(|tool| {
         (include.is_empty() || include.iter().any(|p| p.is_match(&tool.name)))
             && !exclude.iter().any(|p| p.is_match(&tool.name))
+            && (!cfg.use_recommended_tools || recommended.iter().any(|p| p.is_match(&tool.name)))
     });
     ensure!(
         !tools.is_empty(),
@@ -1617,3 +1651,7 @@ mod conversion_tests;
 #[cfg(test)]
 #[path = "catalog/input_tests.rs"]
 mod input_tests;
+
+#[cfg(test)]
+#[path = "catalog/recommendation_tests.rs"]
+mod recommendation_tests;

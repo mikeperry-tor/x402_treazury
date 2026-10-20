@@ -54,6 +54,7 @@ struct Args {
     disable_host_check: bool,
     list_tools: bool,
     discover_pricing: bool,
+    all_tools: bool,
     list_tags: bool,
     route_tool: Option<String>,
     args: String,
@@ -189,6 +190,9 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
             .is_none_or(|t| t >= Duration::from_millis(1)),
         "HTTP read inactivity timeout must be at least 1ms"
     );
+    if args.all_tools {
+        cfg.use_recommended_tools = false;
+    }
     let root = catalog::load_json_discovery(&cfg).await?;
     if args.list_tags {
         println!(
@@ -257,7 +261,15 @@ async fn inspect_standalone(
                 prices = prices.len(), "Startup pricing source finished");
             *tools = catalog::build_tools_with_prices(cfg, root, prefix, &prices)?;
         }
-        println!("{}", serde_json::to_string_pretty(&tools)?);
+        let recommended = cfg.recommendation_matcher()?;
+        let inventory: Vec<_> = tools
+            .iter()
+            .map(|tool| catalog::ToolInspection {
+                tool,
+                recommended: recommended(&tool.name),
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&inventory)?);
         return Ok(true);
     }
     if let Some(name) = &args.route_tool {
@@ -376,6 +388,7 @@ fn validate_meta_arguments(
                     [
                         "meta_config",
                         "discover_pricing",
+                        "all_tools",
                         "env_file",
                         "qualification_no_new_funding",
                         "qualification_unsigned",
@@ -506,7 +519,7 @@ async fn load_deployment(
     path: &std::path::Path,
 ) -> Result<x402_treazury::deployment::Deployment> {
     if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
-        x402_treazury::deployment::Deployment::load(path).await
+        x402_treazury::deployment::Deployment::load_for_inspection(path, args.all_tools).await
     } else if args.qualification_unsigned {
         x402_treazury::deployment::Deployment::load_for_unsigned_serving(path).await
     } else {

@@ -3,7 +3,9 @@
 ## Intent and status
 
 Implementation in progress. Baseline established at `05280d66f903e38b45b521d4b973f5e58529db53`
-(the plan-only commit after the original baseline). P1 is complete and G1 independently closed. P2 implementation is underway. The operator wants
+(the plan-only commit after the original baseline). P1 is complete and G1 independently closed. C2.2 (`4dccbe6`) implements POST
+preference; C2.3 adds advisory recommendations, explicit selection and operator
+inspection. G2 must review both before P3. The operator wants
 provider defaults to expose supported functionality and newly arriving supported
 tools, rather than silently impose a maintainer's recommended subset. Separate
 recommendations from compatibility filtering, use recommendations explicitly in
@@ -57,7 +59,7 @@ full-snapshot requirement or default operation allowlist is needed.
 ## P1 design resolution and delivery ownership
 
 Implementation baseline is `05280d66f903e38b45b521d4b973f5e58529db53`.
-C1.1 is `cf39796`; C1.2 is `0da7d24`. Independent audits are complete;
+C1.1 is `cf39796`; C1.2 is `0da7d24`; C1.3 is `afe1cce`. Independent audits are complete;
 working evidence is under ignored `target/provider-curation/`. CAVEATS owns the
 enduring provider/method classifications and fixture maintenance owns consumer
 responsibilities. No fresh vendor availability or qualification is claimed.

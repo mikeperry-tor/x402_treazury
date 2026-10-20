@@ -449,3 +449,133 @@ async fn read_timeout_migration_preserves_composition_and_historical_settings() 
             .unwrap();
     assert_eq!(historical.read_timeout_seconds, Some(30.0));
 }
+
+#[tokio::test]
+async fn recommendation_composition_is_typed_offline_and_lists_replace() {
+    let dir = tempfile::tempdir().unwrap();
+    let provider = dir.path().join("provider.toml");
+    std::fs::write(&provider, "spec='https://offline.invalid/spec'\nprefix='api'\nrecommended_tools=['api_read']\nuse_recommended_tools=true\n").unwrap();
+    let source = dir.path().join("source.toml");
+    let resolve = |text: &str| toml::from_str(text).unwrap();
+    let inherited = config::resolve(resolve("extends='provider.toml'"), &source)
+        .await
+        .unwrap();
+    assert_eq!(inherited.settings.recommended_tools, ["api_read"]);
+    assert!(inherited.settings.use_recommended_tools);
+    assert!(inherited.origins["recommended_tools"].ends_with("provider.toml"));
+    let replaced = config::resolve(resolve("extends='provider.toml'\nrecommended_tools=['alias_other']\nprefix='alias'\nuse_recommended_tools=false"), &source).await.unwrap();
+    assert_eq!(replaced.settings.recommended_tools, ["alias_other"]);
+    assert!(!replaced.settings.use_recommended_tools);
+    assert!(replaced.origins["recommended_tools"].ends_with("source.toml"));
+    let cleared = config::resolve(
+        resolve("extends='provider.toml'\nrecommended_tools=[]"),
+        &source,
+    )
+    .await
+    .unwrap();
+    assert!(cleared.settings.recommended_tools.is_empty());
+    assert!(
+        cleared.settings.use_recommended_tools,
+        "offline inspection retains invalid empty opt-in for diagnosis"
+    );
+    for invalid in [
+        "recommended_tools=true",
+        "recommended_tools=[1]",
+        "use_recommended_tools='true'",
+        "recommended_tools=['']",
+    ] {
+        assert!(
+            config::resolve(
+                resolve(&format!("spec='https://offline.invalid/spec'\n{invalid}")),
+                &source
+            )
+            .await
+            .is_err(),
+            "{invalid}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn recommendations_preserve_source_alias_listener_filters_and_wallet_bindings() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("api.json"),
+        json!({"paths":{"/read":{"get":{}},"/other":{"get":{}},"/hidden":{"get":{}}}}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("provider.toml"), "spec='api.json'\nbase_url='https://api.example'\nprefix='api'\nrecommended_tools=['api_read']\nuse_recommended_tools=true\nexclude_tools=['api_hidden']").unwrap();
+    let path = dir.path().join("deployment.toml");
+    std::fs::write(
+        &path,
+        r#"
+version=1
+[sources.first]
+extends='provider.toml'
+[sources.second]
+extends='provider.toml'
+recommended_tools=['api_other']
+[wallets.one]
+mode='static'
+private_key_env='UNREAD_ONE'
+[wallets.two]
+mode='static'
+private_key_env='UNREAD_TWO'
+[servers.a]
+listen='127.0.0.1:0'
+bearer_token_env='UNREAD_TOKEN'
+wallet='one'
+sources=['first']
+include_tools=['api_read']
+[servers.b]
+listen='127.0.0.1:0'
+bearer_token_env='UNREAD_TOKEN'
+wallet='two'
+sources=['second']
+"#,
+    )
+    .unwrap();
+    let selected = Deployment::load(&path).await.unwrap();
+    let all = Deployment::load_for_inspection(&path, true).await.unwrap();
+    let selected = serde_json::to_value(selected.inventory()).unwrap();
+    let all = serde_json::to_value(all.inventory()).unwrap();
+    assert_eq!(selected[0]["tools"][0]["name"], "api_read");
+    assert_eq!(selected[1]["tools"][0]["name"], "api_other");
+    assert_eq!(selected[0]["tools"][0]["source"], "first");
+    assert_eq!(selected[1]["tools"][0]["source"], "second");
+    assert_eq!(selected[0]["wallet_bindings"], all[0]["wallet_bindings"]);
+    assert_eq!(selected[1]["wallet_bindings"], all[1]["wallet_bindings"]);
+    assert_eq!(
+        all[0]["tools"].as_array().unwrap().len(),
+        1,
+        "listener narrowing remains"
+    );
+    assert_eq!(
+        all[1]["tools"].as_array().unwrap().len(),
+        2,
+        "source exclusion remains"
+    );
+    assert!(
+        all[1]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "api_read" && t["recommended"] == false)
+    );
+    assert!(
+        selected
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["tools"].as_array().unwrap().len() == 1)
+    );
+    let shown = Deployment::show_config(&path).await.unwrap();
+    assert_eq!(
+        shown["sources"]["first"]["settings"]["use_recommended_tools"],
+        true
+    );
+    assert_eq!(
+        shown["sources"]["second"]["settings"]["recommended_tools"],
+        json!(["api_other"])
+    );
+}
