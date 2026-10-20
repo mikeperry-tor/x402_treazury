@@ -34,8 +34,15 @@ independent synthetic startup documents and two aliases, then removes 26 unused
 output goldens plus settings/index artifacts. Recursive validation of 37 provider
 definitions and the existing alias-sharing regression passed; the ignored
 benchmark compiled without measurement execution. Source-matched complexity has
-no advisory regressions (replay 19/15 to 18/14). Exact-SHA review is pending
-before C5.3a.
+no advisory regressions (replay 19/15 to 18/14). C5.2 (`92c16d5ab0ff9c0239f1215a76bc3d626732fcc5`) received independent
+exact-SHA approval. C5.3a scopes six request/method captures to twelve
+original path objects with complete metadata and local reference closure.
+GenuineGood's six paths and NetIntel's existing eight-path subset remain intact
+for their actual consumers. Independent object/reference review passed; complete
+generated ToolSpec equality passed for 28 default and 40 dual-method retained
+tools, preserving names, schemas and routing. Four focused request/method,
+NetIntel and authority-boundary tests passed, including the independent paid
+preset check. No Rust source changed. Exact-SHA review is pending before C5.3b.
 Source-matched complexity against `05280d6` reports no advisory regressions; preset
 CogC/CycC fell 6/14 to 5/12 and scope 9/10 to 3/5 by removing responsibilities. Actual
 inventories for all eight local inputs originally showed no removed or renamed

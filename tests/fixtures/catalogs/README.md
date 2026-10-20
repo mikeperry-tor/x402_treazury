@@ -38,6 +38,34 @@ Preserve full inputs only where a concrete comparison needs the entire inventory
 The following capture notes describe existing inputs and current assertions;
 selection/count claims are being normalized with their owning implementation.
 
+## Reviewed request and method contracts
+
+These inputs are scoped captures, not complete current vendor inventories. The
+retained path objects preserve original parameters, request schemas, constraints,
+required lists, descriptions, tags, payment metadata and response declarations
+where present, with their transitive local references. Top-level vendor metadata
+is retained; `x-treazury-fixture-scope` labels the reduced capture separately.
+
+| Input | Retained contract and consumer |
+| --- | --- |
+| AgentFund | `/x402/treasury_yield_curve`: independent reviewed preset body schema. |
+| Brazilayer | `/v1/cnpj/situacao/{cnpj}`: reviewed path argument and original parameter/response reference closure. |
+| Deepline | `/api/company/enrich`: reviewed enrichment request, full nested schema and guidance. |
+| PDL | `/api/pdl/company/enrich`: reviewed company enrichment schema and full field descriptions. |
+| LoneStar | `/rates/rates`: reviewed rate request; original provider metadata retained. |
+| GenuineGood | All five real GET/POST grant pairs plus bearer-pass exclusion: actual method/body serialization and canonical naming in `tests/catalog_selection.rs`. This small capture remains complete because all six paths have consumers. |
+| Otto | Four actual GET/POST pairs, `/crypto-news`, `/swap` and `/full-auto`: method/body serialization, reviewed preset and actual execution-authority exclusions. |
+| NetIntel | Existing eight-path subset: URL-secret and array POST pairs, compatible aliases, canonical image mapping. No further reduction preserves these distinct consumers. |
+
+The offline preset input map in `examples/live_integration/presets.rs` validates
+reviewed requests against these independently captured schemas; arguments never
+supply expected schemas. Refresh from the configured vendor OpenAPI URL, select
+complete original path objects and their reference closure, and review request
+and method/name consumers together. Preserve naming witnesses if removing a
+sibling would rename a selected tool. Fixture size never justifies trimming
+schema properties or vendor prose. None of these inputs grants paid execution
+or establishes current upstream health.
+
 The Exa request fixture was captured from `https://api.exa.ai/openapi.json` on
 2026-10-03 with the Rust `snapshot_spec` utility. It retains all 64 operations so
 the exact two-operation allowlist is tested against the real excluded inventory.

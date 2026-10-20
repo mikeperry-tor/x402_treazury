@@ -359,8 +359,9 @@ catalog builder's op-level `$ref` parameter deref. The sixteen free routes
 (`/v1/health`, CNPJ/CPF validators, twelve `*_amostra` dataset samples) carry
 free-semantics overrides; `overrides` also restores the price the vendor's
 long integridade description drops and completes two `nome` param descriptions
-the vendor spec truncates with malformed keys. Pinned against
-`tests/fixtures/brazilayer_openapi.json`.
+the vendor spec truncates with malformed keys. The selected reviewed request and
+its shared reference closure are retained in `tests/fixtures/brazilayer_openapi.json`;
+that scoped fixture is not the full catalog.
 
 ## genuinegood.toml — Genuine Good Grants (genuinegood.online)
 
