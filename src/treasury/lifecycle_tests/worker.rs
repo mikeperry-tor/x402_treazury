@@ -731,7 +731,9 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
     let accepted_quote: Quote = serde_json::from_slice(&saved_quote).unwrap();
     // Exceed max_attempts with actual SDK rejections, then run the coordinator's
     // next source pass as well: metadata must not turn these into recovery work.
-    for pass in 1..=4 {
+    // Follow the published source schedule, including jitter and elapsed SDK work.
+    let mut next_poll = original.next_poll;
+    for _ in 0..4 {
         let error = worker
             .backend
             .lock()
@@ -744,10 +746,10 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
             error.downcast_ref::<FundingCondition>(),
             Some(&FundingCondition::InsufficientFunds)
         );
-        worker.tick(epoch + pass * 60).await.unwrap();
+        worker.tick(next_poll).await.unwrap();
         let job = original.clone();
         let quote = saved_quote.clone();
-        store
+        next_poll = store
             .call(move |s| {
                 let current = s.funding_job(&job.id)?.unwrap();
                 assert_eq!(current.phase, FundingPhase::Quoted);
@@ -758,7 +760,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
                 assert!(
                     !s.status()?.outgoing_pending && s.status()?.treasury_operations.is_empty()
                 );
-                Ok(())
+                Ok(current.next_poll)
             })
             .await
             .unwrap();
@@ -792,15 +794,16 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
         error.downcast_ref::<FundingCondition>(),
         Some(&FundingCondition::CostLimit)
     );
-    worker.tick(epoch + 300).await.unwrap();
+    worker.tick(next_poll).await.unwrap();
     let job = original.clone();
-    store
+    next_poll = store
         .call(move |s| {
             let current = s.funding_job(&job.id)?.unwrap();
             assert_eq!(current.phase, FundingPhase::Quoted);
             assert_eq!(current.operation_id, job.operation_id);
             assert_eq!(s.funding_recovery_count(&job.id)?, 0);
-            s.require_unstarted_preparation(&job.operation_id)
+            s.require_unstarted_preparation(&job.operation_id)?;
+            Ok(current.next_poll)
         })
         .await
         .unwrap();
@@ -810,7 +813,7 @@ async fn unstarted_sdk_failures_keep_the_quote_and_recovery_allowance_until_fund
         "invalid fee proposals must not probe the destination"
     );
     worker.backend.lock().await.max_network_fee = 30_000;
-    worker.tick(epoch + 360).await.unwrap();
+    worker.tick(next_poll).await.unwrap();
     assert_eq!(f.base_calls.load(Ordering::SeqCst), 1);
     let job = original.clone();
     store
