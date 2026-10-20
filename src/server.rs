@@ -24,6 +24,8 @@ pub struct Server {
     pub catalog: Arc<CatalogState>,
     pub discovery: Option<Arc<crate::discovery::Manager>>,
     pub discover_on_demand: bool,
+    pub discovery_search_tool_instructions_text: Option<String>,
+    pub sources_search_tool_instructions_text: Option<String>,
     pub catalog_server: String,
     pub name: String,
     pub host_policy: host::HostPolicy,
@@ -57,6 +59,8 @@ impl Server {
             host_policy: Default::default(),
             discovery: None,
             discover_on_demand: false,
+            discovery_search_tool_instructions_text: None,
+            sources_search_tool_instructions_text: None,
             catalog: Arc::new(CatalogState::new(CatalogSnapshot {
                 instructions: Default::default(),
                 generation: 0,
@@ -174,6 +178,8 @@ impl Server {
                 .as_ref()
                 .is_some_and(|m| m.enabled(&self.catalog_server)),
             self.discover_on_demand,
+            self.discovery_search_tool_instructions_text.as_deref(),
+            self.sources_search_tool_instructions_text.as_deref(),
         )
     }
 

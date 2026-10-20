@@ -124,6 +124,11 @@ views through the same mutation boundary as dynamic registrations. Instructions
 report pending or unavailable sources. Each `tools/list` response also exposes
 listener-specific current instructions, catalog generation and publication-stop
 status in `_meta["x402_treazury/catalog"]`, alongside tools from that snapshot.
+Endpoint `instructions_text` replaces authored source guidance before generated
+availability/conflict notices are appended, including during deferred rebuilds.
+Search-tool instruction fields decorate only exposed wrappers, consistently with
+inspection inventory; they do not change tool access or payment authority. See
+[endpoint instruction placement](agent-sources.md#endpoint-instruction-placement).
 Clients must inspect this metadata; it does not imply a UI notification. Unsigned
 dependency waits add no timer or
 spending authority. Shutdown drains accepted relay work before financial owners.

@@ -1278,3 +1278,138 @@ async fn static_startup_ignores_unrelated_financial_reports_but_retains_identity
         assert_eq!(persisted, version);
     }
 }
+
+#[tokio::test]
+async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() {
+    let (base, state, vendor_task) = vendor("guidance", "/api").await;
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["alpha", "beta"] {
+        std::fs::write(
+            dir.path().join(format!("{name}.json")),
+            spec(&base).to_string(),
+        )
+        .unwrap();
+    }
+    let http = reqwest::Client::new();
+    for (on_demand, management) in [(false, false), (true, false), (false, true), (true, true)] {
+        for authored in [None, Some(""), Some("Endpoint guidance")] {
+            let mut text = configuration()
+                .replace("[sources.alpha]", "[sources.alpha]\nprobe_pricing=false\ninstructions_text='Alpha source guidance'")
+                .replace("[sources.beta]", "[sources.beta]\nprobe_pricing=false\ninstructions_text='Beta source guidance'")
+                .replace("[servers.research]", &format!(
+                    "[servers.research]\ndiscover_on_demand={on_demand}\nsource_management={management}\ndiscovery_search_tool_instructions_text='Research tool guidance'\nsources_search_tool_instructions_text='Research directory guidance'"))
+                .replace("[servers.beta_only]", "[servers.beta_only]\ndiscovery_search_tool_instructions_text='Other tool guidance'\nsources_search_tool_instructions_text='Other directory guidance'");
+            if let Some(authored) = authored {
+                text = text.replace(
+                    "[servers.research]",
+                    &format!("[servers.research]\ninstructions_text='{authored}'"),
+                );
+            }
+            if management {
+                text.push_str("\n[source_management]\nwallet='shared'\n");
+            }
+            let path = write_config(dir.path(), &text);
+            let deployment = Deployment::load(&path).await.unwrap();
+            let inventory = deployment.inventory();
+            let expected_tools = &inventory
+                .iter()
+                .find(|i| i.server == "research")
+                .unwrap()
+                .management_tools;
+            assert_eq!(
+                expected_tools.len(),
+                if management {
+                    8
+                } else if on_demand {
+                    2
+                } else {
+                    0
+                }
+            );
+            let running = deployment.bind(&env()).await.unwrap();
+            let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
+            let stop = CancellationToken::new();
+            let task = tokio::spawn(running.serve(stop.clone()));
+            let initialized = rpc(&http, addresses["research"], "research-secret", "initialize", json!({
+                "protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}
+            })).await;
+            let instructions = initialized["result"]["instructions"].as_str().unwrap();
+            assert_eq!(
+                instructions.contains("Alpha source guidance"),
+                authored.is_none()
+            );
+            assert_eq!(
+                instructions.contains("Beta source guidance"),
+                authored.is_none()
+            );
+            assert_eq!(
+                instructions.contains("Endpoint guidance"),
+                authored == Some("Endpoint guidance")
+            );
+            assert!(instructions.contains("Unknown does not mean free."));
+            assert!(!instructions.contains("Research tool guidance"));
+            assert!(!instructions.contains("Research directory guidance"));
+            let listed = rpc(
+                &http,
+                addresses["research"],
+                "research-secret",
+                "tools/list",
+                json!({}),
+            )
+            .await;
+            let metadata_instructions =
+                listed["result"]["_meta"]["x402_treazury/catalog"]["instructions"]
+                    .as_str()
+                    .unwrap_or_default();
+            assert_eq!(
+                metadata_instructions.contains("Alpha source guidance"),
+                authored.is_none()
+            );
+            assert_eq!(
+                metadata_instructions.contains("Endpoint guidance"),
+                authored == Some("Endpoint guidance")
+            );
+            for expected in expected_tools {
+                let actual = listed["result"]["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|t| t["name"] == expected.name.as_ref())
+                    .unwrap();
+                assert_eq!(*actual, serde_json::to_value(expected).unwrap());
+                let description = actual["description"].as_str().unwrap();
+                assert_eq!(
+                    description.matches("Research tool guidance").count(),
+                    usize::from(expected.name == "x402_treazury_tools_search")
+                );
+                assert_eq!(
+                    description.matches("Research directory guidance").count(),
+                    usize::from(expected.name == "x402_treazury_sources_search")
+                );
+            }
+            assert!(!listed.to_string().contains("Other tool guidance"));
+            let other = rpc(
+                &http,
+                addresses["beta_only"],
+                "beta-secret",
+                "tools/list",
+                json!({}),
+            )
+            .await;
+            assert!(!other.to_string().contains("Research tool guidance"));
+            assert!(!other.to_string().contains("Other tool guidance"));
+            assert!(
+                other["result"]["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|t| !t["name"].as_str().unwrap().starts_with("x402_treazury_"))
+            );
+            stop.cancel();
+            task.await.unwrap().unwrap();
+        }
+    }
+    assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
+    assert_eq!(state.signed.load(Ordering::SeqCst), 0);
+    vendor_task.abort();
+}

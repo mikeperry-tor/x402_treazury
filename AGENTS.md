@@ -151,7 +151,7 @@ links other maintained guides.
 | Wallet CLI, initialization, keys or state conversion | [Wallet administration](docs/wallet-cli.md), [configuration](docs/configuration.md) | `src/wallet_cli/`, `src/cli.rs` |
 | Network clients, HTTP/gRPC timeouts or Tor | [Network policy](docs/network-egress.md), [resource limits](docs/local-resource-limits.md) | `src/network.rs`, `tests/network_audit.rs`, `tests/TOR.md` |
 | Deployment startup, catalog publication or shutdown | [Runtime architecture](docs/architecture.md), [configuration](docs/configuration.md), [startup tests](tests/STARTUP.md) | `src/deployment/`, `src/server/`, `src/catalog_state.rs` |
-| Dynamic sources, directory tools or raw calls | [Agent source management](docs/agent-sources.md) | `src/discovery/`, `src/catalog_state.rs` |
+| Dynamic sources, directory tools, endpoint instructions or raw calls | [Agent source management](docs/agent-sources.md), [endpoint instruction placement](docs/agent-sources.md#endpoint-instruction-placement) | `src/discovery/`, `src/catalog_state.rs` |
 | Provider TOML, OpenAPI schemas, pricing, caching or relay | [Configuration](docs/configuration.md), [catalog architecture](docs/architecture.md#catalog-configuration-and-execution), [provider caveats](providers/CAVEATS.md) | `src/catalog.rs`, `src/config.rs`, `src/pricing/`, `src/http_cache.rs`, `src/discovery_relay.rs`; provider snapshots |
 | MCP images, binary output or truncation | [Output boundaries](docs/architecture.md#mcp-and-output-boundaries), [download/display limits](docs/configuration.md#download-and-display-limits) | `src/output.rs`, `src/server.rs`, `tests/media.rs` |
 | Optional cover traffic | [Cover policy](docs/cover-traffic.md) | `src/cover/` |

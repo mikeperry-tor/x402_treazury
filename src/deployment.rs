@@ -85,6 +85,9 @@ pub struct ListenerConfig {
     /// Advertise discovery wrappers instead of every API schema.
     #[serde(default)]
     pub discover_on_demand: bool,
+    pub instructions_text: Option<String>,
+    pub discovery_search_tool_instructions_text: Option<String>,
+    pub sources_search_tool_instructions_text: Option<String>,
     #[serde(default)]
     pub sources: Vec<String>,
     #[serde(default)]
@@ -642,6 +645,8 @@ impl Deployment {
                 management_tools: crate::discovery::tools::listener_definitions(
                     s.source_management,
                     s.discover_on_demand,
+                    s.discovery_search_tool_instructions_text.as_deref(),
+                    s.sources_search_tool_instructions_text.as_deref(),
                 ),
                 tools: self.selected[name]
                     .iter()
@@ -1111,7 +1116,7 @@ impl Deployment {
                 })
                 .collect();
             let used: BTreeSet<_> = selected.iter().map(|(id, _)| id).collect();
-            let mut instructions = used
+            let source_instructions = used
                 .into_iter()
                 .filter_map(|id| {
                     self.sources[id]
@@ -1121,6 +1126,7 @@ impl Deployment {
                 })
                 .collect::<Vec<_>>()
                 .join("\n\n");
+            let mut instructions = cfg.instructions_text.clone().unwrap_or(source_instructions);
             for id in &cfg.sources {
                 if self.unavailable_sources.contains_key(id) {
                     if self
@@ -1150,6 +1156,10 @@ impl Deployment {
             );
             server.name = name.clone();
             server.discover_on_demand = cfg.discover_on_demand;
+            server.discovery_search_tool_instructions_text =
+                cfg.discovery_search_tool_instructions_text.clone();
+            server.sources_search_tool_instructions_text =
+                cfg.sources_search_tool_instructions_text.clone();
             servers.insert(name.clone(), server);
         }
         servers

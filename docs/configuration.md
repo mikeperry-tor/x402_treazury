@@ -200,6 +200,15 @@ Search returns complete tool descriptions and schemas, five results at a time by
 default. Filters, payment routing, source permissions, and startup catalog loading
 are unchanged. See [on-demand discovery](agent-sources.md) for the call workflow.
 
+Endpoint `instructions_text` overrides composed source guidance (an empty string
+suppresses it), while generated pricing and operational notices remain.
+`discovery_search_tool_instructions_text` appends to the local tool-search description;
+`sources_search_tool_instructions_text` appends to external directory-search help.
+Neither setting enables discovery or source management. See
+[endpoint instruction placement](agent-sources.md#endpoint-instruction-placement)
+for defaults, client caching and guidance placement.
+
+
 To disable HTTP authentication for one listener, set `auth = false` and omit
 `bearer_token_env` in its `[servers.NAME]` table. Other listeners retain their own
 authentication policy. Standalone HTTP uses `--transport http --no-auth`; this

@@ -25,6 +25,46 @@ qualification retain the complete inventory and validate full schemas. Restart t
 server and reconnect clients after changing the setting to refresh cached lists.
 
 
+## Endpoint instruction placement
+
+Each `[servers.NAME]` can customize three instruction surfaces:
+
+| Setting | Placement and semantics |
+| --- | --- |
+| `instructions_text` | Replaces the composed source guidance in `initialize.result.instructions` and current catalog metadata. Omit to retain source composition; `""` suppresses inherited source guidance. Generated pricing, discovery and availability/conflict notices remain. |
+| `discovery_search_tool_instructions_text` | Appends to the standard description of `x402_treazury_tools_search`, exposed by either `discover_on_demand` or `source_management`. |
+| `sources_search_tool_instructions_text` | Appends to the standard description of `x402_treazury_sources_search`, exposed by `source_management`. |
+
+These are endpoint settings, not provider/source settings. They do not enable tools
+or grant permissions. Absent or empty search text leaves the standard description
+unchanged. Both search fields preserve the standard descriptions and input schemas;
+they do not alter search matching or routing. Inspection inventory and MCP tool
+lookup/listing use the same text. Configured search guidance is available even while
+remote catalogs are pending; it describes intended coverage, not current readiness.
+
+Put platform/capability summaries and useful search terms in the tool-search field
+when a client does not forward MCP server instructions to its model. Use the
+source-search field for guidance about finding new APIs in the external directory;
+`tools_search` searches APIs already available on the listener. To avoid repeating
+source guidance, override initialization with concise endpoint instructions.
+Keep essential operation requirements in the relevant tool descriptions or include
+them in the endpoint search guidance when suppressing inherited instructions.
+
+```toml
+[servers.research]
+# Existing listen, wallet, sources and authentication settings also apply.
+discover_on_demand = true
+instructions_text = "Research endpoint. Discover schemas before invoking tools."
+discovery_search_tool_instructions_text = "Search this listener for its configured social platforms; use Twitter for X."
+# When source_management=true, this customizes external directory search:
+sources_search_tool_instructions_text = "Prefer documented research APIs with published OpenAPI specifications."
+```
+
+Clients may cache tool descriptions. Restart/reconnect or refresh tools after
+configuration changes; description changes do not promise a live model-context
+update. Detailed source instructions are not automatically copied to search tools.
+
+
 Enable `source_management = true` on an HTTP deployment endpoint to let its agents
 search the built-in x402 List directory, add public OpenAPI APIs, inspect tool signatures and
 invoke them. It defaults to false. Standalone provider serving remains static.

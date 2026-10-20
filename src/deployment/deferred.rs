@@ -827,6 +827,7 @@ private_key_env='KEY'
 spec='spec.json'
 base_url='{base}'
 probe_pricing=false
+instructions_text='Inherited healthy guidance'
 [sources.late]
 spec='{base}/spec'
 base_url='{base}'
@@ -836,6 +837,9 @@ listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
 wallet='selected'
 sources=['healthy','late']
+discover_on_demand=true
+instructions_text=''
+discovery_search_tool_instructions_text='Pending platform guidance'
 "#
             ),
         )
@@ -853,6 +857,30 @@ sources=['healthy','late']
         .unwrap();
         assert_eq!(deployment.sources.len(), 1);
         assert_eq!(deployment.pending_sources.len(), 1);
+        let preview = deployment.build_servers(&BTreeMap::from([(
+            "selected".into(),
+            PaidClient::new(
+                Payer::new(&format!("{:064x}", 2), SpendPolicy::dollars("1").unwrap()).unwrap(),
+            ),
+        )]));
+        let server = preview["one"].clone();
+        use rmcp::ServerHandler;
+        assert!(server.get_info().instructions.unwrap().contains("PENDING"));
+        assert!(
+            !server
+                .get_info()
+                .instructions
+                .unwrap()
+                .contains("Inherited healthy guidance")
+        );
+        assert!(
+            server
+                .get_tool("x402_treazury_tools_search")
+                .unwrap()
+                .description
+                .unwrap()
+                .contains("Pending platform guidance")
+        );
         let running = deployment.bind(&env).await.unwrap();
         assert_ne!(running.addresses()[0].1.port(), 0);
         let catalog = running.deferred.as_ref().unwrap().catalog.clone();
@@ -889,6 +917,24 @@ sources=['healthy','late']
             !catalog.read().instructions["one"]
                 .as_ref()
                 .is_some_and(|s| s.contains("PENDING"))
+        );
+        let mut server = server;
+        server.catalog = catalog.clone();
+        server.catalog_server = "one".into();
+        assert!(
+            !server
+                .get_info()
+                .instructions
+                .unwrap()
+                .contains("Inherited healthy guidance")
+        );
+        assert!(
+            server
+                .get_tool("x402_treazury_tools_search")
+                .unwrap()
+                .description
+                .unwrap()
+                .contains("Pending platform guidance")
         );
         stop.cancel();
         tokio::time::timeout(Duration::from_secs(5), serving)
