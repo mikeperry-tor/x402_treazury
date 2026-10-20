@@ -28,7 +28,7 @@ server and reconnect clients after changing the setting to refresh cached lists.
 Enable `source_management = true` on an HTTP deployment endpoint to let its agents
 search the built-in x402 List directory, add public OpenAPI APIs, inspect tool signatures and
 invoke them. It defaults to false. Standalone provider serving remains static.
-See the [README workflow](../README.md#let-agents-discover-and-add-apis),
+See the [README workflow](../README.md#agent-api-auto-discovery-and-tool-addition),
 [static-wallet example](../examples/deployments/agent-sources.toml) and
 [managed-wallet example](../examples/deployments/agent-sources-managed.toml).
 

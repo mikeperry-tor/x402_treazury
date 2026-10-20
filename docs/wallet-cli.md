@@ -839,12 +839,12 @@ Historical automatic-retirement records remain readable with their original
 canonical evidence; advisory balance refresh does not manufacture retirement proofs.
 Low-balance traversal rotates payment selection without deleting keys or funds.
 
-The one-time [known-state preflight](operator-notes/privacy-local-schema12.md) is a
+The one-time [known-state preflight](../examples/convert_privacy_local.rs) is a
 separate Rust example, outside the production wallet command tree. It requires
 stopped-service exclusive ownership and inspects immutable state (using a disposable
 copy when journal recovery is needed)
 without loading keys, connecting to a network or changing source state. The
 inspected schema12 source is rejected for missing immutable destination-readiness
 support. No successful transformation is available; ordinary `recover` cannot
-manufacture that proof or convert the schema. The notes describe full-backup
-requirements and why an old backup cannot safely undo subsequent financial work.
+manufacture that proof or convert the schema. Full backups must retain all accepted obligations; an old backup cannot safely
+undo subsequent financial work.
