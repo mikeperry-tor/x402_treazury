@@ -102,7 +102,7 @@ registry_file = "../../state/privacy-sources.sqlite"
 
 [sources.social]
 extends = "../../providers/socialfetch.toml"
-tags = ["Bluesky", "Facebook", "Instagram", "LinkedIn", "Reddit", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Yelp"]
+tags = ["Bluesky", "Facebook", "GitHub", "Hacker News", "Instagram", "LinkedIn", "Reddit", "Rumble", "Snapchat", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Twitch", "Yelp", "YouTube"]
 exclude_tools = ["socialfetch_help"]
 
 # TeleSINT provides 18 stateless Telegram CTI and OSINT channel intelligence tools
@@ -345,8 +345,10 @@ discover_on_demand = true
 instructions_text = "Social research endpoint. Discover an operation and inspect its schema before calling it."
 discovery_search_tool_instructions_text = """
 Social tool keywords to search for:
-- SocialFetch: `Bluesky`, `Facebook`, `Instagram`, `LinkedIn`, `Reddit`, `Telegram`,
-  `Threads`, `TikTok`, `truthsocial` (Truth Social), `Twitter` (X), `Yelp`.
+- SocialFetch: `Bluesky`, `Facebook`, `GitHub`, `Hacker News`, `Instagram`,
+  `LinkedIn`, `Reddit`, `Rumble`, `Snapchat`, `Telegram`,
+  `Threads`, `TikTok`, `truthsocial` (Truth Social), `Twitter` (X), `Twitch`,
+  `Yelp`, `YouTube`.
 - TeleSINT (Telegram OSINT): `telesint`, `telesint_search`, `telesint_ioc`, `telesint_c2`,
   `telesint_actor`, `telesint_breach`, `telesint_vulnerability`, `telesint_darkweb`,
   `telesint_ransomware`, `telesint_intent`, `telesint_malware`, `telesint_feed`,
