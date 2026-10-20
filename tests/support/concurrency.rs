@@ -378,7 +378,21 @@ async fn tor_burst_child() {
         } else {
             assert_eq!(
                 (record.user.clone(), record.password.clone()),
-                network::global().credentials(&id),
+                network::global().credentials(
+                    &network::global()
+                        .http_participating(
+                            &id,
+                            &url,
+                            None,
+                            false,
+                            network::HttpPolicy {
+                                allow_http1: true,
+                                allow_tls12: true
+                            },
+                        )
+                        .unwrap()
+                        .scope
+                ),
                 "{phase}"
             );
             rpc += 1;

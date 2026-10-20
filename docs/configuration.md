@@ -750,7 +750,11 @@ seconds Tor. Both settings work in either mode; there is no Tor read-timeout flo
 Read timeout accepts 1..86400 seconds at network/source-management level and
 positive fractional seconds at provider level. Connection timeout accepts 1..300.
 Base RPCs, chain views and receipt verification have no separate total deadline;
-they use these connection and read-inactivity limits. Protocol transaction expiry
+they use these connection and read-inactivity limits. Tor Base reads exhaust the
+selected scope plus up to two fresh scopes per endpoint before configured fallback;
+direct mode retains its two-attempt transport recovery. See [Base policy](wallet-cli.md)
+and [network policy](network-egress.md) for status eligibility, validation and
+provider evidence boundaries. Protocol transaction expiry
 and qualification deadlines remain independent. Managed payment
 admission has no total timeout; legacy wallet `wait_seconds` is ignored with a
 warning and omitted from effective configuration.
@@ -838,6 +842,11 @@ Use it for JSON OpenAPI request fixtures from any provider. Review fixture diffs
 when refreshing a vendor spec, including changes to the pinned catalog contracts.
 
 ## Provider HTTP and TLS policy
+
+Participating catalog/pricing, unsigned API and Base reads may recover TLS
+failures on up to two fresh Tor scopes after the selected scope. Every attempt
+retains certificate, hostname and configured protocol verification. This grants
+no replay authority to signed requests and does not change direct-mode recovery.
 
 HTTPS provider traffic requires **HTTP/2 and TLS 1.3** by default. This applies to
 catalogs, pricing discovery, lazy help and unsigned/signed API requests. Set

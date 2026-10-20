@@ -47,9 +47,12 @@ after serialization, cache and readiness checks, and retains them through respon
 consumption and publication even if its waiter disconnects. Logical probe ownership
 and one-shot coalescing span the complete retry sequence without a second source gate.
 Ordinary API, directory and raw-call clients also use participating selection as
-specified below. Base RPC retains legacy deterministic transports pending its
-activation in the [Tor isolation retry plan](plans/tor_isolation_retries.md);
-excluded infrastructure callers remain legacy. `payment.rs` pins its
+specified below. Base RPC uses participating selection for each logical read;
+excluded infrastructure callers remain legacy. TLS failures are eligible for fresh
+scopes in catalog/pricing, unsigned API and Base because a Tor exit may interfere;
+every attempt retains certificate, hostname and protocol verification. Other API
+transport failures retain their existing terminal behavior. Signed requests never
+gain replay authority from TLS failure. `payment.rs` pins its
 acquired `HttpTransport` record and scope-matched cover `Owner` from unsigned
 challenge through signing, signed dispatch and response body
 consumption. Sync releases its
@@ -87,7 +90,7 @@ renew another response's inactivity timer or signed authority.
 | `catalog_state.rs` | Lazy help fetch, help URL discovery origin |
 | `discovery/import.rs` | Agent OpenAPI fetch, discovery origin, public-destination policy |
 | `payment.rs` | Actual unsigned challenge and paid retry, selected EVM payer |
-| `rotation/base.rs` | Address reads by EVM owner; chain/header reads by RPC discovery origin |
+| `rotation/base.rs` | Participating read-only RPC: address reads by EVM owner; chain/header reads by RPC discovery origin; validates method results before promotion |
 | `rotation/near.rs` | Metadata by origin; quote and status by immutable request recipient |
 | `treasury/birthday.rs` | Mainnet tip and capability lookup, per-invocation bootstrap identity |
 | `treasury/mod.rs`, `server.rs`, `send.rs` | Scan, witnesses, proposal and capability checks, treasury UUID |
@@ -184,8 +187,23 @@ now specify 60 seconds; operator-owned files are not rewritten automatically.
 
 Base read RPCs, complete chain views and receipt verification use connection and
 read-inactivity timeouts, with no separate total deadline in either network mode.
-Progressing reads can finish; actual transport failures retain one unsigned retry
-and configured whole-view fallback. Block age, confirmations and canonical block
+Progressing reads can finish. Direct reads retain two same-client attempts for
+transport failures with 200 ms backoff. Tor reads instead use one selected scope
+plus up to two fresh scopes on HTTP `400`, `403`, `429`, `503` or eligible typed
+transport failures (including TLS failures), exhausting one endpoint before considering the next. Valid
+`Retry-After` on `429`/`503` delays only a remaining attempt; exhaustion drops the
+unused body and returns without waiting. Caller/query ownership spans the logical
+read, while active RPC capacity covers only each request and its complete body
+collection; retry delays release that capacity for unrelated reads. Neither mode retries RPC errors, malformed
+results or oversized responses on that endpoint. Conditional promotion follows
+each method's observation boundary. Chain, block and contract reads validate
+their results. A null receipt remains pending and may promote connectivity. A
+nonnull unconfirmed receipt needs only a parseable block height and matching
+requested transaction hash to promote; a missing or mismatched hash still returns
+pending but cannot promote. Remaining receipt fields, including transfer and
+authorization events, are checked when evaluating a confirmed receipt. Pending
+observations trigger no additional proof reads and establish no transfer proof.
+Canonical proof and configured whole-view fallback remain independent. Block age, confirmations and canonical block
 rechecks still determine whether evidence is usable. Base RPC response collection
 has a fixed 16 MiB byte bound to protect memory before JSON decoding, including
 chunked and lengthless bodies. Oversized responses produce a redacted typed failure
@@ -257,10 +275,12 @@ up to three isolation scopes (`1` selected plus up to `2` private candidates) on
 unsigned HTTP `400`, `403`, `429`, and `503` while keeping the canonical payer
 pinned, honoring valid `Retry-After` headers on `429` and `503`, and conditionally
 promoting the winning candidate after valid `402` challenge validation or a
-completed valid unsigned output. Unsigned API transport errors, ineligible HTTP
+completed valid unsigned output. Unsigned TLS failures also consume the remaining
+fresh-scope attempts with unchanged verification. Non-TLS API transport errors, ineligible HTTP
 statuses, malformed `402` challenges, failed outputs, signed responses and
 internal paid discovery relay calls (`SelectionPolicy::Legacy`) do not retry on
-new scopes or promote candidates. Eligible failed participating-Tor unsigned status
+new scopes or promote candidates. TLS failures during unsigned dispatch or body collection consume the same finite
+sequence; body recovery never restarts payer selection. Eligible failed participating-Tor unsigned status
 responses are dropped without collecting their bodies, including the final
 exhausted attempt, which returns the known status with a fixed error. There is no
 Retry-After wait after exhaustion because no further request is dispatched.
@@ -482,6 +502,14 @@ use the production factory inside confined subprocesses. See
 [the integration runner](../tests/live/INTEGRATION_REFERENCE.md#owned-tor-qualification)
 for its installed-Tor ownership, private evidence and explicit outage scope.
 
+Base clients retain canonical identity rather than a raw selected client. Each
+logical read reacquires the shared owner/origin/policy selection. Full configured
+URLs still distinguish provider evidence even when same-origin paths share a
+transport. Transport replacement never changes durable endpoint generations or
+financial authority. Strict view/receipt failover keeps its existing predicate
+(including no HTTP 400 fallback); advisory scalar reads may try the next configured
+endpoint after any error. Base never uses a paid relay.
+
 ## Remaining timers and budgets
 
 These scopes are independent; progress renews only transport inactivity, never
@@ -490,7 +518,7 @@ financial or qualification authority.
 | Timer or bound | Purpose and behavior |
 | --- | --- |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
-| Participating Tor HTTP scope retries: up to 3 attempts total (`1` selected + `2` candidates); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery and `PaidClient` unsigned API/directory/raw stages (internal discovery relay calls remain `SelectionPolicy::Legacy`, and Base RPC follows the [Tor isolation retry plan](plans/tor_isolation_retries.md)). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
+| Participating Tor HTTP scope retries: up to 3 attempts total (`1` selected + `2` candidates); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery and `PaidClient` unsigned API/directory/raw stages (internal discovery relay calls remain `SelectionPolicy::Legacy`; Base read-only RPC also participates). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
 | HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
 | Legacy indexer duration arguments | Required by the vendor API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
@@ -498,7 +526,7 @@ financial or qualification authority.
 | MCP SSE keepalive cadence: two seconds | Sends connection-liveness comments while awaiting the result; never renews remote-read inactivity, financial authority, or client whole-tool deadlines. |
 | MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
 | Treasury observation: 60-second minimum, errors back off to 300 seconds | Available treasury startup and explicit sync request one pass. Current enabled unfilled funding demand or validated pending source/shielding work owns recurring scans; idle treasury performs none. Shared scan timing is measured from attempt completion, so long later command work cannot postpone an already-due scan. Busy/locked read-only demand acquisition uses a 60-second local reevaluation wake while commands and notifications remain usable; unknown demand never authorizes a scan or resets observation timing. Scheduled source observers reuse healthy current-owner persisted scans without intervening tip probes; actual new-action validation still checks exact canonical height/hash and snapshot revision. Publication and SDK reconstruction have independent 60-second retries and never justify another scan alone. Owned shutdown retains identical completed-result publication retries without another calculation or submission. Scheduling/reuse never renews the original observation time or financial authority. Successful needed scans may start per-address owned-transparent shielding under current permission/fees. Removed age/lag gates remain removed; expiry/non-inclusion requires actual scanned coverage and signed protocol expiry remains authoritative. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
-| Base resource ownership: 64 query owners, 32 active RPCs, 128 RPC callers | Bounds acquired query memory, active transports, and RPC work including callers awaiting transport capacity. Saturation rejects unsigned acquisition; no whole-work timeout or spending limit. Production owners acquire wallet and authorization pages of at most 64 rows each. Identical in-flight background balance reads share one retained query owner under these same bounds; completed results are not retained by that sharing layer and no local age policy is applied. |
+| Base resource ownership: 64 query owners, 32 active RPCs, 128 RPC callers | Bounds acquired query memory, active transports, and RPC work including callers awaiting transport capacity. Caller/query ownership survives retry waits; active RPC permits cover individual requests/body collection and are released before backoff or `Retry-After`. Saturation rejects unsigned acquisition; no whole-work timeout or spending limit. Production owners acquire wallet and authorization pages of at most 64 rows each. Identical in-flight background balance reads share one retained query owner under these same bounds; completed results are not retained by that sharing layer and no local age policy is applied. |
 | Pricing requests: 16 process-wide; `probe_concurrency` per source | Bounds active origin attempts and admitted relay work. Logical probes release request capacity during server delays; queued relay callers and cache hits hold no request permit. Accepted relay work retains permits through publication despite waiter cancellation. No separate source-wide scheduling gate. |
 | Catalog downloads: `startup.catalog_concurrency`, default 2 | Bounds active origin downloads and admitted relay work per deployment load or deferred runtime. Logical retry delays, relay serialization/readiness waits and cache hits reserve no download capacity. Strict loads/warming retain completeness and single-fetch relay semantics; serving may wait for discovery readiness. |
 | Managed payment owners: 128 | Bounds completed financial observations and private signing work retained while waiting for the group gate or signed dispatch. Saturation cannot sign or create a liability. |

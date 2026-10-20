@@ -1487,19 +1487,53 @@ async fn tor_catalog_retries_promote_only_valid_json_or_304_and_stop_on_local_or
     assert_eq!(step.load(Ordering::SeqCst), 9);
     assert_eq!(socks.records.lock().unwrap().len(), 5);
 
-    // Untrusted TLS certificate fails immediately after 1 attempt without burning candidate scopes.
+    // Untrusted TLS remains rejected on all three fresh-scope attempts.
     let untrusted_ctx = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
         mode: crate::network::Mode::Tor,
         socks_endpoint: Some(socks.address),
         ..Default::default()
     })
     .unwrap();
-    assert!(
-        catalog::load_json_discovery_with(&cfg, &untrusted_ctx)
-            .await
-            .is_err()
+    let untrusted_selected = untrusted_ctx
+        .http_participating(&id, &url, None, false, cfg.transport())
+        .unwrap();
+    let error = catalog::load_json_discovery_with(&cfg, &untrusted_ctx)
+        .await
+        .unwrap_err();
+    assert!(crate::network::tls_failure(
+        error.downcast_ref::<reqwest::Error>().unwrap()
+    ));
+    {
+        let records = socks.records.lock().unwrap();
+        assert_eq!(records.len(), 8);
+        let rejected = &records[5..];
+        assert_eq!(
+            rejected
+                .iter()
+                .map(|record| &record.password)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            3
+        );
+        assert_eq!(
+            (rejected[0].user.clone(), rejected[0].password.clone()),
+            untrusted_ctx.credentials(&untrusted_selected.scope)
+        );
+    }
+    assert_eq!(
+        step.load(Ordering::SeqCst),
+        9,
+        "untrusted TLS never reaches HTTP"
     );
-    assert_eq!(socks.records.lock().unwrap().len(), 6);
+    assert!(
+        Arc::ptr_eq(
+            &untrusted_selected,
+            &untrusted_ctx
+                .http_participating(&id, &url, None, false, cfg.transport())
+                .unwrap()
+        ),
+        "TLS exhaustion cannot promote"
+    );
 
     // Local SOCKS auth failure (BadAuth) and closed local SOCKS listener fail after 1 attempt.
     let bad_socks = crate::test_socks::Socks::start(

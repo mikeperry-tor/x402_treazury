@@ -779,10 +779,36 @@ impl PaidClient {
             }
             diagnostics::stage("transport_selection");
             let transport = factory.http_attempt(&selected, attempt)?;
-            let cover = self.begin_cover(&transport).await;
+            let mut cover = self.begin_cover(&transport).await;
             diagnostics::stage("unsigned_request");
-            let (response, retry, receipt) =
-                unsigned_response(&transport, request, cover.as_ref()).await?;
+            let (response, retry, receipt) = match unsigned_response(
+                &transport,
+                request,
+                cover.as_mut(),
+                (max_attempts > 1 && request.url().scheme() == "https")
+                    .then_some((self.max_response_bytes, unsigned_only)),
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(error)
+                    if attempt < max_attempts
+                        && error
+                            .downcast_ref::<reqwest::Error>()
+                            .is_some_and(crate::network::tls_failure) =>
+                {
+                    drop(cover);
+                    tracing::warn!(
+                        stage = "unsigned_request",
+                        attempt,
+                        max_attempts,
+                        reason = "tls_failure",
+                        "Retrying unsigned API request on fresh Tor isolation scope"
+                    );
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             diagnostics::response(&response);
             let status = response.status();
             if max_attempts > 1 && crate::network::eligible_retry_status(status) {
@@ -926,7 +952,8 @@ pub(crate) async fn bound_challenge(
 async fn unsigned_response(
     transport: &crate::network::HttpTransport,
     request: &reqwest::Request,
-    cover: Option<&crate::cover::runtime::Call>,
+    mut cover: Option<&mut crate::cover::runtime::Call>,
+    collect_unsigned: Option<(usize, bool)>,
 ) -> Result<(
     reqwest::Response,
     reqwest::Request,
@@ -938,7 +965,7 @@ async fn unsigned_response(
     let retry = request
         .try_clone()
         .context("request body cannot be retried")?;
-    let mut padding = cover.and_then(|c| c.pad(&mut unsigned, true));
+    let mut padding = cover.as_deref().and_then(|c| c.pad(&mut unsigned, true));
     if let Some(p) = &mut padding {
         p.dispatched();
     }
@@ -949,11 +976,32 @@ async fn unsigned_response(
         .map_err(reqwest::Error::without_url)?;
     let receipt = crate::pricing::runtime::received();
     drop(padding);
-    if let Some(c) = cover {
+    if let Some(c) = cover.as_deref_mut() {
         c.protocol(response.version());
         c.rejected_padding(response.status());
     }
     crate::network::log_http(&response, "payment_challenge");
+    // Complete unsigned TLS I/O inside the same finite attempt sequence. A body
+    // failure cannot restart payer selection or enter the signed dispatch path.
+    let response = if let Some((limit, unsigned_only)) = collect_unsigned
+        && !crate::network::eligible_retry_status(response.status())
+        && !(unsigned_only && response.status() == reqwest::StatusCode::PAYMENT_REQUIRED)
+    {
+        if response.status() != reqwest::StatusCode::PAYMENT_REQUIRED
+            && let Some(c) = cover
+        {
+            c.response_headers();
+        }
+        let mut buffered = axum::http::Response::builder()
+            .status(response.status())
+            .version(response.version());
+        *buffered.headers_mut().expect("valid status") = response.headers().clone();
+        let bytes =
+            crate::limits::read(response, limit, "API response", "max_response_bytes").await?;
+        buffered.body(bytes)?.into()
+    } else {
+        response
+    };
     Ok((response, retry, receipt))
 }
 

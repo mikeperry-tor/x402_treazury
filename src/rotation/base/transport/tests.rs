@@ -51,8 +51,36 @@ fn response(status: u16, body: &str) -> String {
         body.len()
     )
 }
-fn client() -> reqwest::Client {
-    crate::network::discovery("https://rpc-test.invalid", Duration::from_secs(2)).unwrap()
+fn timed_client(timeout: Duration) -> Arc<crate::network::HttpTransport> {
+    let identity = crate::network::IsolationId::discovery("https://rpc-test.invalid").unwrap();
+    crate::network::global()
+        .http_participating(
+            &identity,
+            "https://rpc-test.invalid",
+            Some(timeout),
+            false,
+            crate::network::HttpPolicy::COMPATIBLE,
+        )
+        .unwrap()
+}
+fn client() -> Arc<crate::network::HttpTransport> {
+    timed_client(Duration::from_secs(2))
+}
+async fn rpc(
+    http: &Arc<crate::network::HttpTransport>,
+    url: &reqwest::Url,
+    method: &'static str,
+    params: Value,
+) -> Result<Value> {
+    super::rpc(
+        crate::network::global(),
+        http.clone(),
+        url,
+        method,
+        params,
+        |value| Ok((value, true)),
+    )
+    .await
 }
 #[tokio::test]
 async fn interrupted_reads_retry_identical_canonical_payload_once() {
@@ -242,7 +270,7 @@ async fn stalled_body_inactivity_reports_body_not_headers() {
         drop(held);
     });
     let error = rpc(
-        &crate::network::discovery("https://rpc-test.invalid", Duration::from_millis(100)).unwrap(),
+        &timed_client(Duration::from_millis(100)),
         &url,
         "eth_chainId",
         json!([]),
@@ -283,8 +311,7 @@ async fn progressing_rpc_body_survives_former_total_deadline() {
             socket.write_all(chunk).await.unwrap();
         }
     });
-    let http =
-        crate::network::discovery("https://rpc-test.invalid", Duration::from_secs(6)).unwrap();
+    let http = timed_client(Duration::from_secs(6));
     let started = Instant::now();
     let value = tokio::time::timeout(
         Duration::from_secs(30),

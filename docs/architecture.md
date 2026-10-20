@@ -299,8 +299,11 @@ or executed even when its response fails. Generic HTTP errors, timeouts and outp
 failures do not authorize another chargeable attempt. Preserve the separately
 specified structured insufficient-funds traversal and journal-before-disclosure
 rules for every authorization. Both payer handoffs and participating Tor unsigned
-status retries apply this same GET/POST eligibility; Base RPC isolation recovery
-remains in the [Tor isolation retry plan](plans/tor_isolation_retries.md).
+status retries apply this same GET/POST eligibility. Base read-only RPC uses the
+same participating selection with endpoint-first scope recovery and method-specific
+validation before promotion; [network policy](network-egress.md) describes its
+separate direct behavior, strict evidence fallback and scalar fallback. Transport
+scope never becomes financial endpoint provenance or settlement authority.
 
 ## Where to change and verify behavior
 

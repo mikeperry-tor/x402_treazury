@@ -13,14 +13,13 @@ pub(super) fn query() -> Result<SemaphorePermit<'static>> {
         .context("Base query capacity unavailable")
 }
 
-pub(super) async fn rpc() -> Result<(SemaphorePermit<'static>, SemaphorePermit<'static>)> {
+pub(super) fn rpc_caller() -> Result<SemaphorePermit<'static>> {
     // Admission precedes waiting, preventing an unbounded semaphore waiter list.
-    let caller = RPC_CALLERS
+    RPC_CALLERS
         .try_acquire()
-        .context("Base RPC queue capacity unavailable")?;
-    let active = ACTIVE_RPCS
-        .acquire()
-        .await
-        .context("Base RPC owner closed")?;
-    Ok((caller, active))
+        .context("Base RPC queue capacity unavailable")
+}
+
+pub(super) async fn active_rpc() -> Result<SemaphorePermit<'static>> {
+    ACTIVE_RPCS.acquire().await.context("Base RPC owner closed")
 }

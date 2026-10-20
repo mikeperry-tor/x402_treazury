@@ -12,6 +12,12 @@ pub mod evidence;
 mod receipt;
 mod resources;
 mod shared;
+#[cfg(test)]
+mod tor_inactivity_tests;
+#[cfg(test)]
+mod tor_ownership_tests;
+#[cfg(test)]
+mod tor_tests;
 mod transport;
 mod verification;
 pub use receipt::{TransferExpectation, TransferProof};
@@ -153,7 +159,7 @@ pub struct ChainView {
 }
 #[derive(Clone)]
 pub struct BaseRpc {
-    http: reqwest::Client,
+    identity: crate::network::IsolationId,
     url: reqwest::Url,
     confirmations: u64,
     fallbacks: Vec<BaseRpc>,
@@ -189,7 +195,7 @@ impl BaseRpc {
     pub fn new(url: &str, confirmations: u64) -> Result<Self> {
         ensure!(confirmations > 0, "invalid Base RPC limits");
         Ok(Self {
-            http: crate::network::discovery(url, None)?,
+            identity: crate::network::IsolationId::discovery(url)?,
             url: secure_endpoint(url)?,
             confirmations,
             fallbacks: vec![],
@@ -218,11 +224,7 @@ impl BaseRpc {
     }
     fn for_address(&self, address: &str) -> Result<Self> {
         Ok(Self {
-            http: crate::network::global().http(
-                &crate::network::IsolationId::evm(address)?,
-                self.url.as_str(),
-                None,
-            )?,
+            identity: crate::network::IsolationId::evm(address)?,
             url: self.url.clone(),
             confirmations: self.confirmations,
             fallbacks: vec![],
@@ -299,43 +301,60 @@ impl BaseRpc {
         }
         Ok(())
     }
-    async fn rpc(&self, method: &'static str, params: Value) -> Result<Value> {
-        transport::rpc(&self.http, &self.url, method, params).await
+    async fn rpc<T>(
+        &self,
+        method: &'static str,
+        params: Value,
+        validate: impl FnOnce(Value) -> Result<(T, bool)>,
+    ) -> Result<T> {
+        let network = crate::network::global();
+        let selected = network.http_participating(
+            &self.identity,
+            self.url.as_str(),
+            None,
+            false,
+            crate::network::HttpPolicy::COMPATIBLE,
+        )?;
+        transport::rpc(network, selected, &self.url, method, params, validate).await
     }
 
     async fn block(&self, tag: &str) -> Result<(Anchor, u64)> {
-        let v = self
-            .rpc("eth_getBlockByNumber", json!([tag, false]))
-            .await?;
-        let malformed = || RpcFailure::malformed("eth_getBlockByNumber");
-        let height = quantity(&v["number"]).map_err(|_| malformed())?;
-        let timestamp = quantity(&v["timestamp"]).map_err(|_| malformed())?;
-        let hash = v["hash"].as_str().ok_or_else(malformed)?;
-        let hash = hash.parse::<B256>().map_err(|_| malformed())?;
-        Ok((
-            Anchor {
-                height,
-                hash: hash.to_string(),
-            },
-            timestamp,
-        ))
+        self.rpc("eth_getBlockByNumber", json!([tag, false]), |v| {
+            let malformed = || RpcFailure::malformed("eth_getBlockByNumber");
+            let height = quantity(&v["number"]).map_err(|_| malformed())?;
+            let timestamp = quantity(&v["timestamp"]).map_err(|_| malformed())?;
+            let hash = v["hash"].as_str().ok_or_else(malformed)?;
+            let hash = hash.parse::<B256>().map_err(|_| malformed())?;
+            // Preserve the caller's canonical-conflict classification for an
+            // unexpected height, without selecting that response's transport.
+            let matches_request =
+                tag == "latest" || quantity(&json!(tag)).is_ok_and(|requested| requested == height);
+            Ok((
+                (
+                    Anchor {
+                        height,
+                        hash: hash.to_string(),
+                    },
+                    timestamp,
+                ),
+                matches_request,
+            ))
+        })
+        .await
     }
-    async fn call(&self, data: String, block: &Anchor) -> Result<U256> {
+    async fn call<T>(
+        &self,
+        data: String,
+        block: &Anchor,
+        validate: impl FnOnce(U256) -> Result<T>,
+    ) -> Result<T> {
         // EIP-1898 binds balance and nonce evidence to exactly the same canonical block.
-        let v = self
-            .rpc(
-                "eth_call",
-                json!([{"to":USDC,"data":data},{"blockHash":block.hash,"requireCanonical":true}]),
-            )
-            .await?;
-        let s = v
-            .as_str()
-            .ok_or_else(|| RpcFailure::malformed("eth_call"))?;
-        ensure!(
-            s.len() == 66 && s.starts_with("0x"),
-            RpcFailure::malformed("eth_call")
-        );
-        U256::from_str_radix(&s[2..], 16).map_err(|_| RpcFailure::malformed("eth_call").into())
+        self.rpc(
+            "eth_call",
+            json!([{"to":USDC,"data":data},{"blockHash":block.hash,"requireCanonical":true}]),
+            |v| Ok((validate(contract_value(v)?)?, true)),
+        )
+        .await
     }
     /// One ordinary balanceOf read; an advisory result needs no historical proof,
     /// confirmed/latest pair, host-clock check or canonical certificate.
@@ -348,18 +367,11 @@ impl BaseRpc {
         for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
             let started = std::time::Instant::now();
             let scoped = endpoint.for_address(&address.to_string())?;
-            let result = async {
-                let value = scoped
-                    .rpc("eth_call", json!([{"to":USDC,"data":data},"latest"]))
-                    .await?;
-                let value = value
-                    .as_str()
-                    .filter(|v| v.len() == 66 && v.starts_with("0x"))
-                    .ok_or_else(|| RpcFailure::malformed("eth_call"))?;
-                U256::from_str_radix(&value[2..], 16)
-                    .map_err(|_| RpcFailure::malformed("eth_call").into())
-            }
-            .await;
+            let result = scoped
+                .rpc("eth_call", json!([{"to":USDC,"data":data},"latest"]), |v| {
+                    Ok((contract_value(v)?, true))
+                })
+                .await;
             match result {
                 Ok(value) => {
                     tracing::debug!(
@@ -555,18 +567,20 @@ impl BaseRpc {
         query: &ChainQuery,
         progress: &ViewProgress,
     ) -> Result<ViewHeaders> {
-        ensure!(
-            quantity(
-                &progress
-                    .step("chain_id", self.rpc("eth_chainId", json!([])))
-                    .await?
+        progress
+            .step(
+                "chain_id",
+                self.rpc("eth_chainId", json!([]), |value| {
+                    ensure!(
+                        quantity(&value).map_err(|_| RpcFailure::malformed("eth_chainId"))? == 8453,
+                        EndpointMismatch {
+                            endpoint: self.endpoint_id()
+                        }
+                    );
+                    Ok(((), true))
+                }),
             )
-            .map_err(|_| RpcFailure::malformed("eth_chainId"))?
-                == 8453,
-            EndpointMismatch {
-                endpoint: self.endpoint_id()
-            }
-        );
+            .await?;
         if let Some(previous) = &query.anchor {
             let (canonical, _) = progress
                 .step(
@@ -626,10 +640,15 @@ impl BaseRpc {
             );
             let scoped = self.for_address(&auth.payer)?;
             let used = progress
-                .step("authorization_nonce", scoped.call(data, &headers.confirmed))
+                .step(
+                    "authorization_nonce",
+                    scoped.call(data, &headers.confirmed, |used| {
+                        ensure!(used <= U256::from(1), RpcFailure::malformed("eth_call"));
+                        Ok(used)
+                    }),
+                )
                 .await
                 .context(VerificationStage("authorization nonce"))?;
-            ensure!(used <= U256::from(1), RpcFailure::malformed("eth_call"));
             if used == U256::from(1) || headers.confirmed_time > auth.valid_before {
                 resolutions.insert(
                     auth.id.clone(),
@@ -750,11 +769,14 @@ impl BaseRpc {
                     let data = format!("0x70a08231{:0>64}", format!("{address:x}"));
                     let scoped = rpc.for_address(&address.to_string())?;
                     let stable = progress
-                        .step("confirmed_balance", scoped.call(data.clone(), &confirmed))
+                        .step(
+                            "confirmed_balance",
+                            scoped.call(data.clone(), &confirmed, Ok),
+                        )
                         .await
                         .context(VerificationStage("confirmed balance"))?;
                     let current = progress
-                        .step("latest_balance", scoped.call(data, &latest))
+                        .step("latest_balance", scoped.call(data, &latest, Ok))
                         .await
                         .context(VerificationStage("latest balance"))?;
                     let observation = evidence::BalanceObservation {
@@ -827,6 +849,14 @@ impl BaseRpc {
         Ok(())
     }
 }
+fn contract_value(value: Value) -> Result<U256> {
+    let s = value
+        .as_str()
+        .filter(|s| s.len() == 66 && s.starts_with("0x"))
+        .ok_or_else(|| RpcFailure::malformed("eth_call"))?;
+    U256::from_str_radix(&s[2..], 16).map_err(|_| RpcFailure::malformed("eth_call").into())
+}
+
 fn quantity(v: &Value) -> Result<u64> {
     let s = v.as_str().context("invalid RPC quantity")?;
     Ok(u64::from_str_radix(

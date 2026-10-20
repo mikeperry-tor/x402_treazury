@@ -607,15 +607,20 @@ preparation and submission handoffs remain immediate. Failed checks retain pendi
 ownership. Saved estimates never grant payment authority or prohibit an otherwise
 authorized signing attempt.
 
-Unsigned `eth_chainId`, `eth_getBlockByNumber` and `eth_call` requests may retry
-once after a transport interruption, with a 200 ms delay inside the original
-request timeout. Both attempts reuse the exact payload, endpoint and
-identity-bound HTTP client, including canonical block pins. HTTP/RPC rejections,
-malformed JSON/envelopes and identified TLS errors are not retried. The read-only
-retry never resends a paid API request or changes provider/Tor identity. Warnings
-record each failed attempt and retry decision, request phase, safe HTTP/IO/TLS
-categories and numeric status codes; raw error chains and addresses stay private.
-The diagnostic example emits the same warnings to stderr.
+Unsigned `eth_chainId`, `eth_getBlockByNumber`, `eth_getTransactionReceipt` and
+constrained `eth_call` reads retain exact payloads and canonical block pins.
+Direct mode allows two same-client attempts for transport interruption, with
+200 ms backoff. Tor instead uses the selected transport plus up to two fresh
+owner-bound scopes for HTTP `400`, `403`, `429`, `503` or eligible typed transport
+failures (including TLS failures) on one endpoint before provider fallback. Valid `Retry-After` delays only
+a remaining attempt; final exhaustion returns without waiting. RPC rejections,
+malformed results/envelopes and oversized bodies earn no circuit
+repetition. Transport promotion uses method-specific observation validation;
+pending receipts can establish connectivity without a transfer proof. Canonical
+chain proof remains separate. These reads never use Curl relay, sign payments, allocate wallets
+or accelerate observation cadence. See [network policy](network-egress.md) for
+receipt validation, selection lifetime and caller-specific fallback rules. Safe diagnostics retain
+numeric status codes and fixed categories, without addresses or raw causes.
 
 When `funding.base_rpc_fallback_url_envs` is omitted, dRPC and Base are fallbacks
 (a default equal to the primary is skipped). Set it to `[]` to disable fallbacks,
@@ -636,8 +641,10 @@ Failover restarts the **entire read-only chain view** on one endpoint, including
 chain ID, persisted anchor, confirmed/latest balances, authorization nonces and
 final canonical-block checks. Partial evidence is discarded. HTTP 403/408/429,
 500/502/503/504, availability transport failures and RPC -32005/-32016/-32601
-permit fallback. Malformed data, wrong chain, conflicting/stale chain evidence,
-TLS validation failures and other rejections fail closed. Paid requests and Zcash
+permit fallback. Malformed JSON/envelopes/results, oversized responses and TLS
+validation failures may also use configured fallback, always acquiring a complete
+fresh view. Wrong chain and conflicting canonical evidence remain terminal.
+Only Tor TLS failures earn fresh-scope retries; trust checks remain enforced. Paid requests and Zcash
 submissions are never replayed by this mechanism. Payer SOCKS identities and the
 configured Tor-only network policy remain unchanged.
 

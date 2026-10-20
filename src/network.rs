@@ -10,6 +10,8 @@ mod http_queue_tests;
 #[path = "network/http_timeout_tests.rs"]
 mod http_timeout_tests;
 mod scope_observation;
+#[cfg(test)]
+mod tls_retry_tests;
 use anyhow::{Context, Result, ensure};
 pub use scope_observation::{ScopeObservation, install_http_scope_observer};
 use serde::{Deserialize, Serialize};
@@ -205,7 +207,7 @@ pub struct HttpPolicy {
     pub allow_tls12: bool,
 }
 impl HttpPolicy {
-    const COMPATIBLE: Self = Self {
+    pub(crate) const COMPATIBLE: Self = Self {
         allow_http1: true,
         allow_tls12: true,
     };
@@ -602,22 +604,42 @@ pub(crate) fn eligible_retry_status(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 400 | 403 | 429 | 503)
 }
 
+pub(crate) fn tls_failure(error: &reqwest::Error) -> bool {
+    let mut source = std::error::Error::source(error);
+    while let Some(error) = source {
+        if error.is::<rustls::Error>() {
+            return true;
+        }
+        // tokio-rustls emits this fixed local marker without a rustls::Error
+        // when the peer closes during the handshake. It is not upstream prose.
+        if let Some(io) = error.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::UnexpectedEof
+            && (io.to_string() == "tls handshake eof"
+                || io
+                    .to_string()
+                    .starts_with("peer closed connection without sending TLS close_notify"))
+        {
+            return true;
+        }
+        source = error
+            .downcast_ref::<std::io::Error>()
+            .and_then(|io| io.get_ref())
+            .map(|inner| inner as &(dyn std::error::Error + 'static))
+            .or_else(|| error.source());
+    }
+    false
+}
+
 pub(crate) fn eligible_retry_transport(error: &reqwest::Error) -> bool {
     if error.is_builder() || error.is_redirect() || error.is_status() {
         return false;
     }
+    // A Tor exit can break TLS. A new scope retries with unchanged trust rules.
+    if tls_failure(error) {
+        return true;
+    }
     let mut source = std::error::Error::source(error);
     while let Some(err) = source {
-        if err.is::<rustls::Error>() {
-            return false;
-        }
-        if let Some(io) = err.downcast_ref::<std::io::Error>()
-            && io
-                .get_ref()
-                .is_some_and(|inner| inner.is::<rustls::Error>())
-        {
-            return false;
-        }
         if let Some(hyper) = err.downcast_ref::<hyper::Error>()
             && (hyper.is_parse() || hyper.is_user() || hyper.is_canceled())
         {

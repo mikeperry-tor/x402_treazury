@@ -30,6 +30,16 @@ access; normal runtime fixtures use localhost and deterministic unfunded keys,
 never a developer's `.env` or mainnet wallet. Ignored child-process helpers invoked
 by their parent tests differ from ignored optional live tests.
 
+Base fixture modules `rotation::base::tor_tests` and
+`rotation::base::tor_ownership_tests` and `rotation::base::tor_inactivity_tests`
+exercise actual read consumers through fake
+SOCKS/TLS/HTTP2: endpoint-first scope ordering, validated promotion, pending receipts,
+fresh whole-view fallback, retained owners, cancellation and absent financial side
+effects. Direct transport fixtures remain in `rotation::base::transport::tests`.
+`network::tls_retry_tests` verifies TLS recovery and exhaustion in catalog/pricing,
+unsigned API and Base while retaining certificate checks and signed no-replay.
+These prove routing and credential boundaries, not live Tor circuits or settlement.
+
 ## Test boundaries
 
 | Area | Principal tests / contract |
@@ -38,7 +48,7 @@ by their parent tests differ from ignored optional live tests.
 | MCP/deployment/discovery | Auth, scope and grants, immutable invocation snapshots, update/remove races, persistent idempotency, cancellation, pagination, shutdown and ownership release. |
 | Payments/managed rotation | Real local signing, cap/asset validation, journal-before-disclosure, captured-wallet traversal only after typed insufficient funds, retained chargeable attempts, concurrent admission, exact reserve promotion, independent initial funding, and separately requested canonical resolution. |
 | Treasury/store/funding | Encrypted persistence, explicit conversion preflight, snapshot ordering, reservations and qualification limits, uncertain source sends, refund/expiry rules, backups and filesystem protections. |
-| Network | Production HTTP/gRPC through authenticated fixture SOCKS, remote hostnames, identity/pool boundaries, participating Tor discovery retries, `Retry-After` handling, conditional promotion, proxy failure, TLS, redirects and public-destination enforcement. |
+| Network | Production HTTP/gRPC through authenticated fixture SOCKS, remote hostnames, identity/pool boundaries, participating Tor discovery/API/Base retries, `Retry-After` handling, conditional promotion, proxy failure, TLS, redirects and public-destination enforcement. |
 | Output/resource limits | Exact/over-bound behavior, visible errors and logs, no partial cache success, no retry of paid oversized responses, typed inline image/mapping behavior. |
 
 Tests should establish the absence of forbidden side effects as well as the

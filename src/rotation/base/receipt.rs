@@ -53,30 +53,55 @@ impl BaseRpc {
         &self,
         expected: &TransferExpectation,
     ) -> Result<Option<TransferProof>> {
-        ensure!(
-            quantity(&self.rpc("eth_chainId", json!([])).await?)? == 8453,
-            "wrong Base chain"
-        );
+        self.rpc("eth_chainId", json!([]), |value| {
+            ensure!(quantity(&value)? == 8453, "wrong Base chain");
+            Ok(((), true))
+        })
+        .await?;
         let (latest, _) = self.block("latest").await?;
-        let receipt = self
+        let confirmed = self
             .rpc(
                 "eth_getTransactionReceipt",
                 json!([expected.transaction.to_string()]),
+                |receipt| {
+                    if receipt.is_null() {
+                        return Ok((None, true));
+                    }
+                    let height = quantity(&receipt["blockNumber"])?;
+                    if latest
+                        .height
+                        .checked_sub(self.confirmations)
+                        .is_none_or(|confirmed_height| height > confirmed_height)
+                    {
+                        // Pending observations retain their existing result even
+                        // when the transaction hash cannot qualify connectivity.
+                        let matches_request = hash(&receipt["transactionHash"])
+                            .is_ok_and(|transaction| transaction == expected.transaction);
+                        return Ok((None, matches_request));
+                    }
+                    let claimed = Anchor {
+                        height,
+                        hash: hash(&receipt["blockHash"])?.to_string(),
+                    };
+                    let proof = validate_receipt(&receipt, expected, &claimed)?;
+                    Ok((Some((claimed, proof)), true))
+                },
             )
             .await?;
-        if receipt.is_null() {
-            return Ok(None);
-        }
-        let height = quantity(&receipt["blockNumber"])?;
-        let Some(confirmed_height) = latest.height.checked_sub(self.confirmations) else {
+        let Some((claimed, proof)) = confirmed else {
             return Ok(None);
         };
-        if height > confirmed_height {
-            return Ok(None);
-        }
-        let (block, _) = self.block(&format!("0x{height:x}")).await?;
-        ensure!(block.height == height, "receipt block height mismatch");
-        let proof = validate_receipt(&receipt, expected, &block)?;
+        // Confirmed receipt acceptance validates transfer fields; canonical chain
+        // proof remains separate and retains the existing pinned-block rechecks.
+        let (block, _) = self.block(&format!("0x{:x}", claimed.height)).await?;
+        ensure!(
+            block.height == claimed.height,
+            "receipt block height mismatch"
+        );
+        ensure!(
+            block.hash == claimed.hash,
+            "receipt transaction/block mismatch"
+        );
         for pinned in [&block, &latest] {
             let (current, _) = self.block(&format!("0x{:x}", pinned.height)).await?;
             ensure!(

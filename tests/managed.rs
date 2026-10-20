@@ -1963,7 +1963,21 @@ async fn promotion_identity_child() {
                 .unwrap();
             assert_eq!(
                 (connection.user.clone(), connection.password.clone()),
-                network::global().credentials(&IsolationId::evm(address).unwrap())
+                network::global().credentials(
+                    &network::global()
+                        .http_participating(
+                            &IsolationId::evm(address).unwrap(),
+                            &h.base,
+                            None,
+                            false,
+                            network::HttpPolicy {
+                                allow_http1: true,
+                                allow_tls12: true
+                            },
+                        )
+                        .unwrap()
+                        .scope
+                )
             );
         }
         h.close().await;

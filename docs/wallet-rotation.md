@@ -575,6 +575,12 @@ startup discovery still runs when its configuration is usable.
 
 ## Wallet observation policy
 
+Base transport recovery is a finite sequence inside the existing logical read and
+retained acquisition owner. New scopes do not create observations, caches, owners
+or faster polling; waiter cancellation does not abandon accepted shared work.
+Transport promotion does not change endpoint generations or release liabilities.
+See [network policy](network-egress.md) for endpoint-first retries and validation.
+
 The observation scope, cadence and completion rule belong to the work requesting it:
 
 | Trigger / work | Observation and cadence | Completion / stop rule |

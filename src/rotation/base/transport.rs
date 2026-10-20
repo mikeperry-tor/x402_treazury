@@ -1,4 +1,4 @@
-//! Only unsigned read RPCs may retry, on the same client, endpoint and payload.
+//! Read-only RPC recovery stays within one endpoint, owner and exact payload.
 use anyhow::{Result, ensure};
 use serde_json::{Value, json};
 use std::{error::Error, io::ErrorKind, time::Duration};
@@ -151,12 +151,16 @@ impl RpcFailure {
 struct AttemptFailure {
     public: RpcFailure,
     retryable: bool,
+    isolated_retryable: bool,
+    retry_after: Option<crate::network::RetryAfter>,
 }
 impl From<RpcFailure> for AttemptFailure {
     fn from(public: RpcFailure) -> Self {
         Self {
             public,
             retryable: false,
+            isolated_retryable: false,
+            retry_after: None,
         }
     }
 }
@@ -172,7 +176,13 @@ fn transport_failure(
         && (!error.is_decode() || public.io_kind.is_some() || public.protocol.is_some())
         && !public.tls
         && !matches!(public.protocol, Some("invalid_http" | "request_error"));
-    AttemptFailure { public, retryable }
+    let isolated_retryable = crate::network::eligible_retry_transport(&error);
+    AttemptFailure {
+        public,
+        retryable,
+        isolated_retryable,
+        retry_after: None,
+    }
 }
 
 async fn attempt(
@@ -187,10 +197,20 @@ async fn attempt(
         .send()
         .await
         .map_err(|e| transport_failure(method, "send", None, e))?;
-    let status = response.status().as_u16();
-    if !response.status().is_success() {
-        return Err(RpcFailure::new(method, "HTTP rejection", "headers", Some(status)).into());
+    let status = response.status();
+    if !status.is_success() {
+        let failure = AttemptFailure {
+            public: RpcFailure::new(method, "HTTP rejection", "headers", Some(status.as_u16())),
+            retryable: false,
+            isolated_retryable: crate::network::eligible_retry_status(status),
+            retry_after: crate::network::parse_retry_after(status, response.headers())
+                .map(crate::network::RetryAfter::after),
+        };
+        // No error body supplies RPC evidence or retry authority, even at exhaustion.
+        drop(response);
+        return Err(failure);
     }
+    let status = status.as_u16();
     // Read separately so an interrupted body is distinguishable from malformed JSON.
     let body = crate::limits::read(
         response,
@@ -227,12 +247,14 @@ async fn attempt(
         .ok_or_else(|| RpcFailure::new(method, "missing result", "envelope", Some(status)).into())
 }
 
-pub(super) async fn rpc(
-    http: &reqwest::Client,
+pub(super) async fn rpc<T>(
+    network: &crate::network::NetworkContext,
+    selected: std::sync::Arc<crate::network::HttpTransport>,
     url: &reqwest::Url,
     method: &'static str,
     params: Value,
-) -> Result<Value> {
+    validate: impl FnOnce(Value) -> Result<(T, bool)>,
+) -> Result<T> {
     ensure!(
         matches!(
             method,
@@ -240,24 +262,58 @@ pub(super) async fn rpc(
         ),
         "unsupported read-only Base RPC method"
     );
-    let _permits = super::resources::rpc().await?;
+    let _caller = super::resources::rpc_caller()?;
     let payload = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});
     let started = Instant::now();
-    // The network client owns connection and renewable read-inactivity limits.
-    // Keep retries finite without imposing a second elapsed-time deadline.
-    for number in 1..=2 {
-        let failure = match attempt(http, url, method, &payload).await {
-            Ok(value) => return Ok(value),
+    let isolated = network.policy.mode == crate::network::Mode::Tor;
+    let max_attempts = if isolated {
+        network.max_http_attempts(false)
+    } else {
+        2
+    };
+    // One caller owner and one sequence: direct keeps its same-client recovery;
+    // Tor replaces that loop with selected -> fresh -> fresh on this endpoint.
+    for number in 1..=max_attempts {
+        let current = if isolated {
+            network.http_attempt(&selected, number)?
+        } else {
+            selected.clone()
+        };
+        // Retain accepted caller ownership during delays, but reserve active I/O
+        // only until this attempt's response has finished or failed.
+        let result = {
+            let _active = super::resources::active_rpc().await?;
+            attempt(&current.client, url, method, &payload).await
+        };
+        let failure = match result {
+            Ok(value) => {
+                // Owning validators determine both the ordinary observation and
+                // whether it qualifies this transport for retained selection.
+                let (value, promote) = validate(value)?;
+                if promote {
+                    network.promote_http(&selected, &current);
+                }
+                return Ok(value);
+            }
             Err(failure) => failure,
         };
-        let retry = number == 1 && failure.retryable;
-        tracing::debug!(category = %failure.public, attempt = number, retry,
+        let retry = number < max_attempts
+            && if isolated {
+                failure.isolated_retryable
+            } else {
+                failure.retryable
+            };
+        tracing::debug!(stage = "base_rpc", category = %failure.public, attempt = number, max_attempts, retry,
             elapsed_ms = started.elapsed().as_millis() as u64,
             "Read-only Base RPC request failed");
         if !retry {
             return Err(failure.public.into());
         }
-        tokio::time::sleep(BACKOFF).await;
+        if isolated {
+            crate::network::sleep_retry_after(failure.retry_after).await;
+        } else {
+            tokio::time::sleep(BACKOFF).await;
+        }
     }
     unreachable!("the final attempt always returns")
 }
