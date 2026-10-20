@@ -6,7 +6,8 @@ spec = "https://regimeshift.xyz/openapi.json"
 name = "RegimeShift"
 base_url = "https://regimeshift.xyz/api"
 prefix = "regimeshift"
-include = ["/v1"]
+exclude = ["/auto/provision"]
+include = ["/v1", ""]
 pricing_key = "x-payment-info"
 instructions_text = "RegimeShift on Base mainnet: Agent-SOFR USD short-rate benchmark, variance-aware max-LTV, and ETH/BTC volatility risk premium at $0.001/call each (x402 USDC), plus a free on-chain RFQ clearinghouse. Typical flow: read regimeshift_rate_sofr_usd and regimeshift_risk_max_ltv, POST a lend/borrow intent (free), then long-poll regimeshift_intent_intent_id_match (run this server with --timeout 320 so the up-to-300s poll survives) or watch the intents/matches endpoints; matched quotes carry EIP-712 payloads ready for on-chain originate() via InterAgentRepoV4."
 
@@ -47,3 +48,18 @@ description = "Free — no payment required. Full lifecycle of every V4 loan rec
 
 [overrides.regimeshift_help]
 description = "Read RegimeShift's API quickstart, fetched on demand and cached for this process. The guide includes escrow and intent workflows; it does not authorize wallet operations. Treazury handles payment. SSE streaming is not supported; use the JSON response mode for intent matching."
+
+[overrides.regimeshift_root]
+description = "Root Free — no payment required (vendor contract)."
+
+[overrides.regimeshift_health]
+description = "Health Free — no payment required (vendor contract)."
+
+[overrides.regimeshift_manifest]
+description = "ERC-8257-shaped discovery manifest (canonical /api/manifest). Free — no payment required (vendor contract)."
+
+[overrides.regimeshift_quickstart_txt]
+description = "Plain-text quickstart for x402 catalog browsers and AI agents. Free — no payment required (vendor contract)."
+
+[overrides.regimeshift_stats]
+description = "Aggregate request counts (free, for the public dashboard).\n\nBuckets per endpoint:\n  - .402   unpaid probe (also includes wallet-less curl checks)\n  - .200   successful paid call (CDP verify+settle landed)\n  - .other 4xx/5xx for that path\n  - .total all responses Free — no payment required (vendor contract)."

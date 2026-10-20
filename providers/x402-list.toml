@@ -2,10 +2,11 @@
 spec = "https://x402-list.com/api/v1/openapi.json"
 base_url = "https://x402-list.com/api/v1"
 prefix = "x402_list"
+recommended_tools = ["x402_list_services", "x402_list_services_slug", "x402_list_best", "x402_list_categories", "x402_list_networks", "x402_list_help"]
+exclude = ["/submit", "/services/{slug}/request-update", "/services/{slug}/verify-ownership", "/services/{slug}/reissue-token"]
 probe_pricing = false
 include = [""]
-include_operations = ["GET /services", "GET /services/{slug}", "GET /best", "GET /categories", "GET /networks"]
-instructions_text = "Search for Base services (network=BSE), then inspect service details. Directory listings and observed prices are leads, not payment/delivery guarantees or executable schemas. When source-management tools are available, use x402_treazury_source_url_info to locate specification URLs and pass a returned or published OpenAPI URL directly to x402_treazury_source_add for server-side fetching and validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use x402_treazury_tools_search after registration for relevant schemas. Reads are unauthenticated but share an IP-level free quota; excess reads may require x402 payment and remain subject to the configured wallet cap. Do not assume a listing supplies an OpenAPI URL."
+instructions_text = "Search x402 services and inspect their details, scores and metadata; listings and prices are leads, not payment/delivery guarantees or executable schemas. Reusable provider recommendations select the ordinary directory reads, while the embedded source-management directory intentionally retains three read operations. x402_list_assess returns a fresh paid JSON assessment; an optional seller-side probe is included in its single quoted charge and is non-refundable. x402_list_suggestions pays to submit a suggestion and returns an acknowledgment, not a promise it will be accepted. Owner-update/domain-proof/email-token flows and the unsupported full-oneOf submission body are excluded. Directory reads share an IP free quota and may require payment; live challenges and ordinary wallet caps remain authoritative. Use source_url_info to locate published specifications and source_add for server-side registration; do not paste large catalogs into agent context. No call authorizes automatic replay of an uncertain signed payment."
 
 help_url = "https://x402-list.com/llms.txt"
 

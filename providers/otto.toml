@@ -2,6 +2,7 @@
 spec = "https://x402.ottoai.services/openapi.json"
 name = "Otto AI x402 — Market Intelligence, DeFi & Trading"
 prefix = "otto"
+recommended_tools = ["otto_crypto_news", "otto_equity_news", "otto_financial_statements", "otto_web_search", "otto_help"]
 exclude_tags = ["Execution"]
 exclude = ["/full-auto"]
 pricing_key = "x-payment-info"

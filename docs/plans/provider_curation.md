@@ -8,8 +8,18 @@ preference; C2.3 adds advisory recommendations, explicit selection and operator
 inspection. G2 independently closed at `74c7d21`; C3.1 now normalizes the fifteen
 ordinary-provider definitions and their focused tests/docs. C3.1 (`97de2ac`) validation and independent exact-SHA review passed.
 The wider audit reopened conditional C2.1, implemented with six passing focused
-tests and fresh source-matched complexity evidence; its exact-SHA/G2 review
-precedes C3.2. The operator wants
+tests and fresh source-matched complexity evidence. Independent exact-SHA review
+approved C2.1 (`27a6312`) and reclosed affected G2. The classification-document
+fixup (`118e205`) was independently approved. C3.2 normalizes the fourteen mixed
+providers and their consumers. Offline validation passed:19 focused provider tests,
+2 SocialFetch, 9 credit-pricing, 6 catalog-selection, the embedded-directory test and
+all 37 provider definitions. Final exact-SHA review is pending. Source-matched
+CogC/CycC review found no advisory regressions; actual thirteen-capture inventories
+show no removed or renamed existing tools. HireScrape has no full local input,
+so only its explicitly synthetic boundary regression is claimed.
+It removes the obsolete company_claw402 operation-list clearing workaround while
+preserving the listener’s explicit four RootData tools; deliberate recommendation
+adoption remains C4.1. The operator wants
 provider defaults to expose supported functionality and newly arriving supported
 tools, rather than silently impose a maintainer's recommended subset. Separate
 recommendations from compatibility filtering, use recommendations explicitly in

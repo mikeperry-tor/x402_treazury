@@ -3,9 +3,10 @@ spec = "https://www.socialfetch.dev/openapi.json"
 name = "SocialFetch"
 base_url = "https://api.socialfetch.dev"
 prefix = "socialfetch"
+exclude_operations = ["GET /v1/monitors", "POST /v1/monitors"]
+exclude = ["/v1/whoami", "/v1/balance", "/v1/monitors/{id}", "/v1/webhook-endpoints", "/v1/webhook-deliveries"]
 include = ["/v1", ""]
-exclude = ["/v1/whoami", "/v1/balance", "/v1/ask", "/v1/monitors", "/v1/webhook-endpoints", "/v1/webhook-deliveries"]
-exclude_tags = ["Auth", "Monitors", "System"]
+exclude_tags = ["Auth"]
 pricing_key = "x-socialfetch-credits-pricing"
 probe_pricing = false
 # API-origin catalog/help ignored byte ranges in the 2026-10-16 probe; HTTP/2

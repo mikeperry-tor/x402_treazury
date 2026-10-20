@@ -15,6 +15,7 @@ pub fn tool(path: &str) -> &'static ToolSpec {
             let mut config: Config = toml::from_str(include_str!("../../providers/x402-list.toml"))
                 .expect("bundled directory provider is valid");
             config.help_url = None;
+            config.recommended_tools.clear();
             config.include_operations = vec![
                 "GET /services".into(),
                 "GET /best".into(),

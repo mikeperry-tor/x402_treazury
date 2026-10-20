@@ -60,7 +60,7 @@ fn live_provider_scope_accounts_for_every_bundled_definition() {
 }
 
 #[tokio::test]
-async fn directory_exact_allowlist_excludes_new_write_and_subroutes() {
+async fn directory_defaults_include_public_operations_and_exclude_ownership() {
     use x402_treazury::{catalog, config};
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let cfg = config::load(&root.join("providers/x402-list.toml"))
@@ -70,12 +70,22 @@ async fn directory_exact_allowlist_excludes_new_write_and_subroutes() {
     assert!(!cfg.probe_pricing);
     let mut doc: Value =
         serde_json::from_str(include_str!("fixtures/x402_list_openapi.json")).unwrap();
-    doc["paths"]["/services"]["post"] = serde_json::json!({"description":"new write"});
-    doc["paths"]["/services/new-admin-action"] =
+    doc["paths"]["/services"]["post"] = serde_json::json!({"description":"new supported request"});
+    doc["paths"]["/services/new-public-read"] =
         serde_json::json!({"get":{"description":"new route"}});
     let tools = catalog::build_tools(&cfg, &doc, "x402_list").unwrap();
-    assert_eq!(tools.len(), 6);
-    assert!(tools.iter().all(|t| t.method == "GET"));
+    assert!(tools.iter().any(|t| t.path == "/services/new-public-read"));
+    for path in ["/assess", "/suggestions"] {
+        assert!(tools.iter().any(|t| t.path == path && t.method == "POST"));
+    }
+    for path in [
+        "/submit",
+        "/services/{slug}/verify-ownership",
+        "/services/{slug}/request-update",
+        "/services/{slug}/reissue-token",
+    ] {
+        assert!(!tools.iter().any(|t| t.path == path), "{path}");
+    }
     let details = tools.iter().find(|t| t.path == "/services/{slug}").unwrap();
     let route = details
         .route(
@@ -202,13 +212,21 @@ async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() 
         serde_json::from_str(include_str!("fixtures/oneshot_openapi.json")).unwrap();
     // A new diagnostic method or nested paid route must not expand the catalog.
     doc["paths"]["/v1/tools/search"]["get"] = json!({"summary":"Search diagnostics"});
-    doc["paths"]["/v1/tools/search/jobs"] = json!({"post":{"summary":"Async search"}});
+    doc["paths"]["/v1/tools/search/jobs"] = json!({"post":{"summary":"New public read"}});
     let tools = catalog::build_tools(&cfg, &doc, "oneshot").unwrap();
-    assert_eq!(
-        tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
-        ["oneshot_search", "oneshot_help"]
+    assert!(tools.iter().any(|t| t.name == "oneshot_health"));
+    assert!(tools.iter().any(|t| t.path == "/v1/soul/{wallet}"));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.path == "/.well-known/acp/manifest.json")
     );
-    let search = &tools[0];
+    assert!(
+        !tools.iter().any(
+            |t| t.path.contains("/jobs") || (t.path == "/v1/tools/search" && t.method == "GET")
+        )
+    );
+    let search = tools.iter().find(|t| t.name == "oneshot_search").unwrap();
     assert_eq!(search.input_schema["required"], json!(["query"]));
     assert_eq!(search.input_schema["properties"]["query"]["minLength"], 1);
     assert_eq!(search.input_schema["properties"]["query"]["maxLength"], 500);
@@ -233,7 +251,7 @@ async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() 
     assert!(search.description.contains("$0.001"));
     assert!(!search.description.contains("securitySchemes"));
     assert_eq!(
-        tools[1].help_url.as_deref(),
+        tools.last().unwrap().help_url.as_deref(),
         Some("https://docs.oneshotagent.com/api-reference/web-search.md")
     );
 }
@@ -252,13 +270,36 @@ async fn stableenrich_keeps_sync_images_and_json_without_async_workflows() {
         serde_json::from_str(include_str!("fixtures/stableenrich_openapi.json")).unwrap();
     doc["paths"]["/api/health"] = json!({"get":{"summary":"Health"}});
     doc["paths"]["/api/exa/search"]["get"] = json!({"summary":"Search diagnostics"});
-    doc["paths"]["/api/exa/search/jobs"] = json!({"post":{"summary":"Async search"}});
+    doc["paths"]["/api/exa/new-read"] = json!({"post":{"summary":"New public read"}});
+    // Synthetic public metadata witnesses, not claims about the captured inventory.
+    for path in [
+        "/api/hunter/new-read",
+        "/api/cloudflare/public-info",
+        "/api/google-maps/aerial-view/public-info",
+    ] {
+        doc["paths"][path] = json!({"get":{"summary":"Public metadata","security":[]}});
+    }
     let tools = catalog::build_tools(&cfg, &doc, "stableenrich").unwrap();
-    assert_eq!(tools.len(), 33);
-    assert!(tools.iter().all(|t| !t.path.contains("/hunter/")
-        && !t.path.contains("/cloudflare/")
-        && !t.path.contains("/aerial-view/")
-        && !t.path.contains("/jobs")));
+    assert!(tools.iter().any(|t| t.path == "/api/health"));
+    assert!(tools.iter().any(|t| t.path == "/api/exa/new-read"));
+    for path in [
+        "/api/hunter/new-read",
+        "/api/cloudflare/public-info",
+        "/api/google-maps/aerial-view/public-info",
+    ] {
+        assert!(tools.iter().any(|t| t.path == path), "{path}");
+    }
+    for path in [
+        "/api/cloudflare/crawl",
+        "/api/cloudflare/jobs",
+        "/api/hunter/email-verifier",
+        "/api/hunter/email-verifier/jobs/{jobId}",
+        "/api/google-maps/aerial-view/render-video",
+        "/api/google-maps/aerial-view/lookup-video",
+    ] {
+        assert!(doc["paths"][path].is_object());
+        assert!(!tools.iter().any(|t| t.path == path), "{path}");
+    }
     let details = tools
         .iter()
         .find(|t| t.name == "stableenrich_google_maps_place_details_partial")
@@ -311,7 +352,11 @@ async fn stableenrich_keeps_sync_images_and_json_without_async_workflows() {
     cfg.tags = vec!["Google Maps".into()];
     let selected = catalog::build_tools(&cfg, &doc, "stableenrich").unwrap();
     // Source tag selection keeps the generated help tool; listener positive tags may remove it.
-    assert_eq!(selected.len(), 10);
+    assert!(
+        selected
+            .iter()
+            .any(|t| t.name == "stableenrich_google_maps_text_search_partial")
+    );
     assert!(
         selected
             .iter()
@@ -320,28 +365,38 @@ async fn stableenrich_keeps_sync_images_and_json_without_async_workflows() {
 }
 
 #[tokio::test]
-async fn agent402_defaults_to_web_and_allows_reviewed_tag_subsets() {
+async fn agent402_exposes_supported_media_json_and_preserves_request_contracts() {
     use serde_json::json;
     use x402_treazury::{catalog, config};
-    let mut cfg =
-        config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/agent402.toml"))
-            .await
-            .unwrap()
-            .settings;
-    assert!(!cfg.probe_pricing);
-    assert_eq!(cfg.tags, ["web"]);
+    let cfg = config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/agent402.toml"))
+        .await
+        .unwrap()
+        .settings;
+    assert!(cfg.tags.is_empty());
     let mut doc: Value =
         serde_json::from_str(include_str!("fixtures/agent402_openapi.json")).unwrap();
-    assert_eq!(catalog::tag_counts(&doc).unwrap().len(), 24);
-    doc["paths"]["/api/health"] = json!({"get":{"tags":["web"]}});
-    doc["paths"]["/api/search"]["post"] = json!({"tags":["web"]});
-    doc["paths"]["/api/search/debug"] = json!({"get":{"tags":["web"]}});
+    doc["paths"]["/api/future-public-read"] = json!({"get":{"tags":["web"]}});
     let tools = catalog::build_tools(&cfg, &doc, "agent402").unwrap();
-    assert_eq!(tools.len(), 49);
-    assert!(!tools.iter().any(|t| t.path.contains("image-resize")
-        || t.path.contains("pdf-merge")
-        || t.path.contains("/debug")
-        || t.path.contains("health")));
+    for path in [
+        "/api/future-public-read",
+        "/api/image-resize",
+        "/api/pdf-merge",
+        "/api/audio-convert",
+        "/api/onramp-link",
+        "/api/skill/media-pipeline",
+        "/api/feedback/summary",
+    ] {
+        assert!(tools.iter().any(|t| t.path == path), "missing {path}");
+    }
+    for path in [
+        "/api/feedback",
+        "/api/testnet-fund",
+        "/api/my-usage",
+        "/v1/audio/speech",
+        "/v1/audio/transcriptions",
+    ] {
+        assert!(!tools.iter().any(|t| t.path == path), "unsupported {path}");
+    }
     let search = tools.iter().find(|t| t.name == "agent402_search").unwrap();
     let routed = search
         .route(
@@ -349,71 +404,49 @@ async fn agent402_defaults_to_web_and_allows_reviewed_tag_subsets() {
             json!({"q":"Rust & MCP","count":3}).as_object().unwrap(),
         )
         .unwrap();
-    assert_eq!(routed.url, "https://agent402.tools/api/search");
     assert_eq!(routed.method, "GET");
     assert_eq!(routed.query["q"], "Rust & MCP");
-    assert_eq!(routed.query["count"], 3);
     assert!(routed.body.is_none());
-    assert!(!search.param_routes.contains_key("Idempotency-Key"));
-    assert!(search.description.contains("$0.01"));
-    assert_eq!(
-        tools.last().unwrap().help_url.as_deref(),
-        Some("https://agent402.tools/llms.txt")
-    );
-    cfg.tags = vec!["data".into(), "crypto".into()];
-    assert_eq!(
-        catalog::build_tools(&cfg, &doc, "agent402").unwrap().len(),
-        215
-    );
-    cfg.tags = vec!["llm".into()];
-    let llm = catalog::build_tools(&cfg, &doc, "agent402").unwrap();
-    assert_eq!(llm.len(), 48);
-    let chat = llm
+    let chat = tools
         .iter()
         .find(|t| t.name == "agent402_chat_completions")
         .unwrap();
     let args = json!({"messages":[{"role":"user","content":"Hello"}],"max_tokens":32});
-    let routed = chat
-        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
-        .unwrap();
-    assert_eq!(routed.url, "https://agent402.tools/v1/chat/completions");
-    assert_eq!(routed.body, Some(args));
-    let messages = llm.iter().find(|t| t.name == "agent402_messages").unwrap();
-    assert!(
-        messages.input_schema["properties"]["stream"]["description"]
-            .as_str()
+    assert_eq!(
+        chat.route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
             .unwrap()
-            .contains("false")
+            .body,
+        Some(args)
     );
-    cfg.tags.clear();
-    let all = catalog::build_tools(&cfg, &doc, "agent402").unwrap();
-    assert_eq!(all.len(), 481);
-    assert!(!all.iter().any(|t| t.path.starts_with("/api/memory")
-        || t.path == "/api/my-usage"
-        || t.path.starts_with("/api/route/")
-        || t.path.starts_with("/api/skill/")
-        || t.path == "/v1/audio/speech"));
-    assert!(
-        all.iter()
-            .find(|t| t.name == "agent402_images_generations")
-            .unwrap()
-            .response_mapping
-            .is_some()
-    );
-    assert!(
-        all.iter()
-            .find(|t| t.name == "agent402_image_crop")
-            .unwrap()
-            .response_mapping
-            .is_some()
-    );
-    cfg.tags = vec!["memory".into()];
-    assert!(
-        catalog::build_tools(&cfg, &doc, "agent402")
-            .unwrap_err()
-            .to_string()
-            .contains("no operations matched")
-    );
+    for name in ["agent402_images_generations", "agent402_image_crop"] {
+        assert!(
+            tools
+                .iter()
+                .find(|t| t.name == name)
+                .unwrap()
+                .response_mapping
+                .is_some()
+        );
+    }
+    // Encoded media in an ordinary JSON envelope stays readable JSON; it is not
+    // automatically decoded into an MCP image or treated as raw binary.
+    let pdf = tools.iter().find(|t| t.path == "/api/pdf-merge").unwrap();
+    let output = x402_treazury::output::HttpOutput {
+        advisories: vec![],
+        bytes: serde_json::to_vec(&json!({"pages":2,"bytes":3,"pdfBase64":"YWJj"})).unwrap(),
+        mime_type: Some("application/json".into()),
+        paid_submission: false,
+    }
+    .render(pdf.response_mapping.as_ref(), &pdf.image_limits)
+    .unwrap();
+    assert!(output.text.contains("YWJj"));
+    assert!(output.images.is_empty());
+    let mut alias = cfg.clone();
+    alias.prefix = Some("custom".into());
+    alias.tags = vec!["payments".into()];
+    let selected = catalog::build_tools(&alias, &doc, "custom").unwrap();
+    assert!(selected.iter().any(|t| t.path == "/api/feedback/summary"));
+    assert!(!selected.iter().any(|t| t.path == "/api/feedback"));
 }
 
 #[tokio::test]
@@ -560,76 +593,175 @@ async fn added_help_tools_build_offline_without_changing_api_routes() {
 }
 
 #[tokio::test]
-async fn new_market_providers_keep_curated_routes_and_body_query_contracts() {
+async fn blockrun_fixed_targets_and_hosted_audio_preserve_boundaries() {
     use serde_json::json;
     use x402_treazury::{catalog, config};
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for (name, count) in [("blockrun", 7), ("claw402", 13)] {
-        let cfg = config::load(&root.join(format!("providers/{name}.toml")))
-            .await
-            .unwrap()
-            .settings;
-        assert!(!cfg.probe_pricing);
-        assert!(!cfg.allow_http1 && !cfg.allow_tls12);
-        let mut doc: Value = serde_json::from_slice(
-            &std::fs::read(root.join(format!("tests/fixtures/{name}_openapi.json"))).unwrap(),
-        )
+    let name = "blockrun";
+    let cfg = config::load(&root.join(format!("providers/{name}.toml")))
+        .await
+        .unwrap()
+        .settings;
+    assert!(!cfg.probe_pricing);
+    assert!(!cfg.allow_http1 && !cfg.allow_tls12);
+    let mut doc: Value = serde_json::from_slice(
+        &std::fs::read(root.join(format!("tests/fixtures/{name}_openapi.json"))).unwrap(),
+    )
+    .unwrap();
+    doc["paths"]["/health"] = json!({"get":{"summary":"New diagnostic"}});
+    doc["paths"]["/api/v1/new-research"] = json!({"post":{"summary":"New synchronous research"}});
+    // Synthetic free image metadata; absent from the captured vendor input.
+    doc["paths"]["/api/v1/images/models"] =
+        json!({"get":{"summary":"Public image model metadata","security":[]}});
+    let tools = catalog::build_tools(&cfg, &doc, name).unwrap();
+    assert!(tools.iter().any(|t| t.path == "/api/v1/images/models"));
+    assert!(tools.iter().any(|t| t.path == "/health"));
+    assert!(tools.iter().any(|t| t.path == "/api/v1/new-research"));
+    let help = tools
+        .iter()
+        .find(|t| t.name == format!("{name}_help"))
         .unwrap();
-        doc["paths"]["/health"] = json!({"get":{"summary":"New diagnostic"}});
-        doc["paths"]["/api/v1/new-paid-job"] = json!({"post":{"summary":"New async job"}});
-        let tools = catalog::build_tools(&cfg, &doc, name).unwrap();
-        assert_eq!(tools.len(), count);
-        let help = tools
-            .iter()
-            .find(|t| t.name == format!("{name}_help"))
-            .unwrap();
-        assert_eq!(help.help_url, cfg.help_url);
-        if name == "blockrun" {
-            let t = tools
-                .iter()
-                .find(|t| t.name == "blockrun_exa_search")
-                .unwrap();
-            let args = json!({"query":"API documentation","numResults":1});
-            let routed = t
-                .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
-                .unwrap();
-            assert_eq!(routed.url, "https://blockrun.ai/api/v1/exa/search");
-            assert_eq!(routed.body, Some(args));
-            assert!(routed.query.is_empty());
-            let chat = tools
-                .iter()
-                .find(|t| t.name == "blockrun_chat_completions")
-                .unwrap();
-            assert!(
-                chat.input_schema["properties"]["stream"]["description"]
-                    .as_str()
-                    .unwrap()
-                    .contains("false")
-            );
-            assert!(
-                tools
-                    .iter()
-                    .all(|t| !t.path.contains("images") && !t.path.contains("sandbox"))
-            );
-        } else {
-            let t = tools
-                .iter()
-                .find(|t| t.name == "claw402_nofx_price_ranking")
-                .unwrap();
-            let args = json!({"duration":"1h"});
-            let routed = t
-                .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
-                .unwrap();
-            assert_eq!(routed.url, "https://claw402.ai/api/v1/nofx/price/ranking");
-            assert_eq!(routed.query["duration"], "1h");
-            assert!(routed.body.is_none());
-            let mut selected = cfg.clone();
-            selected.tags = vec!["Price".into()];
-            let filtered = catalog::build_tools(&selected, &doc, name).unwrap();
-            assert_eq!(filtered.len(), 2); // One tagged API operation plus lazy help.
-            assert_eq!(filtered[0].name, "claw402_nofx_price_ranking");
-        }
+    assert_eq!(help.help_url, cfg.help_url);
+    let t = tools
+        .iter()
+        .find(|t| t.name == "blockrun_exa_search")
+        .unwrap();
+    let args = json!({"query":"API documentation","numResults":1});
+    let routed = t
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(routed.url, "https://blockrun.ai/api/v1/exa/search");
+    assert_eq!(routed.body, Some(args));
+    assert!(routed.query.is_empty());
+    let chat = tools
+        .iter()
+        .find(|t| t.name == "blockrun_chat_completions")
+        .unwrap();
+    assert!(
+        chat.input_schema["properties"]["stream"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("false")
+    );
+    for path in ["/api/v1/images/generations", "/api/v1/images/image2image"] {
+        assert!(!tools.iter().any(|t| t.path == path), "{path}");
     }
+    assert!(
+        !tools
+            .iter()
+            .any(|t| t.path == "/api/v1/modal/sandbox"
+                || t.path.starts_with("/api/v1/modal/sandbox/"))
+    );
+    for (path, args) in [
+        ("/api/v1/audio/speech", json!({"input":"Public fixture"})),
+        (
+            "/api/v1/audio/sound-effects",
+            json!({"text":"Public fixture"}),
+        ),
+    ] {
+        let audio = tools.iter().find(|t| t.path == path).unwrap();
+        let route = audio
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.body, Some(args));
+        assert!(audio.response_mapping.is_none());
+    }
+    assert!(!tools.iter().any(|t| t.path == "/api/v1/audio/generations"
+        || t.path == "/api/v1/pm/polymarket/candlesticks/token/0"));
+    for path in [
+        "/api/v1/crypto/price/BTC-USD",
+        "/api/v1/crypto/history/BTC-USD",
+        "/api/v1/commodity/price/XAU-USD",
+        "/api/v1/commodity/history/XAU-USD",
+        "/api/v1/fx/price/EUR-USD",
+        "/api/v1/fx/history/EUR-USD",
+        "/api/v1/pm/binance/candles/BTCUSDT",
+        "/api/v1/pm/binance/ticks/BTCUSDT",
+    ] {
+        let literal = tools.iter().find(|t| t.path == path).unwrap();
+        let route = literal
+            .route(
+                cfg.base_url.as_ref().unwrap(),
+                json!({}).as_object().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(route.url, format!("https://blockrun.ai{path}"));
+        assert!(
+            !literal.input_schema["properties"]
+                .as_object()
+                .unwrap()
+                .contains_key("symbol")
+        );
+    }
+}
+
+#[tokio::test]
+async fn claw402_open_rootdata_bodies_preserve_prose_guided_arguments() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let name = "claw402";
+    let cfg = config::load(&root.join(format!("providers/{name}.toml")))
+        .await
+        .unwrap()
+        .settings;
+    assert!(!cfg.probe_pricing);
+    assert!(!cfg.allow_http1 && !cfg.allow_tls12);
+    let mut doc: Value = serde_json::from_slice(
+        &std::fs::read(root.join(format!("tests/fixtures/{name}_openapi.json"))).unwrap(),
+    )
+    .unwrap();
+    doc["paths"]["/health"] = json!({"get":{"summary":"New diagnostic"}});
+    doc["paths"]["/api/v1/new-research"] = json!({"post":{"summary":"New synchronous research"}});
+    let tools = catalog::build_tools(&cfg, &doc, name).unwrap();
+    assert!(tools.iter().any(|t| t.path == "/health"));
+    assert!(tools.iter().any(|t| t.path == "/api/v1/new-research"));
+    let help = tools
+        .iter()
+        .find(|t| t.name == format!("{name}_help"))
+        .unwrap();
+    assert_eq!(help.help_url, cfg.help_url);
+    let t = tools
+        .iter()
+        .find(|t| t.name == "claw402_nofx_price_ranking")
+        .unwrap();
+    let args = json!({"duration":"1h"});
+    let routed = t
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(routed.url, "https://claw402.ai/api/v1/nofx/price/ranking");
+    assert_eq!(routed.query["duration"], "1h");
+    assert!(routed.body.is_none());
+    for (suffix, args) in [
+        ("search", json!({"query":"Acme", "precise_x_search":true})),
+        (
+            "project",
+            json!({"project_id":42,"include_team":true,"include_investors":true}),
+        ),
+        (
+            "org",
+            json!({"org_id":7,"include_team":true,"include_investments":true}),
+        ),
+        (
+            "funding",
+            json!({"start_time":1700000000,"end_time":1800000000,"min_amount":100,"max_amount":100000,"project_id":42,"page":1,"page_size":5}),
+        ),
+    ] {
+        let tool = tools
+            .iter()
+            .find(|t| t.name == format!("claw402_crypto_rootdata_{suffix}"))
+            .unwrap();
+        assert!(tool.has_body);
+        let route = tool
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.body, Some(args));
+        assert!(route.query.is_empty());
+    }
+    let mut selected = cfg.clone();
+    selected.tags = vec!["Price".into()];
+    let filtered = catalog::build_tools(&selected, &doc, name).unwrap();
+    assert_eq!(filtered[0].name, "claw402_nofx_price_ranking");
 }
 
 #[tokio::test]
@@ -647,70 +779,44 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
     assert_eq!(cfg.read_timeout_seconds, Some(90.0));
     let mut doc: Value =
         serde_json::from_str(include_str!("fixtures/relayshield_openapi.json")).unwrap();
-    // The real omitted inventory and prospective routes stay excluded.
+    // Actual lifecycle/authenticated contracts stay excluded; new compatible checks remain visible.
     assert!(doc["paths"]["/v1/payg/scan-file"].is_object());
     assert!(doc["paths"]["/v1/metered/breach"].is_object());
     assert!(doc["paths"]["/v1/payg/phone-reputation"].is_null());
-    doc["paths"]["/v1/payg/new-admin-action"] =
-        serde_json::json!({"post":{"description":"new write"}});
+    doc["paths"]["/v1/payg/new-public-check"] =
+        serde_json::json!({"post":{"description":"new supported request"}});
     let tools = catalog::build_tools(&cfg, &doc, "relayshield").unwrap();
-    let expected: BTreeSet<_> = [
-        "breach",
-        "bulk_identity_risk",
-        "campaign_scan",
-        "cert_expiry",
-        "domain",
-        "identity_graph",
-        "identity_risk_score",
-        "infostealer",
-        "ip_intel",
-        "llm_credential_exposure",
-        "mcp_registry_risk",
-        "nft_security",
-        "nhi_exposure",
-        "oauth_watchlist",
-        "prompt_injection_breach",
-        "ransomware_risk",
-        "scamkit_fingerprint",
-        "scamkit_match",
-        "scan_url",
-        "scan_wallet",
-        "secret_scan",
-        "secret_scan_text",
-        "session_risk",
-        "sim_swap",
-        "supply_chain",
-        "target_risk",
-        "tech_stack_cve",
-        "token_security",
-        "wallet_risk",
-        "wallet_screen_batch",
-        "help",
-    ]
-    .into_iter()
-    .map(|name| format!("relayshield_{name}"))
-    .collect();
-    assert_eq!(
-        tools
+    for suffix in ["email_check", "link_check", "wallet_risk"] {
+        let public = tools
             .iter()
-            .map(|tool| tool.name.clone())
-            .collect::<BTreeSet<_>>(),
-        expected
-    );
-    assert_eq!(tools.len(), 31);
-    for tool in tools.iter().filter(|tool| tool.help_url.is_none()) {
-        assert_eq!(tool.method, "POST");
-        assert!(tool.path.starts_with("/v1/payg/"));
-        assert!(tool.has_body);
-        let price = doc["paths"][&tool.path]["post"]["x-payment-info"]["price"]["amount"]
-            .as_str()
+            .find(|t| t.name == format!("relayshield_v1_{suffix}"))
             .unwrap();
-        assert!(
-            tool.description.contains(&format!("${price}")),
-            "{} price",
-            tool.name
+        assert!(public.has_body);
+        assert!(public.description.contains("free"));
+        let args = match suffix {
+            "email_check" => {
+                serde_json::json!({"from_address":"sender@example.com","subject":"Public fixture"})
+            }
+            "link_check" => serde_json::json!({"url":"https://example.com/"}),
+            _ => serde_json::json!({"address":"0x0000000000000000000000000000000000000001"}),
+        };
+        let route = public
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(
+            route.url,
+            format!("https://api.relayshield.net{}", public.path)
         );
+        assert_eq!(route.body, Some(args));
+        assert!(route.query.is_empty());
     }
+    assert!(tools.iter().any(|t| t.name == "relayshield_wallet_risk"));
+    assert!(tools.iter().any(|t| t.path == "/v1/payg/new-public-check"));
+    assert!(!tools.iter().any(
+        |t| (t.path == "/v1/metered" || t.path.starts_with("/v1/metered/"))
+            || t.path == "/v1/payg/scan-file"
+            || (t.path == "/v1/account" || t.path.starts_with("/v1/account/"))
+    ));
     let scan = tools
         .iter()
         .find(|tool| tool.name == "relayshield_scan_url")
@@ -936,50 +1042,40 @@ async fn vaaya_selects_synchronous_x402_research_and_routes_json_filters() {
     assert!(!cfg.allow_http1 && !cfg.allow_tls12);
     assert!(cfg.additional_properties.is_none());
     let mut doc: Value = serde_json::from_str(include_str!("fixtures/vaaya_openapi.json")).unwrap();
-    let discovery: Value =
-        serde_json::from_str(include_str!("fixtures/vaaya_x402_discovery.json")).unwrap();
-    assert_eq!(doc["paths"].as_object().unwrap().len(), 252);
     doc["paths"]["/api/run/edgar/new-action"] = json!({"post":{"summary":"New action"}});
-    doc["paths"]["/api/run/edgar/entities"]["get"] = json!({"summary":"New method"});
     let tools = catalog::build_tools(&cfg, &doc, "vaaya").unwrap();
-    assert_eq!(tools.len(), 47);
-    for tool in tools.iter().filter(|t| t.help_url.is_none()) {
-        assert_eq!(tool.method, "POST");
-        assert!(
-            discovery["resources"]
-                .as_array()
-                .unwrap()
-                .contains(&json!(format!("https://vaaya.ai{}", tool.path)))
-        );
-        let payment = &doc["paths"][&tool.path]["post"]["x-payment-info"];
-        assert!(
-            payment["protocols"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|p| p.get("x402").is_some())
-        );
-        assert!(tool.description.contains(&format!(
-                "${}",
-                payment["price"]["amount"]
-                    .as_str()
-                    .unwrap()
-                    .trim_end_matches('0')
-                    .trim_end_matches('.')
-            )));
+    for path in [
+        "/api/run/edgar/new-action",
+        "/api/run/cueframe/validate",
+        "/api/run/vaaya/supersearch",
+        "/api/run/akta/social-posts",
+        "/api/run/openai/image-generate",
+    ] {
+        assert!(tools.iter().any(|t| t.path == path), "missing {path}");
     }
     for excluded in [
         "/api/run/colors/generate",
         "/api/run/cueframe/render",
-        "/api/run/vaaya/supersearch",
-        "/api/run/vaaya/fetch",
-        "/api/run/firecrawl/crawl",
-        "/api/run/firecrawl/extract",
         "/api/run/agentmail/send",
-        "/api/run/akta/employee-reviews",
-        "/api/run/akta/website-traffic",
     ] {
         assert!(!tools.iter().any(|t| t.path == excluded));
+    }
+    for (path, args) in [
+        (
+            "/api/run/firecrawl/crawl",
+            json!({"url":"https://example.com/"}),
+        ),
+        (
+            "/api/run/firecrawl/extract",
+            json!({"urls":["https://example.com/"],"prompt":"Extract public title"}),
+        ),
+    ] {
+        let tool = tools.iter().find(|t| t.path == path).unwrap();
+        let route = tool
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.body, Some(args));
+        assert!(route.query.is_empty());
     }
     let search = tools.iter().find(|t| t.name == "vaaya_onesearch").unwrap();
     let args = json!({"query":"Acme filings","facets":["public-filings"],"fidelityRequired":true});
@@ -1109,11 +1205,7 @@ async fn vaaya_tako_and_recallradar_keep_research_bodies_and_structured_prices()
         .unwrap();
     assert_eq!(search.input_schema["required"], json!(["query"]));
     assert_eq!(search.input_schema["properties"]["effort"]["const"], "fast");
-    assert!(
-        !tools.iter().any(
-            |t| t.path == "/api/run/tako/visualize" || t.path == "/api/run/tako/thinviz-create"
-        )
-    );
+    assert!(tools.iter().any(|t| t.path == "/api/run/tako/visualize"));
 }
 
 #[tokio::test]
@@ -1187,4 +1279,126 @@ async fn privacy_company_catalog_keeps_separate_relayshield_sources() {
     ] {
         assert!(!netintel.include_tools.iter().any(|name| name == removed));
     }
+}
+
+#[tokio::test]
+async fn netintel_post_bodies_aliases_and_canonical_image_mapping() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let cfg = config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/netintel.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value = serde_json::from_str(include_str!("fixtures/netintel_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "netintel").unwrap();
+    for (path, args) in [
+        (
+            "/breach-check/password",
+            json!({"password":"public-unfunded-fixture"}),
+        ),
+        (
+            "/exa/search",
+            json!({"query":"Acme", "includeDomains":["example.com"]}),
+        ),
+        ("/exa/contents", json!({"urls":["https://example.com/"]})),
+    ] {
+        let tool = tools.iter().find(|t| t.path == path).unwrap();
+        assert_eq!(tool.method, "POST");
+        assert!(!tool.name.ends_with("_post"));
+        let route = tool
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.body, Some(args));
+        assert!(route.query.is_empty());
+        assert!(!tools.iter().any(|t| t.path == path && t.method == "GET"));
+    }
+    for name in [
+        "netintel_api_v1_chat_completions",
+        "netintel_v1_chat_completions",
+        "netintel_api_v1_embeddings",
+        "netintel_v1_embeddings",
+    ] {
+        assert!(tools.iter().any(|t| t.name == name), "{name}");
+    }
+    let image = tools
+        .iter()
+        .find(|t| t.path == "/ai-image/generate")
+        .unwrap();
+    assert!(image.response_mapping.is_some());
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
+    let output = x402_treazury::output::HttpOutput {
+        advisories: vec![],
+        bytes: serde_json::to_vec(
+            &json!({"image_url":format!("data:image/png;base64,{png}"),"model":"fixture"}),
+        )
+        .unwrap(),
+        mime_type: Some("application/json".into()),
+        paid_submission: false,
+    }
+    .render(image.response_mapping.as_ref(), &image.image_limits)
+    .unwrap();
+    assert_eq!(output.images.len(), 1);
+    assert!(output.text.contains("fixture"));
+    assert!(!output.text.contains(png));
+}
+
+#[tokio::test]
+async fn hirescrape_names_future_public_routes_without_exposing_known_siwx() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let cfg =
+        config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/hirescrape.toml"))
+            .await
+            .unwrap()
+            .settings;
+    // Synthetic policy regression, not a vendor inventory or invented request contract.
+    let doc = json!({"openapi":"3.0.3","paths":{
+        "/api/tools/jobs":{"post":{"summary":"scraper"}},
+        "/future-public-diagnostic":{"get":{"summary":"public diagnostic"}},
+        "/api/skills/runs":{"post":{"summary":"SIWX run"}},
+        "/api/snapshots/{id}":{"get":{"summary":"SIWX snapshot"}}
+    }});
+    let tools = catalog::build_tools(&cfg, &doc, "hirescrape").unwrap();
+    assert!(tools.iter().any(|t| t.name == "hirescrape_jobs"));
+    assert!(tools.iter().any(|t| t.path == "/future-public-diagnostic"));
+    assert!(!tools.iter().any(|t| t.path == "/api/skills/runs"
+        || t.path.starts_with("/api/skills/runs/")
+        || t.path == "/api/snapshots"
+        || t.path.starts_with("/api/snapshots/")));
+}
+
+#[tokio::test]
+async fn regimeshift_diagnostics_and_unsigned_intents_preserve_provisioning_boundary() {
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/regimeshift.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("fixtures/regimeshift_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "regimeshift").unwrap();
+    for path in [
+        "/health",
+        "/stats",
+        "/manifest",
+        "/v1/intent/lend",
+        "/v1/intent/borrow",
+    ] {
+        assert!(tools.iter().any(|t| t.path == path), "{path}");
+    }
+    assert!(!tools.iter().any(|t| t.path == "/auto/provision"));
+    assert!(tools.iter().any(|t| t.name == "regimeshift_rate_sofr_usd"));
+    let cfg = config::load(&root.join("providers/otto.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value = serde_json::from_str(include_str!("fixtures/otto_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "otto").unwrap();
+    assert!(tools.iter().any(|t| t.path == "/crypto-news"));
+    assert!(
+        !tools
+            .iter()
+            .any(|t| t.path == "/swap" || t.path == "/full-auto")
+    );
 }

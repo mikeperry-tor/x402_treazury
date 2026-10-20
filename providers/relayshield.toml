@@ -1,68 +1,13 @@
-# RelayShield — Threat, Breach & Identity Intelligence (https://api.relayshield.net)
-#
-# Usage:
-#   x402_treazury serve --provider providers/relayshield.toml
-#
-# Thirty x402 pay-per-call threat-intelligence POST endpoints under `/v1/payg/*`
-# ($0.05-$5.50 USDC on Base): email breach/infostealer/session/OAuth/identity-graph
-# exposure, real-time carrier SIM-swap detection, domain lookalike/ransomware/CVE/
-# secret/NHI/LLM-key/supply-chain risk, passive DNS/IP reputation, phishing-kit
-# fingerprinting, URL heuristics, and multi-chain wallet/token/NFT security screening.
-#
-# `include = ["/v1/payg"]` strips the `/v1/payg` path prefix from tool names
-# (`relayshield_breach`, `relayshield_sim_swap`, `relayshield_supply_chain`, etc.)
-# while keeping `/v1/payg/...` on the wire.
-#
-# Excluded routes:
-# - `/v1/metered/*`, `/v1/account/info`, `/v1/siem/configure`, and
-#   `/v1/webhook/configure`: API-key/Stripe-billed and account-administration routes
-#   without `x-payment-info`.
-# - `/v1/email-check`, `/v1/link-check`, and `/v1/wallet-risk`: unpriced teaser
-#   endpoints outside `/v1/payg` (`/v1/wallet-risk` also collides with
-#   `/v1/payg/wallet-risk`).
-# - `POST /v1/payg/scan-file`: submits a file URL for asynchronous VirusTotal
-#   scanning and returns only an `analysis_id` to poll, while
-#   `GET /v1/payg/result/{analysis_id}` is omitted from `openapi.json` and Treazury
-#   does not run async job-polling workflows.
-
+# x402 payg and three public keyless checks; metered/account ownership and file jobs excluded.
+# /v1/payg shortens paid names; the root fallback retains distinct v1_* public names.
 spec = "https://api.relayshield.net/openapi.json"
 name = "RelayShield"
 base_url = "https://api.relayshield.net"
 prefix = "relayshield"
+recommended_tools = ["relayshield_breach", "relayshield_ip_intel", "relayshield_supply_chain", "relayshield_wallet_risk", "relayshield_scan_url", "relayshield_help"]
+exclude = ["/v1/metered", "/v1/account", "/v1/siem", "/v1/webhook", "/v1/payg/scan-file"]
 
-include = ["/v1/payg"]
-include_operations = [
-    "POST /v1/payg/breach",
-    "POST /v1/payg/bulk-identity-risk",
-    "POST /v1/payg/campaign-scan",
-    "POST /v1/payg/cert-expiry",
-    "POST /v1/payg/domain",
-    "POST /v1/payg/identity-graph",
-    "POST /v1/payg/identity-risk-score",
-    "POST /v1/payg/infostealer",
-    "POST /v1/payg/ip-intel",
-    "POST /v1/payg/llm-credential-exposure",
-    "POST /v1/payg/mcp-registry-risk",
-    "POST /v1/payg/nft-security",
-    "POST /v1/payg/nhi-exposure",
-    "POST /v1/payg/oauth-watchlist",
-    "POST /v1/payg/prompt-injection-breach",
-    "POST /v1/payg/ransomware-risk",
-    "POST /v1/payg/scamkit-fingerprint",
-    "POST /v1/payg/scamkit-match",
-    "POST /v1/payg/scan-url",
-    "POST /v1/payg/scan-wallet",
-    "POST /v1/payg/secret-scan",
-    "POST /v1/payg/secret-scan-text",
-    "POST /v1/payg/session-risk",
-    "POST /v1/payg/sim-swap",
-    "POST /v1/payg/supply-chain",
-    "POST /v1/payg/target-risk",
-    "POST /v1/payg/tech-stack-cve",
-    "POST /v1/payg/token-security",
-    "POST /v1/payg/wallet-risk",
-    "POST /v1/payg/wallet-screen-batch",
-]
+include = ["/v1/payg", ""]
 
 pricing_key = "x-payment-info"
 probe_pricing = false
@@ -73,7 +18,7 @@ help_url = "https://api.relayshield.net/llms.txt"
 
 instructions_text = """
 RelayShield x402 threat, breach, and identity intelligence ($0.05-$5.50 USDC per call on Base):
-- Only the stateless `/v1/payg/*` x402 endpoints in the vendor's `openapi.json` are exposed here (`relayshield_*`). `POST /v1/payg/phone-reputation` ($0.05/call; omitted from the vendor's `openapi.json`) is available via the companion `providers/relayshield/phone-reputation.toml` (`relayshield_phone_reputation`). API-key `/v1/metered/*` routes, account/SIEM/webhook admin routes, unpriced `/v1/*` teaser checks, and `POST /v1/payg/scan-file` (async VirusTotal file job whose `GET /v1/payg/result/{analysis_id}` polling endpoint is absent from `openapi.json`) are excluded.
+- The stateless `/v1/payg/*` x402 endpoints and three public keyless checks are exposed here (`relayshield_*`). `POST /v1/payg/phone-reputation` ($0.05/call; omitted from the vendor's `openapi.json`) is available via the companion `providers/relayshield/phone-reputation.toml` (`relayshield_phone_reputation`). API-key `/v1/metered/*` routes, account/SIEM/webhook admin routes, `POST /v1/payg/scan-file` (async VirusTotal file job whose `GET /v1/payg/result/{analysis_id}` polling endpoint is absent from `openapi.json`) are excluded.
 - Several `/v1/payg/*` schemas omit `required` in `openapi.json` because they accept alternative inputs: supply `domain` or `ip` on `relayshield_ip_intel`; `vendor_domains` or `vendor_emails` on `relayshield_supply_chain`; `content` or `diff` on `relayshield_secret_scan_text`; `tech_stack` on `relayshield_tech_stack_cve` (`domain` references a stored account profile unavailable on stateless calls); `domain` (and/or `vendor_domains`) on `relayshield_secret_scan`, `relayshield_llm_credential_exposure`, and `relayshield_nhi_exposure`; `url` or `html` for kit fingerprinting, or `kind="malware"` with `signals` on `relayshield_scamkit_fingerprint`; and at least one indicator array on `relayshield_campaign_scan`.
 - `relayshield_bulk_identity_risk` ($2.00) and `relayshield_campaign_scan` ($5.50) exceed the default $1.00 per-call payment cap and require a higher `--max-payment` setting.
 - Call `relayshield_help` for the vendor's `llms.txt` reference (note that `llms.txt` lists `/v1/metered/*` paths and includes metered-only endpoints not present under `/v1/payg/*`).
@@ -110,3 +55,12 @@ domain = "Primary root domain to check for exposed machine/CI-CD credentials in 
 [overrides.relayshield_scan_url]
 description = "Scan a URL (`http://` or `https://`) for phishing or malware using synchronous heuristic signals (Google Safe Browsing, RDAP domain age, and RelayShield IOC corpus `malware_families` attribution). Also returns a VirusTotal `analysis_id`, which cannot be polled through this catalog because `GET /v1/payg/result/{analysis_id}` is omitted from `openapi.json`. Cost: ~$0.05/call [spec]."
 
+
+[overrides.relayshield_v1_email_check]
+description = "Keyless and free. The same scoring model as checkemail@relayshield.net, for a caller that has already parsed a message -- an agent reading a mailbox through the Gmail or Graph API -- rather than a raw RFC822 blob. Scores SPF/DKIM/DMARC, brand impersonation in the display name, ask-plus-pressure phrasing, links to public file-hosting services, and attachment names by extension. Links are checked through the same keyless path as `/v1/link-check`, never `/v1/scan-url`, so this endpoint has no per-call vendor cost.\n\nThis does not parse raw email. Extract from_address, from_name, subject, body_text, links and attachment_names yourself before calling.\n\n**Billing.** Free. This endpoint is not metered.\n\n**Note.** No API key required. checkemail@relayshield.net runs the same model over raw forwarded mail; this is a second door for a caller that has already parsed one. Free — no payment required (vendor contract)."
+
+[overrides.relayshield_v1_link_check]
+description = "Keyless and free. Returns the three signals that are immediate and carry no vendor cost: RelayShield's criminal IOC corpus, Google Safe Browsing, and domain registration age. Send `url` for one link, or `urls` for up to 25 at once -- the batch form deduplicates by domain and resolves the whole set in a single Safe Browsing request, so screening a mailbox costs one call rather than one per link.\n\nIt never answers `safe`. The best available verdict is `unknown`, meaning nothing is known against the domain, because an absence of evidence is not evidence of absence. Unauthenticated callers share a per-IP daily allowance and a batch counts once per URL; send an API key to lift it.\n\n**Billing.** Free. This endpoint is not metered.\n\n**Note.** No API key required. A key is still accepted and removes the per-IP daily allowance, which is what an integration serving many users should send. Free — no payment required (vendor contract)."
+
+[overrides.relayshield_v1_wallet_risk]
+description = "Keyless and free. Detects the chain from the address and screens it against sanctions and abuse sources. Answers the question a person actually has before paying an address they were given, rather than after.\n\n**Billing.** Free. This endpoint is not metered.\n\n**Note.** No API key required, on the same terms as /v1/link-check. Free — no payment required (vendor contract)."

@@ -220,7 +220,11 @@ without cover; `drain_direct_payments` waits for accepted signing and dispatch.
 rendering happens later and cannot retry payment.
 
 `src/output.rs` preserves response bytes and MIME, handles ordinary text/JSON,
-small supported inline images and configured base64/data-URI mappings. A bounded
+small supported inline images and configured base64/data-URI mappings. Encoded
+media inside ordinary JSON remains text/metadata unless an explicit response
+mapping extracts it; no automatic base64 decoding or asset fetch occurs.
+Unsupported raw MIME types and multipart request uploads remain separate
+transport boundaries. A bounded
 or unsupported response produces explicit evidence, never a silently truncated
 success. Typed results flow through `PaidClient::execute_response`,
 `BoundTool::invoke_output` and `Server::invoke_output`, including dynamic fallback.

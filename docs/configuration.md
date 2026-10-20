@@ -724,9 +724,11 @@ not advertise list-change notifications. Imports require public HTTPS, use the s
 direct/Tor network factory, and never run pricing sweeps. Persistent registrations
 use a separate owner-only SQLite registry; they do not require a wallet encryption key.
 
-`providers/x402-list.toml` supplies five curated read-only directory tools. Directory
-reads may become paid after a shared-IP quota; ordinary spend caps apply. Its exact
-`include_operations` allowlist prevents new upstream write routes from appearing.
+`providers/x402-list.toml` exposes the supported public directory catalog with
+advisory research recommendations. Directory reads may become paid after a
+shared-IP quota; ordinary spend caps apply. Specific owner-token workflows and
+an unrepresentable submission schema are excluded. The embedded directory keeps
+its separate intentional three-read contract.
 Directory results are leads, not automatically imported schemas.
 
 See [agent source management](agent-sources.md) for the complete configuration,

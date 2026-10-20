@@ -48,15 +48,14 @@ selected request schema is unchanged; no OneShot-specific schema repair is neede
 
 The StableEnrich fixture was captured from `https://stableenrich.dev/openapi.json`
 on 2026-10-03 using `snapshot_spec`. All 38 operations are retained to verify the
-32-operation allowlist, omitted async workflows, tag selection and request
+specific lifecycle exclusions, tag selection and request
 routing. The additional help tool reads the vendor's unified `llms.txt` lazily.
 
 The Agent402 fixture was captured from `https://agent402.tools/openapi.json` on
 2026-10-03 using `snapshot_spec`. It retains all 607 operations and 24 tags while
-omitting response documentation. The default golden contract contains 48 web
-operations plus help. Targeted tests also exercise all 480 eligible operations,
-data/crypto and LLM selections, known exclusions, prospective diagnostics, query
-routing, nested gateway JSON and streaming guidance.
+omitting response documentation. Focused tests exercise supported JSON/base64 media, exact feedback parent exclusions
+with public child preservation, query routing, nested gateway bodies and existing
+image mappings. Full-inventory snapshots are not compatibility contracts.
 
 The AgentUtility catalog lives at `providers/agentutility/openapi.json`, captured on
 2026-10-03 from the API-host OpenAPI plus documentation-host registry. The Rust
@@ -103,9 +102,8 @@ vendor OpenAPI's concrete example ticker/token paths.
 
 The Vaaya fixture preserves all 252 paths from the live vendor OpenAPI,
 omitting response documentation via `snapshot_spec`. The companion discovery fixture
-contains 249 distinct x402 actions; the default golden pins 46 synchronous
-research calls plus help. Tests check discovery membership, x402 pricing,
-exclusions, JSON body filters and regex escaping. These fixtures do not qualify
+contains 249 distinct x402 actions. Focused tests check support boundaries,
+restored public research and JSON contracts, body filters and regex escaping. These fixtures do not qualify
 current availability, paid settlement or Tor access. See provider caveats for
 schema/prose gaps and data limitations.
 
@@ -115,3 +113,11 @@ open, property-free input schema while sending its documented `q` in the JSON
 body, and verifies all five routes and structured estimates despite lower prices
 in vendor prose. The company deployment selects these and focused company/public
 record tools, inheriting its existing wallet and cap.
+
+The NetIntel fixture is a faithful eight-path primary-schema subset for three
+POST-preferred pairs (URL secrets and JSON arrays), compatible chat/embedding
+aliases, and the canonical image mapping. It retains complete selected request
+and response declarations and local dependencies; no live endpoint is called.
+RootData's four captured Claw402 open object bodies verify prose-guided JSON
+passthrough without invented required fields. HireScrape's policy test is
+explicitly synthetic because no complete local vendor capture is available.

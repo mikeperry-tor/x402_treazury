@@ -1,48 +1,16 @@
-# Reviewed synchronous JSON/image operations; async/SIWX workflows are excluded.
+# Supported JSON/image catalog; only documented async/SIWX workflows are excluded.
 spec = "https://stableenrich.dev/openapi.json"
 name = "StableEnrich"
 base_url = "https://stableenrich.dev"
 prefix = "stableenrich"
-include = ["/api"]
-include_operations = [
-  "GET /api/google-maps/place-details/full",
-  "GET /api/google-maps/place-details/partial",
-  "GET /api/google-maps/solar/building-insights",
-  "GET /api/google-maps/solar/data-layers",
-  "GET /api/google-maps/solar/rgb-image",
-  "POST /api/companyenrich/org-enrich",
-  "POST /api/companyenrich/properties-enrich",
-  "POST /api/exa/answer",
-  "POST /api/exa/contents",
-  "POST /api/exa/find-similar",
-  "POST /api/exa/search",
-  "POST /api/firecrawl/scrape",
-  "POST /api/firecrawl/search",
-  "POST /api/fullenrich/company-search",
-  "POST /api/fullenrich/people-search",
-  "POST /api/google-maps/nearby-search/full",
-  "POST /api/google-maps/nearby-search/partial",
-  "POST /api/google-maps/text-search/full",
-  "POST /api/google-maps/text-search/partial",
-  "POST /api/minerva/enrich",
-  "POST /api/minerva/resolve",
-  "POST /api/minerva/validate-emails",
-  "POST /api/pdl/people-enrich",
-  "POST /api/reddit/post-comments",
-  "POST /api/reddit/search",
-  "POST /api/serper/images",
-  "POST /api/serper/lens",
-  "POST /api/serper/news",
-  "POST /api/serper/people-image-search",
-  "POST /api/serper/shopping",
-  "POST /api/whitepages/person-search",
-  "POST /api/whitepages/property-search",
-]
+recommended_tools = ["stableenrich_exa_search", "stableenrich_exa_contents", "stableenrich_firecrawl_scrape", "stableenrich_companyenrich_org_enrich", "stableenrich_help"]
+exclude = ["/api/cloudflare/crawl", "/api/cloudflare/jobs", "/api/hunter/email-verifier", "/api/google-maps/aerial-view/render-video", "/api/google-maps/aerial-view/lookup-video"]
+include = ["/api", ""]
 pricing_key = "x-payment-info"
 probe_pricing = false
 read_timeout_seconds = 90
 help_url = "https://stableenrich.dev/llms.txt"
-instructions_text = "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. Use vendor tags to select a smaller catalog. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazury tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling; those workflows are not enabled. Solar rgb-image may return JSON asset metadata or PNG/JPEG image attachments. Asset URLs are not automatically downloaded; inline images have explicit size limits. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false."
+instructions_text = "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. The full supported catalog remains available; recommendations and vendor tags select smaller research views only on request. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazury tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling; those workflows are not enabled. Solar rgb-image may return JSON asset metadata or PNG/JPEG image attachments. Asset URLs are not automatically downloaded; inline images have explicit size limits. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false."
 
 [overrides.stableenrich_exa_search.params]
 stream = "Omit or set false. Treazury returns completed tool responses, not incremental server-sent events."

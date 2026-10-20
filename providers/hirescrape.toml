@@ -1,17 +1,10 @@
-# Synchronous first-party scraper tools; SIWX-gated snapshots, skills, reports and bounty routes are excluded.
+# Scrapers plus future supported schema arrivals; exclude the documented SIWX lifecycle paths.
 spec = "https://hirescrape.com/openapi.json"
 name = "HireScrape"
 base_url = "https://hirescrape.com"
 prefix = "hirescrape"
-include = ["/api/tools"]
-include_operations = [
-  "POST /api/tools/instagram",
-  "POST /api/tools/jobs",
-  "POST /api/tools/linkedin",
-  "POST /api/tools/tiktok",
-  "POST /api/tools/tiktok-shop",
-  "POST /api/tools/youtube",
-]
+exclude = ["/api/skills/search", "/api/skills/runs", "/api/snapshots", "/api/reports", "/api/scraper-requests"]
+include = ["/api/tools", ""]
 pricing_key = "x-payment-info"
 probe_pricing = false
 read_timeout_seconds = 120

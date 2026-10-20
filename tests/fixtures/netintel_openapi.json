@@ -1,0 +1,1530 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NetIntel API",
+    "version": "1.0.0",
+    "description": "DNS lookup, WHOIS/RDAP, SSL/TLS certificate checks, email SPF/DKIM/DMARC and deliverability, email verification, IP geolocation and IP reputation, domain age and availability, web page fetch, extract and search, and an OpenAI-compatible LLM gateway — 144 pay-per-call endpoints over x402 (USDC on Base or Solana mainnet), no API keys or signup.\n\nNetIntel is agent fair-trade aligned: transparent per-call pricing in USDC on Base or Solana via x402, no API keys or signup, and automatic no-charge on server errors, upstream failures, and input-validation rejections — failed calls are never billed across NetIntel's network, domain, and data-intelligence endpoints.",
+    "x-guidance": "NetIntel provides 144 network intelligence endpoints covering DNS, SSL/TLS, WHOIS/RDAP, email security, web fingerprinting, and OSINT. Every endpoint is pay-per-call via x402 micropayments (USDC on Base or Solana mainnet — no API keys, no subscriptions). Call any endpoint normally; if unpaid it returns HTTP 402 with payment requirements, then pay and retry. The per-call price is in each operation's x-payment-info.",
+    "contact": {
+      "email": "support@netintel.dev"
+    },
+    "x-logo": {
+      "url": "https://netintel.dev/favicon.png",
+      "altText": "NetIntel API"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://netintel.dev"
+    }
+  ],
+  "paths": {
+    "/breach-check/password": {
+      "get": {
+        "operationId": "getBreachCheckPassword",
+        "summary": "Check a password against HaveIBeenPwned breaches",
+        "tags": [
+          "breach-check"
+        ],
+        "description": "Deprecated: sends the `password` in the URL, where it can be retained by edge logs, proxies and shell history. Use POST /breach-check/password and send it in the JSON body instead. This form still works and is still supported for existing callers.\n\nCheck if a password has appeared in known data breaches using the HaveIBeenPwned Pwned Passwords API with k-anonymity — the full password is never transmitted, only a 5-character SHA-1 hash prefix — returns breach count and a risk classification so agents can enforce password policies without storing or exposing credentials.",
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "password",
+            "in": "query",
+            "required": true,
+            "description": "Password to check against known data breaches (1-500 characters; sent as a query param but only a k-anonymity SHA-1 prefix leaves the server)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.010000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.010000",
+          "outputShape": "breached, breach_count, risk_level, score, grade, findings"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "breached": {
+                      "type": "boolean"
+                    },
+                    "breach_count": {
+                      "type": "number"
+                    },
+                    "risk_level": {
+                      "type": "string"
+                    },
+                    "score": {
+                      "type": "number"
+                    },
+                    "grade": {
+                      "type": "string"
+                    },
+                    "findings": {
+                      "type": "array"
+                    }
+                  }
+                },
+                "example": {
+                  "breached": true,
+                  "breach_count": 34521,
+                  "risk_level": "critical",
+                  "score": 0,
+                  "grade": "F",
+                  "findings": [
+                    {
+                      "rule": "critical_breach",
+                      "deduction": -100,
+                      "detail": "Password found 34521 times in known data breaches"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postBreachCheckPassword",
+        "summary": "Check a password against HaveIBeenPwned breaches",
+        "tags": [
+          "breach-check"
+        ],
+        "description": "Check if a password has appeared in known data breaches using the HaveIBeenPwned Pwned Passwords API with k-anonymity — the full password is never transmitted, only a 5-character SHA-1 hash prefix — returns breach count and a risk classification so agents can enforce password policies without storing or exposing credentials.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "description": "Password to check against known data breaches (1-500 characters; sent as a query param but only a k-anonymity SHA-1 prefix leaves the server)"
+                  }
+                },
+                "required": [
+                  "password"
+                ]
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.010000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.010000",
+          "outputShape": "breached, breach_count, risk_level, score, grade, findings"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "breached": {
+                      "type": "boolean"
+                    },
+                    "breach_count": {
+                      "type": "number"
+                    },
+                    "risk_level": {
+                      "type": "string"
+                    },
+                    "score": {
+                      "type": "number"
+                    },
+                    "grade": {
+                      "type": "string"
+                    },
+                    "findings": {
+                      "type": "array"
+                    }
+                  }
+                },
+                "example": {
+                  "breached": true,
+                  "breach_count": 34521,
+                  "risk_level": "critical",
+                  "score": 0,
+                  "grade": "F",
+                  "findings": [
+                    {
+                      "rule": "critical_breach",
+                      "deduction": -100,
+                      "detail": "Password found 34521 times in known data breaches"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      }
+    },
+    "/exa/search": {
+      "get": {
+        "operationId": "getExaSearch",
+        "summary": "Exa neural web search for AI agents",
+        "tags": [
+          "exa"
+        ],
+        "description": "Exa neural web search for AI agents — POST or GET a query, get ranked live results (title, url, published_date, author, score) with optional highlight snippets. Filter by category (news, research paper, github, company, pdf, and more), domain include/exclude, and publish date. For a direct answer use /exa/answer. No API key, pay per call on Base or Solana.",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "description": "Search query, 1-1000 chars. Aliases: q, search, prompt, text",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "num_results",
+            "in": "query",
+            "required": false,
+            "description": "1-10 results (default 10); >10 clamped. Aliases: numResults, limit, n, count",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "auto (default) | neural | keyword | fast",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "description": "company | research paper | news | pdf | github | tweet | personal site | linkedin profile | financial report",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_domains",
+            "in": "query",
+            "required": false,
+            "description": "Up to 20 hostnames to restrict to",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "start_published_date",
+            "in": "query",
+            "required": false,
+            "description": "ISO 8601 date/datetime lower bound",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end_published_date",
+            "in": "query",
+            "required": false,
+            "description": "ISO 8601 date/datetime upper bound",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "snippets",
+            "in": "query",
+            "required": false,
+            "description": "none (default) | highlights | text — clamps num_results to 2",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.010000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.010000",
+          "outputShape": "query, search_type, num_results, results, provider, findings"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string"
+                    },
+                    "search_type": {
+                      "type": "string"
+                    },
+                    "num_results": {
+                      "type": "number"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "published_date": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "author": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "score": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "highlights": {
+                            "type": [
+                              "array",
+                              "null"
+                            ]
+                          },
+                          "text": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "findings": {
+                      "type": "array"
+                    }
+                  }
+                },
+                "example": {
+                  "query": "x402 payment protocol",
+                  "search_type": "neural",
+                  "num_results": 5,
+                  "results": [
+                    {
+                      "title": "x402: an open standard for internet-native payments",
+                      "url": "https://www.x402.org/",
+                      "published_date": "2026-05-12T00:00:00.000Z",
+                      "author": null,
+                      "score": 0.41,
+                      "highlights": null,
+                      "text": null
+                    },
+                    {
+                      "title": "coinbase/x402: HTTP-native micropayments protocol",
+                      "url": "https://github.com/coinbase/x402",
+                      "published_date": "2025-05-06T00:00:00.000Z",
+                      "author": null,
+                      "score": 0.38,
+                      "highlights": null,
+                      "text": null
+                    }
+                  ],
+                  "provider": "exa",
+                  "findings": []
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postExaSearch",
+        "summary": "Exa neural web search for AI agents",
+        "tags": [
+          "exa"
+        ],
+        "description": "Exa neural web search for AI agents — POST or GET a query, get ranked live results (title, url, published_date, author, score) with optional highlight snippets. Filter by category (news, research paper, github, company, pdf, and more), domain include/exclude, and publish date. For a direct answer use /exa/answer. No API key, pay per call on Base or Solana.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Search query, 1-1000 chars. Aliases: q, search, prompt, text"
+                  },
+                  "num_results": {
+                    "type": "number",
+                    "description": "1-10 results (default 10); >10 clamped. Aliases: numResults, limit, n, count"
+                  },
+                  "type": {
+                    "type": "string",
+                    "description": "auto (default) | neural | keyword | fast"
+                  },
+                  "category": {
+                    "type": "string",
+                    "description": "company | research paper | news | pdf | github | tweet | personal site | linkedin profile | financial report"
+                  },
+                  "include_domains": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Up to 20 hostnames to restrict to"
+                  },
+                  "start_published_date": {
+                    "type": "string",
+                    "description": "ISO 8601 date/datetime lower bound"
+                  },
+                  "end_published_date": {
+                    "type": "string",
+                    "description": "ISO 8601 date/datetime upper bound"
+                  },
+                  "snippets": {
+                    "type": "string",
+                    "description": "none (default) | highlights | text — clamps num_results to 2"
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.010000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.010000",
+          "outputShape": "query, search_type, num_results, results, provider, findings"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string"
+                    },
+                    "search_type": {
+                      "type": "string"
+                    },
+                    "num_results": {
+                      "type": "number"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "published_date": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "author": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "score": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "highlights": {
+                            "type": [
+                              "array",
+                              "null"
+                            ]
+                          },
+                          "text": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "findings": {
+                      "type": "array"
+                    }
+                  }
+                },
+                "example": {
+                  "query": "x402 payment protocol",
+                  "search_type": "neural",
+                  "num_results": 5,
+                  "results": [
+                    {
+                      "title": "x402: an open standard for internet-native payments",
+                      "url": "https://www.x402.org/",
+                      "published_date": "2026-05-12T00:00:00.000Z",
+                      "author": null,
+                      "score": 0.41,
+                      "highlights": null,
+                      "text": null
+                    },
+                    {
+                      "title": "coinbase/x402: HTTP-native micropayments protocol",
+                      "url": "https://github.com/coinbase/x402",
+                      "published_date": "2025-05-06T00:00:00.000Z",
+                      "author": null,
+                      "score": 0.38,
+                      "highlights": null,
+                      "text": null
+                    }
+                  ],
+                  "provider": "exa",
+                  "findings": []
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      }
+    },
+    "/exa/contents": {
+      "get": {
+        "operationId": "getExaContents",
+        "summary": "Fetch clean page text for up to 3 URLs via Exa",
+        "tags": [
+          "exa"
+        ],
+        "description": "Clean page text for up to 3 URLs in one call via Exa's index + live crawl — works on JS-rendered and bot-walled pages that direct fetch can't read. Returns title, author, published_date and text per URL, with per-URL status. Pairs with /exa/search (search → contents). No API key, pay per call on Base or Solana.",
+        "parameters": [
+          {
+            "name": "urls",
+            "in": "query",
+            "required": true,
+            "description": "1-3 absolute http(s) URLs. Aliases: url (single string), links, targets",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "name": "max_characters",
+            "in": "query",
+            "required": false,
+            "description": "Per-page character cap, 200-20000 (default 4000). Aliases: maxCharacters, max_chars, limit",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "livecrawl",
+            "in": "query",
+            "required": false,
+            "description": "fallback (default) | always | never | preferred. Alias: live",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.005000",
+          "outputShape": "results, requested, succeeded, provider, findings"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "url": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "author": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "published_date": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "text": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "char_count": {
+                            "type": "number"
+                          },
+                          "truncated": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "requested": {
+                      "type": "number"
+                    },
+                    "succeeded": {
+                      "type": "number"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "findings": {
+                      "type": "array"
+                    }
+                  }
+                },
+                "example": {
+                  "results": [
+                    {
+                      "url": "https://www.x402.org/",
+                      "status": "success",
+                      "title": "x402 — internet-native payments",
+                      "author": null,
+                      "published_date": null,
+                      "text": "x402 is an open standard for internet-native payments…",
+                      "char_count": 1872,
+                      "truncated": false,
+                      "error": null
+                    }
+                  ],
+                  "requested": 1,
+                  "succeeded": 1,
+                  "provider": "exa",
+                  "findings": []
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      },
+      "post": {
+        "operationId": "postExaContents",
+        "summary": "Fetch clean page text for up to 3 URLs via Exa",
+        "tags": [
+          "exa"
+        ],
+        "description": "Clean page text for up to 3 URLs in one call via Exa's index + live crawl — works on JS-rendered and bot-walled pages that direct fetch can't read. Returns title, author, published_date and text per URL, with per-URL status. Pairs with /exa/search (search → contents). No API key, pay per call on Base or Solana.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "1-3 absolute http(s) URLs. Aliases: url (single string), links, targets"
+                  },
+                  "max_characters": {
+                    "type": "number",
+                    "description": "Per-page character cap, 200-20000 (default 4000). Aliases: maxCharacters, max_chars, limit"
+                  },
+                  "livecrawl": {
+                    "type": "string",
+                    "description": "fallback (default) | always | never | preferred. Alias: live"
+                  }
+                },
+                "required": [
+                  "urls"
+                ]
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.005000",
+          "outputShape": "results, requested, succeeded, provider, findings"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "url": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "author": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "published_date": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "text": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "char_count": {
+                            "type": "number"
+                          },
+                          "truncated": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "requested": {
+                      "type": "number"
+                    },
+                    "succeeded": {
+                      "type": "number"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "findings": {
+                      "type": "array"
+                    }
+                  }
+                },
+                "example": {
+                  "results": [
+                    {
+                      "url": "https://www.x402.org/",
+                      "status": "success",
+                      "title": "x402 — internet-native payments",
+                      "author": null,
+                      "published_date": null,
+                      "text": "x402 is an open standard for internet-native payments…",
+                      "char_count": 1872,
+                      "truncated": false,
+                      "error": null
+                    }
+                  ],
+                  "requested": 1,
+                  "succeeded": 1,
+                  "provider": "exa",
+                  "findings": []
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      }
+    },
+    "/api/v1/chat/completions": {
+      "post": {
+        "operationId": "postApiV1ChatCompletions",
+        "summary": "OpenAI-compatible chat completions gateway",
+        "tags": [
+          "api"
+        ],
+        "description": "OpenAI-compatible chat completions gateway (alias of /v1/chat/completions for api/v1-style base URLs) — standard request shape, model chosen in the body: any gpt-* chat model (not Claude/embeddings), each at its own price. Priced per model, $0.005–$0.65 per call in USDC via x402, no API key: POST unpaid and the 402 quotes your model's exact price. Supports response_format json_object. Free model catalog: GET /v1/models.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Model id, e.g. gpt-4o-mini. Free catalog: GET /v1/models"
+                  },
+                  "messages": {
+                    "type": "array",
+                    "description": "OpenAI chat messages: [{role, content}]",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "description": "system, user, or assistant"
+                        },
+                        "content": {
+                          "type": "string",
+                          "description": "Message text"
+                        }
+                      },
+                      "required": [
+                        "role",
+                        "content"
+                      ]
+                    }
+                  },
+                  "max_tokens": {
+                    "type": "number",
+                    "description": "Max output tokens (clamped to the model's cap)."
+                  }
+                },
+                "required": [
+                  "model",
+                  "messages"
+                ]
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": "0.005000",
+            "max": "0.650000",
+            "amount": "0.005000",
+            "minAmount": "0.005000",
+            "maxAmount": "0.650000",
+            "note": "$0.005–$0.65 (depends on the model in the body)"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.005000",
+          "costRangeUsd": {
+            "min": "0.005000",
+            "max": "0.650000"
+          },
+          "costNote": "$0.005–$0.65 (depends on the model in the body)",
+          "outputShape": "id, object, model, choices, usage"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "object": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "choices": {
+                      "type": "array"
+                    },
+                    "usage": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "id": "chatcmpl-9f2f28d90a3c4e0f8f1c2d3e",
+                  "object": "chat.completion",
+                  "model": "gpt-4o-mini",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "Hi!"
+                      },
+                      "finish_reason": "stop"
+                    }
+                  ],
+                  "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 2,
+                    "total_tokens": 15
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "operationId": "postV1ChatCompletions",
+        "summary": "OpenAI-compatible chat completions gateway",
+        "tags": [
+          "v1"
+        ],
+        "description": "OpenAI-compatible chat completions gateway — standard /v1/chat/completions path and request shape, model chosen in the body: any gpt-* chat model (not Claude/embeddings), each at its own price. Priced per model, $0.005–$0.65 per call in USDC via x402, no API key: POST unpaid and the 402 quotes your model's exact price. Supports response_format json_object. GET /v1/models (free) lists every model with its endpoint and price.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Model id, e.g. gpt-4o-mini. Free catalog: GET /v1/models (every model, endpoint and price)"
+                  },
+                  "messages": {
+                    "type": "array",
+                    "description": "OpenAI chat messages: [{role:'system'|'user'|'assistant', content:string}]",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "description": "system, user, or assistant"
+                        },
+                        "content": {
+                          "type": "string",
+                          "description": "Message text"
+                        }
+                      },
+                      "required": [
+                        "role",
+                        "content"
+                      ]
+                    }
+                  },
+                  "max_tokens": {
+                    "type": "number",
+                    "description": "Max output tokens (clamped to the model's cap)."
+                  }
+                },
+                "required": [
+                  "model",
+                  "messages"
+                ]
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": "0.005000",
+            "max": "0.650000",
+            "amount": "0.005000",
+            "minAmount": "0.005000",
+            "maxAmount": "0.650000",
+            "note": "$0.005–$0.65 (depends on the model in the body)"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.005000",
+          "costRangeUsd": {
+            "min": "0.005000",
+            "max": "0.650000"
+          },
+          "costNote": "$0.005–$0.65 (depends on the model in the body)",
+          "outputShape": "id, object, model, choices, usage"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "object": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "choices": {
+                      "type": "array"
+                    },
+                    "usage": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "id": "chatcmpl-9f2f28d90a3c4e0f8f1c2d3e",
+                  "object": "chat.completion",
+                  "model": "gpt-4o-mini",
+                  "choices": [
+                    {
+                      "index": 0,
+                      "message": {
+                        "role": "assistant",
+                        "content": "Hi!"
+                      },
+                      "finish_reason": "stop"
+                    }
+                  ],
+                  "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 2,
+                    "total_tokens": 15
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      }
+    },
+    "/api/v1/embeddings": {
+      "post": {
+        "operationId": "postApiV1Embeddings",
+        "summary": "OpenAI-compatible text embeddings API",
+        "tags": [
+          "api"
+        ],
+        "description": "OpenAI-compatible text embeddings API (alias of /v1/embeddings for api/v1-style base URLs) — input as a string or batch of up to 128 strings, model text-embedding-3-small (default) or text-embedding-3-large. Flat $0.005 per call in USDC via x402, no OpenAI account or API key.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "description": "Text to embed. Also accepts an array of up to 128 strings (64000 chars total).",
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 128
+                      }
+                    ]
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "text-embedding-3-small (default) or text-embedding-3-large"
+                  },
+                  "dimensions": {
+                    "type": "number",
+                    "description": "Optional output vector size (truncation)."
+                  }
+                },
+                "required": [
+                  "input"
+                ]
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.005000",
+          "outputShape": "object, data, model, usage"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "description": "[{object:'embedding', index, embedding:[…]}]"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "usage": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "object": "list",
+                  "data": [
+                    {
+                      "object": "embedding",
+                      "index": 0,
+                      "embedding": [
+                        0.0102,
+                        -0.0083,
+                        0.0264
+                      ]
+                    }
+                  ],
+                  "model": "text-embedding-3-small",
+                  "usage": {
+                    "prompt_tokens": 4,
+                    "total_tokens": 4
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      }
+    },
+    "/v1/embeddings": {
+      "post": {
+        "operationId": "postV1Embeddings",
+        "summary": "OpenAI-compatible text embeddings API",
+        "tags": [
+          "v1"
+        ],
+        "description": "OpenAI-compatible text embeddings API — standard /v1/embeddings request shape: input as a string or a batch of up to 128 strings (64000 chars total on text-embedding-3-small, the default; 24000 on text-embedding-3-large). Flat $0.005 per call in USDC via x402, no OpenAI account or API key. Returns float vectors for RAG, semantic search, clustering, and dedup.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "description": "Text to embed. Also accepts an array of up to 128 strings (64000 chars total).",
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 128
+                      }
+                    ]
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "text-embedding-3-small (default) or text-embedding-3-large"
+                  },
+                  "dimensions": {
+                    "type": "number",
+                    "description": "Optional output vector size (truncation)."
+                  }
+                },
+                "required": [
+                  "input"
+                ]
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.005000",
+          "outputShape": "object, data, model, usage"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "description": "Always 'list'"
+                    },
+                    "data": {
+                      "type": "array",
+                      "description": "[{object:'embedding', index, embedding:[…]}]"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "usage": {
+                      "type": "object",
+                      "description": "prompt_tokens, total_tokens (input-only)"
+                    }
+                  }
+                },
+                "example": {
+                  "object": "list",
+                  "data": [
+                    {
+                      "object": "embedding",
+                      "index": 0,
+                      "embedding": [
+                        0.0102,
+                        -0.0083,
+                        0.0264
+                      ]
+                    }
+                  ],
+                  "model": "text-embedding-3-small",
+                  "usage": {
+                    "prompt_tokens": 4,
+                    "total_tokens": 4
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      }
+    },
+    "/ai-image/generate": {
+      "post": {
+        "operationId": "postAiImageGenerate",
+        "summary": "Generate agent-ready image assets",
+        "tags": [
+          "ai-image"
+        ],
+        "description": "Generate agent-ready image assets (icons, logos, social graphics, thumbnails, banners) with gpt-image-1. Claude refines the prompt, screens content, adds alt text and a score. Returns image_url as a base64 PNG data URI. Flat $0.25; n=1; ratios 1:1/16:9/9:16.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "description": "What to create (3-2000 chars)."
+                  },
+                  "use_case": {
+                    "type": "string",
+                    "description": "One of: app_icon, logo, banner, avatar, social_graphic, og_image, blog_thumbnail, product_mockup, illustration, web_image (default). Unknown values fall back to web_image with a warning."
+                  },
+                  "aspect_ratio": {
+                    "type": "string",
+                    "description": "1:1, 16:9, or 9:16 (aliases like square/wide/tall accepted)."
+                  },
+                  "style": {
+                    "type": "string",
+                    "description": "Optional art direction."
+                  },
+                  "brand_colors": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Optional palette."
+                  },
+                  "provider": {
+                    "type": "string",
+                    "description": "Optional image backend override; unknown values 400."
+                  },
+                  "n": {
+                    "type": "number",
+                    "description": "Image count — currently clamped to 1."
+                  }
+                },
+                "required": [
+                  "prompt"
+                ]
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.250000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-guidance": {
+          "approvalRequirement": "APPROVAL_REQUIREMENT_NOT_REQUIRED",
+          "costObservedUsd": "0.250000",
+          "outputShape": "image_url, revised_prompt, alt_text, score, grade"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "image_url": {
+                      "type": "string"
+                    },
+                    "revised_prompt": {
+                      "type": "string"
+                    },
+                    "alt_text": {
+                      "type": "string"
+                    },
+                    "score": {
+                      "type": "number"
+                    },
+                    "grade": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "image_url": "data:image/png;base64,...",
+                  "revised_prompt": "A clean app icon...",
+                  "alt_text": "App icon.",
+                  "score": 92,
+                  "grade": "A"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required"
+          }
+        }
+      }
+    }
+  },
+  "x-treazury-fixture-scope": {
+    "source": "https://netintel.dev/openapi.json",
+    "basis": "public primary schema; full original retained as ignored audit evidence",
+    "purpose": "same-path secret/array body routing, full-path gateway alias names and canonical PNG data-URI mapping",
+    "subset": [
+      "/breach-check/password",
+      "/exa/search",
+      "/exa/contents",
+      "/api/v1/chat/completions",
+      "/v1/chat/completions",
+      "/api/v1/embeddings",
+      "/v1/embeddings",
+      "/ai-image/generate"
+    ]
+  }
+}

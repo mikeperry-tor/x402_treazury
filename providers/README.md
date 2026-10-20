@@ -37,7 +37,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 
 | Provider | Definition | Catalog |
 | --- | --- | --- |
-| Agent402 | `agent402.toml` | Web-focused default; alternate lowercase tags select reviewed catalog subsets |
+| Agent402 | `agent402.toml` | Full supported catalog; advisory web research recommendations and lowercase tags |
 | AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
 | Datakoot | `datakoot.toml` | Public-data gateway; apex-domain help |
 | HireScrape | `hirescrape.toml` | Synchronous paid scraper namespace; SIWX lifecycle omitted |
@@ -47,8 +47,8 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | AgentFund | `agentfund.toml` | Vendor OpenAPI |
 | AgentUtility | `agentutility/provider.toml` | 15 research operations + help; enriched cluster tags; managed payments omit extensions |
 | Arkham | `arkham.toml` | Vendor OpenAPI |
-| BlockRun | `blockrun.toml` | Six synchronous chat/search tools and lazy help; jobs/media/lifecycle excluded |
-| Claw402 | `claw402.toml` | Twelve market overview reads and lazy help; exact curated allowlist |
+| BlockRun | `blockrun.toml` | Synchronous catalog with fixed-symbol reads; async jobs/ownership excluded |
+| Claw402 | `claw402.toml` | Full catalog, advisory market reads, sparse RootData JSON bodies |
 | botsmith | `botsmith.toml` | Vendor OpenAPI |
 | Brazilayer | `brazilayer.toml` | Vendor OpenAPI |
 | Curl HTTP Request | `curl/provider.toml` | Local schema; POST `/curl` returns status, headers and body text; advertised $0.01 |
@@ -63,16 +63,16 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |
 | LoneStarOracle | `lonestar.toml` | Full supported gateway, including public previews/feeds; research recommendations |
 | News Gurus | `newsgurus/provider.toml` | Local projection of vendor x402 catalog; 48 paid reads plus lazy help |
-| OneShot | `oneshot.toml` | Synchronous web search and lazy help; async workflows excluded |
+| OneShot | `oneshot.toml` | Synchronous search and public discovery; authenticated jobs excluded |
 | Otto | `otto.toml` | Vendor OpenAPI |
 | People Data Labs | `pdl.toml` | Vendor OpenAPI |
 | RelayShield | `relayshield.toml` | Vendor OpenAPI; optional authored `relayshield/phone-reputation.toml` companion |
 | RegimeShift | `regimeshift.toml` | Vendor OpenAPI |
 | SocialFetch | `socialfetch.toml` | Vendor tagged OpenAPI |
-| StableEnrich | `stableenrich.toml` | 32 synchronous JSON/image operations and lazy help; select upstreams by tag |
+| StableEnrich | `stableenrich.toml` | Synchronous JSON/image catalog; specific lifecycle paths excluded |
 | Straits | `straits/provider.toml` | Local `straits/openapi.json` |
-| Vaaya | `vaaya.toml` | 46 synchronous x402 research calls plus lazy help; mixed-protocol/media workflows excluded |
-| x402-list | `x402-list.toml` | Curated API-directory reads |
+| Vaaya | `vaaya.toml` | Supported x402 JSON/image catalog; specific MPP/lifecycle boundaries |
+| x402-list | `x402-list.toml` | Public directory reads, assessments and suggestions |
 | x402stock | `x402stock.toml` | Full supported market/economic catalog; compact research recommendations |
 
 Curl additionally pins the vendor-published OpenAPI response envelope for discovery
@@ -91,10 +91,11 @@ Concordance POST pricing, and Glassnode's discovery workflow when editing them.
 Tests need no Python or live vendor access. See [provider caveats](CAVEATS.md)
 for route exclusions, pricing semantics and vendor-specific workflows.
 
-The x402-list provider exposes service search/detail, rankings, categories and networks.
+The x402-list provider exposes public directory reads, assessments and suggestions.
 Directory reads can become paid after a shared-IP free quota; the ordinary wallet cap
 still applies. Listings do not guarantee compatible payment or supply executable API
-schemas. Pricing probes and directory writes are excluded.
+schemas. Pricing probes, owner-token workflows and an unrepresentable submit
+schema are excluded. Embedded source management deliberately keeps three reads.
 
 ## Provider policy
 
@@ -139,12 +140,11 @@ catalogs and payment evidence retain their own consumers and cannot be discarded
 as redundant test data. See [testing policy](../docs/testing.md#provider-regressions)
 and [fixture maintenance](../tests/fixtures/catalogs/README.md).
 
-Agent402 has a much larger catalog than most providers. Its default `tags = ["web"]`
-produces 48 API tools plus help in the fixture; `--tags data,crypto` replaces that
-selection. Run `--provider providers/agent402.toml catalog tags` to inspect the vendor's
-24 tags. Counts there describe the source before exclusions, not necessarily the
-selected inventory. See [Agent402 caveats](CAVEATS.md#agent402toml--agent402tools)
-for supported subsets, excluded workflows and examples.
+Agent402 exposes a broad supported catalog with advisory web-research
+recommendations. Use source tags or listener selection to narrow it deliberately.
+`catalog tags` reports the vendor inventory before exclusions. See
+[Agent402 caveats](CAVEATS.md#agent402toml--agent402tools) for actual support
+boundaries, supported media modes and request guidance.
 
 ## Inline image results
 

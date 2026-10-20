@@ -185,8 +185,7 @@ instructions_text = "Company research: SEC financial statements and company-spec
 # for project/org lookups; this is company intelligence, not trading execution.
 [sources.company_claw402]
 extends = "../../providers/claw402.toml"
-# Clear the inherited operation allowlist so RootData tools become selectable.
-include_operations = []
+# Select the RootData research routes from the full supported catalog.
 include_tools = [
   "claw402_crypto_rootdata_search",
   "claw402_crypto_rootdata_project",

@@ -1,19 +1,53 @@
 reliability_tags = ["catalog_http_403"]
 reliability_note = "Catalog access and unsigned API requests have returned HTTP 403 while help remained available. Tor causation is not established."
 
-# Synchronous search only. Async tools need wallet-bound polling/auth support.
+# Synchronous paid search plus the verified public discovery reads; owned jobs need separate support.
 spec = "https://win.oneshotagent.com/openapi.json"
 name = "OneShot"
 base_url = "https://win.oneshotagent.com"
 prefix = "oneshot"
-include = ["/v1/tools"]
-include_operations = ["POST /v1/tools/search"]
+recommended_tools = ["oneshot_search", "oneshot_help"]
+include = ["/v1/tools", ""]
+include_operations = ["POST /v1/tools/search", "GET /.well-known/acp/manifest.json", "GET /health", "GET /v1/soul", "GET /v1/soul/browse", "GET /v1/soul/search", "GET /v1/soul/service-types", "GET /v1/soul/stats", "GET /v1/soul/templates", "GET /v1/soul/{wallet}", "GET /v1/stats", "GET /v1/status"]
 probe_pricing = false
 help_url = "https://docs.oneshotagent.com/api-reference/web-search.md"
-instructions_text = "OneShot synchronous web search via x402 USDC on Base. oneshot_search returns results directly; no job polling is needed. oneshot_help provides the search API guide. Treazury handles payment using the live x402 challenge; do not manually add the legacy Authorization, X-Quote-ID or X-Payment-Proof headers shown in vendor documentation. The default catalog excludes diagnostics, account management and async tools: those require polling and potentially wallet ownership proofs that this integration does not implement."
+instructions_text = "OneShot synchronous web search and verified public discovery reads. oneshot_search returns results inline; public soul/status/manifest tools use their declared GET path/query schemas without account ownership proofs. Recommendations select search and its lazy guide. Async tools, account state and SIWX/EIP-712 job retrieval remain excluded; discovery does not implement those workflows. Treazury owns x402 challenge/sign/retry; legacy Authorization, X-Quote-ID or X-Payment-Proof examples are not agent-settable payment instructions. Live challenge and configured cap govern payment; never automatically replay an uncertain signed request."
 
 [overrides.oneshot_search]
 description = "Search the web and return structured results inline, without job polling. Vendor-listed price: $0.001 per request; the live x402 challenge and configured payment cap are authoritative. query is 1–500 characters; max_results is 1–20 (default 5). Prefer the smallest useful result count."
 
 [overrides.oneshot_help]
 description = "Read OneShot's web search API guide, including request fields and synchronous response format. Fetched on demand and cached for this process. Treazury handles payments; legacy payment-header examples in the guide are not setup steps. Any configured document limit is reported explicitly."
+
+[overrides.oneshot_well_known_acp_manifest_json]
+description = "Stripe Agent Commerce Protocol — describes the seller and products. Free — no payment required (vendor contract)."
+
+[overrides.oneshot_health]
+description = "Service health check Free — no payment required (vendor contract)."
+
+[overrides.oneshot_v1_soul]
+description = "Browse all souls (legacy) Free — no payment required (vendor contract)."
+
+[overrides.oneshot_v1_soul_browse]
+description = "Browse souls with pagination Free — no payment required (vendor contract)."
+
+[overrides.oneshot_v1_soul_search]
+description = "Search souls Free — no payment required (vendor contract)."
+
+[overrides.oneshot_v1_soul_service_types]
+description = "Get standard service type taxonomy Free — no payment required (vendor contract)."
+
+[overrides.oneshot_v1_soul_stats]
+description = "Marketplace statistics Free — no payment required (vendor contract)."
+
+[overrides.oneshot_v1_soul_templates]
+description = "Get service templates Free — no payment required (vendor contract)."
+
+[overrides.oneshot_v1_soul_wallet]
+description = "Reserved sub-paths (`browse`, `search`, `service-types`, `templates`, `stats`, `register`) are matched first. Free — no payment required (vendor contract)."
+
+[overrides.oneshot_v1_stats]
+description = "Public service statistics Free — no payment required (vendor contract)."
+
+[overrides.oneshot_v1_status]
+description = "Dependency health, separate from process liveness Free — no payment required (vendor contract)."
