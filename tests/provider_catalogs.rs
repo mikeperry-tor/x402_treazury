@@ -1189,3 +1189,76 @@ async fn vaaya_tako_and_recallradar_keep_research_bodies_and_structured_prices()
         )
     );
 }
+
+#[tokio::test]
+async fn privacy_company_catalog_keeps_separate_relayshield_sources() {
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("examples/deployments/privacy.toml");
+    let deployment = config::read_table(&path).await.unwrap();
+    let sources = deployment["sources"].as_table().unwrap();
+    let company = deployment["servers"]["company"]["sources"]
+        .as_array()
+        .unwrap();
+    assert!(!company.iter().any(|source| source.as_str() == Some("exa")));
+    assert!(
+        deployment["servers"]["web"]["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|source| source.as_str() == Some("exa"))
+    );
+    let cfg = config::resolve(
+        sources["company_relayshield"].as_table().unwrap().clone(),
+        &path,
+    )
+    .await
+    .unwrap()
+    .settings;
+    assert_eq!(cfg.spec, "https://api.relayshield.net/openapi.json");
+    let original: Value =
+        serde_json::from_str(include_str!("fixtures/relayshield_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &original, "relayshield").unwrap();
+    assert_eq!(tools.len(), 11);
+    assert!(
+        !tools
+            .iter()
+            .any(|tool| tool.name == "relayshield_phone_reputation")
+    );
+    let companion = config::resolve(
+        sources["company_relayshield_phone"]
+            .as_table()
+            .unwrap()
+            .clone(),
+        &path,
+    )
+    .await
+    .unwrap()
+    .settings;
+    let phone: Value = serde_json::from_slice(&std::fs::read(&companion.spec).unwrap()).unwrap();
+    let phone_tools = catalog::build_tools(&companion, &phone, "relayshield").unwrap();
+    assert_eq!(phone_tools.len(), 1);
+    assert_eq!(phone_tools[0].name, "relayshield_phone_reputation");
+    for source in ["company_relayshield", "company_relayshield_phone"] {
+        assert!(
+            company
+                .iter()
+                .any(|selected| selected.as_str() == Some(source))
+        );
+    }
+    let netintel = config::resolve(
+        sources["company_netintel"].as_table().unwrap().clone(),
+        &path,
+    )
+    .await
+    .unwrap()
+    .settings;
+    assert_eq!(netintel.include_tools.len(), 7);
+    for removed in [
+        "netintel_ip_risk_score",
+        "netintel_asn_lookup_analyze",
+        "netintel_domain_vendor_risk",
+    ] {
+        assert!(!netintel.include_tools.iter().any(|name| name == removed));
+    }
+}

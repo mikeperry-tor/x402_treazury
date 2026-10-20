@@ -1129,10 +1129,9 @@ another candidate to retry relay spending. An unbound source needs either its ow
 
 `config show` reports the resulting `discovery_wallets` source-to-profile map.
 The privacy example enables relay fallback without an override: `social` uses
-`social`, `webinfo` uses `web`, and shared `exa` selects `company` from its `web` /
-`company` candidates. Exa's discovered catalog/pricing remains shared by its
-listeners; their paid API calls still use their original wallet bindings. Distinct
-source aliases using different wallets keep separate relay requests and caches,
+`company`, while `webinfo` and `exa` use `web`. Exa is available only on the web
+listener. Distinct source aliases using different wallets keep separate relay
+requests and caches,
 even if they fetch the same URL. Sharing a wallet intentionally retains that link;
 this removes a mandatory common discovery payer, not all correlation channels.
 

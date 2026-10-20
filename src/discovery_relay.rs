@@ -949,7 +949,8 @@ pub(crate) mod tests {
             .collect();
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/deployments/privacy.toml");
         let relays = build(policy, &path, &bindings, &clients).await.unwrap();
-        assert!(Arc::ptr_eq(&relays["exa"], &relays["company_otto"]));
+        assert!(Arc::ptr_eq(&relays["social"], &relays["company_otto"]));
+        assert!(Arc::ptr_eq(&relays["exa"], &relays["webinfo"]));
         assert!(!Arc::ptr_eq(&relays["social"], &relays["webinfo"]));
         assert!(Arc::ptr_eq(
             &relays["social"].state,
@@ -973,7 +974,7 @@ pub(crate) mod tests {
             .unwrap()
         };
         let first = resolve(&config, &policy);
-        assert_eq!(first["exa"], "company");
+        assert_eq!(first["exa"], "web");
         // The authored example deliberately shares social/company identities,
         // while the web listener uses a separate payer and Tor scope.
         assert_eq!(first["social"], "company");

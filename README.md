@@ -63,12 +63,12 @@ and toolbox share a wallet and Tor payer identity; web uses a separate wallet:
 | --- | --- | --- |
 | Web | Exa, SocialFetch web/community tools, Google Trends | `http://127.0.0.1:6337/mcp` |
 | Social | SocialFetch social platforms, PDL people tools | `http://127.0.0.1:6338/mcp` |
-| Company | Exa, PDL company search, Otto financials/news, Claw402 startup/investor data, Deepline profiles/ads, x402stock disclosures, GenuineGood grants, RelayShield security and phone reputation, NetIntel phone/IP/infrastructure intelligence | `http://127.0.0.1:6339/mcp` |
+| Company | PDL company search, Otto financials/news, Claw402 startup/investor data, Deepline profiles/ads, x402stock disclosures, GenuineGood grants, RelayShield security and phone reputation, NetIntel phone/IP/infrastructure intelligence | `http://127.0.0.1:6339/mcp` |
 | Toolbox | API discovery, direct calls and persistent agent-added tools | `http://127.0.0.1:6340/mcp` |
 
 SocialFetch's overlapping Reddit tools use different wallets on the web and social
-endpoints; Exa likewise uses separate wallets on web and company. Company tools
-are explicitly selected by name to keep the agent's context focused.
+endpoints. Company tools are explicitly selected by name to keep the agent's
+context focused.
 
 The company endpoint adds 12 selected RelayShield security tools: email breach and
 infostealer checks, identity graphs, vendor supply-chain risk, IP intelligence,
@@ -80,10 +80,9 @@ for 24 hours; the separate carrier SIM-swap endpoint is included but vendor-docu
 availability problems may prevent a result. Neither missing findings nor degraded
 results establish safety. See [RelayShield caveats](providers/CAVEATS.md#relayshieldtoml--relayshield).
 
-Nine selected NetIntel tools add phone validation and formatting, IP threat
-reputation, IP risk scoring and combined reports, geolocation, ASN/network
-ownership, domain vendor risk, cloud-provider detection and website technology
-fingerprinting. NetIntel phone intelligence complements RelayShield reputation;
+Seven selected NetIntel tools add phone validation and formatting, IP threat
+reputation and combined reports, geolocation, WHOIS/RDAP registration data,
+cloud-provider detection and website technology fingerprinting. NetIntel phone intelligence complements RelayShield reputation;
 it does not establish scam history or live reachability. Advertised prices for
 these tools are $0.002-$0.20 per call, within the shared company wallet's $0.50 cap.
 

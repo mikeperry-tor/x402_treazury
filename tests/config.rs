@@ -369,7 +369,7 @@ async fn privacy_example_enables_source_wallet_discovery_offline() {
     assert_eq!(shown["discovery_relay"]["serve"], true);
     assert_eq!(shown["discovery_relay"]["warm"], true);
     assert!(shown["discovery_relay"]["wallet"].is_null());
-    assert_eq!(shown["discovery_wallets"]["exa"], "company");
+    assert_eq!(shown["discovery_wallets"]["exa"], "web");
     assert_eq!(shown["discovery_wallets"]["social"], "company");
     assert_eq!(
         shown["wallet_bindings"]["social"]["social"]["wallet"],
@@ -377,10 +377,7 @@ async fn privacy_example_enables_source_wallet_discovery_offline() {
     );
     assert_eq!(shown["discovery_wallets"]["webinfo"], "web");
     assert_eq!(shown["wallet_bindings"]["web"]["exa"]["wallet"], "web");
-    assert_eq!(
-        shown["wallet_bindings"]["company"]["exa"]["wallet"],
-        "company"
-    );
+    assert!(shown["wallet_bindings"]["company"]["exa"].is_null());
     let social = &shown["servers"]["social"];
     assert_eq!(social["discover_on_demand"], true);
     let instructions = social["instructions_text"].as_str().unwrap();

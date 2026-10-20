@@ -118,12 +118,11 @@ instructions_text = "Additional web access tools are available under socialfetch
 tags = ["Web", "Reddit"]
 exclude_tools = ["socialfetch_help"]
 
-# Exa is reused unchanged across web and company listeners. Its complete
-# curated toolset includes help; subset providers below omit broad vendor guides.
-# Its source-level guidance appears on both listeners under the same [exa] label.
+# Exa supplies the web listener. Its complete curated toolset includes help;
+# subset providers below omit broad vendor guides.
 [sources.exa]
 extends = "../../providers/exa.toml"
-instructions_text = "Use exa_search for web discovery and exa_contents for known URLs or document IDs. This source is shared by the web and company listeners, each with its own payment wallet. Prefer small result/page counts and highlights; charges vary with options and the live challenge is authoritative. For contents supply exactly one of urls or ids. Omit stream or set false: tools return completed responses. exa_help covers these selected endpoints; generic API-key and SDK setup is unnecessary."
+instructions_text = "Use exa_search for web discovery and exa_contents for known URLs or document IDs. Prefer small result/page counts and highlights. For contents supply exactly one of urls or ids. Omit stream or set false: tools return completed responses. exa_help covers these selected endpoints; generic API-key and SDK setup is unnecessary."
 
 # Person lookups stay in the social context. Vendor-listed matches cost $0.28,
 # within the shared $0.50 cap for one matched result; use small batches.
@@ -136,7 +135,7 @@ include_tools = ["pdl_person_*"]
 # the shared $0.50 per-payment cap.
 [sources.pdl_company]
 extends = "../../providers/pdl.toml"
-instructions_text = "Discover companies using People Data Labs structured company search. Prefer size=1: the catalog lists $0.10 per result and this example's company payment cap is $0.50; larger batches may be refused. Paginate with scroll_token when needed. Use Deepline for company enrichment rather than searching again for details. Verify company identity before combining results across providers."
+instructions_text = "Discover companies using People Data Labs structured company search. Prefer size=1 and paginate with scroll_token when needed. Use Deepline for company enrichment rather than searching again for details. Verify company identity before combining results across providers."
 include_tools = ["pdl_company_search"]
 
 # StableEnrich subsets retain the provider's reviewed synchronous operation
@@ -156,7 +155,7 @@ include_tools = [
 
 # Company estimates are $0.0126-$0.08 per call, within the $0.50 cap.
 # FullEnrich company search ($0.15) is omitted. Keep person/contact enrichment
-# on the social listener; Exa already supplies this listener's general web search.
+# on the social listener.
 [sources.company_stableenrich]
 extends = "../../providers/stableenrich.toml"
 include_tools = [
@@ -171,7 +170,7 @@ include_tools = [
   "stableenrich_serper_news",
   "stableenrich_firecrawl_scrape",
 ]
-instructions_text = "Company research through StableEnrich: enrich organizations by domain or name/social URL, discover local businesses with Google Maps, retrieve place details, search company news and scrape company pages with Firecrawl. Verify returned domains and company identity before combining results; CompanyEnrich employees/revenue are ranges and funding totals may lag individual rounds. Prefer partial Maps results when sufficient; full results cost more. For Maps text-search pagination repeat the original search body with its pageToken. Check news dates and source provenance. Treazury handles x402 USDC on Base; interpret actual HTTP bodies without assuming an AgentCash success/data wrapper. Use small batches; vendor prices are estimates and the live challenge and $0.50 company cap govern payment. Do not repeat a paid submission to retrieve pending results."
+instructions_text = "Company research through StableEnrich: enrich organizations by domain or name/social URL, discover local businesses with Google Maps, retrieve place details, search company news and scrape company pages with Firecrawl. Verify returned domains and company identity before combining results; CompanyEnrich employees/revenue are ranges and funding totals may lag individual rounds. Prefer partial Maps results when sufficient. For Maps text-search pagination repeat the original search body with its pageToken. Check news dates and source provenance. Interpret actual HTTP bodies without assuming an AgentCash success/data wrapper."
 
 # Tool-name allowlists keep the company toolset small as upstream catalogs grow.
 # Broad vendor help tools are omitted to avoid suggesting unselected operations.
@@ -179,7 +178,7 @@ instructions_text = "Company research through StableEnrich: enrich organizations
 [sources.company_otto]
 extends = "../../providers/otto.toml"
 include_tools = ["otto_financial_statements", "otto_equity_news"]
-instructions_text = "Company research: SEC financial statements and company-specific equity news. Prices are estimates; use source dates and filing provenance when comparing results."
+instructions_text = "Company research: SEC financial statements and company-specific equity news. Use source dates and filing provenance when comparing results."
 
 # Startup/crypto/investor research: RootData profiles crypto projects and venture
 # organizations, including teams, backers and funding rounds. Search resolves IDs
@@ -194,7 +193,7 @@ include_tools = [
   "claw402_crypto_rootdata_org",
   "claw402_crypto_rootdata_funding",
 ]
-instructions_text = "Crypto-company research through RootData: search projects and investors, inspect project/organization profiles, and list funding rounds. Resolve IDs with search before requesting profiles. Only these four operations are exposed. Treazury handles x402 payment; do not manually retry signed requests."
+instructions_text = "Crypto-company research through RootData: search projects and investors, inspect project/organization profiles, and list funding rounds. Resolve IDs with search before requesting profiles. Only these four operations are exposed."
 
 # Business profiles and competitor advertising; no personal contact harvesting.
 [sources.company_deepline]
@@ -214,7 +213,7 @@ include_tools = [
   "x402stock_dossier_ticker",
   "x402stock_filing_summary_ticker",
 ]
-instructions_text = "US public-company research: resolve symbols with tickers, then request overview, SEC disclosure dossier or filing summary. Pass ticker symbols in the tool's ticker argument. Check timestamps and unavailable sections; quotes may be delayed, and filing summaries are synthesized. Treazury handles x402 payment."
+instructions_text = "US public-company research: resolve symbols with tickers, then request overview, SEC disclosure dossier or filing summary. Pass ticker symbols in the tool's ticker argument. Check timestamps and unavailable sections; quotes may be delayed, and filing summaries are synthesized."
 
 # Multi-board job search (LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter,
 # Bayt, BDJobs, Naukri). Base price is $0.05 + $0.002 * len(sites) * maxResults,
@@ -224,7 +223,7 @@ instructions_text = "US public-company research: resolve symbols with tickers, t
 [sources.company_hirescrape]
 extends = "../../providers/hirescrape.toml"
 include_tools = ["hirescrape_jobs"]
-instructions_text = "Company hiring and job-opening research through HireScrape (hirescrape_jobs). Prefer 1-2 target job boards in sites (e.g. ['linkedin'] or ['linkedin', 'indeed']) and small maxResults: len(sites) * maxResults <= 25 keeps the advertised $0.05 + $0.002 * len(sites) * maxResults quote at $0.10 or less. Larger queries cost more; the live challenge and shared $0.50 company payment cap govern payment."
+instructions_text = "Company hiring and job-opening research through HireScrape (hirescrape_jobs). Prefer 1-2 target job boards in sites (e.g. ['linkedin'] or ['linkedin', 'indeed']) and small maxResults."
 
 # European and global business registries, German Handelsregister, one-call due
 # diligence ($0.10), EU VIES VAT validation, sanctions screening and domain intel.
@@ -238,7 +237,7 @@ include_tools = [
   "agosint_sanctions",
   "agosint_domain",
 ]
-instructions_text = "Company registry and compliance research through AgOSINT: look up legal entities across Czechia, Norway, UK, France, Finland, US SEC and GLEIF LEI (agosint_company, $0.02), German Handelsregister records and officers (agosint_company_de, prefer limit <= 4 for small result batches; the advertised $0.056 + $0.012 * (limit - 1) price and live challenge remain subject to the $0.50 cap), combined one-call due diligence (agosint_due_diligence, $0.10), EU VIES VAT validation (agosint_vat, $0.015), sanctions screening (agosint_sanctions, $0.015) and domain intelligence (agosint_domain, $0.015). For agosint_company and agosint_due_diligence pass exactly one of id, name, lei, vat, or domain (with country required for id or name); for agosint_sanctions pass name or wallet. Treazury handles x402 payment and never replays signed payments automatically."
+instructions_text = "Company registry and compliance research through AgOSINT: look up legal entities across Czechia, Norway, UK, France, Finland, US SEC and GLEIF LEI (agosint_company), German Handelsregister records and officers (agosint_company_de, prefer limit <= 4 for small result batches), combined one-call due diligence (agosint_due_diligence), EU VIES VAT validation (agosint_vat), sanctions screening (agosint_sanctions) and domain intelligence (agosint_domain). For agosint_company and agosint_due_diligence pass exactly one of id, name, lei, vat, or domain (with country required for id or name); for agosint_sanctions pass name or wallet."
 
 # Company security research: eleven explicitly selected main-catalog tools plus
 # the local phone companion. Both inherit the existing company wallet; no new pool.
@@ -257,12 +256,12 @@ include_tools = [
   "relayshield_tech_stack_cve",
   "relayshield_wallet_risk",
 ]
-instructions_text = "Company security and vendor due diligence through RelayShield (relayshield_*): email breach/infostealer exposure and identity pivots, vendor supply-chain risk, domain identity/ransomware risk, public credential exposure, IP intelligence, declared-stack vulnerabilities and counterparty wallet screening. Supply email for breach, infostealer and identity_graph; phone in E.164 format for sim_swap; vendor_domains or vendor_emails for supply_chain; domain or ip for ip_intel; domain for identity_risk_score and ransomware_risk; domain and/or vendor_domains for secret_scan; tech_stack directly for tech_stack_cve (domain references an unavailable account profile); and address for wallet_risk. The vendor documents SIM-swap carrier availability as degraded/unavailable; a failed lookup supplies no verdict. Phone reputation is available through the companion source. Preserve timestamps, coverage, null and degraded markers; missing findings are not proof of safety. Advertised selected-tool prices are $0.05-$0.40; live challenges and the shared $0.50 cap govern payment. Treazury handles x402 and does not automatically replay uncertain paid requests."
+instructions_text = "Company security and vendor due diligence through RelayShield (relayshield_*): email breach/infostealer exposure and identity pivots, vendor supply-chain risk, domain identity/ransomware risk, public credential exposure, IP intelligence, declared-stack vulnerabilities and counterparty wallet screening. Supply email for breach, infostealer and identity_graph; phone in E.164 format for sim_swap; vendor_domains or vendor_emails for supply_chain; domain or ip for ip_intel; domain for identity_risk_score and ransomware_risk; domain and/or vendor_domains for secret_scan; tech_stack directly for tech_stack_cve (domain references an unavailable account profile); and address for wallet_risk. The vendor documents SIM-swap carrier availability as degraded/unavailable; a failed lookup supplies no verdict. Phone reputation is available through the companion source. Preserve timestamps, coverage, null and degraded markers; missing findings are not proof of safety."
 
 [sources.company_relayshield_phone]
 extends = "../../providers/relayshield/phone-reputation.toml"
 include_tools = ["relayshield_phone_reputation"]
-instructions_text = "Use relayshield_phone_reputation for a company's known contact phone, supplied as phone in E.164 format. It returns phone reputation, attack-graph pivots and carrier line-type signals, with SIM-swap data cached for 24 hours rather than a fresh carrier check. Preserve checked/unknown markers and evidence timestamps; an absence of flags is not proof of safety. This locally authored companion covers a route omitted from the vendor OpenAPI catalog; Treazury handles its x402 v1 payment. Advertised cost is $0.05, subject to the live challenge and shared $0.50 cap. Do not automatically repeat an uncertain paid request."
+instructions_text = "Use relayshield_phone_reputation for a company's known contact phone, supplied as phone in E.164 format. It returns phone reputation, attack-graph pivots and carrier line-type signals, with SIM-swap data cached for 24 hours rather than a fresh carrier check. Preserve checked/unknown markers and evidence timestamps; an absence of flags is not proof of safety. This locally authored companion covers a route omitted from the vendor OpenAPI catalog."
 
 # Focused NetIntel phone, IP and company-infrastructure intelligence.
 # Inherit the company wallet and its $0.50 per-payment cap.
@@ -271,23 +270,20 @@ extends = "../../providers/netintel.toml"
 include_tools = [
   "netintel_phone_intel_analyze",
   "netintel_ip_reputation_analyze",
-  "netintel_ip_risk_score",
   "netintel_ip_report_full",
   "netintel_ip_geo_locate",
-  "netintel_asn_lookup_analyze",
-  "netintel_domain_vendor_risk",
   "netintel_whois_rdap_lookup",
   "netintel_cloud_fingerprint_analyze",
   "netintel_tech_fingerprint_analyze",
 ]
-instructions_text = "NetIntel phone, IP and company-infrastructure intelligence (netintel_*). Use phone_intel_analyze with phone in any format and optional country_hint when no country dial code is present; it validates and normalizes the number, with line-type classification limited to NANP and UK numbers, not scam history, subscriber identity or proof of reachability. Use ip for ip_reputation_analyze, ip_risk_score, ip_report_full and ip_geo_locate; target (an IP address or domain) for asn_lookup_analyze; domain for domain_vendor_risk and cloud_fingerprint_analyze; and url for tech_fingerprint_analyze. Choose individual IP checks for focused information or ip_report_full for a combined profile. Score direction differs: ip_reputation_analyze risk_score rises with danger; ip_risk_score trust_score rises with safety and its deprecated risk_score aliases trust_score. Preserve section availability, partial results, unknown fields and source timestamps; unavailable signals are not clean results. IPv6 inputs skip IPv4-only blacklist checks. Advertised selected-tool prices are $0.002-$0.20 per call; live challenges and the shared $0.50 company cap govern payment. Treazury handles x402 USDC on Base; do not automatically repeat uncertain paid submissions."
+instructions_text = "NetIntel phone, IP and company-infrastructure intelligence (netintel_*). Use phone_intel_analyze with phone in any format and optional country_hint when no country dial code is present; it validates and normalizes the number, with line-type classification limited to NANP and UK numbers, not scam history, subscriber identity or proof of reachability. Use ip for ip_reputation_analyze, ip_report_full and ip_geo_locate; domain for cloud_fingerprint_analyze; and url for tech_fingerprint_analyze. Choose individual IP checks for focused information or ip_report_full for a combined profile. The ip_reputation_analyze risk_score rises with danger. Preserve section availability, partial results, unknown fields and source timestamps; unavailable signals are not clean results. IPv6 inputs skip IPv4-only blacklist checks."
 
 # IP enrichment and satellite observations for company infrastructure/site research.
 # Inherit the existing company wallet and its $0.50 per-payment cap.
 [sources.company_ipintel]
 extends = "../../providers/ipintel.toml"
 include_tools = ["ipintel_ip_lookup", "ipintel_satellite"]
-instructions_text = "Company infrastructure and physical-site research through IPIntel.ai. Use ipintel_ip_lookup with an IPv4 or IPv6 ip for geolocation, ASN, ISP, organization, reverse DNS and proxy/mobile/hosting indicators; these are vendor signals, not proof of company ownership or location. Use ipintel_satellite with known lat and lon and optional radius_m, mode and date. Null date selects the latest suitable scene; fallback defaults to true and may select a nearby date. Preserve selected-scene timestamps, fulfillment status, warnings and Copernicus attribution. Satellite image links remain JSON metadata and are not automatically fetched. Advertised prices are $0.003 for IP lookup and $0.09 for satellite; live challenges and the shared $0.50 company payment cap govern payment. Treazury handles x402 USDC on Base; do not automatically repeat uncertain paid submissions."
+instructions_text = "Company infrastructure and physical-site research through IPIntel.ai. Use ipintel_ip_lookup with an IPv4 or IPv6 ip for geolocation, ASN, ISP, organization, reverse DNS and proxy/mobile/hosting indicators; these are vendor signals, not proof of company ownership or location. Use ipintel_satellite with known lat and lon and optional radius_m, mode and date. Null date selects the latest suitable scene; fallback defaults to true and may select a nearby date. Preserve selected-scene timestamps, fulfillment status, warnings and Copernicus attribution. Satellite image links remain JSON metadata and are not automatically fetched."
 
 # Company profiles, public records, market signals and specialist research through Vaaya.
 # Inherit the existing company wallet and its $0.50 per-payment cap.
@@ -321,18 +317,18 @@ include_tools = [
   "vaaya_recallradar_search",
   "vaaya_recallradar_get",
 ]
-instructions_text = "Company profiles, funding, workforce/product signals, US litigation, filings, patents, historical sites, numerical evidence and recalls through Vaaya. For Fundable company_search supply one of name/domain/linkedin/crunchbase; use the returned id with company, or call company directly with one of id/domain/linkedin/crunchbase. Verify legal entity/domain and source articles: the vendor documents identity mismatches and funding totals that may lag the latest round. CourtListener cases/dockets require q with optional party_name/court/date filters; cases searches opinions, dockets searches RECAP federal dockets. Akta headcount_trends/product_reviews take company as domain or Akta uuid. TheirStack technographics takes a company identifier, preferably company_domain; resolve technology slugs with tech_catalog before filtering, and preserve confidence and first/last dates because job mentions do not prove current deployment. Signalbase funding/acquisitions support company_domain/company_name and date filters; preserve event/source dates. EDGAR entities resolves q to CIK; filings takes cik, fulltext takes q with optional forms/date filters, document takes cik/accession/filename, concept takes cik/concept for public-company XBRL financials, and index takes date. Private Form D/C filings may be available, but missing results prove neither nonregistration nor absent financing. USPTO assignees takes organization; patents takes q. Wayback snapshots/available take url and date selectors; fetch takes url/timestamp from a snapshot. Tako search/answer take query with optional source_indexes; contents takes a result url for its backing CSV/page text. RecallRadar search takes q (product/brand) in the JSON body; get takes an id from search. Preserve source links, dates, jurisdiction, coverage, partial results and recall record identifiers; no hits do not prove no litigation or safety notices. Hosted assets remain links. Structured advertised prices govern estimates, including Tako $0.03/$0.03/$0.05 and RecallRadar $0.12/$0.03 rather than lower description prices. Live challenges and the shared $0.50 company payment cap govern payment. Treazury handles x402 USDC on Base; do not automatically repeat uncertain paid submissions."
+instructions_text = "Company profiles, funding, workforce/product signals, US litigation, filings, patents, historical sites, numerical evidence and recalls through Vaaya. For Fundable company_search supply one of name/domain/linkedin/crunchbase; use the returned id with company, or call company directly with one of id/domain/linkedin/crunchbase. Verify legal entity/domain and source articles: the vendor documents identity mismatches and funding totals that may lag the latest round. CourtListener cases/dockets require q with optional party_name/court/date filters; cases searches opinions, dockets searches RECAP federal dockets. Akta headcount_trends/product_reviews take company as domain or Akta uuid. TheirStack technographics takes a company identifier, preferably company_domain; resolve technology slugs with tech_catalog before filtering, and preserve confidence and first/last dates because job mentions do not prove current deployment. Signalbase funding/acquisitions support company_domain/company_name and date filters; preserve event/source dates. EDGAR entities resolves q to CIK; filings takes cik, fulltext takes q with optional forms/date filters, document takes cik/accession/filename, concept takes cik/concept for public-company XBRL financials, and index takes date. Private Form D/C filings may be available, but missing results prove neither nonregistration nor absent financing. USPTO assignees takes organization; patents takes q. Wayback snapshots/available take url and date selectors; fetch takes url/timestamp from a snapshot. Tako search/answer take query with optional source_indexes; contents takes a result url for its backing CSV/page text. RecallRadar search takes q (product/brand) in the JSON body; get takes an id from search. Preserve source links, dates, jurisdiction, coverage, partial results and recall record identifiers; no hits do not prove no litigation or safety notices. Hosted assets remain links."
 
 [sources.googletrends]
 extends = "../../providers/google-trends.toml"
-instructions_text = "Use Google Trends for aggregate keyword interest over time, by region, and related queries/topics in the web research context. Supply keyword and an ISO country code as required by the tools. This is aggregate trend data, not web search or evidence about a specific person's behavior. Treazury handles x402 payment; use the live challenge and configured cap for costs. google_trends_help describes this complete selected toolset."
+instructions_text = "Use Google Trends for aggregate keyword interest over time, by region, and related queries/topics in the web research context. Supply keyword and an ISO country code as required by the tools. This is aggregate trend data, not web search or evidence about a specific person's behavior. google_trends_help describes this complete selected toolset."
 
 # GenuineGood is a grant discovery service. Keep its selected search and detail
 # tools for focused company grant research.
 [sources.genuinegood]
 extends = "../../providers/genuinegood.toml"
 include_tools = ["genuinegood_search_post", "genuinegood_detail_post"]
-instructions_text = "US federal grant research: search Grants.gov opportunities, then request detail by opportunityId. Verify eligibility, deadlines and awards against the linked official notice. Only search and detail are exposed; Treazury handles x402 payment."
+instructions_text = "US federal grant research: search Grants.gov opportunities, then request detail by opportunityId. Verify eligibility, deadlines and awards against the linked official notice. Only search and detail are exposed."
 
 # MCP endpoints expose separate toolsets; social, company and toolbox share payment identity.
 # Sources inherit each listener wallet unless a source explicitly overrides it.
@@ -364,15 +360,11 @@ bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
 sources = ["social", "telesint", "pdl_people", "social_stableenrich"]
 
-# Note: Exa is the same source used by web, but this listener pays from the
-# "company" wallet shared with social. Its Exa connections use a separate Tor
-# identity from web, isolated by the wallet address.
-# Do not set sources.exa.wallet: that would override the listener's wallet choice.
 [servers.company]
 listen = "127.0.0.1:6339"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["exa", "genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel", "company_ipintel", "company_vaaya"]
+sources = ["genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel", "company_ipintel", "company_vaaya"]
 
 # Start with discovery tools; agent-added APIs are persisted in the registry above.
 [servers.toolbox]
