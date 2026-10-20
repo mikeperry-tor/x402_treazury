@@ -45,7 +45,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | TeleSINT | `telesint.toml` | Stateless Telegram intelligence; watch ownership unsupported |
 | RelayShield phone | `relayshield/phone-reputation.toml` | Authored vendor-omitted request contract |
 | AgentFund | `agentfund.toml` | Vendor OpenAPI |
-| AgentUtility | `agentutility/provider.toml` | 15 research operations + help; enriched cluster tags; managed payments omit extensions |
+| AgentUtility | `agentutility/provider.toml` | Full supported aliases/catalog; advisory research recommendations; enriched provenance |
 | Arkham | `arkham.toml` | Vendor OpenAPI |
 | BlockRun | `blockrun.toml` | Synchronous catalog with fixed-symbol reads; async jobs/ownership excluded |
 | Claw402 | `claw402.toml` | Full catalog, advisory market reads, sparse RootData JSON bodies |
@@ -70,7 +70,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | RegimeShift | `regimeshift.toml` | Vendor OpenAPI |
 | SocialFetch | `socialfetch.toml` | Vendor tagged OpenAPI |
 | StableEnrich | `stableenrich.toml` | Synchronous JSON/image catalog; specific lifecycle paths excluded |
-| Straits | `straits/provider.toml` | Local `straits/openapi.json` |
+| Straits | `straits/provider.toml` | Authored free/premium JSON, CSV, RSS and HTML contracts |
 | Vaaya | `vaaya.toml` | Supported x402 JSON/image catalog; specific MPP/lifecycle boundaries |
 | x402-list | `x402-list.toml` | Public directory reads, assessments and suggestions |
 | x402stock | `x402stock.toml` | Full supported market/economic catalog; compact research recommendations |
@@ -79,7 +79,7 @@ Curl additionally pins the vendor-published OpenAPI response envelope for discov
 relay use; see [relay configuration](../docs/configuration.md#paid-discovery-relay).
 
 The five authored local catalogs are OpenAPI 3.1 request definitions, explicitly
-labeled as local rather than vendor-published. They preserve the curated routes,
+labeled as local rather than vendor-published. They preserve the supported routes,
 tags, descriptions, parameters, request bodies and embedded prices from the
 Python reference digests. Prices use the `x-payment-info` extension. Responses
 have a generic description because their schemas are not modeled. Preserve the

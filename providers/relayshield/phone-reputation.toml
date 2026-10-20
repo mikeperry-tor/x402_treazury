@@ -8,7 +8,7 @@
 # attack-graph pivots, Twilio Lookup v2 SIM/eSIM swap status (cached 24h), and
 # carrier line-type intelligence (`voip`, `mobile`, `landline`, etc.).
 #
-# This route is live on `https://api.relayshield.net` and listed in the vendor's
+# This route is documented at `https://api.relayshield.net` and listed in the vendor's
 # root discovery document and `llms.txt`, but omitted from the vendor's published
 # `https://api.relayshield.net/openapi.json`. Its unsigned challenge uses x402 v1;
 # the authored request schema is not a vendor-published schema. Payment support
@@ -22,8 +22,7 @@ name = "RelayShield Phone Reputation"
 base_url = "https://api.relayshield.net"
 prefix = "relayshield"
 
-include = ["/v1/payg"]
-include_operations = ["POST /v1/payg/phone-reputation"]
+include = ["/v1/payg", ""]
 
 pricing_key = "x-payment-info"
 probe_pricing = false

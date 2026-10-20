@@ -287,11 +287,16 @@ and prices embedded from vendor documentation and challenges. The original vendo
 spec is retained in `tests/fixtures/concordance_openapi.json`; the curated tool
 contract is pinned by `tests/provider_catalogs.rs`. Boot
 makes zero probe requests (all paid routes are POST, and the probe is
-GET-only by design). The free utility routes (`/healthz`, `/catalog`,
-`/llms.txt`) are not exposed: `/catalog` would name `concordance_root` under
-the include-anchor naming rules, so the source slugs and example series ids
-it discovers live in the series tool's param notes instead, and `help_url`
-serves the vendor `llms.txt` as `concordance_help()`.
+GET-only by design). The authored projection preserves the complete captured public GET objects for
+`/`, `/catalog` and `/healthz`, adding explicitly authored zero-price hints.
+`include = ["/tools", ""]` preserves paid names and adds `concordance_root`,
+`concordance_catalog` and `concordance_healthz` without changing wire paths.
+Catalog discovery completes the source/series lookup workflow. The existing
+native `concordance_help` fetches the exact `/llms.txt` document, faithfully
+representing that fourth public resource without a duplicate HTTP tool.
+Captured source comparisons preserve the six paid request contracts and local
+reference closure. These are offline schema facts, not current availability or
+funded completion claims.
 
 ## agentfund.toml — AgentFund US Economic, SEC & On-Chain Data (x402.agentfund.net)
 
@@ -393,7 +398,7 @@ closed via `additional_properties = false`. Caveats:
 ## locus.toml — Locus US property & public-records context (api.locus.report)
 
 The curated `providers/locus/openapi.json` exposes **108 paid POST tools**, a
-two-tool free gateway and a help tool. Prices are
+two-tool free gateway, two public discovery manifests and a help tool. Prices are
 embedded from the spec's `x-payment-info.price` blocks ($0.01–$2.49 per call),
 so boots make zero probe requests (`probe_pricing` is false), plus a **two-tool
 free gateway** mirroring the vendor's own remote-MCP shape: `locus_list`
@@ -408,8 +413,10 @@ cannot expose — is rewritten into that flat form). Design notes:
   captured free REST routes occur in the gateway enum: no functionality is lost
   by this representation. The public `/.well-known/locus-tools.json` unified
   free/paid schema directory and `/.well-known/locus-agent-endpoints.json` bundle
-  directory are distinct contracts omitted from the current projection; they
-  should be preserved with their captured schemas and authored free-price hints.
+  directory are distinct contracts preserved as complete captured objects with
+  authored free-price hints. The empty naming fallback preserves their full names;
+  `/api` and `/tools` anchors retain existing names. Bidirectional source/gateway
+  name equality verifies coverage without discarding actual original schemas.
 - The vendor quotes four payment rails; the live 402 puts plain EIP-3009
   USDC-on-Base first in `accepts[]`, which is what our EVM wallet pays (the
   SDK filters the Solana/Tempo/Circle-Gateway entries out).
@@ -431,31 +438,35 @@ x402_treazury serve --provider providers/locus/provider.toml --timeout 120
 
 ## straits.toml — Straits.live Hormuz monitor (straits.live)
 
-Strait of Hormuz crisis data in two tiers, exposed as **33 tools tagged
-`Free` / `Premium` in a curated OpenAPI catalog** (`providers/straits/openapi.json`)
-so the server's tag selection mounts tiers per server (`--tags Premium`,
-`--tags Free`; `catalog tags` inventories them). The vendor spec
-(`straits.live/openapi.json`, snapshot in `tests/fixtures/`) covers only the
-premium side — 13 ops, all tagged `Premium`, correct-shape `x-payment-info`
-($0.01–$0.50) — from which the local catalog derives the 10 GET data routes; it
-also defines the 23-route free tier (`/status`-style summaries,
-short-window series, curated indicators) from the human `/api` catalog, so
-agents get zero-cost context and pay only for depth. Excluded on purpose:
-`/api/premium/stream` + `/stream/session` and `/webhooks`(+DELETE) —
-session-token/subscription-secret auth, not x402-payable, and webhooks
-need a callback URL an MCP agent cannot receive; the retired frozen feeds
-(`/api/v1/hormuz-snapshot`, `/api/v1/cape-snapshot`); and the free
-`/api/v1/vessels` count summary (name collision with premium `vessels`;
-`ports`/`transits` cover its data). Free routes answer `200` unpaid — the
-boot probe would mislabel them, so each carries an override restating
-"Free — no payment required" semantics. Rate limit: 30 req/60 s shared
-across all routes. `help_url` serves the vendor `llms.txt` (which carries
-the exact free-vs-premium comparison) as `straits_help()`. On a tier-tagged
-mount (`--tags Premium`) the free-tier overrides warn-and-skip at boot —
-expected, they do not apply to that subset. Three premium routes
-(hormuz/flags, hormuz/risk-screen, risk-premium) inline >500-char challenge
-descriptions that Coinbase's facilitator rejects; `src/payment.rs` trims
-challenge descriptions client-side, so they settle like the rest.
+The authored catalog exposes free and premium resources tagged `Free` / `Premium`;
+listener tag selection can mount either tier. Original premium GET request objects
+retain their digest provenance. Additional free contracts come from the vendor's
+[human API documentation](https://straits.live/api), rather than the premium-only
+OpenAPI document. Known free additions carry explicit zero-price hints; no endpoint
+response or current service health was verified.
+
+Free resources include the canonical `/status` bundle, AIS vessel counts, public
+CSV downloads, RSS feeds, the HTML data catalogue and embed widget. CSV columns
+and undocumented JSON response fields are not inferred. HTML is ordinary text,
+without browser execution. `/report` renders the same daily-brief prose already
+represented by `/api/v1/briefs`. The retired Hormuz and Cape snapshot feeds remain
+available as historical data frozen on 2026-08-28; their retirement markers must
+not be interpreted as live observations. Respect published per-format quotas and
+upstream timestamps/staleness indicators.
+
+With both tiers enabled, ordinary collision naming produces `straits_vessels_get`
+for the paid manifest and `straits_vessels_get_2` for free counts. A single-tier
+catalog names its selected operation `straits_vessels`. The free count request
+supports optional `flagged=true` and `region=hormuz|cape`; Cape returns null counts
+because it is not measured. Other existing names and requests remain unchanged.
+
+Session creation and the token-authenticated premium SSE stream remain outside
+this catalog, as do subscription-secret webhook lifecycle operations requiring a
+callback receiver. Their ownership/lifecycle contracts are distinct from ordinary
+GET resources. Configured lazy help fetches the vendor's `llms.txt`; positive tier
+listener tag filters omit untagged help; source/CLI tag selection retains configured
+help. The existing client-side challenge-description
+normalization remains necessary for premium routes with long descriptions.
 
 ## lonestar.toml — LoneStarOracle catalog (lonestaroracle.xyz)
 
@@ -771,47 +782,20 @@ are much more complete than OpenAPI: 286 OpenAPI operations have no tags at all,
 including web-search. Using the live spec with a cluster filter would silently
 omit useful operations.
 
-The bundled request-only `openapi.json` preserves OpenAPI request schemas and
-full descriptions, unions OpenAPI tags with registry tags and cluster, and records
-registry `aliasOf` in `x-agentutility-alias-of`. It adds the explicitly authored
-`treazury-research` tag to 15 reviewed operations. It does not use the registry's
-less complete input/output schemas as replacements. The Rust
-`snapshot_agentutility` example generates this catalog from two locally fetched
-files and refuses mismatched inventories, unexpected methods/origins, or missing
-default routes. The provider's exact allowlist includes 525 eligible operations;
-new routes and registry-declared aliases do not appear automatically.
+The bundled request-only `openapi.json` preserves full OpenAPI request schemas,
+descriptions and payment extensions, unions OpenAPI and registry tags plus cluster,
+and records registry `aliasOf` in `x-agentutility-alias-of`. Registry input/output
+schemas never replace the fuller OpenAPI contracts. The Rust
+`snapshot_agentutility` join checks actual inventory, origin, method and alias
+consistency; it has no recommendation or research-tag responsibility.
 
-Default: **15 research operations plus lazy help**—web search, cited answers,
-research briefs, scraping, structured scraping, links, archive snapshots, arXiv
-search/summaries, PubMed, Hacker News, Wikipedia, GitHub README and YouTube/PDF text.
-Basic DNS/status/developer utilities are outside this default. Source tags replace
-the default selection; listener filters can only narrow what a source has loaded.
-Use cluster tags for practical subsets rather than browsing all 2,076 detailed tags:
-
-| Cluster tag | Eligible API operations (excluding help) |
-| --- | ---: |
-| `web-probe` | 85 |
-| `wordmint` | 68 |
-| `edge-finance` | 48 |
-| `edge-market` | 47 |
-| `mediakit` | 38 |
-| `locale` | 27 |
-| `rollforge` | 26 |
-| `synthforge` | 13 |
-| `prooflayer` | 11 |
-| `matchpoint` | 7 |
-| `bestiary` | 6 |
-| `retail` | 5 |
-| `agentops`, `model-router` | 4 each |
-| `browser-workflow` | 3 |
-| `statline` | 1 |
-| `compose` | 132 |
-
-`tags = []` selects 525 API operations plus help. Clusters and finer tags can
-overlap; the table counts each service's registry cluster. The full `catalog tags`
-report includes aliases/exclusions because it describes the input document.
-The registry does not mark every semantically similar endpoint as an alias, so
-some overlap remains even after excluding all declared aliases.
+The full supported catalog, including compatible aliases, is available by default.
+The former fifteen research tools plus help are advisory `recommended_tools`;
+operators can explicitly opt in or select source cluster tags such as `web-probe`,
+`wordmint` or `edge-finance`. Listener filters can only narrow loaded sources.
+Aliases are distinct original HTTP paths and retain their own request, price and
+name identities; no automatic alias rewriting or recommendation prefix rewriting
+occurs. Catalog tags describe the input document, including excluded operations.
 
 ```sh
 target/debug/x402_treazury catalog tools --provider providers/agentutility/provider.toml
@@ -863,8 +847,7 @@ Venice/Fal/CloudConvert credentials or initialize a separate vendor wallet/clien
 - One-shot browser-session returns HTML/title JSON with an optional screenshot;
   IPFS-fetch returns JSON metadata plus text/JSON/base64; QR-code-generate returns
   JSON format/content-type/base64 fields. Optional screenshot or SVG content does
-  not make these JSON envelopes unsupported. Their current omission and alias
-  suppression are editorial; preserve these usable contracts without inventing
+  not make these JSON envelopes unsupported. These and their compatible aliases are exposed without inventing
   automatic image decoding, file adapters or a stable browser-session lifecycle.
 - Watch-page is excluded because it stores caller-selected watch IDs and server-side
   state for up to 365 days; its ownership/access semantics need review. The
@@ -873,10 +856,13 @@ Venice/Fal/CloudConvert credentials or initialize a separate vendor wallet/clien
 - Six audit routes are excluded: db-migration-risk, dep-risk-summary,
   deploy-config-risk, production-readiness-score, prompt-injection-surface, and
   secrets-exposure-check. Their complete `oneOf` branches declare alternative
-  repo/files properties; the current flattener cannot preserve those full branches.
-  Do not replace them with the registry's empty object schemas. Required-only
+  repo/files properties; the current converter succeeds but emits an empty-properties object, losing the
+  complete repo/files alternatives. Each captured operation is independently
+  exercised offline to establish that precise loss; these are not converter errors.
+  Do not replace them with the registry's empty object schemas. No captured aliases
+  target these six operations or watch-page, so no alias exclusions are invented. Required-only
   alternatives on keyword-suggest, wallet-label and company-intel-pack are retained.
-- Compose routes are opt-in bundles executed upstream in a single request. Preserve
+- Compose routes are synchronous bundles executed upstream in a single request. Preserve
   component failures and degraded markers rather than presenting partial reports
   as complete. Web-search can return an explicitly marked recent-news fallback;
   `include_text` is a compatibility input and does not enable page-text retrieval.
@@ -898,8 +884,8 @@ scripts/zcash.sh test --offline --example snapshot_agentutility
 ```
 
 Review request/description/pricing changes, new aliases, tags and response envelopes.
-Update the exact allowlist only after reviewing new routes, and review golden
-contracts alongside any fixture update. The snapshot does not refresh at runtime;
+Review actual supported boundaries and focused transformation/request regressions
+alongside updates; do not restore a fixed inventory or research-default gate. The snapshot does not refresh at runtime;
 no custom registry adapter is introduced into serving or agent source registration.
 
 
@@ -1085,7 +1071,9 @@ The local projection copies Bazaar `pathParams`/`queryParams` properties and
 required lists into OpenAPI parameters; it uses each resource's actual GET
 method, never the generic Bazaar boilerplate's HEAD/DELETE alternatives. Refresh
 from `tests/fixtures/newsgurus_x402_catalog.json` and review the projection and
-full golden contract together; the regression compares every parameter schema.
+focused transformation contract together; the regression compares every parameter
+schema, price, description and vendor output example without inventing a response
+schema.
 
 The guide still describes the legacy `X-PAYMENT` header alongside the v2 catalog;
 Treazury owns negotiation/signing. Free `/public/regime` and `/public/narratives`

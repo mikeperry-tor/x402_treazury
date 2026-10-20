@@ -938,7 +938,458 @@
           }
         }
       }
+    },
+    "/status": {
+      "get": {
+        "summary": "Canonical dashboard snapshot",
+        "description": "Free — no payment required. Dashboard state with per-section data-health indicators. Check upstream asOf and stale indicators rather than treating response time as observation time.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/vessels": {
+      "get": {
+        "summary": "Free AIS vessel presence counts",
+        "description": "Free — no payment required. Counts by corridor and ship type over a 30-minute window, cached for five minutes. flagged=true requests the OFAC-matched subset. region=hormuz or cape; Cape counts are null because that region is not measured.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [
+          {
+            "name": "flagged",
+            "in": "query",
+            "required": false,
+            "description": "true requests the OFAC-matched subset; the vendor also accepts 1.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "description": "Cape is accepted but returns null counts because it is not measured.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hormuz",
+                "cape"
+              ]
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/hormuz-snapshot": {
+      "get": {
+        "summary": "Historical Hormuz snapshot",
+        "description": "Free — no payment required. Retired historical feed, frozen on 2026-08-28 after upstream access ended. Retains a historical/retired marker; do not interpret as current conditions.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/v1/cape-snapshot": {
+      "get": {
+        "summary": "Historical Cape snapshot",
+        "description": "Free — no payment required. Retired historical feed, frozen on 2026-08-28 after upstream access ended. Retains a historical/retired marker; do not interpret as current conditions.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/data": {
+      "get": {
+        "summary": "Public data downloads catalogue",
+        "description": "Free — no payment required. HTML catalogue of downloadable resources and per-file licensing.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/data/status.csv": {
+      "get": {
+        "summary": "Dashboard status CSV",
+        "description": "Free — no payment required. One-row dashboard CSV including denominator/control columns and insurance provenance/staleness indicators. Column order is append-only; response columns are not modeled here.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/data/transits.csv": {
+      "get": {
+        "summary": "Complete daily transit history CSV",
+        "description": "Free — no payment required. Daily transit history from 2025-02-28, beyond the bounded JSON history window.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/data/hormuz-index.csv": {
+      "get": {
+        "summary": "Hormuz indices CSV",
+        "description": "Free — no payment required. Both indices and bands at five-minute resolution over the last seven days.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/data/oil.csv": {
+      "get": {
+        "summary": "Oil price series CSV",
+        "description": "Free — no payment required. Brent and WTI price-series download.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/data/events.csv": {
+      "get": {
+        "summary": "Indexed events CSV",
+        "description": "Free — no payment required. One row per indexed headline with source attribution URLs.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feed.xml": {
+      "get": {
+        "summary": "Events RSS feed",
+        "description": "Free — no payment required. RSS 2.0 feed of indexed events.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "application/rss+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status/feed.xml": {
+      "get": {
+        "summary": "Status changes RSS feed",
+        "description": "Free — no payment required. RSS feed of dashboard status flips.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "application/rss+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sanctioned-vessels/feed.xml": {
+      "get": {
+        "summary": "Sanctioned vessel matches RSS feed",
+        "description": "Free — no payment required. RSS entries for AIS vessel OFAC matches, newest first.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "application/rss+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/briefs/feed.xml": {
+      "get": {
+        "summary": "Daily briefs RSS feed",
+        "description": "Free — no payment required. RSS feed of dated daily briefs.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "application/rss+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/embed": {
+      "get": {
+        "summary": "Embeddable dashboard widget",
+        "description": "Free — no payment required. Public HTML dashboard widget for iframe embedding. Returned as ordinary text; no browser execution is implied.",
+        "tags": [
+          "Free"
+        ],
+        "parameters": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
-  "x-catalog-source": "git:37494402c22f5897bf8660101a7a9784c621f6af:confs/straits/straits_digest.json"
+  "x-catalog-source": "git:37494402c22f5897bf8660101a7a9784c621f6af:confs/straits/straits_digest.json",
+  "x-public-documentation": {
+    "url": "https://straits.live/api",
+    "scope": "Additional public GET request contracts authored from the human API documentation. No endpoint responses were fetched. Undocumented response fields and query parameters are not inferred. Existing x-catalog-source records the original digest basis.",
+    "paths": [
+      "/status",
+      "/api/v1/vessels",
+      "/api/v1/hormuz-snapshot",
+      "/api/v1/cape-snapshot",
+      "/data",
+      "/data/status.csv",
+      "/data/transits.csv",
+      "/data/hormuz-index.csv",
+      "/data/oil.csv",
+      "/data/events.csv",
+      "/feed.xml",
+      "/status/feed.xml",
+      "/sanctioned-vessels/feed.xml",
+      "/briefs/feed.xml",
+      "/embed"
+    ]
+  }
 }

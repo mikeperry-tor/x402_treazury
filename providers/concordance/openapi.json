@@ -364,6 +364,88 @@
           }
         }
       }
+    },
+    "/": {
+      "get": {
+        "summary": "Landing",
+        "operationId": "landing__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        }
+      }
+    },
+    "/catalog": {
+      "get": {
+        "summary": "Catalog",
+        "operationId": "catalog_catalog_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Catalog Catalog Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "summary": "Healthz",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Healthz Healthz Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        }
+      }
     }
   },
   "x-catalog-source": "git:37494402c22f5897bf8660101a7a9784c621f6af:confs/concordance/concordance_digest.json"

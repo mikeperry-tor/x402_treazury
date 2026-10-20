@@ -8968,6 +8968,66 @@
           }
         }
       }
+    },
+    "/.well-known/locus-tools.json": {
+      "get": {
+        "operationId": "get_locus_unified_tool_catalog",
+        "summary": "Unified Locus tool catalog",
+        "description": "One no-auth discovery document for every free and paid Locus tool, with exact schemas, prices, canonical IDs, executable names, and explicit underscore-versus-hyphen naming rules.",
+        "tags": [
+          "free",
+          "discovery",
+          "tools"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "accountApiKeyRequired": false,
+          "paymentRequired": false,
+          "charged": false
+        },
+        "responses": {
+          "200": {
+            "description": "Unified free and paid tool catalog."
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        }
+      }
+    },
+    "/.well-known/locus-agent-endpoints.json": {
+      "get": {
+        "operationId": "get_locus_top_agent_endpoints",
+        "summary": "Top Locus endpoints for agents",
+        "description": "Bundle-first agent directory: Before You Sign, Investor Diligence, and Policy + Environmental Brief, plus pointers to $0.01 atomic calls for agents that already know the exact lane they need.",
+        "tags": [
+          "free",
+          "discovery",
+          "tools"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "accountApiKeyRequired": false,
+          "paymentRequired": false,
+          "charged": false
+        },
+        "responses": {
+          "200": {
+            "description": "Top endpoint and bundle manifest for agents."
+          }
+        },
+        "x-payment-info": {
+          "price": {
+            "amount": "0",
+            "currency": "USD",
+            "mode": "fixed"
+          }
+        }
+      }
     }
   },
   "x-catalog-source": "git:37494402c22f5897bf8660101a7a9784c621f6af:confs/locus/locus_digest.json"

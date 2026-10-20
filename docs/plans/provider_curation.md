@@ -11,9 +11,21 @@ The wider audit reopened conditional C2.1, implemented with six passing focused
 tests and fresh source-matched complexity evidence. Independent exact-SHA review
 approved C2.1 (`27a6312`) and reclosed affected G2. The classification-document
 fixup (`118e205`) was independently approved. C3.2 normalizes the fourteen mixed
-providers and their consumers. Offline validation passed:19 focused provider tests,
+providers and their consumers. Offline validation passed: 19 focused provider tests,
 2 SocialFetch, 9 credit-pricing, 6 catalog-selection, the embedded-directory test and
-all 37 provider definitions. Final exact-SHA review is pending. Source-matched
+all 37 provider definitions. C3.2 (`8a23038` plus test-boundary fixup `f880b27`) received independent
+exact-SHA approval. C3.3 implements local projection/provider normalization;
+validation passed (23 provider regressions, two generator tests, eight config
+tests including all 37 definitions). Its exact-SHA review passed. A subsequent projection audit reopened affected G3:
+the Straits fixup restores fifteen documented free resources, retains retired feeds
+as historical data and migrates the sole paid-vessels collision name through existing
+naming semantics. Focused offline validation and exact-fixup review are required
+before resuming P5. Actual
+inventories for all eight local inputs originally showed no removed or renamed
+existing tools. The later Straits correction adds fifteen resources and changes only
+the paid vessel tool from `straits_vessels` to `straits_vessels_get`; no active
+consumer selector references that tool. Snapshot CogC/CycC fell from 11/16 to
+8/14 by deleting research/default responsibilities. Source-matched
 CogC/CycC review found no advisory regressions; actual thirteen-capture inventories
 show no removed or renamed existing tools. HireScrape has no full local input,
 so only its explicitly synthetic boundary regression is claimed.
@@ -134,7 +146,7 @@ tests, four method-selection tests, the IPIntel quirk test and recursive offline
 TOML validation execute successfully; before/after evidence is under ignored
 `target/provider-curation/`. No paid endpoint or qualification was run.
 
-No child splits are currently needed. C3.3 closes the provider boundary before
+No C3 child splits are currently needed. C3.3 closes the provider boundary before
 C4.1 privacy adoption. Acceptance includes before/after inventories under target,
 new compatible route visibility and complete naming/override migration.
 C5.1 owns qualification's explicit input map and selected-scope checks;

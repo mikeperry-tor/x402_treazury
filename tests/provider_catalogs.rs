@@ -450,7 +450,7 @@ async fn agent402_exposes_supported_media_json_and_preserves_request_contracts()
 }
 
 #[tokio::test]
-async fn agentutility_restores_tags_deduplicates_and_keeps_research_focused() {
+async fn agentutility_preserves_aliases_json_modes_and_explicit_recommendations() {
     use x402_treazury::{catalog, config, output::HttpOutput};
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut cfg = config::load(&root.join("providers/agentutility/provider.toml"))
@@ -459,67 +459,50 @@ async fn agentutility_restores_tags_deduplicates_and_keeps_research_focused() {
         .settings;
     let mut doc: Value =
         serde_json::from_str(include_str!("../providers/agentutility/openapi.json")).unwrap();
-    assert_eq!(doc["paths"].as_object().unwrap().len(), 817);
-    assert_eq!(
-        doc["paths"]
-            .as_object()
-            .unwrap()
-            .values()
-            .filter(|o| o["post"].get("x-agentutility-alias-of").is_some())
-            .count(),
-        282
-    );
-    assert_eq!(cfg.tags, ["treazury-research"]);
-    assert!(!cfg.probe_pricing);
-    doc["paths"]["/health"] = serde_json::json!({"post":{"tags":["treazury-research"]}});
-    doc["paths"]["/web-search"]["get"] = serde_json::json!({"tags":["treazury-research"]});
-    let tools = catalog::build_tools(&cfg, &doc, "agentutility").unwrap();
-    assert_eq!(tools.len(), 16);
-    assert!(
-        !tools
-            .iter()
-            .any(|t| t.path == "/health" || t.path == "/dns-lookup")
-    );
-    let search = tools
-        .iter()
-        .find(|t| t.name == "agentutility_web_search")
-        .unwrap();
-    let args = serde_json::json!({"query":"Rust MCP","num_results":2,"recency":"week"});
-    let route = search
-        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
-        .unwrap();
-    assert_eq!(route.url, "https://x402.agentutility.ai/web-search");
-    assert_eq!(route.method, "POST");
-    assert_eq!(route.body, Some(args));
-    assert!(route.query.is_empty());
-    assert!(search.description.contains("$0.006"));
-    assert_eq!(
-        search.input_schema["required"],
-        serde_json::json!(["query"])
-    );
-    assert_eq!(
-        tools.last().unwrap().help_url.as_deref(),
-        Some("https://agentutility.ai/llms.txt")
-    );
-    cfg.tags.clear();
+    doc["paths"]["/future-public-read"] =
+        serde_json::json!({"get":{"summary":"Synthetic public diagnostic"}});
     let all = catalog::build_tools(&cfg, &doc, "agentutility").unwrap();
-    assert_eq!(all.len(), 526);
-    for tool in all.iter().filter(|t| t.help_url.is_none()) {
-        assert!(
-            doc["paths"][&tool.path]["post"]
-                .get("x-agentutility-alias-of")
-                .is_none()
-        );
-    }
-    for excluded in [
-        "/watch-page",
+    for path in [
+        "/future-public-read",
+        "/dns-lookup",
         "/browser-session",
+        "/browser-render",
         "/ipfs-fetch",
+        "/ipfs-gateway",
         "/qr-code-generate",
-        "/db-migration-risk",
+        "/qr-maker",
     ] {
-        assert!(!all.iter().any(|t| t.path == excluded));
+        assert!(all.iter().any(|t| t.path == path), "{path}");
     }
+    assert!(!all.iter().any(|t| t.path == "/watch-page"));
+    for path in ["/web-search", "/search-web"] {
+        let tool = all.iter().find(|t| t.path == path).unwrap();
+        let args = serde_json::json!({"query":"Rust MCP","num_results":2,"recency":"week"});
+        let route = tool
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.url, format!("https://x402.agentutility.ai{path}"));
+        assert_eq!(route.body, Some(args));
+        assert!(route.query.is_empty());
+        assert_eq!(
+            tool.input_schema["required"],
+            doc["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"]["required"]
+        );
+        assert!(tool.description.contains("$0.006"));
+    }
+    assert_eq!(
+        doc["paths"]["/search-web"]["post"]["x-agentutility-alias-of"],
+        "web-search"
+    );
+    cfg.use_recommended_tools = true;
+    let selected = catalog::build_tools(&cfg, &doc, "agentutility").unwrap();
+    assert!(selected.iter().any(|t| t.path == "/web-search"));
+    assert!(
+        !selected
+            .iter()
+            .any(|t| t.path == "/dns-lookup" || t.path == "/search-web")
+    );
+    cfg.use_recommended_tools = false;
     let keywords = all.iter().find(|t| t.path == "/keyword-suggest").unwrap();
     assert_eq!(
         keywords.input_schema["anyOf"],
@@ -527,7 +510,7 @@ async fn agentutility_restores_tags_deduplicates_and_keeps_research_focused() {
     );
     cfg.tags = vec!["synthforge".into()];
     let images = catalog::build_tools(&cfg, &doc, "agentutility").unwrap();
-    assert_eq!(images.len(), 14); // Hosted URL results require no automatic asset download.
+    // Hosted URL results require no automatic asset download.
     assert!(
         images
             .iter()
@@ -956,11 +939,19 @@ async fn newsgurus_uses_catalog_templates_and_preserves_parameter_contracts() {
         serde_json::from_str(include_str!("fixtures/newsgurus_x402_catalog.json")).unwrap();
     let mut doc: Value =
         serde_json::from_str(include_str!("../providers/newsgurus/openapi.json")).unwrap();
-    assert_eq!(doc["paths"].as_object().unwrap().len(), 49);
     for resource in raw["resources"].as_array().unwrap() {
         let path = resource["resource"].as_str().unwrap();
         let op = &doc["paths"][path]["get"];
         assert_eq!(op["description"], resource["description"]);
+        assert_eq!(
+            op["responses"]["200"]["content"]["application/json"]["example"],
+            resource["extensions"]["bazaar"]["info"]["output"]["example"]
+        );
+        assert!(
+            op["responses"]["200"]["content"]["application/json"]
+                .get("schema")
+                .is_none()
+        );
         let properties =
             &resource["extensions"]["bazaar"]["schema"]["properties"]["input"]["properties"];
         let mut expected = vec![];
@@ -991,9 +982,21 @@ async fn newsgurus_uses_catalog_templates_and_preserves_parameter_contracts() {
     doc["paths"]["/x402/new-action"] = json!({"post":{"summary":"New action"}});
     doc["paths"]["/x402/brain/recent"]["delete"] = json!({"summary":"New method"});
     let tools = catalog::build_tools(&cfg, &doc, "newsgurus").unwrap();
-    assert_eq!(tools.len(), 49);
-    assert!(!tools.iter().any(|t| t.path == "/x402/agents/status"));
-    assert!(tools.iter().all(|t| t.method == "GET"));
+    assert!(tools.iter().any(|t| t.path == "/x402/new-action"));
+    let status = tools
+        .iter()
+        .find(|t| t.name == "newsgurus_agents_status")
+        .unwrap();
+    let route = status
+        .route(
+            cfg.base_url.as_ref().unwrap(),
+            json!({}).as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(route.method, "GET");
+    assert_eq!(route.url, "https://api.newsgurus.ai/x402/agents/status");
+    assert!(route.query.is_empty() && route.body.is_none());
+    assert!(status.description.contains("$0.002"));
     let institutions = tools
         .iter()
         .find(|t| t.name == "newsgurus_institutions_symbol")
@@ -1400,5 +1403,335 @@ async fn regimeshift_diagnostics_and_unsigned_intents_preserve_provisioning_boun
         !tools
             .iter()
             .any(|t| t.path == "/swap" || t.path == "/full-auto")
+    );
+}
+
+#[tokio::test]
+async fn agentutility_excludes_demonstrated_full_branch_conversion_loss() {
+    use x402_treazury::{catalog, config};
+    let cfg = config::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/agentutility/provider.toml"),
+    )
+    .await
+    .unwrap()
+    .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("../providers/agentutility/openapi.json")).unwrap();
+    let supported = catalog::build_tools(&cfg, &doc, "agentutility").unwrap();
+    for path in [
+        "/db-migration-risk",
+        "/dep-risk-summary",
+        "/deploy-config-risk",
+        "/production-readiness-score",
+        "/prompt-injection-surface",
+        "/secrets-exposure-check",
+    ] {
+        let original = &doc["paths"][path];
+        let body = &original["post"]["requestBody"]["content"]["application/json"]["schema"];
+        assert!(body["oneOf"][0]["properties"]["repo"].is_object());
+        // Independently exercise each actual input without provider filters. The
+        // build succeeds but loses all branch inputs and required alternatives.
+        let isolated = serde_json::json!({"paths":{path:original}});
+        let converted =
+            catalog::build_tools(&catalog::Config::default(), &isolated, "probe").unwrap();
+        assert_eq!(
+            converted[0].input_schema,
+            serde_json::json!({"type":"object","properties":{}})
+        );
+        assert!(!supported.iter().any(|t| t.path == path), "{path}");
+        assert!(
+            !doc["paths"]
+                .as_object()
+                .unwrap()
+                .values()
+                .any(|item| item["post"]["x-agentutility-alias-of"] == path[1..])
+        );
+    }
+}
+
+#[tokio::test]
+async fn concordance_preserves_source_requests_and_public_discovery() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let cfg = config::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/concordance/provider.toml"),
+    )
+    .await
+    .unwrap()
+    .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("../providers/concordance/openapi.json")).unwrap();
+    let raw: Value =
+        serde_json::from_str(include_str!("fixtures/concordance_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "concordance").unwrap();
+    for path in ["/", "/catalog", "/healthz"] {
+        let mut projected = doc["paths"][path].clone();
+        assert_eq!(projected["get"]["x-payment-info"]["price"]["amount"], "0");
+        projected["get"]
+            .as_object_mut()
+            .unwrap()
+            .remove("x-payment-info");
+        assert_eq!(projected, raw["paths"][path]);
+        let tool = tools.iter().find(|t| t.path == path).unwrap();
+        assert!(tool.description.contains("$0"));
+        let route = tool
+            .route(
+                cfg.base_url.as_ref().unwrap(),
+                json!({}).as_object().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            route.url,
+            format!("https://concordancehq.duckdns.org{path}")
+        );
+        assert!(route.body.is_none() && route.query.is_empty());
+    }
+    let source_tools = catalog::build_tools(&cfg, &raw, "concordance").unwrap();
+    for tool in tools.iter().filter(|t| t.path.starts_with("/tools/")) {
+        let source = source_tools.iter().find(|t| t.path == tool.path).unwrap();
+        assert_eq!(tool.input_schema, source.input_schema);
+        assert_eq!(tool.param_routes, source.param_routes);
+        assert!(!tool.input_schema.to_string().contains("$ref"));
+    }
+    let series = tools
+        .iter()
+        .find(|t| t.name == "concordance_series")
+        .unwrap();
+    let args = json!({"source":"fred","series_id":"GDP"});
+    let route = series
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.url, "https://concordancehq.duckdns.org/tools/series");
+    assert_eq!(route.body, Some(args));
+    assert_eq!(
+        tools
+            .iter()
+            .find(|t| t.name == "concordance_help")
+            .unwrap()
+            .help_url
+            .as_deref(),
+        Some("https://concordancehq.duckdns.org/llms.txt")
+    );
+}
+
+#[tokio::test]
+async fn locus_discovery_and_gateway_preserve_complete_source_contracts() {
+    use serde_json::json;
+    use std::collections::BTreeSet;
+    use x402_treazury::{catalog, config};
+    let cfg =
+        config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/locus/provider.toml"))
+            .await
+            .unwrap()
+            .settings;
+    let doc: Value = serde_json::from_str(include_str!("../providers/locus/openapi.json")).unwrap();
+    let raw: Value = serde_json::from_str(include_str!("fixtures/locus_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "locus").unwrap();
+    for path in [
+        "/.well-known/locus-tools.json",
+        "/.well-known/locus-agent-endpoints.json",
+    ] {
+        let mut projected = doc["paths"][path].clone();
+        assert_eq!(projected["get"]["x-payment-info"]["price"]["amount"], "0");
+        projected["get"]
+            .as_object_mut()
+            .unwrap()
+            .remove("x-payment-info");
+        assert_eq!(projected, raw["paths"][path]);
+        let tool = tools.iter().find(|t| t.path == path).unwrap();
+        let route = tool
+            .route(
+                cfg.base_url.as_ref().unwrap(),
+                json!({}).as_object().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(route.url, format!("https://api.locus.report{path}"));
+        assert_eq!(route.method, "GET");
+        assert!(route.body.is_none() && route.query.is_empty());
+        assert!(tool.description.contains("$0"));
+    }
+    let free: BTreeSet<_> = raw["paths"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(p, _)| p.starts_with("/api/locus_"))
+        .map(|(p, o)| {
+            assert_eq!(o["post"]["x-locus-access"]["charged"], false);
+            p.strip_prefix("/api/").unwrap()
+        })
+        .collect();
+    let names: BTreeSet<_> =
+        doc["paths"]["/tools/call"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+            ["properties"]["name"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n.as_str().unwrap())
+            .collect();
+    assert_eq!(free, names);
+    let call = tools.iter().find(|t| t.name == "locus_call").unwrap();
+    let args = json!({"name":"locus_coverage_check","arguments":{"place":"1 Main St"}});
+    let route = call
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.url, "https://api.locus.report/tools/call");
+    assert_eq!(route.body, Some(args));
+    let paid = tools
+        .iter()
+        .find(|t| t.path == "/api/locus-place-report")
+        .unwrap();
+    assert_eq!(
+        paid.input_schema["anyOf"],
+        json!([{"required":["address"]},{"required":["zip"]}])
+    );
+    let args = json!({"address":"1 Main St","radiusMeters":800});
+    let route = paid
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.url, "https://api.locus.report/api/locus-place-report");
+    assert_eq!(route.body, Some(args));
+    for path in [
+        "/api/locus-place-report-batch",
+        "/api/locus-record-batch",
+        "/api/locus-property-update",
+        "/api/property-update-jobs/{id}",
+    ] {
+        assert!(raw["paths"][path].is_object());
+        assert!(!tools.iter().any(|t| t.path == path));
+    }
+}
+
+#[tokio::test]
+async fn authored_provider_definitions_allow_compatible_catalog_arrivals() {
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let doc = serde_json::json!({"paths":{"/future-public-metadata":{"get":{"summary":"Synthetic supported public metadata","security":[]}}}});
+    for file in [
+        "agentutility/provider.toml",
+        "concordance/provider.toml",
+        "curl/provider.toml",
+        "glassnode/provider.toml",
+        "locus/provider.toml",
+        "newsgurus/provider.toml",
+        "straits/provider.toml",
+        "relayshield/phone-reputation.toml",
+    ] {
+        let cfg = config::load(&root.join("providers").join(file))
+            .await
+            .unwrap()
+            .settings;
+        assert!(!cfg.use_recommended_tools, "{file}");
+        let tools = catalog::build_tools(&cfg, &doc, cfg.prefix.as_deref().unwrap()).unwrap();
+        assert!(
+            tools.iter().any(|t| t.path == "/future-public-metadata"),
+            "{file}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn straits_public_formats_preserve_routes_tiers_and_historical_meaning() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let mut cfg = config::load(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/straits/provider.toml"),
+    )
+    .await
+    .unwrap()
+    .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("../providers/straits/openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "straits").unwrap();
+    // Independent literal publication expectations; these are authored from /api,
+    // not a vendor OpenAPI capture or invented response examples.
+    for path in [
+        "/status",
+        "/api/v1/vessels",
+        "/api/v1/hormuz-snapshot",
+        "/api/v1/cape-snapshot",
+        "/data",
+        "/data/status.csv",
+        "/data/transits.csv",
+        "/data/hormuz-index.csv",
+        "/data/oil.csv",
+        "/data/events.csv",
+        "/feed.xml",
+        "/status/feed.xml",
+        "/sanctioned-vessels/feed.xml",
+        "/briefs/feed.xml",
+        "/embed",
+    ] {
+        let op = &doc["paths"][path]["get"];
+        assert_eq!(op["tags"], json!(["Free"]));
+        assert_eq!(op["x-payment-info"]["price"]["amount"], "0");
+        assert!(op["responses"]["default"]["content"]["application/json"]["schema"].is_null());
+        let tool = tools.iter().find(|t| t.path == path).unwrap();
+        let request = tool
+            .route(
+                cfg.base_url.as_ref().unwrap(),
+                json!({}).as_object().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.url, format!("https://straits.live{path}"));
+        assert!(request.body.is_none() && request.query.is_empty());
+        assert!(tool.description.contains("Free"));
+    }
+    let paid = tools
+        .iter()
+        .find(|t| t.path == "/api/premium/vessels")
+        .unwrap();
+    let free = tools.iter().find(|t| t.path == "/api/v1/vessels").unwrap();
+    assert_eq!(paid.name, "straits_vessels_get");
+    assert_eq!(free.name, "straits_vessels_get_2");
+    assert_eq!(
+        free.input_schema["properties"]["flagged"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        free.input_schema["properties"]["region"]["enum"],
+        json!(["hormuz", "cape"])
+    );
+    let route = free
+        .route(
+            cfg.base_url.as_ref().unwrap(),
+            json!({"flagged":true,"region":"cape"}).as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(route.query.len(), 2);
+    assert_eq!(route.query["flagged"], true);
+    assert_eq!(route.query["region"], "cape");
+    assert!(route.body.is_none());
+    for path in ["/api/v1/hormuz-snapshot", "/api/v1/cape-snapshot"] {
+        let description = &tools.iter().find(|t| t.path == path).unwrap().description;
+        assert!(description.contains("2026-08-28") && description.contains("historical"));
+    }
+    for (tag, path) in [
+        ("Free", "/api/v1/vessels"),
+        ("Premium", "/api/premium/vessels"),
+    ] {
+        cfg.tags = vec![tag.into()];
+        let selected = catalog::build_tools(&cfg, &doc, "straits").unwrap();
+        assert_eq!(
+            selected.iter().find(|t| t.path == path).unwrap().name,
+            "straits_vessels"
+        );
+    }
+    for path in [
+        "/api/premium/stream",
+        "/api/premium/stream/session",
+        "/api/premium/webhooks",
+    ] {
+        assert!(doc["paths"][path].is_null());
+    }
+    assert_eq!(
+        doc["x-public-documentation"]["url"],
+        "https://straits.live/api"
+    );
+    assert!(
+        doc["x-catalog-source"]
+            .as_str()
+            .unwrap()
+            .contains("straits_digest.json")
     );
 }

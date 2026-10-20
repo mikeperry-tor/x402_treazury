@@ -4,23 +4,6 @@ use anyhow::{Context, Result, ensure};
 use clap::Parser;
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, path::PathBuf};
-const DEFAULTS: &[&str] = &[
-    "web-search",
-    "answer-web",
-    "research-brief",
-    "scrape",
-    "scrape-to-json",
-    "link-extract",
-    "archive-snapshot",
-    "arxiv-search",
-    "arxiv-summarize",
-    "pubmed-search",
-    "hn-search",
-    "wikipedia-search",
-    "github-readme",
-    "youtube-transcript",
-    "pdf-to-markdown",
-];
 #[derive(Parser)]
 struct Args {
     spec: PathBuf,
@@ -85,13 +68,6 @@ fn snapshot(mut spec: Value, registry: &Value) -> Result<Vec<u8>> {
                 .context("missing cluster")?
                 .to_owned(),
         );
-        if DEFAULTS.contains(&slug.as_str()) {
-            ensure!(
-                service.get("aliasOf").is_none(),
-                "default route became an alias; review required"
-            );
-            tags.insert("treazury-research".into());
-        }
         if let Some(alias) = service.get("aliasOf") {
             ensure!(
                 alias.as_str().is_some_and(|s| services.contains_key(s)),
@@ -102,13 +78,7 @@ fn snapshot(mut spec: Value, registry: &Value) -> Result<Vec<u8>> {
         op.insert("tags".into(), serde_json::to_value(tags)?);
         op.remove("responses");
     }
-    for slug in DEFAULTS {
-        ensure!(
-            services.contains_key(*slug),
-            "default research route missing; review required"
-        );
-    }
-    spec["x-treazury-provenance"] = json!({"openapi":"https://x402.agentutility.ai/openapi.json","registry":"https://agentutility.ai/registry.json","transforms":["union OpenAPI tags, registry tags and cluster","add treazury-research to reviewed default routes","record registry aliasOf","omit response documentation"],"service_count":services.len()});
+    spec["x-treazury-provenance"] = json!({"openapi":"https://x402.agentutility.ai/openapi.json","registry":"https://agentutility.ai/registry.json","transforms":["union OpenAPI tags, registry tags and cluster","record registry aliasOf","omit response documentation"],"service_count":services.len()});
     spec.sort_all_objects();
     Ok(format!("{}\n", serde_json::to_string(&spec)?).into_bytes())
 }
@@ -127,8 +97,8 @@ mod tests {
     fn inputs() -> (Value, Value) {
         let mut paths = serde_json::Map::new();
         let mut services = serde_json::Map::new();
-        for slug in DEFAULTS.iter().copied().chain(["alias-search"]) {
-            paths.insert(format!("/{slug}"),json!({"post":{"description":"Keep full guidance","requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"q":{"type":"string"}},"anyOf":[{"required":["q"]}]}}}},"responses":{"200":{}}}}));
+        for slug in ["web-search", "alias-search"] {
+            paths.insert(format!("/{slug}"),json!({"post":{"description":"Keep full guidance","tags":["upstream"],"x-payment-info":{"price":{"amount":"0.006"}},"requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"q":{"type":"string"}},"anyOf":[{"required":["q"]}]}}}},"responses":{"200":{}}}}));
             services.insert(slug.into(),json!({"slug":slug,"methods":["POST"],"url":format!("https://x402.agentutility.ai/{slug}"),"cluster":"web-probe","tags":["search"]}));
         }
         services["alias-search"]["aliasOf"] = json!("web-search");
@@ -144,15 +114,25 @@ mod tests {
         assert_eq!(bytes, snapshot(s.clone(), &r).unwrap());
         let output: Value = serde_json::from_slice(&bytes).unwrap();
         let op = &output["paths"]["/web-search"]["post"];
-        assert_eq!(
-            op["requestBody"],
-            s["paths"]["/web-search"]["post"]["requestBody"]
+        for path in ["/web-search", "/alias-search"] {
+            for field in ["requestBody", "description", "x-payment-info"] {
+                assert_eq!(
+                    output["paths"][path]["post"][field],
+                    s["paths"][path]["post"][field]
+                );
+            }
+        }
+        assert_eq!(output["x-treazury-provenance"]["service_count"], 2);
+        assert!(
+            !output["x-treazury-provenance"]["transforms"]
+                .to_string()
+                .contains("research")
         );
-        assert_eq!(op["description"], "Keep full guidance");
-        assert_eq!(
-            op["tags"],
-            json!(["search", "treazury-research", "web-probe"])
-        );
+        // Recommendation choices do not belong to the registry join contract.
+        let mut alias_registry = r.clone();
+        alias_registry["services"]["web-search"]["aliasOf"] = json!("alias-search");
+        assert!(snapshot(s.clone(), &alias_registry).is_ok());
+        assert_eq!(op["tags"], json!(["search", "upstream", "web-probe"]));
         assert!(op.get("responses").is_none());
         assert_eq!(
             output["paths"]["/alias-search"]["post"]["x-agentutility-alias-of"],
@@ -170,6 +150,12 @@ mod tests {
             };
             assert!(snapshot(s, &r).is_err());
         }
+        let (s, mut r) = inputs();
+        r["totalServices"] = json!(99);
+        assert!(snapshot(s, &r).is_err());
+        let (mut s, r) = inputs();
+        s["paths"]["/web-search"]["get"] = json!({});
+        assert!(snapshot(s, &r).is_err());
         let (mut s, r) = inputs();
         s["paths"].as_object_mut().unwrap().remove("/web-search");
         assert!(snapshot(s, &r).is_err());

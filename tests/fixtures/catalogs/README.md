@@ -23,9 +23,9 @@ Production local catalogs under `providers/` and the Kronos/RegimeShift inputs i
 `examples/live-tor-providers.toml` are runtime inputs. Preserve them independently
 of test pruning. Check consumers in discovery, media, payment, startup, examples
 and qualification before deletion. `cases.json` still feeds the offline qualification preset test and the ignored
-startup benchmark; migrate both before removing it. Captured Apollo, Concordance,
-Locus and Straits test inputs have no code consumer. Concordance, Locus and Straits have
-distinct production local catalogs that remain necessary.
+startup benchmark; migrate both before removing it. Captured Apollo and Straits test inputs have no code consumer. Concordance source
+objects and Locus free-gateway/discovery contracts now have focused fidelity
+consumers. Their distinct production local catalogs remain necessary.
 
 Use `scripts/zcash.sh test --test provider_catalogs --test config` from the repository
 root. Tests use no Python, credentials or live vendors. Review input/schema/routing
@@ -57,25 +57,12 @@ omitting response documentation. Focused tests exercise supported JSON/base64 me
 with public child preservation, query routing, nested gateway bodies and existing
 image mappings. Full-inventory snapshots are not compatibility contracts.
 
-The AgentUtility catalog lives at `providers/agentutility/openapi.json`, captured on
-2026-10-03 from the API-host OpenAPI plus documentation-host registry. The Rust
-`snapshot_agentutility` utility keeps all 817 request contracts, enriches missing
-tags, marks 282 aliases and adds a curated research tag. The provider allows 525
-operations; its golden covers 15 research tools plus help. Tests also cover all
-eligible tools, tag subsets, required-only schema alternatives and satellite image
-metadata. A captured unpaid search challenge pins static signing compatibility and
-managed omission of its bazaar/builder-code extensions; no live funds were used.
-
-Seven additional lazy help URLs were verified in the provider audit; six affect
-these golden catalogs (botsmith is covered by settings and the help-contract test).
-Those six golden changes add only help tools, leaving all API contracts unchanged.
-`provider_payment_challenges.json` captures ten unsigned live challenges from
-2026-10-03 and 2026-10-04: Agent402 pins preservation of offer `outputSchema`;
-Exa Search/Contents and all four Google Trends routes pin exact preservation of
-reviewed informational fields through signing. Locus, Otto and SocialFetch also
-pin signing with top-level extensions omitted. Seller
-signatures and auth nonces are public fixture evidence, not buyer credentials;
-no live settlement or authentication success is implied.
+The AgentUtility runtime catalog preserves all original request contracts, unioned
+upstream/registry/cluster tags and alias/payment provenance. Tiny canonical/alias
+snapshot tests verify the join independently of recommendations. Real provider
+regressions exercise JSON modes, exact full-oneOf conversion losses, remote watch
+ownership and existing satellite extraction. No full output/settings golden or
+research tagging is required.
 
 The RelayShield request fixture captures the vendor's public
 `https://api.relayshield.net/openapi.json` request catalog, retaining all operations
@@ -96,9 +83,8 @@ The NewsGurus raw x402 catalog fixture preserves the vendor's 49 resources. The
 locally authored `providers/newsgurus/openapi.json` projects its Bazaar path/query
 schemas and required lists into ordinary GET parameters and publishes static
 `x-payment-info` prices. A focused regression compares every parameter against
-the raw fixture. Its golden selects 48 task-facing reads plus help, omitting
-agent-status diagnostics and retaining real path templates instead of the
-vendor OpenAPI's concrete example ticker/token paths.
+the raw fixture. The status contract is exposed with its original URL and price; real Bazaar path
+templates remain intact rather than being replaced by concrete example tickers.
 
 The Vaaya fixture preserves all 252 paths from the live vendor OpenAPI,
 omitting response documentation via `snapshot_spec`. The companion discovery fixture
@@ -121,3 +107,12 @@ and response declarations and local dependencies; no live endpoint is called.
 RootData's four captured Claw402 open object bodies verify prose-guided JSON
 passthrough without invented required fields. HireScrape's policy test is
 explicitly synthetic because no complete local vendor capture is available.
+
+Concordance fidelity compares complete captured public GET objects after removing
+only authored zero-price enrichment, and checks paid request schemas after local
+reference expansion. Locus compares complete discovery objects the same way and
+checks equality in both directions between all original free REST names and the
+native gateway enum; retain those complete original contracts and local references,
+not just handpicked names. Actual excluded job/result inputs establish lifecycle
+boundaries. Runtime projections remain full production inputs, independently of
+future fixture minimization.
