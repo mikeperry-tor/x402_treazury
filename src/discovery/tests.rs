@@ -2879,3 +2879,176 @@ async fn discovery_help_lists_endpoint_snapshot_sources_across_publication_and_r
         assert!(!description.contains("Other"));
     }
 }
+
+#[tokio::test]
+async fn bm25_search_scopes_counts_ranked_pages_and_cursor_generation() {
+    let m = manager(None).await;
+    let document = json!({"openapi":"3.0.3","servers":[{"url":"https://api.example.com"}],"paths":{
+        "/reviews":{"get":{"description":"List public reviews for a Yelp business","parameters":[{"in":"query","name":"businessAlias","schema":{"type":"string"}}]}},
+        "/businesses":{"get":{"description":"Look up a Yelp business"}}
+    }});
+    let added = register_spec(&m, "writer", "social", "social.json", document)
+        .await
+        .unwrap();
+    let arguments = json!({"source_name":"social","query":"yelp reviews","limit":1});
+    let first = m
+        .search_tools("writer", "x402_treazury_tools_search", arguments.clone())
+        .unwrap();
+    assert_eq!(first["items"][0]["tool_id"], "dyn_social__reviews");
+    assert_eq!(first["available"], 2);
+    assert_eq!(first["total"], 2);
+    assert!(first.get("hint").is_none());
+    let second = m.search_tools("writer", "x402_treazury_tools_search", json!({
+        "source_name":"social","query":"yelp reviews","limit":1,"cursor":first["next_cursor"]
+    })).unwrap();
+    assert_eq!(second["items"][0]["tool_id"], "dyn_social__businesses");
+    assert_eq!(second["available"], 2);
+    assert_eq!(second["total"], 2);
+    assert!(second["next_cursor"].is_null());
+    let parameter = m
+        .search_tools(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"source_name":"social","query":"businessAlias"}),
+        )
+        .unwrap();
+    assert_eq!(parameter["total"], 1);
+    assert_eq!(parameter["items"][0]["tool_id"], "dyn_social__reviews");
+    let enumeration = m
+        .search_tools(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"source_name":"social"}),
+        )
+        .unwrap();
+    assert_eq!(enumeration["total"], 2);
+    assert_eq!(enumeration["available"], 2);
+    assert_eq!(enumeration["items"][0]["tool_id"], "dyn_social__businesses");
+    for query in ["", " \t\n"] {
+        let blank = m
+            .search_tools(
+                "writer",
+                "x402_treazury_tools_search",
+                json!({"source_name":"social","query":query}),
+            )
+            .unwrap();
+        assert_eq!(blank["items"], enumeration["items"]);
+    }
+    // Excluded sources and other endpoints cannot change the selected corpus,
+    // counts or ranking, even when their descriptions have many query terms.
+    let mut noise = spec();
+    noise["paths"] =
+        json!({"/noise":{"get":{"description":"yelp reviews yelp reviews yelp reviews"}}});
+    register_spec(&m, "writer", "noise", "noise.json", noise)
+        .await
+        .unwrap();
+    let mut foreign = spec();
+    foreign["paths"] = json!({"/private":{"get":{"description":"foreignonlyword yelp reviews"}}});
+    register_spec(&m, "reader", "foreign", "foreign.json", foreign)
+        .await
+        .unwrap();
+    let scoped = m
+        .search_tools("writer", "x402_treazury_tools_search", arguments.clone())
+        .unwrap();
+    assert_eq!(scoped["items"], first["items"]);
+    assert_eq!(scoped["available"], 2);
+    assert_eq!(scoped["total"], 2);
+    let mut endpoint = server(&m, "writer");
+    endpoint.discover_on_demand = true;
+    let scoped_http_path: Value = serde_json::from_str(
+        &endpoint
+            .invoke(
+                "x402_treazury_tools_search",
+                &serde_json::from_value(arguments.clone()).unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(scoped_http_path, scoped);
+    let all = m
+        .search_tools(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"query":"yelp reviews"}),
+        )
+        .unwrap();
+    assert_eq!(all["available"], 3);
+    assert_eq!(all["total"], 3);
+    assert_eq!(
+        search_catalog(
+            &m.catalog,
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"query":"yelp reviews"})
+        )
+        .unwrap(),
+        all
+    );
+    for query in ["nonexistentzzzz", "foreignonlyword", "***"] {
+        let missed = m
+            .search_tools(
+                "writer",
+                "x402_treazury_tools_search",
+                json!({"query":query}),
+            )
+            .unwrap();
+        assert_eq!(missed["available"], 3);
+        assert_eq!(missed["total"], 0);
+        assert!(missed["items"].as_array().unwrap().is_empty());
+        assert!(missed["hint"].as_str().unwrap().contains("omit query"));
+    }
+    let empty_scope = m
+        .search_tools(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"source_id":"missing","query":"reviews"}),
+        )
+        .unwrap();
+    assert_eq!(empty_scope["available"], 0);
+    assert_eq!(empty_scope["total"], 0);
+    assert!(empty_scope.get("hint").is_none());
+    let empty_endpoint = search_catalog(
+        &m.catalog,
+        "hidden",
+        "x402_treazury_tools_search",
+        json!({"query":"reviews"}),
+    )
+    .unwrap();
+    assert_eq!(empty_endpoint["available"], 0);
+    assert_eq!(empty_endpoint["total"], 0);
+    assert!(empty_endpoint.get("hint").is_none());
+    for args in [
+        json!({"source_name":"social","query":"reviews","cursor":scoped["next_cursor"]}),
+        json!({"source_name":"noise","query":"yelp reviews","cursor":scoped["next_cursor"]}),
+    ] {
+        assert!(
+            m.search_tools("writer", "x402_treazury_tools_search", args)
+                .is_err()
+        );
+    }
+    let reference = scoped["items"][0]["tool_ref"].as_str().unwrap();
+    assert_eq!(
+        m.find_reference("writer", reference)
+            .unwrap()
+            .source
+            .as_ref()
+            .unwrap()
+            .0,
+        added["source_id"].as_str().unwrap()
+    );
+    assert!(m.find_reference("reader", reference).is_err());
+    let base = m.static_snapshot().await.unwrap();
+    m.replace_static(base.generation, base).await.unwrap();
+    let mut stale = arguments;
+    stale["cursor"] = scoped["next_cursor"].clone();
+    assert!(
+        m.search_tools("writer", "x402_treazury_tools_search", stale)
+            .is_err()
+    );
+    // A ranking refresh does not redirect or revoke an unchanged captured tool.
+    assert_eq!(
+        m.find_reference("writer", reference).unwrap().tool.name,
+        "dyn_social__reviews"
+    );
+}

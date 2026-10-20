@@ -198,7 +198,11 @@ to its `[servers.NAME]` table (default: `false`). It advertises only search/call
 wrappers, or all eight management wrappers when `source_management = true`.
 Search returns complete tool descriptions and schemas, five results at a time by
 default. Filters, payment routing, source permissions, and startup catalog loading
-are unchanged. See [on-demand discovery](agent-sources.md) for the call workflow.
+are unchanged. Queries use BM25 keyword ranking over names, descriptions and
+parameter names, with literal substring matches prioritized. Omit the query to
+enumerate the catalog; `available` and `total` distinguish scope size from matches.
+See [tool search matching and results](agent-sources.md#tool-search-matching-and-results)
+for query semantics, diagnostics and pagination.
 
 Endpoint `instructions_text` overrides composed source guidance (an empty string
 suppresses it), while generated pricing and operational notices remain.

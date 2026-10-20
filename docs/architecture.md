@@ -128,6 +128,11 @@ Endpoint `instructions_text` replaces authored source guidance before generated
 availability/conflict notices are appended, including during deferred rebuilds.
 Search-tool instruction fields decorate only exposed wrappers, consistently with
 inspection inventory; they do not change tool access or payment authority.
+Tool search filters the captured snapshot by listener and source before computing
+request-local BM25 over names, descriptions and top-level argument names. Literal
+name/description substrings rank first; blank queries retain catalog order. Query
+help and result counts expose these semantics without another index, cache or
+provider request. See [tool search matching](agent-sources.md#tool-search-matching-and-results).
 Source-management tool-search descriptions derive their registered-source summary
 from visible dynamic tool names in the captured listener snapshot, without another
 registry read or cache. These names follow the validated `dyn_<name>__<slug>`

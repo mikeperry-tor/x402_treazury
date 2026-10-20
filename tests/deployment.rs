@@ -1003,6 +1003,12 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
     let lazy = addresses["research"];
     let ordinary = addresses["beta_only"];
     let listed = rpc(&http, lazy, "research-secret", "tools/list", json!({})).await;
+    let query_help =
+        listed["result"]["tools"][0]["inputSchema"]["properties"]["query"]["description"]
+            .as_str()
+            .unwrap();
+    assert!(query_help.contains("BM25"));
+    assert!(query_help.contains("enumerate"));
     let names: Vec<_> = listed["result"]["tools"]
         .as_array()
         .unwrap()

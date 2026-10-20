@@ -12,7 +12,7 @@ complete descriptions and input schemas, and invoke a result through
 `x402_treazury_tool_call` using its opaque `tool_ref` and `arguments`. On-demand
 search defaults to five results per page; `query`, `limit` (1–100), and `cursor`
 support targeted discovery and pagination. A broad search can still return large
-schemas. Provider instructions remain available in the initialization response.
+schemas. By default, provider instructions remain available in the initialization response.
 
 This setting changes tool advertising, not loading or access: all configured
 catalogs still load, with remote catalogs published after listeners bind during
@@ -24,6 +24,70 @@ revision; search again after a restart or stale-reference error. Inspection and
 qualification retain the complete inventory and validate full schemas. Restart the
 server and reconnect clients after changing the setting to refresh cached lists.
 
+
+## Tool search matching and results
+
+`x402_treazury_tools_search.query` performs lexical BM25 keyword retrieval over
+visible tool names, descriptions and top-level input parameter names. For example,
+`yelp reviews` finds a description such as "List public reviews for a Yelp business"
+without requiring those words to be adjacent. Query terms have OR semantics:
+tools matching one term remain candidates, and BM25 ranks their relevance.
+
+Names and descriptions containing the complete trimmed query as a lowercase
+substring rank first, followed by BM25 score and then tool name for deterministic
+ties. Literal priority favors precise identifiers, identifier fragments and phrases;
+it is a relevance rule, not a legacy query mode. Terms are lowercased Unicode
+alphanumeric runs; punctuation, underscores and hyphens separate terms, and repeated
+BM25 query terms count once. There is no stemming, stopword removal, camel-case splitting,
+semantic/fuzzy matching, wildcard expansion or Boolean/quoted-phrase operator syntax.
+A nonblank query without alphanumeric terms can only match a literal substring;
+it never silently becomes a full-catalog enumeration.
+
+Omit `query`, or pass empty/whitespace text, to enumerate every tool in the selected
+scope in catalog order. Omit both `source_name` and `source_id` to search configured
+and registered APIs together. Set one to restrict registered-source search. Results
+are paginated: pass the returned `next_cursor` with the same query and source filter
+until it is null. On-demand discovery defaults to five results per page; ordinary
+source-management search defaults to twenty. `limit` accepts 1–100 in either mode.
+
+Each response includes:
+
+| Field | Meaning |
+| --- | --- |
+| `items` | This page's matching tool references, descriptions and complete schemas. |
+| `available` | Visible tools after endpoint and optional source filtering, before query matching. |
+| `total` | All query matches before pagination, independent of page size. |
+| `next_cursor` | Opaque continuation, or null on the last page. |
+| `catalog_generation` | Snapshot generation; a publication invalidates old cursors. |
+| `hint` | Present for zero matches from a nonblank query when available tools exist; suggests different keywords or enumeration. |
+
+Both counts refer to the selected scope. `available > 0` with `total = 0` means
+search found no match; `available = 0` means no tools are currently visible there,
+which can reflect pending discovery or filtering. Remove a source filter to inspect
+the endpoint as a whole. Neither case proves a configured provider has no APIs.
+No speculative near-miss list is produced: OR-term retrieval already returns tools
+matching some of the query, and enumeration is the explicit fallback.
+
+Ranking uses only the captured endpoint/source-filtered snapshot, so inaccessible
+or unrelated tools cannot influence relevance or counts. It builds no persistent
+index, cache or background job and makes no provider requests. BM25 uses `k1=1.2`,
+`b=0.75` and positive IDF `ln(1 + (N - df + 0.5)/(df + 0.5))`, as documented by
+[Lucene BM25Similarity](https://lucene.apache.org/core/9_12_3/core/org/apache/lucene/search/similarities/BM25Similarity.html).
+Complete descriptions, schemas, references and payment bindings are preserved;
+only discovery matching/order and result diagnostics change.
+
+## External directory matching
+
+`x402_treazury_sources_search` searches x402 List rather than the endpoint's loaded
+tools. Matching is performed upstream: `mode=browse` (default) uses case-insensitive
+substring matching across service name, description, category and base URL, with
+pagination. `mode=best` uses x402 List's relevance and quality ranking, matching
+service metadata plus AI-derived capability tags and summaries. Neither mode uses
+the local tool catalog's BM25 ranking or literal-match priority. A nonadjacent
+multiword query that works in `tools_search` may therefore need fewer keywords in
+directory browse mode. Each invocation dispatches one selected directory request;
+it does not crawl the directory or build a local index. Directory reads share an
+IP-level free quota and can require payment through normal payment admission.
 
 ## Endpoint instruction placement
 

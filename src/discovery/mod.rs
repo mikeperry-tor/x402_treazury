@@ -4,6 +4,7 @@ mod import;
 pub mod policy;
 mod publication;
 pub(crate) mod raw;
+mod relevance;
 mod store;
 pub mod tools;
 pub(crate) mod url_info;
@@ -699,8 +700,7 @@ fn search_catalog_query(
     q: Query,
 ) -> Result<Value> {
     let snapshot = catalog.read();
-    let query = q.query.as_ref().map(|q| q.to_lowercase());
-    let values = snapshot
+    let candidates: Vec<_> = snapshot
         .views
         .get(owner)
         .into_iter()
@@ -710,13 +710,10 @@ fn search_catalog_query(
                 .as_ref()
                 .is_none_or(|id| t.source.as_ref().is_some_and(|s| &s.0 == id))
         })
-        .filter(|t| {
-            query.as_ref().is_none_or(|q| {
-                format!("{} {}", t.tool.name, t.tool.description)
-                    .to_lowercase()
-                    .contains(q)
-            })
-        })
+        .collect();
+    let available = candidates.len();
+    let values = relevance::rank(candidates, q.query.as_deref().unwrap_or_default())
+        .into_iter()
         .map(|t| {
             json!({
                 "tool_ref": catalog_reference(catalog, owner, t),
@@ -732,6 +729,7 @@ fn search_catalog_query(
         values,
         &q,
         snapshot.generation,
+        available,
         &format!(
             "{}:{owner}:{name}:{:?}:{:?}",
             catalog.instance(),
@@ -753,7 +751,13 @@ fn receipt_key(owner: &str, key: &str) -> Result<String> {
     );
     Ok(format!("{}:{owner}{key}", owner.len()))
 }
-fn page(values: Vec<Value>, query: &Query, generation: u64, scope: &str) -> Result<Value> {
+fn page(
+    values: Vec<Value>,
+    query: &Query,
+    generation: u64,
+    available: usize,
+    scope: &str,
+) -> Result<Value> {
     let limit = query.limit.unwrap_or(20);
     ensure!((1..=100).contains(&limit), "invalid page size");
     let prefix = format!("{}:{generation}:", hash(scope.as_bytes()));
@@ -767,9 +771,22 @@ fn page(values: Vec<Value>, query: &Query, generation: u64, scope: &str) -> Resu
     };
     ensure!(offset <= values.len(), "invalid cursor");
     let end = offset.saturating_add(limit).min(values.len());
-    Ok(
-        json!({"items":values[offset..end],"catalog_generation":generation,"next_cursor":(end<values.len()).then(||format!("{prefix}{end}"))}),
-    )
+    let mut result = json!({
+        "items":values[offset..end],
+        "available":available,
+        "total":values.len(),
+        "catalog_generation":generation,
+        "next_cursor":(end<values.len()).then(||format!("{prefix}{end}")),
+    });
+    if values.is_empty()
+        && available > 0
+        && query.query.as_ref().is_some_and(|q| !q.trim().is_empty())
+    {
+        result["hint"] = json!(
+            "No tools matched in this scope. Try different keywords, or omit query to enumerate available tools and page with next_cursor."
+        );
+    }
+    Ok(result)
 }
 pub async fn inspect_cli(meta_config: &std::path::Path) -> Result<()> {
     let cfg: crate::deployment::MetaConfig =
