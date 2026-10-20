@@ -174,11 +174,12 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         drop(listener);
-        let error = reqwest::Client::builder()
-            .no_proxy()
-            .build()
+        let url = format!("http://{address}/private-path?token=private-token");
+        let network = crate::network::NetworkContext::new(Default::default()).unwrap();
+        let error = network
+            .discovery(&url, None)
             .unwrap()
-            .get(format!("http://{address}/private-path?token=private-token"))
+            .get(&url)
             .send()
             .await
             .unwrap_err();
