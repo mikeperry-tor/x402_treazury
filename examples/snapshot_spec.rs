@@ -124,13 +124,4 @@ mod tests {
         assert_eq!(snapshot(expected).unwrap(), bytes);
         assert!(snapshot(json!({"operations":[]})).is_err());
     }
-
-    #[test]
-    fn committed_socialfetch_fixture_is_byte_stable() {
-        let bytes = include_bytes!("../tests/fixtures/socialfetch_openapi.json");
-        assert_eq!(
-            snapshot(serde_json::from_slice(bytes).unwrap()).unwrap(),
-            bytes
-        );
-    }
 }

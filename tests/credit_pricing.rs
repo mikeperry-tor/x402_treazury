@@ -209,7 +209,19 @@ async fn privacy_subsets_inherit_conversion_despite_source_and_endpoint_instruct
     let deployment = config::read_table(&path).await.unwrap();
     let document: Value =
         serde_json::from_str(include_str!("fixtures/socialfetch_openapi.json")).unwrap();
-    for id in ["social", "webinfo"] {
+    for (id, witnesses) in [
+        (
+            "social",
+            &[
+                "socialfetch_twitter_profiles_handle",
+                "socialfetch_instagram_profiles_handle_posts",
+            ][..],
+        ),
+        (
+            "webinfo",
+            &["socialfetch_web_search", "socialfetch_web_ask"][..],
+        ),
+    ] {
         let local = deployment["sources"][id].as_table().unwrap().clone();
         let mut cfg = config::resolve(local, &path).await.unwrap().settings;
         assert_eq!(
@@ -227,7 +239,13 @@ async fn privacy_subsets_inherit_conversion_despite_source_and_endpoint_instruct
         };
         assert!(!instructions.contains("0.014"));
         let selected = catalog::build_tools(&cfg, &document, "socialfetch").unwrap();
-        assert!(!selected.is_empty() && selected.len() < 240);
+        assert!(!selected.is_empty());
+        for name in witnesses {
+            assert!(
+                selected.iter().any(|tool| tool.name == *name),
+                "{id}: {name}"
+            );
+        }
         for tool in &selected {
             assert!(
                 tool.description.contains("Estimated cost:"),

@@ -17,7 +17,23 @@ fn platform_tags_names_pricing_and_routing_preserve_versions() {
     root["paths"]["/v1/webhook-public-info"] =
         json!({"get":{"summary":"Public webhook metadata","tags":["System"],"security":[]}});
     let all = build_tools(&cfg, &root, "socialfetch").unwrap();
+    for path in [
+        "/v1/monitors",
+        "/v1/monitors/{id}",
+        "/v1/monitors/{id}/events",
+        "/v1/webhook-endpoints",
+        "/v1/webhook-deliveries/{id}/redeliver",
+        "/v1/whoami",
+        "/v1/balance",
+    ] {
+        assert!(
+            root["paths"][path].is_object(),
+            "missing ownership witness {path}"
+        );
+        assert!(!all.iter().any(|t| t.path == path), "{path}");
+    }
     assert!(all.iter().any(|t| t.path == "/v1/monitors/sources"));
+    assert!(all.iter().any(|t| t.path == "/v1/youtube/videos"));
     assert!(!all.iter().any(|t| t.path == "/v1/monitors"
         || t.path == "/v1/monitors/{id}"
         || t.path.starts_with("/v1/monitors/{id}/")));
@@ -75,7 +91,20 @@ fn platform_tags_names_pricing_and_routing_preserve_versions() {
     cfg.tags = vec!["twitter".into()];
     assert!(build_tools(&cfg, &root, "socialfetch").is_err());
     let counts = tag_counts(&root).unwrap();
-    assert!(counts.contains_key("Yelp"));
+    for tag in [
+        "Twitter",
+        "YouTube",
+        "LinkedIn",
+        "Instagram",
+        "Web",
+        "Monitors",
+        "Auth",
+    ] {
+        assert!(
+            counts.contains_key(tag),
+            "missing focused fixture tag {tag}"
+        );
+    }
 }
 #[tokio::test]
 async fn meta_sources_override_tags_and_cli_inventories_need_no_credentials() {

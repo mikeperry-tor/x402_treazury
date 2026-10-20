@@ -70,8 +70,13 @@ async fn directory_defaults_include_public_operations_and_exclude_ownership() {
         "/services/{slug}/request-update",
         "/services/{slug}/reissue-token",
     ] {
+        assert!(
+            doc["paths"][path].is_object(),
+            "missing ownership witness {path}"
+        );
         assert!(!tools.iter().any(|t| t.path == path), "{path}");
     }
+    assert!(tools.iter().any(|t| t.path == "/services/{slug}/scores"));
     let details = tools.iter().find(|t| t.path == "/services/{slug}").unwrap();
     let route = details
         .route(
@@ -1675,6 +1680,18 @@ async fn locus_discovery_and_gateway_preserve_complete_source_contracts() {
         .unwrap();
     assert_eq!(route.url, "https://api.locus.report/tools/call");
     assert_eq!(route.body, Some(args));
+    // Preserve the full paid request schema and body-required flag. The authored
+    // projection omits the dialect annotation and media examples; those examples
+    // remain complete in the independently captured source object.
+    let source_body = &raw["paths"]["/api/locus-place-report"]["post"]["requestBody"];
+    let projected_body = &doc["paths"]["/api/locus-place-report"]["post"]["requestBody"];
+    let mut source_schema = source_body["content"]["application/json"]["schema"].clone();
+    source_schema.as_object_mut().unwrap().remove("$schema");
+    assert_eq!(
+        projected_body["content"]["application/json"]["schema"],
+        source_schema
+    );
+    assert_eq!(projected_body["required"], source_body["required"]);
     let paid = tools
         .iter()
         .find(|t| t.path == "/api/locus-place-report")

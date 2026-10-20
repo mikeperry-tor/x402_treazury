@@ -136,15 +136,16 @@ overrides and platform filters retain estimates. Pricing probes are disabled;
 no endpoint sweep is needed. Fetching the live spec still requires one startup
 request. Use a 90-second timeout for slow search/transcript calls.
 
-`tests/fixtures/socialfetch_openapi.json` pins the 2026-10-02 source: 259
-operations. It retains tags, descriptions,
-request schemas and vendor extensions, omitting response documentation only.
-Regenerate it with the Rust development utility (replace the URL with a local
-spec path for offline operation):
+`tests/fixtures/socialfetch_openapi.json` is a scoped source capture for real
+version/tag, credit, public-child and ownership contracts, plus the Twitter
+profile used by both public demos. It preserves complete selected request schemas,
+prose and vendor extensions; it is not the complete vendor inventory. Capture a
+fresh spec to a temporary path, then review selected complete objects and their
+reference closure with the [fixture consumers](../tests/fixtures/catalogs/README.md):
 
 ```sh
-cargo run --locked --manifest-path Cargo.toml --example snapshot_spec -- \
-  https://www.socialfetch.dev/openapi.json tests/fixtures/socialfetch_openapi.json
+scripts/zcash.sh run --example snapshot_spec -- \
+  https://www.socialfetch.dev/openapi.json /tmp/socialfetch-requests.json
 ```
 
 ## deepline.toml — Deepline GTM (stable-deepline.dev)
@@ -283,8 +284,8 @@ OpenAPI spec and an `llms.txt`; the spec's request bodies are FastAPI `$ref`s
 (these deref fine since the flatteners learned local refs) but the spec
 carries **no pricing at all** and POSTs are never probed — so the conf points
 at the curated `providers/concordance/openapi.json`, with references inlined
-and prices embedded from vendor documentation and challenges. The original vendor
-spec is retained in `tests/fixtures/concordance_openapi.json`; the curated tool
+and prices embedded from vendor documentation and challenges. Selected original
+vendor source objects and their reference closure are retained in `tests/fixtures/concordance_openapi.json`; the curated tool
 contract is pinned by `tests/provider_catalogs.rs`. Boot
 makes zero probe requests (all paid routes are POST, and the probe is
 GET-only by design). The authored projection preserves the complete captured public GET objects for
@@ -930,8 +931,8 @@ justified by this small successful sample.
 
 ## Reviewed but unavailable: Apollo
 
-Apollo has a frozen request schema for future work. It has no active TOML definition:
-request-ID retry/recovery handling needs verification. Catalog/quote availability
+Apollo has no active TOML definition; request-ID retry/recovery handling needs
+verification before integration. Catalog/quote availability
 through Tor does not resolve this application-level limitation.
 
 ## Payment extension and offer boundaries

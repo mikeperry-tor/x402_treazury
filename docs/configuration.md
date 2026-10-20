@@ -802,7 +802,8 @@ listener tool-name selection. Untagged operations cannot match an include tag.
 `catalog tags` prints JSON counts from the unfiltered source (grouped by source
 in meta-config mode). It loads no credentials, fetches no help, and performs no
 pricing probes. A remote spec is still fetched once. Use `--spec tests/fixtures/socialfetch_openapi.json` on the single-source command for an
-offline inventory. It is mutually exclusive with other inventory commands.
+offline sampled inventory. This scoped capture is not the complete vendor API.
+It is mutually exclusive with other inventory commands.
 
 SocialFetch's `include: ["/v1", ""]` uses the longest matching naming anchor:
 `/v1` strips that segment; the empty fallback preserves other paths. Consequently
@@ -917,7 +918,7 @@ already exist. No wallet, pricing probes or Python installation is needed.
 
 ```sh
 cargo run --locked --example snapshot_spec -- \
-  https://www.socialfetch.dev/openapi.json tests/fixtures/socialfetch_openapi.json
+  https://www.socialfetch.dev/openapi.json /tmp/socialfetch-requests.json
 
 # Offline input and utility tests:
 cargo run --locked --example snapshot_spec -- \

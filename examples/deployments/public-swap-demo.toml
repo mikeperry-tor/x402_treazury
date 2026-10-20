@@ -36,7 +36,8 @@ funding_amount_usdc = "5.00"
 
 [sources.socialfetch]
 extends = "../../providers/socialfetch.toml"
-# Committed request schema: inspection requires no vendor fetch or pricing probes.
+# Scoped request capture includes this demo's selected Twitter profile contract.
+# It is not the complete SocialFetch inventory; inspection fetches no vendor data.
 spec = "../../tests/fixtures/socialfetch_openapi.json"
 probe_pricing = false
 

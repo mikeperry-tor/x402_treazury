@@ -51,7 +51,19 @@ generated ToolSpecs match the full inputs. Twelve focused checks passed; a
 precommit review found the distinct RelayShield account absence check had become
 vacuous, so its original authenticated operation was restored and both affected
 checks passed again. Fresh source-matched complexity reports no advisory
-regressions. Exact-SHA review is pending before C5.3c.
+regressions. C5.3b (`16bac27826b2ed4cb1e7a1bb6e9483947cc8ec4b`) received
+independent exact-SHA approval. C5.3c scopes SocialFetch/directory/Concordance/Locus
+source witnesses, preserves full NewsGurus projection input, removes the duplicate
+vendor byte-stability test and retires unconsumed Apollo/Straits captures. Complete
+objects, references, source metadata and security schemes pass independent review
+for all 19 accumulated inputs; 140 retained generated ToolSpecs are unchanged.
+Eleven distinct focused checks pass across embedded directory, projections, credit,
+public demos, SocialFetch CLI, generic snapshot transformation and offline presets.
+The new Locus comparison was independently corrected to full schema minus dialect
+plus required-body flag: source-only media examples remain intact outside the
+authored projection. Credit case data replaces an unnecessary nested conditional;
+fresh source-matched complexity has no advisory warnings. Exact-SHA review is
+pending before C6.1.
 Source-matched complexity against `05280d6` reports no advisory regressions; preset
 CogC/CycC fell 6/14 to 5/12 and scope 9/10 to 3/5 by removing responsibilities. Actual
 inventories for all eight local inputs originally showed no removed or renamed
