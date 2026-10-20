@@ -154,8 +154,9 @@ Base calls never sign an x402 payment or invoke the paid Curl relay.
 | Valid unsigned 402 | Stop circuit retries; validate the challenge normally. For API calls, retain its exact transport through signing and signed response consumption. |
 | Other completed HTTP statuses | No new circuit retry, including success, redirects, 401, 404 and other 5xx. Existing discovery relay and Base endpoint-failover eligibility remain separate. |
 | Discovery/Base connection/reset/read-inactivity failure | Eligible for discovery and supported read-only Base operations, using their typed transport evidence; never interrupt a response still making progress. Do not repeat a proven local SOCKS-listener outage expecting exit rotation to repair it. |
-| API transport failure without an eligible completed status | Outside the initial API phase; preserve current error behavior rather than expanding uncertainty handling. |
-| Policy, TLS trust, size, parse or challenge-validation failure | No new circuit retry. Preserve existing rejection and discovery relay handling; never weaken validation to recover. |
+| TLS failure | Eligible for a fresh scope in catalog/pricing, unsigned API and Base, since a Tor exit may malfunction or interfere. Preserve certificate/hostname/protocol verification on every attempt; no signed replay. |
+| API non-TLS transport failure without an eligible completed status | Outside the initial API phase; preserve current error behavior rather than expanding uncertainty handling. |
+| Policy, size, parse or challenge-validation failure | No new circuit retry. Preserve existing rejection and discovery relay handling; never weaken validation to recover. |
 | Signed status or transport/output failure | No new generic retry, fresh challenge or signature. Preserve journaled liabilities and existing structured insufficient-funds traversal. |
 
 For eligible 429/503 responses, honor valid `Retry-After` delay-seconds or HTTP-date
@@ -423,7 +424,8 @@ Acceptance evidence:
 
 - Real PaidClient status matrices cover each eligible unsigned status before 402
   and free success, success at each ordinal, exhaustion, ineligible statuses,
-  transport failures outside scope and unchanged direct mode. Verify exact POST
+  non-TLS transport failures outside scope and unchanged direct mode. Test TLS
+  recovery/exhaustion with unchanged certificate validation and no signed replay. Verify exact POST
   body/query/method and pinned owner; GET and POST use the same eligibility.
 - After valid 402 or completed unsigned success, subsequent logical calls use
   the winner. Same-wallet other-origin calls retain their record/cover; discovery
@@ -517,7 +519,7 @@ currently differ. In particular, adding circuit eligibility for HTTP 400 must
 not silently broaden strict endpoint-failover classification. If that caller does
 not authorize endpoint fallback for the final error, return it after exhaustion.
 
-TLS trust, policy, size, invalid envelopes/results, wrong-chain responses and
+Policy, size, invalid envelopes/results, wrong-chain responses and
 canonical/evidence conflicts gain no new circuit retries. Existing authorized
 fallback to another configured endpoint still applies. Validate method-specific
 results before promotion (Base chain ID, block/quantity/contract/receipt structure
@@ -552,8 +554,9 @@ Acceptance evidence:
   codes that may fail over without circuit retry. Direct behavior stays unchanged;
   invalid/write methods fail before I/O and no generic JSON-RPC replay is added.
 - Assert exact repeated payloads and successful-result validation before promotion.
-  HTTP 200 with wrong chain, malformed result/envelope, invalid receipt, TLS or
-  oversized response cannot promote or earn circuit repetition. Valid zero/null/
+  HTTP 200 with wrong chain, malformed result/envelope, invalid receipt or
+  oversized response cannot promote or earn circuit repetition. TLS failures earn
+  fresh-scope attempts with unchanged verification and cannot promote. Valid zero/null/
   unconfirmed results neither allocate nor trigger another read automatically.
 - A later same-key read uses the winning record. Verify separate wallet/discovery
   identities, other origins and policies, same-origin URL aliases with distinct
