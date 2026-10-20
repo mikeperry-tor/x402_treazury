@@ -105,11 +105,12 @@ extends = "../../providers/socialfetch.toml"
 tags = ["Bluesky", "Facebook", "GitHub", "Hacker News", "Instagram", "LinkedIn", "Reddit", "Rumble", "Snapchat", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Twitch", "Yelp", "YouTube"]
 exclude_tools = ["socialfetch_help"]
 
-# TeleSINT provides 18 stateless Telegram CTI and OSINT channel intelligence tools
-# ($0.01-$0.10, all within the $0.50 social/company payment cap), discovered on demand
-# via x402_treazury_tools_search (search for Telegram, telesint, or category names).
+# Select TeleSINT's stateless Telegram CTI and OSINT recommendations explicitly.
+# Advertised estimates are $0.01-$0.10; the challenge and shared $0.50 cap govern.
+# Discover operations via x402_treazury_tools_search using telesint or category names.
 [sources.telesint]
 extends = "../../providers/telesint.toml"
+use_recommended_tools = true
 exclude_tools = ["telesint_help"]
 
 [sources.webinfo]
@@ -118,7 +119,7 @@ instructions_text = "Additional web access tools are available under socialfetch
 tags = ["Web", "Reddit"]
 exclude_tools = ["socialfetch_help"]
 
-# Exa supplies the web listener. Its complete curated toolset includes help;
+# Exa supplies the web listener. Its supported payable island includes help;
 # subset providers below omit broad vendor guides.
 [sources.exa]
 extends = "../../providers/exa.toml"
@@ -138,8 +139,8 @@ extends = "../../providers/pdl.toml"
 instructions_text = "Discover companies using People Data Labs structured company search. Prefer size=1 and paginate with scroll_token when needed. Use Deepline for company enrichment rather than searching again for details. Verify company identity before combining results across providers."
 include_tools = ["pdl_company_search"]
 
-# StableEnrich subsets retain the provider's reviewed synchronous operation
-# allowlist and omit its broad help. Each source inherits its listener's wallet.
+# StableEnrich purpose selections narrow the supported catalog and omit broad
+# help. Each source inherits its listener's wallet.
 # Social estimates are $0.01-$0.05 per call. FullEnrich ($0.15), StableEnrich
 # PDL ($0.28), Whitepages ($0.22) and Lens ($0.20) remain outside this subset.
 [sources.social_stableenrich]
@@ -353,8 +354,10 @@ Social tool keywords to search for:
   `telesint_ransomware`, `telesint_intent`, `telesint_malware`, `telesint_feed`,
   `telesint_artifact`, `telesint_asn`, `telesint_source`, `telesint_preparation`,
   `telesint_velocity`, `telesint_target_mentions`, `telesint_claim_check`.
-- People data: `person` (person enrichment and search), `stableenrich`
-  (person resolution, enrichment, and email checks).
+- People Data Labs: `pdl_person` (person enrichment and search).
+- StableEnrich: `stableenrich_reddit` (Reddit searches and comments),
+  `stableenrich_minerva` (person resolution, enrichment, and email checks),
+  `stableenrich_serper_people_image_search` (people images).
 """
 listen = "127.0.0.1:6338"
 bearer_token_env = "TREAZURY_MCP_TOKEN"

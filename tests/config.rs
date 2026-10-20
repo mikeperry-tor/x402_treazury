@@ -382,6 +382,15 @@ async fn privacy_example_enables_source_wallet_discovery_offline() {
     assert_eq!(shown["discovery_wallets"]["webinfo"], "web");
     assert_eq!(shown["wallet_bindings"]["web"]["exa"]["wallet"], "web");
     assert!(shown["wallet_bindings"]["company"]["exa"].is_null());
+    // This deployment deliberately adopts research advice without broadening its
+    // independent company/person subsets or changing the shared payer.
+    let telesint = &shown["sources"]["telesint"]["settings"];
+    assert_eq!(telesint["use_recommended_tools"], true);
+    assert_eq!(telesint["exclude_tools"], json!(["telesint_help"]));
+    assert_eq!(
+        shown["wallet_bindings"]["social"]["telesint"]["wallet"],
+        "company"
+    );
     let social = &shown["servers"]["social"];
     assert_eq!(social["discover_on_demand"], true);
     let instructions = social["instructions_text"].as_str().unwrap();
