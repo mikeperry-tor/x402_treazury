@@ -34,7 +34,10 @@ help URLs, pricing settings and explicitly reviewed response mappings. Curated
 local specs are inputs for providers whose public schema needs adaptation; the
 fixture utility is `examples/snapshot_spec.rs`. Tests pin generated contracts
 against `tests/fixtures/`. Operation validation and stable sorting precede path,
-method and tag selection; exact same-path GET/POST pairs then retain POST by default (`prefer_post` can
+method and tag selection. Exact original `exclude_operations` identities override
+operation inclusions without hiding child paths or depending on generated names;
+absent exclusions remain valid under independent source filters. Exact same-path
+GET/POST pairs then retain POST by default (`prefer_post` can
 disable this). Only surviving operations contribute to name collisions.
 Tool-name filters apply after collision resolution. Recommendation metadata is
 advisory until provider/source `use_recommended_tools` opts in. Include, exclude

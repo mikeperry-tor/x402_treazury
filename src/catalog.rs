@@ -140,6 +140,8 @@ pub struct Config {
     pub use_recommended_tools: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include_operations: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub exclude_operations: Vec<String>,
     /// Internal escape hatch for integrations that need both same-path methods.
     pub prefer_post: bool,
     pub tags: Vec<String>,
@@ -211,6 +213,7 @@ impl Default for Config {
             recommended_tools: vec![],
             use_recommended_tools: false,
             include_operations: vec![],
+            exclude_operations: vec![],
             prefer_post: true,
             tags: vec![],
             exclude_tags: vec![],
@@ -1342,7 +1345,9 @@ fn selected_operation_base(cfg: &Config, op: &Value, prefix: &str) -> Option<Str
         "{} {path}",
         op["method"].as_str().unwrap().to_ascii_uppercase()
     );
-    if !cfg.include_operations.is_empty() && !cfg.include_operations.contains(&operation) {
+    if cfg.exclude_operations.contains(&operation)
+        || (!cfg.include_operations.is_empty() && !cfg.include_operations.contains(&operation))
+    {
         return None;
     }
     if anchor(path, &cfg.exclude).is_some() {

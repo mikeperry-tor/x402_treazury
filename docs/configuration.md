@@ -146,6 +146,16 @@ optional wallet templates and an automatic assignment policy:
   `include_tools`, `exclude_tools`, `tags`, `exclude_tags`, and `max_response_chars`.
   Resource identifiers use lowercase letters, digits and `_`, starting with a letter.
 
+Provider/source `include_operations` and `exclude_operations` match exact original
+`METHOD path` identities (uppercase GET, POST, PUT, PATCH or DELETE), independently
+of generated names and prefixes. Paths use the specification's original path or
+absolute HTTP(S) URL. Exclusions win over inclusions before method preference and
+naming. Unlike subtree `exclude`, an exact parent exclusion preserves supported
+child routes. Absent operation entries do not fail inventory validation; an
+independent source tag/path filter can remove them. Lists replace on inheritance;
+`[]` clears the inherited list. Ordinary exact generated-name validation remains
+unchanged. Catalog selection does not constrain explicitly authorized raw calls.
+
 Provider/source `prefer_post` defaults to true. After path/operation/tag
 compatibility filters, exact original-path GET/POST pairs retain POST before
 collision counting and naming. Other methods, different paths and GET-only routes

@@ -173,3 +173,97 @@ async fn captured_method_pairs_keep_post_body_contracts_and_canonical_names() {
         }
     }
 }
+
+#[test]
+fn exact_operation_exclusions_preserve_methods_children_and_independent_sources() {
+    let doc = json!({"paths": {
+        "/pair":{"get":{},"post":{}},
+        "/api/feedback":{"post":{"tags":["account"]}},
+        "/api/feedback/summary":{"get":{"tags":["public"]}},
+        "/v1/monitors":{"get":{},"post":{}},
+        "/v1/monitors/sources":{"get":{"tags":["public"]}},
+        "/v1/monitors/{id}":{"get":{}}
+    }});
+    let mut cfg = Config {
+        exclude_operations: vec![
+            "POST /pair".into(),
+            "POST /api/feedback".into(),
+            "GET /v1/monitors".into(),
+            "POST /v1/monitors".into(),
+        ],
+        exclude: vec!["/v1/monitors/{id}".into()],
+        ..Default::default()
+    };
+    let tools = build_tools(&cfg, &doc, "first").unwrap();
+    assert_eq!(tools.len(), 3);
+    let pair = tools.iter().find(|t| t.path == "/pair").unwrap();
+    assert_eq!(
+        (pair.name.as_str(), pair.method.as_str()),
+        ("first_pair", "GET")
+    );
+    cfg.include_operations = vec!["POST /pair".into(), "GET /api/feedback/summary".into()];
+    let included = build_tools(&cfg, &doc, "first").unwrap();
+    assert_eq!(included.len(), 1);
+    assert_eq!(included[0].path, "/api/feedback/summary");
+    cfg.include_operations.clear();
+    cfg.tags = vec!["public".into()];
+    for prefix in ["first", "independent"] {
+        let tools = build_tools(&cfg, &doc, prefix).unwrap();
+        assert_eq!(tools.len(), 2);
+        for path in ["/api/feedback/summary", "/v1/monitors/sources"] {
+            let tool = tools.iter().find(|t| t.path == path).unwrap();
+            assert!(tool.name.starts_with(prefix));
+            assert_eq!(
+                tool.route("https://example.com", &serde_json::Map::new())
+                    .unwrap()
+                    .url,
+                format!("https://example.com{path}")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn exact_operation_exclusions_validate_replace_and_clear_offline() {
+    let dir = tempfile::tempdir().unwrap();
+    let provider = dir.path().join("provider.toml");
+    let source = dir.path().join("source.toml");
+    std::fs::write(
+        &provider,
+        "spec='missing.json'\nexclude_operations=['POST /parent']",
+    )
+    .unwrap();
+    for (extra, expected, origin) in [
+        ("", vec!["POST /parent"], &provider),
+        (
+            "exclude_operations=['GET /child']",
+            vec!["GET /child"],
+            &source,
+        ),
+        ("exclude_operations=[]", vec![], &source),
+    ] {
+        let resolved = config::resolve(
+            toml::from_str(&format!("extends='provider.toml'\n{extra}")).unwrap(),
+            &source,
+        )
+        .await
+        .unwrap();
+        assert_eq!(resolved.settings.exclude_operations, expected);
+        assert_eq!(
+            resolved.origins["exclude_operations"],
+            origin.display().to_string()
+        );
+    }
+    for field in ["include_operations", "exclude_operations"] {
+        for invalid in ["get /parent", "HEAD /parent", "POST relative", "POST"] {
+            let error = config::resolve(
+                toml::from_str(&format!("spec='missing.json'\n{field}=['{invalid}']")).unwrap(),
+                &source,
+            )
+            .await
+            .err()
+            .unwrap();
+            assert!(format!("{error:#}").contains(field));
+        }
+    }
+}

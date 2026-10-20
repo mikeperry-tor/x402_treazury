@@ -61,17 +61,22 @@ pub fn validate(settings: &Config) -> Result<()> {
     {
         crate::deployment::pattern(selector)?;
     }
-    for operation in &settings.include_operations {
-        let (method, path) = operation
-            .split_once(' ')
-            .context("include_operations requires METHOD path")?;
-        ensure!(
-            ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method)
-                && (path.starts_with('/')
-                    || path.starts_with("https://")
-                    || path.starts_with("http://")),
-            "invalid include_operations entry"
-        );
+    for (field, operations) in [
+        ("include_operations", &settings.include_operations),
+        ("exclude_operations", &settings.exclude_operations),
+    ] {
+        for operation in operations {
+            let (method, path) = operation
+                .split_once(' ')
+                .with_context(|| format!("{field} requires METHOD path"))?;
+            ensure!(
+                ["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method)
+                    && (path.starts_with('/')
+                        || path.starts_with("https://")
+                        || path.starts_with("http://")),
+                "invalid {field} entry"
+            );
+        }
     }
     ensure!(
         settings.max_response_bytes > 0

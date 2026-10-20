@@ -6,8 +6,10 @@ Implementation in progress. Baseline established at `05280d66f903e38b45b521d4b97
 (the plan-only commit after the original baseline). P1 is complete and G1 independently closed. C2.2 (`4dccbe6`) implements POST
 preference; C2.3 adds advisory recommendations, explicit selection and operator
 inspection. G2 independently closed at `74c7d21`; C3.1 now normalizes the fifteen
-ordinary-provider definitions and their focused tests/docs. C3.1 validation passed;
-its exact committed SHA awaits independent review before C3.2. The operator wants
+ordinary-provider definitions and their focused tests/docs. C3.1 (`97de2ac`) validation and independent exact-SHA review passed.
+The wider audit reopened conditional C2.1, implemented with six passing focused
+tests and fresh source-matched complexity evidence; its exact-SHA/G2 review
+precedes C3.2. The operator wants
 provider defaults to expose supported functionality and newly arriving supported
 tools, rather than silently impose a maintainer's recommended subset. Separate
 recommendations from compatibility filtering, use recommendations explicitly in
@@ -86,8 +88,14 @@ empty opt-in advice that requires catalog evidence to diagnose.
 `prefer_post` is a default-true inherited Config boolean, selecting exact-path
 POST over GET after compatibility selection and before naming. All generic,
 imported and embedded construction shares this rule; raw calls stay explicit.
-No proven opt-out exception or exact-method exclusion need emerged. C2.1 is
-unnecessary. Canonical GenuineGood/Otto names and checked-in consumers are listed
+The wider provider audit reopens the exact-exclusion decision: Agent402 feedback
+and SocialFetch monitor parent operations share subtrees with supported public
+children. Existing subtree exclusions overreach; generated-name exclusions fail
+when independent source filters remove the parent. Independently approved C2.1
+adds exact original `METHOD path` exclusions before preference/naming, with absent
+operations permitted and no weakening of exact generated-name validation. Deliver
+C2.1 after C3.1 review and before C3.2, then re-review the affected G2 call chain.
+No proven POST opt-out exception emerged. Canonical GenuineGood/Otto names and checked-in consumers are listed
 in CAVEATS and migrate together in C2.2. Generic tests deliberately inspecting
 both methods must explicitly disable preference. No retry changes are authorized.
 
@@ -130,9 +138,11 @@ privacy-help keyword mismatch (`pdl_person`) failed. Provider catalogs ran 17,
 16 passed and universal bundled-to-paid-scope accounting failed for five newer
 providers. Sandbox-only localhost permission failures are environmental.
 Independent exact reviews approved C1.1–C1.3; G1 closed after individual mixed
-operation decisions resolved the remaining omissions. Agent402 feedback uses an
-existing exact tool exclusion so the public summary child survives; custom prefixes
-must replace that exact selector or fail closed.
+operation decisions initially resolved the omissions. The subsequent wider audit
+corrects overbroad classifications before affected implementation: valid fixed
+literals, supported JSON envelopes, stateless public discovery and link-only
+helpers remain supported. CAVEATS owns these refined boundaries. The conditional
+C2.1 decision above supersedes generated-name exclusions for exact wire operations.
 
 C2.2 also owns replacing blanket catalog/settings test functions: canonical naming
 and serialized defaults deliberately invalidate those expectations. Focused captured
@@ -161,8 +171,8 @@ consumer migrations; no fixtures or financial evidence are removed here.
    express the support boundary. Do not mechanically invert every allowlist.
 4. Normalize exclusion semantics: existing `exclude` is a segment-aware path
    subtree filter, not an exact METHOD/path exclusion. Add `exclude_operations`
-   only where the audit demonstrates a real need to exclude one method while
-   retaining another. If needed, use the existing operation syntax/validation and
+   only where the audit demonstrates a real need to exclude an exact operation
+   while retaining a sibling method or public child route. If needed, use the existing operation syntax/validation and
    make exclusions win. Reuse paths/tags where they accurately express the rule;
    do not enumerate every currently supported operation as its complement.
 5. Proposed minimal recommendation representation: provider/source
@@ -354,7 +364,7 @@ documented restriction; it must not produce a claim of successful qualification.
 
 | Commit | Coherent scope and consumers | Acceptance evidence |
 | --- | --- | --- |
-| C2.1, conditional | Implement exact operation exclusions only if G1 establishes a need; include Config validation/composition, shared catalog matching and owning docs. | Synthetic method-specific exclusion/precedence tests; ordinary path/tag behavior preserved. If unnecessary, record that conclusion and start with C2.2. |
+| C2.1, conditional | Implement exact operation exclusions only if G1 establishes a need; include Config validation/composition, shared catalog matching and owning docs. | Synthetic method and parent/child exclusion tests, precedence, independent tags/custom prefixes, typed validation and list replacement/clearing; ordinary path/tag behavior preserved. Reopened after C3.1 for the demonstrated parent/child need; re-close affected G2 before C3.2. |
 | C2.2 | Implement default-on POST preference and hidden opt-out across generic/dynamic/embedded paths, together with all required existing name, hardcoded reference, override and selector migrations, provider exceptions, tests and docs. | Default/opt-out/inheritance, compatibility ordering, naming, actual routing and publication tests; complete migration inventory with no broken checked-in consumer. |
 | C2.3 | Implement advisory recommendations, explicit opt-in and inspection using final names; include composition, static-source/listener consumers and docs. | Focused metadata/selection/stale/empty/help/isolation tests; full inspection available; no name, payer or raw-call authority change. |
 
