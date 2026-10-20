@@ -77,9 +77,9 @@ configuration, pricing/help caches, Tor isolation, encrypted persistence and
 Zcash sync/recovery. They use localhost and public deterministic test keys;
 normal suites do not spend funds. A sandbox must permit binding localhost.
 
-Golden fixtures pin **971 tool contracts across 26 providers** and settings for
-30 bundled providers. Names, full descriptions, schemas, methods, paths and
-parameter routes are checked without Python or live vendor access. Independent
+Focused provider fixtures preserve identified schema, routing and integration
+quirks without freezing every tool or provider setting. All provider TOMLs validate
+offline. Independent
 Python-generated Keccak/EIP-712 vectors are committed as test data. See
 [fixture maintenance](../tests/fixtures/catalogs/README.md),
 [network verification](network-egress.md), and

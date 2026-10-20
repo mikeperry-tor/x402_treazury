@@ -18,6 +18,7 @@ fn document() -> serde_json::Value {
 #[test]
 fn names_filter_after_collision_naming_and_include_help_explicitly() {
     let mut cfg = Config {
+        prefer_post: false,
         help_url: Some("https://example.com/llms.txt".into()),
         include_tools: vec!["api_company_?et".into(), "api_help".into()],
         ..Default::default()
@@ -43,6 +44,7 @@ fn names_filter_after_collision_naming_and_include_help_explicitly() {
 #[test]
 fn name_filters_intersect_existing_selection_and_fail_on_unknown_exact_names() {
     let mut cfg = Config {
+        prefer_post: false,
         tags: vec!["Company".into()],
         include_tools: vec!["api_*".into()],
         exclude_tools: vec!["*_post".into()],
@@ -84,6 +86,7 @@ async fn composition_replaces_and_clears_name_filters_and_listener_narrows_them(
 spec = "spec.json"
 base_url = "https://example.com"
 prefix = "api"
+prefer_post = false
 include_tools = ["api_company_*"]
 exclude_tools = ["api_company_post"]
 "#,

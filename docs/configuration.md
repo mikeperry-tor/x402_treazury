@@ -146,6 +146,19 @@ optional wallet templates and an automatic assignment policy:
   `include_tools`, `exclude_tools`, `tags`, `exclude_tags`, and `max_response_chars`.
   Resource identifiers use lowercase letters, digits and `_`, starting with a letter.
 
+Provider/source `prefer_post` defaults to true. After path/operation/tag
+compatibility filters, exact original-path GET/POST pairs retain POST before
+collision counting and naming. Other methods, different paths and GET-only routes
+remain. Name filters and recommendations cannot restore a removed GET; explicitly
+set `prefer_post = false` before selecting its collision-resolved name. This is an
+internal integration escape hatch, inherited like any scalar; a source can override
+either value. It is not a CLI option or ordinary provider boilerplate. Review
+request, response and payment contracts before collapsing meaningful differences.
+The full default catalog includes this collapse; disabling preference exposes the
+preference-free method inventory. Exact selections using removed `_get`/`_post`
+suffixes must migrate to canonical names; no hidden aliases are installed. Raw calls
+retain their requested method, and selection grants no retry authority.
+
 Provider and source `include_tools` / `exclude_tools` select generated tool names,
 using the same case-sensitive `*` (any characters) and `?` (one character) patterns
 as server filters. For example:

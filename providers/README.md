@@ -86,8 +86,8 @@ have a generic description because their schemas are not modeled. Preserve the
 Locus gateway body rewrite and job exclusions, Straits free/premium split,
 Concordance POST pricing, and Glassnode's discovery workflow when editing them.
 
-`tests/provider_catalogs.rs` pins 971 tool definitions across the 26 providers
-with committed fixtures. `tests/config.rs` pins settings for 30 providers.
+`tests/provider_catalogs.rs` checks concrete provider contracts and
+`tests/config.rs` validates all definitions offline without settings snapshots.
 Tests need no Python or live vendor access. See [provider caveats](CAVEATS.md)
 for route exclusions, pricing semantics and vendor-specific workflows.
 
@@ -107,9 +107,9 @@ Exact operation allowlists remain appropriate for verified payable islands in a
 mixed API; explain why path or tag exclusions cannot describe that boundary.
 
 Recommendations belong in explicit deployment selections, separate from reusable
-compatibility defaults. The provider-curation work is introducing advisory
-recommendations with explicit opt-in and default POST selection for same-path
-GET/POST twins before naming; these features are not implemented yet. Until then,
+compatibility defaults. Default selection collapses same-path GET/POST twins to POST before naming.
+The provider-curation work is introducing advisory recommendations with explicit
+opt-in; recommendation metadata is not implemented yet. Until normalization,
 existing provider selections below describe current behavior, including editorial
 subsets scheduled for normalization. See the
 [implementation plan](../docs/plans/provider_curation.md).

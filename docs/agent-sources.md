@@ -18,8 +18,9 @@ This setting changes tool advertising, not loading or access: all configured
 catalogs still load, with remote catalogs published after listeners bind during
 ordinary deployment serving. Filters and wallet bindings still apply, and existing direct
 tool calls remain supported. It grants no source registration permissions and
-requires no source-management wallet or registry for static listeners. Tool IDs are
-exact endpoint-local names, reusable across turns, reconnects and restarts while
+requires no source-management wallet or registry for static listeners. Imported OpenAPI catalogs share default same-path POST preference before naming;
+registration exposes no preference argument and raw calls retain their explicit method.
+Tool IDs are exact endpoint-local names, reusable across turns, reconnects and restarts while
 the tool remains available. Calls resolve the current definition and wallet binding,
 including after a source refresh or re-addition with the same tool name. Inspection and
 qualification retain the complete inventory and validate full schemas. Restart the

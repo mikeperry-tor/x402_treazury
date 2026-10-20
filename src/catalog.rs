@@ -137,6 +137,8 @@ pub struct Config {
     pub exclude_tools: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub include_operations: Vec<String>,
+    /// Internal escape hatch for integrations that need both same-path methods.
+    pub prefer_post: bool,
     pub tags: Vec<String>,
     pub exclude_tags: Vec<String>,
     pub pricing_key: Option<String>,
@@ -194,6 +196,7 @@ impl Default for Config {
             include_tools: vec![],
             exclude_tools: vec![],
             include_operations: vec![],
+            prefer_post: true,
             tags: vec![],
             exclude_tags: vec![],
             pricing_key: None,
@@ -1265,11 +1268,9 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(
         )
     });
     let mut selected = Vec::new();
-    let mut counts = BTreeMap::<String, usize>::new();
     let had_operations = !ops.is_empty();
     for op in ops {
         if let Some(base) = selected_operation_base(cfg, &op, prefix) {
-            *counts.entry(base.clone()).or_default() += 1;
             selected.push((op, base));
         }
     }
@@ -1280,6 +1281,22 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(
         } else {
             error
         });
+    }
+    // Exact wire paths define twins; later name filters cannot resurrect GET.
+    if cfg.prefer_post {
+        let post_paths: BTreeSet<_> = selected
+            .iter()
+            .filter(|(op, _)| op["method"].as_str().unwrap().eq_ignore_ascii_case("POST"))
+            .map(|(op, _)| op["path"].as_str().unwrap().to_owned())
+            .collect();
+        selected.retain(|(op, _)| {
+            !op["method"].as_str().unwrap().eq_ignore_ascii_case("GET")
+                || !post_paths.contains(op["path"].as_str().unwrap())
+        });
+    }
+    let mut counts = BTreeMap::<String, usize>::new();
+    for (_, base) in &selected {
+        *counts.entry(base.clone()).or_default() += 1;
     }
     Ok(name_selected_operations(selected, &counts))
 }

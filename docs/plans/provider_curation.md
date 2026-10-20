@@ -3,8 +3,7 @@
 ## Intent and status
 
 Implementation in progress. Baseline established at `05280d66f903e38b45b521d4b973f5e58529db53`
-(the plan-only commit after the original baseline). P1 audits and baseline checks
-are underway; G1 must close before runtime implementation. The operator wants
+(the plan-only commit after the original baseline). P1 is complete and G1 independently closed. P2 implementation is underway. The operator wants
 provider defaults to expose supported functionality and newly arriving supported
 tools, rather than silently impose a maintainer's recommended subset. Separate
 recommendations from compatibility filtering, use recommendations explicitly in
@@ -111,10 +110,20 @@ C5.3a–C5.3c own focused input subsets, the former orphan captures and maintain
 reviewed request schemas and payment evidence remain intact. Each exact SHA and
 fixup receives independent review; gates retain their cumulative scope below.
 
-Focused baseline: sandbox config ran 9 tests, 6 passed; two localhost permission
-failures and a pre-existing privacy-help keyword mismatch (`pdl_person`) failed.
-The unrestricted offline rerun is being captured separately. The static universal
-paid-scope mismatch remains distinct until provider_catalogs executes.
+Focused baseline: unrestricted config ran 9 tests, 8 passed and the existing
+privacy-help keyword mismatch (`pdl_person`) failed. Provider catalogs ran 17,
+16 passed and universal bundled-to-paid-scope accounting failed for five newer
+providers. Sandbox-only localhost permission failures are environmental.
+Independent exact reviews approved C1.1–C1.3; G1 closed after individual mixed
+operation decisions resolved the remaining omissions. Agent402 feedback uses an
+existing exact tool exclusion so the public summary child survives; custom prefixes
+must replace that exact selector or fail closed.
+
+C2.2 also owns replacing blanket catalog/settings test functions: canonical naming
+and serialized defaults deliberately invalidate those expectations. Focused captured
+method regressions and recursive all-definition TOML validation replace them in
+the same behavior commit. C5.2 still owns unused output files/index and remaining
+consumer migrations; no fixtures or financial evidence are removed here.
 
 ## Desired policy and design decisions
 

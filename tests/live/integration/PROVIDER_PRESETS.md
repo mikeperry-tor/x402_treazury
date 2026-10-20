@@ -2,11 +2,18 @@
 
 `providers.example.toml` defines the reviewed 23-provider baseline.
 `../fixtures/provider_requests.json` independently pins its paid request contracts.
-It contains the same 22 paid requests and their $0.20 reservations, plus an
+It contains 22 paid cases and their $0.20 reservations, plus an
 unsigned x402-list directory request. It does not include OneShot or add newly
 discovered providers implicitly. Additional routes, concurrency and depletion calls require separate reviewed scenarios.
 There are 63 explicit cases: 22 paid, one directory read and 40 unsigned help calls
 (fetch/hit pairs for the 20 configured help tools).
+
+The GenuineGood search case now uses canonical `genuinegood_search`, which sends
+POST JSON after default method-twin selection. Its arguments and reservation are
+unchanged. This migration was validated only offline against captured equivalent
+GET/POST request contracts. Earlier funded GET evidence is historical and does not
+qualify the POST request; no funded rerun was performed. Changing the method or
+name grants no replay or renewed case authority.
 
 The zero time window and placeholder treasury ID prohibit execution until the
 operator reviews the deployment, state, run ID, deadlines and authority. Copy the
@@ -75,7 +82,7 @@ is explicitly unsigned: a quota-triggered 402 fails before signing. Help caching
 outer MCP success, body checks and canonical payment debit remain separate gates.
 
 The offline preset test checks the exact paid request/argument/reservation mapping
-against the older reviewed input, validates all tools and arguments against committed
+against the independent request fixture, validates all tools and arguments against committed
 catalogs and listener allowlists, and verifies $4.40 reservations with no new funding.
 It needs no keys, state or live endpoints. Local synthetic tests cover assertion
 evaluation; none of these checks claim a fresh funded or Tor-qualified sweep.

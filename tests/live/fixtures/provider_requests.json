@@ -78,7 +78,7 @@
   },
   {
     "id": "sweep_genuinegood",
-    "tool": "genuinegood_search_get",
+    "tool": "genuinegood_search",
     "arguments": {
       "keyword": "education",
       "rows": 1

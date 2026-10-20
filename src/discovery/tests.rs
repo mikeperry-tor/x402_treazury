@@ -145,6 +145,28 @@ async fn add(m: &Arc<Manager>, name: &str, _lifetime: &str, _visibility: &str) -
     .unwrap()
 }
 #[test]
+fn imported_and_saved_catalogs_share_post_preference_and_body_routing() {
+    let c: Candidate = serde_json::from_value(candidate("demo", "process", "server")).unwrap();
+    let mut doc = spec();
+    doc["paths"]["/read"]["post"] = json!({"requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"q":{"type":"string"}}}}}}});
+    let bytes = serde_json::to_vec(&doc).unwrap();
+    let built = import::build(&policy(None), &c, &bytes).unwrap();
+    let saved = import::saved_tools(&c, &bytes).unwrap();
+    assert_eq!(
+        serde_json::to_value(&built.tools).unwrap(),
+        serde_json::to_value(saved).unwrap()
+    );
+    let read = built.tools.iter().find(|t| t.path == "/read").unwrap();
+    assert_eq!(read.name, "dyn_demo__read");
+    assert_eq!(read.method, "POST");
+    assert_eq!(built.tools.iter().filter(|t| t.path == "/read").count(), 1);
+    let args = json!({"q":"research"});
+    let request = read.route(&built.base, args.as_object().unwrap()).unwrap();
+    assert_eq!(request.body, Some(args));
+    assert!(request.query.is_empty());
+}
+
+#[test]
 fn importer_rejects_unsafe_and_expanding_documents() {
     let p = policy(None);
     let c: Candidate = serde_json::from_value(candidate("demo", "process", "server")).unwrap();

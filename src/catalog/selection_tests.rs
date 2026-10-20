@@ -46,6 +46,19 @@ fn stable_inventory_order_resolves_base_method_and_duplicate_collisions() {
     assert_eq!(
         selected_operations(&Config::default(), &root, "api").unwrap(),
         vec![
+            (root_op.clone(), "api_root".into()),
+            (post.clone(), "api_a".into()),
+            (suffix.clone(), "api_a_get".into()),
+        ]
+    );
+    // Inspect both methods deliberately to exercise duplicate/suffix collisions.
+    let both_methods = Config {
+        prefer_post: false,
+        ..Default::default()
+    };
+    assert_eq!(
+        selected_operations(&both_methods, &root, "api").unwrap(),
+        vec![
             (root_op, "api_root".into()),
             (a, "api_a_get".into()),
             (b, "api_a_get_2".into()),

@@ -1,8 +1,7 @@
 # Provider contract fixtures
 
 Provider-specific inputs must reproduce a named quirk, failure or authored
-transformation; shared synthetic tests own generic parsing and selection. The
-current blanket output/settings snapshots are scheduled for removal under the
+transformation; shared synthetic tests own generic parsing and selection. The unused output/settings snapshot files are scheduled for removal under the
 [provider-curation plan](../../../docs/plans/provider_curation.md). Do not add a
 new golden or freeze a full settings map merely because a provider was added.
 
@@ -23,9 +22,8 @@ Retain inputs by responsibility:
 Production local catalogs under `providers/` and the Kronos/RegimeShift inputs in
 `examples/live-tor-providers.toml` are runtime inputs. Preserve them independently
 of test pruning. Check consumers in discovery, media, payment, startup, examples
-and qualification before deletion. `cases.json` currently feeds the blanket
-catalog test, the offline qualification preset test and the ignored startup
-benchmark; migrate all three before removing it. Captured Apollo, Concordance,
+and qualification before deletion. `cases.json` still feeds the offline qualification preset test and the ignored
+startup benchmark; migrate both before removing it. Captured Apollo, Concordance,
 Locus and Straits test inputs have no code consumer. Concordance, Locus and Straits have
 distinct production local catalogs that remain necessary.
 

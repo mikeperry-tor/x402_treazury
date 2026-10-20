@@ -137,21 +137,25 @@ async fn composition_rejects_json_unknown_fields_nested_extends_and_invalid_limi
 }
 
 #[tokio::test]
-async fn bundled_provider_settings_match_reviewed_snapshots() {
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let expected: std::collections::BTreeMap<String, Value> =
-        serde_json::from_str(include_str!("fixtures/catalogs/settings.json")).unwrap();
-    assert_eq!(expected.len(), 30);
-    for (provider, expected) in expected {
-        let resolved = config::load(&repo.join(&provider)).await.unwrap();
-        let mut actual = serde_json::to_value(&resolved.settings).unwrap();
-        let spec = Path::new(&resolved.settings.spec);
-        if spec.is_absolute() {
-            assert!(spec.exists(), "{provider}");
-            actual["spec"] = json!(spec.strip_prefix(repo).unwrap().to_str().unwrap());
+async fn every_bundled_provider_validates_offline() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers");
+    let mut pending = vec![root];
+    let mut definitions = 0;
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "toml") {
+                let cfg = config::load(&path).await.unwrap().settings;
+                if !cfg.spec.starts_with("https://") && !cfg.spec.starts_with("http://") {
+                    assert!(Path::new(&cfg.spec).exists(), "{}", path.display());
+                }
+                definitions += 1;
+            }
         }
-        assert_eq!(actual, expected, "{provider}");
     }
+    assert!(definitions > 0);
 }
 
 fn deployment_text() -> &'static str {

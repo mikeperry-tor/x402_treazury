@@ -327,7 +327,7 @@ instructions_text = "Use Google Trends for aggregate keyword interest over time,
 # tools for focused company grant research.
 [sources.genuinegood]
 extends = "../../providers/genuinegood.toml"
-include_tools = ["genuinegood_search_post", "genuinegood_detail_post"]
+include_tools = ["genuinegood_search", "genuinegood_detail"]
 instructions_text = "US federal grant research: search Grants.gov opportunities, then request detail by opportunityId. Verify eligibility, deadlines and awards against the linked official notice. Only search and detail are exposed."
 
 # MCP endpoints expose separate toolsets; social, company and toolbox share payment identity.

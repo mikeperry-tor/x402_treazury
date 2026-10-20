@@ -65,12 +65,12 @@ security and payment metadata. Secret-bearing GET descriptions explicitly favor
 POST; JSON bodies also avoid query-array serialization uncertainty. No opt-out
 is indicated, and equal advertised metadata does not establish equal charges.
 
-The intended canonical names are `genuinegood_search`, `genuinegood_detail`,
+The canonical names are `genuinegood_search`, `genuinegood_detail`,
 `genuinegood_fit`, `genuinegood_brief`, `genuinegood_preflight`,
 `otto_generate_meme`, `otto_llm_research`, `otto_tx_explainer` and
-`otto_meta_intelligence`. Migrate both old method suffixes with the preference
-implementation: privacy selections, live-Tor example, reviewed qualification
-preset and independent request fixture, provider instructions and focused tests.
+`otto_meta_intelligence`. Both old method suffixes are replaced in privacy selections, the live-Tor example,
+reviewed qualification preset and independent request fixture. Operators must update
+exact selectors; set `prefer_post = false` in a provider/source to inspect both methods.
 Do not create aliases or alter explicit raw HTTP methods.
 
 
@@ -306,8 +306,8 @@ this conf exists so the wallet/spend-cap story stays in this server.)
 
 ## otto.toml — Otto AI x402 swarm (x402.ottoai.services)
 
-92 operations → **87 API tools plus help**
-(four routes ship GET+POST variants and get `_get`/`_post` names), an
+The default collapses four interchangeable same-path GET/POST pairs to POST before
+naming. Otto is an
 autonomous agent swarm selling market/token intelligence, DeFi & markets
 data, web/domain intelligence, real-world data (FX, weather), AI creative
 tools (image/video gen, research, tx explainer), portfolio reads, a
@@ -354,8 +354,8 @@ the vendor spec truncates with malformed keys. Pinned against
 
 Independent paid US federal grant discovery over Grants.gov public records:
 five data routes — search, detail, fit, brief, preflight — each shipping
-GET+POST twins that share a path and so get `_get`/`_post` names (10 tools
-plus `genuinegood_help()`). Every op publishes a correct-shape
+GET+POST twins that share a path. Default POST selection exposes five API tools
+plus `genuinegood_help()` without redundant method suffixes. Every op publishes a correct-shape
 `x-payment-info` ($0.05 / $0.08 / $0.20 / $0.50, preflight $5.00 per call,
 USDC on Base), so prices render from the **live vendor spec** and boots make
 zero probe requests; the vendor prose states no dollar amounts, so the

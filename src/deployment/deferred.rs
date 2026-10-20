@@ -792,7 +792,7 @@ discover_on_demand=true
             axum::serve(
                 origin,
                 Router::new()
-                    .route("/read", get(|| async { "healthy" }))
+                    .route("/read", get(|| async { "wrong-method" }).post(|| async { "healthy" }))
                     .route(
                         "/spec",
                         get(move || {
@@ -801,7 +801,7 @@ discover_on_demand=true
                             async move {
                                 arrived.lock().await.take().unwrap().send(()).unwrap();
                                 wait.lock().await.take().unwrap().await.unwrap();
-                                axum::Json(json!({"operations":[{"method":"GET","path":"/read"}]}))
+                                axum::Json(json!({"operations":[{"method":"GET","path":"/read"},{"method":"POST","path":"/read"}]}))
                             }
                         }),
                     ),
@@ -811,7 +811,7 @@ discover_on_demand=true
         });
         std::fs::write(
             dir.path().join("spec.json"),
-            r#"{"operations":[{"method":"GET","path":"/read"}]}"#,
+            r#"{"operations":[{"method":"GET","path":"/read"},{"method":"POST","path":"/read"}]}"#,
         )
         .unwrap();
         let path = dir.path().join("deployment.toml");
@@ -892,6 +892,7 @@ discovery_search_tool_instructions_text='Pending platform guidance'
             .unwrap();
         let initial = catalog.read();
         assert_eq!(initial.views["one"].len(), 1);
+        assert_eq!(initial.views["one"][0].tool.name, "healthy_read");
         assert!(
             initial.instructions["one"]
                 .as_ref()
@@ -918,6 +919,13 @@ discovery_search_tool_instructions_text='Pending platform guidance'
                 .as_ref()
                 .is_some_and(|s| s.contains("PENDING"))
         );
+        for binding in &catalog.read().views["one"] {
+            assert!(!binding.tool.name.ends_with("_get") && !binding.tool.name.ends_with("_post"));
+            assert_eq!(
+                binding.invoke(&Default::default()).await.unwrap(),
+                "healthy"
+            );
+        }
         let mut server = server;
         server.catalog = catalog.clone();
         server.catalog_server = "one".into();
