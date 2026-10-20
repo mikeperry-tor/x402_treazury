@@ -1933,9 +1933,18 @@ async fn promotion_identity_child() {
                 .iter()
                 .find(|r| r.upstream_peer == Some(*peer))
                 .unwrap();
+            let id = IsolationId::evm(expected).unwrap();
+            let transport = network::global()
+                .http_participating(&id, &h.url, None, false, Default::default())
+                .unwrap();
             assert_eq!(
                 (connection.user.clone(), connection.password.clone()),
-                network::global().credentials(&IsolationId::evm(expected).unwrap()),
+                network::global().credentials(&transport.scope),
+                "{phase}"
+            );
+            assert_ne!(
+                connection.password,
+                network::global().credentials(&id).1,
                 "{phase}"
             );
             if phase == "signed" {

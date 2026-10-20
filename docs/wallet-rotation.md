@@ -265,7 +265,13 @@ The invocation captures its existing inventory boundary. It may hand off an unsi
 challenge to an eligible payer suggested by the actual price, and may traverse on
 the narrow insufficient-funds exception below. Each identity is visited at most
 once. Each handoff creates that payer's own isolated transport and unsigned
-challenge while preserving the original request bytes.
+challenge while preserving the original request bytes. Within each payer stage in
+Tor mode, unsigned challenge acquisition may try up to three isolation scopes on
+HTTP `400`, `403`, `429`, or `503` (honoring valid `Retry-After` headers on `429`
+and `503`) with that same pinned payer—never switching wallets, allocating,
+funding or waiting for balance reconciliation during the unsigned retry loop—and
+conditionally promotes the winning scope after valid challenge validation before
+signing and signed submission on that exact pinned record.
 
 Signing produces private bytes. The journal transaction rechecks current pool
 ownership, eligible role, actual reserve claim, amount cap, payer address and signed

@@ -164,7 +164,11 @@ Direct GET/POST tools are available only when this listener enables
 `source_management`; `discover_on_demand` alone does not enable them. They use the
 same resolved source-management wallet, including a listener wallet override, with
 normal payment admission, cancellation ownership, public-destination checks,
-`allowed_origins`, direct/Tor transport and source-management response limits.
+`allowed_origins`, direct/Tor transport (including participating Tor unsigned
+status retries and conditional scope promotion shared with generated MCP tools,
+dynamic `tool_call` and directory tools) and source-management response limits.
+`source_url_info` and `source_add` keep their existing single-scope discovery
+and import transport policies.
 They create no registrations or per-endpoint wallets. API tool-name filters do not
 restrict these management tools: enabling source management permits direct calls
 to documented public HTTPS endpoints within the configured origin policy.

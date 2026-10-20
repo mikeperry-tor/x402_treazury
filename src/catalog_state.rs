@@ -72,9 +72,8 @@ impl BoundTool {
                 None => self.client.clone(),
             };
             client
-                .execute_response_scoped(
+                .execute_rendered_scoped(
                     self.tool.route(&self.base, args)?,
-                    &crate::payment::SubmissionProgress::default(),
                     self.client.operation_key(
                         self.source
                             .as_ref()
@@ -83,9 +82,10 @@ impl BoundTool {
                         &self.tool.path,
                         &self.base,
                     ),
+                    self.tool.response_mapping.as_ref(),
+                    &self.tool.image_limits,
                 )
-                .await?
-                .render(self.tool.response_mapping.as_ref(), &self.tool.image_limits)
+                .await
         }
     }
 }

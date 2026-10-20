@@ -204,7 +204,7 @@ async fn fixture() {
     );
     assert_eq!(requests.iter().filter(|(m, _)| m == "HEAD").count(), 32);
     let records = proxy.records.lock().unwrap();
-    let expected: Vec<_> = (1..=2)
+    let mut expected: Vec<_> = (1..=2)
         .map(|key| {
             let signer: alloy_signer_local::PrivateKeySigner =
                 format!("{key:064x}").parse().unwrap();
@@ -212,6 +212,24 @@ async fn fixture() {
                 .credentials(&IsolationId::evm(&signer.address().to_string()).unwrap())
         })
         .collect();
+    let reader_signer: alloy_signer_local::PrivateKeySigner =
+        format!("{:064x}", 2).parse().unwrap();
+    let reader_id = IsolationId::evm(&reader_signer.address().to_string()).unwrap();
+    let reader_dir_transport = crate::network::global()
+        .http_participating(
+            &reader_id,
+            "https://api.example.com",
+            Some(Duration::from_secs(60)),
+            true,
+            Default::default(),
+        )
+        .unwrap();
+    let reader_dir_creds = crate::network::global().credentials(&reader_dir_transport.scope);
+    assert_ne!(
+        reader_dir_creds.1,
+        crate::network::global().credentials(&reader_id).1
+    );
+    expected.push(reader_dir_creds);
     for record in records.iter() {
         assert_eq!(record.host, "api.example.com");
         assert_eq!(record.address_type, 3);

@@ -215,9 +215,15 @@ extend its deadline or restart its volume budget. Different effective scopes for
 the same canonical identity and origin cannot merge sessions or reuse
 qualification/negative capability; after transport record replacement or eviction,
 retained old sessions finish on their original client while new acquisitions attach
-only to their matching scope. A rotation creates a new identity/pool. Old in-flight
-calls retain their original identity. Shared wallet bindings may share episodes
-across listeners when they share the same effective scope.
+only to their matching scope. When an unsigned API attempt in Tor mode fails with
+an eligible retry status (`400`, `403`, `429`, `503`), the caller drops that
+response and releases its cover lease before trying a fresh candidate scope, so
+the failed scope's session drains without closing active streams or resetting
+other origins, and the new scope qualifies independently (which can add cover
+qualification requests beyond the API attempt count). Cover-only range success
+never promotes an API transport record. A rotation creates a new identity/pool.
+Old in-flight calls retain their original identity. Shared wallet bindings may
+share episodes across listeners when they share the same effective scope.
 
 Every real physical request takes priority: outstanding cover streams are canceled
 and their local cleanup is awaited before dispatch. Cover stays paused through

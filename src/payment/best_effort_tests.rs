@@ -879,10 +879,989 @@ async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_s
             assert_eq!(
                 peers.lock().unwrap().len(),
                 1,
-                "unsigned {code} on {method} remains single-shot before T5 activation"
+                "direct mode unsigned {code} on {method} remains single-shot"
             );
         }
     }
     assert_eq!(signed_count.load(Ordering::SeqCst), 2);
     server.abort();
+}
+
+#[tokio::test]
+async fn tor_unsigned_status_retries_and_retained_promotion() {
+    let result = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+        .args([
+            "--ignored",
+            "--exact",
+            "payment::best_effort_tests::tor_unsigned_retry_child",
+            "--nocapture",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+type TorRequest = (SocketAddr, Method, String, Vec<u8>, bool);
+
+#[derive(Clone, Default)]
+struct TorScript {
+    steps: Arc<Mutex<std::collections::VecDeque<TorStep>>>,
+    observed: Arc<Mutex<Vec<TorRequest>>>,
+    signed_payers: Arc<Mutex<Vec<alloy_primitives::Address>>>,
+}
+
+#[derive(Clone)]
+enum TorStep {
+    Status(StatusCode, Option<&'static str>),
+    FailedBody(StatusCode, bool),
+    Malformed402,
+    Valid402(u64),
+    Free200(Vec<u8>),
+    Interrupted200,
+    Stalled200,
+    Valid402WithHook(u64, Arc<dyn Fn() + Send + Sync>),
+    SignedInsufficient402,
+    SignedStatus(StatusCode),
+    Signed200(Vec<u8>),
+}
+
+async fn tor_script_handler(
+    State(script): State<TorScript>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let is_signed = headers.contains_key("payment-signature");
+    script
+        .observed
+        .lock()
+        .unwrap()
+        .push((peer, method, uri.to_string(), body.to_vec(), is_signed));
+    if let Some(encoded) = headers.get("payment-signature") {
+        let payload: Value =
+            serde_json::from_slice(&STANDARD.decode(encoded.as_bytes()).unwrap()).unwrap();
+        let payer = crate::test_signatures::recover_exact(&payload);
+        script.signed_payers.lock().unwrap().push(payer);
+    }
+    let step = script
+        .steps
+        .lock()
+        .unwrap()
+        .pop_front()
+        .unwrap_or(TorStep::Signed200(b"paid".to_vec()));
+    match step {
+        TorStep::Status(code, retry_after) => {
+            let mut resp = (code, "upstream error").into_response();
+            if let Some(value) = retry_after {
+                resp.headers_mut()
+                    .insert(axum::http::header::RETRY_AFTER, value.parse().unwrap());
+            }
+            resp
+        }
+        TorStep::FailedBody(code, stalled) => {
+            let body = if stalled {
+                stalled_body()
+            } else {
+                axum::body::Body::from(vec![b'x'; 17])
+            };
+            (code, [("retry-after", "60")], body).into_response()
+        }
+        TorStep::Malformed402 => (
+            StatusCode::PAYMENT_REQUIRED,
+            [("payment-required", "not-valid-base64!!!")],
+            "{}",
+        )
+            .into_response(),
+        TorStep::Valid402(amount) => {
+            let mut ch = challenge();
+            ch["accepts"][0]["amount"] = json!(amount.to_string());
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [(
+                    "payment-required",
+                    STANDARD.encode(serde_json::to_vec(&ch).unwrap()),
+                )],
+                "{}",
+            )
+                .into_response()
+        }
+        TorStep::Valid402WithHook(amount, hook) => {
+            hook();
+            let mut ch = challenge();
+            ch["accepts"][0]["amount"] = json!(amount.to_string());
+            (
+                StatusCode::PAYMENT_REQUIRED,
+                [(
+                    "payment-required",
+                    STANDARD.encode(serde_json::to_vec(&ch).unwrap()),
+                )],
+                "{}",
+            )
+                .into_response()
+        }
+        TorStep::Free200(bytes) => {
+            (StatusCode::OK, [("content-type", "text/plain")], bytes).into_response()
+        }
+        TorStep::SignedInsufficient402 => (
+            StatusCode::PAYMENT_REQUIRED,
+            [(
+                "payment-response",
+                STANDARD.encode(
+                    serde_json::to_vec(&json!({
+                        "success": false,
+                        "errorReason": "insufficient_funds",
+                        "network": "eip155:8453",
+                        "transaction": ""
+                    }))
+                    .unwrap(),
+                ),
+            )],
+            "{}",
+        )
+            .into_response(),
+        TorStep::Interrupted200 => {
+            let stream = futures_util::stream::unfold(0, |phase| async move {
+                match phase {
+                    0 => Some((Ok(axum::body::Bytes::from_static(b"partial")), 1)),
+                    1 => {
+                        // Yield Pending so Hyper flushes headers and the first
+                        // chunk before interrupting this response's body.
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        Some((
+                            Err(std::io::Error::other("fixture interrupted response")),
+                            2,
+                        ))
+                    }
+                    _ => None,
+                }
+            });
+            (
+                StatusCode::OK,
+                [("content-type", "text/plain")],
+                axum::body::Body::from_stream(stream),
+            )
+                .into_response()
+        }
+        TorStep::Stalled200 => (
+            StatusCode::OK,
+            [("content-type", "text/plain")],
+            stalled_body(),
+        )
+            .into_response(),
+        TorStep::SignedStatus(code) => (code, "signed upstream failure").into_response(),
+        TorStep::Signed200(bytes) => {
+            (StatusCode::OK, [("content-type", "text/plain")], bytes).into_response()
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "private Tor policy; invoked by parent"]
+async fn tor_unsigned_retry_child() {
+    use crate::{
+        network::{IsolationId, Mode, NetworkContext, NetworkPolicy, SelectionPolicy},
+        test_socks::{Fault, Socks},
+    };
+    let script_a = TorScript::default();
+    let script_b = TorScript::default();
+    let listener_a = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_a = listener_a.local_addr().unwrap();
+    let listener_b = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr_b = listener_b.local_addr().unwrap();
+    let app_a = Router::new()
+        .route("/pay", any(tor_script_handler))
+        .with_state(script_a.clone());
+    let app_b = Router::new()
+        .route("/pay", any(tor_script_handler))
+        .with_state(script_b.clone());
+    let server_a = tokio::spawn(async move {
+        axum::serve(
+            listener_a,
+            app_a.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    let server_b = tokio::spawn(async move {
+        axum::serve(
+            listener_b,
+            app_b.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    let proxy = Socks::start(
+        BTreeMap::from([
+            ("api-a.example.com".into(), addr_a),
+            ("api-b.example.com".into(), addr_b),
+            ("dead.example.com".into(), "127.0.0.1:1".parse().unwrap()),
+        ]),
+        Fault::None,
+    )
+    .await;
+    let ctx = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(proxy.address),
+        connect_timeout_seconds: Some(1),
+        ..Default::default()
+    })
+    .unwrap();
+    crate::network::install_test_context(ctx);
+
+    let find_token = |peer: SocketAddr| -> (String, String) {
+        let records = proxy.records.lock().unwrap();
+        let rec = records
+            .iter()
+            .find(|r| r.upstream_peer == Some(peer))
+            .expect("SOCKS record for peer");
+        (rec.user.clone(), rec.password.clone())
+    };
+
+    // 1. Status matrix (400, 403, 429, 503) before 402 -> paid 200 and before free 200,
+    //    across ordinals 1, 2, 3, plus exhaustion at 3 attempts, on GET and POST.
+    let payer = Payer::new(&format!("{:064x}", 11), SpendPolicy::dollars("1").unwrap()).unwrap();
+    let id = IsolationId::evm(&payer.address).unwrap();
+    let legacy_creds = crate::network::global().credentials(&id);
+    let client = PaidClient::new(payer);
+
+    for code in [
+        StatusCode::BAD_REQUEST,
+        StatusCode::FORBIDDEN,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::SERVICE_UNAVAILABLE,
+    ] {
+        for method in ["GET", "POST"] {
+            for fails in 0..=2 {
+                script_a.observed.lock().unwrap().clear();
+                script_a.signed_payers.lock().unwrap().clear();
+                {
+                    let mut steps = script_a.steps.lock().unwrap();
+                    steps.clear();
+                    for _ in 0..fails {
+                        steps.push_back(TorStep::Status(code, None));
+                    }
+                    steps.push_back(TorStep::Valid402(1));
+                    steps.push_back(TorStep::Signed200(b"paid-ok".to_vec()));
+                }
+                let make_matrix_route = || RoutedRequest {
+                    method: method.into(),
+                    url: "http://api-a.example.com/pay".into(),
+                    query: BTreeMap::from([("q".into(), json!("exact & value"))]),
+                    body: (method == "POST").then(|| json!({"payload":[1,2,3]})),
+                };
+                let out = client.execute_response(make_matrix_route()).await.unwrap();
+                assert_eq!(out.bytes, b"paid-ok");
+                assert!(out.paid_submission);
+                let obs = script_a.observed.lock().unwrap().clone();
+                assert_eq!(obs.len(), fails + 2, "unsigned retries + 402 + signed 200");
+                let mut unsigned_tokens = Vec::new();
+                for (i, (peer, m, uri, body, signed)) in obs.iter().enumerate() {
+                    assert_eq!(body, &obs[0].3, "exact repeated wire bytes");
+                    assert_eq!(m.as_str(), method);
+                    assert_eq!(uri, "/pay?q=exact+%26+value");
+                    if method == "POST" {
+                        assert_eq!(
+                            serde_json::from_slice::<Value>(body).unwrap(),
+                            json!({"payload":[1,2,3]})
+                        );
+                    } else {
+                        assert!(body.is_empty());
+                    }
+                    let (user, pass) = find_token(*peer);
+                    assert_eq!(user, legacy_creds.0, "canonical owner user stays pinned");
+                    assert_ne!(pass, legacy_creds.1, "participating scope is fresh");
+                    if i <= fails {
+                        assert!(!signed);
+                        unsigned_tokens.push(pass);
+                    } else {
+                        assert!(signed);
+                        assert_eq!(
+                            &pass,
+                            unsigned_tokens.last().unwrap(),
+                            "signed request must use the exact winning challenge scope"
+                        );
+                    }
+                }
+                let unique: std::collections::BTreeSet<_> = unsigned_tokens.iter().collect();
+                assert_eq!(
+                    unique.len(),
+                    unsigned_tokens.len(),
+                    "each retry attempt uses a distinct fresh scope"
+                );
+                let winner = unsigned_tokens.last().unwrap().clone();
+                let current_selected = crate::network::global()
+                    .http_participating(
+                        &id,
+                        "http://api-a.example.com/pay",
+                        None,
+                        false,
+                        Default::default(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    crate::network::global()
+                        .credentials(&current_selected.scope)
+                        .1,
+                    winner,
+                    "valid 402 promotes winning candidate scope into the cache slot"
+                );
+
+                // Free success at each ordinal follows the same method/status policy.
+                script_a.observed.lock().unwrap().clear();
+                {
+                    let mut steps = script_a.steps.lock().unwrap();
+                    steps.clear();
+                    for _ in 0..fails {
+                        steps.push_back(TorStep::Status(code, None));
+                    }
+                    steps.push_back(TorStep::Free200(b"free-ok".to_vec()));
+                }
+                let out = client.execute_response(make_matrix_route()).await.unwrap();
+                assert_eq!(out.bytes, b"free-ok");
+                assert!(!out.paid_submission);
+                let obs = script_a.observed.lock().unwrap().clone();
+                assert_eq!(obs.len(), fails + 1);
+                for entry in &obs {
+                    assert_eq!(
+                        (&entry.1, &entry.2, &entry.3),
+                        (&obs[0].1, &obs[0].2, &obs[0].3)
+                    );
+                    assert!(!entry.4);
+                }
+                assert_eq!(
+                    find_token(obs[0].0).1,
+                    winner,
+                    "attempt 1 uses prior winner"
+                );
+                let free_winner = find_token(obs.last().unwrap().0).1;
+                if fails > 0 {
+                    assert_ne!(free_winner, winner);
+                } else {
+                    assert_eq!(free_winner, winner);
+                }
+                let after_free = crate::network::global()
+                    .http_participating(
+                        &id,
+                        "http://api-a.example.com/pay",
+                        None,
+                        false,
+                        Default::default(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    crate::network::global().credentials(&after_free.scope).1,
+                    free_winner,
+                    "completed valid unsigned 200 promotes candidate scope"
+                );
+            }
+        }
+    }
+    // Exhaustion after 3 attempts (selected + 2 candidates) on eligible status:
+    let before_exhaust = crate::network::global()
+        .http_participating(
+            &id,
+            "http://api-a.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    script_a.observed.lock().unwrap().clear();
+    let signed_before = script_a.signed_payers.lock().unwrap().len();
+    {
+        let mut steps = script_a.steps.lock().unwrap();
+        steps.clear();
+        for _ in 0..4 {
+            steps.push_back(TorStep::Status(StatusCode::SERVICE_UNAVAILABLE, None));
+        }
+    }
+    let make_route = || RoutedRequest {
+        method: "POST".into(),
+        url: "http://api-a.example.com/pay".into(),
+        query: BTreeMap::new(),
+        body: Some(json!({"exhaust":true})),
+    };
+    assert!(client.execute_response(make_route()).await.is_err());
+    assert_eq!(
+        script_a.observed.lock().unwrap().len(),
+        3,
+        "exhausts after exactly 3 attempts"
+    );
+    assert_eq!(script_a.signed_payers.lock().unwrap().len(), signed_before);
+    let after_exhaust = crate::network::global()
+        .http_participating(
+            &id,
+            "http://api-a.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    assert!(
+        Arc::ptr_eq(&before_exhaust, &after_exhaust),
+        "exhausted retries never promote a failed candidate"
+    );
+
+    // Every failed participating-Tor status discards its body, including the
+    // final attempt. A known exhaustion error must survive stalled/oversized
+    // final bodies and must not wait on their Retry-After without a next dispatch.
+    let exhaustion_client = client
+        .clone()
+        .with_download_limits(16, 16)
+        .with_timeout(std::time::Duration::from_millis(100));
+    let exhaustion_selected = || {
+        crate::network::global()
+            .http_participating(
+                &id,
+                "http://api-a.example.com/pay",
+                Some(std::time::Duration::from_millis(100)),
+                false,
+                Default::default(),
+            )
+            .unwrap()
+    };
+    for code in [
+        StatusCode::BAD_REQUEST,
+        StatusCode::FORBIDDEN,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::SERVICE_UNAVAILABLE,
+    ] {
+        for method in ["GET", "POST"] {
+            for stalled in [false, true] {
+                let before = exhaustion_selected();
+                script_a.observed.lock().unwrap().clear();
+                script_a.signed_payers.lock().unwrap().clear();
+                *script_a.steps.lock().unwrap() = [
+                    TorStep::Status(code, None),
+                    TorStep::Status(code, None),
+                    TorStep::FailedBody(code, stalled),
+                ]
+                .into();
+                let mut route = make_route();
+                route.method = method.into();
+                route.body = (method == "POST").then(|| json!({"exhaust":true}));
+                let error = tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    exhaustion_client.execute_response(route),
+                )
+                .await
+                .expect("exhaustion must not collect an unused body or honor a final Retry-After")
+                .unwrap_err();
+                let failure = error.downcast_ref::<HttpFailure>().expect(
+                    "preserve the known HTTP status instead of a download/inactivity failure",
+                );
+                assert_eq!(failure.status, code);
+                assert_eq!(failure.detail, "unsigned Tor isolation attempts exhausted");
+                assert_eq!(script_a.observed.lock().unwrap().len(), 3);
+                assert!(script_a.signed_payers.lock().unwrap().is_empty());
+                assert!(Arc::ptr_eq(&before, &exhaustion_selected()));
+            }
+        }
+    }
+
+    // 2. Ineligible unsigned statuses (401, 404, 500, 302) and unsigned transport failure:
+    for code in [
+        StatusCode::UNAUTHORIZED,
+        StatusCode::NOT_FOUND,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        StatusCode::FOUND,
+    ] {
+        script_a.observed.lock().unwrap().clear();
+        {
+            let mut steps = script_a.steps.lock().unwrap();
+            steps.clear();
+            steps.push_back(TorStep::Status(code, None));
+            steps.push_back(TorStep::Free200(b"unreachable".to_vec()));
+        }
+        assert!(client.execute_response(make_route()).await.is_err());
+        assert_eq!(
+            script_a.observed.lock().unwrap().len(),
+            1,
+            "ineligible unsigned status {code} must not retry"
+        );
+    }
+    let before_dead = proxy.records.lock().unwrap().len();
+    let dead_route = RoutedRequest {
+        method: "GET".into(),
+        url: "http://dead.example.com/pay".into(),
+        query: BTreeMap::new(),
+        body: None,
+    };
+    assert!(client.execute_response(dead_route).await.is_err());
+    assert_eq!(
+        proxy.records.lock().unwrap().len() - before_dead,
+        1,
+        "unsigned API transport failure outside scope stays single-attempt"
+    );
+
+    // 3. No promotion on malformed 402, oversized/invalid output, or failed rendered output;
+    //    other-origin and discovery independence; internal relay stays Legacy single-shot.
+    let other_origin_pre = crate::network::global()
+        .http_participating(
+            &id,
+            "http://api-b.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    let disc_id = IsolationId::discovery("http://api-a.example.com/pay").unwrap();
+    let disc_pre = crate::network::global()
+        .http_participating(
+            &disc_id,
+            "http://api-a.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    let selected_before_bad = crate::network::global()
+        .http_participating(
+            &id,
+            "http://api-a.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+
+    // 3a. Malformed 402 on candidate attempt 2 does not promote:
+    {
+        let mut steps = script_a.steps.lock().unwrap();
+        steps.clear();
+        steps.push_back(TorStep::Status(StatusCode::FORBIDDEN, None));
+        steps.push_back(TorStep::Malformed402);
+    }
+    assert!(client.execute_response(make_route()).await.is_err());
+    let after_malformed = crate::network::global()
+        .http_participating(
+            &id,
+            "http://api-a.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(&selected_before_bad, &after_malformed));
+
+    // 3b. Invalid UTF-8 on unmapped execute and failed mapping on execute_rendered_scoped do not promote:
+    {
+        let mut steps = script_a.steps.lock().unwrap();
+        steps.clear();
+        steps.push_back(TorStep::Status(StatusCode::FORBIDDEN, None));
+        steps.push_back(TorStep::Free200(vec![0xff, 0xfe]));
+    }
+    assert!(client.execute(make_route()).await.is_err());
+    let after_bad_utf8 = crate::network::global()
+        .http_participating(
+            &id,
+            "http://api-a.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(&selected_before_bad, &after_bad_utf8));
+
+    {
+        let mut steps = script_a.steps.lock().unwrap();
+        steps.clear();
+        steps.push_back(TorStep::Status(StatusCode::FORBIDDEN, None));
+        steps.push_back(TorStep::Free200(b"not-json".to_vec()));
+    }
+    let mapping = crate::output::ResponseMapping {
+        images: vec![crate::output::ImageField {
+            pointer: "/image".into(),
+            encoding: crate::output::ImageEncoding::Base64,
+            mime_type: Some("image/png".into()),
+            mime_pointer: None,
+        }],
+    };
+    assert!(
+        client
+            .execute_rendered_scoped(
+                make_route(),
+                None,
+                Some(&mapping),
+                &crate::output::ImageLimits::default()
+            )
+            .await
+            .is_err()
+    );
+    let after_bad_render = crate::network::global()
+        .http_participating(
+            &id,
+            "http://api-a.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(&selected_before_bad, &after_bad_render));
+
+    // Rejected, interrupted and truly inactive unsigned bodies cannot promote;
+    // the same failures after a candidate challenge cannot replay signed work.
+    let bounded = client
+        .clone()
+        .with_download_limits(16, 16)
+        .with_timeout(std::time::Duration::from_millis(100));
+    let bounded_selected = || {
+        crate::network::global()
+            .http_participating(
+                &id,
+                "http://api-a.example.com/pay",
+                Some(std::time::Duration::from_millis(100)),
+                false,
+                Default::default(),
+            )
+            .unwrap()
+    };
+    let before_bodies = bounded_selected();
+    for body_failure in [
+        TorStep::Free200(vec![b'x'; 17]),
+        TorStep::Interrupted200,
+        TorStep::Stalled200,
+    ] {
+        script_a.observed.lock().unwrap().clear();
+        script_a.signed_payers.lock().unwrap().clear();
+        *script_a.steps.lock().unwrap() = [
+            TorStep::Status(StatusCode::FORBIDDEN, None),
+            body_failure.clone(),
+        ]
+        .into();
+        let error = bounded.execute_response(make_route()).await.unwrap_err();
+        if matches!(body_failure, TorStep::Interrupted200 | TorStep::Stalled200) {
+            assert!(
+                error.chain().any(|e| e
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_decode)),
+                "must fail collecting the response body: {error:#}"
+            );
+        }
+        assert_eq!(script_a.observed.lock().unwrap().len(), 2);
+        assert!(script_a.signed_payers.lock().unwrap().is_empty());
+        assert!(
+            Arc::ptr_eq(&before_bodies, &bounded_selected()),
+            "invalid unsigned body cannot promote"
+        );
+    }
+    // Use the ordinary download bound for 402 envelope validation, while keeping
+    // the short fixture inactivity allowance for stalled signed bodies.
+    let paid_bodies = client
+        .clone()
+        .with_timeout(std::time::Duration::from_millis(100));
+    for body_failure in [
+        TorStep::Free200(vec![0xff]),
+        TorStep::Interrupted200,
+        TorStep::Stalled200,
+    ] {
+        script_a.observed.lock().unwrap().clear();
+        script_a.signed_payers.lock().unwrap().clear();
+        *script_a.steps.lock().unwrap() = [
+            TorStep::Status(StatusCode::FORBIDDEN, None),
+            TorStep::Valid402(1),
+            body_failure.clone(),
+            TorStep::Free200(b"forbidden replay".to_vec()),
+        ]
+        .into();
+        let error = paid_bodies.execute(make_route()).await.unwrap_err();
+        if matches!(body_failure, TorStep::Interrupted200 | TorStep::Stalled200) {
+            assert!(
+                error.chain().any(|e| e
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_decode)),
+                "must fail collecting the paid response body: {error:#}"
+            );
+        }
+        assert_eq!(script_a.observed.lock().unwrap().len(), 3);
+        assert_eq!(script_a.signed_payers.lock().unwrap().len(), 1);
+        let obs = script_a.observed.lock().unwrap().clone();
+        assert_eq!(find_token(obs[1].0), find_token(obs[2].0));
+    }
+
+    // 3c. Same-wallet other-origin and discovery identity on same origin remain untouched:
+    let other_origin_post = crate::network::global()
+        .http_participating(
+            &id,
+            "http://api-b.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(&other_origin_pre, &other_origin_post));
+    let disc_post = crate::network::global()
+        .http_participating(
+            &disc_id,
+            "http://api-a.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(&disc_pre, &disc_post));
+
+    // 3d. Internal relay client (SelectionPolicy::Legacy) stays single-attempt and uses legacy credentials:
+    let relay_client = PaidClient::new(
+        Payer::new(&format!("{:064x}", 11), SpendPolicy::dollars("1").unwrap()).unwrap(),
+    )
+    .with_selection(SelectionPolicy::Legacy);
+    script_a.observed.lock().unwrap().clear();
+    {
+        let mut steps = script_a.steps.lock().unwrap();
+        steps.clear();
+        steps.push_back(TorStep::Status(StatusCode::SERVICE_UNAVAILABLE, None));
+        steps.push_back(TorStep::Free200(b"unreachable".to_vec()));
+    }
+    assert!(relay_client.execute_response(make_route()).await.is_err());
+    let relay_obs = script_a.observed.lock().unwrap().clone();
+    assert_eq!(
+        relay_obs.len(),
+        1,
+        "Legacy selection relay call makes 1 attempt"
+    );
+    assert_eq!(
+        find_token(relay_obs[0].0),
+        legacy_creds,
+        "Legacy selection uses deterministic identity token"
+    );
+
+    // 4. Interleaved valid 402 with replacement and cache eviction before signing:
+    let id_for_hook = id.clone();
+    let hook = Arc::new(move || {
+        let factory = crate::network::global();
+        let current = factory
+            .http_participating(
+                &id_for_hook,
+                "http://api-a.example.com/pay",
+                None,
+                false,
+                Default::default(),
+            )
+            .unwrap();
+        let competing = factory.http_candidate(&current).unwrap();
+        assert!(factory.promote_http(&current, &competing));
+        for i in 0..260 {
+            let evict_id = IsolationId::treasury(&format!("tor-evict-{i}"));
+            let _ = factory.http_transport(
+                &evict_id,
+                &format!("http://127.0.0.1:{}", 20000 + i),
+                None,
+                false,
+                Default::default(),
+                SelectionPolicy::Legacy,
+            );
+        }
+    });
+    script_a.observed.lock().unwrap().clear();
+    {
+        let mut steps = script_a.steps.lock().unwrap();
+        steps.clear();
+        steps.push_back(TorStep::Status(StatusCode::FORBIDDEN, None));
+        steps.push_back(TorStep::Valid402WithHook(1, hook));
+        steps.push_back(TorStep::Signed200(b"interleaved-ok".to_vec()));
+    }
+    let out = client.execute_response(make_route()).await.unwrap();
+    assert_eq!(out.bytes, b"interleaved-ok");
+    let obs = script_a.observed.lock().unwrap().clone();
+    assert_eq!(obs.len(), 3);
+    assert_eq!(
+        find_token(obs[1].0).1,
+        find_token(obs[2].0).1,
+        "in-flight call retains its winning challenge scope across competing promotion and cache eviction"
+    );
+
+    // 5. Signed 400, 403, 429, 503 never replay or create a second signature:
+    for code in [
+        StatusCode::BAD_REQUEST,
+        StatusCode::FORBIDDEN,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::SERVICE_UNAVAILABLE,
+    ] {
+        script_a.observed.lock().unwrap().clear();
+        script_a.signed_payers.lock().unwrap().clear();
+        {
+            let mut steps = script_a.steps.lock().unwrap();
+            steps.clear();
+            steps.push_back(TorStep::Valid402(1));
+            steps.push_back(TorStep::SignedStatus(code));
+            steps.push_back(TorStep::Signed200(b"never".to_vec()));
+        }
+        assert!(client.execute_response(make_route()).await.is_err());
+        assert_eq!(
+            script_a.observed.lock().unwrap().len(),
+            2,
+            "signed {code} must never trigger an unsigned or signed replay"
+        );
+        assert_eq!(script_a.signed_payers.lock().unwrap().len(), 1);
+    }
+
+    // 6. Combined managed structured insufficiency + payer handoff + unsigned circuit retry
+    //    + Retry-After + explicit owner abort + qualification authority check:
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"tor managed fixture",
+    )
+    .unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        store,
+        "pool",
+        crate::rotation::test_capacity::two_reserves("5"),
+        Some(U256::from(5_000_000)),
+        0
+    )
+    .unwrap();
+    for job in store.funding_jobs().unwrap() {
+        store
+            .record_credit(&job.wallet_id, "5000000", "fixture", 100)
+            .unwrap();
+    }
+    let (handle, _worker) = StoreHandle::spawn(store);
+    let manager = Arc::new(
+        ManagedPool::new(
+            handle.clone(),
+            pool.clone(),
+            BaseRpc::new(&format!("http://{addr_b}/rpc"), 12).unwrap(),
+            SpendPolicy::dollars("1").unwrap(),
+        )
+        .unwrap(),
+    );
+    let managed = PaidClient::managed(manager);
+    script_b.observed.lock().unwrap().clear();
+    script_b.signed_payers.lock().unwrap().clear();
+    {
+        let mut steps = script_b.steps.lock().unwrap();
+        steps.clear();
+        // Wallet A: attempt 1 -> 503, attempt 2 -> Valid402(1), signed -> Insufficient402
+        steps.push_back(TorStep::Status(StatusCode::SERVICE_UNAVAILABLE, None));
+        steps.push_back(TorStep::Valid402(1));
+        steps.push_back(TorStep::SignedInsufficient402);
+        // Wallet B: attempt 1 -> 403, attempt 2 -> Valid402(1), signed -> Signed200
+        steps.push_back(TorStep::Status(StatusCode::FORBIDDEN, None));
+        steps.push_back(TorStep::Valid402(1));
+        steps.push_back(TorStep::Signed200(b"managed-paid".to_vec()));
+    }
+    let managed_route = RoutedRequest {
+        method: "POST".into(),
+        url: "http://api-b.example.com/pay".into(),
+        query: BTreeMap::from([("mode".into(), json!("handoff"))]),
+        body: Some(json!({"step":"combined"})),
+    };
+    let (_qualified_dir, claim, qualification_path) =
+        crate::qualification::managed_claim_fixture().await;
+    let out = claim
+        .invoke(managed.execute_response(managed_route))
+        .await
+        .unwrap();
+    assert_eq!(out.bytes, b"managed-paid");
+    let obs_b = script_b.observed.lock().unwrap().clone();
+    assert_eq!(
+        obs_b.len(),
+        6,
+        "A1 unsigned 503, A2 unsigned 402, A2 signed 402, B1 unsigned 403, B2 unsigned 402, B2 signed 200"
+    );
+    let payers = script_b.signed_payers.lock().unwrap().clone();
+    assert_eq!(payers.len(), 2);
+    assert_ne!(
+        payers[0], payers[1],
+        "handoff switches from wallet A to wallet B"
+    );
+    let tok_a1 = find_token(obs_b[0].0);
+    let tok_a2 = find_token(obs_b[1].0);
+    let tok_a_signed = find_token(obs_b[2].0);
+    let tok_b1 = find_token(obs_b[3].0);
+    let tok_b2 = find_token(obs_b[4].0);
+    let tok_b_signed = find_token(obs_b[5].0);
+    assert_eq!(tok_a1.0, tok_a2.0);
+    assert_ne!(tok_a1.1, tok_a2.1);
+    assert_eq!(
+        tok_a2, tok_a_signed,
+        "wallet A signed uses promoted A2 scope"
+    );
+    assert_eq!(tok_b1.0, tok_b2.0);
+    assert_ne!(tok_b1.1, tok_b2.1);
+    assert_eq!(
+        tok_b2, tok_b_signed,
+        "wallet B signed uses promoted B2 scope"
+    );
+    let slot_a = crate::network::global()
+        .http_participating(
+            &IsolationId::evm(&payers[0].to_string()).unwrap(),
+            "http://api-b.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    let slot_b = crate::network::global()
+        .http_participating(
+            &IsolationId::evm(&payers[1].to_string()).unwrap(),
+            "http://api-b.example.com/pay",
+            None,
+            false,
+            Default::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        crate::network::global().credentials(&slot_a.scope),
+        tok_a2,
+        "wallet A's participating slot holds promoted A2 scope"
+    );
+    assert_eq!(
+        crate::network::global().credentials(&slot_b.scope),
+        tok_b2,
+        "wallet B's participating slot holds promoted B2 scope"
+    );
+    let qualification_db = rusqlite::Connection::open(qualification_path).unwrap();
+    for kind in [
+        "application_payment",
+        "application_receipt",
+        "application_challenge",
+    ] {
+        assert_eq!(
+            qualification_db
+                .query_row("SELECT count(*) FROM events WHERE kind=?1", [kind], |r| r
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+            2
+        );
+    }
+    assert_eq!(qualification_db.query_row("SELECT sum(CAST(json_extract(detail,'$.amount') AS INTEGER)) FROM events WHERE kind='application_payment'", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
+    let status_after = handle.call(|s| s.status()).await.unwrap();
+    assert_eq!(
+        status_after.pools[0].addresses.len(),
+        2,
+        "no wallet allocation during unsigned retry or insufficient-funds traversal"
+    );
+    assert_eq!(
+        status_after.funding_jobs.len(),
+        2,
+        "only the two initial seeded funding jobs exist; no new funding job allocated"
+    );
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM payment_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2,
+        "both signed attempts are journaled while unsigned failures add zero liabilities"
+    );
+
+    server_a.abort();
+    server_b.abort();
 }

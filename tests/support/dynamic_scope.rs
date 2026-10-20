@@ -38,15 +38,31 @@ async fn scope_child() {
     let requests = Arc::new(AtomicUsize::new(0));
     let signatures = Arc::new(Mutex::new(vec![]));
     let hold = Arc::new(AtomicBool::new(false));
+    let reject_unsigned_once = Arc::new(AtomicBool::new(false));
     let arrived = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
-    let (pause, entered, resume) = (hold.clone(), arrived.clone(), release.clone());
+    let (pause, reject_once, entered, resume) = (
+        hold.clone(),
+        reject_unsigned_once.clone(),
+        arrived.clone(),
+        release.clone(),
+    );
     let (u, s) = (requests.clone(), signatures.clone());
     let seller = move |headers: HeaderMap| {
         let (u, s) = (u.clone(), s.clone());
-        let (pause, entered, resume) = (pause.clone(), entered.clone(), resume.clone());
+        let (pause, reject_once, entered, resume) = (
+            pause.clone(),
+            reject_once.clone(),
+            entered.clone(),
+            resume.clone(),
+        );
         async move {
             u.fetch_add(1, Ordering::SeqCst);
+            if !headers.contains_key("payment-signature")
+                && reject_once.swap(false, Ordering::SeqCst)
+            {
+                return (StatusCode::FORBIDDEN, "transient exit rejection").into_response();
+            }
             if let Some(header) = headers.get("payment-signature") {
                 let payload: Value = serde_json::from_slice(
                     &base64::engine::general_purpose::STANDARD
@@ -269,30 +285,85 @@ async fn scope_child() {
     ];
     for key in [1, 2] {
         let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
-        expected.push(
-            crate::network::global()
-                .credentials(&IsolationId::evm(&signer.address().to_string()).unwrap()),
+        let id = IsolationId::evm(&signer.address().to_string()).unwrap();
+        let transport = crate::network::global()
+            .http_participating(
+                &id,
+                "https://api.example.com",
+                Some(Duration::from_secs(60)),
+                true,
+                Default::default(),
+            )
+            .unwrap();
+        let creds = crate::network::global().credentials(&transport.scope);
+        assert_ne!(creds.1, crate::network::global().credentials(&id).1);
+        expected.push(creds);
+    }
+    {
+        let records = proxy.records.lock().unwrap();
+        assert_eq!(
+            records.len(),
+            5,
+            "pools separate identity, selection policy and public destination policy"
+        );
+        assert_eq!(
+            records
+                .iter()
+                .map(|r| (r.user.clone(), r.password.clone()))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(
+            records
+                .iter()
+                .all(|r| r.host == "api.example.com" && r.address_type == 3)
         );
     }
-    let records = proxy.records.lock().unwrap();
-    assert_eq!(
-        records.len(),
-        5,
-        "pools separate identity, selection policy and public destination policy"
+
+    // Generated MCP tool (BoundTool::invoke_output) recovers from unsigned 403 on a fresh
+    // Tor scope and promotes the winning candidate scope.
+    let writer_signer: alloy_signer_local::PrivateKeySigner =
+        format!("{:064x}", 1).parse().unwrap();
+    let writer_id = IsolationId::evm(&writer_signer.address().to_string()).unwrap();
+    let pre_tool_scope = crate::network::global()
+        .http_participating(
+            &writer_id,
+            "https://api.example.com",
+            Some(Duration::from_secs(60)),
+            true,
+            Default::default(),
+        )
+        .unwrap()
+        .scope
+        .clone();
+    reject_unsigned_once.store(true, Ordering::SeqCst);
+    let out = server(&m, "writer")
+        .invoke(&name, &Default::default())
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(body["payer"], writer_signer.address().to_string());
+    let post_tool_scope = crate::network::global()
+        .http_participating(
+            &writer_id,
+            "https://api.example.com",
+            Some(Duration::from_secs(60)),
+            true,
+            Default::default(),
+        )
+        .unwrap()
+        .scope
+        .clone();
+    assert_ne!(
+        pre_tool_scope, post_tool_scope,
+        "generated MCP tool unsigned retry must promote the winning candidate scope"
     );
     assert_eq!(
-        records
-            .iter()
-            .map(|r| (r.user.clone(), r.password.clone()))
-            .collect::<Vec<_>>(),
-        expected
+        requests.load(Ordering::SeqCst),
+        before + 3,
+        "1 unsigned 403 + 1 unsigned 402 + 1 signed 200"
     );
-    assert!(
-        records
-            .iter()
-            .all(|r| r.host == "api.example.com" && r.address_type == 3)
-    );
-    drop(records);
+
     for t in tasks {
         t.abort();
     }

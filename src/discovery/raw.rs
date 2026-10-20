@@ -80,8 +80,7 @@ impl Manager {
         self.source_client(owner)?
             .with_source_identity("builtin:raw")
             .public_destinations()
-            .execute_response(route)
-            .await?
-            .render(None, &Default::default())
+            .execute_rendered_scoped(route, None, None, &Default::default())
+            .await
     }
 }

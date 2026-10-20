@@ -45,6 +45,10 @@ pub(crate) struct AdmissionObservation<'a> {
         crate::pricing::runtime::OperationKey,
         crate::pricing::runtime::Receipt,
     )>,
+    pub promotion: Option<(
+        &'a Arc<crate::network::HttpTransport>,
+        &'a Arc<crate::network::HttpTransport>,
+    )>,
 }
 #[cfg(test)]
 mod admission_tests;
@@ -250,6 +254,7 @@ impl ManagedPool {
                             AdmissionObservation {
                                 progress: &progress,
                                 hint: None,
+                                promotion: None,
                                 through,
                                 attempted: &[],
                             },
@@ -293,6 +298,7 @@ impl ManagedPool {
         let AdmissionObservation {
             progress,
             hint,
+            promotion,
             through,
             attempted,
         } = observation;
@@ -301,6 +307,9 @@ impl ManagedPool {
         let _foreground = crate::payment::ownership::foreground()?;
         diagnostics::stage("challenge_preparation");
         let (challenge, offer, omitted) = prepare_challenge(&response, &self.policy)?;
+        if let Some((selected, transport)) = promotion {
+            crate::network::global().promote_http(selected, transport);
+        }
         // Learning follows complete envelope validation, before financial admission.
         // An insufficient balance does not erase a valid observed price.
         if let Some((key, receipt)) = hint {

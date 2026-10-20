@@ -34,6 +34,10 @@ mod best_effort_tests;
 mod handoff_tests;
 #[cfg(test)]
 mod hint_tests;
+#[cfg(test)]
+mod tor_cover_tests;
+#[cfg(test)]
+mod tor_wait_tests;
 
 pub const USDC: &str = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 #[cfg(test)]
@@ -224,6 +228,7 @@ pub struct PaidClient {
     cover: Option<(Arc<crate::cover::Config>, crate::cover::Scope)>,
     unsigned_only: bool,
     unavailable: Option<crate::rotation::error::AdmissionError>,
+    selection: crate::network::SelectionPolicy,
     transport: crate::network::HttpPolicy,
     public_only: bool,
     timeout: Option<std::time::Duration>,
@@ -240,6 +245,7 @@ impl PaidClient {
             cover: None,
             unsigned_only: false,
             unavailable: None,
+            selection: crate::network::SelectionPolicy::Participating,
             transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
@@ -256,6 +262,7 @@ impl PaidClient {
             cover: None,
             unsigned_only: false,
             unavailable: None,
+            selection: crate::network::SelectionPolicy::Participating,
             transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
@@ -273,6 +280,7 @@ impl PaidClient {
             cover: None,
             unsigned_only: true,
             unavailable: None,
+            selection: crate::network::SelectionPolicy::Participating,
             transport: Default::default(),
             public_only: false,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
@@ -333,6 +341,10 @@ impl PaidClient {
     /// Trusted runtime identity, separate from reusable provider tool metadata.
     pub(crate) fn with_source_identity(mut self, source: &str) -> Self {
         self.source_identity = Arc::from(source);
+        self
+    }
+    pub(crate) fn with_selection(mut self, selection: crate::network::SelectionPolicy) -> Self {
+        self.selection = selection;
         self
     }
     pub(crate) fn operation_key(
@@ -434,10 +446,11 @@ impl PaidClient {
             .expect("payer lock poisoned") = Arc::new(payer);
     }
     pub async fn execute(&self, route: RoutedRequest) -> Result<String> {
-        self.execute_response(route)
-            .await?
-            .render(None, &Default::default())?
-            .into_text()
+        self.execute_finished(route, &SubmissionProgress::default(), None, |output| {
+            let text = output.render(None, &Default::default())?.into_text()?;
+            Ok((text, true))
+        })
+        .await
     }
     pub async fn execute_response(
         &self,
@@ -466,40 +479,81 @@ impl PaidClient {
     ) -> Result<T> {
         ownership::run(&self.work, work).await
     }
+    pub(crate) async fn execute_rendered_scoped(
+        &self,
+        route: RoutedRequest,
+        operation: Option<crate::pricing::runtime::OperationKey>,
+        mapping: Option<&crate::output::ResponseMapping>,
+        limits: &crate::output::ImageLimits,
+    ) -> Result<crate::output::ToolOutput> {
+        let mapping = mapping.cloned();
+        let limits = limits.clone();
+        self.execute_finished(
+            route,
+            &SubmissionProgress::default(),
+            operation,
+            move |output| Ok((output.render(mapping.as_ref(), &limits)?, true)),
+        )
+        .await
+    }
     pub(crate) async fn execute_response_scoped(
         &self,
         route: RoutedRequest,
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
     ) -> Result<crate::output::HttpOutput> {
+        self.execute_finished(route, progress, operation, |output| {
+            let valid = output.is_valid_unmapped();
+            Ok((output, valid))
+        })
+        .await
+    }
+    async fn execute_finished<T: Send + 'static>(
+        &self,
+        route: RoutedRequest,
+        progress: &SubmissionProgress,
+        operation: Option<crate::pricing::runtime::OperationKey>,
+        finish: impl FnOnce(crate::output::HttpOutput) -> Result<(T, bool)> + Send + 'static,
+    ) -> Result<T> {
         let client = self.clone();
         let progress = progress.clone();
-        let observed_progress = progress.clone();
         let span = diagnostics::span(&self.source_identity, &route.method);
-        let result = self
-            .run_owned(
-                diagnostics::scope(async move {
-                    let result = client
-                        .execute_response_owned(route, &progress, operation)
-                        .await;
-                    diagnostics::finish(&result, &progress);
+        self.run_owned(
+            diagnostics::scope(async move {
+                let result = client
+                    .execute_response_owned(route, &progress, operation)
+                    .await
+                    .and_then(|(output, unsigned_promotion)| {
+                        diagnostics::stage("output_conversion");
+                        let (output, valid) = finish(output)?;
+                        if valid && let Some((selected, transport)) = unsigned_promotion {
+                            crate::network::global().promote_http(&selected, &transport);
+                        }
+                        Ok(output)
+                    });
+                diagnostics::finish(&result, &progress);
+                if progress.possible() {
+                    result.context("An authorization may still charge or execute; do not automatically repeat this logical call")
+                } else {
                     result
-                })
-                .instrument(span),
-            )
-            .await?;
-        if observed_progress.possible() {
-            result.context("An authorization may still charge or execute; do not automatically repeat this logical call")
-        } else {
-            result
-        }
+                }
+            })
+            .instrument(span),
+        )
+        .await?
     }
     async fn execute_response_owned(
         &self,
         route: RoutedRequest,
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
-    ) -> Result<crate::output::HttpOutput> {
+    ) -> Result<(
+        crate::output::HttpOutput,
+        Option<(
+            Arc<crate::network::HttpTransport>,
+            Arc<crate::network::HttpTransport>,
+        )>,
+    )> {
         self.require_available()?;
         // Pin static signer before any I/O; replacement affects only later calls.
         let payer = self
@@ -535,25 +589,24 @@ impl PaidClient {
             ),
             _ => None,
         };
-        let (response, mut cover, _transport) = loop {
-            if !attempted.is_empty()
-                && let Some(context) = crate::qualification::payment_context()?
-            {
-                context.check_retry_start().await?;
-            }
-            diagnostics::stage("transport_selection");
-            let (transport, mut cover) = self
-                .execution_transport(
+        let (response, mut cover, unsigned_promotion) = loop {
+            let UnsignedStage {
+                selected,
+                transport,
+                mut response,
+                retry,
+                receipt,
+                mut cover,
+            } = self
+                .unsigned_stage(
                     &request,
                     unsigned_only,
                     candidate.as_ref(),
                     payer.as_deref(),
+                    !attempted.is_empty(),
                 )
                 .await?;
-            diagnostics::stage("unsigned_request");
-            let (mut response, retry, receipt) =
-                unsigned_response(&transport, &request, cover.as_ref()).await?;
-            diagnostics::response(&response);
+            let mut stage_paid = false;
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
                 diagnostics::stage("challenge_preparation");
                 if unsigned_only {
@@ -586,6 +639,7 @@ impl PaidClient {
                             crate::rotation::manager::AdmissionObservation {
                                 progress,
                                 hint: operation.zip(receipt),
+                                promotion: Some((&selected, &transport)),
                                 through,
                                 attempted: &attempted,
                             },
@@ -595,6 +649,7 @@ impl PaidClient {
                         Ok((paid, omitted, cost)) => {
                             extensions_omitted |= omitted;
                             paid_submission = true;
+                            stage_paid = true;
                             if paid.status() == reqwest::StatusCode::PAYMENT_REQUIRED
                                 && insufficient_funds(paid.headers())
                             {
@@ -644,6 +699,7 @@ impl PaidClient {
                 } else {
                     response = static_payment(
                         payer.as_deref(),
+                        &selected,
                         &transport,
                         retry,
                         response,
@@ -652,6 +708,7 @@ impl PaidClient {
                     )
                     .await?;
                     paid_submission = true;
+                    stage_paid = true;
                 }
             }
             crate::network::log_http(&response, "payment_result");
@@ -663,7 +720,11 @@ impl PaidClient {
             if let Some(call) = &mut cover {
                 call.response_headers();
             }
-            break (response, cover, transport);
+            break (
+                response,
+                cover,
+                (!stage_paid).then_some((selected, transport)),
+            );
         };
         diagnostics::stage("response_body");
         let result = self.response_output(response, paid_submission).await;
@@ -672,6 +733,7 @@ impl PaidClient {
         {
             call.complete();
         }
+        let result = result.map(|output| (output, unsigned_promotion));
         if extensions_omitted {
             result.context(crate::rotation::manager::OMITTED_EXTENSIONS)
         } else {
@@ -679,55 +741,114 @@ impl PaidClient {
         }
     }
 
-    async fn execution_transport(
+    async fn unsigned_stage(
         &self,
         request: &reqwest::Request,
         unsigned_only: bool,
         candidate: Option<&crate::rotation::manager::PaymentCandidateHandle>,
         payer: Option<&Payer>,
-    ) -> Result<(
-        Arc<crate::network::HttpTransport>,
-        Option<crate::cover::runtime::Call>,
-    )> {
+        prior_wallet_attempts: bool,
+    ) -> Result<UnsignedStage> {
         let identity = if unsigned_only {
             crate::network::IsolationId::discovery(request.url().as_str())?
         } else {
             let address = candidate
-                .as_ref()
                 .map(|c| c.address.as_str())
                 .or_else(|| payer.map(|p| p.address.as_str()))
                 .context("network_identity_missing: payer")?;
             crate::network::IsolationId::evm(address)?
         };
         let factory = crate::network::global();
-        let transport = factory.http_transport(
+        diagnostics::stage("transport_selection");
+        let selected = factory.http_transport(
             &identity,
             request.url().as_str(),
             self.timeout,
             self.public_only,
             self.transport,
-            crate::network::SelectionPolicy::Legacy,
+            self.selection,
         )?;
-        let cover = self.cover.as_ref().and_then(|(config, scope)| {
-            let engine = factory.cover.as_ref()?;
-            let owner = crate::cover::registry::Owner::from_transport(&transport);
-            match engine.begin(
-                owner,
-                config.clone(),
-                scope.clone(),
-                transport.client.clone(),
-            ) {
-                Ok(call) => Some(call),
-                Err(error) => {
-                    tracing::warn!(listener = %scope.listener, source = %scope.source, "optional cover unavailable: {error}");
-                    None
-                }
+        let max_attempts = if self.selection == crate::network::SelectionPolicy::Participating {
+            factory.max_http_attempts(false)
+        } else {
+            1
+        };
+        for attempt in 1..=max_attempts {
+            if attempt > 1 || prior_wallet_attempts {
+                crate::qualification::check_retry_authority().await?;
             }
-        });
-        if let Some(call) = &cover {
-            call.prioritize().await;
+            diagnostics::stage("transport_selection");
+            let transport = factory.http_attempt(&selected, attempt)?;
+            let cover = self.begin_cover(&transport).await;
+            diagnostics::stage("unsigned_request");
+            let (response, retry, receipt) =
+                unsigned_response(&transport, request, cover.as_ref()).await?;
+            diagnostics::response(&response);
+            let status = response.status();
+            if max_attempts > 1 && crate::network::eligible_retry_status(status) {
+                if attempt == max_attempts {
+                    drop(response);
+                    drop(cover);
+                    return Err(HttpFailure {
+                        status,
+                        detail: "unsigned Tor isolation attempts exhausted".into(),
+                    }
+                    .into());
+                }
+                let retry_after_delay =
+                    crate::network::parse_retry_after(status, response.headers());
+                let retry_after = retry_after_delay.map(crate::network::RetryAfter::after);
+                drop(response);
+                drop(cover);
+                if retry_after.is_some() {
+                    crate::qualification::check_retry_authority().await?;
+                }
+                tracing::warn!(
+                    stage = "unsigned_request",
+                    attempt,
+                    max_attempts,
+                    reason = "http_status",
+                    http_status = status.as_u16(),
+                    retry_after_ms =
+                        retry_after_delay.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+                    "Retrying unsigned API request on fresh Tor isolation scope"
+                );
+                crate::network::sleep_retry_after(retry_after).await;
+                continue;
+            }
+            return Ok(UnsignedStage {
+                selected,
+                transport,
+                response,
+                retry,
+                receipt,
+                cover,
+            });
         }
-        Ok((transport, cover))
+        unreachable!("max_attempts is at least 1")
+    }
+
+    async fn begin_cover(
+        &self,
+        transport: &crate::network::HttpTransport,
+    ) -> Option<crate::cover::runtime::Call> {
+        let (config, scope) = self.cover.as_ref()?;
+        let engine = crate::network::global().cover.as_ref()?;
+        let owner = crate::cover::registry::Owner::from_transport(transport);
+        let call = match engine.begin(
+            owner,
+            config.clone(),
+            scope.clone(),
+            transport.client.clone(),
+        ) {
+            Ok(call) => call,
+            Err(error) => {
+                tracing::warn!(listener = %scope.listener, source = %scope.source, "optional cover unavailable: {error}");
+                return None;
+            }
+        };
+        call.prioritize().await;
+        Some(call)
     }
 
     async fn response_output(
@@ -836,9 +957,19 @@ async fn unsigned_response(
     Ok((response, retry, receipt))
 }
 
+struct UnsignedStage {
+    selected: Arc<crate::network::HttpTransport>,
+    transport: Arc<crate::network::HttpTransport>,
+    response: reqwest::Response,
+    retry: reqwest::Request,
+    receipt: Option<crate::pricing::runtime::Receipt>,
+    cover: Option<crate::cover::runtime::Call>,
+}
+
 async fn static_payment(
     payer: Option<&Payer>,
-    transport: &crate::network::HttpTransport,
+    selected: &Arc<crate::network::HttpTransport>,
+    transport: &Arc<crate::network::HttpTransport>,
     retry: reqwest::Request,
     mut response: reqwest::Response,
     cover: Option<&crate::cover::runtime::Call>,
@@ -854,6 +985,7 @@ async fn static_payment(
         .make_payment_headers(response)
         .await
         .context("x402 challenge rejected or signing failed")?;
+    crate::network::global().promote_http(selected, transport);
     let mut retry = retry;
     retry.headers_mut().extend(headers);
     let mut padding = cover.and_then(|c| c.pad(&mut retry, true));

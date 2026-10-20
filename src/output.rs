@@ -160,6 +160,25 @@ impl ToolOutput {
 fn supported(mime: &str) -> bool {
     matches!(mime, "image/png" | "image/jpeg" | "image/webp")
 }
+fn image_signature_matches(bytes: &[u8], mime: &str) -> bool {
+    match mime {
+        "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg" => bytes.starts_with(b"\xff\xd8\xff"),
+        "image/webp" => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
+        _ => false,
+    }
+}
+fn text_mime(mime: &str) -> bool {
+    mime.is_empty()
+        || mime.starts_with("text/")
+        || mime == "application/json"
+        || mime.ends_with("+json")
+        || matches!(
+            mime,
+            "application/xml" | "application/javascript" | "application/x-www-form-urlencoded"
+        )
+        || (mime.starts_with("application/") && mime.ends_with("+xml"))
+}
 fn bound(actual: usize, limit: usize, setting: &'static str) -> Result<()> {
     if actual > limit {
         tracing::warn!(
@@ -188,14 +207,8 @@ fn image(bytes: &[u8], mime: &str, limits: &ImageLimits, total: &mut usize) -> R
         limits.max_total_bytes,
         "image_limits.max_total_bytes",
     )?;
-    let valid = match mime {
-        "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
-        "image/jpeg" => bytes.starts_with(b"\xff\xd8\xff"),
-        "image/webp" => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
-        _ => false,
-    };
     ensure!(
-        valid,
+        image_signature_matches(bytes, mime),
         "unsupported image format or image signature does not match MIME type"
     );
     Ok(InlineImage {
@@ -204,6 +217,16 @@ fn image(bytes: &[u8], mime: &str, limits: &ImageLimits, total: &mut usize) -> R
     })
 }
 impl HttpOutput {
+    pub(crate) fn is_valid_unmapped(&self) -> bool {
+        let limits = ImageLimits::default();
+        let mime = self.mime_type.as_deref().unwrap_or("");
+        if supported(mime) {
+            return image_signature_matches(&self.bytes, mime)
+                && self.bytes.len() <= limits.max_image_bytes
+                && self.bytes.len() <= limits.max_total_bytes;
+        }
+        text_mime(mime) && std::str::from_utf8(&self.bytes).is_ok()
+    }
     pub fn render(
         mut self,
         mapping: Option<&ResponseMapping>,
@@ -238,17 +261,7 @@ impl HttpOutput {
             });
         }
         ensure!(
-            mime.is_empty()
-                || mime.starts_with("text/")
-                || mime == "application/json"
-                || mime.ends_with("+json")
-                || matches!(
-                    mime,
-                    "application/xml"
-                        | "application/javascript"
-                        | "application/x-www-form-urlencoded"
-                )
-                || (mime.starts_with("application/") && mime.ends_with("+xml")),
+            text_mime(mime),
             "unsupported response Content-Type; binary output requires a supported image type or future artifact storage"
         );
         let text = String::from_utf8(self.bytes).context(
@@ -347,4 +360,59 @@ fn image_data<'a>(field: &'a ImageField, doc: &'a Value) -> Result<(&'a str, &'a
         }
     };
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unmapped_promotion_and_default_rendering_accept_the_same_output() {
+        let cases: &[(Option<&str>, &[u8], bool)] = &[
+            (None, b"plain text", true),
+            (Some("text/plain"), b"hello", true),
+            (Some("application/json"), b"{}", true),
+            (Some("application/problem+json"), b"{}", true),
+            (Some("application/xml"), b"<xml/>", true),
+            (Some("application/atom+xml"), b"<xml/>", true),
+            (Some("application/javascript"), b"let x = 1;", true),
+            (Some("application/x-www-form-urlencoded"), b"x=1", true),
+            (Some("image/png"), b"\x89PNG\r\n\x1a\n", true),
+            (Some("image/jpeg"), b"\xff\xd8\xff", true),
+            (Some("image/webp"), b"RIFF\0\0\0\0WEBP", true),
+            (Some("image/png"), b"wrong signature", false),
+            (Some("image/jpeg"), b"\x89PNG\r\n\x1a\n", false),
+            (Some("image/webp"), b"RIFF", false),
+            (Some("application/pdf"), b"%PDF", false),
+            (Some("image/svg+xml"), b"<svg/>", false),
+            (Some("text/plain"), b"\xff", false),
+            (None, b"\xff", false),
+        ];
+        let limits = ImageLimits::default();
+        for &(mime, bytes, expected) in cases {
+            let output = HttpOutput {
+                advisories: vec![],
+                bytes: bytes.to_vec(),
+                mime_type: mime.map(str::to_owned),
+                paid_submission: false,
+            };
+            assert_eq!(output.is_valid_unmapped(), expected, "{mime:?}");
+            assert_eq!(output.render(None, &limits).is_ok(), expected, "{mime:?}");
+        }
+        for (size, expected) in [
+            (limits.max_image_bytes, true),
+            (limits.max_image_bytes + 1, false),
+        ] {
+            let mut bytes = vec![0; size];
+            bytes[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+            let output = HttpOutput {
+                advisories: vec![],
+                bytes,
+                mime_type: Some("image/png".into()),
+                paid_submission: false,
+            };
+            assert_eq!(output.is_valid_unmapped(), expected);
+            assert_eq!(output.render(None, &limits).is_ok(), expected);
+        }
+    }
 }

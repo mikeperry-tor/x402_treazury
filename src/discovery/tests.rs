@@ -447,9 +447,19 @@ async fn public_transport_child() {
     );
     let ctx = crate::network::global();
     let signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
+    let evm_id = IsolationId::evm(&signer.address().to_string()).unwrap();
+    let evm_transport = ctx
+        .http_participating(
+            &evm_id,
+            "https://api.example.com/read",
+            None,
+            true,
+            Default::default(),
+        )
+        .unwrap();
     let ids = [
         IsolationId::discovery("https://spec.example.com").unwrap(),
-        IsolationId::evm(&signer.address().to_string()).unwrap(),
+        evm_transport.scope.clone(),
     ];
     {
         let records = proxy.records.lock().unwrap();
@@ -1259,14 +1269,24 @@ async fn directory_payment_fixture() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let requests = Arc::new(AtomicUsize::new(0));
     let signatures = Arc::new(Mutex::new(Vec::new()));
-    let (count, signed) = (requests.clone(), signatures.clone());
+    let unsigned_faults = Arc::new(Mutex::new(std::collections::VecDeque::<StatusCode>::new()));
+    let (count, signed, faults) = (
+        requests.clone(),
+        signatures.clone(),
+        unsigned_faults.clone(),
+    );
     let seller = move |headers: HeaderMap,
                        method: axum::http::Method,
                        uri: axum::http::Uri,
                        body: axum::body::Bytes| {
-        let (count, signed) = (count.clone(), signed.clone());
+        let (count, signed, faults) = (count.clone(), signed.clone(), faults.clone());
         async move {
             count.fetch_add(1, Ordering::SeqCst);
+            if !headers.contains_key("payment-signature")
+                && let Some(code) = faults.lock().unwrap().pop_front()
+            {
+                return (code, "transient exit rejection").into_response();
+            }
             if uri.path() == "/raw/redirect" {
                 return (
                     StatusCode::FOUND,
@@ -1450,10 +1470,21 @@ async fn directory_payment_fixture() {
         assert_eq!(records.len(), 3);
         for (record, address) in records.iter().zip(&addresses) {
             assert_eq!(record.address_type, 3);
+            let id = IsolationId::evm(address).unwrap();
+            let transport = crate::network::global()
+                .http_participating(
+                    &id,
+                    "https://api.example.com",
+                    Some(Duration::from_secs(60)),
+                    true,
+                    Default::default(),
+                )
+                .unwrap();
             assert_eq!(
                 (record.user.clone(), record.password.clone()),
-                crate::network::global().credentials(&IsolationId::evm(address).unwrap())
+                crate::network::global().credentials(&transport.scope)
             );
+            assert_ne!(record.password, crate::network::global().credentials(&id).1);
         }
     }
     // Exercise real MCP typed output and ensure output failures never replay paid work.
@@ -1511,6 +1542,81 @@ async fn directory_payment_fixture() {
         "redirect was followed"
     );
     assert_eq!(signatures.lock().unwrap().len(), signed_before + 3);
+
+    // Directory search and raw_post recover from eligible unsigned Tor status rejections
+    // on fresh isolation scopes and promote the winning challenge scope.
+    let writer_id = IsolationId::evm(&addresses[0]).unwrap();
+    let pre_retry_scope = crate::network::global()
+        .http_participating(
+            &writer_id,
+            "https://api.example.com",
+            Some(Duration::from_secs(60)),
+            true,
+            Default::default(),
+        )
+        .unwrap()
+        .scope
+        .clone();
+    unsigned_faults
+        .lock()
+        .unwrap()
+        .push_back(StatusCode::SERVICE_UNAVAILABLE);
+    let dir_res = server(&manager, "writer")
+        .invoke(directory::SEARCH, json!({}).as_object().unwrap())
+        .await
+        .unwrap();
+    assert!(dir_res.contains("services"));
+    let post_dir_scope = crate::network::global()
+        .http_participating(
+            &writer_id,
+            "https://api.example.com",
+            Some(Duration::from_secs(60)),
+            true,
+            Default::default(),
+        )
+        .unwrap()
+        .scope
+        .clone();
+    assert_ne!(
+        pre_retry_scope, post_dir_scope,
+        "directory search unsigned retry must promote the winning candidate scope"
+    );
+    unsigned_faults
+        .lock()
+        .unwrap()
+        .push_back(StatusCode::FORBIDDEN);
+    let raw_post_res = server(&manager, "writer")
+        .invoke(
+            raw::POST,
+            json!({"url":"https://api.example.com/api/v1/services","body":{"retry":true}})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(raw_post_res.contains("services"));
+    let post_raw_scope = crate::network::global()
+        .http_participating(
+            &writer_id,
+            "https://api.example.com",
+            Some(Duration::from_secs(60)),
+            true,
+            Default::default(),
+        )
+        .unwrap()
+        .scope
+        .clone();
+    assert_ne!(
+        post_dir_scope, post_raw_scope,
+        "raw_post unsigned retry must promote the new winning candidate scope"
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        before + 7 + 6,
+        "each call makes 1 failed unsigned + 1 winning 402 + 1 signed 200"
+    );
+    assert_eq!(signatures.lock().unwrap().len(), signed_before + 3 + 2);
+
     http_task.abort();
     vendor_task.abort();
 }

@@ -194,7 +194,7 @@ async fn mcp_burst_across_listeners_retains_every_journal_and_isolates_pools() {
     h.close().await;
 }
 
-async fn rotation_burst() -> Vec<(std::net::SocketAddr, String, String)> {
+async fn rotation_burst() -> Vec<(String, std::net::SocketAddr, String, String)> {
     let mut traces = vec![];
     for method in ["GET", "POST"] {
         let h = Harness::new().await;
@@ -261,7 +261,15 @@ async fn rotation_burst() -> Vec<(std::net::SocketAddr, String, String)> {
                 .iter()
                 .all(|p| identities.contains(&signatures::recover_exact(p)))
         );
-        traces.extend(h.f.traces.lock().unwrap().clone());
+        let url = h.url.clone();
+        traces.extend(
+            h.f.traces
+                .lock()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(|(peer, phase, address)| (url.clone(), peer, phase, address)),
+        );
         h.close().await;
     }
     traces
@@ -347,7 +355,7 @@ async fn tor_burst_child() {
     let records = proxy.records.lock().unwrap();
     let mut signed = 0;
     let mut rpc = 0;
-    for (peer, phase, address) in traces {
+    for (url, peer, phase, address) in traces {
         if phase == "unsigned" {
             continue;
         }
@@ -355,14 +363,24 @@ async fn tor_burst_child() {
             .iter()
             .find(|r| r.upstream_peer == Some(peer))
             .unwrap();
-        assert_eq!(
-            (record.user.clone(), record.password.clone()),
-            network::global().credentials(&IsolationId::evm(&address).unwrap()),
-            "{phase}"
-        );
+        let id = IsolationId::evm(&address).unwrap();
         if phase == "signed" {
+            let transport = network::global()
+                .http_participating(&id, &url, None, false, Default::default())
+                .unwrap();
+            assert_eq!(
+                (record.user.clone(), record.password.clone()),
+                network::global().credentials(&transport.scope),
+                "{phase}"
+            );
+            assert_ne!(record.password, network::global().credentials(&id).1);
             signed += 1;
         } else {
+            assert_eq!(
+                (record.user.clone(), record.password.clone()),
+                network::global().credentials(&id),
+                "{phase}"
+            );
             rpc += 1;
         }
     }

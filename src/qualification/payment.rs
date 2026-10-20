@@ -32,6 +32,18 @@ pub(crate) async fn inherit_case<T>(
 pub fn unsigned_case() -> bool {
     CASE.try_with(|c| c.unsigned).unwrap_or(false)
 }
+pub async fn check_retry_authority() -> Result<()> {
+    match CASE.try_with(Clone::clone) {
+        Ok(context) => context.check_retry_start().await,
+        Err(_) => {
+            ensure!(
+                ACTIVE.get().is_none(),
+                "qualification_payment_denied: payment has no reviewed case context"
+            );
+            Ok(())
+        }
+    }
+}
 pub fn payment_context() -> Result<Option<PaymentContext>> {
     match CASE.try_with(Clone::clone) {
         Ok(context) => {

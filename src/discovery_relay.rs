@@ -327,6 +327,7 @@ impl Relay {
         Ok(Arc::new(Self {
             client: client
                 .with_source_identity("builtin:discovery-relay")
+                .with_selection(crate::network::SelectionPolicy::Legacy)
                 .with_transport(cfg.transport())
                 .with_timeout(
                     cfg.read_timeout_seconds

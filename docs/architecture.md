@@ -173,6 +173,8 @@ may repeat it; see the [wallet rules](wallet-rotation.md#best-effort-wallet-rule
 
 Direct Rust `PaidClient` calls retain accepted work through response conversion
 when their waiter is canceled, and reuse an enclosing MCP owner when present.
+Output validation and conditional unsigned transport promotion finish inside
+that owner before result delivery, including after the waiter disconnects.
 `PaidClient::drain` closes clone-shared admission and waits for accepted work.
 The existing foreground bound limits independently retained direct tasks; nested
 managed signing reuses that permit. Qualification case identity and unsigned
@@ -238,9 +240,13 @@ same EVM address, pinning the acquired `HttpTransport` record and its effective
 isolation scope (`cover::registry::Owner::from_transport`) from unsigned challenge
 through admission, signing, signed dispatch and response body consumption.
 `src/network.rs` uses that canonical identity and effective scope for connection
-pooling and SOCKS isolation (with ordinary API acquisition still using legacy
-selection until participating unsigned status retries are activated in the
-[Tor isolation retry plan](plans/tor_isolation_retries.md)). If selection changes
+pooling and SOCKS isolation. Participating API clients (generated MCP tools,
+static/managed payers, directory tools and `raw_get`/`raw_post`) may try up to 3
+Tor isolation scopes on unsigned HTTP `400`, `403`, `429`, and `503` (honoring
+valid `Retry-After` headers on `429`/`503`) with the same pinned payer, and
+conditionally promote a winning candidate after valid `402` challenge validation
+or completed valid unsigned output. Internal discovery relay calls remain on
+`SelectionPolicy::Legacy` (single unsigned attempt). If selection changes
 after a challenge, obtain another unsigned challenge through the next payer's
 transport. The captured inventory and attempted identities bound traversal without
 a retry-count ceiling or new allocation.
@@ -292,9 +298,9 @@ Financial uncertainty remains distinct: a signed request may already have charge
 or executed even when its response fails. Generic HTTP errors, timeouts and output
 failures do not authorize another chargeable attempt. Preserve the separately
 specified structured insufficient-funds traversal and journal-before-disclosure
-rules for every authorization. Existing payer handoffs support POST; additional
-Tor circuit retries remain proposed in the
-[Tor isolation retry plan](plans/tor_isolation_retries.md).
+rules for every authorization. Both payer handoffs and participating Tor unsigned
+status retries apply this same GET/POST eligibility; Base RPC isolation recovery
+remains in the [Tor isolation retry plan](plans/tor_isolation_retries.md).
 
 ## Where to change and verify behavior
 

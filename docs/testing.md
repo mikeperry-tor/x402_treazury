@@ -125,11 +125,27 @@ These are unfunded/local tests, not evidence of live
 Managed-payment fixtures exercise advisory selection, one saturating estimate
 decrement per authorization, structured insufficient-funds traversal beyond a page,
 cloneable POST bodies, exhaustion and multiple retained authorizations. Refresh is
-independent and coalesced; failed reads preserve hints and low markers. Unfollowed 302/307 catalog
+independent and coalesced; failed reads preserve hints and low markers. In Tor mode,
+payment, managed and discovery fixtures also cover participating unsigned status
+retries (`400`, `403`, `429`, `503`), conditional winner promotion, retained
+challenge-to-signed scope across competing promotion and cache eviction, combined
+insufficient-funds handoff with per-wallet unsigned circuit retry and qualification
+accounting, and
+`SelectionPolicy::Legacy` preservation for internal discovery relay calls.
+`payment::tor_wait_tests` covers actual Retry-After waits, independent progress,
+retained disconnected waiters (including winner retention after response, text
+and configured-output waiters disconnect), explicit owner termination and authority
+expiry during the wait. `payment::tor_cover_tests` exercises API promotion and competing
+recoveries with actual HTTP/2 streams, separate SOCKS pools, scope-matched cover,
+and eviction/reinsertion. Body-failure fixtures reject partial, oversized and
+inactive outputs without promotion or generic paid replay. Exhaustion fixtures
+preserve each eligible status despite stalled or oversized final error bodies,
+with no signature, promotion or final Retry-After wait. Unfollowed 302/307 catalog
 fixtures preserve complete JSON validation and existing relay fallback without
 extra origin attempts. Unrepresentable Retry-After fixtures exercise catalog,
-pricing and relay continuation: no early dispatch, unrelated progress and explicit
-cancellation. Funding
+pricing, relay continuation and API ownership: no early dispatch, unrelated
+progress and explicit cancellation. These local fixtures
+do not establish real Tor exit diversity or settlement. Funding
 fixtures cover irreversible first-positive claims, exact accepted-work ownership,
 scoped observation/backoff, cancellation and restart. Qualification charges each
 accepted attempt under its original case allowance; a later success erases none.

@@ -46,11 +46,12 @@ Pricing's process-wide and per-source request permits cover active attempts;
 after serialization, cache and readiness checks, and retains them through response
 consumption and publication even if its waiter disconnects. Logical probe ownership
 and one-shot coalescing span the complete retry sequence without a second source gate.
-Remaining HTTP callers still acquire legacy deterministic transports until later
-consumer activation in the
-[Tor isolation retry plan](plans/tor_isolation_retries.md), while `payment.rs`
-already pins its acquired `HttpTransport` record and scope-matched cover `Owner`
-from unsigned challenge through signing, signed dispatch and response body
+Ordinary API, directory and raw-call clients also use participating selection as
+specified below. Base RPC retains legacy deterministic transports pending its
+activation in the [Tor isolation retry plan](plans/tor_isolation_retries.md);
+excluded infrastructure callers remain legacy. `payment.rs` pins its
+acquired `HttpTransport` record and scope-matched cover `Owner` from unsigned
+challenge through signing, signed dispatch and response body
 consumption. Sync releases its
 channels before tearing down its private runtime. Each cache retains at most 256
 entries and evicts one least-recently-used entry when admitting another. Access
@@ -249,13 +250,30 @@ claiming successful response delivery. These warnings do not establish why the
 caller disconnected or authorize replay of uncertain paid work.
 
 An x402 challenge and its single signed attempt are separate requests, each
-subject to connection and read-inactivity limits. There is no whole-tool-call
-timeout imposed by payment admission. Quote/authorization expiry and funded-test
-authority remain independent of progress. Swap delay is a health warning; graceful
-shutdown has no automatic cutoff. A second signal explicitly exits the executable
-without joining blocking scan/proving workers; it does not release liabilities or
-run wallet cleanup. Library serving returns a typed `ForcedShutdown` error for
-its embedding process to handle. A signed-request timeout still leaves durable unresolved exposure.
+subject to connection and read-inactivity limits. In Tor mode, participating
+API clients (`PaidClient::new`, `PaidClient::managed`, and `PaidClient::unsigned`,
+covering generated MCP tools, directory tools and `raw_get`/`raw_post`) may try
+up to three isolation scopes (`1` selected plus up to `2` private candidates) on
+unsigned HTTP `400`, `403`, `429`, and `503` while keeping the canonical payer
+pinned, honoring valid `Retry-After` headers on `429` and `503`, and conditionally
+promoting the winning candidate after valid `402` challenge validation or a
+completed valid unsigned output. Unsigned API transport errors, ineligible HTTP
+statuses, malformed `402` challenges, failed outputs, signed responses and
+internal paid discovery relay calls (`SelectionPolicy::Legacy`) do not retry on
+new scopes or promote candidates. Eligible failed participating-Tor unsigned status
+responses are dropped without collecting their bodies, including the final
+exhausted attempt, which returns the known status with a fixed error. There is no
+Retry-After wait after exhaustion because no further request is dispatched.
+Once an unsigned `402` challenge is accepted,
+signing and the single signed submission remain pinned to that exact winning
+`HttpTransport` record even if a concurrent caller replaces or evicts the cache
+slot. There is no whole-tool-call timeout imposed by payment admission.
+Quote/authorization expiry and funded-test authority remain independent of
+progress. Swap delay is a health warning; graceful shutdown has no automatic
+cutoff. A second signal explicitly exits the executable without joining blocking
+scan/proving workers; it does not release liabilities or run wallet cleanup.
+Library serving returns a typed `ForcedShutdown` error for its embedding process
+to handle. A signed-request timeout still leaves durable unresolved exposure.
 
 The serialized Store protects payer ownership and journal-before-disclosure.
 Advisory Base reads and signed HTTP submission run outside that Store worker. Balance publication never
@@ -472,6 +490,7 @@ financial or qualification authority.
 | Timer or bound | Purpose and behavior |
 | --- | --- |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
+| Participating Tor HTTP scope retries: up to 3 attempts total (`1` selected + `2` candidates); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery and `PaidClient` unsigned API/directory/raw stages (internal discovery relay calls remain `SelectionPolicy::Legacy`, and Base RPC follows the [Tor isolation retry plan](plans/tor_isolation_retries.md)). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
 | HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
 | Legacy indexer duration arguments | Required by the vendor API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |

@@ -498,7 +498,13 @@ async fn unsigned_child_uses_discovery_isolation_and_has_no_direct_fallback() {
             let record = &records[0];
             assert_eq!(record.address_type, 3);
             assert_eq!(record.host, "unsigned.invalid");
-            assert_eq!((record.user.clone(), record.password.clone()), credentials);
+            assert_eq!(record.user, credentials.0);
+            assert_ne!(
+                record.password, credentials.1,
+                "participating unsigned API calls use a fresh scope token rather than the legacy identity token"
+            );
+            assert_eq!(record.password.len(), credentials.1.len());
+            assert!(record.password.starts_with("x402_treazury:v1:"));
         }
         drop(pipe);
         assert!(exit(&mut child).await.success());
