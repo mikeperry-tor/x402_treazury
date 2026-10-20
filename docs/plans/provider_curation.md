@@ -28,7 +28,14 @@ with sixteen explicit remote inputs and seven resolved local inputs. Selected
 scope checks retain valid unique configs, nonempty reasons and the exact 22 paid
 cases, while removing universal provider accounting. Three focused tests passed:
 selected scope and both offline preset tests, preserving 63 requests, $4.40
-reservation and zero new funding. Exact-SHA review is pending before C5.2.
+reservation and zero new funding. C5.1 (`96ced5ac0336b4089584404a6fff5ad27899bd14`) received independent
+exact-SHA approval. C5.2 replaces the final case-index consumer with three
+independent synthetic startup documents and two aliases, then removes 26 unused
+output goldens plus settings/index artifacts. Recursive validation of 37 provider
+definitions and the existing alias-sharing regression passed; the ignored
+benchmark compiled without measurement execution. Source-matched complexity has
+no advisory regressions (replay 19/15 to 18/14). Exact-SHA review is pending
+before C5.3a.
 Source-matched complexity against `05280d6` reports no advisory regressions; preset
 CogC/CycC fell 6/14 to 5/12 and scope 9/10 to 3/5 by removing responsibilities. Actual
 inventories for all eight local inputs originally showed no removed or renamed
@@ -543,9 +550,9 @@ qualification preset/request/authority validation. Update live coverage docs and
 tests together; consult the live guides and verify scope remains explicit. Repair
 known baseline inconsistencies by deleting unnecessary coupling rather than adding
 boilerplate coverage rows. Preserve actual evidence and never promote untested
-providers to qualified. In particular, `examples/live_integration/presets.rs`
-loads `tests/fixtures/catalogs/cases.json` inside its offline test module: review
-and minimize that test dependency before removing the golden case index. Retain
+providers to qualified. C5.1 replaced the offline preset's case-index dependency with explicit selected
+inputs; C5.2 replaces the final startup-benchmark consumer before removing the
+unused index and output/settings snapshots. Retain
 only justified regression inputs or use generic synthetic alternatives; this is
 not a runtime preset-construction dependency and needs no production framework.
 Preserve deliberately read-only directory scope where it is an actual contract.

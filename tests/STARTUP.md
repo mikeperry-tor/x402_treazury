@@ -15,11 +15,11 @@ Run the focused regression suites sequentially:
 
 ```sh
 scripts/zcash.sh test --test startup --test deployment --test provider_catalogs --test pricing --test network_audit
-scripts/zcash.sh test --no-default-features --test startup --test deployment --test provider_catalogs --test pricing --test network_audit
 scripts/zcash.sh build
 ```
 
-The ignored SOCKS child is exercised by its parent. Pricing barriers additionally
+Reduced-feature checks require an explicit user request; the default checks above
+include Zcash. The ignored SOCKS child is exercised by its parent. Pricing barriers additionally
 assert a shared 16-request cap, lower per-source limits, rolling progress past a
 stalled endpoint, duplicate-URL coalescing, and cancellation releasing permits.
 Pricing retry regressions additionally cover a delayed probe releasing a single
@@ -62,13 +62,20 @@ local fixtures do not qualify live settlement or Tor.
 scripts/zcash.sh test --test startup_benchmark -- --ignored --nocapture
 ```
 
-This opt-in test replays the 20 committed provider catalog cases plus two aliases
-through localhost, introducing 100 ms of delay per request. All 22 sources have
-distinct tool prefixes, with 20 unique spec URLs. It compares complete inventories
-across three runs at each concurrency level, then measures unsigned pricing
-discovery using provider settings and a fresh process-local cache. Possible
-probe destinations are checked to be local before discovery. No external service,
-Tor daemon, secret, funded wallet or signature is involved.
+This opt-in test uses three independent synthetic OpenAPI documents: small
+request contracts with nested arrays and a path template, a larger lookup
+inventory, and embedded-price/GET-POST variants. Five sources include two aliases
+sharing three unique spec URLs while retaining distinct prefixes. Localhost adds
+100 ms per request. The test compares complete inventories across three samples
+at each concurrency level, then exercises unsigned pricing with a fresh shared
+process-local cache at each source concurrency. Its declared workload expects
+34 unique probes: 32 larger-inventory lookups, one small lookup and one unpriced
+GET. Embedded prices, path templates and POST-preferred twins are not probed;
+aliases must not duplicate requests. Every possible probe destination is checked
+to be local and the server rejects payment-signature headers. No provider
+fixture, external service, Tor daemon, secret, funded wallet or signature is
+involved. Compiling this ignored test does not run a measurement or establish
+performance results.
 
 Candidate preparation and tool generation are synchronous. Measure queue, headers,
 body, parsing and price-description rebuild separately; full startup also includes
@@ -82,8 +89,8 @@ Catalog concurrency defaults to 2 (configurable 1..64); pricing uses a shared
 headers rather than consuming complete bodies, so evaluate them independently.
 Compatible catalog aliases share one download per load, while local files and
 separate loads remain independent. Empty discovered-price maps reuse original
-tools. Issue-tagged providers may be explicitly excluded from a benchmark; record
-every exclusion without changing runtime selection.
+tools. A separate live comparison must declare its selected provider workload and
+retain failures without changing runtime selection to improve the result.
 
 The catalog default reflects a working theory that leaving headroom below an
 anticipated three prebuilt Conflux sets helps transfer tails when a set is unavailable.

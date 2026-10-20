@@ -1,9 +1,10 @@
 # Provider contract fixtures
 
 Provider-specific inputs must reproduce a named quirk, failure or authored
-transformation; shared synthetic tests own generic parsing and selection. The unused output/settings snapshot files are scheduled for removal under the
-[provider-curation plan](../../../docs/plans/provider_curation.md). Do not add a
-new golden or freeze a full settings map merely because a provider was added.
+transformation; shared synthetic tests own generic parsing and selection. Do not
+add a golden or freeze a full settings map merely because a provider was added.
+All bundled TOML definitions are validated offline; generated tool inventories
+and settings maps are not regression fixtures.
 
 Retain inputs by responsibility:
 
@@ -24,8 +25,9 @@ Production local catalogs under `providers/` and the Kronos/RegimeShift inputs i
 of test pruning. Check consumers in discovery, media, payment, startup, examples
 and qualification before deletion. The offline qualification preset uses an explicit
 selected-source input map in `examples/live_integration/presets.rs` and resolved
-local production catalogs. `cases.json` still feeds the ignored startup benchmark;
-migrate that consumer before removing it. Captured Apollo and Straits test inputs have no code consumer. Concordance source
+local production catalogs. The ignored startup benchmark uses independent synthetic
+workloads and no provider index. Captured Apollo and Straits test inputs have no
+code consumer. Concordance source
 objects and Locus free-gateway/discovery contracts now have focused fidelity
 consumers. Their distinct production local catalogs remain necessary.
 

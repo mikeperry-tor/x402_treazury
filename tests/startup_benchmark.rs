@@ -2,13 +2,12 @@
 use axum::{
     Router,
     extract::{OriginalUri, State},
+    http::HeaderMap,
     response::IntoResponse,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
-use serde::Deserialize;
 use serde_json::json;
 use std::{
-    path::Path,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -16,13 +15,36 @@ use std::{
     time::{Duration, Instant},
 };
 use x402_treazury::{
-    catalog, config, deployment::Deployment, payment::USDC, pricing::PricingCache,
+    catalog::{self, Config},
+    deployment::Deployment,
+    payment::USDC,
+    pricing::PricingCache,
 };
-#[derive(Deserialize)]
-struct Case {
-    provider: String,
-    spec: Option<String>,
+const LARGE_ROUTES: usize = 32;
+
+fn synthetic_documents() -> Vec<serde_json::Value> {
+    let mut large = serde_json::Map::new();
+    for index in 0..LARGE_ROUTES {
+        large.insert(
+            format!("/lookup-{index}"),
+            json!({"get":{"summary":"Lookup"}}),
+        );
+    }
+    vec![
+        json!({"openapi":"3.1.0","info":{"title":"Requests","version":"1"},"paths":{
+            "/lookup":{"get":{"summary":"Lookup"}},
+            "/items/{id}":{"get":{"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}]}},
+            "/echo":{"post":{"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["items"],"properties":{"items":{"type":"array","items":{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}}}}}}}}}
+        }}),
+        json!({"openapi":"3.1.0","info":{"title":"Large","version":"1"},"paths":large}),
+        json!({"openapi":"3.1.0","info":{"title":"Pricing and methods","version":"1"},"paths":{
+            "/quoted":{"get":{"x-payment-info":{"price":{"amount":"0.002","currency":"USD"}}}},
+            "/twins":{"get":{"summary":"Query variant"},"post":{"summary":"JSON variant","requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"query":{"type":"string"}}}}}}}},
+            "/probe":{"get":{"summary":"Unsigned probe"}}
+        }}),
+    ]
 }
+
 #[derive(Clone)]
 struct Replay {
     specs: Arc<Vec<Vec<u8>>>,
@@ -32,7 +54,10 @@ struct Replay {
 async fn response(
     State(state): State<Replay>,
     OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
 ) -> axum::response::Response {
+    assert!(!headers.contains_key("payment-signature"));
+    assert!(!headers.contains_key("x-payment"));
     tokio::time::sleep(Duration::from_millis(100)).await;
     if let Some(id) = uri.path().strip_prefix("/spec/") {
         state.catalogs.fetch_add(1, Ordering::SeqCst);
@@ -54,26 +79,21 @@ async fn response(
 #[tokio::test]
 #[ignore = "explicit localhost performance measurement; no mainnet requests or signing"]
 async fn representative_startup_replay() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let cases: Vec<Case> =
-        serde_json::from_str(include_str!("fixtures/catalogs/cases.json")).unwrap();
-    let mut inputs = Vec::new();
-    let mut specs = Vec::new();
-    for case in &cases {
-        let settings = config::load(&root.join(&case.provider))
-            .await
-            .unwrap()
-            .settings;
-        let path = case
-            .spec
-            .as_ref()
-            .map(|p| root.join(p))
-            .unwrap_or_else(|| settings.spec.clone().into());
-        let bytes = std::fs::read(path).unwrap();
-        let doc: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        specs.push(bytes);
-        inputs.push((settings, doc));
-    }
+    let inputs: Vec<_> = synthetic_documents()
+        .into_iter()
+        .map(|document| {
+            let settings = Config {
+                pricing_key: Some("x-payment-info".into()),
+                ..Config::default()
+            };
+            (settings, document)
+        })
+        .collect();
+    let specs: Vec<_> = inputs
+        .iter()
+        .map(|(_, document)| serde_json::to_vec(document).unwrap())
+        .collect();
+    let unique_specs = specs.len();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let replay = Replay {
@@ -88,8 +108,8 @@ async fn representative_startup_replay() {
             .unwrap();
     });
     let dir = tempfile::tempdir().unwrap();
-    // Two aliases share original spec URLs and provider policy, but use distinct tool prefixes.
-    let selected: Vec<usize> = (0..cases.len()).chain([0, 1]).collect();
+    // Two aliases share synthetic spec URLs but retain distinct tool prefixes.
+    let selected: Vec<usize> = (0..unique_specs).chain([0, 1]).collect();
     let mut baseline = None;
     for limit in [1, 4, 8, 16] {
         let mut config = format!(
@@ -100,12 +120,7 @@ async fn representative_startup_replay() {
             let name = format!("p{alias:02}");
             names.push(name.clone());
             config += &format!(
-                "[sources.{name}]\nextends={}\nspec='{base}/spec/{index}'\nbase_url='{base}/api/{index}'\nprefix='{name}'\n",
-                toml::Value::String(
-                    root.join(&cases[*index].provider)
-                        .to_string_lossy()
-                        .into_owned()
-                )
+                "[sources.{name}]\nspec='{base}/spec/{index}'\nbase_url='{base}/api/{index}'\nprefix='{name}'\npricing_key='x-payment-info'\nprobe_pricing=false\n"
             );
         }
         config += &format!(
@@ -119,7 +134,7 @@ async fn representative_startup_replay() {
             let start = Instant::now();
             let deployment = Deployment::load(&path).await.unwrap();
             let elapsed = start.elapsed();
-            assert_eq!(replay.catalogs.load(Ordering::SeqCst), cases.len());
+            assert_eq!(replay.catalogs.load(Ordering::SeqCst), unique_specs);
             let inventory = serde_json::to_value(deployment.inventory()).unwrap();
             if let Some(expected) = &baseline {
                 assert_eq!(expected, &inventory);
@@ -128,7 +143,7 @@ async fn representative_startup_replay() {
             }
             println!(
                 "{}",
-                json!({"stage":"catalogs","concurrency":limit,"sample":sample,"elapsed_ms":elapsed.as_millis(),"fetches":replay.catalogs.load(Ordering::SeqCst),"source_count":selected.len(),"unique_specs":cases.len()})
+                json!({"stage":"catalogs","concurrency":limit,"sample":sample,"elapsed_ms":elapsed.as_millis(),"fetches":replay.catalogs.load(Ordering::SeqCst),"source_count":selected.len(),"unique_specs":unique_specs})
             );
         }
     }
@@ -174,8 +189,9 @@ async fn representative_startup_replay() {
         }
         let mut pending = stream::iter(jobs).buffer_unordered(concurrency);
         while pending.next().await.is_some() {}
-        // Kronos startup discovery is disabled; its 20 fixture probes are omitted.
-        assert_eq!(replay.probes.load(Ordering::SeqCst), 66);
+        // One small lookup, the large inventory, and one unpriced GET.
+        // Embedded prices, templated GETs and the POST-preferred twin need no probe.
+        assert_eq!(replay.probes.load(Ordering::SeqCst), LARGE_ROUTES + 2);
         println!(
             "{}",
             json!({"stage":"pricing_total", "source_concurrency":concurrency,
