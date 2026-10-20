@@ -392,12 +392,17 @@ finding. Decide whether repeated findings require a wider targeted audit.
 | --- | --- | --- |
 | C5.1 | Remove universal provider-to-paid-scope coupling; minimize the offline qualification preset test's dependency on the golden case index, retaining necessary inputs until consumers change. | Qualification scope/request/authority tests pass; no provider is newly claimed qualified; no dangling fixture dependency. |
 | C5.2 | Replace remaining blanket catalog/settings snapshots with justified focused/shared tests; remove their unneeded output goldens/index and update test/count guidance together. | Replacement invariants execute; generic TOML validation works without freezing settings; all consumers of removed files are migrated. |
-| C5.3 | Prune residual provider input fixtures, duplicate tests and orphan utilities by named regression responsibility; maintain provenance/refresh guidance for retained inputs. | Consumer search and focused retained suites; runtime local catalogs, payment evidence and financial records preserved. |
+| C5.3a | Minimize independently reviewed request inputs and actual vendor method-pair serialization witnesses (AgentFund, Brazilayer, Deepline, PDL, GenuineGood, LoneStar, Otto, and any new NetIntel regression input). Migrate consumers and provenance together. | Exact selected-request schema/routing checks and actual method-pair regressions; retain naming witnesses and transitive references. |
+| C5.3b | Minimize concrete authentication, lifecycle, request and output witnesses (Exa, OneShot, StableEnrich, Agent402, BlockRun, Claw402, IPIntel, RelayShield, Vaaya and independent discovery evidence). | Focused positive/negative contracts, including new P3 public reads and JSON modes, plus selected qualification request checks; no blanket inventory assertions. |
+| C5.3c | Minimize transformed inputs and remaining consumers (SocialFetch versions/credits/public demos, independent embedded directory schemas, Locus/Concordance source witnesses), remove duplicate byte-stability test and confirmed orphans; retain full NewsGurus raw projection input. Close provenance handoff. | Transformation fidelity and actual demo/credit/directory consumers pass; re-evaluate former orphans after P3 rather than deleting new consumers; runtime catalogs and financial evidence preserved. |
 
 Do not group pruning solely by vendor or file size. If C5.2/C5.3 need smaller
 commits, declare children by shared test responsibility and include each fixture's
 necessary test replacement, consumer migration and documentation in that child.
-Earlier C2/C3 commits already own any coverage repair their behavior changes need.
+The child boundaries above are declared before P5 edits. Each receives exact-SHA
+review; C5.3c closes pruning and the final integration gate reviews all prior
+commits/fixups, complete consumers and repeated findings. Earlier C2/C3 commits
+already own any coverage repair their behavior changes need.
 
 Replace broad catalog/settings snapshots with focused regressions and generic
 synthetic coverage identified in P1. Prune duplicated assertions and unused fixture

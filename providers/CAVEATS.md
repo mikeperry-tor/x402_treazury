@@ -2,8 +2,77 @@
 
 Use these notes alongside [provider definitions](README.md). Prices and vendor
 behavior describe the committed configuration and fixtures; live challenges remain
-authoritative. Tests pin 971 tool contracts across 26 providers and settings for
-30 providers without contacting vendors.
+authoritative. Captured request contracts and unsigned challenges establish local regression
+behavior, not current upstream availability or funded qualification. Public primary
+schema/guide URLs are recorded in each definition and the notes below. Where fresh
+documentation cannot be reached, retain the capture basis and explicit uncertainty.
+
+## Compatibility and editorial selection
+
+The [provider policy](README.md#provider-policy) governs additions. Existing compact
+allowlists and tag selections are being normalized; the table distinguishes actual
+support boundaries from editorial defaults without claiming that pending selection
+features already run. Path `include` values also anchor names and must not be
+removed blindly. Price, a diagnostic label or a hosted asset link alone is not a
+compatibility blocker.
+
+| Definition(s) | Boundary or integration contract |
+| --- | --- |
+| AgentFund, Brazilayer, Deepline, PDL | Gateway/path name anchors and request guidance; no identified editorial operation restriction. |
+| botsmith, Google Trends | Ordinary catalog; probes or structured price/offer metadata have separate contracts. |
+| AgOSINT | `/x402` gateway versus MPP; root base URL repairs upstream `/v1` server prefix. Captured operation freeze is editorial. |
+| Arkham | Three discovery routes demand SIWX; ordinary paid routes remain usable. |
+| Datakoot, IPIntel | Exact current inventories are editorial freezes, not new-route support boundaries. |
+| GenuineGood | Bearer-token pass purchase unusable here; ordinary grant reads include expensive calls subject to payment caps. |
+| Kronos | Path name anchor; disabled probes reflect observed discovery slowness, not a tool gate. |
+| LoneStarOracle, x402stock | Public read exclusions are editorial; unpriced/preview/data overlap is not incompatibility. |
+| TeleSINT | `/watch` owns persistent wallet state; `/status` exclusion and fixed inventory are editorial. |
+| Agent402 | Preserve wallet-owned and actual execution boundaries. JSON/base64 media, PNG/JPEG modes, planning and human onramp links are usable; raw speech and multipart transcription are unsupported. Compact tags/inventory are editorial. |
+| BlockRun | Restrict async jobs, unsupported binary output, wallet-owned lifecycle and fund submission. Valid fixed-symbol paths are usable literally; zero placeholders retain an unverified intended-target limitation. |
+| Claw402 | Market-read subset is editorial. Sparse RootData schemas allow JSON body passthrough; see contracts below. Image result envelope remains unverified. |
+| Exa | Exact Search/Contents payable island remains justified in the surrounding authenticated API. |
+| OneShot | Retain synchronous search and eleven verified public discovery GETs; authenticated jobs/account workflows remain unsupported. |
+| HireScrape | Exclude specific SIWX skills/runs, snapshots, reports and scraper-request workflows. `/api/tools` is a naming anchor, not a blanket outside-path incompatibility. Advertised public marketplace schemas are absent; do not invent routes. |
+| NetIntel | Eighteen reviewed same-path pairs have matching structural inputs, results and payment metadata; POST avoids URL secrets/array serialization. Full paths retain compatible gateway aliases; no method opt-out is indicated. |
+| Otto | Execution tag and full-auto router exceed ordinary read authority; paying-wallet state and hosted links retain their documented meaning. |
+| RegimeShift | Unsigned intent JSON is distinct from signing/transferring collateral. Diagnostics outside name anchor are editorial; provisioning needs separate review. |
+| RelayShield | Exclude metered/account workflows, preserving payg and three keyless public checks outside that namespace. File-result schema is absent from OpenAPI although root discovery advertises it; URL scan retains immediate heuristics. |
+| SocialFetch | Exclude account, monitor ownership and webhook lifecycle. Public `/v1/monitors/sources`, diagnostics and ordinary ask are compatible; exact parent-operation exclusions preserve the public child. |
+| StableEnrich | Crawl/job, Hunter verifier lifecycle and aerial-video rendering/result families are unsupported; synchronous/image contracts remain. |
+| Vaaya | Exclude specific MPP-only, upload/async, persistent account, message/purchase and payment-forwarding contracts. Broad research subset is editorial; complete result chains matter. |
+| x402-list | Broader public GET catalog is compatible; ownership/reissue/write workflows need explicit boundaries. Embedded directory is a separate intentional three-read consumer contract. |
+| AgentUtility | Preserve enrichment/alias provenance. One-shot browser, IPFS and QR return ordinary JSON, including encoded media. Persistent watch ownership and six full oneOf conversion losses require restrictions; optional formats do not justify whole-family suppression. |
+| Concordance | Preserve authored price/ref enrichment; free catalog discovery completes series lookup and was omitted only for compactness. |
+| Curl | Authored request/response relay contract; single-operation list is redundant. |
+| Glassnode | Authored metadata-to-metric workflow; deeper bulk paths cannot be addressed by the current gateway template. |
+| Locus | Authored list/call gateway covers all 114 free REST duals; two public unified discovery manifests are separate compatible contracts. Batch/update job lifecycle remains unsupported. |
+| News Gurus | Bazaar projection preserves real templates; agent-status omission is editorial. |
+| Straits | Authored free/premium contracts, IMO templates and CSV/JSON outputs; preserve naming anchors. |
+| RelayShield phone companion | Authored vendor-omitted endpoint, with separate payment/version and unknown-result limitations. |
+
+### Same-path method contracts
+
+GenuineGood's five grant pairs and Otto's generate-meme, llm-research,
+tx-explainer and meta-intelligence pairs have equivalent captured inputs,
+requireds, result envelopes and advertised payment metadata. POST carries JSON;
+GET array forms document comma separation that generic repeated-key query routing
+does not supply. These pairs support default POST selection before naming.
+Captured metadata does not prove equal actual charges. No reviewed pair requires
+a preference opt-out. Other captured twins belong to excluded state/account
+families. NetIntel's complete retrieved primary schema has eighteen same-path
+GET/POST pairs with matching structural inputs/requireds, response declarations,
+security and payment metadata. Secret-bearing GET descriptions explicitly favor
+POST; JSON bodies also avoid query-array serialization uncertainty. No opt-out
+is indicated, and equal advertised metadata does not establish equal charges.
+
+The intended canonical names are `genuinegood_search`, `genuinegood_detail`,
+`genuinegood_fit`, `genuinegood_brief`, `genuinegood_preflight`,
+`otto_generate_meme`, `otto_llm_research`, `otto_tx_explainer` and
+`otto_meta_intelligence`. Migrate both old method suffixes with the preference
+implementation: privacy selections, live-Tor example, reviewed qualification
+preset and independent request fixture, provider instructions and focused tests.
+Do not create aliases or alter explicit raw HTTP methods.
+
 
 ## Reliability annotations
 
@@ -45,7 +114,12 @@ validated. Local compatibility fixtures do not prove live settlement.
 ## socialfetch.toml — SocialFetch
 
 Uses the live OpenAPI document's platform tags, with administrative `Auth`,
-`Monitors` and `System` excluded. All platforms are included by default;
+`Monitors` and `System` excluded. All platforms are included by default.
+`GET /v1/monitors/sources` is public stateless source discovery, so the current
+whole `Monitors` tag/subtree exclusion is too broad. Exclude `GET` and `POST`
+`/v1/monitors` exactly and the instance `/v1/monitors/{id}` subtree, retaining the
+public child; keep webhook and account boundaries. Diagnostics and natural-language
+ask are editorial omissions. This classification precedes provider normalization.
 `--tags Twitter,YouTube` selects a subset. `LinkedIn` spans v1 and v2; add
 `--include /v1` when only v1 is wanted. Tags are exact and case-sensitive.
 
@@ -322,7 +396,12 @@ cannot expose — is rewritten into that flat form). Design notes:
 
 - The spec's `/api/locus_*` underscore routes are free REST duals of the same
   tools, but their slugs collide with the paid `/api/locus-*` hyphen twins
-  under path-derived naming, so the free tier rides the gateway instead.
+  under path-derived naming, so the free tier rides the gateway instead. All 114
+  captured free REST routes occur in the gateway enum: no functionality is lost
+  by this representation. The public `/.well-known/locus-tools.json` unified
+  free/paid schema directory and `/.well-known/locus-agent-endpoints.json` bundle
+  directory are distinct contracts omitted from the current projection; they
+  should be preserved with their captured schemas and authored free-price hints.
 - The vendor quotes four payment rails; the live 402 puts plain EIP-3009
   USDC-on-Base first in `accepts[]`, which is what our EVM wallet pays (the
   SDK filters the Solana/Tempo/Circle-Gateway entries out).
@@ -461,8 +540,15 @@ The [vendor OpenAPI spec](https://win.oneshotagent.com/openapi.json) describes
 147 operations in the 2026-10-03 fixture. The default definition exposes only
 `oneshot_search` and `oneshot_help`. `POST /v1/tools/search` is explicitly
 synchronous and returns the result inline. Exact method/path selection excludes
-new methods and subroutes as well as health/status/stats, account/balance tools,
-marketplace administration, payments/credits, messaging and other workflows.
+new methods and subroutes, account/balance tools, marketplace administration,
+payments/credits, messaging and other workflows. The health/status/stats and
+public discovery omissions are editorial: eleven captured GETs explicitly
+declare no authentication or payment. These are `/health`,
+`/.well-known/acp/manifest.json`, `/v1/stats`, `/v1/status`, `/v1/soul`,
+`/v1/soul/{wallet}` and `/v1/soul/{browse,search,service-types,stats,templates}`.
+Retain these verified reads alongside the payable search island, using a root
+fallback that preserves the existing search name. This does not establish
+support for authenticated or asynchronous marketplace operations.
 `include = ["/v1/tools"]` removes that prefix from the tool name while preserving
 the original HTTP path and root base URL.
 
@@ -623,21 +709,32 @@ to the existing deployment binding rules.
   remote identity follows the paying address; rotation changes that identity and
   can strand state. A future deliberate stable-wallet integration needs its own
   contract rather than silently treating these as ordinary rotating-wallet tools.
-- Delegation, attestation, composite skill packs and workflow-prompt helpers are
-  excluded. They need separate review of composed actions, state and output
-  contracts. This is an integration boundary, not a claim that all such tools
-  are fundamentally incompatible. Funding/onramp helpers are also excluded.
+- Same-payer attestation remains a wallet-identity boundary. Delegated execution
+  needs its reviewed authority/result contract; deterministic action planning,
+  workflow prompts and fixed synchronous JSON skill packs are compatible.
+  `/api/onramp-link` returns a human checkout link and quote; it does not fund
+  a wallet or authorize a transfer. It must not be suppressed as a funding action;
+  actual faucet/transfer workflows such as `/api/testnet-fund` are distinct.
 - Screenshots, QR, image crop and six image-generation endpoints are enabled.
   PNG/JPEG/WebP bodies become MCP image blocks. Explicit mappings extract
   `/image`, `/data/0/b64_json` or `/dataUri` from reviewed JSON envelopes while
   preserving metadata with attachment markers. Image generation's `n` is fixed
   to one in the vendor contract. No media URLs are automatically fetched.
-- PDF/audio/video generation and conversion remain excluded pending artifact
-  storage. Resize/convert/thumbnail may return BMP and remain excluded; favicon
-  output can be ICO/SVG, missing, or URL-only and also remains excluded. JSON
-  metadata, OCR, image-search results, text conversions and base64 string utilities
-  remain eligible. Image crop describes binary output by default but documents a
-  JSON `dataUri` alternative; both supported response forms are handled.
+- The current compact media exclusions overstate output incompatibility. The
+  primary OpenAPI documents PDF manipulation, audio conversion/normalization,
+  the three `/api/tts*` routes and synchronous `/v1/videos/generations` as JSON
+  containing base64 strings. LinkedIn articles and media/PDF skill packs also
+  return JSON envelopes. These remain ordinary text/metadata without automatic
+  decoding or asset retrieval; optional image mappings are separate.
+- Resize/convert/thumbnail support PNG/JPEG, with PNG default where documented.
+  Select supported formats; optional BMP output does not block the whole route.
+  Favicon lookup returns JSON metadata and a data URI, including non-image or
+  missing-result cases, and needs no mandatory mapping. Raw
+  `/v1/audio/speech` returns unsupported audio MIME types. Conversely,
+  `/v1/audio/transcriptions` and `/v1/pro/audio/transcriptions` require multipart
+  file parts despite their misleading JSON request declarations; generic JSON
+  routing cannot implement that upload contract. Optional report/video 202
+  responses require `Prefer: respond-async`, which this integration does not set.
 - Gateways/reports remain opt-in through tags. Some tools exceed the normal $1
   payment cap or take longer than the provider's 90-second timeout; choosing a
   tag does not raise either limit. Use small output-token budgets. Streaming is
@@ -776,10 +873,12 @@ Venice/Fal/CloudConvert credentials or initialize a separate vendor wallet/clien
   produces before/after attachments. MIME comes from `content_type`; attribution,
   license, dates, geography and remaining metadata are preserved. Existing inline
   byte/count limits apply, with explicit errors after a potentially paid response.
-- Browser-session is excluded because its optional screenshot mode is not described
-  by a stable image envelope in the spec. QR-code-generate is excluded because it
-  can return SVG as well as PNG. IPFS-fetch is excluded because its arbitrary-file
-  response can switch between text, JSON and base64. Their aliases are also absent.
+- One-shot browser-session returns HTML/title JSON with an optional screenshot;
+  IPFS-fetch returns JSON metadata plus text/JSON/base64; QR-code-generate returns
+  JSON format/content-type/base64 fields. Optional screenshot or SVG content does
+  not make these JSON envelopes unsupported. Their current omission and alias
+  suppression are editorial; preserve these usable contracts without inventing
+  automatic image decoding, file adapters or a stable browser-session lifecycle.
 - Watch-page is excluded because it stores caller-selected watch IDs and server-side
   state for up to 365 days; its ownership/access semantics need review. The
   browser-workflow cluster, in contrast, analyzes supplied traces/HTML and returns
@@ -822,16 +921,24 @@ no custom registry adapter is introduced into serving or agent source registrati
 BlockRun defaults to six synchronous chat/Exa/Grok search operations plus help.
 The spec uses `/api/v1`, while the guide often uses `/v1` aliases; keep the spec
 paths on the wire. Omit chat `stream` or set false and supply a small `max_tokens`.
-Async image/video/voice jobs, binary audio, phone/sandbox ownership, trading and
-paths containing literal example addresses/IDs are excluded. Do not reinterpret
-those example-valued paths as templates without an authored schema. The selected
+Async image/video jobs require result polling; phone/sandbox ownership, voice
+calls and trade submission have distinct lifecycle/authority boundaries. Valid
+fixed BTC-USD, XAU-USD, EUR-USD and Binance BTCUSDT paths remain usable with their
+literal targets and generated names. Do not invent symbol parameters or rewrite
+wire paths. Zero-address/token placeholders retain an unverified intended-target
+contract, not a general claim that every fixed target is invalid. The selected
 operations carry vendor prices; startup discovery is disabled.
 
 Claw402 defaults to twelve market overview GETs plus help. Its larger catalog has
 useful exact case-sensitive tags, but clearing/changing tags does not expand the
-operation allowlist. Several RootData POST bodies are only `type: object` despite
-parameter requirements in prose; do not expose these as correctly typed tools
-without request-schema corrections. Account credits/model diagnostics and AI/media
+operation allowlist. RootData POST bodies are sparse open `type: object` schemas. They accept
+undocumented-by-schema arguments in the JSON body: search uses `query` and optional
+`precise_x_search`; project uses `project_id` or `contract_address`, with optional
+`include_team`/`include_investors`; org uses `org_id` with optional
+`include_team`/`include_investments`; funding accepts optional Unix-second
+`start_time`/`end_time`, USD `min_amount`/`max_amount`, `project_id`, `page` and
+`page_size`. Search supplies profile IDs. Preserve this prose and open-body
+routing rather than inventing required schemas or calling the requests unusable. Account credits/model diagnostics and AI/media
 are outside this compact default. Startup pricing discovery is disabled because
 prices are embedded. Help includes broader routes and manual retry suggestions;
 Treazury retains its own payment uncertainty/no-replay rules.
@@ -915,8 +1022,12 @@ also exposes the vendor's other target-method choices. See
 The exact allowlist exposes 30 synchronous or immediately useful pay-per-call
 operations from the vendor OpenAPI catalog, plus lazy `llms.txt` help. Embedded
 `x-payment-info` prices are advisory; pricing probes are disabled. Account and
-metered routes are excluded. File scanning is excluded because its result-polling
-route is absent from the vendor catalog; URL scanning retains immediate heuristic
+metered routes are excluded. Public keyless `POST /v1/email-check`,
+`POST /v1/link-check` and `POST /v1/wallet-risk` are compatible despite lying
+outside `/v1/payg`; a root fallback preserves their full `v1_*` names without
+renaming payg tools. File scanning is excluded because its result-polling schema
+is absent from OpenAPI, although root discovery advertises the route. This is
+a missing integration contract, not proof the API lacks it. URL scanning retains immediate heuristic
 signals, and its description identifies the unavailable asynchronous verdict.
 Bulk identity risk ($2.00) and campaign scanning ($5.50) exceed the default $1.00
 per-payment cap. The help document uses metered paths and includes extra routes;
@@ -1090,3 +1201,18 @@ Description prices are inconsistent with structured prices: Tako search/answer/
 contents prose quotes about $0.012/$0.018/$0.002, while `x-payment-info` advertises
 $0.03/$0.03/$0.05; RecallRadar search/get prose quotes $0.10/$0.025 while structured
 prices are $0.12/$0.03. Use the structured estimates and live payment challenge.
+
+## hirescrape.toml — HireScrape
+
+The primary [schema](https://hirescrape.com/openapi.json), retrieved through its
+homepage documentation link, supplies six paid scraper contracts and specific
+SIWX workflows: `/api/skills/search`, `/api/skills/runs` and its request-ID child,
+`/api/snapshots` and its ID child, `/api/reports` and its ID child, and
+`/api/scraper-requests`. Those actual authentication/lifecycle boundaries should
+be excluded explicitly; `/api/tools` remains a naming anchor with a root fallback.
+The overview advertises free skills discovery and synchronous marketplace runs
+without publishing their corresponding path schemas. Do not invent those tools
+or classify every future marketplace route as incompatible. Scraper modes that
+hand off SIWX snapshots remain unsupported even when small requests usually finish
+inline. Cached primary documentation and captured contracts do not qualify paid
+completion or current availability.

@@ -38,6 +38,12 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Provider | Definition | Catalog |
 | --- | --- | --- |
 | Agent402 | `agent402.toml` | Web-focused default; alternate lowercase tags select reviewed catalog subsets |
+| AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
+| Datakoot | `datakoot.toml` | Public-data gateway; apex-domain help |
+| HireScrape | `hirescrape.toml` | Synchronous paid scraper namespace; SIWX lifecycle omitted |
+| NetIntel | `netintel.toml` | Canonical POST/body contracts and image data-URI mapping |
+| TeleSINT | `telesint.toml` | Stateless Telegram intelligence; watch ownership unsupported |
+| RelayShield phone | `relayshield/phone-reputation.toml` | Authored vendor-omitted request contract |
 | AgentFund | `agentfund.toml` | Vendor OpenAPI |
 | AgentUtility | `agentutility/provider.toml` | 15 research operations + help; enriched cluster tags; managed payments omit extensions |
 | Arkham | `arkham.toml` | Vendor OpenAPI |
