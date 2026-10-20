@@ -55,6 +55,67 @@ Consult the live runbook/reference before changing qualification accounting.
 Method-pair review is part of this audit; no separate GET-preference workstream,
 full-snapshot requirement or default operation allowlist is needed.
 
+## P1 design resolution and delivery ownership
+
+Implementation baseline is `05280d66f903e38b45b521d4b973f5e58529db53`.
+C1.1 is `cf39796`; C1.2 is `0da7d24`. Independent audits are complete;
+working evidence is under ignored `target/provider-curation/`. CAVEATS owns the
+enduring provider/method classifications and fixture maintenance owns consumer
+responsibilities. No fresh vendor availability or qualification is claimed.
+
+G1's design uses `recommended_tools: Vec<String>` and default-false
+`use_recommended_tools`, with existing source-local generated-name selector syntax.
+No prefix rewriting: custom prefixes require explicit replacement advice. Syntax
+validates offline; inventory misses warn when advice is unused. Opted-in exact
+misses fail, wildcard misses warn, and missing/empty/effectively empty advice fails
+rather than broadening. Advice matches the compatible named inventory including
+help, then intersects ordinary source-name filters; listeners narrow afterward.
+Metadata never changes MCP descriptions, names, payer or raw-call authority.
+
+`catalog tools --all-tools` bypasses recommendation opt-in only, after typed
+configuration resolution; ordinary compatibility/source/listener filters remain.
+It conflicts with pricing discovery. To inspect an otherwise filtered full
+compatible catalog, explicitly clear those ordinary filters in a separate config.
+Recommendation markers appear in operator inventories. `config show` remains
+offline and exposes effective metadata/opt-in and origins, including invalid
+empty opt-in advice that requires catalog evidence to diagnose.
+
+`prefer_post` is a default-true inherited Config boolean, selecting exact-path
+POST over GET after compatibility selection and before naming. All generic,
+imported and embedded construction shares this rule; raw calls stay explicit.
+No proven opt-out exception or exact-method exclusion need emerged. C2.1 is
+unnecessary. Canonical GenuineGood/Otto names and checked-in consumers are listed
+in CAVEATS and migrate together in C2.2. Generic tests deliberately inspecting
+both methods must explicitly disable preference. No retry changes are authorized.
+
+Ordered provider ownership (each definition occurs exactly once):
+
+- C3.1: agentfund, agosint, arkham, botsmith, brazilayer, datakoot, deepline,
+  genuinegood, google-trends, ipintel, kronos, lonestar, pdl, telesint, x402stock
+  TOMLs; their caveats, recommendations and affected request/selector tests.
+- C3.2: agent402, blockrun, claw402, exa, hirescrape, netintel, oneshot, otto,
+  regimeshift, relayshield, socialfetch, stableenrich, vaaya, x402-list TOMLs;
+  their narrow lifecycle/auth/authority restrictions, overrides, all affected
+  selectors and focused positive/negative request/routing tests.
+- C3.3: agentutility/provider.toml and snapshot_agentutility utility/catalog;
+  concordance/provider.toml and authored schema; curl, glassnode, locus,
+  newsgurus, straits provider.toml/local schemas; relayshield phone companion.
+  Own projection/enrichment fidelity, namespace preservation and docs/tests.
+
+No child splits are currently needed. C3.3 closes the provider boundary before
+C4.1 privacy adoption. Acceptance includes before/after inventories under target,
+new compatible route visibility and complete naming/override migration.
+C5.1 owns qualification's explicit input map and selected-scope checks;
+C5.2 owns blanket snapshots plus startup_benchmark's cases-index consumer;
+C5.3a–C5.3c own focused input subsets, the former orphan captures and maintained provenance. Runtime inputs,
+reviewed request schemas and payment evidence remain intact. Each exact SHA and
+fixup receives independent review; gates retain their cumulative scope below.
+
+Focused baseline: sandbox config ran 9 tests, 6 passed; two localhost permission
+failures and a pre-existing privacy-help keyword mismatch (`pdl_person`) failed.
+The unrestricted offline rerun is being captured separately. The static universal
+paid-scope mismatch remains distinct until provider_catalogs executes.
+
 ## Desired policy and design decisions
 
 1. Reusable providers expose the supported catalog by default. Compactness,

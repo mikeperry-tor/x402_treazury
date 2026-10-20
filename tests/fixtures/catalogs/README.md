@@ -1,20 +1,40 @@
 # Provider contract fixtures
 
-The 14 legacy tool catalogs were captured from the independent Python implementation
-before its retirement and verified against Rust. Together with the reviewed Rust
-provider catalogs, the 26 fixtures pin 971 tool names, full descriptions, schemas,
-methods, paths, parameter routes and help URLs. Settings snapshots cover 30
-bundled providers, including those without offline specs.
-Local spec paths are relative to the repository root.
+Provider-specific inputs must reproduce a named quirk, failure or authored
+transformation; shared synthetic tests own generic parsing and selection. The
+current blanket output/settings snapshots are scheduled for removal under the
+[provider-curation plan](../../../docs/plans/provider_curation.md). Do not add a
+new golden or freeze a full settings map merely because a provider was added.
 
-Run `cargo test --test provider_catalogs --test config` from the Rust project.
-These tests need no Python, credentials or external services. Input OpenAPI
-snapshots are under `tests/fixtures/`; the five curated catalogs are in `providers/`.
+Retain inputs by responsibility:
 
-When changing providers, review the changed input, the generated tool contract,
-and the expected output together. Do not automatically accept generated snapshots
-just to make tests pass. Schema/routing edge cases also have targeted Rust tests;
-these snapshots preserve the selected provider contracts, not every old behavior.
+- Request/routing quirks: Exa's ids/urls alternatives, Locus address alternatives
+  and gateway rewrite, IPIntel nullability/arbitrary JSON, RecallRadar's open
+  body and structured/prose price disagreement.
+- Mixed payment/lifecycle boundaries: Exa, OneShot, StableEnrich, Agent402,
+  BlockRun, RelayShield and Vaaya, with meaningful positive/negative assertions.
+- Authored transformations: NewsGurus Bazaar projection, AgentUtility registry
+  tag/alias enrichment, SocialFetch version naming and credit metadata.
+- Captured unsigned payment evidence: AgentUtility challenges and
+  provider_payment_challenges.json, independently consumed by signing tests.
+- Offline qualification request schemas: retained vendor inputs validate reviewed
+  requests; they establish neither live compatibility nor spending authority.
+
+Production local catalogs under `providers/` and the Kronos/RegimeShift inputs in
+`examples/live-tor-providers.toml` are runtime inputs. Preserve them independently
+of test pruning. Check consumers in discovery, media, payment, startup, examples
+and qualification before deletion. `cases.json` currently feeds the blanket
+catalog test, the offline qualification preset test and the ignored startup
+benchmark; migrate all three before removing it. Captured Apollo, Concordance,
+Locus and Straits test inputs have no code consumer. Concordance, Locus and Straits have
+distinct production local catalogs that remain necessary.
+
+Use `scripts/zcash.sh test --test provider_catalogs --test config` from the repository
+root. Tests use no Python, credentials or live vendors. Review input/schema/routing
+changes together; never regenerate snapshots merely to obtain a passing result.
+Preserve full inputs only where a concrete comparison needs the entire inventory.
+The following capture notes describe existing inputs and current assertions;
+selection/count claims are being normalized with their owning implementation.
 
 The Exa request fixture was captured from `https://api.exa.ai/openapi.json` on
 2026-10-03 with the Rust `snapshot_spec` utility. It retains all 64 operations so
