@@ -36,7 +36,7 @@ use crate::{
         transparent::{TransparentAddressId, TransparentScope},
     },
     sync::{SHARDTREE_CHECKPOINT_ROLLING_WINDOW_SIZE, ScanPriority, ScanRange},
-    wallet::ScanTarget,
+    wallet::{ScanTarget, ScanTargetOrigin, ScanTargetPools},
 };
 
 use super::{
@@ -60,43 +60,103 @@ fn write_string<W: Write>(mut writer: W, str: &str) -> std::io::Result<()> {
     writer.write_all(str.as_bytes())
 }
 
+/// Reads the serialized version of the type named `type_name`.
+///
+/// A version above `current_version`, the version this build writes, was written by a newer build in a layout this
+/// build cannot read. It is refused so the newer layout is never read as an older one.
+pub(crate) fn read_version<R: Read>(
+    mut reader: R,
+    type_name: &str,
+    current_version: u8,
+) -> std::io::Result<u8> {
+    let version = reader.read_u8()?;
+    if version > current_version {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "{type_name} serialized version {version} was written by a newer build. this build reads up to \
+                 version {current_version}."
+            ),
+        ));
+    }
+
+    Ok(version)
+}
+
 impl ScanTarget {
     fn serialized_version() -> u8 {
-        0
+        // Version 1 makes the txid optional, and replaces the narrow scan area flag with the pools the target's
+        // transaction holds notes of and the target's origin.
+        1
     }
+
+    const INTERNAL_ORIGIN: u8 = 0;
+    const EXTERNAL_ORIGIN: u8 = 1;
 
     /// Deserialize into `reader`
     pub fn read<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let _version = reader.read_u8()?;
+        let version = read_version(&mut reader, "ScanTarget", Self::serialized_version())?;
         let block_height = BlockHeight::from_u32(reader.read_u32::<LittleEndian>()?);
-        let txid = TxId::read(&mut reader)?;
-        let narrow_scan_area = reader.read_u8()? != 0;
+        if version == 0 {
+            // a version 0 target without a particular transaction carried a zero txid, and its narrow scan area
+            // flag is dropped, as the narrow area is now the default. the origin is not recorded, and a version 0
+            // target is taken as external, so a transaction the server does not serve drops it.
+            let txid = TxId::read(&mut reader)?;
+            let _narrow_scan_area = reader.read_u8()?;
+            return Ok(Self::new(
+                block_height,
+                (txid != TxId::from_bytes([0; 32])).then_some(txid),
+            ));
+        }
+        let txid = Optional::read(&mut reader, TxId::read)?;
+        let pools = ScanTargetPools::from_bits(reader.read_u8()?).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "scan target names a shielded pool this version does not know",
+            )
+        })?;
+        let origin = match reader.read_u8()? {
+            Self::INTERNAL_ORIGIN => ScanTargetOrigin::Internal,
+            Self::EXTERNAL_ORIGIN => ScanTargetOrigin::External,
+            unknown => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("unknown scan target origin {unknown}"),
+                ));
+            }
+        };
 
         Ok(Self {
             block_height,
             txid,
-            narrow_scan_area,
+            pools,
+            origin,
         })
     }
 
     /// Serialize into `writer`
     pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         writer.write_u8(Self::serialized_version())?;
-        writer.write_u32::<LittleEndian>(self.block_height.into())?;
-        self.txid.write(&mut *writer)?;
-        writer.write_u8(u8::from(self.narrow_scan_area))
+        writer.write_u32::<LittleEndian>(self.block_height().into())?;
+        Optional::write(&mut *writer, self.txid(), |w, txid| txid.write(w))?;
+        writer.write_u8(self.pools().bits())?;
+        writer.write_u8(match self.origin() {
+            ScanTargetOrigin::Internal => Self::INTERNAL_ORIGIN,
+            ScanTargetOrigin::External => Self::EXTERNAL_ORIGIN,
+        })
     }
 }
 
 impl SyncState {
     fn serialized_version() -> u8 {
         // Version 4 inserts the ironwood shard ranges after the orchard ones.
-        4
+        // Version 5 appends the transparent scan floor.
+        5
     }
 
     /// Deserialize into `reader`
     pub fn read<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let version = reader.read_u8()?;
+        let version = read_version(&mut reader, "SyncState", Self::serialized_version())?;
         let scan_ranges = Vector::read(&mut reader, |r| {
             let start = BlockHeight::from_u32(r.read_u32::<LittleEndian>()?);
             let end = BlockHeight::from_u32(r.read_u32::<LittleEndian>()?);
@@ -176,15 +236,18 @@ impl SyncState {
                 let block_height = BlockHeight::from_u32(r.read_u32::<LittleEndian>()?);
                 let txid = TxId::read(r)?;
 
-                ScanTarget {
-                    block_height,
-                    txid,
-                    narrow_scan_area: true,
-                }
+                ScanTarget::new(block_height, Some(txid))
             })
         })?
         .into_iter()
         .collect::<BTreeSet<_>>();
+        let transparent_scan_floor = if version >= 5 {
+            Optional::read(&mut reader, |r| {
+                Ok(BlockHeight::from_u32(r.read_u32::<LittleEndian>()?))
+            })?
+        } else {
+            None
+        };
 
         Ok(Self {
             scan_ranges,
@@ -193,6 +256,7 @@ impl SyncState {
             ironwood_shard_ranges,
             scan_targets,
             initial_sync_state: InitialSyncState::new(),
+            transparent_scan_floor,
         })
     }
 
@@ -224,7 +288,10 @@ impl SyncState {
             &mut writer,
             &self.scan_targets.iter().collect::<Vec<_>>(),
             |w, &scan_target| scan_target.write(w),
-        )
+        )?;
+        Optional::write(&mut writer, self.transparent_scan_floor, |w, floor| {
+            w.write_u32::<LittleEndian>(floor.into())
+        })
     }
 }
 
@@ -236,7 +303,7 @@ impl TreeBounds {
 
     /// Deserialize into `reader`
     pub fn read<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let version = reader.read_u8()?;
+        let version = read_version(&mut reader, "TreeBounds", Self::serialized_version())?;
         let sapling_initial_tree_size = reader.read_u32::<LittleEndian>()?;
         let sapling_final_tree_size = reader.read_u32::<LittleEndian>()?;
         let orchard_initial_tree_size = reader.read_u32::<LittleEndian>()?;
@@ -280,7 +347,7 @@ impl NullifierMap {
 
     /// Deserialize into `reader`
     pub fn read<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let version = reader.read_u8()?;
+        let version = read_version(&mut reader, "NullifierMap", Self::serialized_version())?;
         let sapling = Vector::read(&mut reader, |r| {
             let mut nullifier_bytes = [0u8; 32];
             r.read_exact(&mut nullifier_bytes)?;
@@ -297,11 +364,7 @@ impl NullifierMap {
                 let block_height = BlockHeight::from_u32(r.read_u32::<LittleEndian>()?);
                 let txid = TxId::read(r)?;
 
-                ScanTarget {
-                    block_height,
-                    txid,
-                    narrow_scan_area: false,
-                }
+                ScanTarget::internal(block_height, txid)
             };
 
             Ok((nullifier, scan_target))
@@ -320,11 +383,7 @@ impl NullifierMap {
                 let block_height = BlockHeight::from_u32(r.read_u32::<LittleEndian>()?);
                 let txid = TxId::read(r)?;
 
-                ScanTarget {
-                    block_height,
-                    txid,
-                    narrow_scan_area: false,
-                }
+                ScanTarget::internal(block_height, txid)
             };
 
             Ok((nullifier, scan_target))
@@ -392,7 +451,7 @@ impl WalletBlock {
 
     /// Deserialize into `reader`
     pub fn read<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let _version = reader.read_u8()?;
+        read_version(&mut reader, "WalletBlock", Self::serialized_version())?;
         let block_height = BlockHeight::from_u32(reader.read_u32::<LittleEndian>()?);
         let mut block_hash = BlockHash([0u8; 32]);
         reader.read_exact(&mut block_hash.0)?;
@@ -435,7 +494,7 @@ impl WalletTransaction {
         mut reader: R,
         consensus_parameters: &impl consensus::Parameters,
     ) -> std::io::Result<Self> {
-        let version = reader.read_u8()?;
+        let version = read_version(&mut reader, "WalletTransaction", Self::serialized_version())?;
         let txid = TxId::read(&mut reader)?;
         let status = ConfirmationStatus::read(&mut reader)?;
         let transaction = Transaction::read(
@@ -520,7 +579,7 @@ impl TransparentCoin {
 
     /// Deserialize into `reader`
     pub fn read<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let version = reader.read_u8()?;
+        let version = read_version(&mut reader, "TransparentCoin", Self::serialized_version())?;
 
         let txid = TxId::read(&mut reader)?;
         let output_index = if version >= 1 {
@@ -611,7 +670,7 @@ fn write_refetch_nullifier_ranges(
 impl SaplingNote {
     /// Deserialize into `reader`
     pub fn read<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let version = reader.read_u8()?;
+        let version = read_version(&mut reader, "WalletNote", Self::serialized_version())?;
 
         let txid = TxId::read(&mut reader)?;
         let output_index = if version >= 2 {
@@ -747,7 +806,11 @@ fn read_orchard_protocol_note<R: Read, P>(
     mut reader: R,
     note_version: orchard::note::NoteVersion,
 ) -> std::io::Result<WalletNote<orchard::Note, orchard::note::Nullifier, P>> {
-    let version = reader.read_u8()?;
+    let version = read_version(
+        &mut reader,
+        "WalletNote",
+        WalletNote::<orchard::Note, orchard::note::Nullifier, P>::serialized_version(),
+    )?;
 
     let txid = TxId::read(&mut reader)?;
     let output_index = if version >= 2 {
@@ -890,7 +953,7 @@ impl OutgoingSaplingNote {
         mut reader: R,
         consensus_parameters: &impl consensus::Parameters,
     ) -> std::io::Result<Self> {
-        let version = reader.read_u8()?;
+        let version = read_version(&mut reader, "OutgoingNote", Self::serialized_version())?;
 
         let txid = TxId::read(&mut reader)?;
         let output_index = if version >= 1 {
@@ -997,7 +1060,12 @@ impl OutgoingSaplingNote {
         Optional::write(
             &mut writer,
             self.recipient_full_unified_address.as_ref(),
-            |w, unified_address| write_string(w, &unified_address.encode(consensus_parameters)),
+            |w, unified_address| {
+                write_string(
+                    w,
+                    &unified_address.encode_receiver_preserving(consensus_parameters),
+                )
+            },
         )?;
 
         Ok(())
@@ -1012,7 +1080,11 @@ fn read_orchard_protocol_outgoing_note<R: Read, P>(
     consensus_parameters: &impl consensus::Parameters,
     note_version: orchard::note::NoteVersion,
 ) -> std::io::Result<OutgoingNote<orchard::Note, P>> {
-    let version = reader.read_u8()?;
+    let version = read_version(
+        &mut reader,
+        "OutgoingNote",
+        OutgoingNote::<orchard::Note, P>::serialized_version(),
+    )?;
 
     let txid = TxId::read(&mut reader)?;
     let output_index = if version >= 1 {
@@ -1099,7 +1171,12 @@ fn write_orchard_protocol_outgoing_note<W: Write, P>(
     Optional::write(
         &mut writer,
         note.recipient_full_unified_address.as_ref(),
-        |w, unified_address| write_string(w, &unified_address.encode(consensus_parameters)),
+        |w, unified_address| {
+            write_string(
+                w,
+                &unified_address.encode_receiver_preserving(consensus_parameters),
+            )
+        },
     )?;
 
     Ok(())
@@ -1159,7 +1236,7 @@ impl ShardTrees {
 
     /// Deserialize into `reader`
     pub fn read<R: Read>(mut reader: R) -> std::io::Result<Self> {
-        let version = reader.read_u8()?;
+        let version = read_version(&mut reader, "ShardTrees", Self::serialized_version())?;
         let sapling = Self::read_shardtree(&mut reader)?;
         let orchard = Self::read_shardtree(&mut reader)?;
         let ironwood = if version >= 1 {
@@ -1368,6 +1445,78 @@ mod tests {
 
     use super::*;
 
+    fn written(scan_target: &ScanTarget) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        scan_target.write(&mut bytes).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn scan_target_round_trips_with_its_pools_and_origin() {
+        let txid = TxId::from_bytes([3; 32]);
+        for scan_target in [
+            ScanTarget::new(BlockHeight::from_u32(10), None),
+            ScanTarget::new(BlockHeight::from_u32(10), Some(txid)),
+            ScanTarget::internal(BlockHeight::from_u32(20), txid)
+                .with_pool(zcash_protocol::ShieldedPool::Sapling)
+                .with_pool(zcash_protocol::ShieldedPool::Ironwood),
+        ] {
+            let read = ScanTarget::read(written(&scan_target).as_slice()).unwrap();
+            assert_eq!(read, scan_target);
+            assert_eq!(read.txid(), scan_target.txid());
+            assert_eq!(read.pools(), scan_target.pools());
+            assert_eq!(read.origin(), scan_target.origin());
+        }
+    }
+
+    // A version 0 target carried a zero txid where no particular transaction was wanted, and a narrow scan area
+    // flag. It is read as an external target with no pool.
+    #[test]
+    fn scan_target_version_zero_is_read_as_external() {
+        let v0 = |txid: [u8; 32]| {
+            let mut bytes = vec![0u8];
+            bytes.write_u32::<LittleEndian>(30).unwrap();
+            bytes.extend_from_slice(&txid);
+            bytes.push(1);
+            bytes
+        };
+
+        let without_transaction = ScanTarget::read(v0([0; 32]).as_slice()).unwrap();
+        assert_eq!(
+            without_transaction,
+            ScanTarget::new(BlockHeight::from_u32(30), None)
+        );
+        assert_eq!(without_transaction.txid(), None);
+        assert_eq!(without_transaction.origin(), ScanTargetOrigin::External);
+        assert!(without_transaction.pools().is_empty());
+
+        let with_transaction = ScanTarget::read(v0([5; 32]).as_slice()).unwrap();
+        assert_eq!(with_transaction.txid(), Some(TxId::from_bytes([5; 32])));
+    }
+
+    #[test]
+    fn scan_target_with_an_unknown_pool_or_origin_is_refused() {
+        let mut unknown_pool = written(&ScanTarget::new(BlockHeight::from_u32(10), None));
+        *unknown_pool.last_mut().unwrap() = 0;
+        let pools_index = unknown_pool.len() - 2;
+        unknown_pool[pools_index] = 1 << 3;
+        assert_eq!(
+            ScanTarget::read(unknown_pool.as_slice())
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+
+        let mut unknown_origin = written(&ScanTarget::new(BlockHeight::from_u32(10), None));
+        *unknown_origin.last_mut().unwrap() = 2;
+        assert_eq!(
+            ScanTarget::read(unknown_origin.as_slice())
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
     // Helper: build a minimal v3 SyncState byte blob (no ironwood_shard_ranges).
     // Format: version(1) | scan_ranges[0] | sapling_shard_ranges[0] |
     //         orchard_shard_ranges[0] | scan_targets[0]
@@ -1404,6 +1553,153 @@ mod tests {
         let recovered = SyncState::read(bytes.as_slice()).expect("read should succeed");
         assert_eq!(recovered.ironwood_shard_ranges, state.ironwood_shard_ranges);
         assert_eq!(recovered.scan_ranges, state.scan_ranges);
+    }
+
+    // Helper: build a minimal v4 SyncState byte blob (no transparent scan floor).
+    // Format: version(1) | scan_ranges[0] | sapling_shard_ranges[0] |
+    //         orchard_shard_ranges[0] | ironwood_shard_ranges[0] | scan_targets[0]
+    fn v4_sync_state_bytes() -> Vec<u8> {
+        let mut out = Vec::new();
+        out.write_u8(4).unwrap();
+        Vector::write(&mut out, &[] as &[()], |_, _| Ok(())).unwrap();
+        Vector::write(&mut out, &[] as &[()], |_, _| Ok(())).unwrap();
+        Vector::write(&mut out, &[] as &[()], |_, _| Ok(())).unwrap();
+        Vector::write(&mut out, &[] as &[()], |_, _| Ok(())).unwrap();
+        Vector::write(&mut out, &[] as &[()], |_, _| Ok(())).unwrap();
+        out
+    }
+
+    #[test]
+    fn sync_state_v4_reads_with_unset_transparent_scan_floor() {
+        let bytes = v4_sync_state_bytes();
+        let sync_state = SyncState::read(bytes.as_slice()).expect("v4 should read cleanly");
+        assert_eq!(sync_state.transparent_scan_floor, None);
+    }
+
+    #[test]
+    fn sync_state_v5_roundtrip_preserves_transparent_scan_floor() {
+        for transparent_scan_floor in [None, Some(BlockHeight::from_u32(100))] {
+            let mut state = SyncState::new();
+            state.transparent_scan_floor = transparent_scan_floor;
+            let mut bytes = Vec::new();
+            state.write(&mut bytes).expect("write should succeed");
+            let recovered = SyncState::read(bytes.as_slice()).expect("read should succeed");
+            assert_eq!(recovered.transparent_scan_floor, transparent_scan_floor);
+        }
+    }
+
+    mod read_version {
+        use super::super::read_version;
+
+        /// The current version of a made-up type. It follows no type's serialized version.
+        const ARBITRARY_CURRENT_VERSION: u8 = 2;
+
+        #[test]
+        fn accepts_versions_up_to_the_current_version() {
+            for version in [0, ARBITRARY_CURRENT_VERSION] {
+                assert_eq!(
+                    read_version([version].as_slice(), "Type", ARBITRARY_CURRENT_VERSION).unwrap(),
+                    version
+                );
+            }
+        }
+
+        #[test]
+        fn refuses_a_version_above_the_current_version() {
+            let error = read_version(
+                [ARBITRARY_CURRENT_VERSION + 1].as_slice(),
+                "Type",
+                ARBITRARY_CURRENT_VERSION,
+            )
+            .expect_err("a version above the current version is refused");
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        }
+    }
+
+    /// Each reader is given only a serialized version above the one its type writes. A reader that refuses the
+    /// version returns invalid data. A reader that read on would report the end of the input.
+    #[test]
+    fn readers_refuse_serialized_versions_above_their_own() {
+        let consensus_parameters = zcash_protocol::consensus::MAIN_NETWORK;
+        let newer_scan_target = [ScanTarget::serialized_version() + 1];
+        let newer_sync_state = [SyncState::serialized_version() + 1];
+        let newer_tree_bounds = [TreeBounds::serialized_version() + 1];
+        let newer_nullifier_map = [NullifierMap::serialized_version() + 1];
+        let newer_wallet_block = [WalletBlock::serialized_version() + 1];
+        let newer_wallet_transaction = [WalletTransaction::serialized_version() + 1];
+        let newer_transparent_coin = [TransparentCoin::serialized_version() + 1];
+        let newer_wallet_note = [SaplingNote::serialized_version() + 1];
+        let newer_outgoing_note = [OutgoingSaplingNote::serialized_version() + 1];
+        let newer_shard_trees = [ShardTrees::serialized_version() + 1];
+
+        for (type_name, read) in [
+            (
+                "ScanTarget",
+                ScanTarget::read(newer_scan_target.as_slice()).map(drop),
+            ),
+            (
+                "SyncState",
+                SyncState::read(newer_sync_state.as_slice()).map(drop),
+            ),
+            (
+                "TreeBounds",
+                TreeBounds::read(newer_tree_bounds.as_slice()).map(drop),
+            ),
+            (
+                "NullifierMap",
+                NullifierMap::read(newer_nullifier_map.as_slice()).map(drop),
+            ),
+            (
+                "WalletBlock",
+                WalletBlock::read(newer_wallet_block.as_slice()).map(drop),
+            ),
+            (
+                "WalletTransaction",
+                WalletTransaction::read(newer_wallet_transaction.as_slice(), &consensus_parameters)
+                    .map(drop),
+            ),
+            (
+                "TransparentCoin",
+                TransparentCoin::read(newer_transparent_coin.as_slice()).map(drop),
+            ),
+            (
+                "SaplingNote",
+                SaplingNote::read(newer_wallet_note.as_slice()).map(drop),
+            ),
+            (
+                "OrchardNote",
+                OrchardNote::read(newer_wallet_note.as_slice()).map(drop),
+            ),
+            (
+                "IronwoodNote",
+                IronwoodNote::read(newer_wallet_note.as_slice()).map(drop),
+            ),
+            (
+                "OutgoingSaplingNote",
+                OutgoingSaplingNote::read(newer_outgoing_note.as_slice(), &consensus_parameters)
+                    .map(drop),
+            ),
+            (
+                "OutgoingOrchardNote",
+                OutgoingOrchardNote::read(newer_outgoing_note.as_slice(), &consensus_parameters)
+                    .map(drop),
+            ),
+            (
+                "OutgoingIronwoodNote",
+                OutgoingIronwoodNote::read(newer_outgoing_note.as_slice(), &consensus_parameters)
+                    .map(drop),
+            ),
+            (
+                "ShardTrees",
+                ShardTrees::read(newer_shard_trees.as_slice()).map(drop),
+            ),
+        ] {
+            assert_eq!(
+                read.expect_err(type_name).kind(),
+                std::io::ErrorKind::InvalidData,
+                "{type_name}"
+            );
+        }
     }
 
     // Helper: build a minimal v1 NullifierMap byte blob (no ironwood BTreeMap).

@@ -1,8 +1,23 @@
+--- a/zingolib/src/lightclient.rs
++++ b/zingolib/src/lightclient.rs
+@@ -648,6 +648,12 @@
+         self.destination_servers = servers;
+     }
+
++    /// Install an application-owned indexer, including its transport policy.
++    /// Existing synchronization must be stopped before replacing an indexer.
++    pub fn set_indexer(&mut self, indexer: zingo_netutils::GrpcIndexer) {
++        self.indexer = Some(indexer);
++    }
++
+     /// Disconnects every network capability of the client, returning only
+     /// when teardown is complete.
+     ///
 --- a/zingo-netutils/src/lib.rs
 +++ b/zingo-netutils/src/lib.rs
-@@ -296,6 +296,11 @@
+@@ -328,6 +328,11 @@
  }
- 
+
  impl GrpcIndexer {
 +    /// Use an application-owned channel; all RPCs and clones retain its connector.
 +    pub fn from_channel(uri: http::Uri, channel: Channel) -> Self {
@@ -12,18 +27,3 @@
      pub async fn new(uri: http::Uri) -> Result<Self, GetClientError> {
          let scheme = uri
              .scheme_str()
---- a/zingolib/src/lightclient.rs
-+++ b/zingolib/src/lightclient.rs
-@@ -599,6 +599,12 @@
-         Ok(())
-     }
- 
-+    /// Install an application-owned indexer, including its transport policy.
-+    /// Existing synchronization must be stopped before replacing an indexer.
-+    pub fn set_indexer(&mut self, indexer: zingo_netutils::GrpcIndexer) {
-+        self.indexer = Some(indexer);
-+    }
-+
-     /// Disconnects every network capability of the client, returning only
-     /// when teardown is complete.
-     pub async fn go_offline(&mut self) {

@@ -2,6 +2,7 @@
 
 use pepper_sync::error::{
     ContinuityError, MempoolError, ScanError, ServerError, SyncError, SyncModeError,
+    SyncStatusError,
 };
 use zingolib::{lightclient::error::LightClientError, wallet::error::WalletError};
 
@@ -93,6 +94,11 @@ pub(crate) fn client_failure(error: LightClientError, launch: bool) -> anyhow::E
                 "mempool_shutdown_timeout"
             }
             SyncError::SyncModeError(e) => mode_reason(e),
+            SyncError::SyncStatusError(e) => match e {
+                SyncStatusError::NoSyncData => "wallet_no_sync_data",
+                SyncStatusError::SyncProgressChannelClosed => "sync_progress_channel_closed",
+                SyncStatusError::WalletError(e) => wallet_reason(e, &mut diagnostic),
+            },
             SyncError::ChainError(..) => "wallet_ahead_of_chain",
             SyncError::BirthdayBelowSapling(..) => "birthday_below_sapling",
             SyncError::ShardTreeError(e) => shard_reason(e),
@@ -138,6 +144,10 @@ pub(crate) fn client_failure(error: LightClientError, launch: bool) -> anyhow::E
         LightClientError::MigrationError(_) => "migration_error",
         LightClientError::SendError(_) => "send_error",
         LightClientError::Offline => "indexer_not_configured",
+        LightClientError::MigrationTransmissionTargetIsSyncEndpoint { .. } => {
+            "migration_transmission_target_is_sync_endpoint"
+        }
+        LightClientError::NoEligibleDestination(_) => "no_eligible_destination",
     };
     diagnostic.into()
 }
@@ -154,6 +164,9 @@ fn server_reason(error: &ServerError, diagnostic: &mut SyncDiagnostic) -> &'stat
         ServerError::ChainVerificationError => "chain_verification_failed",
         ServerError::FetcherDropped => "indexer_fetcher_dropped",
         ServerError::GenesisBlockOnly => "indexer_genesis_only",
+        ServerError::TreeStateNotServed { .. } => "indexer_tree_state_not_served",
+        ServerError::UnsupportedProtocolVersion { .. } => "indexer_protocol_unsupported",
+        ServerError::ChainHeightBelowScanRange { .. } => "indexer_chain_below_scan_range",
     }
 }
 
@@ -182,10 +195,18 @@ fn scan_reason(error: &ScanError, diagnostic: &mut SyncDiagnostic) -> &'static s
         ScanError::InvalidSaplingOutput => "sapling_output_invalid",
         ScanError::InvalidOrchardAction => "orchard_action_invalid",
         ScanError::IncorrectTreeSize { .. } => "tree_size_mismatch",
+        ScanError::TreeSizeNotReported { .. } => "tree_size_not_reported",
+        ScanError::TransactionNotServed { status, .. } => {
+            diagnostic.grpc_code = Some(status.code());
+            "indexer_transaction_not_served"
+        }
         ScanError::IncorrectTxid { .. } => "transaction_id_mismatch",
         ScanError::DecryptedNoteDataNotFound(_) => "decrypted_note_data_missing",
         ScanError::InvalidMemoBytes(_) => "memo_bytes_invalid",
         ScanError::AddressParseError(_) => "address_parse_failed",
+        ScanError::TransparentOutputInvalidValue(_) => "transparent_output_invalid_value",
+        ScanError::AllAddressesInUse => "transparent_addresses_in_use",
+        ScanError::TransparentAddressDerivationError(_) => "transparent_address_derivation",
     }
 }
 
@@ -621,6 +642,160 @@ mod tests {
                 for forbidden in ["secret", "example.invalid", "private", "authorization"] {
                     assert!(!text.contains(forbidden), "{text}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn new_sdk_failures_discard_private_payloads_and_keep_typed_reasons() {
+        let txid = zcash_protocol::TxId::from_bytes([0xab; 32]);
+        let private_height = 987654321u32.into();
+        let cases = [
+            (
+                LightClientError::SyncError(SyncError::SyncStatusError(
+                    SyncStatusError::NoSyncData,
+                )),
+                "wallet_no_sync_data",
+            ),
+            (
+                LightClientError::SyncError(SyncError::SyncStatusError(
+                    SyncStatusError::SyncProgressChannelClosed,
+                )),
+                "sync_progress_channel_closed",
+            ),
+            (
+                LightClientError::SyncError(SyncError::SyncStatusError(
+                    SyncStatusError::WalletError(WalletError::MigrationStateCorrupt(
+                        "private upstream wallet details".into(),
+                    )),
+                )),
+                "wallet_migration_state_corrupt",
+            ),
+            (
+                LightClientError::SyncError(SyncError::ServerError(
+                    ServerError::UnsupportedProtocolVersion {
+                        version: "https://private-token@example.invalid/private-path".into(),
+                    },
+                )),
+                "indexer_protocol_unsupported",
+            ),
+            (
+                LightClientError::SyncError(SyncError::ServerError(
+                    ServerError::TreeStateNotServed {
+                        pool: zcash_protocol::PoolType::ORCHARD,
+                        height: private_height,
+                    },
+                )),
+                "indexer_tree_state_not_served",
+            ),
+            (
+                LightClientError::SyncError(SyncError::ServerError(
+                    ServerError::ChainHeightBelowScanRange {
+                        chain_height: private_height,
+                        scan_range_end: private_height,
+                    },
+                )),
+                "indexer_chain_below_scan_range",
+            ),
+            (
+                LightClientError::SyncError(SyncError::ScanError(ScanError::TreeSizeNotReported {
+                    shielded_protocol: zcash_protocol::PoolType::ORCHARD,
+                    height: private_height,
+                    calculated_size: 987654321,
+                })),
+                "tree_size_not_reported",
+            ),
+            (
+                LightClientError::SyncError(SyncError::ScanError(
+                    ScanError::TransparentOutputInvalidValue(987654321),
+                )),
+                "transparent_output_invalid_value",
+            ),
+            (
+                LightClientError::SyncError(SyncError::ScanError(ScanError::AllAddressesInUse)),
+                "transparent_addresses_in_use",
+            ),
+            (
+                LightClientError::MigrationTransmissionTargetIsSyncEndpoint {
+                    host: "private-token@example.invalid".into(),
+                },
+                "migration_transmission_target_is_sync_endpoint",
+            ),
+            (
+                LightClientError::NoEligibleDestination(
+                    zingolib::destination::servers::NoEligibleDestinations::Empty(
+                        zingolib::destination::servers::Transport::Nakednet,
+                    ),
+                ),
+                "no_eligible_destination",
+            ),
+        ];
+        for (error, reason) in cases {
+            assert_private_sdk_failure(error, reason, None);
+        }
+
+        let mut status = tonic::Status::not_found("private upstream transaction details");
+        status
+            .metadata_mut()
+            .insert("authorization", "private-token".parse().unwrap());
+        assert_private_sdk_failure(
+            LightClientError::SyncError(SyncError::ScanError(ScanError::TransactionNotServed {
+                txid,
+                block_height: private_height,
+                status,
+            })),
+            "indexer_transaction_not_served",
+            Some(tonic::Code::NotFound),
+        );
+    }
+
+    fn assert_private_sdk_failure(
+        error: LightClientError,
+        reason: &str,
+        grpc_code: Option<tonic::Code>,
+    ) {
+        let error = client_failure(error, false);
+        assert_eq!(sync_failure(&error), "sync_scan_failed");
+        assert_eq!(error.chain().count(), 1);
+        assert_eq!(
+            error.downcast_ref::<SyncDiagnostic>().unwrap().reason,
+            reason
+        );
+        assert_eq!(
+            error.downcast_ref::<SyncDiagnostic>().unwrap().grpc_code,
+            grpc_code
+        );
+        let saved = sync_detail(&error).unwrap();
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            warn_sync_failure(&error.context("private outer context"), None);
+        });
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert!(logs.contains(reason), "{logs}");
+        if let Some(code) = grpc_code {
+            assert!(
+                saved.contains(&format!("grpc_code={}", code as i32)),
+                "{saved}"
+            );
+            assert!(
+                logs.contains(&format!("grpc_code={}", code as i32)),
+                "{logs}"
+            );
+        }
+        for text in [&saved, &logs] {
+            for forbidden in [
+                "private",
+                "example.invalid",
+                "authorization",
+                "987654321",
+                "abababab",
+            ] {
+                assert!(!text.contains(forbidden), "{text}");
             }
         }
     }

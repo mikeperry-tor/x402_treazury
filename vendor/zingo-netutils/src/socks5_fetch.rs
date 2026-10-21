@@ -62,7 +62,7 @@ fn classify_stage(
             after_ms: bound.as_millis().try_into().unwrap_or(u64::MAX),
         };
     }
-    if signals.is_connect && socks5_proxy.is_some_and(&chain_mentions) {
+    if signals.is_connect && socks5_proxy.is_some_and(chain_mentions) {
         return NetOpStage::LocalProxyConnect;
     }
     if chain_mentions("socks") {
@@ -152,7 +152,7 @@ impl ConduitDial {
 }
 
 /// The body at `url`, fetched untunneled, disclosing the client IP: the
-/// clearnet leg of the price fetch a switched-off Mixnet Mode consents
+/// nakednet leg of the price fetch a switched-off Mixnet Mode consents
 /// to.
 pub async fn fetch_text_untunneled(
     url: &str,

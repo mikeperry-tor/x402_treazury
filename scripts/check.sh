@@ -20,6 +20,7 @@ cargo test --locked --manifest-path tools/complexity/Cargo.toml --target-dir tar
 python3 scripts/complexity.py --base "${COMPLEXITY_BASE_REF:-main}"
 python3 vendor/verify.py
 python3 vendor/verify_zingo.py
+scripts/zcash.sh test -p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context -- --exact
 scripts/zcash.sh test --all-targets -- --test-threads=1
 scripts/zcash.sh test --features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1
 scripts/zcash.sh test --features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=1

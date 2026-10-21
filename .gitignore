@@ -28,3 +28,6 @@ target/
 # Generated live summaries belong in target/ or private external storage.
 /tests/live/reports/
 /docs/audits/*_20??-??-??.md
+
+# Preserve local proving-parameter copies left by the v6 SDK.
+/vendor/zingolib/zcash-params/

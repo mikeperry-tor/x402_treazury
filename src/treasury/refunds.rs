@@ -190,6 +190,8 @@ impl Treasury {
             >(
                 &mut *wallet,
                 &chain,
+                &zcash_client_backend::util::SystemClock,
+                &mut zingolib::utils::system_rng(),
                 &prover,
                 &prover,
                 &SpendingKeys::new(usk),

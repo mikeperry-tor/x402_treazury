@@ -5,12 +5,16 @@
 Minimize locally maintained dependency checkouts. Prioritize upstream contributions,
 compatible dependency selections and simple supported adapters that can remove an
 entire checkout. Reducing a patch is intermediate progress only when it advances
-a credible complete removal route. The current task establishes tracking and this
-plan; it does not change runtime behavior or submit upstream contributions.
+a credible complete removal route. The selected work now authorizes the Zingolib v7 migration and retirement of
+both Alloy checkouts, preserving current runtime policy. Other retirement tracks
+and upstream submissions remain separate work.
 
-The starting baseline is `5cc4a80444e1d81d2052c326c36618c4403a752a`.
-There are eight patched crate directories, used by both the application and the
-independent compatibility workspace. No replacement candidate is qualified.
+The selected migration starts at `93f2bbeb7ace3b713ffb1ac5a1592dba4cfc3614`.
+The explicitly authorized Rust/Cargo 1.99.1 upgrade is the separate preliminary
+commit `f52c451`; it retains release guards and requires fresh release qualification.
+At that baseline there are eight patched crate directories, used by both the
+application and the independent compatibility workspace. The selected migration
+targets two complete retirements; the ledger tracks the resulting inventory.
 The [checkout ledger](../../vendor/README.md#checkout-retirement-tracking) owns
 current blockers, upstream links, candidate revisions and next actions. Update it
 in place rather than keeping a second status inventory here. Reconfirm the actual
@@ -34,8 +38,45 @@ spendability; do not add historical accounting gates, capital budgets or replay
 authority. Keep identity-bound transports, Tor remote DNS/no direct fallback,
 connection versus response inactivity, progressing work and cancellation/drain
 ownership. Existing application retries remain distinct from disabled automatic
-HTTP transport recovery. Keep toolchain pins, state formats and qualification
-claims intact. None of this work authorizes live-funded qualification.
+HTTP transport recovery. Preserve application state formats and qualification claims;
+the authorized toolchain update and SDK snapshot upgrade are explicit exceptions
+documented below. None of this work authorizes live-funded qualification.
+
+## Selected V2 acceptance work
+
+The v7 implementation and two Alloy checkout removals are present on the selected
+branch, but G1 and G2 remain open. Source review and compatible lockfiles do not
+qualify their runtime behavior. Retain this unfinished acceptance work until the
+required execution succeeds; do not start another retirement on an unresolved
+material finding.
+
+Run the default application suite, payment/crypto vectors, independent compatibility
+workspace, finite-sync/cancellation regressions and synthetic-chain proving/lifecycle
+coverage with the committed sources. Require the strengthened v6 snapshot regression
+to execute its format-45 reopen and retained scan-state assertion. Verify the
+upstream replacement for tip-only/deeper reorg and mock branch-hash behavior through
+the existing lifecycle regressions before accepting removal of those local patches.
+Run feature configurations sequentially, required Clippy and the remaining vendor
+checks; preserve the exact-SHA and cumulative review requirements below.
+
+Local validation is currently blocked before test execution by intermittent,
+multi-minute native process startup stalls affecting the protoc locator and other
+build tools, including rust-analyzer's build script. An isolated helper invocation
+has eventually completed; this does not qualify the application. Kernel signature
+and policy messages accompany some stalled launches but do not establish the root
+cause. Resume acceptance when the standard wrapper can execute, without relaxing
+project pins or security/build guards. Interrupted commands are not passing or
+failing behavior tests. Keep machine diagnostics and generated evidence under
+ignored `target/`.
+
+Current implementation contracts, retained patch reasons and parameter staging
+belong in [Zingo guidance](../../vendor/ZINGO.md),
+[the checkout ledger](../../vendor/README.md),
+[wallet administration](../wallet-cli.md) and
+[release guidance](../reproducible-builds.md). These document finite sync, the
+server protocol requirement, wallet format-45 downgrade limits and isolated
+standard-cache parameter staging. Release reproducibility and Docker consensus
+qualification remain separate from offline acceptance.
 
 ## Selection and upstream work
 
@@ -54,8 +95,9 @@ concrete blocker and next reopening condition in the ledger, then pursue another
 viable exit rather than weakening behavior to force a removal.
 
 Prepare upstream contributions as independently useful changes with small faithful
-regressions: cancellation/reset correctness, reorg handling and fixture branch
-hashes; or supported transport/configuration APIs for application policy. Do not
+regressions: cancellation/reset correctness or supported transport/configuration
+APIs for application policy. v7 already supplies the reviewed reorg and fixture
+branch-hash behavior; retain application regressions rather than resubmitting it. Do not
 submit the entire cross-crate application patch as one upstream feature. Within an
 authorized contribution task, inspect repository contribution instructions and
 existing issues/PRs, prepare and independently review the contribution, then submit
@@ -116,10 +158,10 @@ validation; run feature configurations sequentially.
    progress/backpressure and recovery-control hunk. Each Zingo checkout must replace
    all mapped hunks and reproduce the standalone manifest/dependency graph;
    preserve coherent sibling Git revisions/source identities. A supported injection
-   API alone does not retire Pepper's sync/reorg changes or LightClient ownership.
+   API alone does not retire Pepper's progress/diagnostic changes or LightClient ownership.
    Removing `zingolib` must also replace `compat/zingolib`'s direct path dependency
-   and `scripts/reproducible.py`'s local parameter-staging assumptions in that same
-   coherent commit, preserving hash verification and network-denied builds.
+   and preserve the standard-cache parameter staging in `scripts/reproducible.py`,
+   including hash verification and network-denied builds.
    Select focused sync, diagnostics, cancellation/restart, synthetic lifecycle,
    network and release-tool tests according to the complete affected chain.
 5. **V5 — Finish the selected retirement cycle and remove this plan.** Complete

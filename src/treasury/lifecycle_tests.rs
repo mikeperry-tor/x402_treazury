@@ -13,7 +13,9 @@ use crate::rotation::{
         TransactionSubmission,
     },
 };
-use zingolib::testutils::mock_indexer::{LostSendDestination, MockNet, faucet_funding_transaction};
+use zingolib::testutils::mock_indexer::{
+    Fault, LostSendDestination, MockNet, Rejection, Rpc, faucet_funding_transaction,
+};
 
 const SEED: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -117,11 +119,8 @@ async fn funded_fixture_amount(
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
-    let mut net = MockNet::launch().await;
-    // Obtain the fixture endpoint without adding any production egress constructor.
-    let endpoint_client = net.client(SEED).await;
-    let endpoint = endpoint_client.indexer_uri().unwrap().to_string();
-    drop(endpoint_client);
+    let net = MockNet::launch().await;
+    let endpoint = net.indexer_uri().to_string();
     let mut owner = Treasury::create_with_network(
         state.clone(),
         key.clone(),
@@ -527,17 +526,32 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
     let before = store.call(|s| s.treasury_sync_state()).await.unwrap();
     {
         let mut chain = net.chain.write().await;
+        assert!(chain.validate(pending_prepared.bytes()).is_ok());
         let tip = chain.tip();
         assert_eq!(chain.reorg_to(23).len(), 2);
         chain.mine_empty_blocks(tip - 23);
         assert_eq!(chain.tip(), tip);
+        assert!(matches!(
+            chain.validate(pending_prepared.bytes()),
+            Err(Rejection::UnknownAnchor(_))
+        ));
+        // This stream-only marker is inert for unary SendTransaction. Its
+        // consumption proves the RPC reached the mock's strict validator.
+        chain
+            .faults
+            .inject(Rpc::SendTransaction, Fault::EndStream { after: 0 });
+        assert_eq!(chain.faults.pending(Rpc::SendTransaction), 1);
     }
     assert_eq!(
         handle
             .submit(pending_job.operation_id.clone(), false)
             .await
             .unwrap(),
-        SubmissionOutcome::Accepted
+        SubmissionOutcome::Unknown
+    );
+    assert_eq!(
+        net.chain.read().await.faults.pending(Rpc::SendTransaction),
+        0
     );
     let after = store.call(|s| s.treasury_sync_state()).await.unwrap();
     assert!(
@@ -545,8 +559,9 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
         "reorg must force a scan"
     );
     assert_eq!(after.sync.unwrap().phase, SyncPhase::Ready);
-    // Historical source facts do not gate a best-effort send. The exact pending
-    // transaction still owns its inputs and blocks another calculation.
+    // Historical source facts do not gate a best-effort send. The fork removed
+    // its anchor, so the validator rejected it; the exact pending transaction
+    // still owns its inputs and blocks another calculation.
     let third = store
         .call(|s| {
             let pool = s.ensure_capacity_group(

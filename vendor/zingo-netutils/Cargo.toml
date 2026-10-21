@@ -1,7 +1,6 @@
-bin = [{"name" = "nym-proxy", "required-features" = ["nym"]}, {"name" = "live-indexer-discovery", "required-features" = ["nym"]}]
 [package]
 "name" = "zingo-netutils"
-"version" = "5.0.1"
+"version" = "6.0.0"
 "description" = "network utility crate"
 "authors" = ["zingo@zingolabs.org"]
 "edition" = "2024"
@@ -12,34 +11,43 @@ bin = [{"name" = "nym-proxy", "required-features" = ["nym"]}, {"name" = "live-in
 "autoexamples" = false
 "autobenches" = false
 
-[badges]
-"maintenance" = {"status" = "actively-developed"}
+[features]
+"globally-public-transparent" = ["dep:tokio-stream"]
+"ping-very-insecure" = []
+"testutils" = []
+"socks5-transmit" = ["dep:tokio-socks", "dep:tokio", "dep:zingo-net-diag"]
+"socks5-fetch" = ["dep:reqwest", "dep:zingo-net-diag"]
+"nym" = ["dep:nym-sdk", "dep:nym-socks5-proxy-helpers", "dep:futures-channel", "dep:nym-http-api-client", "dep:nym-validator-client", "dep:tokio-socks", "dep:tokio", "socks5-transmit", "dep:zingo-net-diag"]
+
+[[bin]]
+"name" = "nym-proxy"
+"required-features" = ["nym"]
+
+[[bin]]
+"name" = "live-indexer-discovery"
+"required-features" = ["nym"]
 
 [dependencies]
 "http" = {"version" = "1"}
 "rustls" = {"version" = "0.23.40", "features" = ["prefer-post-quantum"]}
 "thiserror" = {"version" = "2"}
 "tokio-rustls" = {"version" = "0.26", "default-features" = false, "features" = ["aws_lc_rs", "logging", "tls12"]}
-"tonic" = {"version" = "0.14", "features" = ["tls-webpki-roots", "tls-aws-lc"]}
-"lightwallet-protocol" = {"version" = "0.3.0", "features" = ["rebuild-proto"]}
+"tonic" = {"version" = "0.14", "features" = ["tls-aws-lc", "tls-webpki-roots"]}
+"lightwallet-protocol" = {"version" = "0.4.0"}
 "tokio-stream" = {"version" = "0.1", "optional" = true}
 "nym-sdk" = {"version" = "1.21.2", "optional" = true}
 "nym-http-api-client" = {"version" = "1.21.3", "optional" = true}
 "nym-validator-client" = {"version" = "1.21.3", "optional" = true, "default-features" = false, "features" = ["http-client"]}
 "tokio-socks" = {"version" = "0.5", "optional" = true}
 "reqwest" = {"version" = "0.12.15", "default-features" = false, "optional" = true, "features" = ["rustls-tls-webpki-roots-no-provider", "socks"]}
-"hyper-util" = {"version" = "0.1.20", "optional" = true}
+"hyper-util" = {"version" = "0.1.20", "features" = ["client-legacy", "tokio"]}
 "tower" = {"version" = "0.5", "features" = ["util"]}
-"tokio" = {"version" = "1", "optional" = true, "features" = ["time", "rt-multi-thread", "macros", "signal", "io-std", "io-util"]}
-"zingo-net-diag" = {"version" = "0.1.0", "path" = "../zingo-net-diag", "optional" = true}
-"rand" = "0.8"
+"tokio" = {"version" = "1", "optional" = true, "features" = ["io-std", "io-util", "macros", "rt-multi-thread", "signal", "time"]}
+"zingo-net-diag" = {"version" = "0.1.0", "optional" = true, "git" = "https://github.com/zingolabs/zingolib", "rev" = "bfb0a2156819ea7f75a9b09b1724abfd06c8925e"}
+"rand" = {"version" = "0.10"}
 "serde" = {"version" = "1.0.229", "features" = ["derive"]}
+"nym-socks5-proxy-helpers" = {"version" = "1.21.4", "optional" = true}
+"futures-channel" = {"version" = "0.3", "optional" = true}
 
-[features]
-"globally-public-transparent" = ["dep:tokio-stream"]
-"ping-very-insecure" = []
-"testutils" = []
-"socks5-transmit" = ["dep:tokio-socks", "dep:hyper-util", "dep:tokio", "dep:zingo-net-diag"]
-"socks5-fetch" = ["dep:reqwest", "dep:zingo-net-diag"]
-"nym" = ["dep:nym-sdk", "dep:nym-http-api-client", "dep:nym-validator-client", "dep:tokio-socks", "dep:tokio", "socks5-transmit", "dep:zingo-net-diag"]
-
+[badges]
+"maintenance" = {"status" = "actively-developed"}

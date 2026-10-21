@@ -12,7 +12,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SANDBOX = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"]
-# BLAKE2b-512 constants from locked zcash_proofs 0.30.0 src/lib.rs.
+# BLAKE2b-512 constants from locked zcash_proofs 0.31.0-pre.1 src/lib.rs.
 PARAMETERS = {
     "sapling-spend.params": (47958396, "8270785a1a0d0bc77196f000ee6d221c9c9894f55307bd9357c3f0105d31ca63991ab91324160d8f53e2bbd3c2633a6eb8bdf5205d822e7f3f73edac51b2b70c"),
     "sapling-output.params": (3592860, "657e3d38dbb5cb5e7dd2970e8b03d69b4787dd907285b5a7f0790dcc8072f60bf593b32cc2d1c030e00ff5ae64bf84c5c3beb84ddc841d48264b4a171744d028"),
@@ -36,6 +36,22 @@ def verify_parameters(directory):
             raise RuntimeError(f"Missing or invalid {path}; prefetch public parameters with scripts/zcash.sh build")
         result[name] = {"size": size, "blake2b": expected}
     return result
+
+
+def parameter_directory():
+    # Match zcash_proofs' macOS XDG data-home lookup, including relative overrides.
+    data_home = Path(os.environ.get("XDG_DATA_HOME", ""))
+    if not data_home.is_absolute():
+        data_home = Path.home() / ".local/share"
+    return data_home / "ZcashParams"
+
+
+def stage_parameters(original, env):
+    directory = Path(env["XDG_DATA_HOME"]) / "ZcashParams"
+    directory.mkdir(parents=True)
+    for name in PARAMETERS:
+        shutil.copyfile(original / name, directory / name)
+    verify_parameters(directory)
 
 
 def check_environment(expected):
@@ -69,6 +85,7 @@ def build_environment(work, source, cargo_cache, tool_paths, epoch, profile):
             (cargo_home / name).symlink_to(cached, target_is_directory=True)
     env = {
         "PATH": os.pathsep.join(tool_paths), "HOME": str(home), "TMPDIR": str(tmp),
+        "XDG_DATA_HOME": str(home / ".local/share"),
         "LANG": "C", "LC_ALL": "C", "TZ": "UTC", "SOURCE_DATE_EPOCH": epoch,
         "CARGO_HOME": str(cargo_home), "CARGO_TARGET_DIR": str(work / "target"),
         "CARGO_NET_OFFLINE": "true", "CARGO_INCREMENTAL": "0",
@@ -111,7 +128,8 @@ def qualify(run):
         report["revision"] = output(["git", "rev-parse", "HEAD"], cwd=ROOT)
         report["epoch"] = output(["git", "show", "-s", "--format=%ct", "HEAD"], cwd=ROOT)
         report["lock_sha256"] = digest(ROOT / "Cargo.lock")
-        report["parameters"] = verify_parameters(ROOT / "vendor/zingolib/zcash-params")
+        parameters = parameter_directory()
+        report["parameters"] = verify_parameters(parameters)
         archive = run / "source.tar"
         with archive.open("wb") as stream:
             subprocess.run(["git", "archive", "--format=tar", report["revision"]], cwd=ROOT, stdout=stream, check=True)
@@ -124,10 +142,8 @@ def qualify(run):
             source = work / "source"
             source.mkdir(parents=True)
             subprocess.run(["tar", "-xf", str(archive), "-C", str(source)], check=True)
-            for name in PARAMETERS:
-                shutil.copyfile(ROOT / "vendor/zingolib/zcash-params" / name, source / "vendor/zingolib/zcash-params" / name)
-            verify_parameters(source / "vendor/zingolib/zcash-params")
             env = build_environment(work, source, cargo_cache, tool_paths, report["epoch"], {**profile, **report["environment"]})
+            stage_parameters(parameters, env)
             log = run / f"{label}.log"
             print(f"Building {label}; full log: {log}", flush=True)
             # Prove that the sandbox is active: a refused connection is NOT enough.

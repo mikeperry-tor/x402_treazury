@@ -9,10 +9,7 @@ use std::{
     fmt::Debug,
     marker::PhantomData,
     ops::Range,
-    sync::{
-        Arc,
-        atomic::{self, AtomicU8},
-    },
+    sync::atomic::{self, AtomicU8},
 };
 
 use incrementalmerkletree::Position;
@@ -50,25 +47,159 @@ pub mod traits;
 #[cfg(feature = "wallet_essentials")]
 pub mod serialization;
 
-/// Block height and txid of relevant transactions that have yet to be scanned. These may be added due to transparent
-/// output/spend discovery or for targetted rescan.
+/// A block, or a transaction in it, that scanning must reach. A target names a block height and, when a particular
+/// transaction is wanted, its txid. Two targets naming the same block height and txid are the same target.
 ///
-/// `narrow_scan_area` is used to narrow the surrounding area scanned around the target from a shard to 100 blocks.
-/// For example, this is useful when targetting transparent outputs as scanning the whole shard will not affect the
-/// spendability of the scan target but will significantly reduce memory usage and/or storage as well as prioritise
-/// creating spendable notes.
-///
-/// Scan targets with block heights below sapling activation height are not supported.
-// FIXME: add a bool field which is set when users add scan targets manually so `get_transaction` can ignore the error
-// if the txid does not exist.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// The blocks around a target are prioritised for scanning: a narrow range by default, and the whole shard of each
+/// pool the target's transaction was found to hold notes of, so those notes become spendable.
+#[derive(Debug, Clone, Copy)]
 pub struct ScanTarget {
-    /// Block height.
-    pub block_height: BlockHeight,
-    /// Txid.
-    pub txid: TxId,
-    /// Narrow surrounding scan area of target.
-    pub narrow_scan_area: bool,
+    block_height: BlockHeight,
+    txid: Option<TxId>,
+    pools: ScanTargetPools,
+    origin: ScanTargetOrigin,
+}
+
+// Where a scan target came from, which decides what a transaction the server does not serve means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScanTargetOrigin {
+    // Trial decryption, spend detection or transparent address discovery. A transaction the server does not serve
+    // is an inconsistency in the served data.
+    Internal,
+    // `crate::add_scan_targets`. A transaction the server does not serve, or a block height outside the chain, is a
+    // consumer error and the target is dropped.
+    External,
+}
+
+// The shielded pools a scan target's transaction was found to hold notes of, as bits of a byte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct ScanTargetPools(u8);
+
+impl ScanTargetPools {
+    const ALL_POOLS: [ShieldedPool; 3] = [
+        ShieldedPool::Sapling,
+        ShieldedPool::Orchard,
+        ShieldedPool::Ironwood,
+    ];
+
+    const fn bit(pool: ShieldedPool) -> u8 {
+        match pool {
+            ShieldedPool::Sapling => 1,
+            ShieldedPool::Orchard => 1 << 1,
+            ShieldedPool::Ironwood => 1 << 2,
+        }
+    }
+
+    #[cfg(feature = "wallet_essentials")]
+    pub(crate) fn from_bits(bits: u8) -> Option<Self> {
+        let known = Self::ALL_POOLS
+            .into_iter()
+            .fold(0, |known, pool| known | Self::bit(pool));
+        (bits & !known == 0).then_some(Self(bits))
+    }
+
+    #[cfg(feature = "wallet_essentials")]
+    pub(crate) fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub(crate) fn with(self, pool: ShieldedPool) -> Self {
+        Self(self.0 | Self::bit(pool))
+    }
+
+    pub(crate) fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub(crate) fn iter(self) -> impl Iterator<Item = ShieldedPool> {
+        Self::ALL_POOLS
+            .into_iter()
+            .filter(move |&pool| self.0 & Self::bit(pool) != 0)
+    }
+}
+
+impl ScanTarget {
+    /// A target to add through [`crate::add_scan_targets`]. The blocks around `block_height` are prioritised for
+    /// scanning, and the transaction `txid` is scanned there when given.
+    #[must_use]
+    pub fn new(block_height: BlockHeight, txid: Option<TxId>) -> Self {
+        Self {
+            block_height,
+            txid,
+            pools: ScanTargetPools::default(),
+            origin: ScanTargetOrigin::External,
+        }
+    }
+
+    pub(crate) fn internal(block_height: BlockHeight, txid: TxId) -> Self {
+        Self {
+            block_height,
+            txid: Some(txid),
+            pools: ScanTargetPools::default(),
+            origin: ScanTargetOrigin::Internal,
+        }
+    }
+
+    /// The block height of the target.
+    #[must_use]
+    pub fn block_height(&self) -> BlockHeight {
+        self.block_height
+    }
+
+    /// The txid of the transaction to scan at the target's block height, when a particular one is wanted.
+    #[must_use]
+    pub fn txid(&self) -> Option<TxId> {
+        self.txid
+    }
+
+    pub(crate) fn pools(&self) -> ScanTargetPools {
+        self.pools
+    }
+
+    pub(crate) fn origin(&self) -> ScanTargetOrigin {
+        self.origin
+    }
+
+    pub(crate) fn with_pool(self, pool: ShieldedPool) -> Self {
+        Self {
+            pools: self.pools.with(pool),
+            ..self
+        }
+    }
+
+    // The target that stands for both `self` and `other`, which name the same block height and txid: it holds the
+    // pools of both, and it is internal where either is.
+    fn merge(mut self, other: Self) -> Self {
+        self.pools.0 |= other.pools.0;
+        if other.origin == ScanTargetOrigin::Internal {
+            self.origin = ScanTargetOrigin::Internal;
+        }
+        self
+    }
+
+    fn key(&self) -> (BlockHeight, Option<TxId>) {
+        (self.block_height, self.txid)
+    }
+}
+
+impl PartialEq for ScanTarget {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for ScanTarget {}
+
+impl PartialOrd for ScanTarget {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScanTarget {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key().cmp(&other.key())
+    }
 }
 
 /// Initial sync state.
@@ -146,6 +277,17 @@ pub struct SyncState {
     pub(crate) scan_targets: BTreeSet<ScanTarget>,
     /// Initial sync state.
     pub(crate) initial_sync_state: InitialSyncState,
+    /// Compact block transparent data is only scanned above this height. This includes checking transparent outputs
+    /// against the wallet's in-use and gap addresses and mapping transparent inputs to the wallet's outpoint map.
+    ///
+    /// Set to the chain height when transparent address discovery completes at the start of a sync session, as it has
+    /// located all relevant transactions at or below this height. Lowered if the wallet is truncated below this
+    /// height, by a re-org or a chain height below the wallet's, as transparent address discovery does not cover the
+    /// blocks scanned in place of the truncated blocks.
+    ///
+    /// Blocks mined during a sync session are above the floor and may still be unscanned when the session ends, so
+    /// the transparent address discovery of the next sync session searches from the block above the floor.
+    pub(crate) transparent_scan_floor: Option<BlockHeight>,
 }
 
 impl SyncState {
@@ -159,6 +301,7 @@ impl SyncState {
             ironwood_shard_ranges: Vec::new(),
             scan_targets: BTreeSet::new(),
             initial_sync_state: InitialSyncState::new(),
+            transparent_scan_floor: None,
         }
     }
 
@@ -184,6 +327,16 @@ impl SyncState {
     #[must_use]
     pub fn ironwood_shard_ranges(&self) -> &[Range<BlockHeight>] {
         &self.ironwood_shard_ranges
+    }
+
+    /// The shard ranges of `pool`
+    #[must_use]
+    pub fn shard_ranges(&self, pool: ShieldedPool) -> &[Range<BlockHeight>] {
+        match pool {
+            ShieldedPool::Sapling => &self.sapling_shard_ranges,
+            ShieldedPool::Orchard => &self.orchard_shard_ranges,
+            ShieldedPool::Ironwood => &self.ironwood_shard_ranges,
+        }
     }
 
     /// Returns true if all scan ranges are scanned.
@@ -235,6 +388,15 @@ impl SyncState {
             .map(|range| range.block_range().start)
     }
 
+    /// - Inserts `scan_target`, merged into the target already held for the same block height and txid if any.
+    pub(crate) fn insert_scan_target(&mut self, scan_target: ScanTarget) {
+        let merged = self
+            .scan_targets
+            .take(&scan_target)
+            .map_or(scan_target, |held| held.merge(scan_target));
+        self.scan_targets.insert(merged);
+    }
+
     /// Returns the last known chain height to the wallet or `None` if `self.scan_ranges` is empty.
     #[must_use]
     pub fn last_known_chain_height(&self) -> Option<BlockHeight> {
@@ -277,15 +439,44 @@ impl SyncMode {
         }
     }
 
-    /// Creates [`crate::wallet::SyncMode`] from an atomic u8.
-    ///
-    /// # Panic
-    ///
-    /// Panics if `atomic_sync_mode` corresponds to an invalid enum variant.
-    /// It is the consumers responsibility to ensure the library restricts the user API to only set valid values via
-    /// [`crate::wallet::SyncMode`].
-    pub fn from_atomic_u8(atomic_sync_mode: Arc<AtomicU8>) -> Result<SyncMode, SyncModeError> {
+    /// Reads the mode held in `atomic_sync_mode`, failing when the byte is no variant of this enum.
+    pub fn from_atomic_u8(atomic_sync_mode: &AtomicU8) -> Result<SyncMode, SyncModeError> {
         SyncMode::from_u8(atomic_sync_mode.load(atomic::Ordering::Acquire))
+    }
+
+    /// Returns the mode a completed scan leaves behind, which is `Shutdown` for a running engine and the same mode for every other.
+    pub fn on_completion(self) -> Self {
+        match self {
+            Self::Running => Self::Shutdown,
+            other => other,
+        }
+    }
+
+    /// Replaces the mode held in `atomic_sync_mode` with `step` of it in one atomic exchange and returns the mode it replaced.
+    pub fn apply(
+        atomic_sync_mode: &AtomicU8,
+        step: impl Fn(Self) -> Self,
+    ) -> Result<Self, SyncModeError> {
+        atomic_sync_mode
+            .try_update(
+                atomic::Ordering::AcqRel,
+                atomic::Ordering::Acquire,
+                |mode| Self::from_u8(mode).ok().map(|mode| step(mode) as u8),
+            )
+            .map_err(SyncModeError::InvalidSyncMode)
+            .and_then(Self::from_u8)
+    }
+
+    /// Moves `atomic_sync_mode` from `from` to `to` when it holds `from` and returns the mode it held before.
+    pub fn transition(
+        atomic_sync_mode: &AtomicU8,
+        from: Self,
+        to: Self,
+    ) -> Result<Self, SyncModeError> {
+        Self::apply(
+            atomic_sync_mode,
+            |mode| if mode == from { to } else { mode },
+        )
     }
 }
 
@@ -1114,9 +1305,8 @@ impl OutputInterface for TransparentCoin {
 
 /// The network upgrade at which a shielded pool begins to exist.
 ///
-/// This is the workspace's single pool-to-upgrade mapping (ADR 0014,
-/// `docs/adr/0014-pool-activation-derived-in-pepper-sync.md` in the
-/// workspace root): upstream `zcash_protocol` deliberately ships
+/// This is the workspace's single pool-to-upgrade mapping: upstream
+/// `zcash_protocol` deliberately ships
 /// `ShieldedPool` and `NetworkUpgrade` as unrelated enums, so the mapping
 /// is defined exactly once, here. Every height clamp involving a pool's
 /// existence derives from it. A second mapping anywhere in the workspace
@@ -1554,7 +1744,7 @@ impl OutgoingNoteInterface for OutgoingSaplingNote {
     {
         self.recipient_full_unified_address
             .as_ref()
-            .map(|unified_address| unified_address.encode(consensus_parameters))
+            .map(|unified_address| unified_address.encode_receiver_preserving(consensus_parameters))
     }
 
     fn transaction_outgoing_notes(transaction: &WalletTransaction) -> &[Self] {
@@ -1613,7 +1803,7 @@ impl OutgoingNoteInterface for OutgoingOrchardNote {
     {
         self.recipient_full_unified_address
             .as_ref()
-            .map(|unified_address| unified_address.encode(consensus_parameters))
+            .map(|unified_address| unified_address.encode_receiver_preserving(consensus_parameters))
     }
 
     fn transaction_outgoing_notes(transaction: &WalletTransaction) -> &[Self] {
@@ -1672,7 +1862,7 @@ impl OutgoingNoteInterface for OutgoingIronwoodNote {
     {
         self.recipient_full_unified_address
             .as_ref()
-            .map(|unified_address| unified_address.encode(consensus_parameters))
+            .map(|unified_address| unified_address.encode_receiver_preserving(consensus_parameters))
     }
 
     fn transaction_outgoing_notes(transaction: &WalletTransaction) -> &[Self] {

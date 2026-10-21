@@ -434,7 +434,9 @@ async fn automatic_shielding_never_accepts_unconfirmed_or_paused_inputs_and_acto
     let addresses = transparent_addresses(&mut owner, 1).await;
     owner.configure_automatic_shielding(30_000);
     let funding = faucet_funding_transaction(vec![(&addresses[0], 1_000_000, None)]).await;
-    net.chain.write().await.submit_transaction(funding);
+    // The synthetic faucet spends a fabricated note outside this chain. Inject
+    // that fixture deposit; actual treasury submissions still use validation.
+    net.chain.write().await.enter_mempool(funding);
     let stop = CancellationToken::new();
     owner.sync_once(&stop).await.unwrap();
     owner

@@ -24,7 +24,9 @@ impl TreasuryNetwork {
         match self {
             Self::Mainnet => zingolib::config::ChainType::Mainnet,
             #[cfg(all(test, feature = "zcash-testutils"))]
-            Self::Synthetic => zingolib::config::ChainType::Regtest(Default::default()),
+            Self::Synthetic => {
+                zingolib::config::ChainType::Regtest(zingolib::testutils::mock_activation_heights())
+            }
             #[cfg(all(test, feature = "zcash-regtest"))]
             Self::Regtest => zingolib::config::ChainType::Regtest(regtest::heights()),
         }
@@ -444,14 +446,18 @@ impl Treasury {
             .clone()
             .context("sync endpoint not configured")?;
         self.healthy = false;
-        self.client
-            .as_mut()
-            .context("treasury sync interrupted; reopen required")?
-            .wallet()
-            .write()
-            .await
-            .wallet_settings
-            .min_confirmations = settings.confirmations;
+        {
+            let wallet = self
+                .client
+                .as_mut()
+                .context("treasury sync interrupted; reopen required")?
+                .wallet();
+            let mut wallet = wallet.write().await;
+            wallet.wallet_settings.min_confirmations = settings.confirmations;
+            // Treasury observations are one-pass scans, including restored v6
+            // snapshots whose sync settings predate finite/continuous selection.
+            wallet.wallet_settings.sync_config.shutdown_on_completion = true;
+        }
         let mut observation = self
             .store
             .call(|s| s.treasury_sync_state())
@@ -492,10 +498,14 @@ impl Treasury {
         let _cancel_on_drop = cancelled.clone().drop_guard();
         // Upstream sync launches detached fetch/mempool tasks. Isolate each cycle
         // so cancellation/error cannot leave those tasks connected on the MCP runtime.
-        let (session, mut observation, outcome) =
+        let (mut session, mut observation, outcome) =
             tokio::task::spawn_blocking(move || session.run(settings, observation, cancelled))
                 .await
                 .context("treasury sync worker failed")??;
+        // v7 shutdown waits for the current batch. The owned runtime must first
+        // cancel network tasks and join scan workers, then SDK cleanup can reset
+        // its completed/cancelled handle before the final snapshot.
+        session.client.go_offline().await;
         self.revision = session.revision;
         self.client = Some(session.client);
         observation.phase = if stop.is_cancelled() {
@@ -579,7 +589,6 @@ impl SyncSession {
                 _ = cancelled.cancelled() => Err(anyhow::anyhow!("treasury sync cancelled")),
                 result = self.sync_inner(&settings, &mut observation) => result,
             };
-            self.client.go_offline().await;
             crate::network::global().release_grpc(&self.identity).await;
             outcome
         });

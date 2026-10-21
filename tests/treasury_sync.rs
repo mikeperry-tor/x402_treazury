@@ -33,10 +33,15 @@ fn varint(mut n: u64) -> Vec<u8> {
     out
 }
 fn number(tag: u8, n: u64) -> Vec<u8> {
-    [vec![tag << 3], varint(n)].concat()
+    [varint(u64::from(tag) << 3), varint(n)].concat()
 }
 fn bytes(tag: u8, b: &[u8]) -> Vec<u8> {
-    [vec![(tag << 3) | 2], varint(b.len() as u64), b.to_vec()].concat()
+    [
+        varint((u64::from(tag) << 3) | 2),
+        varint(b.len() as u64),
+        b.to_vec(),
+    ]
+    .concat()
 }
 fn take_varint(input: &mut &[u8]) -> u64 {
     let mut n = 0;
@@ -137,6 +142,9 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
         "GetLightdInfo" => vec![
             [
                 bytes(4, mock.chain.as_bytes()),
+                // The v7 sync engine requires the transparent/Ironwood-capable
+                // lightwallet protocol; keep this fixture faithful to that contract.
+                bytes(18, b"0.5.0"),
                 number(5, 419_200),
                 number(
                     7,
@@ -1135,7 +1143,8 @@ async fn slow_initial_scan_finishes_without_an_age_restart() {
         "slow work retains its original observation"
     );
     let requests = calls.lock().unwrap().clone();
-    assert_eq!(requests.iter().filter(|m| *m == "GetLightdInfo").count(), 2);
+    // Application starting/final observations plus the SDK protocol check.
+    assert_eq!(requests.iter().filter(|m| *m == "GetLightdInfo").count(), 3);
     assert!(!requests.iter().any(|m| m == "SendTransaction"));
     treasury.close().await.unwrap();
     server.abort();

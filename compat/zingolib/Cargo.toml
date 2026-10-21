@@ -14,16 +14,11 @@ debug = "line-tables-only"
 x402_treazury = { path = "../.." }
 zingolib = { path = "../../vendor/zingolib", default-features = false }
 
-# Experimental compatibility patch: see vendor/README.md.
+# Reviewed transport patches: see vendor/README.md.
 [patch.crates-io]
 reqwest = { path = "../../vendor/reqwest" }
 h2 = { path = "../../vendor/h2" }
 hyper = { path = "../../vendor/hyper" }
-# Required by zingolib v6.0.0's own workspace. Cargo does not inherit
-# dependency workspaces' root patches into this workspace.
-lightwallet-protocol = { git = "https://github.com/zingolabs/lightwallet-protocol-rust", rev = "9bdfdc77eb283f2a3d26c27100cc2ac90148cd93" }
-alloy-primitives = { path = "../../vendor/alloy-primitives" }
-alloy-sol-macro-expander = { path = "../../vendor/alloy-sol-macro-expander" }
 
 [dev-dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -36,7 +31,7 @@ rmcp = { version = "=3.5.0", default-features = false, features = ["server"] }
 serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }
-zip32 = "0.2.1"
+zip32 = "0.3.0"
 
 [[test]]
 name = "payments"

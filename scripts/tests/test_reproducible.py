@@ -48,15 +48,69 @@ class ReproducibleTests(unittest.TestCase):
             (cache / "registry").mkdir(parents=True)
             (cache / "config.toml").write_text("untrusted config")
             work.mkdir()
-            with patch.dict(os.environ, {"EVM_PRIVATE_KEY": "secret", "RUSTFLAGS": "--bad", "LLVM_PROFILE_FILE": "unwanted", "HTTP_PROXY": "unwanted"}):
+            with patch.dict(os.environ, {"EVM_PRIVATE_KEY": "secret", "RUSTFLAGS": "--bad", "LLVM_PROFILE_FILE": "unwanted", "HTTP_PROXY": "unwanted", "XDG_DATA_HOME": "/untrusted/shared-data"}):
                 env = r.build_environment(work, work / "source", cache, ["/usr/bin"], "1", {"sdk_path": "/sdk", "deployment_target": "14.0"})
             for key in ("EVM_PRIVATE_KEY", "RUSTFLAGS", "LLVM_PROFILE_FILE", "HTTP_PROXY"):
                 self.assertNotIn(key, env)
             self.assertEqual(env["CARGO_NET_OFFLINE"], "true")
             self.assertEqual(env["GIT_CEILING_DIRECTORIES"], str(work))
+            self.assertEqual(env["XDG_DATA_HOME"], str(work / "home/.local/share"))
             self.assertTrue((work / "cargo-home/registry").is_symlink())
             self.assertFalse((work / "cargo-home/config.toml").exists())
             self.assertIn("--remap-path-prefix=", env["CARGO_ENCODED_RUSTFLAGS"])
+
+    def test_macos_parameter_cache_follows_absolute_xdg_override(self):
+        with patch.dict(os.environ, {"HOME": "/fixture/home"}, clear=True):
+            self.assertEqual(r.parameter_directory(), Path("/fixture/home/.local/share/ZcashParams"))
+            for override in ("", "relative/cache", "/fixture/data"):
+                with patch.dict(os.environ, {"XDG_DATA_HOME": override}):
+                    expected = "/fixture/data/ZcashParams" if override.startswith("/") else "/fixture/home/.local/share/ZcashParams"
+                    self.assertEqual(r.parameter_directory(), Path(expected))
+
+    def test_parameter_copies_are_independent_in_each_build_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original = root / "original"
+            original.mkdir()
+            param = original / "fixture.params"
+            param.write_bytes(b"good")
+            expected = {param.name: (4, r.digest(param, "blake2b"))}
+            copies = []
+            with patch.object(r, "PARAMETERS", expected):
+                r.verify_parameters(original)
+                for label in ("first", "second-longer-path"):
+                    work = root / label
+                    work.mkdir()
+                    env = r.build_environment(work, work / "source", root / "cache", ["/usr/bin"], "1", {"sdk_path": "/sdk", "deployment_target": "14.0"})
+                    r.stage_parameters(original, env)
+                    copy = Path(env["XDG_DATA_HOME"]) / "ZcashParams" / param.name
+                    self.assertTrue(copy.is_relative_to(Path(env["HOME"])))
+                    self.assertFalse(copy.is_symlink())
+                    self.assertNotEqual(copy.stat().st_ino, param.stat().st_ino)
+                    copies.append(copy)
+                copies[0].write_bytes(b"evil")
+                self.assertEqual(copies[1].read_bytes(), b"good")
+                self.assertEqual(param.read_bytes(), b"good")
+
+    def test_staging_rejects_missing_or_corrupt_copies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original = root / "original"
+            original.mkdir()
+            param = original / "fixture.params"
+            param.write_bytes(b"good")
+            expected = {param.name: (4, r.digest(param, "blake2b"))}
+            with patch.object(r, "PARAMETERS", expected):
+                for label, content in (("corrupt", b"evil"), ("missing", None)):
+                    def broken_copy(source, destination):
+                        if content is not None:
+                            destination.write_bytes(content)
+                    with patch.object(r.shutil, "copyfile", side_effect=broken_copy):
+                        with self.assertRaisesRegex(RuntimeError, "Missing or invalid"):
+                            r.stage_parameters(original, {"XDG_DATA_HOME": str(root / label)})
+                param.unlink()
+                with self.assertRaises(FileNotFoundError):
+                    r.stage_parameters(original, {"XDG_DATA_HOME": str(root / "missing-original")})
 
     def test_failed_preflight_writes_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:

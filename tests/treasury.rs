@@ -225,3 +225,101 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
     assert!(error.contains("wallet status"));
     assert!(!error.contains("Stack backtrace") && !error.contains("stack backtrace"));
 }
+
+#[tokio::test]
+async fn v6_sdk_snapshot_retains_addresses_and_scan_targets_through_v7_save() {
+    use pepper_sync::wallet::traits::SyncWallet;
+    use zingolib::{
+        config::{ClientConfig, WalletConfig},
+        lightclient::LightClient,
+        wallet::keys::unified::ReceiverSelection,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let config = ClientConfig::builder()
+        .set_wallet_dir(dir.path().to_owned())
+        .set_wallet_config(WalletConfig::Read)
+        .build()
+        .unwrap();
+    // Public BIP39 test mnemonic only; generated with the pinned v6 SDK before
+    // importing v7. Includes two extra shielded addresses and a pending scan target.
+    let old = include_bytes!("fixtures/state/sdk_v6_wallet.bin");
+    assert_eq!(u64::from_le_bytes(old[..8].try_into().unwrap()), 42);
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/state/sdk_v6_addresses.json")).unwrap();
+    let client = LightClient::from_reader(old.as_slice(), config.clone())
+        .await
+        .unwrap();
+    assert!(client.indexer_uri().is_none());
+    assert_eq!(client.mnemonic_phrase().as_deref(), Some(SEED));
+    let addresses = |value: String| {
+        serde_json::from_str::<serde_json::Value>(&value)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| {
+                serde_json::json!({
+                    "account": a["account"], "address_index": a["address_index"],
+                    "encoded_address": a["encoded_address"],
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        serde_json::json!(addresses(client.unified_addresses_json().await.to_string())),
+        expected["before"]
+    );
+    let (bytes, expected_scan_state) = {
+        let wallet = client.wallet();
+        let mut wallet = wallet.write().await;
+        let state = wallet.get_sync_state_mut().unwrap();
+        let mut before = Vec::new();
+        state.write(&mut before).unwrap();
+        // Reinserting the legacy target must be idempotent: reading the old
+        // nested ScanTarget format cannot silently lose it.
+        pepper_sync::add_scan_targets(
+            state,
+            &[pepper_sync::wallet::ScanTarget::new(
+                zcash_protocol::consensus::BlockHeight::from_u32(2_000_010),
+                Some(zcash_protocol::TxId::from_bytes([7; 32])),
+            )],
+        );
+        let mut after = Vec::new();
+        state.write(&mut after).unwrap();
+        assert_eq!(before, after);
+        wallet.mark_dirty();
+        (wallet.save().unwrap().unwrap(), after)
+    };
+    assert_eq!(u64::from_le_bytes(bytes[..8].try_into().unwrap()), 45);
+    let mut reopened = LightClient::from_reader(bytes.as_slice(), config)
+        .await
+        .unwrap();
+    assert!(reopened.indexer_uri().is_none());
+    {
+        let wallet = reopened.wallet();
+        let mut wallet = wallet.write().await;
+        let mut scan_state = Vec::new();
+        wallet
+            .get_sync_state_mut()
+            .unwrap()
+            .write(&mut scan_state)
+            .unwrap();
+        assert_eq!(scan_state, expected_scan_state);
+    }
+    assert_eq!(
+        serde_json::json!(addresses(
+            reopened.unified_addresses_json().await.to_string()
+        )),
+        expected["before"]
+    );
+    reopened
+        .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::json!(addresses(
+            reopened.unified_addresses_json().await.to_string()
+        )),
+        expected["after_next"]
+    );
+}

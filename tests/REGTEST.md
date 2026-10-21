@@ -7,8 +7,10 @@ random loopback-only RPC ports. It does not use deployment profiles, `.env`,
 operator wallets, external indexers, or real funds.
 
 Docker must be running. Pull these images before running the test; the test uses
-`--pull never`. The digests and activation schedule match zingolib v6.0.0's
-pinned test infrastructure. Zaino requires amd64 emulation on ARM hosts.
+`--pull never`. The digests and activation schedule retain the NU6.3 infrastructure
+selected with zingolib v6.0.0. They have not been requalified against the v7 SDK;
+offline synthetic-chain tests do not establish Docker consensus compatibility.
+Zaino requires amd64 emulation on ARM hosts.
 
 ```sh
 docker pull docker.io/zfnd/zebra:6.0.0@sha256:78a10b7f24b83a86e6223d97e857094a353454e3268f84a87bd987e7140a33bb

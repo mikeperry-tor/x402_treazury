@@ -7,7 +7,7 @@ any working directory unless a command explicitly supplies relative data paths.
 | --- | --- |
 | `python3 scripts/reproducible.py` | Two clean, network-denied release builds with binary hash comparison; see [release qualification](../docs/reproducible-builds.md) |
 | `check_toolchain.sh` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
-| `check.sh` | Format, advisory complexity regressions, vendor provenance, default Zcash tests, offline refund-accounting tests, all-feature Clippy and compatibility suite |
+| `check.sh` | Format, complexity review, vendor provenance, SDK merge diagnostics, application/treasury tests, Clippy and compatibility suite |
 | `python3 scripts/complexity.py` | Pinned complexity metrics and advisory regressions against merge-base with `main`; Markdown and complete JSON/CSV under `target/complexity` |
 | `coverage.sh` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
 | `coverage.sh --branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |

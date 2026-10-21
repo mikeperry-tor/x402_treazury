@@ -38,10 +38,16 @@ cargo fetch --locked --manifest-path compat/protoc/Cargo.toml
 scripts/zcash.sh build
 ```
 
-The last command populates the public Sapling parameter copies used by Zingolib.
-The runner checks their sizes and BLAKE2b-512 digests against the constants in
-locked `zcash_proofs` 0.30.0 before copying them into each source snapshot, and
-checks the copies again. Missing or corrupt parameters fail before compilation.
+The last command populates Zingolib's public Sapling parameter cache. On the
+qualified macOS host, `zcash_proofs` 0.31.0-pre.1 uses
+`$XDG_DATA_HOME/ZcashParams` when `XDG_DATA_HOME` is absolute, otherwise
+`$HOME/.local/share/ZcashParams`. The runner reads that cache and checks file
+sizes and BLAKE2b-512 digests against the locked SDK's constants. Each build
+receives independent parameter copies in its isolated HOME, with
+`XDG_DATA_HOME` explicitly set to that HOME's `.local/share`; the copies are
+verified again before compilation. The builds do not share a mutable parameter
+cache. Missing or corrupt parameters fail before compilation. Older parameter
+copies under `vendor/zingolib/zcash-params` are unused and are not deleted.
 No wallet, seed, `.env` or funded transaction is involved.
 
 `--locked` fixes dependency resolution but permits downloads. `--frozen` combines

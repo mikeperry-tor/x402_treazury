@@ -228,7 +228,10 @@ async fn complete(
 async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
     let (dir, mut net, owner, endpoint) = funded_fixture(2).await;
     let mut external = net
-        .client("legal winner thank year wave sausage worth useful legal winner thank yellow")
+        .client(
+            "legal winner thank year wave sausage worth useful legal winner thank yellow",
+            None,
+        )
         .await;
     let mut deposits = Vec::new();
     for _ in 0..3 {

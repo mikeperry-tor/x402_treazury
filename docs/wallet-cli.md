@@ -157,8 +157,8 @@ funding: use `wallet bootstrap` first when warming needs a managed paid relay wa
 
 Build or test the embedded wallet with the shell wrapper, which supplies a
 Cargo-managed protoc compiler. First builds may download public proving
-parameters. The wallet dependency is pinned upstream at zingolib v6.0.0 commit
-`c6381534f802b1022041beda4b01c106ad132329`; no reference checkout is needed.
+parameters. The wallet dependency is pinned upstream at zingolib v7.0.0 commit
+`bfb0a2156819ea7f75a9b09b1724abfd06c8925e`; no reference checkout is needed.
 
 ```sh
 scripts/zcash.sh build
@@ -237,6 +237,14 @@ Missing data, RPC failures, and timeouts fail closed. This checks server
 capability; it does not independently prove that a server supplies honest or
 complete chain data. No check is required before activation.
 
+The v7 SDK also requires the sync server to advertise lightwallet protocol
+version 0.5.0 or newer in `GetLightdInfo`. A missing, malformed or older version
+fails the scan with `indexer_protocol_unsupported`; it does not select another
+endpoint or permit a direct connection outside the configured transport. This
+wire-protocol requirement is separate from the Rust `lightwallet-protocol` crate
+version 0.4.0 used to encode the messages. Offline wallet inspection remains
+available when the server cannot sync.
+
 Both reference Zodl apps default to `zec.rocks:443`. They also list regional
 `na`, `sa`, `eu`, and `ap.zec.rocks` endpoints, and `us.zec.stardust.rest` and
 `eu.zec.stardust.rest`. These public lightwalletd services need no partner key.
@@ -313,6 +321,15 @@ entire backup as spending material. To restore, stop the original process and us
 `state_dir`, its `key` as `key_file`, and the same treasury ID. Do not run the
 original and restored copies simultaneously. A Zcash mnemonic alone cannot restore
 random EVM keys, pending payment authorizations or the rotation journal.
+
+The embedded Zingolib v7 SDK reads older wallet snapshots and writes SDK wallet
+format 45 on the next save, including the finite-sync and transparent-scan fields.
+The treasury database schema, encrypted envelope, identities and journaled
+transaction bytes retain their existing formats. Stop serving and take a complete
+backup before upgrading. Older v6 application binaries cannot reopen a format-45
+SDK snapshot. A pre-upgrade backup is not a safe rollback after new financial work:
+restoring it would discard the newer accepted operations and liabilities. Preserve
+the current state and use a compatible application for recovery.
 
 To assess existing funding problems and perform one recovery pass, stop serving and run:
 

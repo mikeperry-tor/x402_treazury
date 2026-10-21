@@ -1,11 +1,51 @@
+--- a/pepper-sync/src/client/fetch.rs
++++ b/pepper-sync/src/client/fetch.rs
+@@ -166,7 +166,7 @@
+     }
+ }
+
+-#[instrument(skip(client), name = "fetch::get_lightd_info", err, level = "info")]
++#[instrument(skip(client), name = "fetch::get_lightd_info", level = "debug")]
+ pub(super) async fn get_lightd_info<C>(client: &mut C) -> Result<LightdInfo, tonic::Status>
+ where
+     C: Indexer,
+@@ -174,7 +174,7 @@
+     client.get_lightd_info(UNARY_RPC_TIMEOUT).await
+ }
+
+-#[instrument(skip(client), name = "fetch::get_latest_block", err, level = "info")]
++#[instrument(skip(client), name = "fetch::get_latest_block", level = "debug")]
+ async fn get_latest_block<C>(client: &mut C) -> Result<BlockId, tonic::Status>
+ where
+     C: Clone + Indexer + TransparentIndexer + Sync + Send + 'static,
+@@ -288,7 +288,7 @@
+         .await
+ }
+
+-#[instrument(skip(client), name = "fetch::get_tree_state", err, level = "info")]
++#[instrument(skip(client), name = "fetch::get_tree_state", level = "debug")]
+ async fn get_tree_state<C>(
+     client: &mut C,
+     block_height: BlockHeight,
 --- a/pepper-sync/src/error.rs
 +++ b/pepper-sync/src/error.rs
-@@ -22,6 +22,17 @@
-         link = cause.source();
-     }
-     texts.join(CAUSE_CHAIN_SEPARATOR)
-+}
-+
+@@ -9,19 +9,15 @@
+
+ use crate::wallet::OutputId;
+
+-/// The separator between two layers of a rendered cause chain.
+-pub(crate) const CAUSE_CHAIN_SEPARATOR: &str = ": ";
+-
+-/// Renders `error` and every `source()` link as one separated line, so a log
+-/// message keeps the whole cause chain.
+-pub(crate) fn cause_chain_text(error: &(dyn std::error::Error + 'static)) -> String {
+-    let mut texts = vec![error.to_string()];
+-    let mut link = error.source();
+-    while let Some(cause) = link {
+-        texts.push(cause.to_string());
+-        link = cause.source();
+-    }
+-    texts.join(CAUSE_CHAIN_SEPARATOR)
 +/// Application diagnostic context; carries no wallet identifiers.
 +#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 +pub enum ShardTreeOperation {
@@ -16,9 +56,9 @@
 +    /// Rewind an earlier pool during pool-history recovery.
 +    PoolRecoveryRollback,
  }
- 
+
  /// Top level error enumerating any error that may occur during sync
-@@ -53,6 +64,17 @@
+@@ -56,6 +52,17 @@
      /// Shard tree error.
      #[error("shard tree error")]
      ShardTreeError(#[from] ShardTreeError<Infallible>),
@@ -36,26 +76,26 @@
      /// Critical non-recoverable truncation error due to missing shard tree checkpoints.
      #[error(
          "critical non-recoverable truncation error at height {0} due to missing {1} shard tree checkpoints. wallet data cleared. rescan required."
-@@ -110,6 +132,7 @@
+@@ -113,6 +120,7 @@
              | SyncError::ChainError(..)
              | SyncError::BirthdayBelowSapling(..)
              | SyncError::ShardTreeError(_)
 +            | SyncError::ShardTreeContext { .. }
              | SyncError::TruncationError(..)
              | SyncError::TransparentAddressDerivationError(_)
-             | SyncError::WalletError(_) => false,
-@@ -184,6 +207,7 @@
+             | SyncError::WalletError(_)
+@@ -254,6 +262,7 @@
              | SyncError::ChainError(..)
              | SyncError::BirthdayBelowSapling(..)
              | SyncError::ShardTreeError(_)
 +            | SyncError::ShardTreeContext { .. }
              | SyncError::TruncationError(..)
              | SyncError::TransparentAddressDerivationError(_)
-             | SyncError::WalletError(_) => SyncRecoveryObservables::Abort,
+             | SyncError::WalletError(_)
 --- a/pepper-sync/src/sync.rs
 +++ b/pepper-sync/src/sync.rs
-@@ -1695,13 +1695,28 @@
-         } else {
+@@ -1986,13 +1986,28 @@
+         if pool < target_pool {
              match pool {
                  ShieldedPool::Sapling => {
 -                    truncate_tree_to_next_checkpoint(rescan_from - 1, &mut shard_trees.sapling)?;
@@ -86,18 +126,41 @@
                  }
              }
          }
+@@ -2996,7 +3011,7 @@
+                                         }
+                                 }
+                                 Err(e) => {
+-                                    tracing::warn!("Mempool error: {e}");
++                                    tracing::warn!(grpc_code = e.code() as i32, "Mempool stream message failed");
+                                     continue 'main;
+                                 }
+                             }
+@@ -3012,11 +3027,8 @@
+                 }
+             }
+             Err(e @ MempoolError::ShutdownWithoutStream) => return Err(e),
+-            Err(MempoolError::ServerError(e)) => {
+-                tracing::warn!(
+-                    "Mempool stream request failed! Status: {}.\nRetrying...",
+-                    crate::error::cause_chain_text(&e)
+-                );
++            Err(MempoolError::ServerError(_)) => {
++                tracing::warn!("Mempool stream request failed");
+                 tokio::time::sleep(Duration::from_secs(3)).await;
+             }
+         }
 --- a/pepper-sync/src/wallet/traits.rs
 +++ b/pepper-sync/src/wallet/traits.rs
-@@ -17,7 +17,7 @@
+@@ -18,7 +18,7 @@
  use zcash_protocol::{PoolType, ShieldedPool};
  use zip32::AccountId;
- 
+
 -use crate::error::{ServerError, SyncError};
 +use crate::error::{ServerError, ShardTreeOperation, SyncError};
  use crate::keys::transparent::TransparentAddressId;
  use crate::reset_spends;
  use crate::shardtree_ext::{RollbackOutcome, ShardTreeExt};
-@@ -407,17 +407,32 @@
+@@ -415,17 +415,32 @@
              for tree in sapling_located_trees {
                  shard_trees
                      .sapling
@@ -131,9 +194,9 @@
 +                        error,
 +                    })?;
              }
- 
+
              Ok(())
-@@ -482,7 +497,13 @@
+@@ -514,7 +529,13 @@
      match plan_pool_truncation(tree_facts(tree, truncate_height), truncate_height) {
          PoolTruncation::Untouched => Ok(()),
          PoolTruncation::ToCheckpoint { checkpoint } => {
@@ -148,9 +211,9 @@
                  RollbackOutcome::RolledBack => Ok(()),
                  RollbackOutcome::NoSuchCheckpoint => {
                      tracing::error!(
-@@ -567,3 +588,144 @@
- 
-     Ok(())
+@@ -608,3 +629,145 @@
+
+     Ok(Checkpoint::from_parts(tree_state, BTreeSet::new()))
  }
 +
 +#[cfg(test)]
@@ -273,6 +336,7 @@
 +            let range = ScanRange::from_parts(1u32.into()..1u32.into(), ScanPriority::Historic);
 +            let error = wallet
 +                .update_shard_trees(
++                    &zcash_protocol::consensus::MAIN_NETWORK,
 +                    sender,
 +                    &range,
 +                    100_000u32.into(),
@@ -293,11 +357,3 @@
 +        }
 +    }
 +}
---- a/pepper-sync/src/client/fetch.rs
-+++ b/pepper-sync/src/client/fetch.rs
-@@ -165 +165 @@
--#[instrument(skip(client), name = "fetch::get_latest_block", err, level = "info")]
-+#[instrument(skip(client), name = "fetch::get_latest_block", level = "debug")]
-@@ -263 +263 @@
--#[instrument(skip(client), name = "fetch::get_tree_state", err, level = "info")]
-+#[instrument(skip(client), name = "fetch::get_tree_state", level = "debug")]

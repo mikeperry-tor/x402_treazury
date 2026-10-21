@@ -114,15 +114,54 @@ fn read_account_id<R: Read>(reader: &mut R) -> io::Result<zip32::AccountId> {
     })
 }
 
+/// A wallet file written for one chain, read for another. It travels inside
+/// the `io::Error` the read returns, so a caller can tell this failure apart
+/// without reading the message.
+#[derive(Debug)]
+pub struct ChainMismatch {
+    /// The chain the file was written for.
+    pub saved: String,
+    /// The chain the file was read for.
+    pub expected: String,
+}
+
+impl std::fmt::Display for ChainMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "wallet chain name {} doesn't match expected {}",
+            self.saved, self.expected
+        )
+    }
+}
+
+impl std::error::Error for ChainMismatch {}
+
+fn chain_mismatch(saved_network: &str, chain_type: &ChainType) -> Error {
+    Error::new(
+        ErrorKind::InvalidData,
+        ChainMismatch {
+            saved: saved_network.to_string(),
+            expected: chain_type.to_string(),
+        },
+    )
+}
+
 fn check_saved_chain(saved_network: &str, chain_type: &ChainType) -> io::Result<()> {
     if saved_network == chain_type.to_string() {
         Ok(())
     } else {
-        Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("wallet chain name {saved_network} doesn't match expected {chain_type}"),
-        ))
+        Err(chain_mismatch(saved_network, chain_type))
     }
+}
+
+/// The chain a stored chain name stands for, through the tag of that chain.
+fn chain_type_from_stored(stored: &str) -> io::Result<ChainType> {
+    chain_type_from_tag(match chain_name_from_stored(stored)? {
+        "mainnet" => 0,
+        "testnet" => 1,
+        _ => 2,
+    })
 }
 
 impl LightWallet {
@@ -148,15 +187,27 @@ impl LightWallet {
     ///
     /// Version 43 is burned: builds between the two revisions of 42 wrote
     /// it with the final version 42 layout, so it is accepted at read as 42
-    /// and must never be assigned to a new layout. The next format bump is
-    /// 44.
+    /// and must never be assigned to a new layout.
+    ///
+    /// Changes in version 44:
+    /// `SyncConfig` serialized version 2, which appends the
+    /// `shutdown_on_completion` bool.
+    ///
+    /// Changes in version 45:
+    /// `SyncState` serialized version 5, which appends the transparent scan
+    /// floor.
+    /// The readers of the pepper-sync, zingo-status and zingo-price types
+    /// embedded in the wallet file refuse a serialized version above the one
+    /// they write. Builds before version 45 read those types at any version,
+    /// so 44 and 45 were each minted for a change to one of them. A build that
+    /// reads version 45 refuses a newer embedded layout by itself, so a change
+    /// to an embedded type's serialized version takes no new Wallet Version.
     ///
     /// Landing in dev ships a format: every layout that has landed in dev
-    /// must remain readable, and the wallet writable, forever after (ADR
-    /// 0015, docs/adr/0015-landing-in-dev-ships-the-wallet-file-format.md).
+    /// must remain readable, and the wallet writable, forever after.
     #[must_use]
     pub const fn serialized_version() -> u64 {
-        42
+        45
     }
 
     /// Upper bound on the version word [`Self::read_recovery_info`] accepts:
@@ -257,13 +308,53 @@ impl LightWallet {
             ..32 => Self::read_v0(reader, chain_type, version),
             // 43 is a burned version number with the final 42 layout; see
             // the `serialized_version` docs and ADR 0015.
-            32..=43 => Self::read_v32(reader, chain_type, version),
+            32..=45 => Self::read_v32(reader, chain_type, version),
             _ => Err(io::Error::new(
                 ErrorKind::InvalidData,
                 format!(
                     "Failed to read wallet version {}. Do you have the latest version?\n{}",
                     version, "Note: wallet files from zecwallet or beta zingo are not compatible"
                 ),
+            )),
+        }
+    }
+
+    /// The chain a wallet file was written for. Version 32 and later store
+    /// it right after the version word; older files store it past the keys,
+    /// so they are read whole under each chain until one parses.
+    pub fn read_chain(bytes: &[u8]) -> io::Result<ChainType> {
+        let mut reader = bytes;
+        let version = reader.read_u64::<LittleEndian>()?;
+        match version {
+            ..32 => [
+                ChainType::Mainnet,
+                ChainType::Testnet,
+                ChainType::Regtest(ActivationHeights::default()),
+            ]
+            .into_iter()
+            .find(|chain| Self::read(bytes, *chain).is_ok())
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidData,
+                    format!("wallet version {version} parses under no chain"),
+                )
+            }),
+            32..=45 => {
+                if version >= 41 {
+                    chain_type_from_tag(reader.read_u8()?)
+                } else if version == 40 {
+                    match read_v40_chain_field(&mut reader)? {
+                        V40ChainField::Tag(tag) => chain_type_from_tag(tag),
+                        V40ChainField::Name(stored) => chain_type_from_stored(&stored),
+                    }
+                } else {
+                    let stored = utils::read_string(&mut reader)?;
+                    chain_type_from_stored(&stored)
+                }
+            }
+            _ => Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("wallet version {version} is newer than this build reads"),
             )),
         }
     }
@@ -309,10 +400,7 @@ impl LightWallet {
             }
         };
         if saved_network != chain_type.to_string() {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("wallet chain name {saved_network} doesn't match expected {chain_type}"),
-            ));
+            return Err(chain_mismatch(saved_network, &chain_type));
         }
 
         let _wallet_options = if version <= 23 {
@@ -466,11 +554,7 @@ impl LightWallet {
                     transaction
                         .status
                         .get_confirmed_height()
-                        .map(|height| ScanTarget {
-                            block_height: height,
-                            txid: transaction.txid,
-                            narrow_scan_area: true,
-                        })
+                        .map(|height| ScanTarget::new(height, Some(transaction.txid)))
                 })
                 .collect::<Vec<_>>(),
         );
@@ -497,8 +581,9 @@ impl LightWallet {
             save_required: false,
             wallet_settings: WalletSettings {
                 sync_config: SyncConfig {
-                    transparent_address_discovery: TransparentAddressDiscovery::minimal(),
+                    transparent_address_discovery: TransparentAddressDiscovery::default(),
                     performance_level: PerformanceLevel::High,
+                    shutdown_on_completion: false,
                 },
                 min_confirmations: NonZeroU32::try_from(3).unwrap(),
             },
@@ -689,11 +774,7 @@ impl LightWallet {
                 let block_height = BlockHeight::from_u32(r.read_u32::<LittleEndian>()?);
                 let txid = TxId::read(&mut r)?;
 
-                ScanTarget {
-                    block_height,
-                    txid,
-                    narrow_scan_area: true,
-                }
+                ScanTarget::new(block_height, Some(txid))
             };
 
             Ok((OutputId::new(outpoint_txid, output_index), scan_target))
@@ -723,8 +804,9 @@ impl LightWallet {
         } else {
             WalletSettings {
                 sync_config: SyncConfig {
-                    transparent_address_discovery: TransparentAddressDiscovery::minimal(),
+                    transparent_address_discovery: TransparentAddressDiscovery::default(),
                     performance_level: PerformanceLevel::High,
+                    shutdown_on_completion: false,
                 },
                 min_confirmations: NonZeroU32::try_from(3).unwrap(),
             }
