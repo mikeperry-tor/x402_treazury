@@ -66,6 +66,17 @@ scripts/zcash.sh build
 cp examples/deployments/managed.toml examples/deployments/managed.local.toml
 ```
 
+For Tor, start Tor Browser with its SOCKS listener at `127.0.0.1:9150` and add
+[the Tor network policy](examples/network/tor.toml) once to the fresh local copy
+before running the initialization and serving commands below:
+
+```sh
+cat examples/network/tor.toml >> examples/deployments/managed.local.toml
+```
+
+Deployment commands read `[network]` from their `--config` file;
+`--network-config` is for standalone commands.
+
 Initialize its treasury explicitly, then start the authenticated listener:
 
 ```sh
