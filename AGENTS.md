@@ -8,6 +8,10 @@ USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
 
 ## Engineering preferences
 
+- Avoid platform-specific code where possible. When OS-specific behavior is
+  necessary, isolate it behind a small shared abstraction and implement it for
+  Linux, macOS and Windows. Preserve equivalent correctness and security contracts;
+  do not substitute silent no-ops. Follow the [portability guidance](docs/development.md#portability).
 - Favor simplicity and best-effort execution. Prefer blockchain/SDK spendability
   and reconciliation over parallel local monetary tracking. Remove responsibilities
   before adding counters, certificates, recovery ledgers or workflow frameworks.

@@ -3,6 +3,30 @@
 See [testing and qualification](testing.md) for test boundaries and acceptance limits.
 Commands run from the repository root.
 
+## Portability
+
+Target Linux, macOS and Windows. Prefer standard Rust or existing cross-platform
+dependencies over native OS calls. When platform behavior is necessary, put it
+behind a small shared abstraction with implementations for all three systems.
+Define the required behavior first: filesystem privacy and durability, cancellation,
+process ownership and network confinement need equivalent guarantees, not merely
+matching function signatures. Avoid adding abstraction layers for behavior that
+can simply be removed.
+
+Do not hide missing implementations behind successful no-ops or silently weaker
+permission, recovery or network checks. An unavailable required capability must
+produce an explicit error scoped to that operation. Such an error documents an
+unfinished port; it does not establish platform support. Prefer portable test
+fixtures and verify native behavior on each OS before claiming support. Cross-target
+compilation alone does not validate filesystem or process semantics.
+
+These are engineering targets, not a claim that the current tree supports all
+three systems. The [portability fixes plan](plans/portability_fixes.md) tracks known
+gaps and removal options. Ordinary application support and optional qualification
+are separate: [release reproducibility](reproducible-builds.md) and
+[real-Tor confinement](../tests/TOR.md) currently have macOS-specific evidence.
+Keep those claims narrow until equivalent backends are implemented and qualified.
+
 ## Build storage options
 
 For end users, build an optimized executable without incremental compiler caches:
