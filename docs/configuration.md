@@ -456,8 +456,8 @@ choose an explicit payment cap preserving the intended authority. The aggregate
 settings `daily_funding_limit_usdc`, `total_funding_limit_usdc` and
 `daily_treasury_spend_limit_zec` are rejected with migration guidance. Tier/retention
 aliases and `max_live_wallets` are unsupported. Updating configuration never
-converts wallet state; use the separately reviewed stopped-service conversion for
-the inspected source state. Existing keys, balances, transactions and liabilities
+converts wallet state. Unsupported legacy schemas are rejected without mutation.
+Existing keys, balances, transactions and liabilities
 must survive. There is no general migration/abandonment framework or manual
 retirement command.
 
@@ -538,10 +538,10 @@ not automatically abandoned or replaced.
 Reopen applies changed caps, targets and slot enablement. Existing accepted terms,
 job identities and original targets remain immutable; current policy is rechecked
 before new quote acceptance/preparation. Configuration edits do not convert state.
-The inspected schema12 privacy-local source lacks immutable destination readiness
-support and is unsupported by the strict conversion contract. Ordinary startup
-rejects legacy schemas without mutation. No successful conversion or incident repair is implied.
-See the [known-state preflight](../examples/convert_privacy_local.rs).
+Ordinary startup rejects unsupported legacy schemas without mutation. Configuration
+edits and `wallet recover` cannot supply missing immutable destination-readiness
+evidence or convert unsupported state. Preserve complete backups and all accepted
+financial obligations; restoring an older backup cannot undo subsequent work.
 See [Wallet selection and network isolation](architecture.md#wallet-selection-and-network-isolation)
 for the bounded selector and its accepted limitations.
 

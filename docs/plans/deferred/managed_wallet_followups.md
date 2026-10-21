@@ -74,9 +74,9 @@ Specialized abandonment, contradictory-evidence assessment and fork repair remai
 incident-specific operator work. Serving maintenance can clear a wallet-level
 chain repair block only through [complete original-evidence revalidation](../../wallet-rotation.md);
 ordinary recovery never rewrites historical anchors or adopts uncertain liabilities. A future utility needs
-an exact reviewed source shape and preserved original bytes/support; the known
-schema12 privacy-local preflight currently rejects missing immutable destination
-readiness. There is no general-purpose migration or proof override.
+an exact reviewed source shape and preserved original bytes/support. Ordinary
+recovery cannot manufacture missing immutable destination-readiness evidence.
+There is no general-purpose migration or proof override.
 
 ## Related boundaries
 

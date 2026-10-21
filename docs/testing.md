@@ -64,7 +64,7 @@ These prove routing and credential boundaries, not live Tor circuits or settleme
 | Catalog/config/providers | Generated schemas, selected operations, routing, pricing descriptions, composition and pinned local catalogs. |
 | MCP/deployment/discovery | Auth, scope and grants, immutable invocation snapshots, update/remove races, persistent idempotency, cancellation, pagination, shutdown and ownership release. |
 | Payments/managed rotation | Real local signing, cap/asset validation, journal-before-disclosure, captured-wallet traversal only after typed insufficient funds, retained chargeable attempts, concurrent admission, exact reserve promotion, independent initial funding, and separately requested canonical resolution. |
-| Treasury/store/funding | Encrypted persistence, explicit conversion preflight, snapshot ordering, reservations and qualification limits, uncertain source sends, refund/expiry rules, backups and filesystem protections. |
+| Treasury/store/funding | Encrypted persistence, legacy-state rejection/preflight, snapshot ordering, reservations and qualification limits, uncertain source sends, refund/expiry rules, backups and filesystem protections. |
 | Network | Production HTTP/gRPC through authenticated fixture SOCKS, remote hostnames, identity/pool boundaries, participating Tor discovery/API/Base retries, `Retry-After` handling, conditional promotion, proxy failure, TLS, redirects and public-destination enforcement. |
 | Output/resource limits | Exact/over-bound behavior, visible errors and logs, no partial cache success, no retry of paid oversized responses, typed inline image/mapping behavior. |
 
@@ -200,12 +200,11 @@ unique managed authorizations through concurrent calls, held range responses and
 store reopen; seller success and cover progress do not release payment exposure.
 These checks do not qualify a live funded restart or Tor privacy.
 
-The narrow conversion utility has synthetic fixtures for strict source-shape and
-proof validation, rejection before mutation, repeated/reopened inspection,
-exclusive ownership, and committed WAL inspection without changing source sidecars.
-The operator-identified real state was inspected read-only and was **not converted**:
-legacy completion records lack the required immutable destination-readiness support.
-Synthetic checks do not supply that missing proof or qualify a live migration.
+Production storage preflight and historical-schema regressions cover rejection
+without mutation, private disposable recovery of committed WAL and hot rollback
+journals, and preservation of accepted obligations through failed legacy reopen.
+These checks cannot supply missing immutable destination-readiness evidence or
+qualify a live migration.
 Funded lifecycle, privacy and combined cover/payment acceptance retain the limits
 listed under [qualification status](#qualification-status).
 
