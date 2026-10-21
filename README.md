@@ -53,9 +53,46 @@ and validate configuration. `wallet` manages the treasury; `sources inspect`
 reads persisted agent-added sources. Running `x402_treazury` without a command
 shows help. See the [command reference](docs/configuration.md).
 
-## Quickstart: Zcash and Tor
+## Quickstart: managed wallet
 
-The [privacy example conf file](examples/deployments/privacy.toml)
+The [managed starter](examples/deployments/managed.toml) exposes one Curl HTTP
+Request tool on `http://127.0.0.1:8000/mcp`, backed by one rotating wallet pool.
+Its pinned local catalog can be inspected without credentials, treasury state,
+funding or upstream requests:
+
+```sh
+scripts/zcash.sh build
+cp examples/deployments/managed.toml examples/deployments/managed.local.toml
+target/release/x402_treazury config check --config examples/deployments/managed.local.toml
+target/release/x402_treazury catalog tools --config examples/deployments/managed.local.toml
+```
+
+Initialize its treasury explicitly, then start the authenticated listener:
+
+```sh
+target/release/x402_treazury wallet init --config examples/deployments/managed.local.toml
+export TREAZURY_MCP_TOKEN="replace_with_a_secret_bearer_token"
+target/release/x402_treazury serve --config examples/deployments/managed.local.toml
+```
+
+Send ZEC to the shielded receive address printed by initialization. The pool
+requests a $2 USDC reserve, accepting bridge-minimum increases up to $3 before
+fees; allow funds for fees and future replacements. Each payment is capped at
+$0.05. Funding starts after the listener binds, so tools remain visible while
+funding is pending. Connect your MCP client with
+`Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.
+
+The default key file lives with treasury state at `state/managed/wallet.key`;
+protect that directory because it contains both state and decryption material.
+Run one serving process per treasury. `wallet status --config
+examples/deployments/managed.local.toml` reads saved status alongside serving;
+other exclusive wallet administration requires stopping it. See
+[wallet administration](docs/wallet-cli.md) and the
+[example choices](examples/README.md).
+
+## Comprehensive walkthrough: Zcash and Tor
+
+The [comprehensive deployment](examples/deployments/comprehensive.toml)
 provides four MCP endpoints backed by two rotating wallet pools. Social, company
 and toolbox share a wallet and Tor payer identity; web uses a separate wallet:
 
@@ -105,7 +142,7 @@ Run these commands from the repository checkout directory:
 ```sh
 scripts/zcash.sh build
 
-cp examples/deployments/privacy.toml examples/deployments/privacy.local.toml
+cp examples/deployments/comprehensive.toml examples/deployments/comprehensive.local.toml
 ```
 
 The wrapper uses the pinned Rust/Cargo toolchain and supplies protoc.
@@ -119,7 +156,7 @@ builds, use `scripts/zcash.sh build --developer`; see
 [build storage options](docs/development.md#build-storage-options).
 
 Start Tor Browser, or use an installed Tor daemon. Tor is not bundled or started by
-the application. The [example privacy conf file](examples/deployments/privacy.toml)
+the application. The [comprehensive deployment](examples/deployments/comprehensive.toml)
 connects to Tor Browser's `127.0.0.1:9150` SOCKS port. `x402_treazury` uses
 SOCKS username+password isolation, so it will not use the same Tor circuits
 as your web browsing traffic.
@@ -133,7 +170,7 @@ Keep Tor running throughout.
 
 ```sh
 target/release/x402_treazury wallet init \
-  --config examples/deployments/privacy.local.toml
+  --config examples/deployments/comprehensive.local.toml
 ```
 
 Initialization creates the configured wallet directory (`./state/privacy`),
@@ -151,7 +188,7 @@ Set `TREAZURY_MCP_TOKEN` to a secret bearer token, then launch:
 ```sh
 export TREAZURY_MCP_TOKEN="treazury_bearer_auth_key_here"
 target/release/x402_treazury serve \
-  --config examples/deployments/privacy.local.toml
+  --config examples/deployments/comprehensive.local.toml
 ```
 
 `serve` synchronizes the treasury, discovers API catalogs and prices, and funds
@@ -175,7 +212,7 @@ progress using the same deployment file:
 
 ```sh
 target/release/x402_treazury wallet status \
-  --config examples/deployments/privacy.local.toml
+  --config examples/deployments/comprehensive.local.toml
 ```
 
 Send ZEC to that **shielded receive address**. The example's two wallet groups each request a $2 USDC reserve: **$4 USDC total before fees and accepted bridge-minimum increases**. Allow additional ZEC for those costs and future wallet replacements.
@@ -201,7 +238,7 @@ startup, explicit `wallet sync` with serving stopped, or another relevant trigge
 See the [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy)
 for the discovery scopes and unavailable-treasury exception.
 
-The privacy example conf uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
+The comprehensive example uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
 over Tor when catalog or pricing requests are blocked, rate limited or time out.
 Relayed requests cost $0.01 each; relay-dependent catalogs appear when their payer
 wallet becomes usable.
@@ -219,7 +256,7 @@ To stop, press Ctrl-C once and allow the announced transaction-safety drain to f
 
 ## Using Expensive APIs
 
-The privacy example caps each web payment at $0.10 and each payment from the
+The comprehensive example caps each web payment at $0.10 and each payment from the
 shared company/social/toolbox wallet at $0.50. The selected RelayShield tools
 advertise $0.05-$0.40 per call, within that shared cap. Larger company/grant
 queries and result batches can still exceed it. Increase `max_api_payment_usdc`
@@ -238,7 +275,7 @@ To enable a large reserve wallet for a wallet group, add a reserve block for tha
 When sizing the large wallet, aim for a **4x multiple your largest expected API payment**. For example, a $2.50 maximum API payment suggests a **$10 large reserve**:
 
 ```toml
-# Add a large wallet to the company group in examples/deployments/privacy.toml
+# Add a large wallet to the company group in examples/deployments/comprehensive.toml
 [wallets.company.reserves.large]
 funding_amount_usdc = "10.00"
 ```
@@ -276,7 +313,7 @@ using those template settings: per deployment, MCP server, source or server/sour
 Each generated group has its own wallets and payment identity; using the same
 template does not make the groups share funds or addresses.
 
-For example, this `research` template gives each source its own group with a $2
+For example, this `research` template gives each listener its own group with a $2
 small reserve and a $10 large reserve. It permits payments up to $2.50, following
 the 4x large-wallet sizing guidance above:
 
@@ -299,18 +336,18 @@ scope = "server" # deployment, server, source, or binding
 template = "research"
 ```
 
-This is an alternative to explicit wallet assignments in the quickstart. Remove
+This is an alternative to explicit wallet assignments in either example. Remove
 those explicit wallet group assignments where you want the `wallet_assignment` policy to apply; explicit references
 retain priority.
 
 Each generated group in this example starts with $12 of requested
-USDC inventory, so the three automatically assigned MCP servers wallets would request $36 in total.
+USDC inventory, so three automatically assigned listeners would request $36 in total.
 `config show` displays the resolved bindings and combined initial-inventory target
 before allocating anything. That target excludes fees and bridge-minimum increases.
 
-See [automatic wallets](examples/deployments/servers-auto-wallets.toml),
-[multiple managed listeners](examples/deployments/servers-managed.toml), and the
-[composition reference](docs/configuration.md#multiple-mcp-ports-from-one-configuration).
+See the [automatic assignment reference](docs/configuration.md#multiple-mcp-ports-from-one-configuration)
+and [comprehensive deployment](examples/deployments/comprehensive.toml) for
+multiple listeners sharing explicit named pools.
 
 ## Adding API Providers
 
@@ -351,9 +388,10 @@ sets the default wallet and optional persistence file; `source_management = true
 inside a `[servers.NAME]` section enables it for that MCP server endpoint. The wallet name
 must reference an existing `[wallets.NAME]` profile.
 
-For a complete configuration example,
-start with the [managed-wallet example](examples/deployments/agent-sources-managed.toml)
-or [static-wallet example](examples/deployments/agent-sources.toml).
+The [comprehensive deployment](examples/deployments/comprehensive.toml) enables
+this on its toolbox listener using the existing company pool. To add it to the
+[managed starter](examples/deployments/managed.toml), use its existing research
+pool as described in the [agent source guide](docs/agent-sources.md#configuration-and-authority).
 
 Here is an example excerpt:
 

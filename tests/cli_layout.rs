@@ -87,11 +87,8 @@ fn executable_name_version_and_example_inspection_are_portable() {
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for example in [
-        "privacy.toml",
-        "servers.toml",
-        "socialfetch.toml",
-        "servers-auto-wallets.toml",
-        "servers-managed.toml",
+        "managed.toml",
+        "comprehensive.toml",
         "public-swap-demo.toml",
         "public-payment-demo.toml",
     ] {

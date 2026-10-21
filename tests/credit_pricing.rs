@@ -203,9 +203,10 @@ fn unsupported_metadata_has_visible_fallback_and_warning() {
     assert_eq!(logs.matches("affected_operations=5").count(), 2, "{logs}");
 }
 #[tokio::test]
-async fn privacy_subsets_inherit_conversion_despite_source_and_endpoint_instruction_overrides() {
+async fn comprehensive_subsets_inherit_conversion_despite_source_and_endpoint_instruction_overrides()
+ {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join("examples/deployments/privacy.toml");
+    let path = root.join("examples/deployments/comprehensive.toml");
     let deployment = config::read_table(&path).await.unwrap();
     let document: Value =
         serde_json::from_str(include_str!("fixtures/socialfetch_openapi.json")).unwrap();

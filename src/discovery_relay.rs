@@ -933,7 +933,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn built_relays_share_wallet_clients_and_one_global_breaker() {
         let config: crate::deployment::MetaConfig =
-            toml::from_str(include_str!("../examples/deployments/privacy.toml")).unwrap();
+            toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
         let policy = config.discovery_relay.as_ref().unwrap();
         let bindings = resolve_wallets(
             policy,
@@ -947,7 +947,8 @@ pub(crate) mod tests {
             .keys()
             .map(|w| (w.clone(), PaidClient::unsigned()))
             .collect();
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/deployments/privacy.toml");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/deployments/comprehensive.toml");
         let relays = build(policy, &path, &bindings, &clients).await.unwrap();
         assert!(Arc::ptr_eq(&relays["social"], &relays["company_otto"]));
         assert!(Arc::ptr_eq(&relays["exa"], &relays["webinfo"]));
@@ -961,7 +962,7 @@ pub(crate) mod tests {
     #[test]
     fn default_wallet_selection_is_stable_scoped_and_honors_overrides() {
         let mut config: crate::deployment::MetaConfig =
-            toml::from_str(include_str!("../examples/deployments/privacy.toml")).unwrap();
+            toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
         let policy = config.discovery_relay.clone().unwrap();
         assert!(policy.wallet.is_none() && policy.serve && policy.warm);
         let resolve = |config: &crate::deployment::MetaConfig, policy: &Policy| {

@@ -1,6 +1,6 @@
 # Wallet CLI and managed configuration
 
-Start with the [README quickstart](../README.md#quickstart-zcash-and-tor).
+Start with the [README quickstart](../README.md#quickstart-managed-wallet).
 This reference covers treasury commands, funding controls and operator recovery.
 For lifecycle invariants, see [wallet rotation](wallet-rotation.md).
 Commands run from the repository root; `x402_treazury` means the built executable on PATH.
@@ -13,11 +13,11 @@ serving. `--meta-config` remains an alias for `--config`. Wallet commands do not
 initial managed capacity; other administration commands do not start funding workers.
 
 ```sh
-x402_treazury wallet init --config examples/deployments/privacy.local.toml
-x402_treazury wallet addresses --config examples/deployments/privacy.local.toml
-x402_treazury wallet status --config examples/deployments/privacy.local.toml
-x402_treazury wallet backup --config examples/deployments/privacy.local.toml --destination secrets/backup
-x402_treazury wallet sync --config examples/deployments/privacy.local.toml
+x402_treazury wallet init --config examples/deployments/managed.local.toml
+x402_treazury wallet addresses --config examples/deployments/managed.local.toml
+x402_treazury wallet status --config examples/deployments/managed.local.toml
+x402_treazury wallet backup --config examples/deployments/managed.local.toml --destination secrets/backup
+x402_treazury wallet sync --config examples/deployments/managed.local.toml
 ```
 
 `wallet init` prints the primary ZEC receive address and a prompt to send ZEC to
@@ -110,7 +110,7 @@ paths and network policy. `--birthday` and import options remain command-specifi
 After depositing sufficient ZEC into the treasury, run:
 
 ```sh
-x402_treazury wallet bootstrap --config examples/deployments/privacy.local.toml
+x402_treazury wallet bootstrap --config examples/deployments/managed.local.toml
 ```
 
 This declares configured groups, runs the production treasury/funding workers,
@@ -253,7 +253,7 @@ remain part of live qualification.
 To sync an existing treasury using the selected endpoint policy, run:
 
 ```sh
-x402_treazury wallet sync --config examples/deployments/servers-managed.toml
+x402_treazury wallet sync --config examples/deployments/managed.toml
 ```
 
 This command reads `[treasury]`, resolves state/key paths relative to the TOML,
@@ -559,12 +559,12 @@ effects still require recovery; absence of signed bytes alone never permits retr
 Recovery status retains its preceding failure instead of clearing it.
 
 Managed profiles connect these transitions to the x402 request path using a
-trusted Base RPC. [servers-managed.toml](../examples/deployments/servers-managed.toml) contains
+trusted Base RPC. [managed.toml](../examples/deployments/managed.toml) contains
 a complete deployment example. Inspect it without credentials or state access:
 
 ```sh
 target/debug/x402_treazury config show \
-  --config examples/deployments/servers-managed.toml
+  --config examples/deployments/managed.toml
 ```
 
 Serve with the Zcash-enabled binary using the same `--config` and an
@@ -743,8 +743,8 @@ USDC permits six fractional digits and ZEC eight. Singleton treasury/funding
 settings and all risk limits are validated by `config check`/`config show` without
 unlocking state. Endpoint credentials remain environment references. Serving
 requires those references; endpoints require HTTPS, with HTTP allowed only for
-loopback fixtures. Zcash/NEAR endpoint settings are reserved for the funding
-worker and are not contacted by this implementation.
+loopback fixtures. Configuration inspection does not contact Zcash or NEAR endpoints. Managed serving
+and wallet operations use them for synchronization, funding and recovery as applicable.
 
 Managed payments accept Base USDC v2 exact EIP-3009 within the configured per-payment
 cap and signing domain. Balances and historical funding targets are advisory, and

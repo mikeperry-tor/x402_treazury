@@ -1,3 +1,11 @@
+# Comprehensive showcase: curated research, shared pools, Tor and agent-added APIs.
+# Listener -> sources -> pool:
+# web     -> Exa, SocialFetch web/community, Google Trends -> web
+# social  -> social platforms, Telegram and people research -> company
+# company -> selected company, grants and security research -> company
+# toolbox -> endpoint-local agent-added sources -> company
+# All pools share one treasury. Paid discovery follows each source's assigned pool.
+# See examples/README.md for setup and the smaller managed.toml starter.
 # Reserve sizes are funding preferences; the explicit group cap governs every wallet.
 # Start with small and optional large reserves; first payment promotes its payer; refill small-first. Retained balances stay usable.
 # auto_fund=false pauses new funding, not eligible automatic retirement.
@@ -7,7 +15,8 @@
 # First positive USDC credit consumes the initial claim, even below target; accepted source work stays owned.
 # Three research contexts and a toolbox share one Zcash treasury and two rotating wallet pools.
 # Social, company and toolbox share a payer wallet and Tor identity; web stays separate.
-# Copy this file to privacy.local.toml before editing.
+# Copy this file to comprehensive.local.toml before editing.
+# Existing state/privacy and state/privacy-sources.sqlite identities are retained.
 # Run each agent against the MCP listener for its research context.
 # Separate wallets/circuits do not hide identifying terms in API request content.
 version = 1
@@ -25,8 +34,8 @@ read_timeout_seconds = 60
 # Paid fallback for blocked catalog/pricing GETs, using each source's assigned
 # wallet. Shared sources choose one assigned profile deterministically; config
 # show reports discovery_wallets. Paid API calls retain their listener bindings.
-# Enabled serving waits for one eligible funded payer before discovery.
-# Before paid warming, run wallet bootstrap --config YOUR_LOCAL_CONFIG.
+# Listeners bind before funding; relay-dependent catalogs appear as payers become usable.
+# Explicit paid warming requires an eligible payer; wallet bootstrap can prepare reserves.
 # Curl receives target URLs; connections retain wallet-bound Tor isolation.
 # A failure/cancellation disables further relay calls across all wallets this run.
 [discovery_relay]

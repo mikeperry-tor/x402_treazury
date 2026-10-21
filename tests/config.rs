@@ -363,10 +363,10 @@ sources=['api']
 }
 
 #[tokio::test]
-async fn privacy_example_enables_source_wallet_discovery_offline() {
+async fn comprehensive_example_enables_source_wallet_discovery_offline() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let shown = x402_treazury::deployment::Deployment::show_config(
-        &root.join("examples/deployments/privacy.toml"),
+        &root.join("examples/deployments/comprehensive.toml"),
     )
     .await
     .unwrap();

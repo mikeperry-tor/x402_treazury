@@ -1,6 +1,7 @@
 # Configuration reference
 
-For a Zcash-and-Tor walkthrough, start with the [README](../README.md).
+Start with the [managed-wallet quickstart](../README.md#quickstart-managed-wallet);
+the README also provides a comprehensive Zcash-and-Tor walkthrough.
 This reference covers TOML composition, tool selection, transport and pricing.
 Commands run from the repository root. The executable requires an explicit
 subcommand; running it without arguments displays help and never starts serving.
@@ -109,23 +110,26 @@ are read independently. Compatible remote responses can also use the disk cache 
 Pricing discovery rolls across sources and endpoints with a shared 16-request cap.
 
 
-[examples/deployments/servers.toml](../examples/deployments/servers.toml) exposes PDL and LoneStar through
-separate research and company MCP listeners sharing one static wallet profile:
+[examples/deployments/managed.toml](../examples/deployments/managed.toml) exposes
+one Curl HTTP Request tool through an authenticated research listener and one
+managed pool. Its local pinned schema makes these inspection commands offline:
 
 ```sh
-target/debug/x402_treazury config check \
-  --config examples/deployments/servers.toml
-target/debug/x402_treazury catalog tools \
-  --config examples/deployments/servers.toml
-target/debug/x402_treazury serve \
-  --config examples/deployments/servers.toml --env-file .env
+target/release/x402_treazury config check --config examples/deployments/managed.toml
+target/release/x402_treazury catalog tools --config examples/deployments/managed.toml
 ```
 
-Serving this example requires `EVM_PRIVATE_KEY`, `RESEARCH_MCP_TOKEN` and
-`COMPANIES_MCP_TOKEN` in the environment or env file. Each listener serves
-stateless Streamable HTTP at `/mcp` and authenticates with its own token.
-Meta-config listeners currently require loopback addresses. There is no hot
-reload; restart the process to apply configuration changes.
+Initialize the treasury explicitly and fund its shielded address before paid use;
+see the [quickstart](../README.md#quickstart-managed-wallet). Serving needs
+`TREAZURY_MCP_TOKEN` and the initialized treasury, and binds the listener before
+background funding. The [comprehensive deployment](../examples/deployments/comprehensive.toml)
+adds multiple research listeners, Tor, relay and dynamic source management.
+
+Each listener serves stateless Streamable HTTP at `/mcp`. Meta-config listeners
+require loopback addresses. There is no hot reload; restart to apply changes.
+Static wallet profiles remain supported and use `mode = "static"` with
+`private_key_env`; they do not require treasury configuration. Static serving
+loads only the keys used by selected tools.
 
 The version-1 TOML schema separates named sources, wallets and servers, with
 optional wallet templates and an automatic assignment policy:
@@ -198,7 +202,7 @@ recommended_tools = ["otto_equity_intel", "otto_financial_statements", "otto_hel
 use_recommended_tools = true
 ```
 
-The [privacy deployment](../examples/deployments/privacy.toml) explicitly adopts
+The [comprehensive deployment](../examples/deployments/comprehensive.toml) explicitly adopts
 TeleSINT's stateless research recommendations and excludes its broad help. Its
 company and person sources retain their narrower purpose-specific selections.
 
@@ -331,8 +335,7 @@ A source override retains its payment identity across listeners. For finer
 isolation, create separate source aliases extending the same provider and assign
 different wallet names; provider files describe APIs, while deployments choose
 payment identities. Sharing scope controls wallet reuse, not a guarantee of
-complete unlinkability. Every additional managed pool requires its own active
-and configured reserve funding. Referencing one profile from more bindings does not create
+complete unlinkability. Every additional managed pool requires its own configured reserve funding. Referencing one profile from more bindings does not create
 additional pools or funding jobs.
 
 `config show` includes `wallet_bindings.<server>.<source>` with the effective
@@ -346,8 +349,10 @@ out; only effective static wallets used by selected tools load private keys.
 Inspection never reads wallet secrets or opens treasury state.
 
 To avoid repeating managed wallet definitions, define one template and an
-automatic assignment policy. A complete deployment is in
-[servers-auto-wallets.toml](../examples/deployments/servers-auto-wallets.toml):
+automatic assignment policy. To adapt the managed starter, replace its
+`[wallets.research]` definition and reserve with this template/policy and remove
+`wallet = "research"` from the listener. Keep its treasury, funding, source and
+listener settings. This substitutes automatic pools for the explicit pool:
 
 ```toml
 [wallet_templates.small]
@@ -546,7 +551,7 @@ See [Wallet selection and network isolation](architecture.md#wallet-selection-an
 for the bounded selector and its accepted limitations.
 
 Rust configuration is TOML-only. [providers/](../providers/README.md) contains
-all 27 reusable provider definitions. AgentUtility, Glassnode, Concordance,
+the reusable provider definitions. AgentUtility, Glassnode, Concordance,
 Straits and Locus have a `provider.toml` and a locally curated `openapi.json` in their own directory.
 JSON remains the format for API documents, fixture data and inventory output.
 Small PNG/JPEG/WebP results are returned as MCP image attachments; provider TOML
@@ -679,11 +684,12 @@ method, URL, query and JSON body without making a request or loading a signer.
 ## Optional agent API discovery
 
 Authorize agents to register public OpenAPI sources in a running multi-server
-HTTP deployment with `[source_management]` and `source_management = true` on each participating endpoint. The
-[static-wallet example](../examples/deployments/agent-sources.toml) and
-[managed-wallet example](../examples/deployments/agent-sources-managed.toml) use one named
-`agent_shared` wallet for all added APIs. With a $5 small target and no large reserve, that is
-one $5 small reserve regardless of how many APIs are registered.
+HTTP deployment with `[source_management]` and `source_management = true` on each
+participating endpoint. The [comprehensive example](../examples/deployments/comprehensive.toml)
+uses its existing company pool on the toolbox listener. The
+[agent source guide](agent-sources.md#configuration-and-authority) shows how to add
+this to the starter using its research pool. Registered APIs share that pool's
+existing reserve claims regardless of registration count.
 Registration does not create wallet pools or trigger funding.
 
 | Arrangement | Configuration | Payment identity sharing |
@@ -789,11 +795,10 @@ provider’s explicit `credit_pricing` rate, independently of server instruction
 ```sh
 target/debug/x402_treazury catalog tags --provider providers/socialfetch.toml
 target/debug/x402_treazury catalog tools --provider providers/socialfetch.toml --tags Twitter,YouTube
-target/debug/x402_treazury serve --config examples/deployments/socialfetch.toml --env-file .env
 ```
 
-[examples/deployments/socialfetch.toml](../examples/deployments/socialfetch.toml) configures a selected
-platform set. TOML sources accept `tags` and `exclude_tags`: each specified list
+The [comprehensive deployment](../examples/deployments/comprehensive.toml) selects
+separate social and web/community platform sets. TOML sources accept `tags` and `exclude_tags`: each specified list
 replaces the corresponding provider list; omission inherits it, and `[]`
 clears it. Matching is exact and case-sensitive. Include tags match any listed
 tag; exclude tags win. Tag selection combines with source path filters, then
@@ -851,7 +856,7 @@ Legacy network `request_timeout_seconds` is accepted as an alias with its litera
 value now meaning read inactivity. Provider `timeout` and `probe_timeout`, import
 `fetch_timeout_seconds`, and CLI `--timeout` remain compatibility spellings. Use
 only `read_timeout_seconds` in new configs. For old provider configs containing
-both timeout fields, `timeout` takes precedence. The bundled privacy example now
+both timeout fields, `timeout` takes precedence. The bundled comprehensive example now
 uses 60 seconds; user-owned local configs retain their existing explicit values.
 
 For standalone operations or wallet commands, use the same table in a separate file:
@@ -985,7 +990,7 @@ listener tokens, wallet state access or starting a server:
 
 ```sh
 x402_treazury catalog tools --provider providers/botsmith.toml --discover-pricing
-x402_treazury catalog tools --config examples/deployments/privacy.local.toml --discover-pricing
+x402_treazury catalog tools --config examples/deployments/comprehensive.local.toml --discover-pricing
 ```
 
 The flag requires `catalog tools` and respects `probe_pricing = false`, route
@@ -1207,7 +1212,7 @@ another candidate to retry relay spending. An unbound source needs either its ow
 `wallet` or an explicit `discovery_relay.wallet` override.
 
 `config show` reports the resulting `discovery_wallets` source-to-profile map.
-The privacy example enables relay fallback without an override: `social` uses
+The comprehensive example enables relay fallback without an override: `social` uses
 `company`, while `webinfo` and `exa` use `web`. Exa is available only on the web
 listener. Distinct source aliases using different wallets keep separate relay
 requests and caches,
@@ -1313,7 +1318,7 @@ unchanged.
 SocialFetch enables this using the historical 0.014 USDC/credit estimate; it is not
 a verified current x402 tariff. Every converted tool names the configured rate and
 states that the payment challenge is authoritative. Source instruction overrides
-and tag filtering (including `privacy.toml`) preserve these per-tool estimates.
+and tag filtering (including `comprehensive.toml`) preserve these per-tool estimates.
 An explicit tool description override still replaces the generated description.
 
 MCP server instructions preserve authored guidance and include this caveat once:

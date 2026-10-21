@@ -4,22 +4,21 @@ Rust reads TOML configuration. A deployment source can declare all settings
 inline or extend one of these reusable files:
 
 ```toml
-[sources.socialfetch]
-extends = "../providers/socialfetch.toml"
-timeout = 90
+[sources.curl]
+extends = "../../providers/curl/provider.toml"
 
 [servers.research]
 listen = "127.0.0.1:8000"
-bearer_token_env = "RESEARCH_MCP_TOKEN"
-wallet = "default"
-sources = ["socialfetch"]
-tags = ["Twitter", "YouTube"]
-
-[wallets.default]
-mode = "static"
-private_key_env = "EVM_PRIVATE_KEY"
-max_api_payment_usdc = "1.00"
+bearer_token_env = "TREAZURY_MCP_TOKEN"
+wallet = "research"
+sources = ["curl"]
 ```
+
+This excerpt belongs to the complete
+[managed deployment](../examples/deployments/managed.toml), which defines the
+research pool, treasury and funding settings. Provider files describe APIs;
+deployments choose payment identities. Static wallets remain supported in the
+[configuration reference](../docs/configuration.md).
 
 The `extends` path is relative to the deployment file. A local `spec` path is
 relative to the file declaring that value. Local fields replace entire inherited

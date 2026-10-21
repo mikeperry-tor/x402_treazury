@@ -155,22 +155,30 @@ and may be cached; search results reflect current availability. The external
 Enable `source_management = true` on an HTTP deployment endpoint to let its agents
 search the built-in x402 List directory, add public OpenAPI APIs, inspect tool signatures and
 invoke them. It defaults to false. Standalone provider serving remains static.
-See the [README workflow](../README.md#agent-api-auto-discovery-and-tool-addition),
-[static-wallet example](../examples/deployments/agent-sources.toml) and
-[managed-wallet example](../examples/deployments/agent-sources-managed.toml).
+See the [README workflow](../README.md#agent-api-auto-discovery-and-tool-addition)
+and the [comprehensive example's toolbox endpoint](../examples/deployments/comprehensive.toml).
 
 ## Configuration and authority
 
+To add source management to [the managed starter](../examples/deployments/managed.toml),
+add the shared block and the flag to its existing listener table:
+
 ```toml
 [source_management]
-wallet = "agent_shared"
-registry_file = "../../state/agent-sources.sqlite" # optional persistence
+wallet = "research" # Existing [wallets.research]; no new pool required.
+registry_file = "../../state/managed-sources.sqlite" # Optional persistence.
 
 [servers.research]
 source_management = true
-# Existing listen, bearer_token_env and other server settings go here.
-# Static sources are optional.
+# Retain its existing listen, bearer_token_env, wallet and sources settings.
 ```
+
+Omit `registry_file` for registrations that last only until exit. Static sources
+are optional: set `sources = []` for a discovery-only listener. A second listener
+can enable source management with the same shared wallet and its own authenticated
+identity; registrations remain separate even when both listeners use one pool.
+Static profiles also work here when the operator defines the referenced wallet
+with `mode = "static"` and `private_key_env`.
 
 The shared block names an existing wallet and optionally a separate registry file.
 A server's existing `wallet` setting overrides the shared dynamic wallet. No automatic

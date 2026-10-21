@@ -1119,20 +1119,53 @@ async fn accepted_add_commits_after_waiter_cancellation() {
 }
 
 #[tokio::test]
-async fn boolean_config_and_examples_are_strict_and_offline() {
-    for example in [
-        "examples/deployments/agent-sources.toml",
-        "examples/deployments/agent-sources-managed.toml",
-    ] {
-        let shown = crate::deployment::Deployment::show_config(std::path::Path::new(example))
+async fn boolean_config_and_shared_wallet_bindings_are_strict_and_offline() {
+    for managed in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deployment.toml");
+        let wallet = if managed {
+            "mode='zcash_rotation'\nmax_api_payment_usdc='0.05'\nmax_conversion_overhead_percent=5\n[wallets.agent_shared.reserves.small]\nfunding_amount_usdc='2.00'"
+        } else {
+            "mode='static'\nprivate_key_env='UNSET_TEST_KEY'"
+        };
+        std::fs::write(
+            &path,
+            format!(
+                r#"version=1
+[treasury]
+state_dir='state'
+[funding]
+confidentiality='public'
+[wallets.agent_shared]
+{wallet}
+[source_management]
+wallet='agent_shared'
+registry_file='registry.sqlite'
+[servers.research]
+listen='127.0.0.1:0'
+bearer_token_env='UNSET_RESEARCH_TOKEN'
+source_management=true
+[servers.analysis]
+listen='127.0.0.1:0'
+bearer_token_env='UNSET_ANALYSIS_TOKEN'
+source_management=true
+"#
+            ),
+        )
+        .unwrap();
+        let shown = crate::deployment::Deployment::show_config(&path)
             .await
             .unwrap();
-        assert_eq!(shown["servers"]["research"]["source_management"], true);
         assert_eq!(shown["source_management"]["scope"], "endpoint_local");
-        assert_eq!(
-            shown["source_management"]["wallet_bindings"]["analysis"],
-            "agent_shared"
-        );
+        for endpoint in ["research", "analysis"] {
+            assert_eq!(shown["servers"][endpoint]["source_management"], true);
+            assert_eq!(
+                shown["source_management"]["wallet_bindings"][endpoint],
+                "agent_shared"
+            );
+        }
+        assert!(!dir.path().join("registry.sqlite").exists());
+        assert!(!dir.path().join("state").exists());
     }
     for value in [json!({"enabled":true}), json!("manage")] {
         assert!(

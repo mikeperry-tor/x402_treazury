@@ -328,10 +328,12 @@ fn funding_limits_are_exact_and_old_names_are_rejected() {
 }
 
 #[tokio::test]
-async fn privacy_example_exposes_reserves_and_per_operation_fee_defaults_offline() {
-    let shown = Deployment::show_config(std::path::Path::new("examples/deployments/privacy.toml"))
-        .await
-        .unwrap();
+async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_offline() {
+    let shown = Deployment::show_config(std::path::Path::new(
+        "examples/deployments/comprehensive.toml",
+    ))
+    .await
+    .unwrap();
     assert!(shown["funding"].get("daily_funding_limit_usdc").is_none());
     assert!(shown["funding"].get("total_funding_limit_usdc").is_none());
     assert_eq!(shown["wallets"].as_object().unwrap().len(), 2);
@@ -564,4 +566,39 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
     assert_eq!(funding["auto_fund"], true);
     assert_eq!(funding["base_confirmations"], 12);
     assert_eq!(funding["quote_deadline_seconds"], 7200);
+}
+
+#[tokio::test]
+async fn managed_starter_inspects_one_tool_without_credentials_or_financial_state() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dir = tempfile::tempdir().unwrap();
+    let mut config: toml::Value =
+        toml::from_str(include_str!("../examples/deployments/managed.toml")).unwrap();
+    config["treasury"]["state_dir"] =
+        toml::Value::String(dir.path().join("state").to_str().unwrap().into());
+    config["sources"]["curl"]["extends"] = toml::Value::String(
+        root.join("providers/curl/provider.toml")
+            .to_str()
+            .unwrap()
+            .into(),
+    );
+    let path = dir.path().join("managed.toml");
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    let shown = Deployment::show_config(&path).await.unwrap();
+    assert_eq!(shown["wallets"].as_object().unwrap().len(), 1);
+    assert_eq!(shown["servers"].as_object().unwrap().len(), 1);
+    assert_eq!(shown["sources"].as_object().unwrap().len(), 1);
+    assert_eq!(shown["wallets"]["research"]["mode"], "zcash_rotation");
+    assert_eq!(
+        shown["wallet_bindings"]["research"]["curl"]["wallet"],
+        "research"
+    );
+    let deployment = Deployment::load(&path).await.unwrap();
+    let inventory = deployment.inventory();
+    assert_eq!(inventory.len(), 1);
+    assert_eq!(inventory[0].tools.len(), 1);
+    let tool = &inventory[0].tools[0].tool;
+    assert_eq!(tool.name, "curl_curl");
+    assert_eq!(tool.method, "POST");
+    assert!(!dir.path().join("state").exists());
 }

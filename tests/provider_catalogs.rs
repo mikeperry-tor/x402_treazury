@@ -1316,10 +1316,10 @@ async fn vaaya_tako_and_recallradar_keep_research_bodies_and_structured_prices()
 }
 
 #[tokio::test]
-async fn privacy_company_catalog_keeps_separate_relayshield_sources() {
+async fn comprehensive_company_catalog_keeps_separate_relayshield_sources() {
     use x402_treazury::{catalog, config};
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let path = root.join("examples/deployments/privacy.toml");
+    let path = root.join("examples/deployments/comprehensive.toml");
     let deployment = config::read_table(&path).await.unwrap();
     let sources = deployment["sources"].as_table().unwrap();
     let company = deployment["servers"]["company"]["sources"]
