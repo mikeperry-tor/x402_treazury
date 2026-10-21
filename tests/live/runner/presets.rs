@@ -114,7 +114,7 @@ mod tests {
         manifest.treasury_id = "11111111-1111-4111-8111-111111111111".into();
         manifest.windows[0].not_before = 1;
         manifest.windows[0].not_after = 20000;
-        manifest.deployment = root.join("examples/live-tor-providers.toml");
+        manifest.deployment = root.join("tests/live/deployments/live-tor-providers.toml");
         let config = Deployment::show_config(&manifest.deployment).await.unwrap();
         let plan = planner::build(&manifest, &config).unwrap();
         assert_eq!(plan.api_reservation_atomic, 4_400_000);
@@ -186,7 +186,7 @@ mod tests {
         }
         // Independently reviewed requests, extracted from the original manifest.
         let reviewed: Vec<Value> = serde_json::from_str(include_str!(
-            "../../tests/live/fixtures/provider_requests.json"
+            "../fixtures/provider_requests.json"
         ))
         .unwrap();
         assert_eq!(reviewed.len(), 22);

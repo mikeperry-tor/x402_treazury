@@ -133,7 +133,7 @@ select another matching installation. Rust 1.99.0 from Homebrew uses LLVM 23.1.2
 
 Open `target/coverage/html/index.html`; text and machine-readable summaries are
 `target/coverage/summary.txt` and `target/coverage/summary.json`. The denominator
-covers application source, excluding integration tests, examples and vendored
+covers application source, excluding integration tests, examples, operational tools and vendored
 code; inline unit-test helpers can still count. Stable Rust reports line, region
 and function coverage, not branch coverage. Optional proving/Docker and live
 funded tests are outside this run. Reports contain local paths and are gitignored.

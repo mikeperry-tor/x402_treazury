@@ -47,8 +47,8 @@ pub fn source_hash(root: &Path) -> io::Result<String> {
     let mut files = Vec::new();
     for name in [
         "src",
-        "examples/live_integration.rs",
-        "examples/live_integration",
+        "tests/live/live_integration.rs",
+        "tests/live/runner",
         "vendor",
         "Cargo.toml",
         "Cargo.lock",
@@ -71,4 +71,50 @@ pub fn source_hash(root: &Path) -> io::Result<String> {
         hash.update(file_hash(&file)?.as_bytes());
     }
     Ok(format!("{:x}", hash.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_hash;
+
+    #[test]
+    fn relocated_runner_inputs_affect_fingerprint_without_private_live_inputs() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        for name in ["src", "vendor"] {
+            std::fs::create_dir(root.join(name)).unwrap();
+        }
+        for name in [
+            "Cargo.toml",
+            "Cargo.lock",
+            "build.rs",
+            "rust-toolchain.toml",
+            "tests/live/live_integration.rs",
+            "tests/live/runner/driver.rs",
+            "tests/live/runner/fixtures/reporting_complete.txt",
+        ] {
+            let path = root.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"fixture").unwrap();
+        }
+        let initial = source_hash(root).unwrap();
+        // Unrelated private live inputs are outside the compilation fingerprint.
+        std::fs::write(
+            root.join("tests/live/private.local.toml"),
+            b"private fixture",
+        )
+        .unwrap();
+        assert_eq!(source_hash(root).unwrap(), initial);
+        for name in [
+            "tests/live/live_integration.rs",
+            "tests/live/runner/driver.rs",
+            "tests/live/runner/fixtures/reporting_complete.txt",
+        ] {
+            let path = root.join(name);
+            std::fs::write(&path, b"changed fixture").unwrap();
+            assert_ne!(source_hash(root).unwrap(), initial, "{name}");
+            std::fs::write(path, b"fixture").unwrap();
+        }
+        assert_eq!(source_hash(root).unwrap(), initial);
+    }
 }

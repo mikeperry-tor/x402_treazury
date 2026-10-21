@@ -19,11 +19,11 @@ scripts/zcash.sh build --example provider_preflight --example quote_near
 With an independently started Tor instance and a `[network]` file pointing to it:
 
 ```sh
-RUST_BACKTRACE=0 target/debug/examples/provider_preflight \
+RUST_BACKTRACE=0 target/release/examples/provider_preflight \
   --network-config /absolute/path/network.toml \
   --manifest tests/live/preflight.json \
   --output /absolute/path/new-private-results.jsonl
-RUST_BACKTRACE=0 target/debug/examples/quote_near \
+RUST_BACKTRACE=0 target/release/examples/quote_near \
   --network-config /absolute/path/network.toml --amount-usdc 0.10
 ```
 

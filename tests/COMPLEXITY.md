@@ -30,7 +30,9 @@ or historical code execution occurs. Baseline source, raw metrics, hashes and th
 resolved commit are retained alongside the current report under ignored `target/`.
 
 The reporter inventories tracked and non-ignored new `.rs` files under `src/`,
-`tests/` and `examples/`. It excludes vendor code, reference checkouts, build output,
+`tests/`, `examples/`, `tools/providers/` and `tools/diagnostics/`. Both current
+and baseline discovery include these roots. It excludes vendor code, reference
+checkouts, build output,
 fixtures in other formats, and the development tool itself. Source changes during
 analysis abort publication. The default build command uses `--locked` and writes
 only to `target/tools/complexity`; `--no-build` explicitly reuses that helper binary.
@@ -68,10 +70,14 @@ for the syntax exercised here, not a guarantee for every Rust construct.
 Test-only item spans come from Rust attributes and AST traversal. `cfg` predicates
 are evaluated with `test=false` and other predicates unknown; only definitely
 excluded items are classified as test-only. `#[test]`/`#[tokio::test]` and known
-standalone test paths (`tests/`, `tests.rs`, `*_tests.rs`, `regtest.rs`) also identify
-tests, as does the repository's `test_*.rs` helper naming convention. Test-only
-ranges take precedence over the examples category. Operational examples form a
-third category. Conditional lint levels (`allow`, `warn`,
+standalone test names (`tests.rs`, `*_tests.rs`, `regtest.rs`, `test_*.rs`)
+also identify tests. Other `tests/` paths identify tests except the operational
+runner under `tests/live/runner/`, its `tests/live/live_integration.rs` entry point,
+and `tests/live/provider_preflight.rs`. Those sources and operational tools under
+`tools/providers/` and `tools/diagnostics/` retain the `examples` category used
+before relocation. Test names and test-only ranges take precedence over that
+category. Moving operational code does not reduce its scrutiny or its scores.
+Conditional lint levels (`allow`, `warn`,
 `deny`, `forbid`, `expect`) do not affect classification and are accepted regardless
 of their predicate. Other `cfg_attr` attributes, including mixed and nested lists,
 are flagged for manual classification review and exclude their file rather than
@@ -126,7 +132,9 @@ analysis does, and preserves the previous successful publication.
 
 Matching uses path, qualified name and category, never line numbers. Renames and
 ambiguous duplicate names/closures are reported as new or unmatched rather than
-guessed. Unchanged score multisets for duplicate identities do not warn. Review
+guessed. When sources move, explicitly compare old/new path metric rows and
+disposition unmatched warnings; a relocation is not a complexity improvement.
+Unchanged score multisets for duplicate identities do not warn. Review
 those warnings in context; helper extraction does not automatically justify a new
 hotspot. These are review triggers, not an instruction to split coherent code merely
 to meet a number. Own scores and nested callable rows remain available for review.

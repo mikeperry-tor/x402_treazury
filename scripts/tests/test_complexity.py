@@ -39,6 +39,17 @@ class ComplexityTests(unittest.TestCase):
         self.assertEqual(reporter.category("src/rotation/store/test_vfs.rs", 1, 2, []), "tests")
         self.assertEqual(reporter.category("src/rotation/test_capacity.rs", 1, 2, []), "tests")
 
+    def test_relocated_operational_sources_retain_scrutiny_and_true_tests(self):
+        for path in ["tests/live/live_integration.rs", "tests/live/provider_preflight.rs",
+                     "tests/live/runner/registry.rs", "tests/live/runner/tor/archive.rs",
+                     "tools/providers/snapshot_spec.rs", "tools/diagnostics/quote_near.rs"]:
+            with self.subTest(path=path):
+                self.assertEqual(reporter.category(path, 1, 2, []), "examples")
+                self.assertEqual(reporter.category(path, 1, 2, [(1, 2)]), "tests")
+        for path in ["tests/integration_preparation.rs", "tests/live/runner/tests.rs",
+                     "tests/live/runner/registry_tests.rs", "tests/live/runner/test_fixture.rs"]:
+            self.assertEqual(reporter.category(path, 1, 2, []), "tests")
+
     def test_advisory_thresholds_new_increased_unchanged_and_improved(self):
         def row(name, cognitive, cyclomatic, category="production", start=1):
             return dict(path="src/a.rs", name=name, cognitive=cognitive,
@@ -178,6 +189,18 @@ class BaselineTests(unittest.TestCase):
             (root / "src").mkdir()
             original = b'fn f() { /* $Format:%H$ */ }\n'
             (root / "src/a.rs").write_bytes(original)
+            inputs = {"src/a.rs": original}
+            for name in ["tests/live/live_integration.rs", "tests/live/provider_preflight.rs",
+                         "tests/live/runner/registry.rs", "tools/providers/snapshot_spec.rs",
+                         "tools/diagnostics/quote_near.rs"]:
+                inputs[name] = b"fn operational() {}\n"
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(inputs[name])
+            excluded = root / "tools/complexity/src/main.rs"
+            excluded.parent.mkdir(parents=True)
+            excluded.write_text("fn analyzer() {}\n")
+            new_tool = root / "tools/diagnostics/new.rs"
             (root / ".gitattributes").write_text("src/a.rs export-subst export-ignore\n")
             git("add", ".")
             git("-c", "commit.gpgsign=false", "commit", "-m", "base")
@@ -192,15 +215,18 @@ class BaselineTests(unittest.TestCase):
 
             def analyze(actual, paths, cwd, output, prefix):
                 self.assertEqual(actual, binary)
-                self.assertEqual(paths, ["src/a.rs"])
-                self.assertEqual((cwd / "src/a.rs").read_bytes(), original)
+                self.assertEqual(paths, sorted(inputs))
+                for name, raw in inputs.items():
+                    self.assertEqual((cwd / name).read_bytes(), raw)
                 self.assertEqual(prefix, "base-")
                 return [], []
 
             with patch.object(reporter, "ROOT", root), patch.object(reporter, "analyze_sources", side_effect=analyze):
+                new_tool.write_text("fn new_tool() {}\n")
+                self.assertEqual(reporter.selected_paths(), sorted([*inputs, "tools/diagnostics/new.rs"]))
                 report = reporter.baseline_report(binary, "main", out)
                 self.assertEqual(report["revision"], revision)
-                self.assertEqual(report["files"], {"src/a.rs": reporter.digest(original)})
+                self.assertEqual(report["files"], {name: reporter.digest(raw) for name, raw in inputs.items()})
                 with self.assertRaises(subprocess.CalledProcessError):
                     reporter.baseline_report(binary, "absent-ref", root / "absent")
             broken = root / "broken"

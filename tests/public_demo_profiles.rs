@@ -6,7 +6,7 @@ use x402_treazury::deployment::Deployment;
 async fn public_demo_profiles_expose_one_bounded_tool_without_credentials() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for name in ["public-swap-demo.toml", "public-payment-demo.toml"] {
-        let path = root.join("examples/deployments").join(name);
+        let path = root.join("tests/live/deployments").join(name);
         let shown = Deployment::show_config(&path).await.unwrap();
         assert_eq!(shown["wallets"]["demo"]["max_api_payment_usdc"], "0.05");
         if name == "public-swap-demo.toml" {

@@ -4,7 +4,7 @@
 mod capacity_fixture;
 #[path = "support/consume_reserve.rs"]
 mod consume_reserve;
-include!("../examples/live_integration/driver.rs");
+include!("live/runner/driver.rs");
 #[path = "support/rpc_evidence.rs"]
 mod rpc_evidence;
 use serde_json::json;

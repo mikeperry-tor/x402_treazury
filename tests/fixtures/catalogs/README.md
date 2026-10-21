@@ -21,10 +21,10 @@ Retain inputs by responsibility:
   requests; they establish neither live compatibility nor spending authority.
 
 Production local catalogs under `providers/` and the Kronos/RegimeShift inputs in
-`examples/live-tor-providers.toml` are runtime inputs. Preserve them independently
+`tests/live/deployments/live-tor-providers.toml` are runtime inputs. Preserve them independently
 of test pruning. Check consumers in discovery, media, payment, startup, examples
 and qualification before deletion. The offline qualification preset uses an explicit
-selected-source input map in `examples/live_integration/presets.rs` and resolved
+selected-source input map in `tests/live/runner/presets.rs` and resolved
 local production catalogs. The ignored startup benchmark uses independent synthetic
 workloads and no provider index. Source witnesses for authored transformations
 have focused fidelity consumers; their distinct production local catalogs remain
@@ -56,7 +56,7 @@ is retained; `x-treazury-fixture-scope` labels the reduced capture separately.
 | Otto | Four actual GET/POST pairs, `/crypto-news`, `/swap` and `/full-auto`: method/body serialization, reviewed preset and actual execution-authority exclusions. |
 | NetIntel | Existing eight-path subset: URL-secret and array POST pairs, compatible aliases, canonical image mapping. No further reduction preserves these distinct consumers. |
 
-The offline preset input map in `examples/live_integration/presets.rs` validates
+The offline preset input map in `tests/live/runner/presets.rs` validates
 reviewed requests against these independently captured schemas; arguments never
 supply expected schemas. Refresh from the configured vendor OpenAPI URL, select
 complete original path objects and their reference closure, and review request

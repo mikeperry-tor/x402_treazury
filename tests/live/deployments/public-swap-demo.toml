@@ -2,12 +2,12 @@
 # Start with small and optional large reserves; first payment promotes its payer; refill small-first. Retained balances stay usable.
 # auto_fund=false pauses new funding, not eligible automatic retirement.
 # First positive USDC credit consumes the initial claim, even below target; accepted source work stays owned.
-# One pool, one listener, one cheap tool. Follow ../../docs/public-swap-demo.md.
+# One pool, one listener, one cheap tool. Follow ../../../docs/public-swap-demo.md.
 # Copy beside this file as public-swap-demo.local.toml before editing.
 version = 1
 
 [treasury]
-state_dir = "../../state/public-demo"
+state_dir = "../../../state/public-demo"
 # wallet.key lives inside state_dir; the treasury ID is read from existing state.
 # Zcash endpoints use the built-in default unless explicitly overridden.
 max_refund_shielding_fee_zec = "0.0003"
@@ -35,10 +35,10 @@ max_attempts = 3
 funding_amount_usdc = "5.00"
 
 [sources.socialfetch]
-extends = "../../providers/socialfetch.toml"
+extends = "../../../providers/socialfetch.toml"
 # Scoped request capture includes this demo's selected Twitter profile contract.
 # It is not the complete SocialFetch inventory; inspection fetches no vendor data.
-spec = "../../tests/fixtures/socialfetch_openapi.json"
+spec = "../../fixtures/socialfetch_openapi.json"
 probe_pricing = false
 
 [servers.demo]

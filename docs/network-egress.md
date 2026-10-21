@@ -97,7 +97,7 @@ renew another response's inactivity timer or signed authority.
 | `treasury/submission.rs` | Deposit/shielding broadcast and lookup, durable EVM recipient or owned transparent address scope |
 | `treasury/expiry.rs`, `refunds.rs` | Shared scans use treasury identity; per-operation lookup/submission uses durable recipient/address scope |
 | `wallet_cli.rs` | Same configured adapters as serving; local inspection stays offline |
-| `examples/snapshot_spec.rs`, `quote_near.rs` | Same factory; both accept `--network-config` |
+| `tools/providers/snapshot_spec.rs`, `tools/diagnostics/quote_near.rs` | Same factory; both accept `--network-config` |
 
 `PreparedTransaction` resolves its recipient from funding job/recovery records or
 an immutable `operation_network` binding. Refund shielding records its job's recipient

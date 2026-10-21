@@ -17,7 +17,7 @@ name grants no replay or renewed case authority.
 
 The zero time window and placeholder treasury ID prohibit execution until the
 operator reviews the deployment, state, run ID, deadlines and authority. Copy the
-referenced `examples/live-tor-providers.toml` to a private deployment, configure
+referenced `tests/live/deployments/live-tor-providers.toml` to a private deployment, configure
 the already-funded treasury/pools and owned Tor endpoint, then update the manifest
 paths. Relative paths in the committed template are relative to its committed
 location; use absolute paths when relocating a copy. The API reservation ceiling

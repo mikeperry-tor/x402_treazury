@@ -95,7 +95,12 @@ fn executable_name_version_and_example_inspection_are_portable() {
         "public-swap-demo.toml",
         "public-payment-demo.toml",
     ] {
-        let path = root.join("examples/deployments").join(example);
+        let directory = if example.starts_with("public-") {
+            "tests/live/deployments"
+        } else {
+            "examples/deployments"
+        };
+        let path = root.join(directory).join(example);
         let shown = run(&["config", "show", "--config", path.to_str().unwrap()]);
         let legacy = run(&["config", "show", "--meta-config", path.to_str().unwrap()]);
         assert!(legacy.status.success());

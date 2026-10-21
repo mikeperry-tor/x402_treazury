@@ -93,6 +93,7 @@ alloy-sol-macro-expander = { path = "vendor/alloy-sol-macro-expander" }
 
 [[example]]
 name = "quote_near"
+path = "tools/diagnostics/quote_near.rs"
 required-features = ["zcash"]
 
 [patch."https://github.com/zingolabs/zingolib"]
@@ -108,8 +109,25 @@ sha2 = "0.10"
 
 [[example]]
 name = "live_integration"
+path = "tests/live/live_integration.rs"
 required-features = ["zcash"]
 
 [[test]]
 name = "integration_preparation"
 required-features = ["zcash"]
+
+[[example]]
+name = "snapshot_spec"
+path = "tools/providers/snapshot_spec.rs"
+
+[[example]]
+name = "snapshot_agentutility"
+path = "tools/providers/snapshot_agentutility.rs"
+
+[[example]]
+name = "diagnose_credit"
+path = "tools/diagnostics/diagnose_credit.rs"
+
+[[example]]
+name = "provider_preflight"
+path = "tests/live/provider_preflight.rs"

@@ -26,13 +26,13 @@ EVM private key needs to be shared.
 From the repository root:
 
 ```sh
-scripts/zcash.sh build --offline
+scripts/zcash.sh build --developer --offline
 target/debug/x402_treazury config show \
-  --config examples/deployments/public-swap-demo.toml
+  --config tests/live/deployments/public-swap-demo.toml
 target/debug/x402_treazury config check \
-  --config examples/deployments/public-swap-demo.toml
+  --config tests/live/deployments/public-swap-demo.toml
 target/debug/x402_treazury catalog tools \
-  --config examples/deployments/public-swap-demo.toml
+  --config tests/live/deployments/public-swap-demo.toml
 ```
 
 The example uses a committed request schema, disables pricing probes and exposes
@@ -64,12 +64,12 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    use the same paths and network policy:
 
    ```sh
-   cp examples/deployments/public-swap-demo.toml \
-     examples/deployments/public-swap-demo.local.toml
+   cp tests/live/deployments/public-swap-demo.toml \
+     tests/live/deployments/public-swap-demo.local.toml
    target/debug/x402_treazury wallet init \
-     --config examples/deployments/public-swap-demo.local.toml
+     --config tests/live/deployments/public-swap-demo.local.toml
    target/debug/x402_treazury wallet addresses \
-     --config examples/deployments/public-swap-demo.local.toml
+     --config tests/live/deployments/public-swap-demo.local.toml
    ```
 
    Initialization discovers the mainnet tip and rewinds 100 blocks for the birthday.
@@ -96,7 +96,7 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
    mkdir -p secrets
    chmod 700 secrets
    target/debug/x402_treazury wallet backup \
-     --config examples/deployments/public-swap-demo.local.toml \
+     --config tests/live/deployments/public-swap-demo.local.toml \
      --destination secrets/public-demo-backup
    ```
 
@@ -115,9 +115,9 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
 
    ```sh
    target/debug/x402_treazury wallet sync \
-     --config examples/deployments/public-swap-demo.local.toml
+     --config tests/live/deployments/public-swap-demo.local.toml
    target/debug/x402_treazury wallet status \
-     --config examples/deployments/public-swap-demo.local.toml
+     --config tests/live/deployments/public-swap-demo.local.toml
    ```
 
    Require a fresh ready sync and enough confirmed shielded spendable balance for
@@ -128,7 +128,7 @@ No funded mainnet swap or paid seller call is covered by the offline qualificati
 
    ```sh
    target/debug/x402_treazury serve \
-     --config examples/deployments/public-swap-demo.local.toml
+     --config tests/live/deployments/public-swap-demo.local.toml
    ```
 
    Start with no MCP clients issuing tool calls. Observe the two funding jobs,
@@ -156,7 +156,7 @@ trigger a demonstration.
 
 ## Funded EVM-key alternative
 
-Use `examples/deployments/public-payment-demo.toml` with `PUBLIC_DEMO_EVM_PRIVATE_KEY` and
+Use `tests/live/deployments/public-payment-demo.toml` with `PUBLIC_DEMO_EVM_PRIVATE_KEY` and
 `PUBLIC_DEMO_MCP_TOKEN` in the environment. The key must hold USDC on Base; this
 exact EIP-3009 test does not require Permit2 approval. Inspect with `config show`
 and `catalog tools`, then start serving and perform only the single approved call

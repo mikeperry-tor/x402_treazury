@@ -52,6 +52,14 @@ test -f "$first/previous-report/legacy"
 test "$(cat "$first/status")" = complete
 test -s "$first/profiles.txt"
 grep -q fixture-revision "$first/provenance.txt"
+# The application denominator excludes operational tools in their relocated homes.
+exclude=$(sed -n 's/^ignore_filename_regex=//p' "$first/provenance.txt")
+for source in /repo/tools/providers/snapshot_spec.rs /repo/tools/diagnostics/quote_near.rs /repo/tests/live/runner/driver.rs; do
+    printf '%s\n' "$source" | grep -Eq "$exclude"
+done
+if printf '%s\n' /repo/src/payment.rs | grep -Eq "$exclude"; then
+    echo 'application source incorrectly excluded from coverage' >&2; exit 1
+fi
 if FAIL_COVERAGE_TEST=yes scripts/coverage.sh > failed.log 2>&1; then
     echo 'failed test run incorrectly succeeded' >&2; exit 1
 fi

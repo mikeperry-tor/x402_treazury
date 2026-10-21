@@ -6,8 +6,8 @@ fn main() {
     let root = Path::new(&root);
     for input in [
         "src",
-        "examples/live_integration.rs",
-        "examples/live_integration",
+        "tests/live/live_integration.rs",
+        "tests/live/runner",
         "vendor",
         "Cargo.toml",
         "Cargo.lock",
@@ -47,8 +47,8 @@ fn main() {
                     "--untracked-files=all",
                     "--",
                     "src",
-                    "examples/live_integration.rs",
-                    "examples/live_integration",
+                    "tests/live/live_integration.rs",
+                    "tests/live/runner",
                     "vendor",
                     "Cargo.toml",
                     "Cargo.lock",

@@ -156,8 +156,7 @@ mod tests {
     use super::*;
     #[tokio::test]
     async fn selected_manifest_is_valid_offline() {
-        let cases: Vec<Case> =
-            serde_json::from_str(include_str!("../tests/live/preflight.json")).unwrap();
+        let cases: Vec<Case> = serde_json::from_str(include_str!("preflight.json")).unwrap();
         assert!(!cases.is_empty());
         let mut identities = std::collections::BTreeSet::new();
         for case in &cases {

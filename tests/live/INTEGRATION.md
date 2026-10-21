@@ -16,6 +16,11 @@ Current lifecycle evidence uses schema 2: payment admission records the exact pa
 
 ## 1. Build and review inputs
 
+The runner source lives in `tests/live/live_integration.rs` and `tests/live/runner/`,
+next to its runbooks, manifests and deployment profiles. It remains an explicit
+root-package Cargo `[[example]]` target named `live_integration`; the source move
+does not change commands or ordinary application-only builds. See [tools](../../tools/README.md).
+
 Build the application and runner together; preparation pins their build identity.
 Default builds include Zcash. Build traffic is separate from runtime Tor policy.
 
@@ -27,8 +32,8 @@ Before preparation, copy both executables into an owner-only directory for this
 experiment (ordinary copies, not hard links). Set the manifest's `binary` to that
 private `x402_treazury` copy and invoke the private `live_integration` copy for all
 commands below. Keep them unchanged through reporting. Cargo may replace files
-in `target/debug` during unrelated tests; rebuilding that path during a pinned
-live run breaks artifact continuity even if the running process never restarts.
+in `target/debug` or `target/release` during unrelated builds; rebuilding that path
+during a pinned live run breaks artifact continuity even if the running process never restarts.
 The command examples show build output paths only for brevity.
 
 Copy `integration/providers.example.toml`, `integration/authorization.example.toml`
@@ -46,7 +51,7 @@ Extra routes/providers, funding and repeated calls need separate reviewed bounds
 Plan offline without catalogs, wallet keys, balances or requests:
 
 ```sh
-target/debug/examples/live_integration plan --manifest /private/run.toml
+target/release/examples/live_integration plan --manifest /private/run.toml
 ```
 
 Optional `select-cases` produces a new reviewed manifest; see
@@ -71,7 +76,7 @@ existing treasury-local registry. This records a baseline without signing or
 network requests. Existing charges and liabilities cannot be erased by reauthorizing.
 
 ```sh
-target/debug/examples/live_integration authorize-registry \
+target/release/examples/live_integration authorize-registry \
   --state-dir /private/treasury/state --authorization /private/auth.toml
 ```
 
@@ -87,7 +92,7 @@ Retained jobs keep their original run ownership and charges.
 ## 3. Prepare complete catalogs
 
 ```sh
-target/debug/examples/live_integration prepare \
+target/release/examples/live_integration prepare \
   --state-dir /private/treasury/state --manifest /private/run.toml
 ```
 
@@ -114,11 +119,11 @@ pins and reservations are not overwritten.
 ## 4. Run once, then inspect
 
 ```sh
-target/debug/examples/live_integration run \
+target/release/examples/live_integration run \
   --state-dir /private/treasury/state --run RUN_ID
-target/debug/examples/live_integration report \
+target/release/examples/live_integration report \
   --state-dir /private/treasury/state --run RUN_ID --output /private/new-report.json
-target/debug/examples/live_integration report \
+target/release/examples/live_integration report \
   --state-dir /private/treasury/state --run RUN_ID --format markdown \
   --output /private/new-report.md
 ```
@@ -145,7 +150,7 @@ Existing output files cannot be overwritten. For all runs, omit `--run`. Optiona
 eligibility inspection adds case-window observations and the unstarted-run gate:
 
 ```sh
-target/debug/examples/live_integration report \
+target/release/examples/live_integration report \
   --state-dir /private/treasury/state --run RUN_ID --eligibility
 ```
 

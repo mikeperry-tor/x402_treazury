@@ -77,7 +77,7 @@ standard-library Python observer tests run with
 Coverage requires `cargo-llvm-cov` and LLVM tools matching `rustc -vV`. Homebrew
 LLVM is detected; explicit `LLVM_COV` / `LLVM_PROFDATA` overrides take precedence.
 With rustup, install `llvm-tools-preview`. The report excludes integration test
-harnesses, examples and vendor code, but can include inline unit-test helpers.
+harnesses, examples, operational tools and vendor code, but can include inline unit-test helpers.
 CLI tests clear inherited environment except `LLVM_PROFILE_FILE` for subprocess
 coverage. Never replace this with unrestricted environment inheritance.
 

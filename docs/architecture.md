@@ -32,7 +32,7 @@ permissions and wallet bindings without loading specs or reading keys.
 and path/query/body routing. Provider files in `providers/` carry selections,
 help URLs, pricing settings and explicitly reviewed response mappings. Curated
 local specs are inputs for providers whose public schema needs adaptation; the
-fixture utility is `examples/snapshot_spec.rs`. Tests pin generated contracts
+fixture utility is `tools/providers/snapshot_spec.rs`. Tests pin generated contracts
 against `tests/fixtures/`. Operation validation and stable sorting precede path,
 method and tag selection. Exact original `exclude_operations` identities override
 operation inclusions without hiding child paths or depending on generated names;

@@ -210,7 +210,7 @@ limited to 16 MiB; exceeding it logs a warning and fails publication explicitly.
 pricing stage; request an assertion only for a source that will be priced. Catalog
 inspection (`config check`/preparation) still does not probe. The real-executable suite
 in `tests/integration_preparation.rs` shares the runner entry code in
-`examples/live_integration/driver.rs`, preventing module/CLI drift.
+`tests/live/runner/driver.rs`, preventing module/CLI drift.
 Keep CLI and module wiring in this shared driver; do not duplicate it in tests.
 
 ## Report output
@@ -251,7 +251,7 @@ Tor causation. Reporting makes no requests and grants no execution authority.
 
 ## Execution and existing-pool adoption
 
-`examples/live_integration.rs` provides offline planning and a durable registry.
+`tests/live/live_integration.rs` provides offline planning and a durable registry.
 It prepares frozen catalogs and supervises registry-reviewed MCP cases through
 a pinned executable. Static deployments are strictly unsigned. Managed public-swap
 deployments may use existing funded wallets with zero new funding authority, or
@@ -864,7 +864,7 @@ fund**, with zero API/source/job authority. The fixture writer is explicitly
 ignored in normal test runs and itself performs no network requests:
 
 ```sh
-scripts/zcash.sh build --bin x402_treazury --example live_integration
+scripts/zcash.sh build --developer --bin x402_treazury --example live_integration
 TREAZURY_M4_FIXTURE_DIR=/private/tmp/treazury-m4-new \
   scripts/zcash.sh test --test integration_preparation \
   prepare_real_tor_qualification_fixture -- --ignored --exact --nocapture
@@ -913,7 +913,7 @@ fixtures verify physical reuse, never-indexed HPACK, faults and stream priority.
 Generate a private real-Tor fixture with no network traffic:
 
 ```sh
-scripts/zcash.sh build --bin x402_treazury --example live_integration
+scripts/zcash.sh build --developer --bin x402_treazury --example live_integration
 target/debug/examples/live_integration cover-fixture \
   --directory /private/tmp/treazury-cover-qualification \
   --binary "$PWD/target/debug/x402_treazury" \

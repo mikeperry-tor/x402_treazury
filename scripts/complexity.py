@@ -15,6 +15,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "0.0.25"
 THRESHOLDS = {"cognitive": 20, "cyclomatic": 40}
+SOURCE_ROOTS = ("src", "tests", "examples", "tools/providers", "tools/diagnostics")
 
 
 def digest(data):
@@ -27,13 +28,17 @@ def git(*args):
 
 def category(path, start, end, ranges):
     p = Path(path)
-    if (p.parts[0] == "tests" or p.name in {"tests.rs", "regtest.rs"}
+    if (p.name in {"tests.rs", "regtest.rs"}
             or p.name.endswith("_tests.rs") or p.name.startswith("test_")):
         return "tests"
     if any(a <= start and end <= b for a, b in ranges):
         return "tests"
-    if p.parts[0] == "examples":
+    if (p.parts[0] == "examples" or p.is_relative_to("tests/live/runner")
+            or p in {Path("tests/live/live_integration.rs"), Path("tests/live/provider_preflight.rs")}
+            or p.is_relative_to("tools/providers") or p.is_relative_to("tools/diagnostics")):
         return "examples"
+    if p.parts[0] == "tests":
+        return "tests"
     return "production"
 
 
@@ -237,7 +242,7 @@ def baseline_report(binary, ref, out):
     directory.mkdir()
     hashes = {}
     entries = []
-    for entry in git("ls-tree", "-rz", revision, "--", "src", "tests", "examples").split(b"\0"):
+    for entry in git("ls-tree", "-rz", revision, "--", *SOURCE_ROOTS).split(b"\0"):
         if not entry:
             continue
         metadata, name = entry.split(b"\t", 1)
@@ -246,7 +251,7 @@ def baseline_report(binary, ref, out):
         mode, kind, oid = metadata.split()
         path = Path(name.decode())
         if (mode not in {b"100644", b"100755"} or kind != b"blob" or path.is_absolute()
-                or ".." in path.parts or path.parts[0] not in {"src", "tests", "examples"}):
+                or ".." in path.parts or not any(path.is_relative_to(r) for r in SOURCE_ROOTS)):
             raise ValueError(f"unsupported baseline source entry: {path}")
         entries.append((path, oid))
     if not entries:
@@ -276,7 +281,7 @@ def baseline_report(binary, ref, out):
 
 
 def selected_paths():
-    return sorted(set(p for p in git("ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "src", "tests", "examples").decode().split("\0") if p.endswith(".rs") and (ROOT / p).is_file()))
+    return sorted(set(p for p in git("ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", *SOURCE_ROOTS).decode().split("\0") if p.endswith(".rs") and (ROOT / p).is_file()))
 
 
 def main():

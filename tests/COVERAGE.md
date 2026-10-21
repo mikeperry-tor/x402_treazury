@@ -5,7 +5,10 @@ Use [the testing guide](../docs/testing.md) for commands and qualification statu
 Each report records source/compiler/features/lockfile provenance. Failed or empty
 collections must not replace a successful report; `scripts/tests/coverage.sh`
 checks that publication boundary. Compare identical denominators and features.
-Stable regions do not establish branch or mutation coverage.
+Stable regions do not establish branch or mutation coverage. The application
+report excludes tests, examples, operational tools, vendor and compatibility sources.
+Moving maintenance utilities to `tools/` preserves that denominator policy and does
+not establish a coverage improvement.
 
 | Boundary | Regression location |
 | --- | --- |
@@ -17,7 +20,7 @@ Stable regions do not establish branch or mutation coverage.
 | MCP auth, routes, fallback, pagination, process shutdown | `tests/server.rs`, `tests/stdio.rs`, `tests/shutdown.rs`, `tests/supervision.rs` |
 | Catalog complexity, concurrent startup and one-shot pricing | `src/catalog.rs`, `tests/provider_catalogs.rs`, `tests/startup.rs`, `tests/pricing.rs` |
 | Visible byte/display bounds, typed media and error redaction | `tests/download_limits.rs`, `tests/media.rs`, `tests/confidential_errors.rs` |
-| Registry claims, canonical settlement, no replay and frozen catalogs | `tests/integration_preparation.rs`, `examples/live_integration/` tests |
+| Registry claims, canonical settlement, no replay and frozen catalogs | `tests/integration_preparation.rs`, `tests/live/runner/` tests |
 
 Concurrency fixtures use multithreaded Tokio runtimes and barriers at challenge,
 admission or commit boundaries. `--test-threads=1` serializes tests, not callers
