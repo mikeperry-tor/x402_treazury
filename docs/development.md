@@ -232,6 +232,37 @@ Keep ordinary CLI errors legible even with backtrace environment variables enabl
 
 ## Dependency compatibility
 
+### TLS security updates
+
+The application and `compat/zingolib` are independent Cargo workspaces; update
+both committed lockfiles for TLS security fixes. For the
+[emSign intermediate-key compromise](https://rustsec.org/advisories/RUSTSEC-2026-0382),
+runtime verification requires `rustls-webpki` 0.103.16 or later in the 0.103
+series, together with `webpki-roots` and `webpki-root-certs` 1.0.10 or later.
+The verifier rejects compromised intermediate public keys; the root-bundle
+update removes the affected emSign root. Host trust-store updates remain
+necessary for platform verification. Rebuild and replace deployed binaries to
+consume locked dependency changes. Vendored upstream lockfiles are provenance
+inputs, not the dependency resolution used by these two workspaces.
+
+The build-only legacy TLS dependency and parameter-integrity boundary are
+documented in [the Zingo connector guide](../vendor/ZINGO.md#build-time-parameter-downloads).
+That graph still contains affected certificate-verification versions; these
+updates do not eliminate every advisory finding from the lockfiles.
+
+There are no repository Python requirements or uv lockfiles. The vector generator
+uses inline script dependencies; those do not pin the package manager's TLS
+implementation. Follow the
+[Python security guidance](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)
+for developer environments: use pip 26.2.2 or later, uv 0.13.4 or later, and
+certifi 2026.10.19 or later wherever installed, and update system certificates.
+Use the upstream checksum-verified bootstrap instructions when upgrading an
+affected package manager. Updating certifi alone does not update pip's vendored
+bundle. These tools and existing virtual environments are maintained outside
+the repository.
+
+### Combined workspace verification
+
 Run the reproducible combined suite with the reviewed vendored connector patch:
 
 ```sh
