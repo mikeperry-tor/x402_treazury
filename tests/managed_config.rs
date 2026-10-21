@@ -375,9 +375,10 @@ async fn managed_funding_uses_spendable_treasury_without_aggregate_configuration
         .unwrap();
         let error = Deployment::show_config(&path)
             .await
-            .expect_err("removed setting must fail")
-            .to_string();
+            .expect_err("removed setting must fail");
+        let error = format!("{error:#}");
         assert!(error.contains("was removed"), "{error}");
+        assert!(error.contains(setting), "{error}");
     }
     assert!(!dir.path().join("state").exists());
 }
