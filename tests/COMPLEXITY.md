@@ -91,7 +91,8 @@ byte positions/newlines and cannot add control-flow syntax. Raw evidence records
 literals and still reject malformed Rust. Other grammar errors remain failures.
 
 This is not a compiled-feature report: all other feature branches remain present,
-including the default Zcash code. Cargo feature flags do not filter these metrics.
+including opt-in test code. Zcash application code is unconditional. Cargo feature
+flags do not filter these metrics.
 A production function can contain test-only statements; its inclusive score still
 includes them, and the **Test attrs** column flags such functions. This also applies
 to production functions containing nested test-only callables. Macro bodies and

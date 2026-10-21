@@ -97,7 +97,6 @@ impl PreparedTransaction {
             .as_deref()
             .map(crate::network::IsolationId::evm)
             .transpose()?;
-        #[cfg(feature = "zcash")]
         let identity = match identity {
             Some(identity) => Some(identity),
             None => store.shielding_identity(operation_id, facts.as_ref())?,

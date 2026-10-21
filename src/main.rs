@@ -447,10 +447,6 @@ async fn run_deployment(
             "qualification binding requires an explicit unsigned or managed mode"
         );
         if args.qualification_managed {
-            ensure!(
-                cfg!(feature = "zcash"),
-                "managed qualification requires the zcash feature"
-            );
             x402_treazury::qualification::install_managed(binding, path)?;
         } else {
             x402_treazury::qualification::install(binding, path)?;

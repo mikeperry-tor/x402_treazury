@@ -62,15 +62,6 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
     assert_eq!(deployment.inventory().len(), 1);
     assert!(!dir.path().join("state").exists());
     assert!(deployment.bind(&BTreeMap::new()).await.is_err());
-    #[cfg(not(feature = "zcash"))]
-    {
-        let env = BTreeMap::from([("TOKEN".into(), "secret".into())]);
-        let error = match Deployment::load(&path).await.unwrap().bind(&env).await {
-            Ok(_) => panic!("managed serving accepted without zcash feature"),
-            Err(e) => e.to_string(),
-        };
-        assert!(error.contains("--features zcash"), "{error}");
-    }
     assert!(!dir.path().join("state").exists());
     for (from, to) in [
         (

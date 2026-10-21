@@ -37,7 +37,6 @@ macro_rules! declare_and_allocate {
 }
 pub(crate) use declare_and_allocate;
 
-#[cfg(feature = "zcash")]
 pub(crate) async fn treasury_pair(
     owner: &x402_treazury::treasury::Treasury,
     name: &str,

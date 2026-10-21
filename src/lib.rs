@@ -10,7 +10,6 @@ pub mod provider_status;
 pub mod qualification;
 pub mod rotation;
 pub mod server;
-#[cfg(feature = "zcash")]
 pub mod treasury;
 pub mod wallet_cli;
 

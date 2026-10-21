@@ -10,9 +10,7 @@ use anyhow::{Context, Result, bail, ensure};
 pub mod catalog_evidence;
 mod startup;
 pub use startup::StartupConfig;
-#[cfg(feature = "zcash")]
 mod bootstrap;
-#[cfg(feature = "zcash")]
 pub use bootstrap::{BootstrapSummary, bootstrap_wallets};
 mod cache_warm;
 pub use cache_warm::{CacheWarmSummary, warm_cache};
@@ -301,7 +299,6 @@ impl MetaConfig {
         Ok(())
     }
 }
-#[cfg(feature = "zcash")]
 async fn install_funding_restrictions(
     store: &crate::rotation::store::StoreHandle,
     restriction: crate::rotation::restriction::FundingRestriction,
@@ -618,7 +615,6 @@ impl Deployment {
         }
         .await;
         if let Err(error) = loaded {
-            #[cfg(feature = "zcash")]
             if let Some(initialized) = deployment.initialized.take() {
                 initialized.shutdown().await?;
             }
@@ -777,7 +773,6 @@ impl Deployment {
         Ok(wallets)
     }
 
-    #[cfg(feature = "zcash")]
     fn managed_connection_preflight(
         &self,
         env: &BTreeMap<String, String>,
@@ -787,7 +782,6 @@ impl Deployment {
             self.base_connection_preflight(env)?,
         ))
     }
-    #[cfg(feature = "zcash")]
     fn funding_connection_preflight(
         &self,
         env: &BTreeMap<String, String>,
@@ -828,7 +822,6 @@ impl Deployment {
             sender,
         })
     }
-    #[cfg(feature = "zcash")]
     fn base_connection_preflight(
         &self,
         env: &BTreeMap<String, String>,
@@ -867,208 +860,195 @@ impl Deployment {
         relay_wallets: &BTreeSet<String>,
         allow_store_only: bool,
     ) -> Result<InitializedWallets> {
-        #[cfg(not(feature = "zcash"))]
-        let _ = (restriction, allow_store_only);
         self.validate_static_identities(only_wallets).await?;
         let mut wallets = self.static_wallets(env, only_wallets, relay_wallets)?;
-        #[cfg(feature = "zcash")]
         let mut runtime = ManagedRuntime::None;
-        #[cfg(feature = "zcash")]
         let mut managed_pools = Vec::new();
         if self.wallet_resolution.wallets.iter().any(|(name, wallet)| {
             only_wallets.is_none_or(|selected| selected.contains(name)) && wallet.managed()
         }) {
-            #[cfg(not(feature = "zcash"))]
-            bail!("managed serving requires a build with --features zcash");
-            #[cfg(feature = "zcash")]
-            {
-                use crate::rotation::manager::ManagedPool;
-                let t = self.config.treasury.as_ref().unwrap();
-                let f = self.config.funding.as_ref().unwrap();
-                let mut capabilities = if allow_store_only {
-                    let shared = crate::treasury::Treasury::open_shared_state(
-                        t.state_dir.clone(),
-                        t.key_file.clone(),
-                        t.runtime_id()?,
-                        crate::rotation::store::TreasuryNetwork::Mainnet,
-                    )
-                    .await?;
-                    let base = self.base_connection_preflight(env);
-                    match base {
-                        Err(_) => {
-                            tracing::warn!(
-                                category = "base_configuration_unavailable",
-                                "Managed Base configuration unavailable; independent static service remains available; correct Base configuration and restart"
-                            );
-                            ManagedSetup::StoreOnly {
-                                owner: StoreOnlyOwner::new(shared),
-                                base: None,
-                            }
+            use crate::rotation::manager::ManagedPool;
+            let t = self.config.treasury.as_ref().unwrap();
+            let f = self.config.funding.as_ref().unwrap();
+            let mut capabilities = if allow_store_only {
+                let shared = crate::treasury::Treasury::open_shared_state(
+                    t.state_dir.clone(),
+                    t.key_file.clone(),
+                    t.runtime_id()?,
+                    crate::rotation::store::TreasuryNetwork::Mainnet,
+                )
+                .await?;
+                let base = self.base_connection_preflight(env);
+                match base {
+                    Err(_) => {
+                        tracing::warn!(
+                            category = "base_configuration_unavailable",
+                            "Managed Base configuration unavailable; independent static service remains available; correct Base configuration and restart"
+                        );
+                        ManagedSetup::StoreOnly {
+                            owner: StoreOnlyOwner::new(shared),
+                            base: None,
                         }
-                        Ok(base) => match self.funding_connection_preflight(env) {
-                            Ok(source) => match crate::treasury::Treasury::reconstruct(shared)
-                                .await?
-                            {
-                                crate::treasury::OpenedTreasury::Ready(owner) => {
-                                    ManagedSetup::Treasury(Box::new(TreasurySetup {
-                                        owner: *owner,
-                                        base,
-                                        source,
-                                    }))
-                                }
-                                crate::treasury::OpenedTreasury::SnapshotUnavailable(shared) => {
-                                    tracing::warn!(
-                                        category = "treasury_snapshot_unavailable",
-                                        "Treasury SDK unavailable; Base service retains shared ownership; funding unavailable"
-                                    );
-                                    ManagedSetup::StoreOnly {
-                                        owner: StoreOnlyOwner::new(*shared),
-                                        base: Some(base),
-                                    }
-                                }
-                            },
-                            Err(_) => {
+                    }
+                    Ok(base) => match self.funding_connection_preflight(env) {
+                        Ok(source) => match crate::treasury::Treasury::reconstruct(shared).await? {
+                            crate::treasury::OpenedTreasury::Ready(owner) => {
+                                ManagedSetup::Treasury(Box::new(TreasurySetup {
+                                    owner: *owner,
+                                    base,
+                                    source,
+                                }))
+                            }
+                            crate::treasury::OpenedTreasury::SnapshotUnavailable(shared) => {
                                 tracing::warn!(
-                                    category = "funding_configuration_unavailable",
-                                    "Funding configuration unavailable; Base service retains shared ownership; correct funding configuration and restart"
+                                    category = "treasury_snapshot_unavailable",
+                                    "Treasury SDK unavailable; Base service retains shared ownership; funding unavailable"
                                 );
                                 ManagedSetup::StoreOnly {
-                                    owner: StoreOnlyOwner::new(shared),
+                                    owner: StoreOnlyOwner::new(*shared),
                                     base: Some(base),
                                 }
                             }
                         },
-                    }
-                } else {
-                    let (source, base) = self.managed_connection_preflight(env)?;
-                    let owner = crate::treasury::Treasury::open(
-                        t.state_dir.clone(),
-                        t.key_file.clone(),
-                        t.runtime_id()?,
-                    )
-                    .await?;
-                    ManagedSetup::Treasury(Box::new(TreasurySetup {
-                        owner,
+                        Err(_) => {
+                            tracing::warn!(
+                                category = "funding_configuration_unavailable",
+                                "Funding configuration unavailable; Base service retains shared ownership; correct funding configuration and restart"
+                            );
+                            ManagedSetup::StoreOnly {
+                                owner: StoreOnlyOwner::new(shared),
+                                base: Some(base),
+                            }
+                        }
+                    },
+                }
+            } else {
+                let (source, base) = self.managed_connection_preflight(env)?;
+                let owner = crate::treasury::Treasury::open(
+                    t.state_dir.clone(),
+                    t.key_file.clone(),
+                    t.runtime_id()?,
+                )
+                .await?;
+                ManagedSetup::Treasury(Box::new(TreasurySetup {
+                    owner,
+                    base,
+                    source,
+                }))
+            };
+            let store = capabilities.store();
+            let setup: Result<()> = async {
+            if let ManagedSetup::Treasury(treasury) = &mut capabilities {
+                treasury.owner.configure_sync(treasury.source.sync_settings.clone());
+                if f.auto_fund {
+                    treasury.owner.configure_automatic_shielding(crate::rotation::config::zatoshis(
+                        &t.max_refund_shielding_fee_zec,
+                    )? as u64);
+                }
+            }
+            install_funding_restrictions(&store, restriction, f.auto_fund && capabilities.funding_available())
+                .await?;
+            let managed = self
+                .wallet_resolution
+                .wallets
+                .iter()
+                .filter(|(_, w)| w.managed())
+                .map(|(n, _)| n.clone())
+                .collect();
+            let statics = self
+                .wallet_resolution
+                .wallets
+                .iter()
+                .filter(|(_, w)| !w.managed())
+                .map(|(n, _)| n.clone())
+                .collect();
+            store
+                .call(move |s| s.configure_profiles(&managed, &statics))
+                .await?;
+            for (name, w) in &self.wallet_resolution.wallets {
+                if only_wallets.is_some_and(|selected| !selected.contains(name)) {
+                    continue;
+                }
+                if let WalletConfig::ZcashRotation {
+                    reserves,
+                    max_api_payment_usdc,
+                    max_retirement_remainder_usdc,
+                    ..
+                } = w
+                {
+                    let policy = SpendPolicy::dollars(max_api_payment_usdc)?;
+                    let group_name = name.clone();
+                    let reserves = reserves.clone();
+                    let retirement = crate::rotation::config::retirement_remainder(
+                        max_retirement_remainder_usdc,
+                    )?;
+                    let cap = policy.max_atomic;
+                    let pool = store
+                        .call(move |s| {
+                            s.ensure_capacity_group(&group_name, &reserves, cap, retirement)
+                        })
+                        .await?;
+                    let client = if let Some(base) = capabilities.base() {
+                        let manager = std::sync::Arc::new(ManagedPool::new(store.clone(), pool, base.clone(), policy)?);
+                        managed_pools.push(manager.clone());
+                        PaidClient::managed(manager)
+                    } else {
+                        PaidClient::unavailable(crate::rotation::error::AdmissionError::WalletNotReady(
+                            "managed Base configuration unavailable; correct configuration and restart"))
+                    };
+                    wallets.insert(name.clone(), client);
+                }
+            }
+            Ok(())
+            }.await;
+            if let Err(error) = setup {
+                drop(managed_pools);
+                drop(wallets);
+                drop(store);
+                capabilities.close().await?;
+                return Err(error);
+            }
+            runtime = match capabilities {
+                ManagedSetup::StoreOnly { owner, .. } => ManagedRuntime::StoreOnly(owner),
+                ManagedSetup::Treasury(treasury) => {
+                    let TreasurySetup {
+                        mut owner,
                         base,
                         source,
-                    }))
-                };
-                let store = capabilities.store();
-                let setup: Result<()> = async {
-                if let ManagedSetup::Treasury(treasury) = &mut capabilities {
-                    treasury.owner.configure_sync(treasury.source.sync_settings.clone());
-                    if f.auto_fund {
-                        treasury.owner.configure_automatic_shielding(crate::rotation::config::zatoshis(
-                            &t.max_refund_shielding_fee_zec,
-                        )? as u64);
-                    }
-                }
-                install_funding_restrictions(&store, restriction, f.auto_fund && capabilities.funding_available())
-                    .await?;
-                let managed = self
-                    .wallet_resolution
-                    .wallets
-                    .iter()
-                    .filter(|(_, w)| w.managed())
-                    .map(|(n, _)| n.clone())
-                    .collect();
-                let statics = self
-                    .wallet_resolution
-                    .wallets
-                    .iter()
-                    .filter(|(_, w)| !w.managed())
-                    .map(|(n, _)| n.clone())
-                    .collect();
-                store
-                    .call(move |s| s.configure_profiles(&managed, &statics))
-                    .await?;
-                for (name, w) in &self.wallet_resolution.wallets {
-                    if only_wallets.is_some_and(|selected| !selected.contains(name)) {
-                        continue;
-                    }
-                    if let WalletConfig::ZcashRotation {
-                        reserves,
-                        max_api_payment_usdc,
-                        max_retirement_remainder_usdc,
-                        ..
-                    } = w
-                    {
-                        let policy = SpendPolicy::dollars(max_api_payment_usdc)?;
-                        let group_name = name.clone();
-                        let reserves = reserves.clone();
-                        let retirement = crate::rotation::config::retirement_remainder(
-                            max_retirement_remainder_usdc,
-                        )?;
-                        let cap = policy.max_atomic;
-                        let pool = store
-                            .call(move |s| {
-                                s.ensure_capacity_group(&group_name, &reserves, cap, retirement)
-                            })
-                            .await?;
-                        let client = if let Some(base) = capabilities.base() {
-                            let manager = std::sync::Arc::new(ManagedPool::new(store.clone(), pool, base.clone(), policy)?);
-                            managed_pools.push(manager.clone());
-                            PaidClient::managed(manager)
-                        } else {
-                            PaidClient::unavailable(crate::rotation::error::AdmissionError::WalletNotReady(
-                                "managed Base configuration unavailable; correct configuration and restart"))
-                        };
-                        wallets.insert(name.clone(), client);
-                    }
-                }
-                Ok(())
-                }.await;
-                if let Err(error) = setup {
-                    drop(managed_pools);
-                    drop(wallets);
-                    drop(store);
-                    capabilities.close().await?;
-                    return Err(error);
-                }
-                runtime = match capabilities {
-                    ManagedSetup::StoreOnly { owner, .. } => ManagedRuntime::StoreOnly(owner),
-                    ManagedSetup::Treasury(treasury) => {
-                        let TreasurySetup {
-                            mut owner,
-                            base,
-                            source,
-                        } = *treasury;
-                        tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
-                            "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to actual spendable treasury funds, ZEC/fee safeguards and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
-                        let (handle, commands) = crate::treasury::actor::channel();
-                        let backend = crate::rotation::funding::Backend {
-                            treasury: handle,
-                            store: store.clone(),
-                            near: source.near,
-                            base,
-                            wallets: self.wallet_resolution.wallets.clone(),
-                            funding: f.clone(),
-                            max_network_fee: source.max_network_fee,
-                        };
-                        owner.configure_funding_discovery(
-                            crate::rotation::funding::FundingBackend::allocation_groups(&backend),
-                        );
-                        ManagedRuntime::Treasury(Box::new(TreasuryRuntime {
-                            owner,
-                            funding: (
-                                commands,
-                                source.sender,
-                                crate::rotation::funding::FundingWorker::new(
-                                    store.clone(),
-                                    backend,
-                                    f.poll_seconds,
-                                ),
+                    } = *treasury;
+                    tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
+                        "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to actual spendable treasury funds, ZEC/fee safeguards and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
+                    let (handle, commands) = crate::treasury::actor::channel();
+                    let backend = crate::rotation::funding::Backend {
+                        treasury: handle,
+                        store: store.clone(),
+                        near: source.near,
+                        base,
+                        wallets: self.wallet_resolution.wallets.clone(),
+                        funding: f.clone(),
+                        max_network_fee: source.max_network_fee,
+                    };
+                    owner.configure_funding_discovery(
+                        crate::rotation::funding::FundingBackend::allocation_groups(&backend),
+                    );
+                    ManagedRuntime::Treasury(Box::new(TreasuryRuntime {
+                        owner,
+                        funding: (
+                            commands,
+                            source.sender,
+                            crate::rotation::funding::FundingWorker::new(
+                                store.clone(),
+                                backend,
+                                f.poll_seconds,
                             ),
-                        }))
-                    }
-                };
-            }
+                        ),
+                    }))
+                }
+            };
         }
         Ok(InitializedWallets {
             wallets,
-            #[cfg(feature = "zcash")]
             runtime,
-            #[cfg(feature = "zcash")]
             managed_pools,
         })
     }
@@ -1282,9 +1262,7 @@ impl Deployment {
                 .keys()
                 .map(|name| (name.clone(), PaidClient::unsigned()))
                 .collect(),
-            #[cfg(feature = "zcash")]
             runtime: ManagedRuntime::None,
-            #[cfg(feature = "zcash")]
             managed_pools: Vec::new(),
         })
     }
@@ -1300,7 +1278,6 @@ impl Deployment {
             .initialized
             .as_mut()
             .expect("initialized serving wallets");
-        #[cfg(feature = "zcash")]
         if restriction == crate::rotation::restriction::FundingRestriction::DenyNewFunding
             && let Some(store) = initialized.runtime.store()
         {
@@ -1444,7 +1421,6 @@ impl Deployment {
         let (tokens, initialized) = match setup {
             Ok(setup) => setup,
             Err(error) => {
-                #[cfg(feature = "zcash")]
                 if let Some(initialized) = self.initialized.take() {
                     // Source relay clients retain store handles. Release them
                     // before shutdown waits for the treasury worker to exit.
@@ -1455,9 +1431,7 @@ impl Deployment {
             }
         };
         let wallets = initialized.wallets;
-        #[cfg(feature = "zcash")]
         let runtime = initialized.runtime;
-        #[cfg(feature = "zcash")]
         let managed_pools = initialized.managed_pools;
         let deferred_wallets = wallets.clone();
         let bound = self.bind_catalog_listeners(wallets, tokens).await;
@@ -1470,21 +1444,15 @@ impl Deployment {
             Ok(bound) => bound,
             Err(error) => {
                 drop(deferred_wallets);
-                #[cfg(feature = "zcash")]
-                {
-                    drop(managed_pools);
-                    drop(self);
-                    runtime.close().await?;
-                }
+                drop(managed_pools);
+                drop(self);
+                runtime.close().await?;
                 return Err(error);
             }
         };
-        #[cfg(feature = "zcash")]
         let can_allocate = runtime.funding_available()
             && self.config.funding.as_ref().is_some_and(|f| f.auto_fund)
             && restriction == crate::rotation::restriction::FundingRestriction::Ordinary;
-        #[cfg(not(feature = "zcash"))]
-        let can_allocate = false;
         let deferred = self.defer_discovery.then(|| {
             deferred::Runtime::new(self, deferred_wallets, catalog, manager, can_allocate)
         });
@@ -1496,9 +1464,7 @@ impl Deployment {
             listener_failure: None,
             #[cfg(test)]
             funding_failure: None,
-            #[cfg(feature = "zcash")]
             runtime,
-            #[cfg(feature = "zcash")]
             managed_pools,
         })
     }
@@ -1645,7 +1611,6 @@ struct BoundListeners {
     accepted_work: Vec<crate::server::work::Work>,
 }
 
-#[cfg(feature = "zcash")]
 struct FundingConnections {
     max_network_fee: u64,
     sync_settings: crate::treasury::SyncSettings,
@@ -1653,12 +1618,10 @@ struct FundingConnections {
     sender: crate::treasury::submission::GrpcSubmission,
 }
 
-#[cfg(feature = "zcash")]
 struct StoreOnlyOwner {
     store: crate::rotation::store::StoreHandle,
     worker: tokio::task::JoinHandle<()>,
 }
-#[cfg(feature = "zcash")]
 impl StoreOnlyOwner {
     fn new(store: crate::rotation::store::Store) -> Self {
         let (store, worker) = crate::rotation::store::StoreHandle::spawn(store);
@@ -1672,7 +1635,6 @@ impl StoreOnlyOwner {
 
 // Preflight may leave Base usable without a reconstructable SDK. Keep those
 // capabilities together instead of treating independent Options as permission.
-#[cfg(feature = "zcash")]
 enum ManagedSetup {
     StoreOnly {
         owner: StoreOnlyOwner,
@@ -1680,13 +1642,11 @@ enum ManagedSetup {
     },
     Treasury(Box<TreasurySetup>),
 }
-#[cfg(feature = "zcash")]
 struct TreasurySetup {
     owner: crate::treasury::Treasury,
     base: crate::rotation::base::BaseRpc,
     source: FundingConnections,
 }
-#[cfg(feature = "zcash")]
 impl ManagedSetup {
     fn store(&self) -> crate::rotation::store::StoreHandle {
         match self {
@@ -1713,18 +1673,15 @@ impl ManagedSetup {
 
 // Only these three dormant states can reach binding, bootstrap or serving.
 // A treasury owner always carries its matching command/funding runtime.
-#[cfg(feature = "zcash")]
 enum ManagedRuntime {
     None,
     StoreOnly(StoreOnlyOwner),
     Treasury(Box<TreasuryRuntime>),
 }
-#[cfg(feature = "zcash")]
 struct TreasuryRuntime {
     owner: crate::treasury::Treasury,
     funding: FundingRuntime,
 }
-#[cfg(feature = "zcash")]
 impl ManagedRuntime {
     fn store(&self) -> Option<crate::rotation::store::StoreHandle> {
         match self {
@@ -1752,12 +1709,9 @@ impl ManagedRuntime {
 
 struct InitializedWallets {
     wallets: BTreeMap<String, PaidClient>,
-    #[cfg(feature = "zcash")]
     runtime: ManagedRuntime,
-    #[cfg(feature = "zcash")]
     managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
 }
-#[cfg(feature = "zcash")]
 type FundingRuntime = (
     crate::treasury::actor::TreasuryCommands,
     crate::treasury::submission::GrpcSubmission,
@@ -1770,9 +1724,7 @@ pub struct RunningDeployment {
     listener_failure: Option<(String, tokio::sync::oneshot::Receiver<()>)>,
     #[cfg(test)]
     funding_failure: Option<tokio::sync::oneshot::Receiver<()>>,
-    #[cfg(feature = "zcash")]
     runtime: ManagedRuntime,
-    #[cfg(feature = "zcash")]
     managed_pools: Vec<std::sync::Arc<crate::rotation::manager::ManagedPool>>,
     listeners: Vec<(String, TcpListener, axum::Router)>,
 }
@@ -1797,7 +1749,6 @@ impl RunningDeployment {
                 }
             });
         }
-        #[cfg(feature = "zcash")]
         let (treasury_task, funding_task, retained_runtime) = match self.runtime {
             ManagedRuntime::Treasury(treasury) => {
                 let TreasuryRuntime {
@@ -1824,9 +1775,7 @@ impl RunningDeployment {
             }
             runtime => (None, None, runtime),
         };
-        #[cfg(feature = "zcash")]
         let mut reconciliation = JoinSet::new();
-        #[cfg(feature = "zcash")]
         for pool in self.managed_pools {
             let stopped = reconciliation_stop.clone();
             reconciliation.spawn(async move {
@@ -1929,9 +1878,7 @@ impl RunningDeployment {
         drop(deferred_owner);
         stop.cancel();
         reconciliation_stop.cancel();
-        #[cfg(feature = "zcash")]
         while reconciliation.join_next().await.is_some() {}
-        #[cfg(feature = "zcash")]
         {
             // Drop the funding worker's store handle before joining the owner;
             // a stopped owner retains the shared store until serving releases it.
@@ -1958,7 +1905,6 @@ impl RunningDeployment {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
-    #[cfg(feature = "zcash")]
     #[tokio::test]
     async fn strict_near_preflight_fails_before_treasury_state_is_opened() {
         let dir = tempfile::tempdir().unwrap();
@@ -2033,7 +1979,6 @@ bearer_token_env="TOKEN"
         deployment.managed_connection_preflight(&env).unwrap();
         assert!(!dir.path().join("state").exists());
     }
-    #[cfg(feature = "zcash")]
     #[tokio::test]
     async fn funding_failure_keeps_listeners_and_base_reconciliation_available() {
         use axum::{Json, routing::post};
@@ -2283,17 +2228,17 @@ bearer_token_env = "TOKEN"
     }
 }
 
-#[cfg(all(test, feature = "zcash"))]
+#[cfg(test)]
 mod initialization_tests;
 
 #[cfg(test)]
 mod validation_tests;
 
-#[cfg(all(test, feature = "zcash"))]
+#[cfg(test)]
 #[path = "deployment/store_only_tests.rs"]
 mod store_only_tests;
 
-#[cfg(all(test, feature = "zcash"))]
+#[cfg(test)]
 mod prebind_tests;
 
 mod deferred;

@@ -29,7 +29,7 @@ identify its selected requests, caps, authority and unobserved outcomes.
 
 ## Default development checks
 
-The default build includes Zcash. `scripts/zcash.sh` supplies the pinned Cargo
+The application always includes Zcash. `scripts/zcash.sh` supplies the pinned Cargo
 invocation and Cargo-managed protoc; do not append a second `--locked` flag.
 
 ```sh
@@ -38,9 +38,9 @@ cargo fmt --check
 scripts/zcash.sh clippy --all-targets -- -D warnings
 ```
 
-Reduced-feature suites require an explicit request. Run requested feature
-configurations sequentially: subprocess tests use the built executable
-path. Prefer focused tests for a change, then the relevant broader suite.
+Run requested test-feature configurations sequentially: subprocess tests use the
+built executable path. Prefer focused tests for a change, then the relevant
+broader suite.
 `scripts/check.sh` is the full qualification wrapper, including compatibility and
 vendor verification. Building dependencies/proving parameters can require network
 access; normal runtime fixtures use localhost and deterministic unfunded keys,

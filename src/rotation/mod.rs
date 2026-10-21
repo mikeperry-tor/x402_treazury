@@ -7,10 +7,8 @@ pub mod restriction;
 pub mod store;
 pub mod transaction;
 
-#[cfg(feature = "zcash")]
 pub mod near;
 
-#[cfg(feature = "zcash")]
 pub mod funding;
 
 #[cfg(test)]

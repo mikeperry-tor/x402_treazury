@@ -186,8 +186,8 @@ external settlement contract or live qualification from a fixture timeout.
 
 ## Commands and test exceptions
 
-Run commands from the repository root. The default build includes Zcash; static
-wallet deployments simply omit treasury configuration. Use the wrapper for pinned
+Run commands from the repository root. Zcash is unconditional in the application
+build; static wallet deployments simply omit treasury configuration. Use the wrapper for pinned
 Cargo and Cargo-managed protoc. `build` defaults to release without incremental
 caches; `build --developer` opts into an incremental development build.
 
@@ -200,11 +200,11 @@ cargo fmt --check
 
 - Prefer focused tests for a change. Do not repeat full suites after a localized
   fix unless new changes or unresolved concerns justify it. `scripts/check.sh` is
-  the full default-Zcash check, including Clippy, vendor/compatibility verification,
+  the full application check, including Clippy, vendor/compatibility verification,
   complexity analysis and the synthetic-chain treasury lifecycle.
-- Do not run no-default-feature builds, tests or Clippy without an explicit user
-  request. Run requested feature configurations sequentially: CLI tests share an
-  executable path. Keep sources/executables frozen during their validation.
+- Only `zcash-testutils` and `zcash-regtest` are opt-in test features. Run requested
+  feature configurations sequentially: CLI tests share an executable path. Keep
+  sources/executables frozen during their validation.
 - Tests use temporary state, public unfunded deterministic keys and localhost
   fixtures. Never load real wallet secrets. Live-funded qualification requires
   separate operator authorization; consensus tests require Docker and an explicit

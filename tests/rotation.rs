@@ -931,7 +931,6 @@ fn accepted_calculation_survives_reopen_without_local_balance_or_day_policy() {
     );
 }
 
-#[cfg(feature = "zcash")]
 #[test]
 fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
     use x402_treazury::rotation::near::Quote;

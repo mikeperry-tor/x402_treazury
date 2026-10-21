@@ -1,7 +1,5 @@
 //! All runtime egress is constructed here. Policy is immutable after startup.
-#[cfg(feature = "zcash")]
 mod grpc;
-#[cfg(feature = "zcash")]
 pub(crate) use grpc::ConnectionDiagnostic;
 #[cfg(test)]
 #[path = "network/http_queue_tests.rs"]
@@ -147,7 +145,6 @@ impl IsolationId {
     }
     /// Owned transparent shielding has no EVM recipient. Keep each address in
     /// its own stable network/treasury scope, including after journal reload.
-    #[cfg(feature = "zcash")]
     pub(crate) fn transparent_treasury(
         network: crate::rotation::store::TreasuryNetwork,
         treasury: &str,
@@ -299,7 +296,6 @@ pub struct NetworkContext {
     test_root: Option<&'static [u8]>,
     #[cfg(test)]
     test_dns: Option<Arc<dyn reqwest::dns::Resolve>>,
-    #[cfg(feature = "zcash")]
     grpc: tokio::sync::Mutex<
         HashMap<
             (tokio::runtime::Id, IsolationId, String),
@@ -324,7 +320,6 @@ impl NetworkContext {
             test_root: None,
             #[cfg(test)]
             test_dns: None,
-            #[cfg(feature = "zcash")]
             grpc: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
@@ -710,7 +705,6 @@ pub(crate) async fn sleep_retry_after(deadline: Option<RetryAfter>) {
     }
 }
 
-#[cfg(feature = "zcash")]
 impl NetworkContext {
     pub async fn release_grpc(&self, id: &IsolationId) {
         let runtime = tokio::runtime::Handle::current().id();

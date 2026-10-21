@@ -127,7 +127,6 @@ impl Store {
         Ok(!self.preparation_pending()?)
     }
 
-    #[cfg(feature = "zcash")]
     pub(crate) fn automatic_shielding_submission(&self, id: &str, max_fee: u64) -> Result<bool> {
         if self.funding_restriction != super::super::restriction::FundingRestriction::Ordinary
             || self.funding_permits.is_some()
@@ -142,7 +141,6 @@ impl Store {
                 .is_some())
     }
 
-    #[cfg(feature = "zcash")]
     pub(crate) fn shielding_identity(
         &self,
         id: &str,
@@ -253,7 +251,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "zcash"))]
+#[cfg(test)]
 mod shielding_identity_tests {
     use super::*;
     use crate::rotation::transaction::PreparedTransaction;

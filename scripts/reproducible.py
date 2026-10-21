@@ -100,8 +100,8 @@ def compare(first, second):
     return hashes[0]
 
 
-def qualify(run, no_zcash):
-    report = {"status": "incomplete", "features": "no-default-features" if no_zcash else "default", "artifacts": []}
+def qualify(run):
+    report = {"status": "incomplete", "features": "default", "artifacts": []}
     try:
         subprocess.run(["sh", str(ROOT / "scripts/check_toolchain.sh")], check=True)
         if output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT):
@@ -111,7 +111,7 @@ def qualify(run, no_zcash):
         report["revision"] = output(["git", "rev-parse", "HEAD"], cwd=ROOT)
         report["epoch"] = output(["git", "show", "-s", "--format=%ct", "HEAD"], cwd=ROOT)
         report["lock_sha256"] = digest(ROOT / "Cargo.lock")
-        report["parameters"] = {} if no_zcash else verify_parameters(ROOT / "vendor/zingolib/zcash-params")
+        report["parameters"] = verify_parameters(ROOT / "vendor/zingolib/zcash-params")
         archive = run / "source.tar"
         with archive.open("wb") as stream:
             subprocess.run(["git", "archive", "--format=tar", report["revision"]], cwd=ROOT, stdout=stream, check=True)
@@ -124,10 +124,9 @@ def qualify(run, no_zcash):
             source = work / "source"
             source.mkdir(parents=True)
             subprocess.run(["tar", "-xf", str(archive), "-C", str(source)], check=True)
-            if not no_zcash:
-                for name in PARAMETERS:
-                    shutil.copyfile(ROOT / "vendor/zingolib/zcash-params" / name, source / "vendor/zingolib/zcash-params" / name)
-                verify_parameters(source / "vendor/zingolib/zcash-params")
+            for name in PARAMETERS:
+                shutil.copyfile(ROOT / "vendor/zingolib/zcash-params" / name, source / "vendor/zingolib/zcash-params" / name)
+            verify_parameters(source / "vendor/zingolib/zcash-params")
             env = build_environment(work, source, cargo_cache, tool_paths, report["epoch"], {**profile, **report["environment"]})
             log = run / f"{label}.log"
             print(f"Building {label}; full log: {log}", flush=True)
@@ -140,8 +139,6 @@ def qualify(run, no_zcash):
             run_logged(["cargo", "build", "--frozen", "--manifest-path", "compat/protoc/Cargo.toml"], source, env, log)
             env["PROTOC"] = output(SANDBOX + [str(work / "target/debug/x402-protoc-path")], cwd=source, env=env)
             command = ["cargo", "build", "--frozen", "--release", "--bin", "x402_treazury", "--target", profile["host"]]
-            if no_zcash:
-                command.append("--no-default-features")
             run_logged(command, source, env, log)
             binary = work / "target" / profile["host"] / "release/x402_treazury"
             run_logged([str(binary), "--help"], source, env, log)
@@ -158,14 +155,13 @@ def qualify(run, no_zcash):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--no-default-features", action="store_true")
-    args = parser.parse_args()
+    parser.parse_args()
     runs = ROOT / "target/reproducibility-runs"
     runs.mkdir(parents=True, exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix="release-", dir=runs)).resolve()
     print(f"Reproducibility evidence: {run}", flush=True)
     try:
-        qualify(run, args.no_default_features)
+        qualify(run)
     except Exception as error:
         print(f"Qualification failed: {error}\nEvidence retained: {run}", file=sys.stderr)
         return 1

@@ -176,7 +176,6 @@ impl RelayFailure {
                 status: None,
             };
         }
-        #[cfg(feature = "zcash")]
         if let Some(admission) = error.downcast_ref::<crate::rotation::error::AdmissionError>() {
             use crate::rotation::error::AdmissionError;
             let reason = match admission {
@@ -1082,16 +1081,13 @@ pub(crate) mod tests {
             RelayFailure::from_error(&error).to_string(),
             "discovery relay request failed: reason=payment_or_response"
         );
-        #[cfg(feature = "zcash")]
-        {
-            let error = anyhow::Error::new(crate::rotation::error::AdmissionError::PriceLimit(
-                "PRIVATE_UPSTREAM_DETAIL",
-            ));
-            assert_eq!(
-                RelayFailure::from_error(&error).to_string(),
-                "discovery relay request failed: reason=price_limit"
-            );
-        }
+        let error = anyhow::Error::new(crate::rotation::error::AdmissionError::PriceLimit(
+            "PRIVATE_UPSTREAM_DETAIL",
+        ));
+        assert_eq!(
+            RelayFailure::from_error(&error).to_string(),
+            "discovery relay request failed: reason=price_limit"
+        );
     }
 
     #[test]
@@ -1542,6 +1538,6 @@ pub(crate) mod tests {
     }
 }
 
-#[cfg(all(test, feature = "zcash"))]
+#[cfg(test)]
 #[path = "discovery_relay/readiness_tests.rs"]
 pub(crate) mod readiness_tests;

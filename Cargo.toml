@@ -16,11 +16,9 @@ name = "x402_treazury"
 path = "src/main.rs"
 
 [features]
-default = ["zcash"]
 # Explicit opt-in for synthetic-note proving tests; never needed by serving.
-zcash-testutils = ["zcash", "zingolib/testutils", "dep:orchard", "dep:zingo-status"]
+zcash-testutils = ["zingolib/testutils", "dep:orchard", "dep:zingo-status"]
 zcash-regtest = ["zcash-testutils", "dep:zcash_local_net"]
-zcash = ["dep:zingolib", "dep:zip32", "dep:zcash_client_backend", "dep:zcash_primitives", "dep:zcash_protocol", "dep:zcash_keys", "dep:zingo-netutils", "dep:tonic", "dep:pepper-sync", "dep:shardtree", "dep:bip0039", "dep:zcash_proofs"]
 
 [dependencies]
 rand = "0.9"
@@ -35,19 +33,19 @@ uuid = { version = "1", features = ["v4"] }
 fs2 = "0.4"
 httpdate = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-zingolib = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", default-features = false, optional = true }
-zip32 = { version = "0.2.1", optional = true }
-zcash_client_backend = { version = "0.24", default-features = false, optional = true }
-zcash_primitives = { version = "0.30.1", default-features = false, optional = true }
-zcash_protocol = { version = "0.10.6", optional = true }
-zcash_keys = { version = "0.16.1", default-features = false, optional = true }
-zingo-netutils = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", default-features = false, optional = true }
+zingolib = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", default-features = false }
+zip32 = { version = "0.2.1" }
+zcash_client_backend = { version = "0.24", default-features = false }
+zcash_primitives = { version = "0.30.1", default-features = false }
+zcash_protocol = { version = "0.10.6" }
+zcash_keys = { version = "0.16.1", default-features = false }
+zingo-netutils = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", default-features = false }
 zingo-status = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", optional = true }
-pepper-sync = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329", optional = true }
-shardtree = { version = "0.7.1", default-features = false, optional = true }
-bip0039 = { version = "0.14", optional = true }
-zcash_proofs = { version = "0.30", optional = true }
-tonic = { version = "0.14", default-features = false, optional = true }
+pepper-sync = { git = "https://github.com/zingolabs/zingolib", rev = "c6381534f802b1022041beda4b01c106ad132329" }
+shardtree = { version = "0.7.1", default-features = false }
+bip0039 = { version = "0.14" }
+zcash_proofs = { version = "0.30" }
+tonic = { version = "0.14", default-features = false }
 alloy-primitives = "1.5"
 alloy-signer-local = "2.0"
 anyhow = "1"
@@ -94,7 +92,6 @@ alloy-sol-macro-expander = { path = "vendor/alloy-sol-macro-expander" }
 [[example]]
 name = "quote_near"
 path = "tools/diagnostics/quote_near.rs"
-required-features = ["zcash"]
 
 [patch."https://github.com/zingolabs/zingolib"]
 zingolib = { path = "vendor/zingolib" }
@@ -110,11 +107,6 @@ sha2 = "0.10"
 [[example]]
 name = "live_integration"
 path = "tests/live/live_integration.rs"
-required-features = ["zcash"]
-
-[[test]]
-name = "integration_preparation"
-required-features = ["zcash"]
 
 [[example]]
 name = "snapshot_spec"

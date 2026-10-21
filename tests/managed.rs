@@ -1345,7 +1345,6 @@ async fn journal_failure_sends_no_signature_and_next_admission_recovers() {
     h.close().await;
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn managed_deployment_shares_pools_keeps_static_profiles_and_releases_ownership() {
     use x402_treazury::{deployment::Deployment, treasury::Treasury};
@@ -1766,7 +1765,6 @@ async fn ordinary_balance_refresh_preserves_unresolved_authorizations() {
     h.close().await;
 }
 
-#[cfg(feature = "zcash")]
 #[path = "support/lifecycle.rs"]
 mod lifecycle;
 
@@ -2214,7 +2212,6 @@ async fn qualification_guard_allows_existing_ready_consumption_but_denies_refill
     h.close().await;
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn qualification_deployment_installs_guard_before_bootstrap_even_with_auto_fund() {
     use x402_treazury::rotation::restriction::FundingRestriction;

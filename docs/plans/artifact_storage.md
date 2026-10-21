@@ -240,7 +240,7 @@ tools identically. For URL capture, prove original-wallet SOCKS identity after r
 remote DNS, no direct fallback and no authentication forwarding across origins.
 
 Run focused provider request/output regressions against faithful fixtures, then
-default all-target, Clippy, formatting and network-audit checks. Reduced-feature
-validation requires an explicit request and runs sequentially when requested.
+default all-target, Clippy, formatting and network-audit checks. Run requested opt-in
+test-feature configurations sequentially.
 A release requires demonstrated retrieval in supported clients,
 documented disk/retention behavior, and explicit errors/logs for every enforced bound.

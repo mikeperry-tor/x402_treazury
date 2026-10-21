@@ -254,7 +254,6 @@ async fn invalid_policies_templates_risk_limits_and_reserved_names_fail_offline(
     }
 }
 
-#[cfg(feature = "zcash")]
 async fn seed_managed_inventory(
     shown: &Value,
     state: &std::path::Path,
@@ -292,7 +291,6 @@ async fn seed_managed_inventory(
     }
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
     use x402_treazury::{rotation::store::status, treasury::Treasury};
@@ -407,10 +405,8 @@ async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
     }
 }
 
-#[cfg(feature = "zcash")]
 #[path = "support/signatures.rs"]
 mod signatures;
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn automatic_scope_bindings_match_actual_payment_signers() {
     use axum::{

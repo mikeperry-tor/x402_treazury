@@ -382,7 +382,6 @@ fn future_schema_is_refused_and_referenced_snapshots_survive_repeated_saves() {
             s.prepared_bytes(&job.operation_id).unwrap().as_slice(),
             format!("signed-{i}").as_bytes()
         );
-        #[cfg(feature = "zcash")]
         assert_eq!(
             s.prepared_snapshot(&job.operation_id).unwrap().as_slice(),
             format!("prepared-{i}").as_bytes()

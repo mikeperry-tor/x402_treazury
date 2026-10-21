@@ -1,10 +1,8 @@
 //! Wallet administration. Only explicit reconcile --rebroadcast can submit saved bytes.
-#[cfg(feature = "zcash")]
 use anyhow::Context;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 mod output;
-#[cfg(feature = "zcash")]
 mod sync;
 use std::path::PathBuf;
 
@@ -322,8 +320,6 @@ fn resolve_administrative_identity(
     Ok(treasury_id)
 }
 
-// Keep wallet commands recognizable in reduced builds so they can report feature requirements.
-#[cfg_attr(not(feature = "zcash"), allow(dead_code))]
 enum Command {
     Recover {
         meta_config: PathBuf,
@@ -406,16 +402,6 @@ async fn run_args(
     args: WalletArgs,
     network: crate::rotation::store::TreasuryNetwork,
 ) -> Result<()> {
-    #[cfg(not(feature = "zcash"))]
-    let _ = network;
-    #[cfg(not(feature = "zcash"))]
-    anyhow::ensure!(
-        matches!(
-            &args.command,
-            Action::Status { .. } | Action::Backup { .. } | Action::RecoverUnprepared { .. }
-        ),
-        "treasury commands require a build with --features zcash"
-    );
     let json = match &args.command {
         Action::Init { json, .. }
         | Action::Sync { json, .. }
@@ -424,7 +410,6 @@ async fn run_args(
         _ => true,
     };
     let command = resolve_args(args)?;
-    #[cfg(feature = "zcash")]
     if let Command::Sync {
         meta_config,
         qualification_parent_stdin,
@@ -432,7 +417,6 @@ async fn run_args(
     {
         return sync::run(meta_config, network, qualification_parent_stdin, json).await;
     }
-    #[cfg(feature = "zcash")]
     if let Command::Bootstrap { meta_config } = command {
         let summary = crate::deployment::bootstrap_wallets(&meta_config).await?;
         if json {
@@ -442,7 +426,6 @@ async fn run_args(
         }
         return Ok(());
     }
-    #[cfg(feature = "zcash")]
     if let Command::Recover { meta_config } = command {
         return recover_funding(meta_config, network).await;
     }
@@ -453,7 +436,6 @@ async fn run_args(
     {
         return show_status(state_dir, key_file, json).await;
     }
-    #[cfg(feature = "zcash")]
     if let Command::Addresses {
         state_dir,
         key_file,
@@ -496,33 +478,26 @@ async fn run_args(
         println!("{}", serde_json::json!({"funding_attempt_closed":true}));
         return Ok(());
     }
-    #[cfg(not(feature = "zcash"))]
-    {
-        anyhow::bail!("treasury commands require a build with --features zcash")
-    }
-    #[cfg(feature = "zcash")]
-    {
-        let initializing = matches!(&command, Command::Init { .. });
-        let treasury = execute_wallet_command(command, network).await?;
-        if initializing && !json {
-            let addresses = treasury.addresses().await?;
-            let address = addresses[0]["encoded_address"]
-                .as_str()
-                .context("initialized wallet has no primary receive address")?;
-            treasury.close().await?;
-            println!(
-                "Zcash wallet initialized.\n\nPrimary ZEC address:\n{address}\n\nSend ZEC to this address to fund your wallet."
-            );
-            return Ok(());
-        }
+    let initializing = matches!(&command, Command::Init { .. });
+    let treasury = execute_wallet_command(command, network).await?;
+    if initializing && !json {
+        let addresses = treasury.addresses().await?;
+        let address = addresses[0]["encoded_address"]
+            .as_str()
+            .context("initialized wallet has no primary receive address")?;
+        treasury.close().await?;
         println!(
-            "{}",
-            serde_json::to_string_pretty(
-                &serde_json::json!({"state":treasury.status().await?,"receive_addresses":treasury.addresses().await?})
-            )?
+            "Zcash wallet initialized.\n\nPrimary ZEC address:\n{address}\n\nSend ZEC to this address to fund your wallet."
         );
-        treasury.close().await
+        return Ok(());
     }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(
+            &serde_json::json!({"state":treasury.status().await?,"receive_addresses":treasury.addresses().await?})
+        )?
+    );
+    treasury.close().await
 }
 
 async fn show_status(state_dir: PathBuf, key_file: PathBuf, json: bool) -> Result<()> {
@@ -533,15 +508,9 @@ async fn show_status(state_dir: PathBuf, key_file: PathBuf, json: bool) -> Resul
         println!("{}", serde_json::to_string_pretty(&status)?);
         return Ok(());
     }
-    #[cfg(feature = "zcash")]
     let inspected = crate::treasury::Treasury::inspect_status(state_dir.clone(), key_file, None)
         .await
         .ok();
-    #[cfg(not(feature = "zcash"))]
-    let inspected: Option<(crate::rotation::store::Status, serde_json::Value)> = {
-        let _ = key_file;
-        None
-    };
     let (status, addresses) = match inspected {
         Some(inspected) => inspected,
         None => (
@@ -555,13 +524,12 @@ async fn show_status(state_dir: PathBuf, key_file: PathBuf, json: bool) -> Resul
         println!("\nPrimary shielded ZEC receive address:\n{address}");
     } else {
         println!(
-            "\nPrimary shielded ZEC receive address: unavailable (requires a readable wallet key and saved snapshot in a Zcash-enabled build)"
+            "\nPrimary shielded ZEC receive address: unavailable (requires a readable wallet key and saved snapshot)"
         );
     }
     Ok(())
 }
 
-#[cfg(feature = "zcash")]
 async fn execute_wallet_command(
     command: Command,
     network: crate::rotation::store::TreasuryNetwork,
@@ -615,7 +583,6 @@ async fn execute_wallet_command(
     Ok(treasury)
 }
 
-#[cfg(feature = "zcash")]
 async fn recover_funding(
     path: PathBuf,
     network: crate::rotation::store::TreasuryNetwork,
@@ -668,7 +635,6 @@ async fn recover_funding(
     Ok(())
 }
 
-#[cfg(feature = "zcash")]
 async fn recover_expired(
     meta_config: PathBuf,
     operation_id: String,
@@ -698,7 +664,6 @@ async fn recover_expired(
     Ok(treasury)
 }
 
-#[cfg(feature = "zcash")]
 async fn shield_refunds(
     meta_config: PathBuf,
     job_id: String,
@@ -728,7 +693,6 @@ async fn shield_refunds(
     Ok(treasury)
 }
 
-#[cfg(feature = "zcash")]
 async fn reconcile(
     meta_config: PathBuf,
     operation_id: String,
@@ -784,7 +748,6 @@ async fn reconcile(
     Ok(treasury)
 }
 
-#[cfg(feature = "zcash")]
 async fn init(
     state_dir: PathBuf,
     key_file: PathBuf,
@@ -862,7 +825,6 @@ async fn init(
     crate::treasury::Treasury::create(state_dir, key_file, birthday, seed).await
 }
 
-#[cfg(feature = "zcash")]
 pub(crate) async fn shutdown_signal() -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -874,7 +836,6 @@ pub(crate) async fn shutdown_signal() -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "zcash")]
 async fn configured(
     path: &std::path::Path,
     network: crate::rotation::store::TreasuryNetwork,
@@ -902,7 +863,6 @@ async fn configured(
     Ok((treasury, settings))
 }
 
-#[cfg(feature = "zcash")]
 pub(crate) async fn finish_on_shutdown<T>(
     stage: &'static str,
     stop: &tokio_util::sync::CancellationToken,
@@ -936,7 +896,7 @@ async fn regtest_command_child() {
     std::process::exit(0);
 }
 
-#[cfg(all(test, unix, feature = "zcash"))]
+#[cfg(all(test, unix))]
 mod shutdown_tests {
     use super::*;
 
@@ -1032,6 +992,6 @@ mod shutdown_tests {
     }
 }
 
-#[cfg(all(test, feature = "zcash"))]
+#[cfg(test)]
 #[path = "wallet_cli/resolution_tests.rs"]
 mod resolution_tests;

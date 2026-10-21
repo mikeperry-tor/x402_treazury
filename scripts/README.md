@@ -8,22 +8,20 @@ any working directory unless a command explicitly supplies relative data paths.
 | `python3 scripts/reproducible.py` | Two clean, network-denied release builds with binary hash comparison; see [release qualification](../docs/reproducible-builds.md) |
 | `check_toolchain.sh` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
 | `check.sh` | Format, advisory complexity regressions, vendor provenance, default Zcash tests, offline refund-accounting tests, all-feature Clippy and compatibility suite |
-| `check.sh --no-default-features` | Explicit opt-in only: tests and Clippy without the embedded wallet, plus format/provenance |
 | `python3 scripts/complexity.py` | Pinned complexity metrics and advisory regressions against merge-base with `main`; Markdown and complete JSON/CSV under `target/complexity` |
 | `coverage.sh` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
 | `coverage.sh --branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |
 | `coverage.sh --proving` | Only the named synthetic proving test; `target/coverage-proving` |
 | `coverage.sh --consensus TEST` | One explicitly selected consensus test; `target/coverage-consensus-TEST` |
 | `tests/coverage.sh` | Offline regression check for report publication and failure preservation |
-| `zcash.sh build` / `zcash.sh test --all-targets` | Cargo-managed protoc; default features include the wallet, `--no-default-features` disables it |
+| `zcash.sh build` / `zcash.sh test --all-targets` | Cargo-managed protoc; the application always includes Zcash |
 | `check_compat.py` | Standard-library Python orchestration of the separate payment/Zingolib compatibility workspace |
 | `generate_crypto_vectors.py` | Independent Python Keccak/EIP-712 reference vectors using pinned script dependencies |
 
-Do not run the no-default-feature checks during ordinary development unless explicitly
-requested. The standard build includes Zcash; static-wallet deployments need no treasury
-configuration. If both variants are requested, run them sequentially: CLI tests share
-`target/debug/x402_treazury`.
-`check.sh` leaves the Zcash-enabled executable available at that path.
+Zcash support is unconditional; static-wallet deployments omit treasury
+configuration. Only synthetic proving and local consensus are opt-in test features.
+Run feature configurations sequentially: CLI tests share
+`target/debug/x402_treazury`. `check.sh` leaves the application executable there.
 Its complexity audit warns above CogC 20 or CycC 40 for new/unmatched or worsening
 callables; scores never fail tests. Missing baseline history or incomplete analysis
 fails the audit. Set `COMPLEXITY_BASE_REF` for another review target; CI must fetch

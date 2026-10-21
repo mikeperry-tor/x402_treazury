@@ -138,7 +138,6 @@ async fn http_and_grpc_keep_tls_verification_through_socks() {
                 .await
                 .is_err()
         );
-        #[cfg(feature = "zcash")]
         assert!(ctx.grpc(&identity, url).await.is_err());
     }
     assert_eq!(
@@ -163,7 +162,6 @@ async fn http_and_grpc_keep_tls_verification_through_socks() {
         .status()
         .is_success()
     );
-    #[cfg(feature = "zcash")]
     {
         use zingo_netutils::{
             Indexer,
@@ -247,7 +245,6 @@ async fn socks_failures_never_reach_a_direct_http_or_grpc_target() {
                 .await
                 .is_err()
         );
-        #[cfg(feature = "zcash")]
         assert!(ctx.grpc(&id, &url).await.is_err());
         assert_eq!(hits.load(Ordering::SeqCst), 0);
     }
@@ -319,7 +316,6 @@ async fn interrupted_http_body_is_not_retried() {
     server.abort();
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn grpc_eviction_release_and_runtime_recreation_keep_live_channels_usable() {
     use zingo_netutils::{

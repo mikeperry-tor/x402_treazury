@@ -11,7 +11,7 @@ publish = false
 debug = "line-tables-only"
 
 [dependencies]
-x402_treazury = { path = "../..", default-features = false }
+x402_treazury = { path = "../.." }
 zingolib = { path = "../../vendor/zingolib", default-features = false }
 
 # Experimental compatibility patch: see vendor/README.md.

@@ -335,26 +335,6 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
         )
         .await);
     }
-    #[cfg(not(feature = "zcash"))]
-    {
-        let error = bad(run(
-            dir,
-            &[
-                "wallet",
-                "init",
-                "--state-dir",
-                "wallet",
-                "--key-file",
-                "key",
-                "--birthday",
-                "2000000",
-            ],
-            &[],
-        )
-        .await);
-        assert!(error.contains("features zcash"));
-        assert!(!dir.join("wallet").exists());
-    }
 }
 
 #[tokio::test]
@@ -387,9 +367,6 @@ async fn wallet_recovery_argument_errors_are_legible_without_submission_credenti
             &[],
         )
         .await);
-        #[cfg(not(feature = "zcash"))]
-        assert!(error.contains("features zcash"));
-        #[cfg(feature = "zcash")]
         assert!(!error.contains("submission token"));
     }
 }
@@ -495,7 +472,6 @@ async fn unsigned_qualification_cannot_use_stdio_or_dotenv_or_inspection_modes()
     assert!(error.contains("cannot be used with"), "{error}");
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn bootstrap_is_catalog_free_requires_policy_and_resumes_completed_pairs() {
     let tmp = tempfile::tempdir().unwrap();

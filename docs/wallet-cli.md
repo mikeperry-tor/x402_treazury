@@ -567,7 +567,7 @@ target/debug/x402_treazury config show \
   --config examples/deployments/managed.toml
 ```
 
-Serve with the Zcash-enabled binary using the same `--config` and an
+Serve with the application binary using the same `--config` and an
 `--env-file` containing the referenced endpoints and listener tokens. Paths are
 relative to the deployment file. `[treasury]` identifies an already initialized
 wallet; serving never creates/imports a Zcash seed. All declared managed profiles
@@ -786,8 +786,8 @@ after a child exits without destructors. The child helper
 is marked ignored in normal enumeration and run explicitly by its parent test.
 The managed tests cover offer filtering, journal failures, deadlines, independent
 pools, restart/cancellation, expiration, stale/reorged evidence and promotion
-rollback. Two `zcash` feature tests exercise encrypted zingolib restore and the
-offline CLI; two more test managed multi-listener serving and generated-pool
+rollback. Offline tests exercise encrypted zingolib restore and the
+offline CLI; additional tests cover managed multi-listener serving and generated-pool
 identity across template edits and scope changes. Local gRPC fixtures exercise
 real zingolib sync, wrong-network rejection, periodic checkpoints, cancellation,
 and encrypted restart/resume without real funds or external indexers.

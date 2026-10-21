@@ -135,7 +135,6 @@ async fn auth_downgrades_refusals_and_timeouts_never_go_direct() {
                 .await
                 .is_err()
         );
-        #[cfg(feature = "zcash")]
         assert!(
             ctx.grpc(&IsolationId::treasury("failure-test"), &url)
                 .await
@@ -277,7 +276,6 @@ async fn legacy_credentials_eviction_and_runtime_recreation_preserve_inflight_id
     server.abort();
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn grpc_remote_dns_authenticated_streaming_and_channel_isolation() {
     use zingo_netutils::{
@@ -385,7 +383,6 @@ fn policy_inspection_does_not_connect_or_require_secrets() {
     assert!(!output.status.success());
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 #[ignore = "requires an explicit live Tor SOCKS endpoint; read-only, no wallet or funds"]
 async fn live_tor_unfunded_smoke() {
@@ -426,25 +423,21 @@ async fn public_only_tor_uses_remote_dns_and_existing_isolation_without_fallback
     );
 }
 
-#[cfg(feature = "zcash")]
 #[path = "support/live_tor.rs"]
 mod live_tor;
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 #[ignore = "requires the dedicated qualification Tor instance to have stopped"]
 async fn live_tor_proxy_unavailable() {
     live_tor::unavailable().await;
 }
 
-#[cfg(feature = "zcash")]
 #[test]
 #[ignore = "requires external loopback control listeners and explicit sandbox expectations"]
 fn live_tor_egress_controls() {
     live_tor::egress_controls();
 }
 
-#[cfg(feature = "zcash")]
 #[test]
 #[ignore = "requires the external confined listener qualification observer"]
 fn live_tor_inbound_listeners() {
@@ -624,7 +617,6 @@ async fn tor_read_inactivity_covers_headers_and_body() {
     server.abort();
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn grpc_progress_is_per_response_and_ignores_legacy_total_deadlines() {
     use axum::body::Bytes;
@@ -722,7 +714,6 @@ async fn grpc_progress_is_per_response_and_ignores_legacy_total_deadlines() {
     server.abort();
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn grpc_reconnect_uses_connection_budget_before_response_inactivity() {
     use std::sync::{
@@ -834,7 +825,6 @@ async fn grpc_reconnect_uses_connection_budget_before_response_inactivity() {
     server.abort();
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn grpc_stream_capacity_stall_is_bounded_before_dispatch() {
     use zingo_netutils::Indexer;
@@ -902,7 +892,6 @@ async fn grpc_stream_capacity_stall_is_bounded_before_dispatch() {
     }
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn grpc_queued_timeout_and_cancellation_do_not_dispatch_when_capacity_returns() {
     use axum::{

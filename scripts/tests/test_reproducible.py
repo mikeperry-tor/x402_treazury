@@ -62,7 +62,7 @@ class ReproducibleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(r.subprocess, "run"), patch.object(r, "output", return_value=" M Cargo.toml"):
                 with self.assertRaisesRegex(RuntimeError, "Tracked changes"):
-                    r.qualify(Path(tmp), False)
+                    r.qualify(Path(tmp))
             report = json.loads((Path(tmp) / "report.json").read_text())
             self.assertEqual(report["status"], "failed")
             self.assertIn("Tracked changes", report["error"])

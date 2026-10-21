@@ -1,4 +1,3 @@
-#![cfg(feature = "zcash")]
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
 use axum::{

@@ -1,5 +1,4 @@
 //! Startup failures must release managed relay clients before treasury shutdown.
-#![cfg(feature = "zcash")]
 use std::{collections::BTreeMap, time::Duration};
 use x402_treazury::{deployment::Deployment, treasury::Treasury};
 

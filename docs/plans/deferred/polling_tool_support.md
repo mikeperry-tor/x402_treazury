@@ -490,7 +490,7 @@ submission, status, recovery and results, including after rotation/restart and
 across multiple MCP listeners. Test hostile result URLs/redirects, isolation of
 unrelated jobs, and prevention of authentication forwarding. Exercise both direct
 and Tor-configured stacks with local fixtures; real Tor qualification is separate.
-Run the relevant suites in default-Zcash and no-Zcash builds, retain existing
+Run the relevant suites in the application build, retain existing
 payment/concurrency tests, and add region-coverage evidence for new state branches.
 
 Open decisions include process-only versus durable jobs for nonfinancial providers,

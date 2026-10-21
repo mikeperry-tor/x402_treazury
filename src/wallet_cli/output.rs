@@ -154,7 +154,6 @@ fn formats_zec_without_rounding_and_preserves_unknown_values() {
     assert_eq!(timestamp(Some(0)), "1970-01-01 00:00:00 UTC");
 }
 
-#[cfg(feature = "zcash")]
 pub(super) fn bootstrap(summary: &crate::deployment::BootstrapSummary) -> String {
     let mut text =
         String::from("Wallet bootstrap completed.\n\nAdvisory wallet balance estimates (USDC):\n");

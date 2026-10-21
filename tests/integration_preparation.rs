@@ -250,6 +250,7 @@ async fn build_info_is_credential_free_and_matches_compiled_library() {
     let identity: x402_treazury::build_identity::BuildIdentity =
         serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(identity, x402_treazury::build_identity::current());
+    assert_eq!(identity.features.first().map(String::as_str), Some("zcash"));
 }
 
 #[tokio::test]
@@ -992,7 +993,6 @@ async fn large_catalog_evidence_preserves_full_documents_without_raising_result_
     assert_eq!(m.limits.result_bytes, 10000);
 }
 
-#[cfg(feature = "zcash")]
 #[tokio::test]
 async fn production_wallet_sync_failure_is_not_reported_as_absent_funds() {
     let dir = tempfile::tempdir().unwrap();

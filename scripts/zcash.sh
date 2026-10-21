@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build/test using Cargo-managed protoc; Zcash is enabled by default.
+# Build/test the application using Cargo-managed protoc.
 set -eu
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 command=${1:-build}

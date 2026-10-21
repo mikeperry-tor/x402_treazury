@@ -28,7 +28,7 @@ pub fn current() -> BuildIdentity {
         profile: env!("TREAZURY_BUILD_PROFILE").into(),
         compiler: env!("TREAZURY_BUILD_RUSTC").into(),
         features: [
-            ("zcash", cfg!(feature = "zcash")),
+            ("zcash", true),
             ("zcash-testutils", cfg!(feature = "zcash-testutils")),
             ("zcash-regtest", cfg!(feature = "zcash-regtest")),
         ]

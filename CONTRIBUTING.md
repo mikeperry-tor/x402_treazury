@@ -76,7 +76,7 @@ scripts/zcash.sh clippy --all-targets -- -D warnings
 ```
 
 Run focused tests while developing; `scripts/check.sh` is the complete check suite.
-Use the pinned toolchain. Run default and no-default-feature suites sequentially
+Use the pinned toolchain. Run requested test-feature configurations sequentially
 because subprocess tests share an executable path. State which checks passed,
 failed or could not run. See [testing](docs/testing.md) for qualification limits;
 offline tests do not establish successful live payments or real-Tor isolation.

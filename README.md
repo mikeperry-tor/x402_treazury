@@ -146,6 +146,8 @@ cp examples/deployments/comprehensive.toml examples/deployments/comprehensive.lo
 ```
 
 The wrapper uses the pinned Rust/Cargo toolchain and supplies protoc.
+Zcash is always included; static-wallet deployments omit treasury configuration.
+Only synthetic proving and local consensus tests use opt-in Cargo features.
 See [build reproducibility](docs/reproducible-builds.md) for toolchain setup.
 
 The cargo download dependencies and Zcash proving parameters are downloaded

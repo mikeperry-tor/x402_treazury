@@ -1,4 +1,3 @@
-#![cfg(feature = "zcash")]
 use axum::{
     body::Bytes,
     extract::State,

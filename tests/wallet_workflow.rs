@@ -1,5 +1,4 @@
 //! The ordinary deployment-driven wallet workflow never fetches API catalogs or funds pools.
-#![cfg(feature = "zcash")]
 use std::{
     path::Path,
     process::{Command, Output},

@@ -89,7 +89,7 @@ remove responsibilities. Resolve material findings before building on a decision
    on all three OSes through CI or retained reproducible commands. Acceptance:
    default build, relevant native tests, CLI smoke tests, format and applicable
    Clippy checks; record exact toolchains/targets and unresolved dependency gaps.
-   No reduced-feature checks without an explicit user request. Update
+   Use the single application build and requested opt-in test features. Update
    `docs/development.md`, `scripts/README.md` and setup instructions in `README.md`.
 5. **P5 — Extend optional qualification backends.** Independently port release
    reproducibility, Tor confinement and measurement where useful. Keep each backend

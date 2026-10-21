@@ -395,7 +395,6 @@ impl Store {
         }
     }
 
-    #[cfg(feature = "zcash")]
     pub(crate) fn require_preparation_binding(
         &self,
         operation: &str,
@@ -609,7 +608,6 @@ impl Store {
 
     /// Persist only adapter-validated status, bound to the exact accepted operation.
     /// Terminal facts accumulate so a contradictory response cannot erase evidence.
-    #[cfg(feature = "zcash")]
     pub fn record_provider_outcome(
         &mut self,
         job: &str,
@@ -1076,7 +1074,6 @@ impl Store {
     }
     /// Persist the accepted bridge output separately from the immutable original
     /// allocation target, after validating the current claim's allowed range.
-    #[cfg(feature = "zcash")]
     pub fn save_funding_quote_with_target(
         &mut self,
         id: &str,
@@ -1087,7 +1084,6 @@ impl Store {
         ensure!(parsed.request["amount"] == target, "quote target mismatch");
         self.save_quote(id, quote, Some(target), None)
     }
-    #[cfg(feature = "zcash")]
     pub fn save_funding_quote_for_operation(
         &mut self,
         id: &str,
@@ -1737,7 +1733,6 @@ mod completion_tests {
         }
     }
 
-    #[cfg(feature = "zcash")]
     #[test]
     fn source_preparation_binds_the_original_pool_and_exact_accepted_source_terms() {
         let (_dir, mut store, job) = fixture();
@@ -2228,7 +2223,6 @@ mod completion_tests {
         );
     }
 
-    #[cfg(feature = "zcash")]
     #[test]
     fn success_requires_original_source_confirmation_and_keeps_original_credit_after_spending() {
         use crate::rotation::near::SwapStatus;
@@ -2287,7 +2281,6 @@ mod completion_tests {
         assert_eq!(store.destination_requirement(&job.id).unwrap().amount, "10");
     }
 
-    #[cfg(feature = "zcash")]
     fn submit_source_for_status(store: &mut Store, job: &FundingJob) {
         use crate::rotation::transaction::{ManagedFundingAuthority, TransactionFacts};
         assert!(
@@ -2344,7 +2337,6 @@ mod completion_tests {
         );
     }
 
-    #[cfg(feature = "zcash")]
     #[test]
     fn incomplete_deposit_keeps_observing_until_a_terminal_provider_fact() {
         use crate::rotation::near::SwapStatus;
@@ -2399,7 +2391,6 @@ mod completion_tests {
         }
     }
 
-    #[cfg(feature = "zcash")]
     #[test]
     fn provider_conflicts_preserve_both_facts_and_require_review() {
         use crate::rotation::near::SwapStatus;

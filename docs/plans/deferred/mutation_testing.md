@@ -25,10 +25,10 @@ parallel copies to cause swapping.
 
 | Decision | Baseline targets | Invariant |
 | --- | --- | --- |
-| `payment::SpendPolicy::select` amount/asset/network predicates | `--no-default-features --test payments` | Equality to cap allowed; larger amount or unsupported asset/network cannot sign. |
-| `rotation::base::validate_timestamp` comparisons | `--no-default-features --lib rotation::base::tests` | Future/stale anchors rejected at defined boundaries. |
-| `network::public_ip` classification | `--no-default-features --lib network::` | Private/reserved answers cannot become public-only destinations. |
-| Discovery target/persistence grants | `--no-default-features --lib discovery::tests::permissions` | Denial changes neither catalog nor durable records. |
+| `payment::SpendPolicy::select` amount/asset/network predicates | `--test payments` | Equality to cap allowed; larger amount or unsupported asset/network cannot sign. |
+| `rotation::base::validate_timestamp` comparisons | `--lib rotation::base::tests` | Future/stale anchors rejected at defined boundaries. |
+| `network::public_ip` classification | `--lib network::` | Private/reserved answers cannot become public-only destinations. |
+| Discovery target/persistence grants | `--lib discovery::tests::permissions` | Denial changes neither catalog nor durable records. |
 
 Confirm function/test names against the checkout before execution. Start with the
 first two rows; add the others only within the same budget. Refund, journal,

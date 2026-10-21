@@ -1,4 +1,3 @@
-#![cfg(feature = "zcash")]
 use anyhow::Result;
 #[path = "support/capacity.rs"]
 mod capacity_fixture;

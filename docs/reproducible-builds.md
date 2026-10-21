@@ -56,15 +56,13 @@ OS sandbox; running it directly in a local terminal does not require a service.
 
 ```sh
 python3 scripts/reproducible.py
-# Separate optional qualification without the embedded wallet:
-python3 scripts/reproducible.py --no-default-features
 ```
 
 Commit tracked changes first. The script archives HEAD; untracked files,
 including user scripts and secrets, are excluded. A clean checkout and its
 Git archive produce the same snapshot. Each build uses `cargo build --frozen
---release --bin x402_treazury --target aarch64-apple-darwin`, with default Zcash unless
-explicitly disabled. The locked protoc helper is also rebuilt independently.
+--release --bin x402_treazury --target aarch64-apple-darwin`; Zcash is unconditional.
+The locked protoc helper is also rebuilt independently.
 
 The environment is constructed from an allowlist: no inherited Rust flags,
 profiling settings, proxy variables or wallet credentials. Cargo registry/Git
@@ -100,6 +98,6 @@ separate comparison policy; this check compares Cargo's original output.
 
 The macOS default-Zcash profile has passed a same-host two-build comparison of
 original Cargo binaries, with sandbox probes, vendor checks and CLI smoke tests.
-This does not establish independent-host equality, no-Zcash releases, signing or
-notarization. Run the procedure for the release candidate being distributed and
-retain hashes and provenance with that release outside the source tree.
+This historical result does not establish a fresh qualification of later candidates,
+independent-host equality, signing or notarization. Run the procedure for the
+release candidate being distributed and retain hashes and provenance with that release outside the source tree.

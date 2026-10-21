@@ -18,9 +18,8 @@ scripts/zcash.sh test --test startup --test deployment --test provider_catalogs 
 scripts/zcash.sh build
 ```
 
-Reduced-feature checks require an explicit user request; the default checks above
-include Zcash. The ignored SOCKS child is exercised by its parent. Pricing barriers additionally
-assert a shared 16-request cap, lower per-source limits, rolling progress past a
+The application includes Zcash. The ignored SOCKS child is exercised by its parent.
+Pricing barriers additionally assert a shared 16-request cap, lower per-source limits, rolling progress past a
 stalled endpoint, duplicate-URL coalescing, and cancellation releasing permits.
 Pricing retry regressions additionally cover a delayed probe releasing a single
 source slot, sixteen delayed sources permitting a queued provider's description

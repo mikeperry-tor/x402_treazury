@@ -95,7 +95,6 @@ impl Store {
     }
 
     pub(super) fn notify_capacity_changed(&self, pool: &str) {
-        #[cfg(feature = "zcash")]
         self.treasury_changes.notify_one();
         if let Some(owner) = self
             .group_gates

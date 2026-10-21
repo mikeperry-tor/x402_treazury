@@ -491,7 +491,6 @@ fn qualification_snapshot_accepts_parent_alias_but_refuses_database_symlink() {
     assert!(qualification_state(&dir.path().join("state")).is_err());
 }
 
-#[cfg(feature = "zcash")]
 #[test]
 fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_submission() {
     use crate::rotation::store::preparation::{CalculationInputs, InputPool, OwnedInput};

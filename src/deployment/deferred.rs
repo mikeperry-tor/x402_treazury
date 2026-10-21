@@ -1155,7 +1155,6 @@ sources=['healthy','priced','failed']
         let _ = api.await;
     }
 
-    #[cfg(feature = "zcash")]
     #[tokio::test]
     async fn canonical_capacity_wakes_deferred_publication_in_same_serving_process() {
         use crate::rotation::{
@@ -1422,7 +1421,6 @@ sources=['healthy','priced','failed']
         relay.abort();
         api.abort();
     }
-    #[cfg(feature = "zcash")]
     #[tokio::test]
     async fn worker_panic_still_drains_relay_and_closes_store_before_returning() {
         let (dir, mut running, catalog, fixture, relay_task, api) =

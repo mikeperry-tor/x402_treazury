@@ -27,6 +27,19 @@ are separate: [release reproducibility](reproducible-builds.md) and
 [real-Tor confinement](../tests/TOR.md) currently have macOS-specific evidence.
 Keep those claims narrow until equivalent backends are implemented and qualified.
 
+## Application configuration
+
+Zcash support is unconditional in the executable and library. Static-wallet and
+unsigned deployments can omit treasury configuration; compiling support does not load
+treasury keys or start its workers. Only `zcash-testutils` (synthetic proving) and
+`zcash-regtest` (optional local consensus) are Cargo feature switches. Cargo's
+`--no-default-features` does not select a different application.
+
+Build identity retains its versioned schema and always reports the `zcash`
+capability marker, followed by the actual enabled test-feature markers. Preparation
+compares these identities and exact input hashes; historical pinned reports keep
+their original metadata and remain observation-only.
+
 ## Build storage options
 
 For end users, build an optimized executable without incremental compiler caches:
@@ -82,11 +95,10 @@ as routine disk cleanup.
 
 ## Verification
 
-Run `scripts/check.sh` for the default Zcash build, all-feature Clippy,
-compatibility checks and the local synthetic-chain treasury lifecycle. Reduced-
-feature checks require an explicit user request; they are not part of ordinary
-validation. If both configurations are requested, run them sequentially because
-CLI tests share the executable path. See [development tools](../scripts/README.md).
+Run `scripts/check.sh` for the application, test-feature Clippy, compatibility
+checks and the local synthetic-chain treasury lifecycle. Run feature configurations
+sequentially because CLI tests share the executable path. See
+[development tools](../scripts/README.md).
 Individual commands:
 
 ```sh
