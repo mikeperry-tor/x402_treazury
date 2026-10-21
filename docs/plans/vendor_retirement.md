@@ -1,230 +1,216 @@
-# Vendor checkout retirement
+# Vendor retirement assessment
 
-## Intent and baseline
+## Selected scope and baseline
 
-Minimize locally maintained dependency checkouts. Prioritize upstream contributions,
-compatible dependency selections and simple supported adapters that can remove an
-entire checkout. Reducing a patch is intermediate progress only when it advances
-a credible complete removal route. The selected work now authorizes the Zingolib v7 migration and retirement of
-both Alloy checkouts, preserving current runtime policy. Other retirement tracks
-and upstream submissions remain separate work.
+Assess whether application-owned RPC adaptation, direct Pepper synchronization
+and backend deposit calculation can retire **both `zingolib` and
+`zingo-netutils`**, with less total maintenance and unchanged runtime policy.
+Plan implementation only after that assessment passes independent review.
+This document plans the work; its creation does not start runtime implementation,
+upstream submission, live-funded execution or another retirement track.
 
-The selected migration starts at `93f2bbeb7ace3b713ffb1ac5a1592dba4cfc3614`.
-The explicitly authorized Rust/Cargo 1.99.1 upgrade is the separate preliminary
-commit `f52c451`; it retains release guards and requires fresh release qualification.
-At that baseline there are eight patched crate directories, used by both the
-application and the independent compatibility workspace. The selected migration
-targets two complete retirements; the ledger tracks the resulting inventory.
-The [checkout ledger](../../vendor/README.md#checkout-retirement-tracking) owns
-current blockers, upstream links, candidate revisions and next actions. Update it
-in place rather than keeping a second status inventory here. Reconfirm the actual
-baseline and complete blocker set before each implementation branch.
+The starting baseline is `9ec7f318cf36a8f9af9f6acb71dc12dceba38f97`.
+Six patched checkouts remain; both Alloy checkouts have already been retired.
+The selected Zingo revision is `bfb0a2156819ea7f75a9b09b1724abfd06c8925e`
+(v7.0.0). Reconfirm the working tree, exact sources and both Cargo graphs when
+assessment begins; record any new baseline before comparing implementation.
+The permanent [checkout ledger](../../vendor/README.md#checkout-retirement-tracking)
+owns current blockers, qualified candidates and upstream follow-up. This plan
+owns assessment ordering and acceptance work, rather than a second status inventory.
 
-Owning guides are [vendor provenance and reasons](../../vendor/README.md),
-[Zingo patches](../../vendor/ZINGO.md), [network policy](../network-egress.md),
-[retry ownership](../network-egress.md#retry-ownership),
-[resource limits](../local-resource-limits.md),
+Read [Zingo patch reasons](../../vendor/ZINGO.md),
+[network policy](../network-egress.md), [resource limits](../local-resource-limits.md),
 [wallet ownership](../wallet-rotation.md),
 [best-effort wallet rules](../wallet-rotation.md#best-effort-wallet-rules),
 [wallet observation](../wallet-rotation.md#wallet-observation-policy),
 [development](../development.md), [testing](../testing.md),
 [lifecycle coverage](../../tests/LIFECYCLE.md),
-[complexity review](../../tests/COMPLEXITY.md#review-discipline) and
-[reproducible builds](../reproducible-builds.md).
+[build tools](../../scripts/README.md),
+[release staging](../reproducible-builds.md) and
+[complexity discipline](../../tests/COMPLEXITY.md#review-discipline).
 
-Preserve journal-before-disclosure, exact accepted inputs/bytes/identities,
-financial uncertainty and restart recovery. SDK/blockchain state owns current
-spendability; do not add historical accounting gates, capital budgets or replay
-authority. Keep identity-bound transports, Tor remote DNS/no direct fallback,
-connection versus response inactivity, progressing work and cancellation/drain
-ownership. Existing application retries remain distinct from disabled automatic
-HTTP transport recovery. Preserve application state formats and qualification claims;
-the authorized toolchain update and SDK snapshot upgrade are explicit exceptions
-documented below. None of this work authorizes live-funded qualification.
+## Current behavior and proposed replacement
 
-## Selected V2 acceptance work
+Today patched `GrpcIndexer` transports are installed on `LightClient` for SDK
+sync and deposit calculation. Sync runs on an application-owned runtime;
+the SDK startup patch acknowledges first polling without a launch deadline.
+Connected deposit calculation retains ordinary transaction expiry. Shielding
+already uses the backend's public calculate-only API. Exact selected inputs and
+accepted intent are journaled before calculation and survive restart. The process
+retains completed bytes and snapshots through failed publication and cancellation;
+those results survive restart after their durable commit. Process loss before
+publication leaves an uncertain accepted calculation, not permission to recalculate.
 
-The v7 implementation and two Alloy checkout removals are present on the selected
-branch, but G1 and G2 remain open. Source review and compatible lockfiles do not
-qualify their runtime behavior. Retain this unfinished acceptance work until the
-required execution succeeds; do not start another retirement on an unresolved
-material finding.
+The candidate replaces the two crates' local changes with:
 
-Run the default application suite, payment/crypto vectors, independent compatibility
-workspace, finite-sync/cancellation regressions and synthetic-chain proving/lifecycle
-coverage with the committed sources. Require the strengthened v6 snapshot regression
-to execute its format-45 reopen and retained scan-state assertion. Verify the
-upstream replacement for tip-only/deeper reorg and mock branch-hash behavior through
-the existing lifecycle regressions before accepting removal of those local patches.
-Run feature configurations sequentially, required Clippy and the remaining vendor
-checks; preserve the exact-SHA and cumulative review requirements below.
+- An application implementation of public `Indexer`/`TransparentIndexer` traits
+  around the generated gRPC client and existing network transport.
+- Direct public `pepper_sync::sync` execution using the existing session owner,
+  wallet, progress and checkpoint machinery.
+- Backend calculation of deposit proposals, preserving ordinary expiry and the
+  accepted selected-input binding, using the shielding integration as precedent.
 
-Local validation is currently blocked before test execution by intermittent,
-multi-minute native process startup stalls affecting the protoc locator and other
-build tools, including rust-analyzer's build script. An isolated helper invocation
-has eventually completed; this does not qualify the application. Kernel signature
-and policy messages accompany some stalled launches but do not establish the root
-cause. Resume acceptance when the standard wrapper can execute, without relaxing
-project pins or security/build guards. Interrupted commands are not passing or
-failing behavior tests. Keep machine diagnostics and generated evidence under
-ignored `target/`.
+These are unqualified design candidates, not implemented replacements. The generic
+Pepper entry point predates v7. New status/wait helpers do not bypass the existing
+LightClient launcher. Simply keeping LightClient offline changes its high-level
+calculation to epoch-end expiry; that is not this plan's intended behavior.
 
-Current implementation contracts, retained patch reasons and parameter staging
-belong in [Zingo guidance](../../vendor/ZINGO.md),
-[the checkout ledger](../../vendor/README.md),
-[wallet administration](../wallet-cli.md) and
-[release guidance](../reproducible-builds.md). These document finite sync, the
-server protocol requirement, wallet format-45 downgrade limits and isolated
-standard-cache parameter staging. Release reproducibility and Docker consensus
-qualification remain separate from offline acceptance.
+Keep all production outbound constructors in `src/network.rs`. Preserve direct/Tor
+identity, remote DNS, public-destination policy, no direct fallback, clone/cache
+ownership and per-response inactivity below protobuf assembly. Do not add adapter
+retries, monetary tracking, queues, caps or whole-work deadlines. Preserve current
+request metadata handling, including removal of total gRPC deadlines by the
+progress transport; copying upstream RPC wrappers must not restore them.
 
-## Selection and upstream work
+SDK/blockchain state remains authoritative for current spendability. Preserve
+journal-before-disclosure, exact accepted inputs/bytes/identities, liability fences,
+ordinary expiry, canonical release proofs and current recovery authority. NEAR
+status, Base credit and refunds can inform observations but cannot prove ZEC
+non-inclusion or authorize replacement deposits. Keep state and environment
+contracts stable. Canonical recovery simplification is a separate future
+assessment, requiring equivalent SDK evidence rather than weaker status hints.
 
-Start with Alloy compatibility and the independent Hyper/h2 correctness fixes:
-these offer concrete routes to whole-checkout removal. Priority is provisional;
-candidate availability, remaining blockers and total implementation burden govern
-the next choice. Do not hold an independently removable checkout behind an
-unrelated blocked track.
+`pepper-sync` remains vendored in this candidate. Its complete-message timers,
+loader/worker drain ownership and diagnostic context are separate blockers;
+the RPC adapter cannot change them. Preserve the executable merge regression and
+root workspace membership while that checkout remains.
 
-For each candidate, identify the exact checkout(s) it can eliminate and every
-remaining source, manifest, test and tooling blocker. Inspect current upstream
-source and releases; record exact revisions rather than treating a feature name,
-accepted PR or newer version as equivalence. Check both workspace graphs and
-the application/x402 version constraints. Record an infeasible candidate with its
-concrete blocker and next reopening condition in the ledger, then pursue another
-viable exit rather than weakening behavior to force a removal.
+## Ordered commit boundaries
 
-Prepare upstream contributions as independently useful changes with small faithful
-regressions: cancellation/reset correctness or supported transport/configuration
-APIs for application policy. v7 already supplies the reviewed reorg and fixture
-branch-hash behavior; retain application regressions rather than resubmitting it. Do not
-submit the entire cross-crate application patch as one upstream feature. Within an
-authorized contribution task, inspect repository contribution instructions and
-existing issues/PRs, prepare and independently review the contribution, then submit
-and record its link and dependencies in the ledger. Submission and acceptance are
-prerequisites, not retirement evidence. Keep minimal upstream tests separate from
-application ownership and financial regressions that must remain here.
+### Z0 — Assess the complete two-checkout exit
 
-Evaluate local behavior changes only against the complete checkout blocker set.
-State the affected request types, before/after behavior, safety implications and
-expected directories removed. Prefer supported APIs and a small adapter in the
-existing owner over new proxy, retry, connection or workflow machinery. Compare
-total responsibilities and complexity, including failure paths. Do not enable
-unstarted HTTP recovery, weaken cancellation, restore forced-success drain
-timeouts or reduce diagnostic detail merely to delete isolated hunks while the
-checkout remains. Any selected policy change needs a revised, independently
-reviewed coherent commit boundary and updates to its owning guides before work.
+Before substantive implementation, an independent read-only design reviewer
+challenges the candidate, unnecessary checks and opportunities to remove existing
+responsibilities. Resolve material findings before developing the affected option.
 
-## Ordered delivery boundaries
+Map every hunk, manifest adaptation, consumer, optional feature, fixture and
+build/release dependency for each of the three Zingo checkouts. Inspect public
+upstream APIs and source identities at the exact candidate revision. Include
+`compat/zingolib`'s direct dependency, retained Pepper path overrides and upstream
+sibling revision coherence; a root-only build is insufficient.
 
-These boundaries describe future work. V1 chooses available candidates before
-implementation; V2/V3 are initial priorities, not promises of removal. If one is
-blocked, record why and proceed to a ready track. Independently review each design
-before substantive implementation, including necessity of checks and opportunities
-to remove responsibilities. Freeze sources and avoid competing builds during
-validation; run feature configurations sequentially.
+Use isolated development probes where source inspection cannot establish:
 
-1. **V1 — Qualify and rank complete exits.** Inspect candidate graphs and upstream
-   code for all blockers of the selected checkout. Prepare focused upstream work
-   where necessary. Commit durable ledger updates and any required regression
-   coverage with accurate ownership/verification documentation; generated
-   investigation logs stay under ignored `target/`. Exit with an exact candidate
-   and acceptance checklist, or a specific external blocker and reopening condition.
-   Do not claim a checkout can be removed from source inspection alone.
-2. **V2 — Retire compatible Alloy checkouts.** Qualify an unpatched graph for the
-   runtime primitives and macro expander. Alternative Keccak features alone do not
-   remove their current unconditional SHA3 dependencies. Remove both overrides
-   together when the coherent graph permits; an independently viable single-crate
-   removal may be selected explicitly. In the same commit update both manifests
-   and lockfiles, delete only retired sources/provenance, adapt verification and
-   update `vendor/README.md` and `docs/development.md`. Run crypto vectors, payment
-   signing including Permit2, the independent compatibility suite, and remaining
-   vendor verification. A crypto dependency migration also needs offline wallet
-   restore/serialization and relevant treasury coverage; do not loosen pins to
-   suppress a resolution failure.
-3. **V3-H and V3-2 — Retire Hyper and h2 independently.** Each identifier is one
-   coherent removal commit for a qualified upstream candidate. Inspect both sides
-   of pending-open cancellation even when only one checkout exits. Preserve raw
-   HEADERS absence, zero-capacity cleanup, explicit/implicit cancellation, no stale
-   bodies and healthy multiplexed connection reuse. Run the queue/timeout tests in
-   `src/network/`, relevant HTTP and gRPC cases in `tests/network.rs`, network audit
-   and compatibility suite. Update both workspace graphs, provenance verification,
-   the ledger and network guidance with each removal. Combine these commits only
-   when a real version/API dependency makes their replacement inseparable.
-4. **V4 — Select the next complete Reqwest or Zingo exit.** Before implementation,
-   revise this boundary into ordered checkout-specific commits with stable IDs,
-   exact candidates, full consumers, tests and owning documentation. Do not use V4
-   as a generic authorization to refactor. Reqwest must replace every timing,
-   progress/backpressure and recovery-control hunk. Each Zingo checkout must replace
-   all mapped hunks and reproduce the standalone manifest/dependency graph;
-   preserve coherent sibling Git revisions/source identities. A supported injection
-   API alone does not retire Pepper's progress/diagnostic changes or LightClient ownership.
-   Removing `zingolib` must also replace `compat/zingolib`'s direct path dependency
-   and preserve the standard-cache parameter staging in `scripts/reproducible.py`,
-   including hash verification and network-denied builds.
-   Select focused sync, diagnostics, cancellation/restart, synthetic lifecycle,
-   network and release-tool tests according to the complete affected chain.
-5. **V5 — Finish the selected retirement cycle and remove this plan.** Complete
-   qualified removals and transfer remaining externally blocked work to concrete
-   ledger actions/reopening conditions. Verify permanent guide and AGENTS links,
-   remove this plan and its transient references, and independently review the
-   exact cleanup SHA and final combined branch. Keep no completed-plan archive.
+- **RPC adaptation:** all active trait methods, generated message defaults,
+  status/error-code and transaction-ID parsing, streaming types and cloned
+  transport ownership work through the existing factory. Compare roughly twenty
+  delegations with supported upstream injection APIs and the current fork burden;
+  avoid copying a second networking or retry implementation.
+- **Direct sync:** the real wallet satisfies the public engine traits; finite
+  completion, protocol checks, progress, periodic encrypted checkpoints and
+  successful witness capture are preserved. Retain cancellation/runtime teardown,
+  worker joins and final snapshot ordering, without a second sync controller.
+- **Deposit calculation:** the selected proposal survives authority acceptance
+  unchanged; public proposal cleanup releases SDK locks correctly despite private
+  proposal-management APIs. Preserve ordinary expiry, network-upgrade boundaries,
+  fee/output checks, CSPRNG/prover behavior and exact original selected inputs.
+  Exercise real proving and retained publication/restart behavior; shielding
+  precedent alone does not establish deposit compatibility.
+- **Source replacement:** both dependency graphs can use ordinary unmodified
+  upstream sources for the two crates, with the same retained Pepper patches.
+  Standard-cache parameter staging, hashes and network-denied release builds
+  remain supported without a local Zingolib source path.
 
-Every removal commit includes its replacement, consumer changes, necessary
-recovery path, tests, permanent documentation and verifier/tooling adaptations.
-Do not temporarily disable provenance checks or delete a regression because its
-original fixture/source was vendored. Verify that remaining-source mutation is
-still rejected when verification code changes. Search for residual path references,
-including optional test features and release inputs; do not edit Cargo caches or
-reference checkouts. Removing checkout files never deletes private parameters,
-wallet state, financial evidence or retained qualification artifacts.
+Keep experimental outputs and metrics under ignored `target/`; never patch Cargo
+caches or reference checkouts. Freeze sources during validation and serialize
+feature builds. Record a durable proceed/defer decision and concrete source/API
+blockers in the ledger and owning guides; retain a focused regression with the
+implementation that needs it, rather than committing a probe framework or report.
 
-## Review and acceptance gates
+**Gate A, after Z0:** independent review examines the whole proposal, both graphs,
+the sync/proposal/calculation/submission/recovery chains and actual probe evidence.
+Compare CogC/CycC for changed functions and full chains against the agreed baseline,
+including unchanged high-risk consumers. Compare total ownership and maintenance
+responsibilities, not just deleted lines. Exit with a supported, tested replacement
+design and concrete Z1 acceptance mapping, or a specific blocker/reopening
+condition. A negative assessment is a valid result. Do not weaken expiry, network
+or recovery policy to force an exit; do not automatically switch to another track.
 
-For every implementation commit, obtain independent review of the exact committed
-SHA and relevant consumers; the reviewer must not be its author. Provide intent,
-starting baseline, actual commands/results and remaining limitations. Resolve
-findings with `git commit --fixup=<introducing-SHA>`, independently review each
-exact fixup and preserve unsquashed history through final integration review.
-Do not build on unresolved material findings.
+### Z1 — Implement and qualify the selected replacement
 
-- **G1, after each selected V2/V3 retirement track: dependency and transport gate.** Review all
-  prior plan commits and fixups with both Cargo graphs and complete payment,
-  discovery, Base, HTTP/gRPC and cancellation call chains. Exit requires verified
-  whole-checkout removals, effective remaining provenance checks, preserved
-  financial/network contracts and no material findings. Skipped tracks remain
-  explicitly blocked in the ledger rather than counted as removals.
-- **G2, after each selected V4 SDK or HTTP ownership boundary.** Review all prior
-  plan commits/fixups with full relevant sync, proposal, submission, observation,
-  restart, parameter/build and diagnostic paths. Reassess whether adapters truly
-  simplify ownership. Exit requires exercised failure/cancellation boundaries,
-  coherent sources, truthful build/qualification claims and no material findings.
-- **G3, after V5: final integration gate.** Independently review the accumulated
-  branch, all fixups, the exact cleanup SHA and permanent documentation handoff.
-  Confirm actual checkout count/graph removal, preserved local changes/evidence
-  and actionable remaining external blockers. Earlier approvals do not exempt code.
+This is conditional on Gate A and authorization to implement. Use one coherent
+commit for the adapter, direct sync, backend deposit calculation, retirement of
+both checkouts and necessary consumer/test/tooling/documentation changes. If Z0
+demonstrates an independently useful split, revise this plan into ordered stable
+commit IDs with their own evidence and review gates before implementation.
+Never remove existing behavior separately from its required replacement.
 
-Each gate analyzes fixup causes, recurring assumptions, hazards and testing gaps
-across all earlier commits and complete call chains. Decide explicitly whether
-they require wider audit, regression coverage, simplification or design changes.
-Material later changes reopen affected gates and validation. For substantive Rust
-refactors and architecture gates compare CogC/CycC against the agreed starting
-baseline using the pinned analyzer, covering changed functions, full chains and
-unchanged high-risk hotspots. Review warnings and concrete simpler alternatives;
-neither passing tests nor helper extraction justifies moved complexity.
+Update both manifests and lockfiles, source verification, patch/provenance files,
+network audit, compatibility dependencies and release staging together. Keep
+remaining source verification effective, including a deliberate scratch-source
+mutation rejection. Search optional-feature and release paths for stale retired
+paths. Do not delete ignored parameters, user files, wallet state or evidence.
 
-Use socket-capable execution up front for socket fixtures under the
-[test sandbox guidance](../testing.md#sandbox-permissions). Require nonzero
-execution of the intended tests. Run remaining vendor checks and compatibility
-checks for graph changes, with broader application/Clippy/feature validation when
-the changed consumers require it. Evidence from offline fixtures does not qualify
-live settlement, real Tor confinement or a reproducible release. Adapted release
-tooling must retain network-denial and parameter-integrity controls; do not claim
-release reproducibility without its dedicated qualification.
+Acceptance includes nonzero execution of the affected real consumers:
 
-Keep each delivered rule in its owning guide with its implementation commit.
-`AGENTS.md` must retain its link to the permanent checkout ledger, not this plan.
-Keep current patch reasons and source-verification boundaries in `vendor/README.md`
-and Zingo details in `vendor/ZINGO.md`; update network/resource inventories together
-if policy is deliberately changed. Before V5, verify these destinations and all
-plan links so cleanup leaves maintained guidance and focused remaining work.
+- Direct and fixture-SOCKS gRPC, identity/clone isolation, queued cancellation,
+  progressing large messages versus true stalls, and no fallback/bypass through
+  `tests/network.rs`, `tests/network_audit.rs` and the owning network tests.
+- Finite sync, early failure, periodic checkpoints, cancellation, supervisor EOF,
+  no surviving I/O and restart through `tests/treasury_sync.rs`.
+- Real deposit proving, ordinary-expiry/upgrade-boundary assertions, journal and
+  calculation/publication failure recovery, exact bytes/inputs after restart,
+  confirmation, tip/deeper forks, expiry recovery, and unchanged shielding via
+  `treasury::send::proving_tests`, `treasury::lifecycle_tests` and affected Store tests.
+- Wallet format/read-save-reopen compatibility, current diagnostics/redaction,
+  client-scoped synthetic codec and Pepper's actual merge fixture. Keep SDK/mock
+  activation schedules aligned and strict mock submission validation enabled.
+- Both dependency graphs, crypto/payment signing, default application tests,
+  sequential opt-in proving/lifecycle/codec tests, feature Clippy, format and
+  remaining vendor checks. Use `scripts/check.sh` or its verified component
+  commands; choose socket-capable execution up front for socket fixtures.
+- Release-tool parameter staging/integrity/network-denial regressions. Retain
+  existing qualification limits: offline tests do not qualify live settlement,
+  real Tor, Docker consensus or a fresh reproducible release. Those runs require
+  their own prerequisites and applicable authorization.
+
+Update enduring explanations with Z1 in `vendor/README.md`, `vendor/ZINGO.md`,
+`docs/network-egress.md`, `docs/development.md`, `tests/LIFECYCLE.md` and affected
+release/tooling guides. Update wallet ownership/recovery guidance where integration
+details change. Intended resource and timing policy is unchanged; any proposed
+policy change reopens design review and both owning inventories.
+
+**Gate B, after Z1:** independently review every plan commit/fixup together with
+complete network, sync, financial and build/release call chains. Exit requires
+both whole-checkout removals, exercised failure/restart boundaries, fewer justified
+responsibilities, reviewed CogC/CycC warnings and no unresolved material findings.
+
+### Z2 — Complete the selected track and preserve unfinished assessments
+
+Verify permanent documentation and the AGENTS ledger link before cleanup. Remove
+only completed planning material; keep the unfinished assessments below in a
+focused plan until individually resolved or transferred with their validation
+requirements and reopening conditions. Completing Zingo does not complete them.
+Keep no completed-plan archive. **Gate C** reviews the exact cleanup SHA and final
+combined branch after cleanup, including all prior commits/fixups and handoff.
+
+For Z0/Z1/Z2, obtain independent review of every exact committed SHA and relevant
+consumers; the reviewer must not be its author. Address findings with
+`git commit --fixup=<introducing-SHA>` and independently review each fixup. Preserve
+unsquashed history through final review. Every gate examines recurring assumptions,
+fixup causes, hazards and coverage gaps across all prior work and decides whether
+they require broader audit, regression coverage, simplification or design changes.
+Later material changes reopen affected gates and validation. Do not build on
+unresolved material findings or use metric-driven helper extraction as a substitute
+for simpler ownership. Existing prior-track tests do not qualify new implementation.
+
+## Deferred assessments retained from the broader plan
+
+These preserve unfinished work, not authorization to execute it alongside Zingo.
+Select a track explicitly, capture a fresh baseline and define its implementation
+commits/gates after assessment. Current status and candidates stay in the ledger.
+
+| ID | Assessment and exit evidence |
+| --- | --- |
+| H / H2 | Assess Hyper and h2 independently against exact upstream revisions; inspect both sides of pending-open cancellation even if only one checkout can exit. Preserve raw HEADERS absence, zero-peer-capacity cleanup, explicit/implicit cancellation, no stale bodies and healthy multiplexed reuse. Require queue/timeout tests in `src/network/`, HTTP/gRPC cases in `tests/network.rs`, network audit and independent compatibility. Combine removals only for a demonstrated version/API dependency. |
+| R | Assess a complete Reqwest replacement for post-connect header timing, nonempty body progress, backpressure and disabled unstarted-request recovery. Compare supported hooks/adapters and any proposed policy change across each affected request type, with before/after behavior and whole-checkout payoff. Use the owning HTTP timeout/queue and network/compatibility regressions; reducing one retry hunk alone is not a retirement. |
+| P | Assess Pepper message-timeout control, truthful retained loader/worker drain and typed sanitized diagnostics together, including standalone manifests and the private merge fixture/workspace membership. Require progress/stall, cancellation/restart, diagnostics and synthetic lifecycle/merge evidence. Relaxing logs alone does not remove this checkout; do not replace sync algorithms locally merely to avoid a dependency fork. |
+| E | Watch for upstream typed canonical recovery evidence that can replace local proof plumbing while preserving exact accepted inputs/bytes and release authority. A network adapter, NEAR status or Base credit alone is not such evidence. Assess a concrete API when one exists; do not add a watcher, ledger or new proof framework in anticipation. |
+
+For upstream work, first inspect contribution instructions and existing issues/PRs.
+Prepare independently useful fixes/APIs with small faithful upstream regressions,
+separately from application financial-ownership fixtures. Actual submission needs
+its own authorization. Record links, merge revisions, exact candidate versions and
+remaining blockers in the ledger. An accepted PR or newer release is not qualified
+replacement evidence. Preserve both workspace graphs, regression/provenance
+coverage and relevant build/release inputs with every eventual retirement.

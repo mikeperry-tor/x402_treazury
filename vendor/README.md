@@ -36,19 +36,21 @@ but does not count as a retired checkout. Moving the same fork into another
 repository does not retire its maintenance responsibility.
 
 Six patched crate directories remain. Alloy uses unpatched registry sources;
-`lightwallet-protocol` 0.4.0 supplies Ironwood fields without a Git override. The
-[retirement plan](../docs/plans/vendor_retirement.md) defines the initial execution
-sequence; this table remains the maintained source of current blockers and next
-actions after that plan is removed.
+`lightwallet-protocol` 0.4.0 supplies Ironwood fields without a Git override. This
+table owns the current blockers, next actions and upstream follow-up.
+The [retirement assessment plan](../docs/plans/vendor_retirement.md) focuses on
+the Zingolib/netutils pair and retains the other unfinished assessment requirements.
+Its proposed adapter/backend route is not yet qualified; Pepper remains vendored
+under that proposal.
 
 | Checkout | Complete local blocker set | Next action | Upstream reference and candidate |
 | --- | --- | --- | --- |
 | `hyper` | Pending-open cancellation in `hyper-transport.patch`. | Prepare a minimal upstream cancellation regression/fix; qualify a version containing equivalent behavior independently of h2's status. | No retirement candidate qualified. |
 | `h2` | Pending-open queue cleanup and scheduler wakeups in `h2-transport.patch`. | Prepare upstream zero-capacity/reset regressions and fix; qualify a version independently of Hyper's status. | No retirement candidate qualified. |
 | `reqwest` | Post-connect header timing, body inactivity/backpressure, and disabled unstarted-request recovery. | Identify a supported upstream implementation or hooks covering every hunk before selecting contributions or a local adapter. Retain current retry behavior. | No retirement candidate qualified. |
-| `zingo-netutils` | Connector constructor plus clone-preserving service injection/Tower changes; standalone manifest adaptations. | Seek a supported injected transport API and qualify source identities with every Zingo consumer. | No retirement candidate qualified. |
+| `zingo-netutils` | Connector constructor plus clone-preserving service injection/Tower changes; standalone manifest adaptations. | Assess an application implementation of the public indexer traits with direct Pepper sync and backend deposit calculation as a paired exit with Zingolib; compare supported upstream transport injection and qualify both graphs. | Pinned v7 public-trait route identified; no retirement candidate qualified. |
 | `pepper-sync` | Stream-message/drain changes and typed/sanitized diagnostics; standalone manifest adaptations and root membership for its private merge regression. | Establish a complete upstream route for both concerns before choosing contribution order; preserve lifecycle/merge regression evidence and remove local test membership when retiring the checkout. | No retirement candidate qualified. |
-| `zingolib` | Indexer installation and sync startup ownership; standalone manifest adaptations and direct compatibility-workspace dependency. | Qualify supported indexer installation and startup ownership APIs plus the complete manifest/dependency path. | No retirement candidate qualified. |
+| `zingolib` | Indexer installation and sync startup ownership; standalone manifest adaptations and direct compatibility-workspace dependency. | Assess direct public Pepper sync and backend deposit calculation preserving ordinary expiry, as a paired exit with netutils. Preserve sibling revision coherence, replace the compatibility workspace's direct dependency, and preserve isolated standard-cache parameter staging with hash verification and network-denied builds. | Pinned v7 public-API route identified; no retirement candidate qualified. |
 
 Update each affected row during dependency work and when a relevant upstream
 response, accepted change or compatible release becomes known. Record actual
