@@ -10,15 +10,15 @@ systems, independent machines or different toolchain distributions.
 
 ## Toolchain and release environment
 
-`rust-toolchain.toml` selects Rust 1.99.0 for rustup. The Zcash and check wrappers
+`rust-toolchain.toml` selects Rust 1.99.1 for rustup. The Zcash and check wrappers
 also run `scripts/check_toolchain.sh`, which rejects a different Rust or Cargo
 version under Homebrew/system installations. Direct Cargo commands under
 Homebrew bypass that wrapper; run the checker first. `rust-version` in
 `Cargo.toml` remains the minimum supported language version, not a toolchain pin.
 Optional nightly branch coverage deliberately uses a separate toolchain.
 
-The initial qualification profile in `scripts/release-environment.json` is
-Apple Silicon macOS, Homebrew Rust/Cargo 1.99.0, Apple Clang 21.0.0
+The current qualification profile in `scripts/release-environment.json` is
+Apple Silicon macOS, Homebrew Rust/Cargo 1.99.1, Apple Clang 21.0.0
 (clang-2100.1.1.101), ld-1267 and SDK 26.5, targeting macOS 14.0. The runner
 rejects different compiler commit, Cargo distribution/version, Clang/linker
 version, SDK version or Rust host. This is a version-checked local environment,
@@ -96,8 +96,10 @@ separate comparison policy; this check compares Cargo's original output.
 
 ## Qualification scope
 
-The macOS default-Zcash profile has passed a same-host two-build comparison of
-original Cargo binaries, with sandbox probes, vendor checks and CLI smoke tests.
+The earlier Homebrew Rust/Cargo 1.99.0 macOS default-Zcash profile passed a
+same-host two-build comparison of original Cargo binaries, with sandbox probes,
+vendor checks and CLI smoke tests. That evidence does not qualify the current
+1.99.1 profile, which requires a fresh two-build comparison.
 This historical result does not establish a fresh qualification of later candidates,
 independent-host equality, signing or notarization. Run the procedure for the
 release candidate being distributed and retain hashes and provenance with that release outside the source tree.

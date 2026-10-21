@@ -141,7 +141,7 @@ Install `cargo-llvm-cov` (`cargo install cargo-llvm-cov --locked`) and LLVM tool
 matching `rustc -vV` (or `rustup component add llvm-tools-preview` for rustup).
 Run `scripts/coverage.sh` for the default Zcash build, all test targets and examples.
 It supplies protoc and detects Homebrew LLVM; `LLVM_COV` and `LLVM_PROFDATA` can
-select another matching installation. Rust 1.99.0 from Homebrew uses LLVM 23.1.2.
+select another matching installation. Rust 1.99.1 from Homebrew uses LLVM 23.1.3.
 
 Open `target/coverage/html/index.html`; text and machine-readable summaries are
 `target/coverage/summary.txt` and `target/coverage/summary.json`. The denominator
