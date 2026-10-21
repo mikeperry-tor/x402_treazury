@@ -182,12 +182,13 @@ request or keepalive can start or renew it. Stream-capacity waiting and request
 upload remain inside the post-connection header allowance (the same upload
 limitation documented for gRPC below); there is no whole-response deadline.
 Body inactivity renews only on nonempty DATA, and available buffered data is
-consumed before checking elapsed time after consumer backpressure. Hyper's
-separate stale-pool automatic retry is disabled too: an unsigned caller may use
-its existing finite retry policy, but the transport never silently reconnects
-and resends a signed request. Public destinations, remote DNS, TLS verification,
-identity-bound pooling and ordinary error classification remain unchanged.
-
+consumed before checking elapsed time after consumer backpressure. Reqwest's
+request retry policy and Hyper's separate recovery of unstarted pooled requests
+are both disabled for application HTTP clients. Application-owned retries,
+polling and financial recovery retain their own rules; see
+[retry ownership](#retry-ownership). Public destinations, remote DNS, TLS
+verification, identity-bound pooling and ordinary error classification remain
+unchanged.
 
 For compatibility, network `request_timeout_seconds` is an alias for
 `read_timeout_seconds`, with its literal value now specifying inactivity. Provider
@@ -331,6 +332,44 @@ Compatible aliases coalesce downloads within the load. See
 [the deferred independent provider startup plan](plans/deferred/independent_provider_startup.md) for independent
 loading and background pricing. Frozen catalogs and disabled probes avoid those
 startup dependencies in the live qualification.
+
+## Retry ownership
+
+For application HTTP clients built by `src/network.rs`, disabling automatic
+transport retries does not prohibit application-owned retries or recurring
+observations. The current layers are:
+
+- Reqwest request-policy retries are disabled with `retry(never())`.
+- The vendored Reqwest patch also disables Hyper's separate recovery of unstarted
+  requests, including a closed pool checkout or an unusable reused connection.
+  This applies to both unsigned and signed HTTP requests. An unstarted request is
+  one the transport can establish has not begun writing HTTP headers/body; a
+  missing response or generic connection error does not establish that fact.
+- Application callers decide whether to issue another request under their own
+  rules. Polling observes an existing operation again; financial recovery retains
+  that operation's journal, identities and authority. Neither activity inherently
+  authorizes another payment or funding deposit.
+
+| Request/activity | Current retry or observation owner |
+| --- | --- |
+| Catalog downloads, price discovery, help and imports | Their application workflows own permitted retries. Catalog/pricing Tor scope recovery is described above; it does not extend automatically to every document fetch. Paid discovery relay calls retain payment exposure. |
+| Unsigned x402 GET/POST | The payment caller owns permitted unsigned retries under the [x402 execution model](architecture.md#unsigned-x402-requests-and-post-retries). |
+| Signed-payment HTTP requests | The payment owner retains each authorization. Generic errors, timeouts and missing responses grant no chargeable repetition; structured insufficient-funds wallet traversal remains separately permitted. |
+| USDC balances, receipts and other Base read RPCs | The Base read layer owns request retries/fallback; the reconciliation owner schedules recurring observations. Reads do not submit transfers. |
+| NEAR Intents metadata, quotes and status | The NEAR/funding workflow owns quote handling and repeated status observations. Status polling does not authorize another deposit; [source safety](wallet-rotation.md#funding-and-source-safety) governs preparation and recovery. |
+| Zcash sync, transaction lookup, deposits and shielding submission | These use tonic/gRPC, outside the Reqwest retry switch. SDK read retries, treasury reconciliation and explicitly authorized rebroadcast retain their existing contracts. Uncertain submission preserves exact bytes and input ownership rather than authorizing a replacement transaction. |
+
+The Hyper recovery switch remains disabled even when a request is demonstrably
+unstarted. Enabling it would change behavior. It also interacts with connection
+and header timing: the patched header timer starts at the first connection
+capture. If that reused connection proved unusable before writing, a hidden
+replacement connection would run inside the already-started header allowance,
+including its DNS/SOCKS/TLS work. For example, a replacement Tor connection taking
+90 seconds could be interrupted by a 60-second header allowance despite fitting
+the 120-second connection allowance. This is why removing only the retry-disabling
+hunk would not preserve the current separation of those timers. Recovery of a
+closed checkout before the first connection capture would not have this timing
+interaction. No such automatic recovery is enabled by the current configuration.
 
 ## Stable credential encoding
 

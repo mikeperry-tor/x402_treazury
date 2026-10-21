@@ -263,7 +263,7 @@ the repository.
 
 ### Combined workspace verification
 
-Run the reproducible combined suite with the reviewed vendored connector patch:
+Run source verification and the combined suite with the reviewed vendored patches:
 
 ```sh
 python3 vendor/verify.py
@@ -277,11 +277,15 @@ zingolib caches/copies those parameters during its build. Tests use temporary
 offline wallets and localhost payment servers. No wallet sync, funded payment, approval or broadcast
 occurs.
 
-The [vendored patch](../vendor/README.md) changes only the `sha3` dependency in
+The [vendored inventory](../vendor/README.md) records each patch's current reason,
+consumers, removal evidence and source-verification scope. The Alloy patch changes
+only the `sha3` dependency in
 `alloy-primitives` and `alloy-sol-macro-expander` 1.7.3 from `0.11.0` to
-`=0.10.9`. Both workspace roots apply it. No Rust source in those Alloy crates is modified. The separate
-[Zingolib connector patch](../vendor/ZINGO.md) adds injected-channel support for
-the shared direct/Tor transport. The graphs can then retain:
+`=0.10.9`. Both workspace roots apply it. No Rust source in those Alloy crates is modified. The
+[Zingo patches](../vendor/ZINGO.md) provide transport injection, progress/drain
+ownership, sanitized diagnostics and same-height reorg handling; an additional
+patch corrects the optional synthetic indexer fixture. HTTP transport patches
+preserve the [network inactivity/cancellation contract](network-egress.md#timeout-budgets-and-concurrency). The graphs can then retain:
 
 ```text
 Alloy → sha3 0.10.9 → digest 0.10.7
@@ -289,7 +293,7 @@ zingolib → bip32 → hmac prerelease → digest 0.11.0-pre.9
 ```
 
 `vendor/provenance.json` records upstream archive/file hashes; `vendor/verify.py`
-checks that these are the only modifications. Upstream license texts are included.
+checks those Alloy changes and separately verifies the HTTP transport patches. Upstream license texts are included.
 The independent hash vectors are regenerated with
 `uv run --script scripts/generate_crypto_vectors.py`; normal Rust
 tests consume the committed vectors without Python.
@@ -300,7 +304,7 @@ The combined workspace must also repeat zingolib's **existing upstream**
 workspace's root patches. Without it, compilation fails on missing Ironwood
 protobuf fields. This is separate from the Alloy compatibility patch.
 
-The combined suite runs the 12 shared payment/MCP/crypto tests plus an offline
+The combined suite runs the shared payment/MCP/crypto test targets plus an offline
 wallet test: restore a public mnemonic, derive shielded addresses, serialize and
 restore wallet bytes, check the next derived address, and create an EVM payer
 in the same process. Its lockfile resolves Alloy's upper stack to 2.5.0 and

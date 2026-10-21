@@ -38,6 +38,7 @@
     "pepper-sync/src/wallet/serialization.rs": "8d7dcab7fcd9c0b338457be226cd4fe17152b62c76ee9d991a1b04738d64ae96",
     "pepper-sync/src/wallet/traits.rs": "0d92161644643df0e119cae9eaaf63459f3988c4313ca928f4804ac9a012fa46",
     "pepper-sync/src/witness.rs": "e864fbab1a89b59f6975f72ef6db54aaef9c7846667fb5760904dc6dd51baa49",
+    "zingo-connector.patch": "aae84d95ca4e22590aa62780ff9ee11fe49dcabfd0cd900e1473ea89735a6031",
     "zingo-mock-chain.patch": "027d85da21113f10c91afa80e1fc25684745071df75242df5485c00bdbe3b90b",
     "zingo-netutils/CHANGELOG.md": "316551d5b3724ea868c63dde4aee2a70ed460b56623f7480e4614af1f9c03089",
     "zingo-netutils/Cargo.lock": "05993bd2a0e09e79e19996c77d5fa6a16b0ebd097eee70d8cf8bf76017a0c022",

@@ -19,4 +19,4 @@ for package in ("zingolib", "zingo-netutils", "pepper-sync"):
             errors.append(str(path.relative_to(root)))
 if errors:
     raise SystemExit("Zingo vendor verification failed: " + ", ".join(errors))
-print(f"Verified {len(manifest['files'])} vendored files from {manifest['revision']} plus reviewed connector and diagnostic patches")
+print(f"Verified {len(manifest['files'])} snapshot and patch files from {manifest['revision']}")

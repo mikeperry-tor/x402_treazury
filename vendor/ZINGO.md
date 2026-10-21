@@ -1,15 +1,15 @@
-# Zingo connector injection
+# Zingo vendored patches
 
 `zingolib/`, `zingo-netutils/` and `pepper-sync/` contain source from zingolib revision
 `c6381534f802b1022041beda4b01c106ad132329` (v6.0.0). Upstream licenses are
 included. `zingo-connector.patch` records the connector Rust source changes:
 
 - `GrpcIndexer::from_channel` wraps an application-owned tonic channel.
-- `GrpcIndexer::from_transport` retains application middleware across all clones.
 - `LightClient::set_indexer` installs that indexer without creating a direct socket.
 
 `zingo-progress.patch` applies after the connector and diagnostic patches. It
-adds injectable service middleware (constructed only by `src/network.rs`), removes
+adds `GrpcIndexer::from_transport` for clone-preserving service middleware
+(constructed only by `src/network.rs`), removes
 complete-message timers on sync streams, replaces sync-start polling/abort with
 an owned first-poll acknowledgement, and drains loaders/workers with periodic
 stage diagnostics instead of forced timeout success. Application transport owns
@@ -38,8 +38,13 @@ wallet data and verifies the replacement tip against its retained predecessor.
 Deeper forks use the existing backward verification/truncation path and reorg
 allowance. Starting with a wide range could span a whole fork with matching seams
 and retain orphaned confirmed transactions. The application's funded synthetic
-lifecycle covers both a tip-only and a deeper same-height fork, retained source
-accounting, blocked new work and canonical reappearance. Apply this patch after
+lifecycle covers both a tip-only and a deeper same-height fork, immutable source
+facts, retained pending input claims and canonical reappearance. Historical source
+facts do not block new preparation: the SDK owns current spendability, while
+accepted unresolved input claims still prevent duplicate calculation. See
+[the lifecycle map](../tests/LIFECYCLE.md) and
+`same_height_tip_only_reorg_updates_sdk_without_historical_source_gate` in
+`src/treasury/lifecycle_tests.rs`. Apply this patch after
 the diagnostic/progress patches above.
 
 `zingo-mock-chain.patch` fixes the optional synthetic-chain indexer fixture: its
@@ -60,9 +65,43 @@ dependencies, except Pepper Sync’s unit-test dependencies. Library sources
 build scripts and licenses are preserved. The combined compatibility manifest uses
 these same patches. Run `python3 vendor/verify_zingo.py` to check all
 reviewed files against `zingo-sources.json`; compare `zingo-connector.patch` with the
-pinned upstream commit when updating; check `pepper-sync-diagnostics.patch` and
-`zingo-progress.patch` too.
+pinned upstream commit when updating; review all five patch files listed above too.
 Never edit a reference checkout or Cargo's Git cache to implement these patches.
+
+## Current consumers and removal criteria
+
+The [complete inventory](README.md#current-reasons-and-removal-evidence) separates
+runtime requirements, diagnostics and test-only fixes. None of these changes adds
+application monetary accounting. Relying on SDK/blockchain spendability makes
+correct SDK reorg handling necessary; it does not require revalidating all historical
+source operations before allowing new work.
+
+`src/network.rs` constructs `GrpcIndexer::from_transport`;
+`src/treasury/mod.rs` and `src/treasury/send.rs` install it on offline LightClients.
+Remove connector injection only when an upstream API preserves that same transport
+across every RPC and clone, including Tor remote DNS and no direct fallback.
+`tests/network_audit.rs`, `tests/network.rs` and `tests/treasury_sync.rs`
+cover the relevant factory/consumer boundaries.
+
+Remove progress changes only with equivalent response inactivity below protobuf
+assembly, first-poll startup acknowledgement and retained loader/worker ownership
+until draining finishes. Inspect `src/network/grpc.rs`,
+`tests/network.rs`, `tests/treasury_sync.rs` and the startup implementation in
+`vendor/zingolib/src/lightclient/sync.rs`; restoring whole-message or forced drain deadlines
+would change current policy even if monetary accounting stays unchanged.
+
+The diagnostic patch is a deliberate observability choice. Its typed context is
+consumed by `src/treasury/diagnostics.rs`, whose tests cover fixed labels and
+redaction; the Pepper fixture covers real merge conflicts. Replace it only with
+equivalent context and safe instrumentation, or explicitly revise the documented
+diagnostic contract. It does not change tree recovery recommendations or authority.
+
+The tip-reorg and mock-chain patches have separate roles: the former corrects
+production SDK state, while the latter makes optional `zcash-testutils` lifecycle
+evidence faithful. Before removing either, run the affected synthetic-chain
+lifecycle through the correct branch hashes; offline wallet round trips alone
+cannot establish reorg correctness. No removal or upstream upgrade is validated
+merely by source-hash verification.
 
 ## Build-time parameter downloads
 

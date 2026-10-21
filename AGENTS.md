@@ -184,6 +184,10 @@ When changing policy, update its owning guide and affected references. Resource
 policy changes must keep both inventories current. Do not infer a runtime deadline,
 external settlement contract or live qualification from a fixture timeout.
 
+For dependency patches, follow [checkout retirement tracking](vendor/README.md#checkout-retirement-tracking).
+Prioritize complete checkout removal; assess every remaining blocker and preserve
+required behavior, regression coverage and provenance before counting a retirement.
+
 ## Commands and test exceptions
 
 Run commands from the repository root. Zcash is unconditional in the application
