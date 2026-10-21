@@ -501,20 +501,6 @@ Removal revokes API access without deleting wallet balances or financial journal
 See the [configuration and authority reference](docs/agent-sources.md#configuration-and-authority)
 for import restrictions, limits and endpoint permissions.
 
-## Bare Bones Single-Wallet MCP Stdio Server
-
-For a simple static-key stdio setup, provide `EVM_PRIVATE_KEY` through the environment
-or a private `.env` file:
-
-```sh
-target/release/x402_treazury serve --provider providers/socialfetch.toml \
-  --network-config examples/network/tor.toml --env-file .env
-```
-
-This uses Tor but does not rotate or fund the static wallet. MCP clients should spawn
-the binary with absolute config paths or a repository working directory. Logs go to
-stderr; stdout carries MCP output.
-
 ## Experimental HTTP/2 cover traffic
 
 Tor mode enables bounded unsigned range traffic by default for eligible configured
