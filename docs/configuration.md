@@ -1,6 +1,6 @@
 # Configuration reference
 
-Start with the [managed-wallet quickstart](../README.md#quickstart-managed-wallet);
+Start with the [managed-wallet quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools);
 the README also provides a comprehensive Zcash-and-Tor walkthrough.
 This reference covers TOML composition, tool selection, transport and pricing.
 Commands run from the repository root. The executable requires an explicit
@@ -118,7 +118,7 @@ exit unless a registry file is configured. Optional `config show` inspection sta
 offline; `config check` and `catalog tools` load the remote catalog.
 
 Initialize the treasury explicitly and fund its shielded address before paid use;
-see the [quickstart](../README.md#quickstart-managed-wallet). Serving needs
+see the [quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools). Serving needs
 `TREAZURY_MCP_TOKEN` and the initialized treasury, and binds the listener before
 background funding. The [comprehensive deployment](../examples/deployments/comprehensive.toml)
 adds multiple research listeners, Tor, relay and persistent source registrations.

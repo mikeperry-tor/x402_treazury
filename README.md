@@ -53,8 +53,6 @@ and validate configuration. `wallet` manages the treasury; `sources inspect`
 reads persisted agent-added sources. Running `x402_treazury` without a command
 shows help. See the [command reference](docs/configuration.md).
 
-<a id="quickstart-managed-wallet"></a>
-
 ## Quickstart: Z-Cash Wallet with Dynamically Managed Tools
 
 The [managed starter](examples/deployments/managed.toml) exposes Exa web search,

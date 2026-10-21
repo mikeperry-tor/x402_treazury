@@ -1,6 +1,6 @@
 # Wallet CLI and managed configuration
 
-Start with the [README quickstart](../README.md#quickstart-managed-wallet).
+Start with the [README quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools).
 This reference covers treasury commands, funding controls and operator recovery.
 For lifecycle invariants, see [wallet rotation](wallet-rotation.md).
 Commands run from the repository root; `x402_treazury` means the built executable on PATH.

@@ -4,7 +4,7 @@ Start with [deployments/managed.toml](deployments/managed.toml): one authenticat
 MCP listener, one managed wallet pool, Exa web search and page contents, and
 source management for agent-added APIs. Exa's catalog loads from its public
 specification. Added APIs share the research pool; registrations last until exit.
-The [README quickstart](../README.md#quickstart-managed-wallet) walks through
+The [README quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools) walks through
 building, treasury setup and serving.
 
 [deployments/comprehensive.toml](deployments/comprehensive.toml) combines curated
