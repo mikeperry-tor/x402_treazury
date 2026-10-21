@@ -38,10 +38,13 @@ configuration; independent per-asset results report partial failure. `wallet sta
 reads saved observations without network traffic. See the
 [CLI output and discovery scope](wallet-cli.md#one-configuration-for-wallet-commands).
 `--meta-config` remains a deployment alias. `--provider FILE` selects a reusable
-provider for standalone serving and catalog inspection. `--network-config FILE` is an optional network-only
-file for standalone operations, not an override for deployments.
+provider for standalone serving and catalog inspection. `--network-config FILE`
+selects a network-only file for either standalone or deployment commands. It
+replaces the complete deployment `[network]` section for that invocation; omitted
+fields use network defaults rather than inheriting deployment values. Other
+standalone provider options still cannot be combined with `--config`.
 
-Ordinary deployment examples live in `examples/deployments/`, standalone network policies in
+Ordinary deployment examples live in `examples/deployments/`, reusable network policies in
 `examples/network/`, and reusable APIs in `providers/`. Paths resolve from the file
 that declares them. Existing user-owned local copies are not moved automatically.
 
@@ -584,8 +587,7 @@ hidden truncation.
 
 `config show` prints the composed file settings and per-source field origins,
 including defaults, without reading secrets or loading specs. It accepts
-`--provider` or `--config`, plus optional `--network-config` for a standalone
-provider; CLI/environment runtime overrides are outside
+`--provider` or `--config`, plus optional `--network-config` to inspect the selected network policy; CLI/environment runtime overrides are outside
 this file inspection command. Wallet/token fields show environment variable
 names, never their values.
 
@@ -859,7 +861,7 @@ only `read_timeout_seconds` in new configs. For old provider configs containing
 both timeout fields, `timeout` takes precedence. The bundled comprehensive example now
 uses 60 seconds; user-owned local configs retain their existing explicit values.
 
-For standalone operations or wallet commands, use the same table in a separate file:
+For deployment, standalone or wallet commands, use the same table in a separate file:
 
 ```sh
 x402_treazury catalog tools --provider providers/socialfetch.toml \
@@ -868,9 +870,16 @@ x402_treazury wallet init --state-dir state/public-demo \
   --network-config examples/network/tor.toml
 ```
 
-Paths above assume the repository root as the current directory. Meta-config wallet
-commands take network policy from their deployment file; an external network policy
-cannot override it. Provider files and MCP tool arguments cannot choose transport.
+Paths above assume the repository root as the current directory. Deployment commands,
+including wallet commands, use their embedded policy unless `--network-config` is
+provided. The external file replaces the entire policy before validation or client
+creation; it does not rewrite the deployment or change wallet identities. This also
+applies to `catalog warm` and `sources refresh`. `catalog warm --direct` retains its
+explicit direct-fetch behavior even when a network override is supplied.
+Qualification snapshots, bound/supervised serving and supervised wallet sync keep
+the policy in their pinned deployment and reject an external override; select the
+policy in that deployment before preparation. Provider files and MCP tool arguments
+cannot choose transport.
 `config show` reports effective settings without reading keys or contacting Tor.
 Offline wallet inspection, backup and explicit-birthday init remain offline.
 
@@ -1133,7 +1142,8 @@ Only selected catalogs are fetched. `--discover-pricing` also warms eligible uns
 GET estimates, respecting source opt-outs, endpoint caps and the union of listener
 filters. The command requires an existing treasury state directory and rejects
 `http_cache_enabled = false` or `catalog_cache_ttl_seconds = 0` on a selected source. Without `--direct`, it uses the
-deployment's network policy. It starts no listeners or funding workers. It opens
+deployment's network policy, replaced by `--network-config` when supplied. It starts
+no listeners or funding workers. It opens
 only the resolved discovery wallets when paid relay warming is enabled below;
 otherwise it remains unsigned and opens no wallet.
 

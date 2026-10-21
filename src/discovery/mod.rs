@@ -771,8 +771,20 @@ pub async fn maintain_cli(
     source_id: &str,
     refresh: bool,
 ) -> Result<()> {
-    crate::deployment::Deployment::show_config(path).await?;
-    let mut cfg: crate::deployment::MetaConfig = toml::from_str(&std::fs::read_to_string(path)?)?;
+    maintain_cli_with_network(path, owner, source_id, refresh, None).await
+}
+pub async fn maintain_cli_with_network(
+    path: &std::path::Path,
+    owner: &str,
+    source_id: &str,
+    refresh: bool,
+    network_override: Option<&crate::network::NetworkPolicy>,
+) -> Result<()> {
+    crate::deployment::Deployment::show_config_with_network(path, network_override).await?;
+    let mut cfg = crate::deployment::MetaConfig::parse_with_network(
+        &std::fs::read_to_string(path)?,
+        network_override,
+    )?;
     if let Some(t) = &mut cfg.treasury {
         t.resolve(path);
     }

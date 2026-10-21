@@ -102,8 +102,13 @@ uses this same endpoint policy. Standalone initialization retains its optional
 
 Standalone `--state-dir` remains available; `--key-file` defaults inside that
 directory and `--treasury-id` is an optional assertion. Do not combine those
-location overrides or `--network-config` with `--config`: the deployment owns its
-paths and network policy. `--birthday` and import options remain command-specific.
+location overrides with `--config`: the deployment owns its paths. You may combine
+`--config` and `--network-config FILE` to replace the complete network policy for
+that invocation, including initialization, synchronization, bootstrap and recovery.
+Omitted network fields use defaults; they do not inherit values from the deployment.
+Saved transaction bytes, wallet identities and recovery authority are unchanged.
+Supervised qualification sync retains its pinned deployment policy and rejects
+this override. `--birthday` and import options remain command-specific.
 
 ## Bootstrap before discovery
 

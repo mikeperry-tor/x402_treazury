@@ -10,6 +10,18 @@ providers see a Tor exit IP instead of the client's public IP, so this warning i
 suppressed. RPC providers still receive the wallet addresses being queried.
 `config show` lists the configured providers under `base_rpc_policy` in both modes.
 
+Ordinary CLI commands select the deployment's `[network]` policy unless an explicit
+`--network-config FILE` replaces it. Replacement is whole-policy, before semantic
+validation or client creation; omitted fields use defaults. The same resolved policy
+flows through serving, catalog inspection/warming, source refresh and wallet
+initialization/sync/bootstrap/recovery, including configuration reloads. `config show`
+reports it without installing a transport or contacting the network. Explicit
+`catalog warm --direct` still selects direct fetching for that dedicated process.
+Frozen qualification snapshots, bound/supervised serving and supervised wallet sync
+require policy in the pinned deployment instead of accepting an unpinned external
+file. Changing transport policy does not change signed bytes, wallet identities or
+financial authority.
+
 `src/network.rs` owns the process's immutable transport policy, canonical isolation
 identities, reqwest pools and tonic channels. Direct and Tor use the same factory,
 callers and payment/funding state machines. Each HTTP cache slot holds an immutable

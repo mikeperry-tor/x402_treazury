@@ -47,9 +47,10 @@ pub(super) async fn run(
     network: crate::rotation::store::TreasuryNetwork,
     supervised: bool,
     json: bool,
+    policy: Option<&crate::network::NetworkPolicy>,
 ) -> Result<()> {
     let mut parent = crate::supervision::Parent::from_stdin(supervised)?;
-    let config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(&path).await?)?;
+    let config = MetaConfig::parse_with_network(&tokio::fs::read_to_string(&path).await?, policy)?;
     anyhow::ensure!(config.version == 1, "unsupported deployment version");
     crate::network::install(config.network.clone())?;
     let mut settings = config.treasury.clone().context("missing [treasury]")?;

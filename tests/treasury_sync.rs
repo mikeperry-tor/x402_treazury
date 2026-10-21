@@ -721,18 +721,19 @@ async fn init_discovers_new_birthday_but_never_guesses_for_imports() {
 
 #[tokio::test]
 async fn config_driven_initialization_uses_tor_and_no_endpoint_environment() {
-    let (endpoint, calls, server, _) = mock("main").await;
-    let dir = tempfile::tempdir().unwrap();
-    let proxy = socks::Socks::start(
-        std::collections::BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
-        socks::Fault::None,
-    )
-    .await;
-    let config = dir.path().join("deployment.toml");
-    std::fs::write(
-        &config,
-        format!(
-            r#"version=1
+    for external in [false, true] {
+        let (endpoint, calls, server, _) = mock("main").await;
+        let dir = tempfile::tempdir().unwrap();
+        let proxy = socks::Socks::start(
+            std::collections::BTreeMap::from([("loopback".into(), "127.0.0.1:1".parse().unwrap())]),
+            socks::Fault::None,
+        )
+        .await;
+        let config = dir.path().join("deployment.toml");
+        std::fs::write(
+            &config,
+            format!(
+                r#"version=1
 servers={{}}
 [treasury]
 state_dir="wallet"
@@ -744,38 +745,54 @@ socks_endpoint="{}"
 [sources.unloaded]
 spec="nonexistent.json"
 "#,
-            proxy.address
-        ),
-    )
-    .unwrap();
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
-        .env_clear()
-        .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
-        .args(["wallet", "init", "--config"])
-        .arg(&config)
-        .output()
-        .await
+                if external {
+                    "127.0.0.1:1".parse().unwrap()
+                } else {
+                    proxy.address
+                }
+            ),
+        )
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let value = serde_json::to_value(
-        x402_treazury::rotation::store::status(&dir.path().join("wallet")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(value["birthday"], TIP - 100);
-    assert!(dir.path().join("wallet/wallet.key").is_file());
-    assert_eq!(calls.lock().unwrap().len(), 2);
-    let records = proxy.records.lock().unwrap();
-    assert!(!records.is_empty());
-    assert!(
-        records
-            .iter()
-            .all(|r| r.user == "<torS0X>0" && !r.password.is_empty() && r.upstream_peer.is_some())
-    );
-    server.abort();
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
+        command
+            .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+            .args(["wallet", "init", "--config"])
+            .arg(&config);
+        if external {
+            let policy = dir.path().join("network.toml");
+            std::fs::write(&policy, format!("[network]\nmode='tor'\nsocks_endpoint='{}'\nisolation_namespace='override-init'\n", proxy.address)).unwrap();
+            command.arg("--network-config").arg(policy);
+        }
+        let output = command.output().await.unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value = serde_json::to_value(
+            x402_treazury::rotation::store::status(&dir.path().join("wallet")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(value["birthday"], TIP - 100);
+        assert!(dir.path().join("wallet/wallet.key").is_file());
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        let records = proxy.records.lock().unwrap();
+        assert!(!records.is_empty());
+        assert!(
+            records.iter().all(|r| r.user == "<torS0X>0"
+                && !r.password.is_empty()
+                && r.upstream_peer.is_some())
+        );
+        if external {
+            assert!(
+                records
+                    .iter()
+                    .all(|record| record.password.starts_with("override-init:v1:"))
+            );
+        }
+        server.abort();
+    }
 }
 
 #[tokio::test]

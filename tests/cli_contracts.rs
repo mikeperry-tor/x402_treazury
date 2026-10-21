@@ -5,6 +5,8 @@ mod capacity_fixture;
 mod quote_fixture;
 #[path = "support/rpc_evidence.rs"]
 mod rpc_evidence;
+#[path = "support/socks.rs"]
+mod socks;
 use serde_json::{Value, json};
 use std::{path::Path, process::Output};
 use x402_treazury::rotation::store::{Store, funding::FundingPhase};
@@ -1033,4 +1035,288 @@ async fn recommendation_inspection_is_explicit_typed_and_never_widens_ordinary_f
         String::from_utf8_lossy(&unused.stderr).contains("Provider tool selector matches nothing")
     );
     assert_eq!(good(unused).as_array().unwrap().len(), 2);
+}
+
+fn network_override_fixture(dir: &Path, network: &str) {
+    std::fs::write(
+        dir.join("deployment.toml"),
+        format!(
+            r#"version=1
+[treasury]
+state_dir='state'
+[wallets.shared]
+mode='static'
+private_key_env='UNREAD_KEY'
+[sources.api]
+spec='http://catalog.invalid/spec'
+base_url='https://api.example.com'
+probe_pricing=false
+[servers.research]
+listen='127.0.0.1:0'
+bearer_token_env='UNREAD_TOKEN'
+wallet='shared'
+sources=['api']
+{network}
+"#
+        ),
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn deployment_network_override_replaces_policy_without_inspection_io() {
+    let dir = tempfile::tempdir().unwrap();
+    network_override_fixture(
+        dir.path(),
+        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\nisolation_namespace='embedded'\nread_timeout_seconds=19\n",
+    );
+    std::fs::write(
+        dir.path().join("network.toml"),
+        "[network]\nmode='direct'\n",
+    )
+    .unwrap();
+    let args = [
+        "config",
+        "show",
+        "--config",
+        "deployment.toml",
+        "--network-config",
+        "network.toml",
+    ];
+    let shown = good(run(dir.path(), &args, &[]).await);
+    assert_eq!(shown["network"]["mode"], "direct");
+    assert_eq!(shown["network"]["socks_endpoint"], Value::Null);
+    assert_eq!(shown["network"]["isolation_namespace"], "x402_treazury");
+    assert_eq!(shown["network"]["read_timeout_seconds"], 60);
+    assert_eq!(shown["network"]["connect_timeout_seconds"], 15);
+    let original = good(
+        run(
+            dir.path(),
+            &["config", "show", "--config", "deployment.toml"],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(original["network"]["isolation_namespace"], "embedded");
+    assert_eq!(original["network"]["read_timeout_seconds"], 19);
+    // Replacement precedes semantic validation of the embedded policy.
+    network_override_fixture(dir.path(), "[network]\nmode='tor'\n");
+    assert_eq!(
+        good(run(dir.path(), &args, &[]).await)["network"]["mode"],
+        "direct"
+    );
+    assert!(
+        bad(run(
+            dir.path(),
+            &["config", "show", "--config", "deployment.toml"],
+            &[]
+        )
+        .await)
+        .contains("socks_endpoint is required")
+    );
+    // A partial external Tor policy uses its own defaults, too.
+    std::fs::write(
+        dir.path().join("network.toml"),
+        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:2'\n",
+    )
+    .unwrap();
+    let shown = good(run(dir.path(), &args, &[]).await);
+    assert_eq!(shown["network"]["mode"], "tor");
+    assert_eq!(shown["network"]["connect_timeout_seconds"], 120);
+    assert_eq!(shown["network"]["read_timeout_seconds"], 60);
+    assert!(!dir.path().join("state").exists());
+}
+
+#[tokio::test]
+async fn network_override_routes_catalog_warming_and_serving_through_the_selected_proxy() {
+    use std::{collections::BTreeMap, sync::atomic::Ordering};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = axum::Router::new().route(
+        "/spec",
+        axum::routing::get(|| async { axum::Json(json!({"paths":{"/read":{"get":{}}}})) }),
+    );
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let authored = socks::Socks::start(BTreeMap::new(), socks::Fault::Refuse).await;
+    let selected = socks::Socks::start(
+        BTreeMap::from([("catalog.invalid".into(), address)]),
+        socks::Fault::None,
+    )
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("state")).unwrap();
+    let embedded = format!(
+        "[network]\nmode='tor'\nsocks_endpoint='{}'\nisolation_namespace='embedded'\n",
+        authored.address
+    );
+    std::fs::write(
+        dir.path().join("network.toml"),
+        format!(
+            "[network]\nmode='tor'\nsocks_endpoint='{}'\nisolation_namespace='override'\n",
+            selected.address
+        ),
+    )
+    .unwrap();
+    for command in [
+        ["catalog", "tools"],
+        ["catalog", "tags"],
+        ["config", "check"],
+        ["catalog", "warm"],
+    ] {
+        network_override_fixture(dir.path(), &embedded);
+        let file = dir.path().join("deployment.toml");
+        let text = std::fs::read_to_string(&file).unwrap().replace(
+            "catalog.invalid/spec'",
+            &format!("catalog.invalid/spec?{}'", command[1]),
+        );
+        std::fs::write(&file, text).unwrap();
+        let before = selected.records.lock().unwrap().len();
+        let output = run(
+            dir.path(),
+            &[
+                command[0],
+                command[1],
+                "--config",
+                "deployment.toml",
+                "--network-config",
+                "network.toml",
+            ],
+            &[],
+        )
+        .await;
+        assert!(
+            output.status.success(),
+            "{command:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(selected.records.lock().unwrap().len() > before);
+    }
+    network_override_fixture(dir.path(), &embedded);
+    // Static serving needs no treasury; warming used the empty directory only for cache storage.
+    let file = dir.path().join("deployment.toml");
+    std::fs::write(
+        &file,
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .replace("[treasury]\nstate_dir='state'\n", ""),
+    )
+    .unwrap();
+    let before = selected.records.lock().unwrap().len();
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .current_dir(dir.path())
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+        .env("UNREAD_KEY", format!("{:064x}", 1))
+        .env("UNREAD_TOKEN", "fixture-token")
+        .args([
+            "serve",
+            "--config",
+            "deployment.toml",
+            "--network-config",
+            "network.toml",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        while selected.records.lock().unwrap().len() == before {
+            if let Some(status) = child.try_wait().unwrap() {
+                use tokio::io::AsyncReadExt;
+                let mut stderr = String::new();
+                child
+                    .stderr
+                    .take()
+                    .unwrap()
+                    .read_to_string(&mut stderr)
+                    .await
+                    .unwrap();
+                panic!("serve exited before discovery ({status}): {stderr}");
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    child.kill().await.unwrap();
+    let output = child.wait_with_output().await.unwrap();
+    assert!(output.stdout.is_empty());
+    assert_eq!(authored.accepted.load(Ordering::SeqCst), 0);
+    for record in selected.records.lock().unwrap().iter() {
+        assert_eq!(record.host, "catalog.invalid");
+        assert_eq!(record.address_type, 3);
+        assert_eq!(record.user, "<torS0X>0");
+        assert!(record.password.starts_with("override:v1:"));
+    }
+    assert!(!dir.path().join("state/wallet.key").exists());
+    server.abort();
+}
+
+#[tokio::test]
+async fn invalid_network_overrides_and_unpinned_qualification_fail_before_side_effects() {
+    let dir = tempfile::tempdir().unwrap();
+    network_override_fixture(dir.path(), "");
+    std::fs::write(
+        dir.path().join("invalid.toml"),
+        "[network]\nmode='tor'\nsocks_endpoint='1.1.1.1:9150'\n",
+    )
+    .unwrap();
+    for command in [
+        vec!["serve"],
+        vec!["config", "check"],
+        vec!["config", "show"],
+        vec!["catalog", "tools"],
+        vec!["catalog", "warm"],
+        vec![
+            "sources",
+            "refresh",
+            "--server",
+            "research",
+            "--source-id",
+            "missing",
+        ],
+    ] {
+        let mut args = command;
+        args.extend([
+            "--config",
+            "deployment.toml",
+            "--network-config",
+            "invalid.toml",
+        ]);
+        assert!(
+            bad(run(dir.path(), &args, &[]).await)
+                .contains("SOCKS endpoint must be a literal loopback")
+        );
+    }
+    for mut args in [
+        vec!["config", "check", "--qualification-snapshot"],
+        vec![
+            "serve",
+            "--qualification-unsigned",
+            "--qualification-parent-stdin",
+        ],
+        vec![
+            "serve",
+            "--qualification-managed",
+            "--qualification-parent-stdin",
+            "--qualification-binding",
+            "missing-binding.json",
+        ],
+    ] {
+        args.extend([
+            "--config",
+            "missing.toml",
+            "--network-config",
+            "missing-network.toml",
+        ]);
+        assert!(
+            bad(run(dir.path(), &args, &[]).await)
+                .contains("qualification requires network policy in the pinned deployment")
+        );
+    }
+    assert!(!dir.path().join("state").exists());
+    assert!(!dir.path().join("registry.sqlite").exists());
 }

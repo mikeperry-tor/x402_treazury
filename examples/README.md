@@ -20,9 +20,9 @@ identities unless deliberately changing them.
 
 The starter uses direct networking. The comprehensive example requires a running
 Tor Browser SOCKS listener at `127.0.0.1:9150`; adjust its `[network]` for your own
-Tor daemon. [network/tor.toml](network/tor.toml) supplies the same kind of standalone
-policy for commands using `--provider` and `--network-config`. Deployments use
-their own `[network]`. Tor resolves destination names remotely and has no direct
+Tor daemon. [network/tor.toml](network/tor.toml) can be passed with
+`--network-config` to replace the whole network policy for deployment or standalone
+commands, or copied into a deployment as its `[network]` table. Tor resolves destination names remotely and has no direct
 fallback; separate circuits do not hide identifying request content.
 
 Managed serving binds listeners before funding. Initialize the treasury explicitly

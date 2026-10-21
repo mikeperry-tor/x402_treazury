@@ -110,11 +110,22 @@ async fn run() -> Result<()> {
         }
         cli::Command::Sources(cli::Sources::Refresh {
             config,
+            network_config,
             server,
             source_id,
         }) => {
-            return x402_treazury::discovery::maintain_cli(&config, &server, &source_id, true)
-                .await;
+            let policy = network_config
+                .as_deref()
+                .map(x402_treazury::network::NetworkPolicy::load)
+                .transpose()?;
+            return x402_treazury::discovery::maintain_cli_with_network(
+                &config,
+                &server,
+                &source_id,
+                true,
+                policy.as_ref(),
+            )
+            .await;
         }
         cli::Command::BuildInfo => {
             println!(
@@ -124,11 +135,17 @@ async fn run() -> Result<()> {
             return Ok(());
         }
         cli::Command::Catalog(cli::Catalog::Warm(args)) => {
-            let summary = x402_treazury::deployment::warm_cache(
+            let policy = args
+                .network_config
+                .as_deref()
+                .map(x402_treazury::network::NetworkPolicy::load)
+                .transpose()?;
+            let summary = x402_treazury::deployment::warm_cache_with_network(
                 &args.config,
                 &args.source,
                 args.direct,
                 args.discover_pricing,
+                policy.as_ref(),
             )
             .await?;
             println!("{}", serde_json::to_string_pretty(&summary)?);
@@ -160,11 +177,18 @@ async fn run() -> Result<()> {
         args.allowed_hosts.clone(),
         args.disable_host_check,
     )?;
+    let network_override = args
+        .network_config
+        .as_deref()
+        .map(x402_treazury::network::NetworkPolicy::load)
+        .transpose()?;
     if args.show_config {
-        return show_config(&args).await;
+        return show_config(&args, network_override.as_ref()).await;
     }
-    if let Some(path) = &args.network_config {
-        x402_treazury::network::install(x402_treazury::network::NetworkPolicy::load(path)?)?;
+    if args.meta_config.is_none()
+        && let Some(policy) = &network_override
+    {
+        x402_treazury::network::install(policy.clone())?;
     }
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     if let Some(path) = &args.env_file {
@@ -174,7 +198,7 @@ async fn run() -> Result<()> {
         }
     }
     if let Some(path) = &args.meta_config {
-        return run_deployment(&args, &env, path).await;
+        return run_deployment(&args, &env, path, network_override.as_ref()).await;
     }
     run_standalone(args, env).await
 }
@@ -380,6 +404,15 @@ fn validate_meta_arguments(
     matches: &clap::ArgMatches,
     command: &clap::Command,
 ) -> Result<()> {
+    ensure!(
+        args.network_config.is_none()
+            || !(args.qualification_snapshot
+                || args.qualification_unsigned
+                || args.qualification_managed
+                || args.qualification_parent_stdin
+                || args.qualification_binding.is_some()),
+        "qualification requires network policy in the pinned deployment; --network-config is unavailable"
+    );
     if args.meta_config.is_some() {
         for argument in command.get_arguments() {
             let id = argument.get_id();
@@ -387,6 +420,7 @@ fn validate_meta_arguments(
                 ensure!(
                     [
                         "meta_config",
+                        "network_config",
                         "discover_pricing",
                         "all_tools",
                         "env_file",
@@ -411,9 +445,13 @@ fn validate_meta_arguments(
     Ok(())
 }
 
-async fn show_config(args: &Args) -> Result<()> {
+async fn show_config(
+    args: &Args,
+    network_override: Option<&x402_treazury::network::NetworkPolicy>,
+) -> Result<()> {
     let mut value = if let Some(path) = &args.meta_config {
-        x402_treazury::deployment::Deployment::show_config(path).await?
+        x402_treazury::deployment::Deployment::show_config_with_network(path, network_override)
+            .await?
     } else {
         let path = args
             .config
@@ -422,13 +460,7 @@ async fn show_config(args: &Args) -> Result<()> {
         serde_json::to_value(x402_treazury::config::load(std::path::Path::new(path)).await?)?
     };
     if args.meta_config.is_none() {
-        let policy = args
-            .network_config
-            .as_ref()
-            .map(|path| x402_treazury::network::NetworkPolicy::load(path))
-            .transpose()?
-            .unwrap_or_default();
-        value["network"] = policy.inspection();
+        value["network"] = network_override.cloned().unwrap_or_default().inspection();
     }
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
@@ -438,6 +470,7 @@ async fn run_deployment(
     args: &Args,
     env: &BTreeMap<String, String>,
     path: &std::path::Path,
+    network_override: Option<&x402_treazury::network::NetworkPolicy>,
 ) -> Result<()> {
     let mut parent =
         x402_treazury::supervision::Parent::from_stdin(args.qualification_parent_stdin)?;
@@ -455,7 +488,7 @@ async fn run_deployment(
     if args.qualification_snapshot {
         return inspect_deployment_snapshot(path, &mut parent).await;
     }
-    let loading = load_deployment(args, env, path);
+    let loading = load_deployment(args, env, path, network_override);
     let mut deployment = tokio::select! {
         result = loading => result?,
         closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during catalog startup; no server started"); }
@@ -513,13 +546,19 @@ async fn load_deployment(
     args: &Args,
     env: &BTreeMap<String, String>,
     path: &std::path::Path,
+    network_override: Option<&x402_treazury::network::NetworkPolicy>,
 ) -> Result<x402_treazury::deployment::Deployment> {
     if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
-        x402_treazury::deployment::Deployment::load_for_inspection(path, args.all_tools).await
+        x402_treazury::deployment::Deployment::load_for_inspection_with_network(
+            path,
+            args.all_tools,
+            network_override,
+        )
+        .await
     } else if args.qualification_unsigned {
         x402_treazury::deployment::Deployment::load_for_unsigned_serving(path).await
     } else {
-        x402_treazury::deployment::Deployment::load_for_serving_with_relay(
+        x402_treazury::deployment::Deployment::load_for_serving_with_relay_and_network(
             path,
             env,
             // Supervised startup can be cancelled by parent EOF. Keep its
@@ -530,6 +569,7 @@ async fn load_deployment(
             } else {
                 Default::default()
             },
+            network_override,
         )
         .await
     }

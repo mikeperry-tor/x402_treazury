@@ -69,6 +69,9 @@ pub enum Sources {
     Refresh {
         #[arg(long)]
         config: PathBuf,
+        /// Replace the deployment's complete network policy.
+        #[arg(long)]
+        network_config: Option<PathBuf>,
         #[arg(long)]
         server: String,
         #[arg(long)]
@@ -89,7 +92,8 @@ pub struct Input {
     /// Reusable provider TOML for standalone serving or inspection.
     #[arg(long = "provider")]
     config: Option<String>,
-    #[arg(long, conflicts_with = "meta_config")]
+    /// Replace the complete network policy for this invocation.
+    #[arg(long)]
     network_config: Option<PathBuf>,
     #[arg(long)]
     spec: Option<String>,
@@ -165,6 +169,9 @@ pub struct Warm {
     /// Deployment whose existing treasury state directory and cache policy are used.
     #[arg(long, alias = "meta-config")]
     pub config: PathBuf,
+    /// Replace the complete network policy; --direct still explicitly bypasses it.
+    #[arg(long)]
+    pub network_config: Option<PathBuf>,
     /// Source IDs to warm (repeat or comma-separate); defaults to all declared sources.
     #[arg(long, value_delimiter = ',')]
     pub source: Vec<String>,
@@ -213,7 +220,8 @@ pub struct Location {
 pub struct Show {
     #[command(flatten)]
     location: Location,
-    #[arg(long, conflicts_with = "meta_config")]
+    /// Replace the complete network policy for this invocation.
+    #[arg(long)]
     network_config: Option<PathBuf>,
 }
 

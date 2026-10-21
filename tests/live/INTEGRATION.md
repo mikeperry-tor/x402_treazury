@@ -16,6 +16,11 @@ Current lifecycle evidence uses schema 2: payment admission records the exact pa
 
 ## 1. Build and review inputs
 
+Qualification pins the deployment file, including its `[network]` policy.
+Select Tor or direct networking there before preparation. Qualification snapshots,
+bound/supervised serving and supervised wallet sync reject `--network-config`;
+ordinary CLI overrides are not part of the frozen qualification inputs.
+
 The runner source lives in `tests/live/live_integration.rs` and `tests/live/runner/`,
 next to its runbooks, manifests and deployment profiles. It remains an explicit
 root-package Cargo `[[example]]` target named `live_integration`; the source move

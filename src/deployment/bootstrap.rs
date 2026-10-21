@@ -68,12 +68,18 @@ async fn bootstrap_summary(
 /// Explicit funding authority still requires the deployment's auto_fund policy.
 /// No listener tokens, static signing keys, catalogs or pricing are loaded.
 pub async fn bootstrap_wallets(path: &Path) -> Result<BootstrapSummary> {
+    bootstrap_wallets_with_network(path, None).await
+}
+pub async fn bootstrap_wallets_with_network(
+    path: &Path,
+    network_override: Option<&crate::network::NetworkPolicy>,
+) -> Result<BootstrapSummary> {
     ensure!(
         !crate::qualification::active() && !catalog_evidence::collecting(),
         "wallet bootstrap is unavailable during qualification"
     );
-    let mut config: MetaConfig =
-        toml::from_str(&tokio::fs::read_to_string(path).await?).context("invalid meta-config")?;
+    let mut config =
+        MetaConfig::parse_with_network(&tokio::fs::read_to_string(path).await?, network_override)?;
     if let Some(policy) = &mut config.source_management {
         policy.resolve(path);
     }

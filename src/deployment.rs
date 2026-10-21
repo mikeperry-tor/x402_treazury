@@ -11,9 +11,9 @@ pub mod catalog_evidence;
 mod startup;
 pub use startup::StartupConfig;
 mod bootstrap;
-pub use bootstrap::{BootstrapSummary, bootstrap_wallets};
+pub use bootstrap::{BootstrapSummary, bootstrap_wallets, bootstrap_wallets_with_network};
 mod cache_warm;
-pub use cache_warm::{CacheWarmSummary, warm_cache};
+pub use cache_warm::{CacheWarmSummary, warm_cache, warm_cache_with_network};
 
 /// Full frozen catalogs may exceed ordinary tool-result/evidence limits. Includes
 /// all source documents and inventories, with no response-schema truncation.
@@ -154,6 +154,17 @@ pub(crate) fn pattern(text: &str) -> Result<Regex> {
     Ok(Regex::new(&expression)?)
 }
 impl MetaConfig {
+    /// Replace the complete network policy before validating or using a deployment.
+    pub fn parse_with_network(
+        text: &str,
+        network_override: Option<&crate::network::NetworkPolicy>,
+    ) -> Result<Self> {
+        let mut config: Self = toml::from_str(text).context("invalid meta-config")?;
+        if let Some(policy) = network_override {
+            config.network = policy.clone();
+        }
+        Ok(config)
+    }
     pub(crate) fn validate(&self) -> Result<Resolution> {
         self.validate_capabilities(false)
     }
@@ -375,7 +386,16 @@ fn validate_selected_cover(
 
 impl Deployment {
     pub async fn show_config(path: &Path) -> Result<serde_json::Value> {
-        let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)?;
+        Self::show_config_with_network(path, None).await
+    }
+    pub async fn show_config_with_network(
+        path: &Path,
+        network_override: Option<&crate::network::NetworkPolicy>,
+    ) -> Result<serde_json::Value> {
+        let mut config = MetaConfig::parse_with_network(
+            &tokio::fs::read_to_string(path).await?,
+            network_override,
+        )?;
         if let Some(p) = &mut config.source_management {
             p.resolve(path);
         }
@@ -417,16 +437,23 @@ impl Deployment {
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
-        Self::load_with_warnings(path, false, None, false).await
+        Self::load_with_warnings(path, false, None, false, None).await
     }
     /// Strict operator inspection; bypassing advice retains all ordinary filters.
     pub async fn load_for_inspection(path: &Path, all_tools: bool) -> Result<Self> {
-        Self::load_with_warnings(path, false, None, all_tools).await
+        Self::load_for_inspection_with_network(path, all_tools, None).await
+    }
+    pub async fn load_for_inspection_with_network(
+        path: &Path,
+        all_tools: bool,
+        network_override: Option<&crate::network::NetworkPolicy>,
+    ) -> Result<Self> {
+        Self::load_with_warnings(path, false, None, all_tools, network_override).await
     }
     /// Warn for listener-bound sources before catalog I/O, including failed fetches.
     /// Keyless serving keeps provider warnings but cannot bootstrap or pay a relay.
     pub async fn load_for_unsigned_serving(path: &Path) -> Result<Self> {
-        Self::load_with_warnings(path, true, None, false).await
+        Self::load_with_warnings(path, true, None, false, None).await
     }
     pub async fn load_for_serving(path: &Path) -> Result<Self> {
         Self::load_for_serving_with_relay(path, &std::env::vars().collect(), Default::default())
@@ -437,7 +464,22 @@ impl Deployment {
         env: &BTreeMap<String, String>,
         restriction: crate::rotation::restriction::FundingRestriction,
     ) -> Result<Self> {
-        Self::load_with_warnings(path, true, Some((env, restriction)), false).await
+        Self::load_for_serving_with_relay_and_network(path, env, restriction, None).await
+    }
+    pub async fn load_for_serving_with_relay_and_network(
+        path: &Path,
+        env: &BTreeMap<String, String>,
+        restriction: crate::rotation::restriction::FundingRestriction,
+        network_override: Option<&crate::network::NetworkPolicy>,
+    ) -> Result<Self> {
+        Self::load_with_warnings(
+            path,
+            true,
+            Some((env, restriction)),
+            false,
+            network_override,
+        )
+        .await
     }
     fn validate_listener_credentials(&self, env: &BTreeMap<String, String>) -> Result<()> {
         for server in self.config.servers.values().filter(|s| s.auth) {
@@ -527,9 +569,12 @@ impl Deployment {
             crate::rotation::restriction::FundingRestriction,
         )>,
         all_tools: bool,
+        network_override: Option<&crate::network::NetworkPolicy>,
     ) -> Result<Self> {
-        let mut config: MetaConfig = toml::from_str(&tokio::fs::read_to_string(path).await?)
-            .context("invalid meta-config")?;
+        let mut config = MetaConfig::parse_with_network(
+            &tokio::fs::read_to_string(path).await?,
+            network_override,
+        )?;
         if let Some(p) = &mut config.source_management {
             p.resolve(path);
         }

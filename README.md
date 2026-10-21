@@ -57,25 +57,14 @@ shows help. See the [command reference](docs/configuration.md).
 
 The [managed starter](examples/deployments/managed.toml) exposes Exa web search,
 page contents and source-management tools on `http://127.0.0.1:8000/mcp`, backed
-by one rotating wallet pool. Agents can add public APIs using that same pool;
-registrations last until the process exits. Exa's catalog loads from its public
+by one rotating wallet pool. Agents can [add public APIs](#agent-api-auto-discovery-and-tool-addition) that use that same pool;
+API registrations last until the process exits. Exa's catalog loads from its public
 OpenAPI specification; no Exa API key is required.
 
 ```sh
 scripts/zcash.sh build
 cp examples/deployments/managed.toml examples/deployments/managed.local.toml
 ```
-
-For Tor, start Tor Browser with its SOCKS listener at `127.0.0.1:9150` and add
-[the Tor network policy](examples/network/tor.toml) once to the fresh local copy
-before running the initialization and serving commands below:
-
-```sh
-cat examples/network/tor.toml >> examples/deployments/managed.local.toml
-```
-
-Deployment commands read `[network]` from their `--config` file;
-`--network-config` is for standalone commands.
 
 Initialize its treasury explicitly, then start the authenticated listener:
 
@@ -85,7 +74,26 @@ export TREAZURY_MCP_TOKEN="replace_with_a_secret_bearer_token"
 target/release/x402_treazury serve --config examples/deployments/managed.local.toml
 ```
 
-Send ZEC to the shielded receive address printed by initialization. The pool
+To serve over Tor instead, start Tor Browser with its SOCKS listener at
+`127.0.0.1:9150`. Pass [the separate network policy](examples/network/tor.toml):
+
+```sh
+target/release/x402_treazury serve --config examples/deployments/managed.local.toml \
+  --network-config examples/network/tor.toml
+```
+
+Or embed that policy once in the fresh local deployment and use the basic command:
+
+```sh
+cat examples/network/tor.toml >> examples/deployments/managed.local.toml
+target/release/x402_treazury serve --config examples/deployments/managed.local.toml
+```
+
+`--network-config` replaces the complete `[network]` policy for that invocation.
+For treasury initialization over Tor, pass the same option to `wallet init`, or
+initialize using the deployment with the embedded policy.
+
+Send ~$5 ZEC to the shielded receive address printed by initialization. The pool
 requests a $2 USDC reserve, accepting bridge-minimum increases up to $3 before
 fees; allow funds for fees and future replacements. Each payment is capped at
 $0.50. Funding starts after the listener binds, so tools remain visible while
@@ -94,8 +102,10 @@ funding is pending. Connect your MCP client with
 
 The default key file lives with treasury state at `state/managed/wallet.key`;
 protect that directory because it contains both state and decryption material.
-Run one serving process per treasury. `wallet status --config
-examples/deployments/managed.local.toml` reads saved status alongside serving;
+Run one serving process per treasury.
+
+`x402_treazury wallet status --config examples/deployments/managed.local.toml`
+reads saved status alongside serving;
 other exclusive wallet administration requires stopping it. See
 [wallet administration](docs/wallet-cli.md) and the
 [example choices](examples/README.md).

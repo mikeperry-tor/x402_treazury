@@ -9,7 +9,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 pub struct WalletArgs {
     /// Deployment configuration; bootstrap also consumes wallet and funding settings.
-    #[arg(long, alias = "meta-config", global = true, conflicts_with_all = ["network_config", "state_dir", "key_file", "treasury_id"])]
+    #[arg(long, alias = "meta-config", global = true, conflicts_with_all = ["state_dir", "key_file", "treasury_id"])]
     config: Option<PathBuf>,
     #[arg(long, global = true)]
     network_config: Option<PathBuf>,
@@ -103,16 +103,44 @@ enum Action {
     },
 }
 
-fn resolve_args(args: WalletArgs) -> Result<Command> {
-    use anyhow::Context;
+fn network_override(args: &WalletArgs) -> Result<Option<crate::network::NetworkPolicy>> {
     if matches!(args.command, Action::Pool { .. }) {
         anyhow::bail!(
             "wallet pool was removed; configure managed wallet reserves and explicit max_api_payment_usdc in the deployment, then use wallet bootstrap --config FILE"
         );
     }
+
+    anyhow::ensure!(
+        args.network_config.is_none()
+            || !matches!(
+                args.command,
+                Action::Sync {
+                    qualification_parent_stdin: true,
+                    ..
+                }
+            ),
+        "supervised wallet sync requires the network policy in its deployment configuration"
+    );
+    args.network_config
+        .as_ref()
+        .map(|path| crate::network::NetworkPolicy::load(path))
+        .transpose()
+}
+
+#[cfg(test)]
+fn resolve_args(args: WalletArgs) -> Result<Command> {
+    let policy = network_override(&args)?;
+    resolve_args_with_network(args, policy.as_ref())
+}
+
+fn resolve_args_with_network(
+    args: WalletArgs,
+    policy: Option<&crate::network::NetworkPolicy>,
+) -> Result<Command> {
+    use anyhow::Context;
     let settings = load_wallet_settings(
         args.config.as_ref(),
-        args.network_config.as_ref(),
+        policy,
         matches!(&args.command, Action::Sync { .. }),
     )?;
     if let Some(command) = configured_command(&args.command, args.config.as_ref())? {
@@ -189,13 +217,15 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
 
 fn load_wallet_settings(
     config_path: Option<&PathBuf>,
-    network_path: Option<&PathBuf>,
+    policy: Option<&crate::network::NetworkPolicy>,
     sync_only: bool,
 ) -> Result<Option<crate::rotation::config::TreasuryConfig>> {
     use anyhow::{Context, ensure};
     let settings = if let Some(path) = config_path {
-        let config: crate::deployment::MetaConfig =
-            toml::from_str(&std::fs::read_to_string(path)?)?;
+        let config = crate::deployment::MetaConfig::parse_with_network(
+            &std::fs::read_to_string(path)?,
+            policy,
+        )?;
         ensure!(config.version == 1, "unsupported deployment version");
         crate::network::install(config.network)?;
         let mut treasury = config.treasury.context("missing [treasury]")?;
@@ -207,8 +237,8 @@ fn load_wallet_settings(
         treasury.resolve(path);
         Some(treasury)
     } else {
-        if let Some(path) = network_path {
-            crate::network::install(crate::network::NetworkPolicy::load(path)?)?;
+        if let Some(policy) = policy {
+            crate::network::install(policy.clone())?;
         }
         None
     };
@@ -409,16 +439,26 @@ async fn run_args(
         | Action::Bootstrap { json } => *json,
         _ => true,
     };
-    let command = resolve_args(args)?;
+    let policy = network_override(&args)?;
+    let command = resolve_args_with_network(args, policy.as_ref())?;
     if let Command::Sync {
         meta_config,
         qualification_parent_stdin,
     } = command
     {
-        return sync::run(meta_config, network, qualification_parent_stdin, json).await;
+        return sync::run(
+            meta_config,
+            network,
+            qualification_parent_stdin,
+            json,
+            policy.as_ref(),
+        )
+        .await;
     }
     if let Command::Bootstrap { meta_config } = command {
-        let summary = crate::deployment::bootstrap_wallets(&meta_config).await?;
+        let summary =
+            crate::deployment::bootstrap_wallets_with_network(&meta_config, policy.as_ref())
+                .await?;
         if json {
             println!("{}", serde_json::to_string_pretty(&summary)?);
         } else {
@@ -427,7 +467,7 @@ async fn run_args(
         return Ok(());
     }
     if let Command::Recover { meta_config } = command {
-        return recover_funding(meta_config, network).await;
+        return recover_funding(meta_config, network, policy.as_ref()).await;
     }
     if let Command::Status {
         state_dir,
@@ -479,7 +519,7 @@ async fn run_args(
         return Ok(());
     }
     let initializing = matches!(&command, Command::Init { .. });
-    let treasury = execute_wallet_command(command, network).await?;
+    let treasury = execute_wallet_command(command, network, policy.as_ref()).await?;
     if initializing && !json {
         let addresses = treasury.addresses().await?;
         let address = addresses[0]["encoded_address"]
@@ -533,24 +573,25 @@ async fn show_status(state_dir: PathBuf, key_file: PathBuf, json: bool) -> Resul
 async fn execute_wallet_command(
     command: Command,
     network: crate::rotation::store::TreasuryNetwork,
+    policy: Option<&crate::network::NetworkPolicy>,
 ) -> Result<crate::treasury::Treasury> {
     use crate::treasury::Treasury;
     let treasury = match command {
         Command::RecoverExpired {
             meta_config,
             operation_id,
-        } => recover_expired(meta_config, operation_id, network).await?,
+        } => recover_expired(meta_config, operation_id, network, policy).await?,
 
         Command::ShieldRefunds {
             meta_config,
             job_id,
-        } => shield_refunds(meta_config, job_id, network).await?,
+        } => shield_refunds(meta_config, job_id, network, policy).await?,
 
         Command::Reconcile {
             meta_config,
             operation_id,
             rebroadcast,
-        } => reconcile(meta_config, operation_id, rebroadcast, network).await?,
+        } => reconcile(meta_config, operation_id, rebroadcast, network, policy).await?,
 
         Command::Sync { .. } => unreachable!("sync owns its per-asset output"),
 
@@ -586,15 +627,18 @@ async fn execute_wallet_command(
 async fn recover_funding(
     path: PathBuf,
     network: crate::rotation::store::TreasuryNetwork,
+    policy: Option<&crate::network::NetworkPolicy>,
 ) -> Result<()> {
-    let config: crate::deployment::MetaConfig =
-        toml::from_str(&tokio::fs::read_to_string(&path).await?)?;
+    let config = crate::deployment::MetaConfig::parse_with_network(
+        &tokio::fs::read_to_string(&path).await?,
+        policy,
+    )?;
     let allow_new_attempt = config
         .funding
         .as_ref()
         .is_some_and(|funding| funding.auto_fund);
     let wallets = config.validate()?.wallets;
-    let (mut treasury, settings) = configured(&path, network).await?;
+    let (mut treasury, settings) = configured(&path, network, policy).await?;
     let indexer = settings.indexer_endpoint(|name| std::env::var(name).ok())?;
     let mut sender = crate::treasury::submission::GrpcSubmission::with_network(
         indexer.clone(),
@@ -639,8 +683,9 @@ async fn recover_expired(
     meta_config: PathBuf,
     operation_id: String,
     network: crate::rotation::store::TreasuryNetwork,
+    policy: Option<&crate::network::NetworkPolicy>,
 ) -> Result<crate::treasury::Treasury> {
-    let (mut treasury, settings) = configured(&meta_config, network).await?;
+    let (mut treasury, settings) = configured(&meta_config, network, policy).await?;
     let indexer = settings.indexer_endpoint(|name| std::env::var(name).ok())?;
     let mut sender = crate::treasury::submission::GrpcSubmission::with_network(
         indexer.clone(),
@@ -668,8 +713,9 @@ async fn shield_refunds(
     meta_config: PathBuf,
     job_id: String,
     network: crate::rotation::store::TreasuryNetwork,
+    policy: Option<&crate::network::NetworkPolicy>,
 ) -> Result<crate::treasury::Treasury> {
-    let (mut treasury, settings) = configured(&meta_config, network).await?;
+    let (mut treasury, settings) = configured(&meta_config, network, policy).await?;
     let stop = tokio_util::sync::CancellationToken::new();
     let result = finish_on_shutdown(
         "wallet_command",
@@ -698,8 +744,9 @@ async fn reconcile(
     operation_id: String,
     rebroadcast: bool,
     network: crate::rotation::store::TreasuryNetwork,
+    policy: Option<&crate::network::NetworkPolicy>,
 ) -> Result<crate::treasury::Treasury> {
-    let (mut treasury, settings) = configured(&meta_config, network).await?;
+    let (mut treasury, settings) = configured(&meta_config, network, policy).await?;
     let indexer = settings.indexer_endpoint(|name| std::env::var(name).ok())?;
     // Read-only reconciliation needs no submission secret.
     let submission = if rebroadcast {
@@ -839,12 +886,15 @@ pub(crate) async fn shutdown_signal() -> std::io::Result<()> {
 async fn configured(
     path: &std::path::Path,
     network: crate::rotation::store::TreasuryNetwork,
+    policy: Option<&crate::network::NetworkPolicy>,
 ) -> Result<(
     crate::treasury::Treasury,
     crate::rotation::config::TreasuryConfig,
 )> {
-    let config: crate::deployment::MetaConfig =
-        toml::from_str(&tokio::fs::read_to_string(path).await?)?;
+    let config = crate::deployment::MetaConfig::parse_with_network(
+        &tokio::fs::read_to_string(path).await?,
+        policy,
+    )?;
     crate::network::install(config.network.clone())?;
     anyhow::ensure!(config.version == 1, "unsupported deployment version");
     let mut settings = config.treasury.context("missing [treasury]")?;

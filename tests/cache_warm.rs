@@ -133,11 +133,15 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     assert!(!unknown.status.success());
     assert!(String::from_utf8_lossy(&unknown.stderr).contains("unknown cache-warming source"));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let network_path = dir.path().join("network.toml");
+    std::fs::write(&network_path, format!("[network]\nmode='tor'\nsocks_endpoint='{socks_address}'\nisolation_namespace='direct-warm-fixture'\n")).unwrap();
     let warmed = cli(&[
         "catalog",
         "warm",
         "--config",
         path,
+        "--network-config",
+        network_path.to_str().unwrap(),
         "--source",
         "api",
         "--direct",

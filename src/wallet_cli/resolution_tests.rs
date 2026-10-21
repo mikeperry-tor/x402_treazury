@@ -67,8 +67,8 @@ fn command_value(command: Command) -> Value {
     }
 }
 
-// Each child owns a fresh production network OnceLock and environment. No command
-// execution occurs: even funded command variants are only inspected as values.
+// Each child owns a fresh production network OnceLock and environment. Resolution
+// cases inspect command values; explicit execution cases use absent unfunded state.
 #[test]
 fn resolution_child() {
     let Ok(spec) = std::env::var("X402_RESOLUTION_SPEC") else {
@@ -82,8 +82,20 @@ fn resolution_child() {
     let args =
         WalletArgs::try_parse_from(std::iter::once("wallet".to_owned()).chain(args)).unwrap();
     let mut category = None;
-    let result = match resolve_args(args) {
-        Ok(command) => json!({"ok":command_value(command)}),
+    let result = match if std::env::var_os("X402_RESOLUTION_EXECUTE").is_some() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(run_args(
+                args,
+                crate::rotation::store::TreasuryNetwork::Mainnet,
+            ))
+            .map(|()| json!({"executed":true}))
+    } else {
+        resolve_args(args).map(command_value)
+    } {
+        Ok(value) => json!({"ok":value}),
         Err(error) => {
             category = if let Some(io) = error.downcast_ref::<std::io::Error>() {
                 Some(format!("io:{:?}", io.kind()))
@@ -568,4 +580,88 @@ fn administrative_identity_resolution_preserves_saved_state_and_optional_asserti
     }
     assert!(!dir.path().join("backup").exists());
     assert!(!dir.path().join("missing").exists());
+}
+
+#[test]
+fn external_policy_replaces_embedded_network_and_survives_wallet_reloads() {
+    let dir = tempfile::tempdir().unwrap();
+    // The authored Tor policy cannot be used as written. The external default
+    // policy replaces it wholly, rather than retaining its mode or timeout.
+    std::fs::write(dir.path().join("deployment.toml"),
+        "version=1\n[treasury]\nstate_dir='absent'\n[funding]\nauto_fund=false\nconfidentiality='public'\n[network]\nmode='tor'\nconnect_timeout_seconds=7\n[wallets.shared]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[sources.api]\nspec='https://unreachable.invalid/catalog'\n[servers.research]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='shared'\nsources=['api']\n").unwrap();
+    std::fs::write(dir.path().join("network.toml"), "[network]\n").unwrap();
+    let args = [
+        "bootstrap",
+        "--config",
+        "deployment.toml",
+        "--network-config",
+        "network.toml",
+    ];
+    let resolved = resolve_in(dir.path(), &args, &[], false, true);
+    assert_eq!(resolved["result"]["ok"]["kind"], "bootstrap");
+    assert_eq!(resolved["default_install"], "ok");
+    let executed = resolve_in(
+        dir.path(),
+        &args,
+        &[("X402_RESOLUTION_EXECUTE", "1")],
+        false,
+        true,
+    );
+    assert_eq!(
+        executed["result"]["error"],
+        "wallet bootstrap requires funding.auto_fund=true; funding remains paused"
+    );
+    assert_eq!(executed["default_install"], "ok");
+    for action in [
+        vec!["sync"],
+        vec!["recover"],
+        vec!["recover-expired", "--operation-id", "unfunded"],
+        vec!["shield-refunds", "--job-id", "unfunded"],
+        vec!["reconcile", "--operation-id", "unfunded"],
+    ] {
+        let mut args = action;
+        args.extend([
+            "--config",
+            "deployment.toml",
+            "--network-config",
+            "network.toml",
+        ]);
+        let executed = resolve_in(
+            dir.path(),
+            &args,
+            &[("X402_RESOLUTION_EXECUTE", "1")],
+            false,
+            true,
+        );
+        // Each helper has reloaded and installed the replacement before trying
+        // to inspect the absent treasury; no network or financial work starts.
+        assert_eq!(executed["error_category"], "io:NotFound", "{executed}");
+        assert_eq!(executed["default_install"], "ok");
+        assert!(!dir.path().join("absent").exists());
+    }
+}
+
+#[test]
+fn supervised_sync_refuses_external_policy_before_reading_files_or_installing() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = resolve_in(
+        dir.path(),
+        &[
+            "sync",
+            "--qualification-parent-stdin",
+            "--config",
+            "missing.toml",
+            "--network-config",
+            "also-missing.toml",
+        ],
+        &[("X402_RESOLUTION_EXECUTE", "1")],
+        false,
+        true,
+    );
+    assert_eq!(
+        result["result"]["error"],
+        "supervised wallet sync requires the network policy in its deployment configuration"
+    );
+    assert_eq!(result["default_install"], "ok");
+    assert!(!dir.path().join("absent").exists());
 }

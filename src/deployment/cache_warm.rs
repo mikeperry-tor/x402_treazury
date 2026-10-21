@@ -23,12 +23,21 @@ pub async fn warm_cache(
     direct: bool,
     discover_pricing: bool,
 ) -> Result<CacheWarmSummary> {
+    warm_cache_with_network(path, selected, direct, discover_pricing, None).await
+}
+pub async fn warm_cache_with_network(
+    path: &Path,
+    selected: &[String],
+    direct: bool,
+    discover_pricing: bool,
+    network_override: Option<&crate::network::NetworkPolicy>,
+) -> Result<CacheWarmSummary> {
     ensure!(
         !crate::qualification::active() && !catalog_evidence::collecting(),
         "cache warming is not a qualification operation"
     );
-    let mut config: MetaConfig =
-        toml::from_str(&tokio::fs::read_to_string(path).await?).context("invalid meta-config")?;
+    let mut config =
+        MetaConfig::parse_with_network(&tokio::fs::read_to_string(path).await?, network_override)?;
     if let Some(policy) = &mut config.source_management {
         policy.resolve(path);
     }
