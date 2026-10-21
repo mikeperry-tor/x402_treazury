@@ -202,6 +202,11 @@ cargo fmt --check
   fix unless new changes or unresolved concerns justify it. `scripts/check.sh` is
   the full application check, including Clippy, vendor/compatibility verification,
   complexity analysis and the synthetic-chain treasury lifecycle.
+- Choose sandbox permissions before running tests. Keep socket-free tests in the
+  ordinary sandbox. When localhost sockets are known to be blocked, request
+  socket-capable execution through the runner up front for socket fixtures and
+  full suites; do not deliberately run them once to obtain a permission failure.
+  Follow the [test sandbox guidance](docs/testing.md#sandbox-permissions).
 - Only `zcash-testutils` and `zcash-regtest` are opt-in test features. Run requested
   feature configurations sequentially: CLI tests share an executable path. Keep
   sources/executables frozen during their validation.

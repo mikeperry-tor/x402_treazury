@@ -57,6 +57,32 @@ effects. Direct transport fixtures remain in `rotation::base::transport::tests`.
 unsigned API and Base while retaining certificate checks and signed no-replay.
 These prove routing and credential boundaries, not live Tor circuits or settlement.
 
+### Sandbox permissions
+
+Choose execution permissions for the selected tests before starting them. Offline
+fixtures can still create real localhost sockets. When the current sandbox is
+known to block those sockets, request socket-capable execution through the runner
+up front; a failed attempt is not a prerequisite. An environment that already
+permits the required operations needs no extra approval.
+
+| Selection | Runtime requirements |
+| --- | --- |
+| `crypto_vectors`, `provider_catalogs`, `managed_config`, `network_audit`, `cli_layout` | Currently socket-free complete test targets: local computation/files and, for CLI inspection, child processes. Run in the ordinary sandbox. |
+| `network`, `startup`, `cli_contracts`, `config` | Representative targets containing localhost fixtures. Use socket-capable execution for the complete target. |
+| `scripts/zcash.sh test --all-targets`, `scripts/check.sh` | Include socket fixtures and require localhost socket access. |
+
+Names above are Cargo test targets (`--test NAME`). For filtered tests, follow
+helper and child-process calls: `config` and `cli_contracts` mix socket-free
+inspection with real servers. A filename or search for direct bind calls alone
+cannot establish requirements. Inspect unclassified selections before choosing
+permissions, and reassess these examples when fixtures or helpers change.
+
+These are runtime capabilities, not a guarantee that Cargo can build inside a
+particular sandbox. Dependency/proving-parameter downloads and cache writes have
+separate network/filesystem requirements; see [build tooling](../scripts/README.md).
+Keep real wire, SOCKS, gRPC and lifecycle coverage intact rather than replacing or
+skipping it to avoid a permission request.
+
 ## Test boundaries
 
 | Area | Principal tests / contract |
