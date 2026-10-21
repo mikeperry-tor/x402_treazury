@@ -19,9 +19,6 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
 [Plans](plans/) describe unfinished work, including artifact storage.
-The [examples reorganization plan](plans/examples_reorganization.md) covers the
-managed starter, comprehensive showcase, internal tooling relocation and single
-Zcash application build while preserving static-wallet runtime support.
 The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
 describe advisory estimates, per-wallet attempts, no top-ups, SDK-owned Zcash
 funds, owner recovery and automatic owned-transparent shielding. The
