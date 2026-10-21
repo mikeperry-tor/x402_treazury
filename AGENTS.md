@@ -33,47 +33,55 @@ USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
   recovery attempts. Disconnect, cancellation or cache eviction must not orphan
   accepted financial work, duplicate active I/O or report abandonment as success.
 
-Reusable providers expose supported functionality, with concrete reasons for
-compatibility restrictions. Same-path GET/POST twins default to POST before naming;
-review actual method contracts and document necessary opt-outs. Recommendations
-remain advisory until explicit opt-in. Provider-specific regression storage
-needs a named quirk, failure or authored transformation; use small faithful inputs
-and shared synthetic tests instead of universal inventory/settings snapshots. Follow
-the [provider policy](providers/README.md#provider-policy),
+## Provider guidance
+
+- Reusable providers expose supported functionality, with concrete reasons for
+  compatibility restrictions.
+- Same-path GET/POST twins default to POST before naming; review actual method
+  contracts and document necessary opt-outs.
+- Recommendations remain advisory until explicit opt-in.
+- Provider-specific regression test and fixture storage needs a named quirk,
+  failure or authored transformation; use small faithful inputs and shared
+  synthetic tests instead of universal inventory/settings snapshots in
+  fixtures and tests.
+
+Follow the [provider policy](providers/README.md#provider-policy),
 [selection semantics](docs/configuration.md) and
-[test policy](docs/testing.md#provider-regressions).
+[test policy](docs/testing.md#provider-regressions). Provider oddities,
+quirks, workarounds, and compatibility exemptions are documented in
+[provider caveats](providers/CAVEATS.md).
 
 ## Financial and execution boundaries
 
-Ordinary USDC payment selection treats balances and price hints as advisory;
-current payer ownership and amount authority govern signing. After recognized
-structured insufficient funds, try each existing
-eligible wallet once with its own challenge while balance reconciliation proceeds
-independently. Apply the [unsigned x402 GET/POST retry semantics](docs/architecture.md#unsigned-x402-requests-and-post-retries)
-when assessing method restrictions. Drop the unused error body. Each authorization
-remains potentially chargeable. Other uncertainty grants no automatic replay; never allocate wallets
-or wait for funding during this traversal.
+- Ordinary USDC payment selection treats balances and price hints as advisory;
+  current payer ownership and amount authority govern signing.
+- After recognized structured insufficient funds, try each existing eligible wallet
+  once with its own challenge while balance reconciliation proceeds independently.
+  Apply the [unsigned x402 GET/POST retry semantics](docs/architecture.md#unsigned-x402-requests-and-post-retries)
+  when assessing method restrictions. Drop the unused error body. Each authorization
+  remains potentially chargeable. Other uncertainty grants no automatic replay;
+  never allocate wallets or wait for funding during this traversal.
+- Journal before disclosure. Preserve exact accepted inputs, signed bytes, original
+  identities and liabilities through cancellation/restart; missing results do not
+  prove nothing happened.
+- SDK/blockchain state owns current ZEC spendability. Automatic shielding can recover
+  owned transparent funds without refund attribution; refunds do not authorize
+  another funding deposit.
+- Each wallet's initial funding claim is consumed by its first positive USDC
+  observation; low estimates never reopen it or authorize top-ups.
+- All production outbound HTTP/gRPC constructors belong in `src/network.rs`.
+  Preserve identity-bound transports, public-destination enforcement and Tor's remote
+  DNS/no-direct-fallback policy. Do not introduce a vendor-specific bypass.
+- Listener identity is the authenticated source-management principal; agent/session
+  fields cannot select owners. Registration never allocates or funds a wallet.
+- Ordinary serving binds listeners before funding and exposes usable tools while
+  managed funding/discovery is pending or degraded. Strict inspection and separately
+  authorized qualification retain their completeness and authority requirements.
 
-Journal before disclosure. Preserve exact accepted inputs, signed bytes, original
-identities and liabilities through cancellation/restart; missing results do not
-prove nothing happened. SDK/blockchain state owns current ZEC spendability.
-Automatic shielding can recover owned transparent funds without refund attribution;
-refunds do not authorize another funding deposit. Each wallet's initial funding
-claim is consumed by its first positive USDC observation; low estimates never
-reopen it or authorize top-ups. Read the
+Read the
 [best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules) and
 [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy)
 before changing estimation, polling, payment, funding or recovery behavior.
-
-All production outbound HTTP/gRPC constructors belong in `src/network.rs`.
-Preserve identity-bound transports, public-destination enforcement and Tor's remote
-DNS/no-direct-fallback policy. Do not introduce a vendor-specific bypass. Listener
-identity is the authenticated source-management principal; agent/session fields
-cannot select owners. Registration never allocates or funds a wallet.
-
-Ordinary serving binds listeners before funding and exposes usable tools while
-managed funding/discovery is pending or degraded. Strict inspection and separately
-authorized qualification retain their completeness and authority requirements.
 
 ## Independent subagent workflows
 
@@ -209,23 +217,25 @@ cargo fmt --check
 
 ## Local files, logs and documentation
 
-Keep `.env`, `state/`, `secrets/`, local example overrides and reference checkouts
-untracked. Preserve unrelated user files, including `TODO`, `run_servers.sh`,
-`FUCK.md` and editor files. Do not inspect or print secret values unnecessarily.
-Do not use the TODO tool. Do not routinely delete `target/`: it may hold private
-qualification evidence and pinned executables as well as disposable build caches.
-
-All logs go to stderr; stdout is the MCP wire or requested CLI JSON. Never persist
-or log credential-bearing upstream prose. Follow the [logging contract](docs/development.md#logging-and-diagnostics)
-when changing diagnostics. Limits that reject or truncate content must be visible
-to the affected consumer; never present a partial document as complete. Visibility
-requirements do not justify adding a limit; see [resource-limit behavior](docs/local-resource-limits.md#rejection-and-truncation).
-
-Maintain current rules in place. Keep detailed contracts in their owning guides,
-not appended migration notes or duplicate checklists. Follow the [documentation
-policy](docs/README.md): generated metrics/reports go under ignored `target/` or
-private external storage, and completed plans yield maintained guidance plus
-focused unfinished work. Do not add implemented-plan archives or dated handoffs.
-Documentation/Git cleanup never erases financial evidence or grants replay authority.
-Preserve stable state formats, generated `auto_v1_` pool names, Tor token domains
-and `X402_*` environment contracts when renaming files or product labels.
+- Keep `.env`, `state/`, `secrets/`, local example overrides and reference checkouts
+  untracked.
+- Preserve unrelated user files and local changes, whether tracked, untracked or
+  ignored.
+- Do not inspect or print secret values unnecessarily.
+- Do not routinely delete `target/`: it may hold private qualification evidence and
+  pinned executables as well as disposable build caches.
+- All logs go to stderr; stdout is the MCP wire or requested CLI JSON. Never persist
+  or log credential-bearing upstream prose. Follow the [logging contract](docs/development.md#logging-and-diagnostics)
+  when changing diagnostics.
+- Limits that reject or truncate content must be visible to the affected consumer;
+  never present a partial document as complete. Visibility requirements do not
+  justify adding a limit; see [resource-limit behavior](docs/local-resource-limits.md#rejection-and-truncation).
+- Maintain current rules in place. Keep detailed contracts in their owning guides,
+  not appended migration notes or duplicate checklists.
+- Follow the [documentation policy](docs/README.md): generated metrics/reports go
+  under ignored `target/` or private external storage, and completed plans yield
+  maintained guidance plus focused unfinished work. Do not add implemented-plan
+  archives or dated handoffs.
+- Documentation/Git cleanup never erases financial evidence or grants replay authority.
+- Preserve stable state formats, generated `auto_v1_` pool names, Tor token domains
+  and `X402_*` environment contracts when renaming files or product labels.
