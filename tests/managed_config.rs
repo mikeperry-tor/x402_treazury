@@ -560,19 +560,15 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
 }
 
 #[tokio::test]
-async fn managed_starter_inspects_one_tool_without_credentials_or_financial_state() {
+async fn managed_starter_exposes_exa_and_source_management_without_financial_state() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let dir = tempfile::tempdir().unwrap();
     let mut config: toml::Value =
         toml::from_str(include_str!("../examples/deployments/managed.toml")).unwrap();
     config["treasury"]["state_dir"] =
         toml::Value::String(dir.path().join("state").to_str().unwrap().into());
-    config["sources"]["curl"]["extends"] = toml::Value::String(
-        root.join("providers/curl/provider.toml")
-            .to_str()
-            .unwrap()
-            .into(),
-    );
+    config["sources"]["exa"]["extends"] =
+        toml::Value::String(root.join("providers/exa.toml").to_str().unwrap().into());
     let path = dir.path().join("managed.toml");
     std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
@@ -580,16 +576,75 @@ async fn managed_starter_inspects_one_tool_without_credentials_or_financial_stat
     assert_eq!(shown["servers"].as_object().unwrap().len(), 1);
     assert_eq!(shown["sources"].as_object().unwrap().len(), 1);
     assert_eq!(shown["wallets"]["research"]["mode"], "zcash_rotation");
+    assert_eq!(shown["wallets"]["research"]["max_api_payment_usdc"], "0.50");
     assert_eq!(
-        shown["wallet_bindings"]["research"]["curl"]["wallet"],
+        shown["wallet_bindings"]["research"]["exa"]["wallet"],
         "research"
     );
+    assert_eq!(
+        shown["sources"]["exa"]["settings"]["spec"],
+        "https://api.exa.ai/openapi.json"
+    );
+    assert_eq!(shown["servers"]["research"]["source_management"], true);
+    assert_eq!(
+        shown["source_management"]["wallet_bindings"]["research"],
+        "research"
+    );
+    assert_eq!(shown["source_management"]["persistent"], false);
+    assert!(!dir.path().join("state").exists());
+
+    // Exercise deployment composition offline; provider-specific schema contracts
+    // are covered separately by the Exa regression in provider_catalogs.
+    let spec = serde_json::json!({
+        "openapi": "3.0.3", "info": {"title": "Search fixture", "version": "1"},
+        "paths": {
+            "/search": {"post": {"summary": "Search", "requestBody": {"content": {
+                "application/json": {"schema": {"type": "object", "properties": {
+                    "query": {"type": "string"}, "stream": {"type": "boolean"}
+                }}}
+            }}}},
+            "/contents": {"post": {"summary": "Contents", "requestBody": {"content": {
+                "application/json": {"schema": {"type": "object", "properties": {
+                    "urls": {"type": "array", "items": {"type": "string"}},
+                    "ids": {"type": "array", "items": {"type": "string"}}
+                }}}
+            }}}}
+        }
+    });
+    std::fs::write(
+        dir.path().join("spec.json"),
+        serde_json::to_vec(&spec).unwrap(),
+    )
+    .unwrap();
+    config["sources"]["exa"]
+        .as_table_mut()
+        .unwrap()
+        .insert("spec".into(), toml::Value::String("spec.json".into()));
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     let deployment = Deployment::load(&path).await.unwrap();
     let inventory = deployment.inventory();
     assert_eq!(inventory.len(), 1);
-    assert_eq!(inventory[0].tools.len(), 1);
-    let tool = &inventory[0].tools[0].tool;
-    assert_eq!(tool.name, "curl_curl");
-    assert_eq!(tool.method, "POST");
+    assert_eq!(
+        inventory[0]
+            .tools
+            .iter()
+            .map(|entry| entry.tool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["exa_contents", "exa_help", "exa_search"]
+    );
+    assert!(
+        inventory[0]
+            .tools
+            .iter()
+            .filter(|entry| entry.tool.name != "exa_help")
+            .all(|entry| entry.tool.method == "POST")
+    );
+    assert_eq!(inventory[0].management_tools.len(), 6);
+    assert!(
+        inventory[0]
+            .management_tools
+            .iter()
+            .any(|tool| tool.name == "x402_treazury_source_add")
+    );
     assert!(!dir.path().join("state").exists());
 }

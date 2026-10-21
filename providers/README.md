@@ -4,20 +4,20 @@ Rust reads TOML configuration. A deployment source can declare all settings
 inline or extend one of these reusable files:
 
 ```toml
-[sources.curl]
-extends = "../../providers/curl/provider.toml"
+[sources.exa]
+extends = "../../providers/exa.toml"
 
 [servers.research]
 listen = "127.0.0.1:8000"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "research"
-sources = ["curl"]
+sources = ["exa"]
 ```
 
-This excerpt belongs to the complete
+This provider-binding excerpt belongs to the complete
 [managed deployment](../examples/deployments/managed.toml), which defines the
-research pool, treasury and funding settings. Provider files describe APIs;
-deployments choose payment identities. Static wallets remain supported in the
+research pool, treasury, funding and source-management settings. Provider files
+describe APIs; deployments choose payment identities. Static wallets remain supported in the
 [configuration reference](../docs/configuration.md).
 
 The `extends` path is relative to the deployment file. A local `spec` path is

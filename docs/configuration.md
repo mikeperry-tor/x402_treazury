@@ -111,19 +111,17 @@ Pricing discovery rolls across sources and endpoints with a shared 16-request ca
 
 
 [examples/deployments/managed.toml](../examples/deployments/managed.toml) exposes
-one Curl HTTP Request tool through an authenticated research listener and one
-managed pool. Its local pinned schema makes these inspection commands offline:
-
-```sh
-target/release/x402_treazury config check --config examples/deployments/managed.toml
-target/release/x402_treazury catalog tools --config examples/deployments/managed.toml
-```
+Exa web search, page contents and source-management tools through an authenticated
+research listener and one managed pool. Exa's catalog loads from its public
+specification. Agent-added APIs share the research pool; registrations last until
+exit unless a registry file is configured. Optional `config show` inspection stays
+offline; `config check` and `catalog tools` load the remote catalog.
 
 Initialize the treasury explicitly and fund its shielded address before paid use;
 see the [quickstart](../README.md#quickstart-managed-wallet). Serving needs
 `TREAZURY_MCP_TOKEN` and the initialized treasury, and binds the listener before
 background funding. The [comprehensive deployment](../examples/deployments/comprehensive.toml)
-adds multiple research listeners, Tor, relay and dynamic source management.
+adds multiple research listeners, Tor, relay and persistent source registrations.
 
 Each listener serves stateless Streamable HTTP at `/mcp`. Meta-config listeners
 require loopback addresses. There is no hot reload; restart to apply changes.
@@ -351,8 +349,10 @@ Inspection never reads wallet secrets or opens treasury state.
 To avoid repeating managed wallet definitions, define one template and an
 automatic assignment policy. To adapt the managed starter, replace its
 `[wallets.research]` definition and reserve with this template/policy and remove
-`wallet = "research"` from the listener. Keep its treasury, funding, source and
-listener settings. This substitutes automatic pools for the explicit pool:
+`wallet = "research"` from the listener. For this variant, also remove the
+`[source_management]` block and the listener's `source_management = true`: dynamic
+sources require an explicitly named wallet. Keep its treasury, funding, source and
+other listener settings. This substitutes automatic pools for the explicit pool:
 
 ```toml
 [wallet_templates.small]
@@ -686,9 +686,9 @@ method, URL, query and JSON body without making a request or loading a signer.
 Authorize agents to register public OpenAPI sources in a running multi-server
 HTTP deployment with `[source_management]` and `source_management = true` on each
 participating endpoint. The [comprehensive example](../examples/deployments/comprehensive.toml)
-uses its existing company pool on the toolbox listener. The
-[agent source guide](agent-sources.md#configuration-and-authority) shows how to add
-this to the starter using its research pool. Registered APIs share that pool's
+uses its existing company pool on the toolbox listener; the managed starter uses
+its research pool. The [agent source guide](agent-sources.md#configuration-and-authority)
+explains persistence and wallet sharing. Registered APIs share their pool's
 existing reserve claims regardless of registration count.
 Registration does not create wallet pools or trigger funding.
 

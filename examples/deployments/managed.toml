@@ -1,4 +1,4 @@
-# Minimal managed deployment: Curl API -> research listener -> research pool.
+# Minimal managed deployment: Exa + agent-added APIs -> research listener -> research pool.
 # Copy beside this file as managed.local.toml before editing.
 # Initialize the treasury with wallet init --config YOUR_LOCAL_CONFIG, then send
 # ZEC to its shielded receive address. Keep the listener token in the environment.
@@ -13,18 +13,23 @@ confidentiality = "public" # Public NEAR settlement; no NEAR signup required.
 
 [wallets.research]
 mode = "zcash_rotation"
-max_api_payment_usdc = "0.05" # Per authorization, independently of reserve size.
+max_api_payment_usdc = "0.50" # Per authorization, independently of reserve size.
 max_conversion_overhead_percent = 5
 
 [wallets.research.reserves.small]
 funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00" # Explicit headroom for bridge minimums.
 
-[sources.curl]
-extends = "../../providers/curl/provider.toml" # Pinned local schema; one POST tool.
+[sources.exa]
+extends = "../../providers/exa.toml" # Web search, page contents and on-demand help.
+
+[source_management]
+wallet = "research" # Agent-added APIs share the existing pool.
+# Registrations last until exit; add registry_file for persistence.
 
 [servers.research]
 listen = "127.0.0.1:8000"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "research"
-sources = ["curl"]
+sources = ["exa"]
+source_management = true

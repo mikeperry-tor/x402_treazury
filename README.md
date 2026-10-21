@@ -53,18 +53,19 @@ and validate configuration. `wallet` manages the treasury; `sources inspect`
 reads persisted agent-added sources. Running `x402_treazury` without a command
 shows help. See the [command reference](docs/configuration.md).
 
-## Quickstart: managed wallet
+<a id="quickstart-managed-wallet"></a>
 
-The [managed starter](examples/deployments/managed.toml) exposes one Curl HTTP
-Request tool on `http://127.0.0.1:8000/mcp`, backed by one rotating wallet pool.
-Its pinned local catalog can be inspected without credentials, treasury state,
-funding or upstream requests:
+## Quickstart: Z-Cash Wallet with Dynamically Managed Tools
+
+The [managed starter](examples/deployments/managed.toml) exposes Exa web search,
+page contents and source-management tools on `http://127.0.0.1:8000/mcp`, backed
+by one rotating wallet pool. Agents can add public APIs using that same pool;
+registrations last until the process exits. Exa's catalog loads from its public
+OpenAPI specification; no Exa API key is required.
 
 ```sh
 scripts/zcash.sh build
 cp examples/deployments/managed.toml examples/deployments/managed.local.toml
-target/release/x402_treazury config check --config examples/deployments/managed.local.toml
-target/release/x402_treazury catalog tools --config examples/deployments/managed.local.toml
 ```
 
 Initialize its treasury explicitly, then start the authenticated listener:
@@ -78,7 +79,7 @@ target/release/x402_treazury serve --config examples/deployments/managed.local.t
 Send ZEC to the shielded receive address printed by initialization. The pool
 requests a $2 USDC reserve, accepting bridge-minimum increases up to $3 before
 fees; allow funds for fees and future replacements. Each payment is capped at
-$0.05. Funding starts after the listener binds, so tools remain visible while
+$0.50. Funding starts after the listener binds, so tools remain visible while
 funding is pending. Connect your MCP client with
 `Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.
 
@@ -391,9 +392,11 @@ inside a `[servers.NAME]` section enables it for that MCP server endpoint. The w
 must reference an existing `[wallets.NAME]` profile.
 
 The [comprehensive deployment](examples/deployments/comprehensive.toml) enables
-this on its toolbox listener using the existing company pool. To add it to the
-[managed starter](examples/deployments/managed.toml), use its existing research
-pool as described in the [agent source guide](docs/agent-sources.md#configuration-and-authority).
+this on its toolbox listener using the existing company pool. The
+[managed starter](examples/deployments/managed.toml) enables it on the research
+listener using its research pool. See the
+[agent source guide](docs/agent-sources.md#configuration-and-authority) for persistence
+and wallet sharing.
 
 Here is an example excerpt:
 

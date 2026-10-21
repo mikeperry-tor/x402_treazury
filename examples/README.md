@@ -1,9 +1,11 @@
 # Deployment examples
 
 Start with [deployments/managed.toml](deployments/managed.toml): one authenticated
-MCP listener, one managed wallet pool and the Curl HTTP Request provider's pinned
-local catalog. The [README quickstart](../README.md#quickstart-managed-wallet)
-walks through building, offline inspection, treasury setup and serving.
+MCP listener, one managed wallet pool, Exa web search and page contents, and
+source management for agent-added APIs. Exa's catalog loads from its public
+specification. Added APIs share the research pool; registrations last until exit.
+The [README quickstart](../README.md#quickstart-managed-wallet) walks through
+building, treasury setup and serving.
 
 [deployments/comprehensive.toml](deployments/comprehensive.toml) combines curated
 research sources, four listeners, two named pools, paid discovery relay and a

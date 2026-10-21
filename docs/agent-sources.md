@@ -160,13 +160,13 @@ and the [comprehensive example's toolbox endpoint](../examples/deployments/compr
 
 ## Configuration and authority
 
-To add source management to [the managed starter](../examples/deployments/managed.toml),
-add the shared block and the flag to its existing listener table:
+The [managed starter](../examples/deployments/managed.toml) already enables source
+management using its research pool. Its settings are:
 
 ```toml
 [source_management]
 wallet = "research" # Existing [wallets.research]; no new pool required.
-registry_file = "../../state/managed-sources.sqlite" # Optional persistence.
+# registry_file = "../../state/managed-sources.sqlite" # Optional persistence.
 
 [servers.research]
 source_management = true
