@@ -230,12 +230,7 @@ fn wallet_clap_conflicts_and_legacy_config_alias_preserve_resolution_boundaries(
             .output()
             .unwrap()
     };
-    for option in [
-        "--network-config",
-        "--state-dir",
-        "--key-file",
-        "--treasury-id",
-    ] {
+    for option in ["--state-dir", "--key-file", "--treasury-id"] {
         let output = run(&[
             "wallet",
             "status",
@@ -249,6 +244,19 @@ fn wallet_clap_conflicts_and_legacy_config_alias_preserve_resolution_boundaries(
         assert!(error.contains("cannot be used with"), "{error}");
         assert!(!error.contains("panicked"));
     }
+    let output = run(&[
+        "wallet",
+        "status",
+        "--config",
+        "missing.toml",
+        "--network-config",
+        "missing-network.toml",
+    ]);
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("reading network config"), "{error}");
+    assert!(!error.contains("cannot be used with"));
+    assert!(!error.contains("panicked"));
     for args in [
         vec![
             "wallet",
