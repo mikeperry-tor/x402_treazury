@@ -562,6 +562,12 @@ Rust configuration is TOML-only. [providers/](../providers/README.md) contains
 the reusable provider definitions. AgentUtility, Glassnode, Concordance,
 Straits and Locus have a `provider.toml` and a locally curated `openapi.json` in their own directory.
 JSON remains the format for API documents, fixture data and inventory output.
+Dynamic curated catalogs retain accepted provider configuration with their schema
+bytes; restart and offline source inspection rebuild that accepted definition.
+Explicit source refresh adopts current bundled settings and schema together.
+Source-management byte limits and wallet/origin policy remain authoritative; its
+explicit read-inactivity setting overrides the provider value, then the network
+default applies. See [source persistence and maintenance](agent-sources.md#persistence-and-operator-maintenance).
 Small PNG/JPEG/WebP results are returned as MCP image attachments; provider TOML
 can also extract explicitly mapped base64/data-URI images from JSON while keeping
 metadata. See [inline image configuration](../providers/README.md#inline-image-results)

@@ -36,8 +36,11 @@ pub struct Selection {
 #[serde(deny_unknown_fields)]
 pub struct Candidate {
     pub name: String,
+    #[serde(default)]
     pub spec_url: String,
     pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<super::curated::AcceptedProvider>,
     #[serde(default)]
     pub selection: Selection,
     #[serde(default)]
@@ -51,6 +54,7 @@ pub struct Candidate {
 pub struct Built {
     pub tools: Vec<ToolSpec>,
     pub base: String,
+    pub instructions: Option<String>,
 }
 fn rejected(reason: &'static str) -> anyhow::Error {
     tracing::warn!(reason, "source import validation rejected");
@@ -80,14 +84,29 @@ pub fn endpoint(policy: &Policy, url: &str) -> Result<reqwest::Url> {
     )?;
     Ok(u)
 }
-pub async fn fetch(policy: &Policy, url: &str) -> Result<Vec<u8>> {
+pub(super) fn read_timeout(
+    policy: &Policy,
+    provider: Option<&super::curated::AcceptedProvider>,
+) -> Option<Duration> {
+    policy
+        .read_timeout_seconds
+        .map(Duration::from_secs)
+        .or_else(|| {
+            provider.and_then(|p| p.settings.read_timeout_seconds.map(Duration::from_secs_f64))
+        })
+}
+pub(super) async fn fetch_with(
+    policy: &Policy,
+    url: &str,
+    provider: Option<&super::curated::AcceptedProvider>,
+) -> Result<Vec<u8>> {
     endpoint(policy, url)?;
     let client = network::global().http_policy(
         &IsolationId::discovery(url)?,
         url,
-        policy.read_timeout_seconds.map(Duration::from_secs),
+        read_timeout(policy, provider),
         true,
-        Default::default(),
+        provider.map(|p| p.settings.transport()).unwrap_or_default(),
     )?;
     fetch_response(policy, client.get(url)).await
 }
@@ -278,7 +297,10 @@ pub fn build(policy: &Policy, c: &Candidate, bytes: &[u8]) -> Result<Built> {
         .context("spec_too_large"));
     }
     validate_source_name(&c.name)?;
-    let spec = endpoint(policy, &c.spec_url)?;
+    let spec = c
+        .remote_spec()
+        .map(|url| endpoint(policy, url))
+        .transpose()?;
     let root = parse_document(bytes)?;
     let paths = root["paths"]
         .as_object()
@@ -289,11 +311,15 @@ pub fn build(policy: &Policy, c: &Candidate, bytes: &[u8]) -> Result<Built> {
         "operation_count_limit",
         "hardcoded_path_count",
     )?;
-    let (base, base_url) = resolve_base(policy, c, &spec, &root)?;
+    let (base, base_url) = resolve_base(policy, c, spec.as_ref(), &root)?;
     validate_paths(paths)?;
-    let tools = selected_tools(c, &root)?;
+    let (tools, instructions) = selected_tools(c, &root)?;
     validate_tools(policy, &tools, &base, &base_url)?;
-    Ok(Built { tools, base })
+    Ok(Built {
+        tools,
+        base,
+        instructions,
+    })
 }
 
 // Inspect reference expansion before deriving any catalog from untrusted JSON.
@@ -320,16 +346,22 @@ fn parse_document(bytes: &[u8]) -> Result<Value> {
 fn resolve_base(
     policy: &Policy,
     c: &Candidate,
-    spec: &reqwest::Url,
+    spec: Option<&reqwest::Url>,
     root: &Value,
 ) -> Result<(String, reqwest::Url)> {
-    let base = if let Some(base) = &c.base_url {
+    let configured = c.base_url.as_ref().or_else(|| {
+        c.provider
+            .as_ref()
+            .and_then(|p| p.settings.base_url.as_ref())
+    });
+    let base = if let Some(base) = configured {
         base.clone()
     } else {
         let server = root["servers"][0]["url"]
             .as_str()
             .context("base_url or OpenAPI server required")?;
-        spec.join(server)
+        spec.map(|spec| spec.join(server))
+            .unwrap_or_else(|| reqwest::Url::parse(server))
             .context("invalid OpenAPI server URL")?
             .to_string()
     };
@@ -378,10 +410,35 @@ fn validate_paths(paths: &serde_json::Map<String, Value>) -> Result<()> {
 /// Rebuild the saved registration's inventory without current admission policy,
 /// listener filtering, transports or payment credentials.
 pub(super) fn saved_tools(c: &Candidate, bytes: &[u8]) -> Result<Vec<ToolSpec>> {
-    selected_tools(c, &parse_document(bytes)?)
+    selected_tools(c, &parse_document(bytes)?).map(|(tools, _)| tools)
 }
 
-fn selected_tools(c: &Candidate, root: &Value) -> Result<Vec<ToolSpec>> {
+impl Candidate {
+    pub(super) fn remote_spec(&self) -> Option<&str> {
+        match &self.provider {
+            Some(provider)
+                if provider.settings.spec.starts_with("https://")
+                    || provider.settings.spec.starts_with("http://") =>
+            {
+                Some(&provider.settings.spec)
+            }
+            Some(_) => None,
+            None => Some(&self.spec_url),
+        }
+    }
+    pub(super) fn same_registration(&self, other: &Self) -> bool {
+        match (&self.provider, &other.provider) {
+            (Some(a), Some(b)) => a.id == b.id,
+            (None, None) => self.spec_url == other.spec_url,
+            _ => false,
+        }
+    }
+}
+
+fn selected_tools(c: &Candidate, root: &Value) -> Result<(Vec<ToolSpec>, Option<String>)> {
+    if let Some(provider) = &c.provider {
+        return super::curated::build(provider, &c.name, root);
+    }
     let cfg = Config {
         spec: c.spec_url.clone(),
         include: c.selection.include.clone(),
@@ -408,7 +465,7 @@ fn selected_tools(c: &Candidate, root: &Value) -> Result<Vec<ToolSpec>> {
             }
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(tools)
+    Ok((tools, None))
 }
 
 fn validate_tools(

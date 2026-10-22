@@ -99,7 +99,7 @@ renew another response's inactivity timer or signed authority.
 | --- | --- |
 | `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, participating discovery origin (up to 3 Tor attempts; promotes on valid JSON or 304) |
 | `pricing.rs` | Startup-only unsigned GET probe, participating discovery origin (up to 3 Tor attempts; promotes on usable 402 or 2xx); successes/failures remain cached |
-| `catalog_state.rs` | Lazy help fetch, help URL discovery origin |
+| `catalog_state.rs` | Lazy help fetch, help URL discovery origin; dynamic bindings retain public-destination policy |
 | `discovery/import.rs` | Agent OpenAPI fetch, discovery origin, public-destination policy |
 | `payment.rs` | Actual unsigned challenge and paid retry, selected EVM payer |
 | `rotation/base.rs` | Participating read-only RPC: address reads by EVM owner; chain/header reads by RPC discovery origin; validates method results before promotion |
@@ -164,8 +164,13 @@ imports, ordinary paid API responses and Curl relay responses, including large
 binary bodies. Waiting for response headers is also subject to this budget.
 Byte limits remain enforced, and partial documents are never published.
 
-A provider/source or source-management `read_timeout_seconds` explicitly overrides
-the network default. Omission inherits it. HTTP pools key on the effective idle
+A provider/source `read_timeout_seconds` explicitly overrides the network default.
+For accepted curated dynamic sources, source-management `read_timeout_seconds`
+wins over the saved provider value, then the network default. That ordering applies
+to schema acquisition/refresh, API responses and lazy help. Generic imports and raw
+calls inherit the network default when source-management omits the override.
+Source-management specification, response and help byte limits remain decisive
+for dynamic operations. HTTP pools key on the effective idle
 budget alongside identity, transport and public-destination policy, preserving
 the exact configured duration, including fractional milliseconds. Cover owners
 use the same exact duration to keep distinct transport policies separate.
@@ -506,8 +511,12 @@ response if optional URL discovery cannot proceed. Provider probes never sign,
 never follow redirects and use existing spec/help byte and response-inactivity limits.
 
 
-Dynamic imports and paid API calls, including source-management `raw_call`, use the
-same factory with a `public_only` pool key. HTTPS, no credentials/fragments, public literal addresses and public hostnames
+Dynamic imports, lazy help and paid API calls, including source-management
+`raw_call`, use the same factory with a `public_only` pool key. Dynamic help uses
+the help URL's discovery-origin identity and validates public destinations at
+execution, as well as during catalog validation. A help origin different from
+the API base must be explicitly present in `allowed_origins`. HTTPS, no
+credentials/fragments, public literal addresses and public hostnames
 are required. In direct mode, a custom resolver rejects the entire result if any
 answer is non-public, and returns only that validated set to the connector. Cached
 connections already target validated addresses; each new DNS lookup repeats the check.
@@ -534,8 +543,12 @@ compatibility. No alternative production HTTP constructor exists.
 Provider HTTPS uses HTTP/2-only ALPN/client mode and a TLS 1.3 minimum by default.
 Provider/source `allow_http1` and `allow_tls12` independently permit older versions,
 without weakening trust, redirect, retry or proxy policy. Catalog, pricing, help
-and paid requests carry the same source policy. Agent imports and dynamic paid
-bindings use strict defaults. Infrastructure adapters retain their existing
+and paid requests carry the same source policy. Accepted curated dynamic sources
+preserve their reviewed compatibility permissions through remote schema
+acquisition, explicit refresh, bound API execution and lazy help. Their
+source-management public-destination policy still applies. Generic specification
+imports, their dynamic bindings and raw calls use strict defaults. No vendor
+transport bypass is introduced. Infrastructure adapters retain their existing
 policy; explicit cleartext HTTP remains unchanged. See the
 [configuration guide](configuration.md#provider-http-and-tls-policy).
 
@@ -581,7 +594,7 @@ financial or qualification authority.
 | --- | --- |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
 | Participating Tor HTTP scope retries: up to 3 attempts total (`1` selected + `2` candidates); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery and `PaidClient` unsigned API/directory/raw stages (internal discovery relay calls remain `SelectionPolicy::Legacy`; Base read-only RPC also participates). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
-| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
+| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP uses explicit source-management override, then accepted provider value, then network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
 | Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
 | Pepper drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. One independently polled engine task preserves progress during checkpoint lock waits; runtime teardown owns cancellation and worker joins. Scan retirement drains without a cutoff. |

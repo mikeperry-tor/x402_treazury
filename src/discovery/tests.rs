@@ -5,6 +5,10 @@ use crate::{
     server::Server,
 };
 use std::collections::BTreeSet;
+#[path = "curated_network_tests.rs"]
+mod curated_network_tests;
+#[path = "curated_tests.rs"]
+mod curated_tests;
 fn listeners(_persistent: bool) -> BTreeMap<String, ListenerConfig> {
     ["writer", "reader", "hidden"].into_iter().map(|id| (id.into(), serde_json::from_value(json!({"listen":"127.0.0.1:0","bearer_token_env":"TEST_TOKEN","sources":[],"source_management":id != "hidden"})).unwrap())).collect()
 }
@@ -458,7 +462,7 @@ async fn public_transport_child() {
     .with_test_root(crate::test_tls::CA);
     crate::network::install_test_context(context);
     let p = policy(None);
-    let bytes = import::fetch(&p, "https://spec.example.com/openapi.json")
+    let bytes = import::fetch_with(&p, "https://spec.example.com/openapi.json", None)
         .await
         .unwrap();
     assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), spec());
@@ -474,13 +478,13 @@ async fn public_transport_child() {
     assert_eq!(signed.load(Ordering::SeqCst), 1);
     for path in ["redirect", "downgrade"] {
         assert!(
-            import::fetch(&p, &format!("https://spec.example.com/{path}"))
+            import::fetch_with(&p, &format!("https://spec.example.com/{path}"), None)
                 .await
                 .is_err()
         );
     }
     assert!(
-        import::fetch(&p, "https://127.0.0.1/openapi.json")
+        import::fetch_with(&p, "https://127.0.0.1/openapi.json", None)
             .await
             .is_err()
     );
@@ -1928,7 +1932,8 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
             .await
             .is_ok()
     );
-    let original = m.fetches.lock().unwrap()["https://api.example.com/active"].clone();
+    let original =
+        m.fetches.lock().unwrap()[&FetchKey::from("https://api.example.com/active")].clone();
     // Churn completed retention beyond capacity; an active fetch is never evicted.
     for n in 0..12 {
         assert!(
@@ -1943,7 +1948,7 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
     }
     assert!(Arc::ptr_eq(
         &original,
-        &m.fetches.lock().unwrap()["https://api.example.com/active"]
+        &m.fetches.lock().unwrap()[&FetchKey::from("https://api.example.com/active")]
     ));
     release.notify_one();
     while let Some(result) = aliases.join_next().await {
@@ -2292,7 +2297,8 @@ async fn static_publication_composes_with_dynamic_commits_and_fences_stale_prici
     let mut priced = m.static_snapshot().await.unwrap();
     priced.views.get_mut("writer").unwrap()[0].tool.description = "startup price".into();
     let second_url = "https://api.example.com/second.json";
-    let cell = m.fetches.lock().unwrap()["https://api.example.com/openapi.json"].clone();
+    let cell =
+        m.fetches.lock().unwrap()[&FetchKey::from("https://api.example.com/openapi.json")].clone();
     m.fetches.lock().unwrap().insert(second_url.into(), cell);
     let (registered, published) = tokio::join!(
         m.invoke(
@@ -2500,7 +2506,7 @@ async fn more_than_sixteen_sources_and_one_hundred_tools_are_accepted() {
         m.fetches
             .lock()
             .unwrap()
-            .insert(url.clone(), Arc::new(cell));
+            .insert(url.as_str().into(), Arc::new(cell));
         m.invoke(
             "writer",
             "x402_treazury_source_add",
@@ -2555,7 +2561,7 @@ async fn register_spec(
     m.fetches
         .lock()
         .unwrap()
-        .insert(url.clone(), Arc::new(cell));
+        .insert(url.as_str().into(), Arc::new(cell));
     m.invoke(
         owner,
         "x402_treazury_source_add",
@@ -3184,10 +3190,10 @@ async fn automatic_source_names_are_readable_collision_safe_and_duplicate_safe()
             result: Ok(Arc::new(serde_json::to_vec(&spec()).unwrap())),
         })
         .unwrap();
-        m.fetches
-            .lock()
-            .unwrap()
-            .insert(format!("https://api.example.com/{path}"), Arc::new(cell));
+        m.fetches.lock().unwrap().insert(
+            format!("https://api.example.com/{path}").as_str().into(),
+            Arc::new(cell),
+        );
     }
     let args = |path| json!({"spec_url":format!("https://api.example.com/{path}")});
     let results = futures_util::future::join_all((0..8).map(|index| {

@@ -32,8 +32,10 @@ explicit `use_recommended_tools = true`; listener filters still apply. Advice
 uses each source's actual generated names without prefix rewriting. Operator
 `catalog tools --all-tools` bypasses advice selection for inspection only and
 retains ordinary filters. Recommendation markers do not change MCP descriptions,
-source owners, payer bindings or invocation identity. Static advice is not inherited
-by agent-imported specifications, and raw calls retain their separate authority.
+source owners, payer bindings or invocation identity. Generic specification imports
+do not inherit provider advice. Accepted curated
+definitions retain recommendation metadata without enabling recommendation selection;
+raw calls retain their separate authority.
 See [catalog selection](configuration.md) for composition and stale-advice behavior.
 
 ## Tool search matching and results
@@ -133,6 +135,14 @@ discovery_search_tool_instructions_text = "Search this listener for its configur
 # When source_management=true, this customizes external directory search:
 sources_search_tool_instructions_text = "Prefer documented research APIs with published OpenAPI specifications."
 ```
+
+Dynamic source guidance is recomposed from the immutable static instruction base
+on every publication. Only enabled registrations with visible tools contribute;
+refresh, removal, restore and static republishing replace that contribution without
+duplication or stale guidance. Listener `instructions_text` replacement, including
+empty suppression, applies to dynamic guidance too. Known canonical tool references
+in provider help descriptions and instructions use their public dynamic names;
+URLs, wire fields and input schemas retain their accepted values.
 
 Clients may cache tool descriptions. Restart/reconnect or refresh tools after
 configuration changes; description changes do not promise a live model-context
@@ -359,8 +369,12 @@ remove them from existing configuration.
 Specifications default to 32 MiB. Other advanced overrides in
 `[source_management]` are `max_spec_bytes`, `max_response_bytes`, `max_help_bytes`,
 `read_timeout_seconds`, and `allowed_origins`. The optional read-inactivity
-override replaces the network default (60 seconds in either transport). Spec and
-API responses have no total HTTP download deadline. `fetch_timeout_seconds` is a
+override takes precedence over an accepted curated provider value, which otherwise
+inherits the network default (60 seconds in either transport). Generic imports and
+raw calls inherit the network default when the source-management value is omitted.
+Source-management response, help and specification byte limits govern dynamic
+operations rather than the provider's static byte settings. Spec, help and API
+responses have no total HTTP download deadline. `fetch_timeout_seconds` is a
 legacy alias.
 
 The endpoint tool quota accepts 1–10,000 and specifications up to 64 MiB.
@@ -391,8 +405,12 @@ Agent destinations require public HTTPS without userinfo or fragments. Local/spe
 addresses, private names, redirects and local files are rejected. Direct connections
 validate DNS answers at dial time. Optional `allowed_origins` narrows specification
 and API destinations to exact canonical HTTPS origins. Undeclared cross-origin API
-routes are rejected. All production traffic uses the network factory; paid dynamic
-clients retain public-destination restrictions.
+routes and help URLs are rejected; a cross-origin help URL requires its origin in
+`allowed_origins`. All production traffic uses the network factory. Dynamic API
+clients and lazy help retain public-destination restrictions at execution, including
+after binding, while help uses its own discovery-origin isolation identity. Accepted
+curated protocol compatibility applies to schema acquisition, refresh, API and help
+through that factory; generic imports and raw calls retain strict defaults.
 
 Tor uses authenticated remote-DNS SOCKS with no direct fallback. Private DNS-answer
 rejection depends on Tor's `ClientRejectInternalAddresses`; the application does not
@@ -418,8 +436,17 @@ for connection, cover-state and Tor reuse limitations.
 ## Persistence and operator maintenance
 
 The separate owner-only SQLite registry holds accepted specification bytes, hashes,
-source UUIDs, endpoint ownership, revisions and tombstones. It contains no
-wallet keys, but URLs and documents can reveal operator interests. Back it up while
+source UUIDs, endpoint ownership, revisions and tombstones. A curated source also
+saves its provider identity and effective catalog settings as one accepted
+definition. Catalog construction applies canonical provider names and name-keyed
+overrides before rebinding tools to `dyn_<registration-name>__<operation>`; the
+provider prefix is not repeated. Accepted settings preserve base repairs,
+compatibility filters, descriptions, help, instructions, pricing metadata and image
+mappings. They do not activate static caches, warming, relays, pricing probes,
+cover configuration or recommendation selection, and grant no wallet/payment
+authority. Legacy generic records retain their existing settings and identity.
+
+The registry contains no wallet keys, but URLs and documents can reveal operator interests. Back it up while
 serving is stopped. Never delete or replace its ownership sidecar while serving.
 Registry files and sidecars cannot alias configuration or treasury paths.
 
@@ -427,9 +454,11 @@ Registry files and sidecars cannot alias configuration or treasury paths.
 `sources inspect --config FILE` reads saved registrations and never creates a missing
 registry. It does not require listener tokens, wallet keys or catalog requests.
 Each source includes `tools`, an array of generated `name`, HTTP `method` and
-`path` entries rebuilt from its accepted specification and saved selection.
+`path` entries rebuilt from its accepted specification and saved catalog settings
+or legacy generic selection. Inspection does not resolve the current bundle.
 Disabled sources retain their saved inventory; removed sources have an empty list
-because removal clears the specification. An invalid saved catalog reports
+because removal clears the specification and accepted provider settings. An invalid
+saved catalog reports
 `tools: null` and `tools_error: "saved_catalog_invalid"` without hiding other
 sources or exposing specification/error prose. Existing registration metadata is
 preserved. Inspection can run while serving and does not acquire registry ownership.
@@ -446,12 +475,20 @@ x402_treazury sources refresh --config FILE --server research --source-id SOURCE
 x402_treazury sources remove --config FILE --server research --source-id SOURCE_ID
 ```
 
-Refresh fetches and validates new bytes through the configured network policy without
-wallet credentials or pricing probes. Removal records a tombstone. Neither command
+Generic refresh fetches and validates new bytes through the configured network
+policy without wallet credentials or pricing probes. Curated refresh resolves the
+current bundled provider definition and acquires its remote or embedded schema,
+then atomically replaces settings, provenance and document together while retaining
+owner, name and source identity and advancing the revision. A missing provider or
+failed refresh preserves the accepted revision. Removal records a tombstone. Neither
+command
 changes wallets, payment reservations, funding/refund records or reconciliation.
 Temporary registrations need no registry maintenance; they disappear on exit.
 
-Restart rebuilds from accepted bytes without vendor requests. Disabled endpoints,
+Restart rebuilds from accepted bytes and saved settings without vendor requests
+or bundle re-resolution; a binary upgrade alone cannot change accepted provider
+semantics. Saved inventory, restoration, publication and refresh use the same
+catalog construction path. Disabled endpoints,
 nonlocal saved bindings, invalid formats and quota conflicts cannot regain access
 silently. Corrupt/unsupported registries fail startup. Persistent additions commit
 before publication; cancelling an accepted commit's waiter cannot undo the write.

@@ -274,9 +274,8 @@ async fn scope_child() {
     assert_eq!(pricing_credentials.0, legacy_discovery.0);
     assert_ne!(pricing_credentials.1, legacy_discovery.1);
     let mut expected = vec![
-        legacy_discovery.clone(),
-        // Public-only imports and lazy help retain separate legacy pools;
-        // participating pricing discovery uses its own fresh-scope pool.
+        // Public-only imports and dynamic lazy help share the guarded legacy
+        // discovery pool; participating pricing uses a fresh-scope pool.
         legacy_discovery,
         pricing_credentials,
     ];
@@ -300,8 +299,8 @@ async fn scope_child() {
         let records = proxy.records.lock().unwrap();
         assert_eq!(
             records.len(),
-            5,
-            "pools separate identity, selection policy and public destination policy"
+            4,
+            "public help shares guarded discovery; identities and selection stay separate"
         );
         assert_eq!(
             records

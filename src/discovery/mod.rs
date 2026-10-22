@@ -1,4 +1,5 @@
 //! Operator-authorized source registration; all paid work stays in the common dispatcher.
+mod curated;
 mod directory;
 mod import;
 pub mod policy;
@@ -14,6 +15,7 @@ use crate::{
     payment::PaidClient,
 };
 use anyhow::{Context, Result, ensure};
+pub use curated::AcceptedProvider;
 pub use import::{Candidate, Lifetime, Selection, Visibility};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -27,6 +29,21 @@ use std::{
 use tokio::sync::{OnceCell, Semaphore};
 use uuid::Uuid;
 const FORMAT: u32 = 1;
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FetchKey {
+    url: String,
+    transport: crate::network::HttpPolicy,
+    timeout: Option<Duration>,
+}
+impl From<&str> for FetchKey {
+    fn from(url: &str) -> Self {
+        Self {
+            url: url.into(),
+            transport: Default::default(),
+            timeout: None,
+        }
+    }
+}
 fn hash(bytes: &[u8]) -> String {
     alloy_primitives::hex::encode(Sha256::digest(bytes))
 }
@@ -92,7 +109,7 @@ pub struct Manager {
     payers: BTreeMap<String, PaidClient>,
     catalog: Arc<CatalogState>,
     inner: Mutex<Inner>,
-    fetches: Mutex<BTreeMap<String, FetchCell>>,
+    fetches: Mutex<BTreeMap<FetchKey, FetchCell>>,
     global_import: Arc<Semaphore>,
     owner_import: BTreeMap<String, Arc<Semaphore>>,
     mutations: Arc<Semaphore>,
@@ -308,62 +325,80 @@ impl Manager {
             let built = import::build(&self.policy, &record.candidate, record.document.as_bytes())?;
             let doc: Value = serde_json::from_str(&record.document)?;
             let ops = crate::catalog::operations(&doc, None)?;
-            for target in &record.targets {
-                let cfg = self.listeners.get(target).context("target_missing")?;
-                let wallet = policy::wallet(&self.policy, cfg);
-                let payer = self
-                    .payers
-                    .get(wallet)
-                    .context("dynamic wallet unavailable")?
-                    .clone()
-                    .with_timeout(self.policy.read_timeout_seconds.map(Duration::from_secs))
-                    .with_download_limits(
-                        self.policy.max_response_bytes,
-                        self.policy.max_help_bytes,
-                    )
-                    .public_destinations();
-                let view = result.views.get_mut(target).context("target_missing")?;
-                for tool in &built.tools {
-                    if !crate::catalog::matches_operation_tags(
-                        &ops,
-                        tool,
-                        &cfg.tags,
-                        &cfg.exclude_tags,
-                    ) || !import::matches(&tool.name, &cfg.include_tools, &cfg.exclude_tools)?
-                    {
-                        continue;
-                    }
-                    ensure!(
-                        !view.iter().any(|t| t.tool.name == tool.name),
-                        "tool_name_collision"
-                    );
-                    view.push(BoundTool {
-                        tool: tool.clone(),
-                        client: payer.clone(),
-                        base: built.base.clone(),
-                        source: Some((record.id.clone(), record.revision)),
-                        help: previous
-                            .views
-                            .get(target)
-                            .and_then(|tools| {
-                                tools.iter().find(|bound| {
-                                    bound.tool.name == tool.name
-                                        && bound.source.as_ref()
-                                            == Some(&(record.id.clone(), record.revision))
-                                })
+            let target = &record.owner;
+            let cfg = self.listeners.get(target).context("target_missing")?;
+            let wallet = policy::wallet(&self.policy, cfg);
+            let payer = self
+                .payers
+                .get(wallet)
+                .context("dynamic wallet unavailable")?
+                .clone()
+                .with_transport(
+                    record
+                        .candidate
+                        .provider
+                        .as_ref()
+                        .map(|p| p.settings.transport())
+                        .unwrap_or_default(),
+                )
+                .with_timeout(import::read_timeout(
+                    &self.policy,
+                    record.candidate.provider.as_ref(),
+                ))
+                .with_download_limits(self.policy.max_response_bytes, self.policy.max_help_bytes)
+                .public_destinations();
+            let view = result.views.get_mut(target).context("target_missing")?;
+            let initial_count = view.len();
+            for tool in &built.tools {
+                if !crate::catalog::matches_operation_tags(&ops, tool, &cfg.tags, &cfg.exclude_tags)
+                    || !import::matches(&tool.name, &cfg.include_tools, &cfg.exclude_tools)?
+                {
+                    continue;
+                }
+                ensure!(
+                    !view.iter().any(|t| t.tool.name == tool.name),
+                    "tool_name_collision"
+                );
+                view.push(BoundTool {
+                    tool: tool.clone(),
+                    client: payer.clone(),
+                    base: built.base.clone(),
+                    source: Some((record.id.clone(), record.revision)),
+                    help: previous
+                        .views
+                        .get(target)
+                        .and_then(|tools| {
+                            tools.iter().find(|bound| {
+                                bound.tool.name == tool.name
+                                    && bound.source.as_ref()
+                                        == Some(&(record.id.clone(), record.revision))
                             })
-                            .map(|bound| bound.help.clone())
-                            .unwrap_or_else(|| Arc::new(OnceCell::new())),
-                    });
+                        })
+                        .map(|bound| bound.help.clone())
+                        .unwrap_or_else(|| Arc::new(OnceCell::new())),
+                });
+            }
+            if view.len() > initial_count
+                && cfg.instructions_text.is_none()
+                && let Some(instructions) = built.instructions.as_ref().filter(|s| !s.is_empty())
+            {
+                let text = result
+                    .instructions
+                    .entry(target.clone())
+                    .or_default()
+                    .get_or_insert_default();
+                if !text.is_empty() {
+                    text.push_str("\n\n");
                 }
-                if !cfg.discover_on_demand {
-                    crate::limits::check(
-                        view.iter().filter(|t| t.source.is_some()).count(),
-                        self.policy.max_tools_per_server,
-                        "server_tool_quota_exceeded",
-                        "max_tools_per_server",
-                    )?;
-                }
+                text.push_str(&format!("[{}]\n{instructions}", record.candidate.name));
+            }
+            if !cfg.discover_on_demand {
+                crate::limits::check(
+                    view.iter().filter(|t| t.source.is_some()).count(),
+                    self.policy.max_tools_per_server,
+                    "server_tool_quota_exceeded",
+                    "max_tools_per_server",
+                )?;
             }
         }
         Ok(result)
@@ -382,9 +417,35 @@ impl Manager {
         result
     }
 
+    #[cfg(test)]
     async fn document(&self, owner: &str, url: &str, refresh: bool) -> Result<Arc<Vec<u8>>> {
+        self.document_with(owner, url, refresh, None).await
+    }
+    async fn source_document(&self, owner: &str, candidate: &Candidate) -> Result<Arc<Vec<u8>>> {
+        match candidate.remote_spec() {
+            Some(url) => {
+                self.document_with(owner, url, false, candidate.provider.as_ref())
+                    .await
+            }
+            None => Ok(Arc::new(curated::local_document(
+                candidate.provider.as_ref().context("provider_required")?,
+            )?)),
+        }
+    }
+    async fn document_with(
+        &self,
+        owner: &str,
+        url: &str,
+        refresh: bool,
+        provider: Option<&curated::AcceptedProvider>,
+    ) -> Result<Arc<Vec<u8>>> {
         let canonical = import::endpoint(&self.policy, url)?.to_string();
         let url = canonical.as_str();
+        let key = FetchKey {
+            url: canonical.clone(),
+            transport: provider.map(|p| p.settings.transport()).unwrap_or_default(),
+            timeout: import::read_timeout(&self.policy, provider),
+        };
         let cell = {
             let mut cache = self.fetches.lock().unwrap();
             cache.retain(|_, cell| {
@@ -396,11 +457,11 @@ impl Manager {
                     done.completed.elapsed() < Duration::from_secs(retention)
                 })
             });
-            if refresh && cache.get(url).is_some_and(|cell| cell.get().is_some()) {
-                cache.remove(url);
+            if refresh && cache.get(&key).is_some_and(|cell| cell.get().is_some()) {
+                cache.remove(&key);
             }
             let max = (128 * 1024 * 1024 / self.policy.max_spec_bytes).min(8);
-            if !cache.contains_key(url) && cache.len() >= max {
+            if !cache.contains_key(&key) && cache.len() >= max {
                 // Never evict active work. Completed retention is optional;
                 // capacity churn must not cause duplicate in-flight fetches.
                 let oldest = cache
@@ -415,7 +476,7 @@ impl Manager {
                 }
             }
             cache
-                .entry(url.into())
+                .entry(key)
                 .or_insert_with(|| Arc::new(OnceCell::new()))
                 .clone()
         };
@@ -432,7 +493,7 @@ impl Manager {
                         .global_import
                         .try_acquire()
                         .map_err(|_| crate::limits::busy("imports_busy", 4))?;
-                    self.fetch_document(url)
+                    self.fetch_document(url, provider)
                         .await
                         .map(Arc::new)
                         .map_err(|_| "source_fetch_failed_or_rejected")
@@ -447,7 +508,11 @@ impl Manager {
         done.result.clone().map_err(anyhow::Error::msg)
     }
 
-    async fn fetch_document(&self, url: &str) -> Result<Vec<u8>> {
+    async fn fetch_document(
+        &self,
+        url: &str,
+        provider: Option<&curated::AcceptedProvider>,
+    ) -> Result<Vec<u8>> {
         #[cfg(test)]
         {
             let fixture = self.fixture_endpoint.lock().unwrap().clone();
@@ -455,7 +520,7 @@ impl Manager {
                 return import::fixture_fetch(&self.policy, &url).await;
             }
         }
-        import::fetch(&self.policy, url).await
+        import::fetch_with(&self.policy, url, provider).await
     }
     pub async fn invoke(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
         crate::limits::check(
@@ -493,6 +558,7 @@ impl Manager {
                 .unwrap_or_else(|| import::default_source_name(&a.spec_url)),
             spec_url: a.spec_url,
             base_url: None,
+            provider: None,
             selection: Selection::default(),
             visibility: Visibility::Server,
             targets: vec![],
@@ -505,7 +571,7 @@ impl Manager {
         if !generated_name {
             self.targets(owner, &candidate)?;
         }
-        let document = self.document(owner, &candidate.spec_url, false).await?;
+        let document = self.source_document(owner, &candidate).await?;
         let id = Uuid::new_v4().to_string();
         import::build(&self.policy, &candidate, &document)?;
         let record = Record {
@@ -569,7 +635,7 @@ impl Manager {
             let mut inner = this.inner.lock().unwrap();
             // Recheck duplicate URLs under the publication lock, including racing adds.
             if let Some(r) = inner.state.records.values().find(|r| {
-                !r.removed && r.owner == owner && r.candidate.spec_url == record.candidate.spec_url
+                !r.removed && r.owner == owner && r.candidate.same_registration(&record.candidate)
             }) {
                 return Ok(this.result(r, &owner, &this.catalog.read()));
             }
@@ -815,8 +881,19 @@ pub async fn maintain_cli_with_network(
             "source_scope_must_be_endpoint_local"
         );
         crate::network::install(cfg.network.clone())?;
-        let bytes = import::fetch(&policy, &record.candidate.spec_url).await?;
-        import::build(&policy, &record.candidate, &bytes)?;
+        let mut candidate = record.candidate.clone();
+        if let Some(provider) = &candidate.provider {
+            candidate.provider = Some(curated::AcceptedProvider::current(&provider.id)?);
+        }
+        let bytes = match candidate.remote_spec() {
+            Some(url) => import::fetch_with(&policy, url, candidate.provider.as_ref()).await?,
+            None => {
+                curated::local_document(candidate.provider.as_ref().context("provider_required")?)?
+            }
+        };
+        import::build(&policy, &candidate, &bytes)?;
+        candidate.spec_url = candidate.remote_spec().unwrap_or_default().to_owned();
+        record.candidate = candidate;
         record.hash = hash(&bytes);
         record.document = String::from_utf8(bytes)?;
         record.format = FORMAT;
@@ -824,6 +901,7 @@ pub async fn maintain_cli_with_network(
     } else {
         record.removed = true;
         record.document.clear();
+        record.candidate.provider = None;
     }
     record.revision = record
         .revision

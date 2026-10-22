@@ -131,8 +131,24 @@ cannot redirect an in-flight call. Search/call uses the readable endpoint-local
 tool name, resolving its current visible binding at invocation; restarts do not
 invalidate the name. Dynamic source UUID/revision still owns execution isolation,
 not an agent-supplied handle. Registration deduplicates canonical specification
-URLs under the publication lock, without a separate result-receipt ledger. Listener filters constrain invocation as well
-as listing. Agent-added sources use the same execution path; see
+URLs under the publication lock, without a separate result-receipt ledger. Accepted
+curated sources carry provider identity and effective catalog settings with their
+exact document bytes. One catalog path applies canonical provider overrides and
+filters before rebinding known tool symbols to `dyn_<registration-name>__<operation>`
+in names, descriptions and instructions. Wire paths, schemas and URLs remain
+unchanged; reviewed response mappings reach the bound invocation. Legacy generic
+records retain their existing default configuration. Restart and saved inventory
+inspection use accepted settings without re-resolving the shipped bundle. Explicit
+curated refresh validates current bundled settings and newly acquired schema bytes
+before replacing the accepted revision atomically. Listener filters constrain
+invocation as well as listing. Dynamic source-management byte limits and current
+operator destination/wallet
+authority govern binding and execution. Source-management read inactivity takes
+precedence over an accepted provider value, then the network default; reviewed
+provider HTTP/TLS permissions reach schema acquisition, refresh, API and help via
+the network factory. Generic imports and raw calls remain strict. Accepted catalog
+settings do not activate static caches, warming, relays, probes, cover configuration
+or recommendation selection. Agent-added sources use the same execution path; see
 [agent source management](agent-sources.md) for endpoint-local registration, persistence and refresh.
 Ordinary serving publishes available local tools before running remote catalog
 discovery, retained relay continuations and startup pricing. Late sources publish complete listener
@@ -140,8 +156,12 @@ views through the same mutation boundary as dynamic registrations. Instructions
 report pending or unavailable sources. Each `tools/list` response also exposes
 listener-specific current instructions, catalog generation and publication-stop
 status in `_meta["x402_treazury/catalog"]`, alongside tools from that snapshot.
-Endpoint `instructions_text` replaces authored source guidance before generated
-availability/conflict notices are appended, including during deferred rebuilds.
+Dynamic source instructions are composed afresh from the immutable static base on
+each publication, including only enabled sources with visible tools. Refresh,
+removal, restoration and static replacement cannot accumulate or retain stale
+provider guidance. Endpoint `instructions_text` replaces authored source guidance
+before generated availability/conflict notices are appended, including empty
+suppression and deferred rebuilds.
 Search-tool instruction fields decorate only exposed wrappers, consistently with
 inspection inventory; they do not change tool access or payment authority.
 Tool search filters the captured snapshot by listener and source before computing
