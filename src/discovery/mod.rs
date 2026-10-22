@@ -324,11 +324,14 @@ impl Manager {
         result.generation = generation;
         let previous = self.catalog.read();
         for record in live.into_iter().filter(|r| r.disabled.is_none()) {
-            let built = import::build(&self.policy, &record.candidate, record.document.as_bytes())?;
-            let doc: Value = serde_json::from_str(&record.document)?;
-            let ops = crate::catalog::operations(&doc, None)?;
             let target = &record.owner;
             let cfg = self.listeners.get(target).context("target_missing")?;
+            let built = import::build_visible(
+                &self.policy,
+                &record.candidate,
+                record.document.as_bytes(),
+                cfg,
+            )?;
             let wallet = policy::wallet(&self.policy, cfg);
             let payer = self
                 .payers
@@ -352,11 +355,6 @@ impl Manager {
             let view = result.views.get_mut(target).context("target_missing")?;
             let initial_count = view.len();
             for tool in &built.tools {
-                if !crate::catalog::matches_operation_tags(&ops, tool, &cfg.tags, &cfg.exclude_tags)
-                    || !import::matches(&tool.name, &cfg.include_tools, &cfg.exclude_tools)?
-                {
-                    continue;
-                }
                 ensure!(
                     !view.iter().any(|t| t.tool.name == tool.name),
                     "tool_name_collision"
@@ -986,23 +984,9 @@ pub async fn maintain_cli_with_network(
             .values()
             .filter(|r| !r.removed && r.disabled.is_none() && r.owner == owner)
         {
-            let built = import::build(&policy, &r.candidate, r.document.as_bytes())?;
-            let document: Value = serde_json::from_str(&r.document)?;
-            let operations = crate::catalog::operations(&document, None)?;
-            for tool in &built.tools {
-                if crate::catalog::matches_operation_tags(
-                    &operations,
-                    tool,
-                    &listener.tags,
-                    &listener.exclude_tags,
-                ) && import::matches(
-                    &tool.name,
-                    &listener.include_tools,
-                    &listener.exclude_tools,
-                )? {
-                    tools += 1;
-                }
-            }
+            tools += import::build_visible(&policy, &r.candidate, r.document.as_bytes(), listener)?
+                .tools
+                .len();
         }
         crate::limits::check(
             tools,

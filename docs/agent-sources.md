@@ -526,7 +526,10 @@ Temporary registrations need no registry maintenance; they disappear on exit.
 Restart rebuilds from accepted bytes and saved settings without vendor requests
 or bundle re-resolution; a binary upgrade alone cannot change accepted provider
 semantics. Saved inventory, restoration, publication and refresh use the same
-catalog construction path. Disabled endpoints,
+catalog construction path. Runtime publication and operator refresh quota checks
+share the listener's tag and tool-name projection, after full catalog validation;
+saved inventory inspection remains unfiltered. A listener may filter every tool
+without invalidating the accepted source. Disabled endpoints,
 nonlocal saved bindings, invalid formats and quota conflicts cannot regain access
 silently. Corrupt/unsupported registries fail startup. Persistent additions commit
 before publication; cancelling an accepted commit's waiter cannot undo the write.

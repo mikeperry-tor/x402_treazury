@@ -558,7 +558,37 @@ async fn public_transport_child() {
             .revision,
         2
     );
-    // On-demand listeners retain the same saved tools despite this eager-list quota.
+    // Eager refresh counts the same filtered inventory as runtime restoration.
+    config_value["servers"]["writer"]
+        .as_table_mut()
+        .unwrap()
+        .insert("tags".into(), toml::Value::try_from(vec!["read"]).unwrap());
+    std::fs::write(&config, toml::to_string(&config_value).unwrap()).unwrap();
+    maintain_cli(&config, "writer", &id, true).await.unwrap();
+    let mut filtered_policy = policy(Some(file.clone()));
+    filtered_policy.max_tools_per_server = 1;
+    let mut filtered_listeners = listeners(true);
+    filtered_listeners.get_mut("writer").unwrap().tags = vec!["read".into()];
+    let restored = manager_with(filtered_policy, filtered_listeners).await;
+    assert_eq!(restored.catalog.read().views["writer"].len(), 1);
+    assert_eq!(
+        restored.catalog.read().views["writer"][0].tool.name,
+        "dyn_refresh__read"
+    );
+    assert_eq!(
+        store::inspect(&file).unwrap()["sources"][0]["tools"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    drop(restored);
+
+    // On-demand listeners retain the complete inventory despite this eager-list quota.
+    config_value["servers"]["writer"]
+        .as_table_mut()
+        .unwrap()
+        .remove("tags");
     config_value["servers"]["writer"]
         .as_table_mut()
         .unwrap()
@@ -572,7 +602,7 @@ async fn public_transport_child() {
             .unwrap()
             .records[&id]
             .revision,
-        3
+        4
     );
     task.abort();
 }

@@ -122,6 +122,88 @@ fn canonical_curated_configuration_applies_before_dynamic_renaming() {
 }
 
 #[test]
+fn listener_projection_preserves_selection_and_validates_hidden_operations() {
+    let candidate = curated_candidate("custom");
+    let mut document = document();
+    document["paths"]["/v1/read"]["post"]["tags"] = json!(["read"]);
+    document["paths"]["/v1/read"]["get"]["tags"] = json!(["write"]);
+    document["paths"]["/v1/other"] = json!({"get":{"tags":["read"]}});
+    document["paths"]["/v1/blocked"] = json!({"get":{"tags":["read","blocked"]}});
+    let bytes = serde_json::to_vec(&document).unwrap();
+    let p = policy(None);
+    for (filters, expected) in [
+        (json!({}), vec!["blocked", "other", "read", "help"]),
+        (json!({"tags":["write"]}), vec![]),
+        (
+            json!({"tags":["read"],"exclude_tags":["blocked"]}),
+            vec!["other", "read"],
+        ),
+        (
+            json!({"exclude_tags":["blocked"]}),
+            vec!["other", "read", "help"],
+        ),
+        (
+            json!({"include_tools":["dyn_custom__r*","dyn_custom__help"]}),
+            vec!["read", "help"],
+        ),
+        (
+            json!({"include_tools":["dyn_custom__*"],"exclude_tools":["*read","*help"]}),
+            vec!["blocked", "other"],
+        ),
+        (json!({"exclude_tools":["*"]}), vec![]),
+    ] {
+        let mut listener = listeners(false).remove("writer").unwrap();
+        let mut value = serde_json::to_value(&listener).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(filters.as_object().unwrap().clone());
+        listener = serde_json::from_value(value).unwrap();
+        let built = import::build_visible(&p, &candidate, &bytes, &listener).unwrap();
+        assert_eq!(
+            built
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|suffix| format!("dyn_custom__{suffix}"))
+                .collect::<Vec<_>>(),
+            "{filters}"
+        );
+        assert!(
+            built
+                .tools
+                .iter()
+                .filter(|tool| tool.name.ends_with("__read"))
+                .all(|tool| tool.method == "POST")
+        );
+        assert!(
+            built.instructions.is_some(),
+            "projection leaves instruction composition to publication"
+        );
+    }
+    let mut hidden = listeners(false).remove("writer").unwrap();
+    hidden.exclude_tools = vec!["*".into()];
+    document["paths"]["/v1/read"]["post"]["servers"] = json!([{"url":"https://other.example.com"}]);
+    assert!(
+        import::build_visible(
+            &p,
+            &candidate,
+            &serde_json::to_vec(&document).unwrap(),
+            &hidden
+        )
+        .is_err()
+    );
+    assert_eq!(
+        import::saved_tools(&candidate, &bytes).unwrap().len(),
+        4,
+        "saved inspection stays unfiltered"
+    );
+}
+
+#[test]
 fn source_management_timeout_wins_then_provider_then_network_inherits() {
     let provider = authored();
     let mut p = policy(None);

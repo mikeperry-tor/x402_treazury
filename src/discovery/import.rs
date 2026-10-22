@@ -322,6 +322,33 @@ pub fn build(policy: &Policy, c: &Candidate, bytes: &[u8]) -> Result<Built> {
     })
 }
 
+/// Project a fully validated catalog into a listener's visible tool inventory.
+/// Publication and operator refresh use this same selection before counting quota.
+pub(super) fn build_visible(
+    policy: &Policy,
+    candidate: &Candidate,
+    bytes: &[u8],
+    listener: &crate::deployment::ListenerConfig,
+) -> Result<Built> {
+    let mut built = build(policy, candidate, bytes)?;
+    let document: Value = serde_json::from_slice(bytes)?;
+    let operations = catalog::operations(&document, None)?;
+    let mut visible = Vec::new();
+    for tool in built.tools {
+        if catalog::matches_operation_tags(
+            &operations,
+            &tool,
+            &listener.tags,
+            &listener.exclude_tags,
+        ) && matches(&tool.name, &listener.include_tools, &listener.exclude_tools)?
+        {
+            visible.push(tool);
+        }
+    }
+    built.tools = visible;
+    Ok(built)
+}
+
 // Inspect reference expansion before deriving any catalog from untrusted JSON.
 fn parse_document(bytes: &[u8]) -> Result<Value> {
     let root: Value =
