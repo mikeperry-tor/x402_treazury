@@ -6,11 +6,10 @@ use serde_json::{Map, Value, json};
 pub const NAME: &str = "x402_treazury_providers_list";
 
 fn pagination_properties() -> Map<String, Value> {
-    let properties = &directory::tool("/services").input_schema["properties"];
-    ["page", "per_page"]
-        .into_iter()
-        .map(|name| (name.into(), properties[name].clone()))
-        .collect()
+    json!({
+        "page":{"type":"integer","minimum":1,"default":1,"description":"Page number, starting at 1."},
+        "per_page":{"type":"integer","minimum":1,"default":crate::limits::DEFAULT_PAGE_SIZE,"description":"Results per page. Defaults to 25; accepts any positive integer."}
+    }).as_object().unwrap().clone()
 }
 
 pub fn list_schema() -> Value {
@@ -66,7 +65,7 @@ fn browse(query: Option<&str>, args: &Map<String, Value>) -> Result<Value> {
             .unwrap_or_else(|| {
                 Ok(properties[name]["default"]
                     .as_u64()
-                    .expect("directory pagination default"))
+                    .expect("local pagination default"))
             })
     };
     crate::providers::browse(query, integer("page")?, integer("per_page")?)

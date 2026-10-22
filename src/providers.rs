@@ -122,10 +122,7 @@ fn browse_providers(
     per_page: u64,
 ) -> Result<Value> {
     ensure!(page >= 1, "page must be at least 1");
-    ensure!(
-        (1..=100).contains(&per_page),
-        "per_page must be between 1 and 100"
-    );
+    ensure!(per_page >= 1, "per_page must be at least 1");
     let query = q.unwrap_or_default().trim().to_lowercase();
     let matched: Vec<_> = providers
         .iter()
@@ -146,7 +143,7 @@ fn browse_providers(
     let items: Vec<_> = matched
         .into_iter()
         .skip(usize::try_from(offset).unwrap_or(usize::MAX))
-        .take(per_page as usize)
+        .take(per_page.min(total) as usize)
         .map(Provider::metadata)
         .collect();
     Ok(json!({
@@ -297,6 +294,15 @@ mod tests {
             json!([])
         );
         assert!(browse_providers(&entries, None, 0, 1).is_err());
-        assert!(browse_providers(&entries, None, 1, 101).is_err());
+        for size in [101, u32::MAX as u64 + 1, u64::MAX] {
+            assert_eq!(
+                browse_providers(&entries, None, 1, size).unwrap()["items"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
+        }
+        assert!(browse_providers(&entries, None, 1, 0).is_err());
     }
 }

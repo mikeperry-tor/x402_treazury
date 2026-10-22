@@ -85,7 +85,8 @@ impl Client {
         let mut cursor = Value::Null;
         let mut seen_cursors = BTreeSet::new();
         let mut complete = false;
-        for page in 0..100 {
+        // Preserve the 10,000-tool qualification allowance at 25 tools per page.
+        for page in 0..400 {
             let (_, result) = self
                 .rpc(
                     &format!("qualification-inventory-{page}"),
@@ -129,7 +130,7 @@ impl Client {
         }
         ensure!(
             complete,
-            "MCP inventory exceeds 100-page qualification limit; inventory is incomplete"
+            "MCP inventory exceeds 400-page qualification limit; inventory is incomplete"
         );
         Ok(actual)
     }

@@ -56,6 +56,16 @@ pub fn search_schema() -> Value {
             properties.insert(name.clone(), field);
         }
     }
+    // Shared fields must admit local sizes; remote branches retain upstream bounds.
+    properties
+        .get_mut("per_page")
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("maximum");
+    properties["per_page"]["description"] = json!(
+        "Results per page, default 25. Local browsing accepts any positive integer; remote directory browse accepts at most 100."
+    );
     properties.insert("local_only".into(), json!({
         "type":"boolean","default":false,
         "description":"When true, search bundled provider metadata offline with q and browse pagination only. No directory requests, wallet work or automatic remote fallback. False or omitted uses the external directory."
@@ -76,7 +86,7 @@ pub fn search_schema() -> Value {
             .unwrap()
             .keys()
             .filter(|name| name.as_str() != "network")
-            .map(|name| (name.clone(), json!({})))
+            .map(|name| (name.clone(), schema["properties"][name].clone()))
             .collect();
         allowed.insert("mode".into(), json!({"const":mode}));
         allowed.insert("local_only".into(), json!({"const":false}));

@@ -1864,6 +1864,7 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
         (directory::SEARCH, json!({"mode":"best","prefer":"invalid"})),
         (directory::SEARCH, json!({"mode":"invalid"})),
         (directory::SEARCH, json!({"q":null})),
+        (directory::SEARCH, json!({"per_page":101})),
         (directory::DETAILS, json!({"slug":""})),
         (directory::DETAILS, json!({"slug":".."})),
         (directory::DETAILS, json!({"slug":"."})),
@@ -1910,7 +1911,19 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
             if name == "network" {
                 continue;
             }
+            let branch = if path == "/services" { 0 } else { 1 };
+            assert_eq!(schema["oneOf"][branch]["properties"][name], *field);
             let mut merged = schema["properties"][name].clone();
+            if name == "per_page" {
+                assert!(merged.get("maximum").is_none());
+                assert_eq!(schema["oneOf"][2]["properties"]["per_page"]["default"], 25);
+                assert!(
+                    schema["oneOf"][2]["properties"]["per_page"]
+                        .get("maximum")
+                        .is_none()
+                );
+                continue;
+            }
             let original_description = field["description"].as_str().unwrap();
             assert!(
                 merged["description"]
@@ -2154,7 +2167,7 @@ async fn on_demand_management_keeps_seven_wrappers_and_scoped_dynamic_search() {
     let template = snapshot.views["writer"][0].clone();
     snapshot.views.insert(
         "writer".into(),
-        (0..6)
+        (0..26)
             .map(|i| {
                 let mut tool = template.clone();
                 tool.tool.name = format!("fixture_{i}");
@@ -2167,7 +2180,7 @@ async fn on_demand_management_keeps_seven_wrappers_and_scoped_dynamic_search() {
     let page = call(&base, "x402_treazury_tools_search", json!({})).await;
     assert_eq!(
         page["structuredContent"]["items"].as_array().unwrap().len(),
-        5
+        25
     );
     let next = call(
         &base,
@@ -3403,3 +3416,111 @@ async fn simplified_tool_wrappers_reject_old_fields_and_filtered_names() {
 
 #[path = "provider_registration_tests.rs"]
 mod provider_registration_tests;
+
+#[tokio::test]
+async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
+    let m = manager(None).await;
+    add(&m, "demo", "", "").await;
+    let template = m.catalog.read().views["writer"][0].clone();
+    for owner in ["hidden", "writer"] {
+        let (base, task) = listen(crate::server::http_app(
+            server(&m, owner),
+            "test-token".into(),
+        ))
+        .await;
+        for count in [0, 25, 50, 51] {
+            let mut snapshot = (*m.catalog.read()).clone();
+            snapshot.generation += 1;
+            snapshot.views.insert(owner.into(), (0..count).map(|i| {
+                let mut bound = template.clone();
+                bound.source = None;
+                bound.tool.name = format!("tool_{i}");
+                bound.tool.description = "Complete description 雪".repeat(100);
+                bound.tool.input_schema = json!({"type":"object","properties":{"nested":{"type":"array","items":{"type":"object","properties":{"value":{"type":"string"}}}}}});
+                bound
+            }).collect());
+            m.catalog.publish(snapshot);
+            let mut expected: Vec<Value> =
+                tools::listener_definitions(owner == "writer", false, None, None, &[])
+                    .into_iter()
+                    .map(|t| serde_json::to_value(t).unwrap())
+                    .collect();
+            expected.extend(m.catalog.read().views[owner].iter().map(|b| json!({"name":b.tool.name,"description":b.tool.description,"inputSchema":b.tool.input_schema})));
+            let mut actual = Vec::new();
+            let mut params = json!({});
+            loop {
+                let result = rpc(&base, "test-token", "tools/list", params).await;
+                let page = result["tools"].as_array().unwrap();
+                assert!(page.len() <= 25);
+                actual.extend(page.iter().cloned());
+                if result["nextCursor"].is_null() {
+                    break;
+                }
+                assert_eq!(page.len(), 25);
+                params = json!({"cursor":result["nextCursor"]});
+            }
+            assert_eq!(actual, expected);
+            let searched = if owner == "hidden" {
+                search_catalog(&m.catalog, owner, "x402_treazury_tools_search", json!({})).unwrap()
+            } else {
+                m.invoke(owner, "x402_treazury_tools_search", json!({}))
+                    .await
+                    .unwrap()
+            };
+            assert_eq!(searched["items"].as_array().unwrap().len(), count.min(25));
+            for limit in [101, u32::MAX as u64 + 1, u64::MAX] {
+                let result = search_catalog_query(
+                    &m.catalog,
+                    owner,
+                    "x402_treazury_tools_search",
+                    serde_json::from_value(json!({"limit":limit})).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(result["items"].as_array().unwrap().len(), count);
+            }
+            for limit in [json!(0), json!(-1), json!(1.5)] {
+                assert!(
+                    search_catalog(
+                        &m.catalog,
+                        owner,
+                        "x402_treazury_tools_search",
+                        json!({"limit":limit})
+                    )
+                    .is_err()
+                );
+            }
+        }
+        let first = rpc(&base, "test-token", "tools/list", json!({})).await;
+        let cursor = first["nextCursor"].clone();
+        let other = if owner == "hidden" {
+            "writer"
+        } else {
+            "hidden"
+        };
+        let (other_base, other_task) = listen(crate::server::http_app(
+            server(&m, other),
+            "test-token".into(),
+        ))
+        .await;
+        let invalid = |url: String, cursor: Value| async move {
+            let response: Value = crate::network::discovery(&url, Duration::from_secs(5)).unwrap().post(format!("{url}/mcp"))
+                .bearer_auth("test-token").header("accept", "application/json, text/event-stream")
+                .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":cursor}}))
+                .send().await.unwrap().mcp_json().await.unwrap();
+            assert!(
+                response["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("stale or invalid cursor")
+            );
+        };
+        invalid(other_base, cursor.clone()).await;
+        invalid(base.clone(), json!("invalid")).await;
+        let mut snapshot = (*m.catalog.read()).clone();
+        snapshot.generation += 1;
+        m.catalog.publish(snapshot);
+        invalid(base, cursor).await;
+        task.abort();
+        other_task.abort();
+    }
+}

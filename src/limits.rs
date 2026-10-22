@@ -1,5 +1,7 @@
 //! Explicit resource rejection; never return a partial document as successful data.
 use anyhow::{Result, bail};
+/// Public inventory page selection; not a total-result or acquisition bound.
+pub const DEFAULT_PAGE_SIZE: usize = 25;
 pub const MCP_REQUEST_BYTES: usize = 4 * 1024 * 1024;
 pub const RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 pub const HELP_BYTES: usize = 4 * 1024 * 1024;

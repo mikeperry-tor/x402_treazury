@@ -292,7 +292,7 @@ async fn inventory_prepared_validation_occurs_after_both_traversals() {
 }
 
 #[tokio::test]
-async fn inventory_page_bounds_accept_terminal_hundredth_page_in_each_protocol() {
+async fn inventory_page_bounds_accept_terminal_page_in_each_protocol() {
     for discovery in [false, true] {
         for terminal in [true, false] {
             let mut replies = Vec::new();
@@ -301,8 +301,9 @@ async fn inventory_page_bounds_accept_terminal_hundredth_page_in_each_protocol()
                 replies.push(json!({"tools":[]}));
                 trace.push(inventory_request(0, None, false));
             }
-            for page in 0..100 {
-                let cursor = if page == 99 && terminal {
+            let pages = if discovery { 100 } else { 400 };
+            for page in 0..pages {
+                let cursor = if page == pages - 1 && terminal {
                     Value::Null
                 } else {
                     json!(format!("page-{page}"))
@@ -315,7 +316,7 @@ async fn inventory_page_bounds_accept_terminal_hundredth_page_in_each_protocol()
                 let previous = (page > 0).then(|| format!("page-{}", page - 1));
                 trace.push(inventory_request(page, previous.as_deref(), discovery));
             }
-            inventory_case(replies,json!({"tools":[],"discover_on_demand":discovery}),if terminal {None}else if discovery {Some("MCP discovered inventory exceeds 100-page limit")}else{Some("MCP inventory exceeds 100-page qualification limit; inventory is incomplete")},trace).await;
+            inventory_case(replies,json!({"tools":[],"discover_on_demand":discovery}),if terminal {None}else if discovery {Some("MCP discovered inventory exceeds 100-page limit")}else{Some("MCP inventory exceeds 400-page qualification limit; inventory is incomplete")},trace).await;
         }
     }
 }

@@ -271,7 +271,7 @@ and HTTP/2 authority validation still follow the MCP library's protocol rules.
 To reduce the initial tool context for a listener, add `discover_on_demand = true`
 to its `[servers.NAME]` table (default: `false`). It advertises only search/call
 wrappers, or all seven management wrappers when `source_management = true`.
-Search returns complete tool descriptions and schemas, five results at a time by
+Search returns complete tool descriptions and schemas, 25 results at a time by
 default. Filters, payment routing, source permissions, and startup catalog loading
 are unchanged. Queries use BM25 keyword ranking over names, descriptions and
 parameter names, with literal substring matches prioritized. Omit the query to
@@ -694,6 +694,13 @@ Filters accept comma-separated values. Supported
 Use `--help` for the complete CLI. `catalog route NAME --args '{...}'` prints
 method, URL, query and JSON body without making a request or loading a signer.
 
+All MCP listeners paginate `tools/list` at 25 definitions per page. Follow
+`nextCursor` until absent. Tool search also defaults to 25; explicit positive
+`limit` values are supported without a local ceiling. Cursors bind the listener
+and catalog snapshot; publication requires restarting enumeration. Remote directory
+browse defaults to 25 and retains its upstream maximum of 100. Pagination selects
+pages and does not reject or trim the full inventory.
+
 ## Optional agent API discovery
 
 Authorize agents to register public OpenAPI sources in a running multi-server
@@ -722,7 +729,7 @@ specification URLs return the accepted registration on that endpoint. See the [a
 `x402_treazury_providers_list` enumerates the embedded provider catalog offline;
 `sources_search` with `local_only=true` searches the same metadata by case-insensitive
 substring across ID, name, description and declared API base. Both support `page`
-(default 1) and `per_page` (default 25, range 1–100). Local search accepts only `q`,
+(default 1) and `per_page` (default 25, any positive integer). Local search accepts only `q`,
 those pagination fields and omitted or `browse` mode; directory filters/ranking are
 rejected before I/O. These tools perform no wallet or network work and never fall
 back to the remote directory. Omitted or false `local_only` retains remote search.

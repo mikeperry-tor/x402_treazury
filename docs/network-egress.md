@@ -608,6 +608,7 @@ financial or qualification authority.
 
 | Timer or bound | Purpose and behavior |
 | --- | --- |
+| Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote directory browse retains upstream maximum 100. Follow continuations for complete inventories. |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
 | Participating Tor HTTP scope retries: up to 3 attempts total (`1` selected + `2` candidates); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery and `PaidClient` unsigned API/directory/raw stages (internal discovery relay calls remain `SelectionPolicy::Legacy`; Base read-only RPC also participates). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
 | HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP uses explicit source-management override, then accepted provider value, then network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |

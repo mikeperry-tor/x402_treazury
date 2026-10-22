@@ -112,6 +112,22 @@ async fn local_search_and_list_work_without_any_wallet_or_network_client() {
         first["items"][0]["provider_id"],
         second["items"][0]["provider_id"]
     );
+    assert_eq!(list["per_page"], 25);
+    for size in [101, u32::MAX as u64 + 1, u64::MAX] {
+        let all = m
+            .invoke("writer", local::NAME, json!({"per_page":size}))
+            .await
+            .unwrap();
+        let total = all["total"].as_u64().unwrap();
+        assert_eq!(
+            all["items"].as_array().unwrap().len() as u64,
+            size.min(total)
+        );
+        assert_eq!(
+            all["next_page"],
+            json!(if size < total { Some(2) } else { None })
+        );
+    }
     assert!(m.fetches.lock().unwrap().is_empty());
     assert!(m.inner.lock().unwrap().state.records.is_empty());
 }
@@ -127,7 +143,7 @@ async fn local_arguments_and_authority_reject_before_wallet_lookup() {
         json!({"local_only":true,"max_price_usd":1}),
         json!({"local_only":true,"q":null}),
         json!({"local_only":true,"page":0}),
-        json!({"local_only":true,"per_page":101}),
+        json!({"local_only":true,"per_page":0}),
     ] {
         let error = m
             .invoke_sources_search("writer", args.as_object().unwrap())

@@ -11,7 +11,7 @@ fn search_schema() -> Value {
             "source_name": {"type":"string", "description":"Optional registered source name, preserved exactly and case-sensitive. Restricts search to this source on this endpoint. Omit to search configured and registered APIs together."},
             "query": {"type":"string", "description":"Optional BM25 keyword search over tool names, descriptions and top-level parameter names. Lowercase Unicode alphanumeric terms match with OR semantics, so 'yelp reviews' need not be adjacent. Literal name/description substring matches rank first, then BM25 relevance. No semantic, fuzzy, wildcard or Boolean query syntax. Omit query or pass blank text to enumerate all tools in the selected scope; follow next_cursor for more results."},
             "cursor": {"type":"string", "description":"Opaque next_cursor from the preceding result. Reuse the same query and source filter; catalog changes invalidate cursors."},
-            "limit": {"type":"integer", "minimum":1, "maximum":100, "description":"Maximum results per page, from 1 to 100. Defaults to 5 with on-demand discovery, otherwise 20."}
+            "limit": {"type":"integer", "minimum":1, "default":crate::limits::DEFAULT_PAGE_SIZE, "description":"Maximum results per page. Any positive integer; defaults to 25."}
         }),
         &[],
     )

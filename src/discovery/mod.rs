@@ -128,7 +128,7 @@ struct Query {
     source_name: Option<String>,
     query: Option<String>,
     cursor: Option<String>,
-    limit: Option<usize>,
+    limit: Option<u64>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -806,16 +806,7 @@ fn search_catalog_query(
         })
         .collect();
     let available = candidates.len();
-    let values = relevance::rank(candidates, q.query.as_deref().unwrap_or_default())
-        .into_iter()
-        .map(|t| {
-            json!({
-                "tool_id": t.tool.name,
-                "description": t.tool.description,
-                "input_schema": t.tool.input_schema
-            })
-        })
-        .collect();
+    let values = relevance::rank(candidates, q.query.as_deref().unwrap_or_default());
     page(
         values,
         &q,
@@ -836,14 +827,17 @@ fn epoch() -> u64 {
         .as_secs()
 }
 fn page(
-    values: Vec<Value>,
+    values: Vec<&crate::catalog_state::BoundTool>,
     query: &Query,
     generation: u64,
     available: usize,
     scope: &str,
 ) -> Result<Value> {
-    let limit = query.limit.unwrap_or(20);
-    ensure!((1..=100).contains(&limit), "invalid page size");
+    let limit = query
+        .limit
+        .unwrap_or(crate::limits::DEFAULT_PAGE_SIZE as u64);
+    ensure!(limit > 0, "invalid page size");
+    let limit = limit.min(values.len() as u64) as usize;
     let prefix = format!("{}:{generation}:", hash(scope.as_bytes()));
     let offset = if let Some(cursor) = &query.cursor {
         cursor
@@ -855,8 +849,11 @@ fn page(
     };
     ensure!(offset <= values.len(), "invalid cursor");
     let end = offset.saturating_add(limit).min(values.len());
+    let items: Vec<_> = values[offset..end].iter().map(|t| json!({
+        "tool_id":t.tool.name, "description":t.tool.description, "input_schema":t.tool.input_schema
+    })).collect();
     let mut result = json!({
-        "items":values[offset..end],
+        "items":items,
         "available":available,
         "total":values.len(),
         "catalog_generation":generation,

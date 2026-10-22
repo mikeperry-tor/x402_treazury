@@ -94,10 +94,7 @@ impl Server {
         if self.discover_on_demand {
             match name {
                 "x402_treazury_tools_search" => {
-                    let mut args = args.clone();
-                    args.entry("limit".to_owned())
-                        .or_insert(serde_json::json!(5));
-                    let args = serde_json::Value::Object(args);
+                    let args = serde_json::Value::Object(args.clone());
                     let result = match self
                         .discovery
                         .as_ref()
@@ -229,7 +226,7 @@ impl ServerHandler for Server {
             .unwrap_or(&self.instructions);
         let mut instructions = pricing_instructions(authored.as_deref());
         if self.discover_on_demand {
-            instructions.push_str("\n\nAPI tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a small limit (default 5) to read complete descriptions and input schemas, then pass the returned tool_id and arguments to x402_treazury_tool_call. Discovery and calls stay within this listener's configured tools and wallets.");
+            instructions.push_str("\n\nAPI tools are discovered on demand. Use x402_treazury_tools_search with a targeted query and a limit (default 25) to read complete descriptions and input schemas, then pass the returned tool_id and arguments to x402_treazury_tool_call. Discovery and calls stay within this listener's configured tools and wallets.");
         }
         if self.catalog.publication_failed() {
             instructions.push_str("\n\nDeferred catalog publication has stopped. Sources listed as PENDING are unavailable until restart.");
@@ -257,21 +254,18 @@ impl ServerHandler for Server {
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
         let snapshot = self.catalog.read();
-        let mut tools = self.management_tools(&snapshot);
-        if !self.discover_on_demand {
-            tools.extend(
-                snapshot
-                    .views
-                    .get(&self.catalog_server)
-                    .into_iter()
-                    .flatten()
-                    .map(|t| Self::definition(&t.tool)),
-            );
-        }
-        let dynamic = self
-            .discovery
-            .as_ref()
-            .is_some_and(|m| m.enabled(&self.catalog_server));
+        let management = self.management_tools(&snapshot);
+        let api = snapshot
+            .views
+            .get(&self.catalog_server)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let api = if self.discover_on_demand {
+            &[][..]
+        } else {
+            api
+        };
+        let count = management.len() + api.len();
         let prefix = format!(
             "{}:{}:{}:",
             self.catalog.instance(),
@@ -283,7 +277,7 @@ impl ServerHandler for Server {
                 .strip_prefix(&prefix)
                 .and_then(|o| o.parse::<usize>().ok())
             {
-                Some(o) if dynamic && o <= tools.len() => o,
+                Some(o) if o <= count => o,
                 _ => {
                     return Err(McpError::invalid_params(
                         "stale or invalid cursor: restart listing",
@@ -294,11 +288,9 @@ impl ServerHandler for Server {
         } else {
             0
         };
-        let end = if dynamic {
-            offset.saturating_add(100).min(tools.len())
-        } else {
-            tools.len()
-        };
+        let end = offset
+            .saturating_add(crate::limits::DEFAULT_PAGE_SIZE)
+            .min(count);
         let mut meta = MetaObject::new();
         meta.insert("x402_treazury/catalog".into(), serde_json::json!({
             "generation": snapshot.generation,
@@ -307,8 +299,13 @@ impl ServerHandler for Server {
         }));
         Ok(ListToolsResult {
             meta: Some(meta),
-            next_cursor: (end < tools.len()).then(|| format!("{prefix}{end}")),
-            tools: tools[offset..end].to_vec(),
+            next_cursor: (end < count).then(|| format!("{prefix}{end}")),
+            tools: (offset..end)
+                .map(|index| match management.get(index) {
+                    Some(tool) => tool.clone(),
+                    None => Self::definition(&api[index - management.len()].tool),
+                })
+                .collect(),
             ..Default::default()
         })
     }

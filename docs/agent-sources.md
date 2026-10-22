@@ -10,7 +10,7 @@ out of `tools/list`.
 Agents search the listener's catalog with `x402_treazury_tools_search`, receive
 complete descriptions and input schemas, and invoke a result through
 `x402_treazury_tool_call` using its readable `tool_id` and `arguments`. On-demand
-search defaults to five results per page; `query`, `limit` (1–100), and `cursor`
+search defaults to 25 results per page; `query`, positive integer `limit`, and `cursor`
 support targeted discovery and pagination. A broad search can still return large
 schemas. By default, provider instructions remain available in the initialization response.
 
@@ -60,8 +60,7 @@ Omit `query`, or pass empty/whitespace text, to enumerate every tool in the sele
 scope in catalog order. Omit `source_name` to search configured and registered APIs together. Set it to
 a registration name to restrict the search to that source. Results
 are paginated: pass the returned `next_cursor` with the same query and source filter
-until it is null. On-demand discovery defaults to five results per page; ordinary
-source-management search defaults to twenty. `limit` accepts 1–100 in either mode.
+until it is null. All tool search defaults to 25 results per page. `limit` accepts any positive integer.
 
 Each response includes:
 
@@ -94,7 +93,7 @@ Ranking preserves complete descriptions, schemas and payment bindings.
 metadata: IDs, display names, capability descriptions and declared API bases use
 case-insensitive substring matching, ordered by stable provider ID. Omitted or
 blank `q` enumerates the bundle. `page` defaults to 1; `per_page` defaults to 25
-and accepts 1–100. Only omitted or `browse` mode is allowed; directory filters,
+and accepts any positive integer. Only omitted or `browse` mode is allowed; directory filters,
 ranking arguments and `best` fail before I/O. `x402_treazury_providers_list` accepts
 only the same pagination fields and shares this projection with blank local search.
 Both return `items`, `total`, `page`, `per_page` and `next_page`; each item includes
@@ -108,7 +107,7 @@ rather than the endpoint's loaded tools. The local selector is stripped before
 remote dispatch. Matching is performed upstream: `mode=browse` (default) uses
 case-insensitive
 substring matching across service name, description, category and base URL, with
-pagination. `mode=best` uses x402 List's relevance and quality ranking, matching
+pagination (default 25, upstream maximum 100 per page). `mode=best` uses x402 List's relevance and quality ranking, matching
 service metadata plus AI-derived capability tags and summaries. Neither mode uses
 the local tool catalog's BM25 ranking or literal-match priority. A nonadjacent
 multiword query that works in `tools_search` may therefore need fewer keywords in
@@ -389,7 +388,7 @@ those API definitions out of `tools/list`. HTTP is stateless and does not advert
 list-change notifications, so clients may cache their inventory. Search/call remains
 usable with that cached inventory. Search cursors bind the running catalog,
 endpoint, query/filter and generation; stale cursors require restarting pagination.
-Tool-list pages contain at most 100 entries on enabled endpoints. Descriptions and
+All listeners return at most 25 definitions per `tools/list` page. Follow `nextCursor` until absent; cursors bind the listener and snapshot, and catalog publication invalidates them. Descriptions and
 schemas are not silently truncated.
 
 ## Limits and network policy
