@@ -19,7 +19,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
 [Plans](plans/) describe unfinished work, including
-[Coinbase curated discovery and workflow bundles](plans/coinbase_discovery.md),
+[Coinbase curated search with paid relay fallback](plans/coinbase_discovery.md),
 artifact storage and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md). The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
