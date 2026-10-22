@@ -114,6 +114,10 @@ service failures are free. Credit conversion preserves this separate error charg
 alongside the AI-transcription surcharge terms.
 
 Uses the vendor's platform tags; all platforms are included by default.
+The bundled configuration deliberately omits `GET /health` as an unneeded utility;
+it is documented as free but carries no structured credit metadata. This is an
+inventory preference, not a payment incompatibility. Other public `System`
+operations remain available.
 Account identity, monitor ownership and webhook lifecycle are excluded. Exact
 GET/POST parent exclusions preserve the public stateless
 `GET /v1/monitors/sources` child. Diagnostics and ordinary ask remain available.

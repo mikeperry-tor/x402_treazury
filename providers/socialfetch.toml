@@ -3,7 +3,8 @@ spec = "https://www.socialfetch.dev/openapi.json"
 name = "SocialFetch"
 base_url = "https://api.socialfetch.dev"
 prefix = "socialfetch"
-exclude_operations = ["GET /v1/monitors", "POST /v1/monitors"]
+# Health is an intentionally omitted utility, not a payment incompatibility.
+exclude_operations = ["GET /health", "GET /v1/monitors", "POST /v1/monitors"]
 exclude = ["/v1/whoami", "/v1/balance", "/v1/monitors/{id}", "/v1/webhook-endpoints", "/v1/webhook-deliveries"]
 include = ["/v1", ""]
 exclude_tags = ["Auth"]

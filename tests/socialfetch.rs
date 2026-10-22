@@ -16,8 +16,13 @@ fn platform_tags_names_pricing_and_routing_preserve_versions() {
     // Synthetic public metadata witness, not a captured vendor operation.
     root["paths"]["/v1/webhook-public-info"] =
         json!({"get":{"summary":"Public webhook metadata","tags":["System"],"security":[]}});
+    // The live health operation lacks credit metadata and is deliberately omitted
+    // from the bundled tools, while other public System operations remain visible.
+    root["paths"]["/health"] =
+        json!({"get":{"description":"Check API availability.","tags":["System"]}});
     let all = build_tools(&cfg, &root, "socialfetch").unwrap();
     for path in [
+        "/health",
         "/v1/monitors",
         "/v1/monitors/{id}",
         "/v1/monitors/{id}/events",

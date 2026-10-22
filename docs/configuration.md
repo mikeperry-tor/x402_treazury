@@ -789,8 +789,10 @@ apply in both network modes. See the [provider caveats](../providers/CAVEATS.md)
 ## SocialFetch and tag selection
 
 `providers/socialfetch.toml` uses the vendor's live OpenAPI tags through the generic
-catalog. It exposes platform routes, excludes `Auth`, `Monitors` and `System`,
-and disables pricing probes because credit prices are embedded in the spec.
+catalog. It exposes platform routes, excludes `Auth`, account/monitor ownership
+and webhook lifecycle operations, and deliberately omits `GET /health`.
+Other public `System` operations remain available. Pricing probes are disabled
+because credit prices are embedded in the spec.
 Each selected tool retains credit terms and a USDC estimate calculated with the
 provider’s explicit `credit_pricing` rate, independently of server instructions.
 
