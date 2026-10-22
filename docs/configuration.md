@@ -733,6 +733,13 @@ substring across ID, name, description and declared API base. Both support `page
 those pagination fields and omitted or `browse` mode; directory filters/ranking are
 rejected before I/O. These tools perform no wallet or network work and never fall
 back to the remote directory. Omitted or false `local_only` retains remote search.
+Known IDs or specification URLs go directly to `source_add`; `source_details` is
+optional assistance for unknown providers. An absent `api_base` means no configured
+base override: import uses the schema's API server, not the specification URL's
+origin. Metadata lists addable providers; live `tools_search` enumerates callable
+tools on this same endpoint. Cached descriptions contain no source-state summary.
+Unknown cost does not mean free. Optional advertised help may explain prices and
+request contracts; registration and help do not establish paid-delivery qualification.
 
 `x402_treazury_source_add` accepts exactly one bundled `provider_id` or public
 OpenAPI `spec_url`, plus optional `name`. A unique exact known specification URL

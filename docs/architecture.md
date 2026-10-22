@@ -169,12 +169,10 @@ request-local BM25 over names, descriptions and top-level argument names. Litera
 name/description substrings rank first; blank queries retain catalog order. Query
 help and result counts expose these semantics without another index, cache or
 provider request. See [tool search matching](agent-sources.md#tool-search-matching-and-results).
-Source-management tool-search descriptions derive their registered-source summary
-from visible dynamic tool names in the captured listener snapshot, without another
-registry read or cache. These names follow the validated `dyn_<name>__<slug>`
-contract; splitting the final delimiter preserves trailing source underscores.
-Client-cached descriptions are not live inventories. See
-[endpoint instruction placement](agent-sources.md#endpoint-instruction-placement).
+Tool descriptions omit registered-source state because clients may cache them.
+Live search/enumeration reflects the captured listener snapshot; source-name
+filtering retains the validated `dyn_<name>__<slug>` contract and final delimiter.
+See [endpoint instruction placement](agent-sources.md#endpoint-instruction-placement).
 Clients must inspect this metadata; it does not imply a UI notification. Unsigned
 dependency waits add no timer or
 spending authority. Shutdown drains accepted relay work before financial owners.

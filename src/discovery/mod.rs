@@ -409,7 +409,7 @@ impl Manager {
             "tool_prefix": import::tool_prefix(&r.candidate.name).ok(),
             "tool_count": snapshot.views.get(caller).into_iter().flatten().filter(|t| t.source.as_ref().is_some_and(|s| s.0 == r.id)).count(),
             "status": if r.disabled.is_some() { "disabled" } else { "available" },
-            "next": "Search tools with source_name=name, then invoke tool_id with arguments through x402_treazury_tool_call."
+            "next": "Search tools with source_name=name on this same MCP endpoint, then invoke tool_id with arguments through x402_treazury_tool_call. Optional advertised provider help may explain prices and request contracts before a paid call. Unknown cost is not free; registration and help do not establish paid-delivery qualification."
         });
         if let Some(provider) = &r.candidate.provider {
             result["provider_id"] = json!(provider.id);

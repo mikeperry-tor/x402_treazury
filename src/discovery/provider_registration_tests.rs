@@ -176,13 +176,10 @@ async fn local_arguments_and_authority_reject_before_wallet_lookup() {
             .unwrap_err();
         assert!(error.to_string().contains("wallet unavailable"), "{error}");
     }
-    let listed = tools::listener_definitions(false, true, None, None, &[]);
+    let listed = tools::listener_definitions(false, true, None, None);
     assert_eq!(listed.len(), 2);
     assert!(!listed.iter().any(|t| t.name == local::NAME));
-    assert_eq!(
-        tools::listener_definitions(true, true, None, None, &[]).len(),
-        7
-    );
+    assert_eq!(tools::listener_definitions(true, true, None, None).len(), 7);
     assert!(m.fetches.lock().unwrap().is_empty());
     assert!(m.inner.lock().unwrap().state.records.is_empty());
 }

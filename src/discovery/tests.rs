@@ -2742,10 +2742,6 @@ async fn source_names_are_verbatim_unique_and_race_safe() {
                 .starts_with(&format!("dyn_{name}__"))
         }));
     }
-    assert_eq!(
-        tools::registered_source_names(&m.catalog.read().views["writer"]),
-        ["-", "Acme-IP", "Acme_IP", "_", "acme_", "acme_ip"]
-    );
     assert!(
         register_spec(&m, "writer", "acme__ip", "invalid.json", spec())
             .await
@@ -2808,10 +2804,6 @@ async fn restore_unsupported_names_disables_only_the_affected_source() {
     );
     assert_eq!(m.catalog.read().views["writer"].len(), 2);
     assert_eq!(m.catalog.read().views["reader"].len(), 2);
-    assert_eq!(
-        tools::registered_source_names(&m.catalog.read().views["writer"]),
-        ["healthy"]
-    );
 }
 
 #[tokio::test]
@@ -2864,7 +2856,7 @@ async fn source_name_search_preserves_request_boundary_and_cursor_scope() {
 }
 
 #[tokio::test]
-async fn discovery_help_lists_endpoint_snapshot_sources_across_publication_and_restart() {
+async fn discovery_help_omits_cached_source_state_across_publication_and_restart() {
     use rmcp::ServerHandler;
     for on_demand in [false, true] {
         let dir = tempfile::tempdir().unwrap();
@@ -2919,14 +2911,12 @@ async fn discovery_help_lists_endpoint_snapshot_sources_across_publication_and_r
             .unwrap()
             .description
             .unwrap();
-        assert!(empty.contains("description snapshot: none."));
-        assert!(empty.contains("clients may cache it"));
-        assert!(empty.contains("not updated dynamically"));
+        assert!(!empty.contains("description snapshot"));
+        assert!(!empty.contains("Registered sources"));
         let first = register_spec(&m, "writer", "Zed_", "zed.json", spec())
             .await
             .unwrap();
         let first_id = registered_id(&m, &first);
-        let captured = m.catalog.read();
         register_spec(&m, "writer", "Alpha-IP", "alpha.json", spec())
             .await
             .unwrap();
@@ -2936,24 +2926,12 @@ async fn discovery_help_lists_endpoint_snapshot_sources_across_publication_and_r
         register_spec(&m, "writer", "Filtered", "filtered.json", spec())
             .await
             .unwrap();
-        assert_eq!(
-            tools::registered_source_names(&captured.views["writer"]),
-            ["Zed_"]
-        );
-        assert_eq!(
-            tools::registered_source_names(&m.catalog.read().views["writer"]),
-            ["Alpha-IP", "Zed_"]
-        );
-        assert_eq!(
-            tools::registered_source_names(&m.catalog.read().views["reader"]),
-            ["Other"]
-        );
         let description = endpoint
             .get_tool("x402_treazury_tools_search")
             .unwrap()
             .description
             .unwrap();
-        assert!(description.contains("description snapshot: Alpha-IP, Zed_."));
+        assert_eq!(description, empty);
         assert!(!description.contains("Other"));
         assert!(!description.contains("Filtered"));
         assert!(description.ends_with("Writer capability guidance"));
@@ -3028,9 +3006,21 @@ async fn discovery_help_lists_endpoint_snapshot_sources_across_publication_and_r
         drop(endpoint);
         drop(m);
         let restored = manager_with(p.clone(), configured.clone()).await;
-        assert_eq!(
-            tools::registered_source_names(&restored.catalog.read().views["writer"]),
-            ["Alpha-IP", "Zed_"]
+        let result = restored
+            .search_tools(
+                "writer",
+                "x402_treazury_tools_search",
+                json!({"source_name":"Alpha-IP"}),
+            )
+            .unwrap();
+        assert_eq!(result["items"].as_array().unwrap().len(), 2);
+        assert!(
+            !server(&restored, "writer")
+                .get_tool("x402_treazury_tools_search")
+                .unwrap()
+                .description
+                .unwrap()
+                .contains("description snapshot")
         );
         drop(restored);
         maintain_cli(&config, "writer", &first_id, false)
@@ -3042,7 +3032,7 @@ async fn discovery_help_lists_endpoint_snapshot_sources_across_publication_and_r
             .unwrap()
             .description
             .unwrap();
-        assert!(description.contains("description snapshot: Alpha-IP."));
+        assert!(!description.contains("description snapshot"));
         assert!(!description.contains("Zed_"));
         assert!(!description.contains("Filtered"));
         assert!(!description.contains("Other"));
@@ -3441,7 +3431,7 @@ async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
             }).collect());
             m.catalog.publish(snapshot);
             let mut expected: Vec<Value> =
-                tools::listener_definitions(owner == "writer", false, None, None, &[])
+                tools::listener_definitions(owner == "writer", false, None, None)
                     .into_iter()
                     .map(|t| serde_json::to_value(t).unwrap())
                     .collect();

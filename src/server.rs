@@ -129,9 +129,7 @@ impl Server {
             && name.starts_with("x402_treazury_")
         {
             anyhow::ensure!(
-                self.management_tools(&self.catalog.read())
-                    .iter()
-                    .any(|t| t.name == name),
+                self.management_tools().iter().any(|t| t.name == name),
                 "unknown tool"
             );
             if name == "x402_treazury_sources_search" {
@@ -180,7 +178,7 @@ impl Server {
             .await?;
         Ok(self.limit(text))
     }
-    fn management_tools(&self, snapshot: &CatalogSnapshot) -> Vec<Tool> {
+    fn management_tools(&self) -> Vec<Tool> {
         crate::discovery::tools::listener_definitions(
             self.discovery
                 .as_ref()
@@ -188,13 +186,6 @@ impl Server {
             self.discover_on_demand,
             self.discovery_search_tool_instructions_text.as_deref(),
             self.sources_search_tool_instructions_text.as_deref(),
-            &crate::discovery::tools::registered_source_names(
-                snapshot
-                    .views
-                    .get(&self.catalog_server)
-                    .map(Vec::as_slice)
-                    .unwrap_or_default(),
-            ),
         )
     }
 
@@ -237,11 +228,7 @@ impl ServerHandler for Server {
     }
     fn get_tool(&self, name: &str) -> Option<Tool> {
         let snapshot = self.catalog.read();
-        if let Some(tool) = self
-            .management_tools(&snapshot)
-            .into_iter()
-            .find(|t| t.name == name)
-        {
+        if let Some(tool) = self.management_tools().into_iter().find(|t| t.name == name) {
             return Some(tool);
         }
         catalog_state::find(&snapshot, &self.catalog_server, name)
@@ -254,7 +241,7 @@ impl ServerHandler for Server {
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
         let snapshot = self.catalog.read();
-        let management = self.management_tools(&snapshot);
+        let management = self.management_tools();
         let api = snapshot
             .views
             .get(&self.catalog_server)

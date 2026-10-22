@@ -96,6 +96,10 @@ still applies. Listings do not guarantee compatible payment or supply executable
 schemas. Pricing probes, owner-token workflows and an unrepresentable submit
 schema are excluded. Embedded source management deliberately keeps three reads.
 
+Optional advertised provider help may explain prices and request contracts before
+a paid call. Unknown prices mean missing pricing information, not free calls.
+Importing a schema and reading help do not establish paid-delivery qualification.
+
 ## Bundled provider metadata
 
 The executable embeds the shipped definitions and referenced local OpenAPI assets.
