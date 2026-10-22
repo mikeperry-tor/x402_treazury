@@ -230,32 +230,6 @@ fn operation_count_limit_warns_even_when_selection_excludes_operations() {
 }
 
 #[tokio::test]
-async fn eager_endpoint_quota_warns_without_publishing() {
-    let accepted = manager(None).await;
-    add(&accepted, "accepted", "", "").await;
-    let mut p = policy(None);
-    p.max_tools_per_server = 1;
-    let eager = manager_with(p, listeners(false)).await;
-    let logs = capture_limit_logs(|| {
-        let state = accepted.inner.lock().unwrap();
-        let base = eager.inner.lock().unwrap();
-        let result = eager.snapshot(&state.state, &base.base, 1);
-        assert!(
-            result
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("server_tool_quota_exceeded")
-        );
-    });
-    assert!(logs.contains("WARN"), "{logs}");
-    assert!(logs.contains("max_tools_per_server"), "{logs}");
-    assert!(logs.contains("actual=2"), "{logs}");
-    assert!(eager.catalog.read().views.values().all(Vec::is_empty));
-    assert!(eager.inner.lock().unwrap().state.records.is_empty());
-}
-
-#[tokio::test]
 async fn oversized_management_request_warns_without_logging_arguments() {
     use tracing::instrument::WithSubscriber;
     let m = manager(None).await;
@@ -526,4 +500,120 @@ async fn reserved_source_delimiter_warns_for_add_inspection_and_restore() {
     );
     assert!(!logs.contains("PRIVATE"), "{logs}");
     assert!(m.catalog.read().views["writer"].is_empty());
+}
+#[tokio::test]
+async fn advertised_inventory_warning_is_first_page_only_and_observational() {
+    use rmcp::{ServerHandler, model::PaginatedRequestParams, service::RequestContext};
+    use tracing::instrument::WithSubscriber;
+    let m = manager(None).await;
+    add(&m, "accepted", "", "").await;
+    let template = m.catalog.read().views["writer"][0].clone();
+    for (owner, on_demand, api_count, expected_warnings) in [
+        ("hidden", false, 250, 0),
+        ("hidden", false, 251, 2),
+        ("writer", false, 243, 0),
+        ("writer", false, 244, 2),
+        ("writer", true, 513, 0),
+    ] {
+        let mut snapshot = (*m.catalog.read()).clone();
+        snapshot.generation += 1;
+        snapshot.views.insert(
+            owner.into(),
+            (0..api_count)
+                .map(|index| {
+                    let mut bound = template.clone();
+                    bound.tool.name = format!("fixture_{index}");
+                    bound.tool.description = "PRIVATE_DESCRIPTION https://private.invalid".into();
+                    if index % 2 == 0 {
+                        bound.source = None;
+                    }
+                    bound
+                })
+                .collect(),
+        );
+        m.catalog.publish(snapshot);
+        let mut endpoint = server(&m, owner);
+        endpoint.discover_on_demand = on_demand;
+        // A peer supplies the request context; listing itself is exercised directly,
+        // with no client transport, wallet lookup or provider work.
+        let (transport, _client) = tokio::io::duplex(1024);
+        let running = rmcp::service::serve_directly(endpoint.clone(), transport, None);
+        let list = |cursor: Option<String>| {
+            endpoint.list_tools(
+                cursor.map(|cursor| PaginatedRequestParams::default().with_cursor(Some(cursor))),
+                RequestContext::new(rmcp::model::RequestId::Number(1), running.peer().clone()),
+            )
+        };
+        let logs = LimitLogs::default();
+        let sink = logs.clone();
+        let subscriber = tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(move || sink.clone())
+                .finish(),
+        );
+        let first = list(None)
+            .with_subscriber(subscriber.clone())
+            .await
+            .unwrap();
+        let count = if on_demand {
+            7
+        } else {
+            api_count + if owner == "writer" { 7 } else { 0 }
+        };
+        assert_eq!(first.tools.len(), count.min(25));
+        let after_first = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(
+            after_first
+                .matches("Large advertised tool inventory")
+                .count(),
+            usize::from(expected_warnings > 0)
+        );
+        let prefix = format!(
+            "{}:{}:{}:",
+            m.catalog.instance(),
+            owner,
+            m.catalog.read().generation
+        );
+        for cursor in [
+            format!("{prefix}0"),
+            format!("{prefix}25"),
+            "invalid".into(),
+        ] {
+            let result = list(Some(cursor.clone()))
+                .with_subscriber(subscriber.clone())
+                .await;
+            if cursor == "invalid" || count < 25 && cursor.ends_with(":25") {
+                assert!(result.is_err());
+            } else {
+                assert!(result.is_ok());
+            }
+        }
+        assert_eq!(
+            String::from_utf8(logs.0.lock().unwrap().clone()).unwrap(),
+            after_first
+        );
+        list(None).with_subscriber(subscriber).await.unwrap();
+        let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(
+            logs.matches("Large advertised tool inventory").count(),
+            expected_warnings
+        );
+        if expected_warnings > 0 {
+            for expected in [
+                "WARN",
+                owner,
+                &format!("advertised_tools={count}"),
+                "discover_on_demand = true",
+            ] {
+                assert!(logs.contains(expected), "{logs}");
+            }
+        }
+        assert!(!logs.contains("PRIVATE_DESCRIPTION"));
+        assert!(!logs.contains("private.invalid"));
+        assert_eq!(m.catalog.read().views[owner].len(), api_count);
+        running.cancel().await.unwrap();
+    }
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
 }

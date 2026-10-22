@@ -391,15 +391,17 @@ schemas are not silently truncated.
 
 ## Limits and network policy
 
-The default dynamic-tool quota is 512 tools per endpoint, controlled by
-`[source_management].max_tools_per_server`. Endpoints with
-`discover_on_demand = true` are exempt because API tools are omitted from their
-advertised inventory. The exemption applies to registration, startup restoration,
-static catalog publication and operator refresh. Eager endpoints count dynamic
-tools after endpoint filters; static tools do not consume this quota.
-There is no registration-count or per-source tool-count quota. The removed
-`max_sources` and `max_tools_per_source` settings are rejected as unknown fields;
-remove them from existing configuration.
+There is no tool-count admission quota. A valid first-page `tools/list` request
+with more than 250 advertised definitions emits one advisory WARN naming the
+listener and count and suggesting `discover_on_demand = true`. Counts include
+filtered static/dynamic API definitions and advertised management wrappers;
+on-demand listeners count only wrappers. Continuations and invalid cursors do not
+warn; a fresh first-page request may warn again. This observes advertised inventory,
+not client/model context, and never rejects registration or changes access/mode.
+The operator must explicitly opt in to on-demand discovery.
+
+Removed `max_tools_per_server`, `max_sources` and `max_tools_per_source` settings
+are rejected as unknown fields; remove them from existing configuration.
 
 Specifications default to 32 MiB. Other advanced overrides in
 `[source_management]` are `max_spec_bytes`, `max_response_bytes`, `max_help_bytes`,
@@ -412,14 +414,14 @@ operations rather than the provider's static byte settings. Spec, help and API
 responses have no total HTTP download deadline. `fetch_timeout_seconds` is a
 legacy alias.
 
-The endpoint tool quota accepts 1–10,000 and specifications up to 64 MiB.
+The specification byte override accepts up to 64 MiB.
 Management requests have a 64 KiB limit; forwarded API calls retain normal API behavior. Import
 concurrency is four process-wide and one per endpoint; at most 16 mutation jobs can
 be outstanding. Aliases share an active fetch without each consuming a permit.
 Active fetches cannot be evicted by retention age or completed-cache churn; a full
 active cache returns busy. Success retention is 300 seconds from completion,
 transient failure backoff one second. Completed entries remain byte/count bounded.
-Saturation returns an explicit busy error. Publication and quota
+Saturation returns an explicit busy error. Publication and collision
 checks are serialized, so concurrent additions cannot publish partial sources.
 
 JSON/reference traversal remains bounded to depth 64, 500,000 expanded nodes and
@@ -523,10 +525,11 @@ Temporary registrations need no registry maintenance; they disappear on exit.
 Restart rebuilds from accepted bytes and saved settings without vendor requests
 or bundle re-resolution; a binary upgrade alone cannot change accepted provider
 semantics. Saved inventory, restoration, publication and refresh use the same
-catalog construction path. Runtime publication and operator refresh quota checks
-share the listener's tag and tool-name projection, after full catalog validation;
-saved inventory inspection remains unfiltered. A listener may filter every tool
+catalog construction path. Runtime publication applies the listener's tag and
+tool-name projection after full catalog validation; operator refresh validates the
+full catalog without tool-count admission checks. Saved inventory inspection remains
+unfiltered. A listener may filter every tool
 without invalidating the accepted source. Disabled endpoints,
-nonlocal saved bindings, invalid formats and quota conflicts cannot regain access
+nonlocal saved bindings, invalid formats and tool-name conflicts cannot regain access
 silently. Corrupt/unsupported registries fail startup. Persistent additions commit
 before publication; cancelling an accepted commit's waiter cannot undo the write.

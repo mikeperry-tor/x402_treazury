@@ -259,7 +259,9 @@ impl ServerHandler for Server {
             self.catalog_server,
             snapshot.generation
         );
-        let offset = if let Some(cursor) = request.and_then(|r| r.cursor) {
+        let cursor = request.and_then(|r| r.cursor);
+        let first_page = cursor.is_none();
+        let offset = if let Some(cursor) = cursor {
             match cursor
                 .strip_prefix(&prefix)
                 .and_then(|o| o.parse::<usize>().ok())
@@ -275,6 +277,10 @@ impl ServerHandler for Server {
         } else {
             0
         };
+        if first_page && count > 250 {
+            tracing::warn!(listener = %self.catalog_server, advertised_tools = count,
+                "Large advertised tool inventory; consider discover_on_demand = true");
+        }
         let end = offset
             .saturating_add(crate::limits::DEFAULT_PAGE_SIZE)
             .min(count);

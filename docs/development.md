@@ -189,6 +189,12 @@ every command. Info reports catalog/pricing completion, listener startup and
 funding progress. Download, parse and protocol details belong at debug; warnings
 identify failures, degraded operation or actionable configuration problems.
 
+A valid first-page `tools/list` with more than 250 advertised definitions emits
+an advisory WARN with listener ID, count and `discover_on_demand = true` suggestion,
+without URLs, descriptions or credentials. It observes inventory, not model context;
+continuations and invalid cursors do not warn, and fresh first pages may repeat it.
+It does not reject work, change mode or perform network/wallet work.
+
 An unreachable configured local Tor SOCKS endpoint during serving startup emits
 an immediate shared ERROR with the local address, safe I/O kind, retry cadence and
 reminder interval. Failed probes repeat the ERROR after at least 60 seconds while

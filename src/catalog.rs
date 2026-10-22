@@ -1109,7 +1109,7 @@ fn openapi_parameter(root: &Value, parameter: &Value) -> Option<Value> {
 
 /// Listener tags match the exact path and case-insensitive HTTP method. Tag values
 /// are case-sensitive; exclusions win, and positive filters reject untagged tools.
-/// Keep listener name selectors, quota checks and wallet binding at the call site.
+/// Keep listener name selectors and wallet binding at the call site.
 pub(crate) fn matches_operation_tags(
     operations: &[Value],
     tool: &ToolSpec,

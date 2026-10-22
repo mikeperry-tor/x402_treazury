@@ -10,8 +10,6 @@ use std::{
 pub struct Policy {
     pub wallet: String,
     pub registry_file: Option<PathBuf>,
-    #[serde(default = "per_server")]
-    pub max_tools_per_server: usize,
     #[serde(default = "bytes")]
     pub max_spec_bytes: usize,
     #[serde(default = "crate::limits::response_default")]
@@ -26,9 +24,6 @@ pub struct Policy {
     pub read_timeout_seconds: Option<u64>,
     #[serde(default)]
     pub allowed_origins: Vec<String>,
-}
-fn per_server() -> usize {
-    512
 }
 fn bytes() -> usize {
     33554432
@@ -50,10 +45,6 @@ pub fn validate(config: &MetaConfig) -> Result<()> {
         ensure!(
             config.wallets.contains_key(&p.wallet),
             "unknown source_management wallet"
-        );
-        ensure!(
-            (1..=10000).contains(&p.max_tools_per_server),
-            "invalid source management quota"
         );
         ensure!(
             (1024..=67108864).contains(&p.max_spec_bytes)

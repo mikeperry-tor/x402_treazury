@@ -323,7 +323,7 @@ pub fn build(policy: &Policy, c: &Candidate, bytes: &[u8]) -> Result<Built> {
 }
 
 /// Project a fully validated catalog into a listener's visible tool inventory.
-/// Publication and operator refresh use this same selection before counting quota.
+/// Snapshot publication applies this projection after full import validation.
 pub(super) fn build_visible(
     policy: &Policy,
     candidate: &Candidate,

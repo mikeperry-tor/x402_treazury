@@ -298,7 +298,7 @@ impl Manager {
             Ok(s) => s,
             Err(_) => {
                 for r in state.records.values_mut().filter(|r| !r.removed) {
-                    r.disabled = Some("registration_conflict_or_quota".into());
+                    r.disabled = Some("registration_conflict_or_invalid_state".into());
                 }
                 self.snapshot(&state, &inner.base, generation)?
             }
@@ -391,14 +391,6 @@ impl Manager {
                     text.push_str("\n\n");
                 }
                 text.push_str(&format!("[{}]\n{instructions}", record.candidate.name));
-            }
-            if !cfg.discover_on_demand {
-                crate::limits::check(
-                    view.iter().filter(|t| t.source.is_some()).count(),
-                    self.policy.max_tools_per_server,
-                    "server_tool_quota_exceeded",
-                    "max_tools_per_server",
-                )?;
             }
         }
         Ok(result)
@@ -973,25 +965,6 @@ pub async fn maintain_cli_with_network(
         "registry_document_limit",
         "hardcoded_registry_document_bytes",
     )?;
-    if refresh && !cfg.servers[owner].discover_on_demand {
-        let listener = &cfg.servers[owner];
-        let mut tools = 0;
-        for r in state
-            .records
-            .values()
-            .filter(|r| !r.removed && r.disabled.is_none() && r.owner == owner)
-        {
-            tools += import::build_visible(&policy, &r.candidate, r.document.as_bytes(), listener)?
-                .tools
-                .len();
-        }
-        crate::limits::check(
-            tools,
-            policy.max_tools_per_server,
-            "server_tool_quota_exceeded",
-            "max_tools_per_server",
-        )?;
-    }
     state.generation = state
         .generation
         .checked_add(1)

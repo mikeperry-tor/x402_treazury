@@ -711,6 +711,13 @@ its research pool. The [agent source guide](agent-sources.md#configuration-and-a
 explains persistence and wallet sharing. Registered APIs share their pool's
 existing reserve claims regardless of registration count.
 Registration does not create wallet pools or trigger funding.
+`source_management.max_tools_per_server` has been removed; strict parsing rejects
+it by name. Remove it from existing configuration. Tool counts do not gate
+registration, restoration, publication or refresh. On a valid first `tools/list`
+page, more than 250 advertised definitions produce an advisory WARN suggesting
+explicit `discover_on_demand = true`. Continuations and invalid cursors do not warn;
+each fresh first-page request may warn again. The advisory counts filtered API
+definitions plus wrappers (only wrappers in on-demand mode) and never changes access.
 
 | Arrangement | Configuration | Payment identity sharing |
 | --- | --- | --- |

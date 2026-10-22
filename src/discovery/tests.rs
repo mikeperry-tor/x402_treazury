@@ -434,8 +434,14 @@ async fn public_transport_child() {
     let requests = Arc::new(AtomicUsize::new(0));
     let signed = Arc::new(AtomicUsize::new(0));
     let (u, s) = (requests.clone(), signed.clone());
+    let large_catalog = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let large = large_catalog.clone();
     let (address,task)=crate::test_tls::serve(axum::Router::new()
-        .route("/openapi.json",get(|| async {axum::Json(spec())}))
+        .route("/openapi.json",get(move || { let large = large.clone(); async move {
+            let mut doc = spec();
+            if large.load(Ordering::SeqCst) { for index in 0..511 { doc["paths"][format!("/extra-{index}")] = json!({"get":{}}); } }
+            axum::Json(doc)
+        }}))
         .route("/redirect",get(|| async {axum::response::Redirect::temporary("https://other.example.com/never")}))
         .route("/downgrade",get(|| async {axum::response::Redirect::temporary("http://127.0.0.1:1/never")}))
         .route("/read",get(move |headers:HeaderMap| {let (u,s)=(u.clone(),s.clone());async move {
@@ -535,38 +541,25 @@ async fn public_transport_child() {
     let id = registered_id(&m, &added);
     assert!(maintain_cli(&config, "writer", &id, true).await.is_err());
     drop(m);
+    large_catalog.store(true, Ordering::SeqCst);
     maintain_cli(&config, "writer", &id, true).await.unwrap();
     let saved = store::Store::open(&file, &[]).unwrap().load().unwrap();
     assert_eq!(saved.records[&id].revision, 2);
     assert_eq!(
-        serde_json::from_str::<Value>(&saved.records[&id].document).unwrap(),
-        spec()
-    );
-    // A refused refresh leaves the saved revision untouched.
-    config_value["source_management"]
-        .as_table_mut()
-        .unwrap()
-        .insert("max_tools_per_server".into(), toml::Value::Integer(1));
-    std::fs::write(&config, toml::to_string(&config_value).unwrap()).unwrap();
-    assert!(maintain_cli(&config, "writer", &id, true).await.is_err());
-    assert_eq!(
-        store::Store::open(&file, &[])
+        serde_json::from_str::<Value>(&saved.records[&id].document).unwrap()["paths"]
+            .as_object()
             .unwrap()
-            .load()
-            .unwrap()
-            .records[&id]
-            .revision,
-        2
+            .len(),
+        513
     );
-    // Eager refresh counts the same filtered inventory as runtime restoration.
+    // Refresh and runtime restoration use the same filtered inventory.
     config_value["servers"]["writer"]
         .as_table_mut()
         .unwrap()
         .insert("tags".into(), toml::Value::try_from(vec!["read"]).unwrap());
     std::fs::write(&config, toml::to_string(&config_value).unwrap()).unwrap();
     maintain_cli(&config, "writer", &id, true).await.unwrap();
-    let mut filtered_policy = policy(Some(file.clone()));
-    filtered_policy.max_tools_per_server = 1;
+    let filtered_policy = policy(Some(file.clone()));
     let mut filtered_listeners = listeners(true);
     filtered_listeners.get_mut("writer").unwrap().tags = vec!["read".into()];
     let restored = manager_with(filtered_policy, filtered_listeners).await;
@@ -580,11 +573,11 @@ async fn public_transport_child() {
             .as_array()
             .unwrap()
             .len(),
-        2
+        513
     );
     drop(restored);
 
-    // On-demand listeners retain the complete inventory despite this eager-list quota.
+    // On-demand listeners also retain the complete inventory.
     config_value["servers"]["writer"]
         .as_table_mut()
         .unwrap()
@@ -819,25 +812,6 @@ async fn registry_persistence_is_operator_controlled_and_revocation_is_local() {
         add(&temporary, "temporary", "", "").await["status"],
         "available"
     );
-}
-
-#[tokio::test]
-async fn eager_endpoint_quota_never_publishes_partial_sources() {
-    let mut p = policy(None);
-    p.max_tools_per_server = 1;
-    let m = manager_with(p, listeners(false)).await;
-    seed(&m).await;
-    assert!(
-        m.invoke(
-            "writer",
-            "x402_treazury_source_add",
-            json!({"spec_url":"https://api.example.com/openapi.json"})
-        )
-        .await
-        .is_err()
-    );
-    assert!(m.inner.lock().unwrap().state.records.is_empty());
-    assert!(m.catalog.read().views.values().all(Vec::is_empty));
 }
 
 #[tokio::test]
@@ -2517,8 +2491,11 @@ async fn accepted_static_publication_outlives_cancelled_waiter() {
 
 #[test]
 fn source_policy_removes_registration_and_source_tool_quotas() {
-    assert_eq!(policy(None).max_tools_per_server, 512);
-    for removed in ["max_sources", "max_tools_per_source"] {
+    for removed in [
+        "max_sources",
+        "max_tools_per_source",
+        "max_tools_per_server",
+    ] {
         let mut value = json!({"wallet":"shared"});
         value[removed] = json!(1);
         let error = serde_json::from_value::<policy::Policy>(value)
@@ -2566,27 +2543,41 @@ async fn more_than_sixteen_sources_and_one_hundred_tools_are_accepted() {
 }
 
 #[tokio::test]
-async fn on_demand_endpoint_bypasses_quota_on_add_restart_and_static_publication() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("registry.sqlite");
-    let mut p = policy(Some(file));
-    p.max_tools_per_server = 1;
-    let mut configured = listeners(true);
-    configured.get_mut("writer").unwrap().discover_on_demand = true;
-    let m = manager_with(p.clone(), configured.clone()).await;
-    add(&m, "on-demand", "", "").await;
-    assert_eq!(m.catalog.read().views["writer"].len(), 2);
-    let base = m.static_snapshot().await.unwrap();
-    m.replace_static(base.generation, base).await.unwrap();
-    assert_eq!(m.catalog.read().views["writer"].len(), 2);
-    drop(m);
-    let restored = manager_with(p, configured).await;
-    assert_eq!(restored.catalog.read().views["writer"].len(), 2);
-    let found = restored
-        .invoke("writer", "x402_treazury_tools_search", json!({}))
-        .await
-        .unwrap();
-    assert_eq!(found["items"].as_array().unwrap().len(), 2);
+async fn large_sources_survive_add_restart_and_static_publication_in_both_modes() {
+    for on_demand in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("registry.sqlite");
+        let p = policy(Some(file));
+        let mut configured = listeners(true);
+        configured.get_mut("writer").unwrap().discover_on_demand = on_demand;
+        let m = manager_with(p.clone(), configured.clone()).await;
+        let mut doc = spec();
+        doc["paths"] = (0..513).map(|i| (format!("/tool-{i}"), json!({"get":{"parameters":[{"name":"nested","in":"query","schema":{"type":"object","properties":{"value":{"type":"string"}}}}]}}))).collect::<serde_json::Map<_,_>>().into();
+        register_spec(&m, "writer", "large", "large.json", doc)
+            .await
+            .unwrap();
+        assert_eq!(m.catalog.read().views["writer"].len(), 513);
+        let base = m.static_snapshot().await.unwrap();
+        m.replace_static(base.generation, base).await.unwrap();
+        assert_eq!(m.catalog.read().views["writer"].len(), 513);
+        drop(m);
+        let restored = manager_with(p, configured).await;
+        assert_eq!(restored.catalog.read().views["writer"].len(), 513);
+        let found = restored
+            .invoke(
+                "writer",
+                "x402_treazury_tools_search",
+                json!({"limit":1000}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(found["items"].as_array().unwrap().len(), 513);
+        assert!(
+            restored
+                .find_tool("writer", found["items"][0]["tool_id"].as_str().unwrap())
+                .is_ok()
+        );
+    }
 }
 
 // Seed an imported document without live provider requests or wallet material.
