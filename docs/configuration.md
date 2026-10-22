@@ -915,8 +915,15 @@ cannot choose transport.
 `config show` reports effective settings without reading keys or contacting Tor.
 Offline wallet inspection, backup and explicit-birthday init remain offline.
 
-The SOCKS endpoint must be a literal loopback IP and nonzero port. Tor Browser or a
-Tor daemon must already be running; 9150 is an example, not an auto-discovered port.
+The SOCKS endpoint must be a literal loopback IP and nonzero port. Run Tor Browser
+or a Tor daemon on that endpoint; 9150 is an example, not an auto-discovered port.
+If that port is unreachable during ordinary serving startup, an ERROR names the
+configured SOCKS endpoint. Finite startup discovery waits and retries the local
+TCP connection every five seconds, then resumes automatically without a restart.
+Listeners, fresh cached catalogs/prices and independent financial work remain
+available. This checks TCP reachability only, not Tor bootstrap or destination
+connectivity, and stops after the first successful connection. Explicit sync,
+inspection and qualification retain their normal failure behavior.
 A standalone daemon can use `SocksPort 127.0.0.1:9050 IsolateSOCKSAuth`. Optional
 `socks_auth = "legacy"` uses username `x402_treazury` and an identity-derived password.
 The default extended format uses username `<torS0X>0` and places the namespace and

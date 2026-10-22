@@ -168,9 +168,11 @@ impl Downloads {
         // No detached tasks: cancellation drops the initializer and its HTTP request.
         cell.get_or_init(|| async {
             if self.defer {
+                let mut config = cfg.clone();
+                config.wait_for_startup_socks = true;
                 Ok(Download::Deferred(DeferredDocument(Arc::new(
                     DeferredLoad {
-                        config: cfg.clone(),
+                        config,
                         prepared: OnceCell::new(),
                     },
                 ))))

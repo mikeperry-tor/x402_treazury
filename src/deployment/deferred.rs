@@ -1,5 +1,7 @@
 //! One serving-owned publisher; accepted relay work drains before financial owners.
 #[cfg(test)]
+mod startup_socks_tests;
+#[cfg(test)]
 mod tor_catalog_capacity_tests;
 use super::*;
 use futures_util::{FutureExt, StreamExt, stream::FuturesUnordered};
@@ -69,7 +71,8 @@ impl Runtime {
     }
     fn pricing(&self, id: &str) -> futures_util::future::BoxFuture<'static, Event> {
         let id = id.to_owned();
-        let source = self.deployment.sources[&id].clone();
+        let mut source = self.deployment.sources[&id].clone();
+        source.config.wait_for_startup_socks = true;
         let selected = self
             .deployment
             .selected

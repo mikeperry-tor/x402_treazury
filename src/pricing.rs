@@ -437,6 +437,9 @@ async fn probe_network(
     cfg: &Config,
     capacity: &Arc<Semaphore>,
 ) -> (ProbeResult, Option<crate::network::RetryAfter>) {
+    if cfg.wait_for_startup_socks {
+        network.wait_for_startup_socks().await;
+    }
     let timeout = cfg.read_timeout_seconds.map(Duration::from_secs_f64);
     let Ok(selected) = crate::network::IsolationId::discovery(url)
         .and_then(|id| network.http_participating(&id, url, timeout, false, cfg.transport()))

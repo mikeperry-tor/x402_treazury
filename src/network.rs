@@ -10,6 +10,7 @@ mod http_queue_tests;
 #[path = "network/http_timeout_tests.rs"]
 mod http_timeout_tests;
 mod scope_observation;
+mod startup_socks;
 #[cfg(test)]
 mod tls_retry_tests;
 use anyhow::{Context, Result, ensure};
@@ -294,6 +295,7 @@ pub struct NetworkContext {
     pub cover: Option<Arc<crate::cover::runtime::Engine>>,
     pub policy: NetworkPolicy,
     http: Mutex<HashMap<HttpKey, CachedClient<Arc<HttpTransport>>>>,
+    startup_socks: tokio::sync::OnceCell<()>,
     #[cfg(test)]
     test_root: Option<&'static [u8]>,
     #[cfg(test)]
@@ -303,6 +305,16 @@ pub struct NetworkContext {
     >,
 }
 impl NetworkContext {
+    /// Local startup prerequisite only; no destination or SOCKS credentials cross it.
+    async fn connect_startup_socks(&self, endpoint: SocketAddr) -> std::io::Result<()> {
+        tokio::time::timeout(
+            self.policy.connect_timeout(),
+            tokio::net::TcpStream::connect(endpoint),
+        )
+        .await
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?
+        .map(drop)
+    }
     #[cfg(test)]
     pub(crate) fn http_cache_len(&self) -> usize {
         self.http.lock().expect("network cache poisoned").len()
@@ -315,6 +327,7 @@ impl NetworkContext {
                 .then(|| crate::cover::runtime::Engine::new(policy.cover_limits.clone())),
             policy,
             http: Mutex::new(HashMap::new()),
+            startup_socks: tokio::sync::OnceCell::new(),
             #[cfg(test)]
             test_root: None,
             #[cfg(test)]

@@ -81,6 +81,10 @@ impl ManagedPool {
         let mut pending_cursor = -1;
         let mut page = VecDeque::<(i64, Option<String>)>::new();
         let mut startup_complete = boundary < 0;
+        let mut startup_ready = one_pass;
+        let network = crate::network::global();
+        let socks = network.wait_for_startup_socks();
+        tokio::pin!(socks);
         let mut active = BTreeSet::new();
         let mut reads = FuturesUnordered::<BoxFuture<'_, Completion>>::new();
         let mut qualification_due = Instant::now();
@@ -95,7 +99,7 @@ impl ManagedPool {
             let mut wake = Instant::now() + CADENCE;
             // The finite pass is independent of recurring requested work. Its
             // failed reads report failure; only explicit requests retain retries.
-            while !startup_complete && active.len() < BALANCE_READS {
+            while startup_ready && !startup_complete && active.len() < BALANCE_READS {
                 if let Some((sequence, id)) = page.pop_front() {
                     cursor = sequence;
                     self.schedule_balance(id, &mut active, &mut reads, &mut first_error);
@@ -167,6 +171,7 @@ impl ManagedPool {
             }
             tokio::select! {
                 _=stop.cancelled()=>break,
+                _=&mut socks, if !startup_ready && !startup_complete => startup_ready=true,
                 _=&mut changed=>{},
                 Some(done)=reads.next(),if !reads.is_empty()=>{
                     if let Some(id)=done.id { active.remove(&id); }

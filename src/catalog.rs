@@ -91,6 +91,10 @@ pub struct Config {
     pub discovery_source: Option<String>,
     #[serde(skip)]
     pub discovery_relay: Option<std::sync::Arc<crate::discovery_relay::Relay>>,
+    /// Only deferred serving discovery waits for its local SOCKS prerequisite.
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub wait_for_startup_socks: bool,
     pub http_cache_enabled: bool,
     /// Local catalog snapshot lifetime; zero disables catalog disk caching.
     pub catalog_cache_ttl_seconds: u64,
@@ -187,6 +191,7 @@ impl Default for Config {
         Self {
             discovery_source: None,
             discovery_relay: None,
+            wait_for_startup_socks: false,
             http_cache_enabled: true,
             catalog_cache_ttl_seconds: crate::limits::API_CACHE_TTL_SECONDS,
             http_cache_directory: None,
@@ -642,6 +647,9 @@ async fn load_json_discovery_origin(
         return Ok(cached.expect("fresh cached document").1);
     }
 
+    if cfg.wait_for_startup_socks {
+        network.wait_for_startup_socks().await;
+    }
     let conditional = cached
         .as_ref()
         .map(|(entry, _)| entry)

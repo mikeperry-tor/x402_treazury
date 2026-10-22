@@ -1,0 +1,49 @@
+//! Startup-only local connectivity discovery, independent of financial authority.
+use super::*;
+
+const RETRY: Duration = Duration::from_secs(5);
+
+impl NetworkContext {
+    /// Keep finite serving discovery pending until its local Tor prerequisite exists.
+    /// This is one TCP observation, not a Tor bootstrap check or a permanent monitor.
+    /// Drop the future with its startup owner; no detached task or HTTP replay exists.
+    pub(crate) async fn wait_for_startup_socks(&self) {
+        if self.policy.mode != Mode::Tor || crate::qualification::active() {
+            return;
+        }
+        self.startup_socks
+            .get_or_init(|| async {
+                let endpoint = self.policy.socks_endpoint.expect("validated Tor policy");
+                let mut unavailable = false;
+                loop {
+                    let reason = match self.connect_startup_socks(endpoint).await {
+                        Ok(()) => {
+                            if unavailable {
+                                tracing::info!(
+                                    socks_endpoint = %endpoint,
+                                    "Tor SOCKS endpoint is reachable; resuming pending startup discovery; Tor bootstrap and destination connectivity are not yet verified"
+                                );
+                            }
+                            break;
+                        }
+                        Err(error) => error.kind(),
+                    };
+                    if !unavailable {
+                        tracing::error!(
+                            category = "tor_socks_unreachable",
+                            socks_endpoint = %endpoint,
+                            io_kind = ?reason,
+                            retry_after_seconds = RETRY.as_secs(),
+                            "Tor SOCKS endpoint is unreachable; start Tor Browser or the configured Tor daemon. Startup discovery will resume automatically; MCP serving remains available"
+                        );
+                        unavailable = true;
+                    }
+                    tokio::time::sleep(RETRY).await;
+                }
+            })
+            .await;
+    }
+}
+
+#[cfg(test)]
+mod tests;

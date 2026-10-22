@@ -189,6 +189,11 @@ every command. Info reports catalog/pricing completion, listener startup and
 funding progress. Download, parse and protocol details belong at debug; warnings
 identify failures, degraded operation or actionable configuration problems.
 
+An unreachable configured local Tor SOCKS endpoint during serving startup emits
+one shared ERROR with the local address, safe I/O kind and retry cadence. Recovery
+emits INFO describing TCP reachability, without asserting Tor bootstrap or remote
+service health. No upstream prose, credentials or destination URLs are included.
+
 Managed extension omission is INFO (`bazaar` discovery metadata remains DEBUG).
 It reports challenge preparation before offer validation or signing, not a failed
 payment. Payment-call spans carry an ephemeral `call_id`, configured source and

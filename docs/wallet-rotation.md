@@ -626,6 +626,15 @@ not create a hidden SDK owner or relax strict inspection/qualification requireme
 Listeners bind before startup discovery. Ordinary serving does not sweep idle
 ACTIVE, READY or RETAINED wallets.
 
+In Tor mode, finite serving startup discovery retains its captured work while the
+configured local SOCKS port is unreachable. A shared TCP-only check reports the
+endpoint and retries every five seconds until reachable; it then ends and the
+normal finite passes proceed. This does not verify Tor bootstrap, add recurring
+idle discovery or reset an existing wallet/treasury observation cooldown.
+Requested refreshes, accepted work and treasury commands remain independent;
+a successful demanded treasury scan can satisfy its pending startup pass.
+Explicit one-pass sync and qualification do not wait for this startup prerequisite.
+
 Recognized signed-payment insufficient funds requests an asynchronous scalar
 refresh. Multiple requests before a read coalesce; a request arriving during a
 read remains pending for a later read. Success, including zero, finishes the

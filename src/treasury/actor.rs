@@ -149,6 +149,10 @@ impl Treasury {
     ) -> Result<()> {
         let changed = self.store.treasury_changes();
         let mut observed_sync = None;
+        let network = crate::network::global();
+        let socks = network.wait_for_startup_socks();
+        tokio::pin!(socks);
+        let mut startup_ready = false;
         loop {
             if self.completed.is_some() {
                 tokio::select! {
@@ -180,7 +184,7 @@ impl Treasury {
                     Err(error) => return Err(error),
                 }
             }
-            let requested = if self.startup_discovery {
+            let requested = if self.startup_discovery && startup_ready {
                 Some(true)
             } else {
                 let groups = self.funding_groups.clone();
@@ -191,9 +195,7 @@ impl Treasury {
                     &mut None,
                 )?
             };
-            let due = if self.startup_discovery {
-                tokio::time::Instant::now()
-            } else if requested.is_none() {
+            let due = if requested.is_none() {
                 // Unknown demand is not permission to scan. A read-only busy
                 // inventory defers reevaluation while accepted commands stay live.
                 tokio::time::Instant::now()
@@ -204,6 +206,7 @@ impl Treasury {
             tokio::select! {
                 biased;
                 _ = stop.cancelled() => break,
+                _ = &mut socks, if self.startup_discovery && !startup_ready => startup_ready = true,
                 command = commands.receiver.recv() => {
                     let Some(command) = command else { break };
                     match command {
@@ -241,7 +244,9 @@ impl Treasury {
                 }
                 _ = tokio::time::sleep_until(due), if requested != Some(false) => {
                     if requested == Some(true) {
-                        self.startup_discovery = false;
+                        // Ordinary demanded work can satisfy startup discovery while
+                        // its local connectivity observation is still pending.
+                        self.startup_discovery &= !startup_ready;
                         if let Err(error) = self.sync_for_observation(stop).await
                             && !stop.is_cancelled() {
                                 super::diagnostics::warn_sync_failure(
@@ -253,6 +258,9 @@ impl Treasury {
                 }
                 // Capacity traffic must not starve an already-due scan.
                 _ = changed.notified() => {},
+            }
+            if self.last_completed_sync.is_some() {
+                self.startup_discovery = false;
             }
             if self.healthy
                 && self.last_completed_sync.is_some()

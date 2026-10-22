@@ -42,6 +42,14 @@ impl Drop for Socks {
 impl Socks {
     pub async fn start(routes: BTreeMap<String, SocketAddr>, fault: Fault) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        Self::start_on(listener, routes, fault).await
+    }
+    /// A retained address lets startup fixtures bring the proxy online later.
+    pub async fn start_on(
+        listener: TcpListener,
+        routes: BTreeMap<String, SocketAddr>,
+        fault: Fault,
+    ) -> Self {
         let address = listener.local_addr().unwrap();
         let records = Arc::new(Mutex::new(Vec::new()));
         let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));

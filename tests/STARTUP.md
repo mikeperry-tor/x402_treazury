@@ -41,6 +41,15 @@ strict loading and warming, which download the healthy source while remaining
 pending for completeness; cancellation cannot dispatch delayed retries.
 
 Wallet discovery uses the [wallet observation policy](../docs/wallet-rotation.md#wallet-observation-policy).
+`network::startup_socks::tests` covers a late local SOCKS listener, shared and
+cancelled waiters, sanitized ERROR/recovery INFO, completed observation without a
+permanent monitor, and fresh catalog/pricing cache hits while the proxy is absent.
+`deployment::deferred::startup_socks_tests` verifies that a bound authenticated MCP
+listener and local tools remain available, then remote catalogs and captured Base
+balance discovery and an idle treasury's initial scan resume in the same process
+when a fake SOCKS endpoint appears after a confirmed startup connectivity ERROR,
+without signed requests or new financial work. These are local TCP/SOCKS fixtures,
+not live Tor bootstrap qualification.
 `rotation::manager::maintenance::tests` exercises finite Base discovery, successful
 zero refresh completion, notification bursts at 59 seconds, cancellation/restart,
 retired-wallet exclusion, startup inventory failure and first-positive initial
