@@ -39,7 +39,8 @@ Read [Zingo patch reasons](../../vendor/ZINGO.md),
 
 ## Current behavior and proposed replacement
 
-Today patched `GrpcIndexer` transports are installed on `LightClient` for SDK
+At the assessment baseline, patched `GrpcIndexer` transports are installed on
+`LightClient` for SDK
 sync and deposit calculation. Sync runs on an application-owned runtime;
 the SDK startup patch acknowledges first polling without a launch deadline.
 Connected deposit calculation retains ordinary transaction expiry. Shielding

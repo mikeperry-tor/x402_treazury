@@ -445,8 +445,10 @@ revalidated current authority. Signed bytes and
 recovery evidence remain archived; the old operation cannot be broadcast again.
 Missing or conflicting evidence keeps the original ownership.
 
-`treasury/send.rs` implements explicit deposit preparation through zingolib's
-calculate-only API. It accepts one mainnet transparent recipient, uses account 0's
+`treasury/send.rs` retains the public Zingolib proposal through accepted-input
+journaling, then uses the backend's calculate-only API with explicit ordinary
+NU7-aware expiry. Public proposal cleanup runs after releasing the wallet guard.
+It accepts one mainnet transparent recipient, uses account 0's
 shielded inputs, rejects multi-step transactions, and verifies the resulting
 recipient, amount, actual fee and bounded expiry. The caller supplies the pool,
 operation UUID, source/fee safeguards and quote deadline.

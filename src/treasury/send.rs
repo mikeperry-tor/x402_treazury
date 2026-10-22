@@ -1,4 +1,5 @@
 //! Serialized, calculate-only deposit preparation and durable submission control.
+mod prover;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod proving_tests;
 use super::{SyncPhase, Treasury};
@@ -13,6 +14,49 @@ use anyhow::{Context, Result, ensure};
 use zcash_keys::address::Address;
 use zcash_protocol::value::Zatoshis;
 use zingo_netutils::Indexer;
+
+type DepositProposal = zcash_client_backend::proposal::Proposal<
+    zcash_primitives::transaction::fees::zip317::FeeRule,
+    zingolib::wallet::output::OutputRef,
+>;
+
+fn calculate_deposit(
+    wallet: &mut zingolib::wallet::LightWallet,
+    proposal: &DepositProposal,
+) -> Result<Vec<zcash_protocol::TxId>> {
+    let chain = wallet.chain_type();
+    let usk: zcash_keys::keys::UnifiedSpendingKey = wallet
+        .unified_key_store
+        .get(&zip32::AccountId::ZERO)
+        .context("missing treasury account")?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("treasury spend key unavailable"))?;
+    let prover = prover::LazySaplingProver::default();
+    zcash_client_backend::data_api::wallet::create_proposed_transactions::<
+        _,
+        _,
+        std::convert::Infallible,
+        _,
+        std::convert::Infallible,
+        _,
+    >(
+        wallet,
+        &chain,
+        &zcash_client_backend::util::SystemClock,
+        &mut zingolib::utils::system_rng(),
+        &prover,
+        &prover,
+        &zcash_client_backend::data_api::wallet::SpendingKeys::new(usk),
+        zcash_client_backend::wallet::OvkPolicy::Sender,
+        proposal,
+        Some(zingolib::wallet::expiry::tx_expiry_height(
+            &chain,
+            proposal.min_target_height().into(),
+        )),
+    )
+    .map(|ids| ids.into_iter().collect())
+    .map_err(|_| anyhow::anyhow!("treasury calculation failed"))
+}
 
 impl TransactionPreparer for Treasury {
     async fn prepare(&mut self, request: PrepareRequest) -> Result<PreparedTransaction> {
@@ -115,12 +159,12 @@ impl Treasury {
         }
         // Read-only checks precede any reservation, library mutation or poisoning.
         let preflight: Result<_> = async {
-            let mut indexer = crate::network::global()
-                .grpc(&identity, &settings.endpoint)
-                .await?;
             // The actor already validated the canonical network/anchor above.
-            // Direct preparation retains its own network validation.
+            // Only direct preparation needs its own network connection and check.
             if stop.is_none() {
+                let mut indexer = crate::network::global()
+                    .grpc(&identity, &settings.endpoint)
+                    .await?;
                 let info = indexer
                     .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
                     .await
@@ -132,26 +176,22 @@ impl Treasury {
             }
             let instant = now()?;
             ensure!(request.deadline > instant, "funding_deadline_expired");
-            Ok(indexer)
+            Ok(())
         }
         .await;
-        let indexer = match preflight {
-            Ok(indexer) => indexer,
-            Err(error) => {
-                self.client
-                    .as_mut()
-                    .context("treasury client unavailable")?
-                    .clear_proposal()
-                    .await;
-                return Err(error.context(crate::rotation::transaction::PreparationDeferred));
-            }
-        };
+        if let Err(error) = preflight {
+            self.client
+                .as_mut()
+                .context("treasury client unavailable")?
+                .clear_proposal()
+                .await;
+            return Err(error.context(crate::rotation::transaction::PreparationDeferred));
+        }
         let client = self
             .client
             .as_mut()
             .context("treasury client unavailable")?;
-        client.set_indexer(indexer);
-        let (calculation, authorized_cost, fee) = selected;
+        let (calculation, authorized_cost, fee, proposal) = selected;
         // Spendability and actual fees are known before destination discovery.
         // This advisory one-pass read cannot gate valid preparation on RPC health;
         // its positive result consumes the claim checked again at acceptance.
@@ -198,16 +238,23 @@ impl Treasury {
             }
             return Err(error);
         }
-        let ids = client
-            .calculate_stored_proposal()
-            .await
-            .map_err(|_| anyhow::anyhow!("treasury calculation failed"))?;
+        let calculation_result = {
+            let mut wallet = client.wallet().write().await;
+            calculate_deposit(&mut wallet, &proposal)
+        };
+        // Public cleanup also restores the SDK proposal pause. Drop the wallet
+        // guard before acquiring it through the client on either result path.
+        client.clear_proposal().await;
+        let ids = calculation_result?;
         ensure!(ids.len() == 1, "calculation produced multiple transactions");
         let (raw, facts) = {
             let wallet = client.wallet().read().await;
             let record = wallet
                 .wallet_transactions
-                .get(ids.first())
+                .get(
+                    ids.first()
+                        .context("calculated transaction identity missing")?,
+                )
                 .context("calculated transaction missing")?;
             let transaction = record.transaction();
             let mut raw = zeroize::Zeroizing::new(Vec::new());
@@ -269,6 +316,7 @@ impl Treasury {
         crate::rotation::store::preparation::CalculationInputs,
         i64,
         u64,
+        DepositProposal,
     )> {
         // SyncSession returns an offline client after stopping its isolated
         // runtime; create/open/reconstruction also restore offline clients.
@@ -340,7 +388,7 @@ impl Treasury {
             destination: request.recipient.clone(),
             inputs: selected,
         };
-        Ok((calculation, i64::try_from(total)?, fee))
+        Ok((calculation, i64::try_from(total)?, fee, proposal))
         }.await;
         match selected_proposal {
             Ok(value) => Ok(value),

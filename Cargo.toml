@@ -35,6 +35,9 @@ zcash-regtest = ["zcash-testutils", "dep:zcash_local_net"]
 
 [dependencies]
 rand = "0.9"
+rand10 = { package = "rand", version = "0.10" }
+sapling-crypto = "0.9.0"
+jubjub = "0.11.1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 zcash_local_net = { git = "https://github.com/zingolabs/infrastructure.git", rev = "89cf104a2416144d1bbbae30aca02bec062d1492", optional = true }
 orchard = { version = "0.16.0", default-features = false, features = ["circuit"], optional = true }

@@ -51,7 +51,7 @@ vendored under the proposed replacement.
 | `reqwest` | Post-connect header timing, body inactivity/backpressure, and disabled unstarted-request recovery. | Identify a supported upstream implementation or hooks covering every hunk before selecting contributions or a local adapter. Retain current retry behavior. | No retirement candidate qualified. |
 | `zingo-netutils` | Connector constructor plus clone-preserving service injection/Tower changes; standalone manifest adaptations. | Pair retirement with Zingolib in Z1 using nineteen public-trait RPC delegations over the existing network factory; qualify concrete consumers and both graphs before removal. | Z0/Gate A passed at the pinned revision with no public-API blocker. No production replacement qualified. |
 | `pepper-sync` | Stream-message/drain changes and typed/sanitized diagnostics; standalone manifest adaptations and root membership for its private merge regression. | Establish a complete upstream route for both concerns before choosing contribution order; preserve lifecycle/merge regression evidence and remove local test membership when retiring the checkout. | No retirement candidate qualified. |
-| `zingolib` | Indexer installation and sync startup ownership; standalone manifest adaptations and direct compatibility-workspace dependency. | Pair retirement with netutils in Z1: one owned Pepper task, exact public proposal and backend calculation with explicit ordinary expiry/lazy embedded prover. Preserve both graphs, attribution and release inputs. | Z0/Gate A passed at the pinned revision with no public-API blocker. No production replacement qualified. |
+| `zingolib` | SDK sync indexer installation and startup ownership; standalone manifest adaptations and direct compatibility-workspace dependency. | Backend deposits now use the exact public proposal with ordinary expiry/lazy embedded proving. Replace the SDK sync launcher next, then activate the RPC adapter and qualify paired source removal; preserve both graphs, attribution and release inputs. | Z0/Gate A passed at the pinned revision with no public-API blocker. No production replacement qualified. |
 
 The independently reviewed Z0 decision is to proceed with the paired Z1 design
 after separate implementation authorization. It removes two checkout
@@ -59,8 +59,9 @@ snapshots and their manifest/patch synchronization, while adding narrow RPC and
 prover adapters; handwritten behavior does not shrink. The
 [replacement boundary](ZINGO.md#two-checkout-replacement-boundary) records the
 complete patch handoff and financial/network constraints. Reject inline engine
-polling that can deadlock checkpoint acquisition. Z1 must cover that interleaving,
-remove the actor's now-unused connection and preserve direct network validation.
+polling that can deadlock checkpoint acquisition. The sync transition must cover
+that interleaving. Backend deposits omit the actor's redundant connection while
+retaining direct network validation.
 Record upstream descriptor/Git metadata in release evidence; parameter staging
 alone does not qualify a reproducible release. A material source/API change or a
 failure to retain these contracts reopens Gate A rather than weakening policy or

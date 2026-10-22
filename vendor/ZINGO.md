@@ -49,8 +49,8 @@ current spendability, while accepted unresolved inputs remain fenced.
 
 Every existing RPC, cloned indexer and pepper-sync stream uses the supplied channel.
 The application constructs both direct and authenticated SOCKS channels through
-`network.rs`; it creates LightClient offline and installs that indexer before sync
-or proposal work. It does not use upstream online constructors, URI setters,
+`network.rs`; it creates LightClient offline and installs that indexer for SDK
+sync. Deposit selection and backend calculation keep the client offline. It does not use upstream online constructors, URI setters,
 migration transmitters, price fetchers or optional nym workers.
 
 Cargo manifests expand workspace-inherited dependencies, pin sibling Git crates to
@@ -74,7 +74,11 @@ correct SDK reorg handling necessary; it does not require revalidating all histo
 source operations before allowing new work.
 
 `src/network.rs` constructs `GrpcIndexer::from_transport`;
-`src/treasury/mod.rs` and `src/treasury/send.rs` install it on offline LightClients.
+`src/treasury/mod.rs` installs it on the offline LightClient for SDK sync.
+`src/treasury/send.rs` retains the public proposal and calls backend calculation
+without installing an SDK indexer. Its lazy Sapling prover uses embedded public
+parameter bytes; copied prover/RPC code retains attribution in
+`vendor/ZINGO-LICENSE-MIT`.
 Remove connector injection only when an upstream API preserves that same transport
 across every RPC and clone, including Tor remote DNS and no direct fallback.
 `tests/network_audit.rs`, `tests/network.rs` and `tests/treasury_sync.rs`
@@ -113,8 +117,8 @@ version selected in the lockfiles.
 ## Two-checkout replacement boundary
 
 The pinned v7 public APIs provide a candidate exit for `zingolib` and
-`zingo-netutils` together. This is an assessed design, not the production
-integration described above. The [checkout ledger](README.md#checkout-retirement-tracking)
+`zingo-netutils` together. Backend deposit calculation already uses this public
+route; the sync, adapter and source transitions remain to be implemented. The [checkout ledger](README.md#checkout-retirement-tracking)
 owns its decision and remaining qualification; the
 [implementation plan](../docs/plans/vendor_retirement.md) owns commit and review gates.
 

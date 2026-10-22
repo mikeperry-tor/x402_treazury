@@ -120,7 +120,14 @@ The explicit per-address command remains available.
 
 Zingolib selects inputs and calculates standard network fees. The application
 checks the actual proposal against configured per-operation fee/spend safeguards,
-then persists the exact input owner before calculation. A configured maximum is a
+then persists the exact input owner before calculation. Backend calculation
+borrows that same public proposal and retains ordinary consensus expiry, including
+the SDK's NU7 delta, rather than the offline high-level API's epoch-end expiry.
+Sapling proving uses lazily parsed embedded parameters. Proposal cleanup happens
+after releasing the wallet guard; accepted input ownership remains durable.
+Canonical actor validation supplies the network/anchor check without an additional
+connection for local calculation; direct preparation keeps its network validation.
+A configured maximum is a
 rejection ceiling, not a capital reservation. Unknown outcomes after calculation
 acceptance retain that input fence. The preparation phase commits with input
 ownership; known proposal shortages and fee rejections leave the quoted operation

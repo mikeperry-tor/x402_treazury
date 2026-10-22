@@ -15,6 +15,26 @@ use std::{
     },
 };
 
+// Count transport construction even when a connection carries no RPC.
+struct CountingListener {
+    listener: tokio::net::TcpListener,
+    connections: Arc<AtomicUsize>,
+}
+impl axum::serve::Listener for CountingListener {
+    type Io = tokio::net::TcpStream;
+    type Addr = std::net::SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        let connection = axum::serve::Listener::accept(&mut self.listener).await;
+        self.connections.fetch_add(1, Ordering::SeqCst);
+        connection
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.listener.local_addr()
+    }
+}
+
 async fn base_fixture(balance: u64) -> (BaseRpc, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
@@ -82,12 +102,15 @@ async fn check_preparation_probes(actor: bool, matching_chain: bool) {
         .0;
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorded = calls.clone();
+    let treasury_id = store.call(|s| Ok(s.id().to_owned())).await.unwrap();
+    let identity = crate::network::IsolationId::treasury(&treasury_id);
     let database = dir.path().join("state/state.sqlite");
     let pool = job.pool_id.clone();
     let app = Router::new().fallback(move |uri: axum::http::Uri| {
         let calls = recorded.clone();
         let database = database.clone();
         let pool = pool.clone();
+        let identity = identity.clone();
         async move {
             let method = uri.path().rsplit('/').next().unwrap().to_owned();
             calls.lock().unwrap().push(method.clone());
@@ -118,6 +141,9 @@ async fn check_preparation_probes(actor: bool, matching_chain: bool) {
                     protobuf_varint(u64::from(height), &mut message);
                     message.extend([0x12, hash.len() as u8]);
                     message.extend(hash);
+                    // Force a subsequent factory call to create a new transport.
+                    // The current canonical-validation request retains its clone.
+                    crate::network::global().release_grpc(&identity).await;
                 }
                 _ => panic!("unexpected preparation RPC: {method}"),
             }
@@ -139,6 +165,11 @@ async fn check_preparation_probes(actor: bool, matching_chain: bool) {
     owner.sync_settings.as_mut().unwrap().endpoint =
         format!("http://{}", listener.local_addr().unwrap());
     owner.startup_discovery = false;
+    let connections = Arc::new(AtomicUsize::new(0));
+    let listener = CountingListener {
+        listener,
+        connections: connections.clone(),
+    };
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let (base, base_calls, base_server) = base_fixture(1).await;
     let mut remaining_owner = Some(owner);
@@ -178,6 +209,11 @@ async fn check_preparation_probes(actor: bool, matching_chain: bool) {
         (error, None)
     };
     assert!(error.0.is::<PreparationDeferred>(), "{:#}", error.0);
+    assert_eq!(
+        connections.load(Ordering::SeqCst),
+        1,
+        "preparation must not open another connection after canonical validation"
+    );
     assert_eq!(
         base_calls.load(Ordering::SeqCst),
         usize::from(actor && matching_chain)

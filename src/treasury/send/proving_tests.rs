@@ -30,12 +30,26 @@ fn varint(mut n: u64) -> Vec<u8> {
 
 #[tokio::test]
 async fn funded_preparation_proves_and_restores_identical_pending_bytes() {
-    qualify_preparation(true, true).await;
-    qualify_preparation(false, true).await;
-    qualify_preparation(false, false).await;
+    qualify_preparation(PreparationCase::PublicationFailure).await;
+    qualify_preparation(PreparationCase::Published).await;
+    qualify_preparation(PreparationCase::Unfunded).await;
 }
 
-async fn qualify_preparation(fail_commit: bool, funded: bool) {
+#[tokio::test]
+async fn calculation_failure_clears_proposal_but_retains_accepted_inputs() {
+    qualify_preparation(PreparationCase::CalculationFailure).await;
+}
+
+#[derive(Clone, Copy)]
+enum PreparationCase {
+    Published,
+    PublicationFailure,
+    Unfunded,
+    CalculationFailure,
+}
+
+async fn qualify_preparation(case: PreparationCase) {
+    let funded = !matches!(case, PreparationCase::Unfunded);
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -89,14 +103,29 @@ async fn qualify_preparation(fail_commit: bool, funded: bool) {
         .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let count = calls.clone();
+    let fail_calculation = matches!(case, PreparationCase::CalculationFailure)
+        .then(|| treasury.client.as_ref().unwrap().wallet().clone());
     let app = axum::Router::new().fallback(move |uri: axum::http::Uri| {
         let count = count.clone();
+        let fail_calculation = fail_calculation.clone();
         async move {
             assert!(
                 uri.path().ends_with("GetLightdInfo"),
                 "unexpected RPC: {uri}"
             );
             count.fetch_add(1, Ordering::SeqCst);
+            if let Some(wallet) = fail_calculation {
+                // Production selection has finished; fail calculation after
+                // acceptance without adding a hook to the financial path.
+                assert!(
+                    wallet
+                        .write()
+                        .await
+                        .unified_key_store
+                        .remove(&zip32::AccountId::ZERO)
+                        .is_some()
+                );
+            }
             let message = [
                 vec![0x22, 4, b'm', b'a', b'i', b'n', 0x38],
                 varint(TIP.into()),
@@ -151,7 +180,67 @@ async fn qualify_preparation(fail_commit: bool, funded: bool) {
         server.abort();
         return;
     }
-    if fail_commit {
+    if matches!(case, PreparationCase::CalculationFailure) {
+        let revision = treasury.revision;
+        let error = treasury.prepare(request()).await.err().unwrap();
+        assert_eq!(error.to_string(), "missing treasury account");
+        assert!(!error.is::<crate::rotation::transaction::PreparationDeferred>());
+        assert!(!treasury.healthy && treasury.completed.is_none());
+        assert_eq!(treasury.revision, revision);
+        assert!(matches!(
+            treasury
+                .client
+                .as_mut()
+                .unwrap()
+                .calculate_stored_proposal()
+                .await,
+            Err(zingolib::lightclient::error::LightClientError::SendError(
+                zingolib::lightclient::error::SendError::NoStoredProposal
+            ))
+        ));
+        let id = operation.clone();
+        let selected = treasury
+            .store
+            .call(move |s| {
+                assert!(s.require_unstarted_preparation(&id).is_err());
+                assert!(s.prepared_bytes(&id).is_err());
+                s.prepared_inputs(&id)
+            })
+            .await
+            .unwrap();
+        assert_eq!(selected.len(), 1);
+        let status = treasury.status().await.unwrap();
+        assert!(status.outgoing_pending && status.treasury_operations.is_empty());
+        assert!(
+            treasury
+                .prepare(request())
+                .await
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("requires reopen")
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "no replay or submission");
+        treasury.close().await.unwrap();
+        let restored = Treasury::open(state, key, treasury_id).await.unwrap();
+        assert_eq!(restored.revision, revision);
+        restored
+            .store
+            .call(move |s| {
+                assert_eq!(s.prepared_inputs(&operation)?, selected);
+                assert!(s.require_unstarted_preparation(&operation).is_err());
+                assert!(s.abandon_unprepared(&operation).is_err());
+                assert!(s.require_preparation_available().is_err());
+                assert!(s.prepared_bytes(&operation).is_err());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        restored.close().await.unwrap();
+        server.abort();
+        return;
+    }
+    if matches!(case, PreparationCase::PublicationFailure) {
         let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
         db.execute_batch("CREATE TRIGGER reject_prepare BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture prepared commit failure'); END;").unwrap();
         let revision = treasury.revision;
@@ -278,4 +367,158 @@ async fn qualify_preparation(fail_commit: bool, funded: bool) {
         .unwrap();
     restored.close().await.unwrap();
     server.abort();
+}
+
+async fn synthetic_deposit_client(
+    tip: u32,
+    nu7: u32,
+    sapling: bool,
+) -> (tempfile::TempDir, zingolib::lightclient::LightClient) {
+    let dir = tempfile::tempdir().unwrap();
+    let heights = zingolib::testutils::mock_activation_heights_with(|era| era.set_nu7(Some(nu7)));
+    let builder = SyntheticWalletBuilder::new(SEED)
+        .tip(tip)
+        .activation_heights(heights);
+    let mut wallet = if sapling {
+        builder.sapling_note(100_000)
+    } else {
+        builder.orchard_note(100_000)
+    }
+    .build();
+    let chain = wallet.chain_type();
+    wallet.wallet_settings.min_confirmations = 1.try_into().unwrap();
+    wallet.mark_dirty();
+    let bytes = wallet.save().unwrap().unwrap();
+    let config = zingolib::config::ClientConfig::builder()
+        .set_chain_type(chain)
+        .set_wallet_dir(dir.path().to_path_buf())
+        .set_wallet_config(zingolib::config::WalletConfig::Read)
+        .build()
+        .unwrap();
+    let client = zingolib::lightclient::LightClient::from_reader(bytes.as_slice(), config)
+        .await
+        .unwrap();
+    (dir, client)
+}
+
+async fn deposit_proposal(client: &mut zingolib::lightclient::LightClient) -> DepositProposal {
+    let recipient = client
+        .wallet()
+        .read()
+        .await
+        .transparent_addresses()
+        .values()
+        .next()
+        .unwrap()
+        .clone();
+    let payment = zcash_client_backend::zip321::Payment::new(
+        recipient.parse().unwrap(),
+        Some(Zatoshis::from_u64(50_000).unwrap()),
+        None,
+        None,
+        None,
+        vec![],
+    )
+    .unwrap();
+    client
+        .propose_send(
+            zcash_client_backend::zip321::TransactionRequest::new(vec![payment]).unwrap(),
+            zip32::AccountId::ZERO,
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn backend_deposit_expiry_before_at_nu7_and_upgrade_boundary() {
+    // Explicit custom schedules exercise ordinary expiry without offline retargeting.
+    for (tip, nu7) in [(98, 100), (99, 100), (100, 100), (80, 100)] {
+        let (_dir, mut client) = synthetic_deposit_client(tip, nu7, false).await;
+        let proposal = deposit_proposal(&mut client).await;
+        let selected = super::super::inputs::selected_inputs(&proposal).unwrap();
+        let target = u32::from(proposal.min_target_height());
+        let expected_delta = if target >= nu7 { 120 } else { 40 };
+        let before = prover::parse_count();
+        let ids = {
+            let mut wallet = client.wallet().write().await;
+            calculate_deposit(&mut wallet, &proposal).unwrap()
+        };
+        assert_eq!(
+            prover::parse_count(),
+            before,
+            "Orchard-only work must not parse Sapling parameters"
+        );
+        client.clear_proposal().await;
+        assert!(
+            client.calculate_stored_proposal().await.is_err(),
+            "public cleanup consumed stored proposal"
+        );
+        let wallet = client.wallet().read().await;
+        let tx = wallet
+            .wallet_transactions
+            .get(&ids[0])
+            .unwrap()
+            .transaction();
+        assert_eq!(u32::from(tx.expiry_height()), target + expected_delta);
+        assert_eq!(
+            selected,
+            super::super::inputs::selected_inputs(&proposal).unwrap()
+        );
+        assert!(tx.transparent_bundle().unwrap().vin.is_empty());
+        assert_eq!(tx.transparent_bundle().unwrap().vout.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn backend_deposit_real_sapling_proving_and_public_failure_cleanup() {
+    let (_dir, mut client) = synthetic_deposit_client(80, 100, true).await;
+    let proposal = deposit_proposal(&mut client).await;
+    let before = prover::parse_count();
+    let ids = {
+        let mut wallet = client.wallet().write().await;
+        calculate_deposit(&mut wallet, &proposal).unwrap()
+    };
+    assert_eq!(prover::parse_count(), before + 1);
+    client.clear_proposal().await;
+    {
+        let wallet = client.wallet().read().await;
+        let transaction = wallet
+            .wallet_transactions
+            .get(&ids[0])
+            .unwrap()
+            .transaction();
+        assert!(
+            !transaction
+                .sapling_bundle()
+                .unwrap()
+                .shielded_spends()
+                .is_empty()
+        );
+        assert_eq!(
+            u32::from(transaction.expiry_height()),
+            u32::from(proposal.min_target_height()) + 40
+        );
+    }
+    let (_dir, mut client) = synthetic_deposit_client(80, 100, false).await;
+    let proposal = deposit_proposal(&mut client).await;
+    let key = {
+        let mut wallet = client.wallet().write().await;
+        let key = wallet
+            .unified_key_store
+            .remove(&zip32::AccountId::ZERO)
+            .unwrap();
+        assert!(calculate_deposit(&mut wallet, &proposal).is_err());
+        key
+    };
+    client.clear_proposal().await;
+    client
+        .wallet()
+        .write()
+        .await
+        .unified_key_store
+        .insert(zip32::AccountId::ZERO, key);
+    assert!(client.calculate_stored_proposal().await.is_err());
+    // Declining the failed proposal leaves SDK selection usable.
+    let _ = deposit_proposal(&mut client).await;
+    client.clear_proposal().await;
 }
