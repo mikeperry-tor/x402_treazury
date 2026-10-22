@@ -40,17 +40,31 @@ Six patched crate directories remain. Alloy uses unpatched registry sources;
 table owns the current blockers, next actions and upstream follow-up.
 The [retirement assessment plan](../docs/plans/vendor_retirement.md) focuses on
 the Zingolib/netutils pair and retains the other unfinished assessment requirements.
-Its proposed adapter/backend route is not yet qualified; Pepper remains vendored
-under that proposal.
+Z0 passed independent Gate A review for the paired public-trait/backend route at
+the pinned v7 revision. Production still uses all six checkouts. Pepper remains
+vendored under the proposed replacement.
 
 | Checkout | Complete local blocker set | Next action | Upstream reference and candidate |
 | --- | --- | --- | --- |
 | `hyper` | Pending-open cancellation in `hyper-transport.patch`. | Prepare a minimal upstream cancellation regression/fix; qualify a version containing equivalent behavior independently of h2's status. | No retirement candidate qualified. |
 | `h2` | Pending-open queue cleanup and scheduler wakeups in `h2-transport.patch`. | Prepare upstream zero-capacity/reset regressions and fix; qualify a version independently of Hyper's status. | No retirement candidate qualified. |
 | `reqwest` | Post-connect header timing, body inactivity/backpressure, and disabled unstarted-request recovery. | Identify a supported upstream implementation or hooks covering every hunk before selecting contributions or a local adapter. Retain current retry behavior. | No retirement candidate qualified. |
-| `zingo-netutils` | Connector constructor plus clone-preserving service injection/Tower changes; standalone manifest adaptations. | Assess an application implementation of the public indexer traits with direct Pepper sync and backend deposit calculation as a paired exit with Zingolib; compare supported upstream transport injection and qualify both graphs. | Pinned v7 public-trait route identified; no retirement candidate qualified. |
+| `zingo-netutils` | Connector constructor plus clone-preserving service injection/Tower changes; standalone manifest adaptations. | Pair retirement with Zingolib in Z1 using nineteen public-trait RPC delegations over the existing network factory; qualify concrete consumers and both graphs before removal. | Z0/Gate A passed at the pinned revision with no public-API blocker. No production replacement qualified. |
 | `pepper-sync` | Stream-message/drain changes and typed/sanitized diagnostics; standalone manifest adaptations and root membership for its private merge regression. | Establish a complete upstream route for both concerns before choosing contribution order; preserve lifecycle/merge regression evidence and remove local test membership when retiring the checkout. | No retirement candidate qualified. |
-| `zingolib` | Indexer installation and sync startup ownership; standalone manifest adaptations and direct compatibility-workspace dependency. | Assess direct public Pepper sync and backend deposit calculation preserving ordinary expiry, as a paired exit with netutils. Preserve sibling revision coherence, replace the compatibility workspace's direct dependency, and preserve isolated standard-cache parameter staging with hash verification and network-denied builds. | Pinned v7 public-API route identified; no retirement candidate qualified. |
+| `zingolib` | Indexer installation and sync startup ownership; standalone manifest adaptations and direct compatibility-workspace dependency. | Pair retirement with netutils in Z1: one owned Pepper task, exact public proposal and backend calculation with explicit ordinary expiry/lazy embedded prover. Preserve both graphs, attribution and release inputs. | Z0/Gate A passed at the pinned revision with no public-API blocker. No production replacement qualified. |
+
+The independently reviewed Z0 decision is to proceed with the paired Z1 design
+after separate implementation authorization. It removes two checkout
+snapshots and their manifest/patch synchronization, while adding narrow RPC and
+prover adapters; handwritten behavior does not shrink. The
+[replacement boundary](ZINGO.md#two-checkout-replacement-boundary) records the
+complete patch handoff and financial/network constraints. Reject inline engine
+polling that can deadlock checkpoint acquisition. Z1 must cover that interleaving,
+remove the actor's now-unused connection and preserve direct network validation.
+Record upstream descriptor/Git metadata in release evidence; parameter staging
+alone does not qualify a reproducible release. A material source/API change or a
+failure to retain these contracts reopens Gate A rather than weakening policy or
+switching retirement tracks.
 
 Update each affected row during dependency work and when a relevant upstream
 response, accepted change or compatible release becomes known. Record actual

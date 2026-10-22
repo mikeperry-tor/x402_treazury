@@ -110,6 +110,62 @@ least 0.5.0; [indexer requirements](../docs/wallet-cli.md#treasury-and-managed-p
 describe the operational failure behavior. This is distinct from the Rust crate
 version selected in the lockfiles.
 
+## Two-checkout replacement boundary
+
+The pinned v7 public APIs provide a candidate exit for `zingolib` and
+`zingo-netutils` together. This is an assessed design, not the production
+integration described above. The [checkout ledger](README.md#checkout-retirement-tracking)
+owns its decision and remaining qualification; the
+[implementation plan](../docs/plans/vendor_retirement.md) owns commit and review gates.
+
+| Maintained adaptation | Replacement or retained responsibility |
+| --- | --- |
+| Zingolib `set_indexer` and netutils channel/service injection | Application `Indexer`/`TransparentIndexer` implementation over the generated client, constructed only in `src/network.rs`. All 13 indexer and six transparent methods are required; Pepper still calls deprecated aliases. Keep generated defaults, concrete streaming types, nonzero send-code rejection as `Status::Unknown` and quote-wrapped transaction-ID parsing. `ping-very-insecure` and nym capabilities are not enabled consumers. |
+| Zingolib sync startup/first-poll patch | One owned Pepper engine task inside the existing isolated `SyncSession` runtime, with a local mode/progress pair and existing checkpoints. No launch deadline, first-poll handshake or second controller is needed. Keep successful public `capture_migration_witnesses`, protocol checks and finite sync. |
+| Connected high-level deposit calculation | Keep the exact public proposal returned by `LightClient::propose_send` through authority acceptance, then call backend `create_proposed_transactions` by reference. Clear through public `LightClient::clear_proposal` after dropping the wallet guard. Private proposal management is unnecessary. |
+| Expanded standalone manifests, licenses and source hashes | Ordinary upstream Git sources for both crates at the exact cohort revision in both graphs, including the compatibility workspace's direct Zingolib dependency. Retain the Pepper override and coherent sibling identities; remove only obsolete verification/provenance entries with implementation. |
+| Pepper progress/drain and diagnostics patches | Retain all changes in `client.rs`, `scan/task.rs`, `error.rs`, `sync.rs`, `client/fetch.rs` and `wallet/traits.rs`, plus manifest adaptations, unit-test dependencies and explicit root merge-fixture selection. The adapter does not replace them. |
+
+Pepper can hold the wallet write lock across asynchronous fetches. Polling its
+future inline in a select that then awaits checkpoint acquisition can deadlock.
+An independently scheduled engine task preserves progress while a checkpoint waits;
+the session runtime still stops detached I/O and joins blocking workers before the
+final snapshot. No additional cancellation or mode-reset framework is needed for
+a session-local engine atomic that is never reused.
+
+Ordinary deposits need an explicit
+`Some(wallet::expiry::tx_expiry_height(chain, proposal.min_target_height().into()))`.
+Neither the backend default nor offline high-level calculation preserves the
+connected SDK's NU7-aware ordinary expiry. The accepted single transparent-payment
+shape cannot be a canonical ZIP 318 crossing, so no general crossing controller is
+needed. Keep original spending keys, `SystemClock`, the SDK CSPRNG and sender OVK.
+Preserve lazy Sapling proving from public embedded `SaplingParams` bytes; using
+shielding's runtime parameter-cache lookup would change deposit availability.
+
+The backend already scans calculated transactions into SDK pending state.
+Current send proposal selection uses no SDK output locks; proposal cleanup releases
+the stored proposal/pause, not a separate input-lock ledger. Existing snapshot
+publication marks the wallet dirty. Keep accepted-input journaling, retained
+publication, restart uncertainty and canonical recovery unchanged rather than
+duplicating these SDK/application responsibilities.
+
+The payoff is removal of two checkout snapshots, manifest expansion and connector/
+startup patch synchronization. It adds ownership of nineteen RPC delegations and
+a small lazy-prover trait adapter; it is not a reduction in handwritten behavioral
+lines. Retain upstream attribution for copied adapter/prover code when removing
+the checkout licenses. Upstream public injection or a public lazy prover could
+reduce that burden later, but neither is required to use the pinned
+public-trait/backend route.
+
+The upstream Git build also derives its embedded descriptor from checkout tags,
+revision and dirty status. Pinning source revision alone does not pin those Git
+metadata inputs. Release evidence must identify them and the actual generated
+descriptor when replacing the current vendored-archive fallback. That fallback
+uses the crate version and can add `_dirty` when Git finds no repository.
+Shared-cache, same-host comparisons do not prove
+reproducibility across independently populated caches. Do not alter Cargo caches
+to force a descriptor. Parameter staging and network denial remain separate checks.
+
 ## Build-time parameter downloads
 
 Sapling parameters are obtained and embedded by the upstream build script, not

@@ -9,7 +9,11 @@ Plan implementation only after that assessment passes independent review.
 This document plans the work; its creation does not start runtime implementation,
 upstream submission, live-funded execution or another retirement track.
 
-The starting baseline is `9ec7f318cf36a8f9af9f6acb71dc12dceba38f97`.
+The plan's original baseline was `9ec7f318cf36a8f9af9f6acb71dc12dceba38f97`.
+Z0 assesses `7097bf1fcb9de3a07aadb20879ea9cbd4f726727`; the intervening
+commits include the v7 cohort upgrade and Alloy retirement documentation.
+The assessment starts with no tracked modifications; unrelated untracked user
+files are outside its scope.
 Six patched checkouts remain; both Alloy checkouts have already been retired.
 The selected Zingo revision is `bfb0a2156819ea7f75a9b09b1724abfd06c8925e`
 (v7.0.0). Reconfirm the working tree, exact sources and both Cargo graphs when
@@ -50,7 +54,7 @@ The candidate replaces the two crates' local changes with:
 - Backend calculation of deposit proposals, preserving ordinary expiry and the
   accepted selected-input binding, using the shielding integration as precedent.
 
-These are unqualified design candidates, not implemented replacements. The generic
+These are assessment candidates, not production replacements. The generic
 Pepper entry point predates v7. New status/wait helpers do not bypass the existing
 LightClient launcher. Simply keeping LightClient offline changes its high-level
 calculation to epoch-end expiry; that is not this plan's intended behavior.
@@ -126,6 +130,29 @@ design and concrete Z1 acceptance mapping, or a specific blocker/reopening
 condition. A negative assessment is a valid result. Do not weaken expiry, network
 or recovery policy to force an exit; do not automatically switch to another track.
 
+**Z0 complete; Gate A passed:** proceed with the paired Z1 design at the pinned
+revision after separate implementation authorization. Independent assessment
+review found no unresolved material finding or public source/API blocker. The
+[replacement boundary](../../vendor/ZINGO.md#two-checkout-replacement-boundary)
+maps all three checkouts' patch/manifest responsibilities; the
+[ledger](../../vendor/README.md#checkout-retirement-tracking) owns the decision.
+Keep the coherent Z1 commit: changing the factory's concrete indexer also changes
+its sync, calculation and submission consumers.
+
+Isolated probes compiled ordinary upstream Zingolib/netutils in both dependency
+graphs with the retained Pepper override. Real Orchard/Sapling calculation,
+ordinary expiry before/at NU7 and across an upgrade boundary, cleanup after
+calculation failure, retained publication/restart, network/sync/wallet regressions,
+synthetic lifecycle, scoped codec, Pepper merge and independent compatibility
+checks passed. Release-tool regressions passed; the unmodified upstream build
+script also passed under actual OS network denial with hash-verified isolated
+standard-cache parameters. Source/lock identities, logs and same-analyzer CogC/CycC
+comparisons remain under ignored `target/z0-assessment/`; no probe framework is
+committed. Existing SDK scan/build hotspots remain SDK-owned. Z1 will delete
+launcher choreography and the unused actor connection rather than copying
+algorithms or extracting helpers for scores. Production integration remains Z1
+work; these probes do not qualify a fresh release or live execution.
+
 ### Z1 — Implement and qualify the selected replacement
 
 This is conditional on Gate A and authorization to implement. Use one coherent
@@ -138,8 +165,10 @@ Never remove existing behavior separately from its required replacement.
 Update both manifests and lockfiles, source verification, patch/provenance files,
 network audit, compatibility dependencies and release staging together. Keep
 remaining source verification effective, including a deliberate scratch-source
-mutation rejection. Search optional-feature and release paths for stale retired
-paths. Do not delete ignored parameters, user files, wallet state or evidence.
+mutation rejection. Preserve upstream attribution for copied RPC/prover code
+when removing checkout license files. Search optional-feature and release paths
+for stale retired paths. Do not delete ignored parameters, user files, wallet
+state or evidence.
 
 Acceptance includes nonzero execution of the affected real consumers:
 
@@ -147,11 +176,16 @@ Acceptance includes nonzero execution of the affected real consumers:
   progressing large messages versus true stalls, and no fallback/bypass through
   `tests/network.rs`, `tests/network_audit.rs` and the owning network tests.
 - Finite sync, early failure, periodic checkpoints, cancellation, supervisor EOF,
-  no surviving I/O and restart through `tests/treasury_sync.rs`.
+  no surviving I/O and restart through `tests/treasury_sync.rs`. Keep the engine
+  independently polled while checkpoint acquisition waits for its wallet lock;
+  add a regression with a checkpoint due during a lock-held asynchronous engine
+  operation. An inline engine/checkpoint select can deadlock.
 - Real deposit proving, ordinary-expiry/upgrade-boundary assertions, journal and
   calculation/publication failure recovery, exact bytes/inputs after restart,
   confirmation, tip/deeper forks, expiry recovery, and unchanged shielding via
   `treasury::send::proving_tests`, `treasury::lifecycle_tests` and affected Store tests.
+  Retain Z0's real Sapling and Orchard-only proving coverage, explicit pre/at-NU7
+  expiry, public proposal cleanup and lazy embedded-parameter behavior.
 - Wallet format/read-save-reopen compatibility, current diagnostics/redaction,
   client-scoped synthetic codec and Pepper's actual merge fixture. Keep SDK/mock
   activation schedules aligned and strict mock submission validation enabled.
@@ -160,7 +194,10 @@ Acceptance includes nonzero execution of the affected real consumers:
   remaining vendor checks. Use `scripts/check.sh` or its verified component
   commands; choose socket-capable execution up front for socket fixtures.
 - Release-tool parameter staging/integrity/network-denial regressions. Retain
-  existing qualification limits: offline tests do not qualify live settlement,
+  descriptor and upstream Git metadata as release inputs: the current vendored
+  archive's version-only fallback does not apply to the upstream Git checkout.
+  Shared-cache comparison is not cross-cache reproducibility. Existing
+  qualification limits remain: offline tests do not qualify live settlement,
   real Tor, Docker consensus or a fresh reproducible release. Those runs require
   their own prerequisites and applicable authorization.
 
@@ -169,6 +206,15 @@ Update enduring explanations with Z1 in `vendor/README.md`, `vendor/ZINGO.md`,
 release/tooling guides. Update wallet ownership/recovery guidance where integration
 details change. Intended resource and timing policy is unchanged; any proposed
 policy change reopens design review and both owning inventories.
+
+The selected design must also remove the actor preparation's unused connection:
+canonical validation already occurs through scan reuse or a new scan, and backend
+calculation no longer needs an installed SDK indexer. Preserve direct preparation's
+network validation and the existing deadline/cleanup path. Verify that actor
+preparation issues no additional connection/RPC after canonical validation, while
+direct wrong-network preparation still defers without accepting inputs. The Z0
+scratch calculation retains that redundant connection; its tests do not qualify
+this final simplification.
 
 **Gate B, after Z1:** independently review every plan commit/fixup together with
 complete network, sync, financial and build/release call chains. Exit requires

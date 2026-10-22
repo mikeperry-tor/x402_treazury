@@ -75,9 +75,10 @@ profiling settings, proxy variables or wallet credentials. Cargo registry/Git
 source caches are shared, but compiled output, Cargo configuration and credentials
 are not. Incremental compilation is disabled. Rust/C source paths are remapped;
 locale, timezone, deployment target and `SOURCE_DATE_EPOCH` are fixed. Git lookup
-stops before reaching the surrounding checkout. Thus Zingolib's existing
-no-checkout fallback embeds its crate version instead of host tags or a dirty
-working-tree description; no additional vendor patch is required.
+stops before reaching the surrounding checkout. Zingolib's no-checkout fallback
+uses its crate version; with Git installed, the failed `diff-index` check also
+adds `_dirty`. This does not describe the surrounding checkout, and no additional
+vendor patch is required.
 
 Each run is retained under `target/reproducibility-runs/release-*` with:
 
