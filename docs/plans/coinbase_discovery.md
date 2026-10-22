@@ -190,14 +190,17 @@ do not preserve an archive of implemented search work.
 ## Preimplementation contract and clarity gate
 
 The original gate's bundle/public-Tor requirement is replaced by the selected
-scope above. Independent review found the revised search/relay route feasible;
-full exact-contract and emitted-interface review remain required before D01.
+scope above. The preimplementation design and clarity gate is complete: the
+frozen contract below and prospective serialized interface passed independent
+transport/authority review and the full 20-scenario clarity walkthrough, with
+material findings resolved. D01 has not started. Actual runtime emissions and
+execution remain G1/G2 acceptance evidence, not a preimplementation claim.
 Reviewers are read-only and receive user intent, baseline/P01A, transcript,
 external evidence, relevant consumers and validation evidence. Challenge necessity
 of checks/state, source identity, paid fallback authority and simpler reuse.
 Resolve material findings before implementing the affected decision.
 
-Freeze this seven-tool sketch against the actual definitions a client receives:
+The frozen seven-tool sketch is reviewed in the client-visible JSON shape:
 
 | Tool (prefix `x402_treazury_`) | Inputs and outputs |
 | --- | --- |
@@ -209,9 +212,9 @@ Freeze this seven-tool sketch against the actual definitions a client receives:
 | `tools_search` | Optional endpoint-local `source_name`, `query`, `cursor`, `limit`; unchanged complete schemas, live BM25/enumeration and pagination. |
 | `tool_call` | Exact endpoint-local `tool_id`/`arguments`; current binding resolution, no management-tool recursion. |
 
-Before D01, freeze exact Coinbase field names/types/requiredness/bounds, outgoing
-filters, complete result envelope and operation-scoped errors. Verify the new
-relay opt-in, configuration validation and payer mapping through all consumers.
+The contract below freezes exact Coinbase fields/types/bounds, outgoing filters,
+result envelope, operation-scoped errors, relay opt-in and payer mapping. D01/G1
+must implement and validate these choices through the complete consumer chains.
 Review shared versus per-invocation relay state concretely: preserve accepted-work
 and payment safeguards while excluding catalog caching, shared stopped state,
 target failure retention, readiness queues and added serialization from live search.
@@ -225,6 +228,201 @@ unknown-price honesty, live availability rather than cached source summaries,
 endpoint identities, complete outputs and tools/list continuation. Record concrete
 ambiguities and dispositions under ignored `target/`; semantic assertions assist
 but do not replace independent comprehension review.
+
+### Frozen contract for D01–D03
+
+This gate freezes design, not runtime availability. D01 has not begun. Proposed
+serialized tool definitions and synthetic results under
+`target/coinbase-contract-gate/` are review inputs, not outputs of an implemented
+Coinbase adapter. G1/G2 must compare the eventual runtime emissions against this
+contract; material deviations reopen the affected gate.
+
+**Selectors and parameters.** `sources_search` is one flat object with
+`additionalProperties=false` and four exclusive schema branches: local browse,
+x402 List browse, x402 List best and Coinbase ranked search. Local requires
+`local_only=true` and forbids `directory`. Remote branches allow omitted/false
+`local_only`. x402 branches allow omitted/`x402_list` directory; Coinbase requires
+`directory=coinbase`. x402 best requires `mode=best`; other branches accept omitted
+mode or their own mode (`browse` for local/x402 browse, `best` for Coinbase).
+Reject null selectors and unsupported/mixed fields before identity or network
+work. No global `directory`, `mode`, `limit`, `curated_only` or other branch-only
+schema default is emitted: clients applying those defaults could select the wrong
+branch or inject forbidden fields. Defaults belong to branch schemas and help.
+Root `local_only=false` is safe. Root shared-field types admit all branches;
+branch schemas carry the precise type, bounds, defaults and allowed fields.
+
+Local fields remain `q`, `page` and `per_page`, with current substring matching,
+blank/omitted enumeration, page 1 and per-page 25, both positive integers without
+a local ceiling. x402 List fields, enums, requiredness and upstream bounds remain
+those of the bundled `/services` and `/best` definitions, excluding `network`
+which remains server-selected `BSE`. Browse retains per-page maximum 100; best
+retains default limit 5 and maximum 20. The new selector is removed at dispatch.
+
+Coinbase exposes exactly these optional fields in addition to its selectors:
+
+| Field | JSON type, default and upstream translation |
+| --- | --- |
+| `q` | String, at most 400 Unicode characters; no default. Send unchanged as `query`, including explicit blank text. Omission permits filter-only ranked search; it is not a broad inventory interface. |
+| `curated_only` | Boolean, default true; always send explicit `curatedOnly`. False requests both curated and non-curated matches. |
+| `limit` | Integer 1–20, default 20; send `limit`. No page/cursor/continuation. |
+| `max_price_usd` | String, passed unchanged as `maxUsdPrice`, e.g. `"0.05"`. Upstream validates its USD-price syntax; no invented local numeric parser/bounds. x402 List best keeps its existing nonnegative number type for this field. Branch help and schemas explicitly distinguish these types. Advisory only, not a payment cap. |
+| `tags` | Array of strings, at most 5; repeat `tags` query key, preserving order/values. Case-sensitive upstream exact matches with OR semantics. |
+| `bundle_slugs` | Array of at most 5 strings; each at most 64 characters matching `^[a-z0-9]+(?:-[a-z0-9]+)*$`. Repeat `bundleSlugs`. Known-slug OR filter only, no bundle discovery/detail. |
+| `extensions` | Array of strings; repeat `extensions`. No added local array/item limit. Upstream extension filter, not a schema-import request. |
+| `pay_to` | String of 1–128 characters; send `payTo`. Merchant-address filter, never a wallet/owner selector. |
+| `url_substring` | String of 3–2048 characters; send `urlSubstring`. Case-insensitive upstream substring filter, not exact-resource lookup. |
+
+Array omission sends no keys; empty arrays send no repeated keys. Do not trim,
+case-fold, deduplicate or reinterpret supplied filters. Standard URL query encoding
+preserves values. Always add `network=eip155:8453`,
+`asset=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, `scheme=exact`. Reject caller
+`network`, `asset`, `scheme`, x402-only filters/ranking fields and all pagination
+fields in the Coinbase branch. Preserve every returned offer; filtering does not
+prove every resource or offer supports local execution.
+
+**Success and error representation.** Coinbase returns JSON shaped as
+`{directory:"coinbase", acquisition:{via:"origin"|"curl"}, response:<complete upstream object>, guidance:<fixed text>}`.
+Require a top-level object, `resources` array of objects and Boolean
+`partialResults` for a valid search response. Preserve any top-level
+`x402Version` verbatim, including unknown values or absence; discovery does not
+negotiate a payment protocol. Preserve all fields
+inside that object without normalization, including unknown fields and missing
+resource contracts. Optional or unknown `searchMethod` values remain intact;
+do not synthesize them. Do not require per-resource schema/method/offer fields
+merely to display discovery metadata. Missing/invalid top-level contracts are
+response failures, not empty success. Validation finishes before origin promotion.
+
+Use fixed guidance rather than redundant per-resource support classifications:
+HTTP resources may use `raw_call` only with an exact documented method/arguments
+and supported payment authority; MCP, missing or other protocol types remain
+metadata only. No paid argument guessing, provider-base inference or guarantee of
+reachability/delivery. Partial/empty matching is not proof of absence. `via=curl`
+identifies relay-supplied content; fixed guidance explains its trust/payment
+boundary and that repeating a search can incur new authorizations. Do not report
+an exact charge, free call or confirmed settlement without evidence. Legacy
+local/x402 List envelopes remain unchanged.
+
+Use existing tool-error delivery, not a new error framework. New failure strings
+start with a fixed operation identifier (`coinbase_search` or `documentation`),
+then safe stage/category and an HTTP status or bound setting when available.
+Argument errors name the unsupported field/branch and the expected type; this
+includes Coinbase string versus x402 numeric price. Failures report whether Curl
+was disabled, unused, attempted or failed and warn against automatically repeating
+an attempted paid workflow. Never include credential-bearing upstream prose,
+cookies, response bodies or private wallet identities in errors/logs. Preserve
+ordinary paid-client uncertainty classification; do not assert that no payment
+occurred when signed submission may have happened.
+
+**Relay wiring, policy and lifecycle.** `[discovery_relay].search` is a Boolean,
+false when absent. It independently enables runtime Coinbase fallback, without
+`serve`/`warm`, authored source bindings, a static relay wallet or startup financial
+work. Existing declared `wallet`/`sources` references still validate as configuration,
+but affect static catalog/pricing only. Inspect output must show the search opt-in
+and endpoint-to-source-management-wallet bindings without a readiness probe.
+Invalid relay bootstrap/provider configuration fails configuration validation;
+provider loading is local and unsigned. A valid configured relay is not a runtime
+funding/readiness prerequisite for public search.
+
+Validate the Coinbase target with `import::endpoint` and operator
+`allowed_origins` before identity/I/O. The explicitly configured relay endpoint
+separately must pass public-HTTPS/credential-free URL policy; it is not an API
+search target and need not be added to `allowed_origins`. Policy rejection cannot
+be escaped through Curl. Documents retain their own direct origin check.
+Use the endpoint source client's existing `documentation_identity`; unavailable
+identity fails locally without paid fallback, alternate identity or funding.
+Origin uses the source client's transport and source-management inactivity setting,
+then network defaults, with public destinations and remote DNS enforced.
+
+Origin status/transport retry eligibility comes from `network.rs`, including
+HTTP 400/403/429/503, with one initial plus at most two fresh Tor attempts and one
+attempt in direct mode. Eligible incomplete-body transport failures consume the
+same remaining attempt budget. Complete malformed JSON, local size rejection and
+response-contract failures do not earn an extra isolation retry. Complete malformed
+JSON/response-contract failures may use explicitly enabled Curl after existing
+origin policy finishes. Origin download-limit rejection is a local policy failure
+and cannot trigger paid fallback for the same bounded target. Preserve valid
+origin `Retry-After` between eligible attempts and after
+the terminal 429/503 before Curl, including cancellation and unbounded server delays.
+Successful empty/partial responses never invoke Curl. Locally rejected input,
+identity/policy failure or work cancellation never triggers paid fallback.
+
+Share immutable local bootstrap parsing and coherent Curl request/envelope decoding,
+not `Relay::fetch`, its mutex/caches/stopped flag, `fetch_when_ready` or static wallet
+resolution. Carry an optional immutable bootstrap into the source Manager through
+listener construction, independently of static serve/warm relay initialization.
+Search payer is the authenticated endpoint source client with source identity
+`builtin:coinbase-search-relay`; it cannot be selected by arguments or static relay
+wallet override. Use provider transport for the Curl leg; source-management read
+inactivity overrides provider inactivity, otherwise provider then network applies.
+Source-management `max_response_bytes` bounds both the outer paid relay response
+and decoded Coinbase body; provider byte settings continue governing static relay
+work. No new byte limit or whole-work deadline is introduced.
+
+Curl execution uses one ordinary retained paid-client workflow, with participating
+selection as appropriate to that existing API client and no enclosing replay.
+This is not a promise of one signed authorization: normal recognized structured-
+insufficient-funds traversal may visit captured eligible wallets, each with its own
+journaled authority and possible charge. Do not add funding allocation/waits or
+weaken normal admission. Validate exact GET target attribution, HTTP 200,
+error/redirect/truncation indicators, complete envelope and search response before
+returning. Do not forward Coinbase credentials or sign Coinbase challenges.
+Use existing retained work ownership across origin, fallback, decode and result
+conversion; nested payment calls reuse it and existing listener shutdown drains
+it. No new workers/drain registry or global failure state. Later calls remain
+independent after a failure; a fresh invocation is not a replay authorized by an
+uncertain earlier result. Curl responses never promote Coinbase transport scope.
+
+**Documents and unchanged tools.** Keep the seven-tool sketch above, with these
+exact document and result-guidance additions. `source_details` accepts exactly
+one of `slug`, `base_url`, `documentation_url`; all other fields reject.
+Descriptions and slug parameter help explicitly say x402 List slug, not Coinbase
+resource URL or bundle slug. Document URLs accept public HTTPS query parameters
+but no credentials/fragments, under `import::endpoint` and `allowed_origins`.
+Use one unsigned GET, no HEAD, payment, relay fallback, redirects or traversal.
+
+For documents, accept complete valid UTF-8 with text/plain, text/markdown or
+text/x-markdown MIME (case-insensitive, parameters allowed), or absent MIME when
+text is valid UTF-8 without NUL; empty text is permitted and reported as empty.
+Reject NUL-containing text, other MIME, invalid UTF-8 and HTML indicated by text/html or a leading HTML doctype/html
+root (case-insensitive after optional BOM/whitespace), even if mislabeled.
+Do not require a Markdown heading. Return the complete original accepted text,
+including BOM/whitespace, without trimming. Do not import a document as OpenAPI
+or interpret examples as argument schemas.
+
+Missing MIME is represented as `content_type:null`. Empty status refers to
+zero-length text, not trimmed whitespace/BOM. Tool guidance explicitly discloses
+HTML/non-text rejection, and search help states freshness and the attempt count.
+
+Document results are `{documentation:{url, provenance:"caller_supplied", status,
+content_type, ...}, guidance:<untrusted-text/no-authority note>}`. Success has
+`status:"ok"` and complete `text`; accepted empty text has `status:"empty"` and
+`text:""`. Failure has no text and a fixed status (`redirect`, `payment_required`,
+`blocked`, `not_found`, `http_error`, `too_large`, `non_text`, `invalid_utf8`,
+`unreachable`), plus HTTP status or safe reason/limit setting when applicable.
+Input/policy/identity failures use ordinary tool errors before I/O. Legacy
+slug/base outputs are preserved. Existing help bounds and inactivity apply.
+
+For registration, preserve status/count/schema/name fields; `next` recommends
+search then invocation only when tools are visible and registration enabled.
+Disabled results retain reason and direct operator repair/refresh guidance; zero
+visible tools direct the caller to remove filters/check operator configuration
+or search the endpoint as a whole, without promising a callable tool. No
+registration, refresh or help result establishes paid-delivery qualification.
+
+### Gate evidence and stopping point
+
+Independent review evidence is under ignored `target/coinbase-contract-gate/`:
+`network-review.md` and `clarity-review.md`; the latter covers all 20 scenarios.
+`proposed-tools.json`, `proposed-results.json` and `proposed-config.json` contain
+the exact prospective review inputs. `baseline-tools.json` is explicitly a
+current-source reconstruction, not an executable emission. Thirty focused
+prospective-schema cases and structural checks passed; they are not runtime
+tests or a complete JSON Schema validator. The protocol continuation/permission
+behavior, network effects, payment ownership and generated runtime definitions
+still require D01–D03/G1/G2 verification. No Rust changes, builds, live requests
+or wallet access were made for this gate; CogC/CycC comparison remains scheduled
+for substantive Rust work and G1/G2 against the fixed baseline. The user selected
+this gate as the stopping point. Do not start D01 without a subsequent instruction.
 
 ## Ordered implementation commits
 
