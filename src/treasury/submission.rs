@@ -1,4 +1,5 @@
 //! Explicit raw gRPC sender. No upstream transmit helper, fallback endpoint or retries.
+use crate::network::GrpcIndexer;
 use crate::rotation::{
     base::secure_endpoint,
     transaction::{
@@ -11,7 +12,7 @@ use std::{io::Cursor, time::Duration};
 use zcash_primitives::transaction::{Transaction, TxVersion};
 use zcash_protocol::consensus::BranchId;
 use zingo_netutils::{
-    GrpcIndexer, Indexer,
+    Indexer,
     lightwallet_protocol::{BlockId, RawTransaction, TxFilter},
 };
 fn request_timeout() -> Duration {

@@ -1,6 +1,8 @@
 //! All runtime egress is constructed here. Policy is immutable after startup.
 mod grpc;
+mod indexer;
 pub(crate) use grpc::ConnectionDiagnostic;
+pub use indexer::GrpcIndexer;
 #[cfg(test)]
 #[path = "network/http_queue_tests.rs"]
 mod http_queue_tests;
@@ -297,10 +299,7 @@ pub struct NetworkContext {
     #[cfg(test)]
     test_dns: Option<Arc<dyn reqwest::dns::Resolve>>,
     grpc: tokio::sync::Mutex<
-        HashMap<
-            (tokio::runtime::Id, IsolationId, String),
-            CachedClient<zingo_netutils::GrpcIndexer>,
-        >,
+        HashMap<(tokio::runtime::Id, IsolationId, String), CachedClient<GrpcIndexer>>,
     >,
 }
 impl NetworkContext {
@@ -713,7 +712,7 @@ impl NetworkContext {
             .await
             .retain(|(owner, identity, _), _| *owner != runtime || identity != id);
     }
-    pub async fn grpc(&self, id: &IsolationId, url: &str) -> Result<zingo_netutils::GrpcIndexer> {
+    pub async fn grpc(&self, id: &IsolationId, url: &str) -> Result<GrpcIndexer> {
         use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
         let key = (
             tokio::runtime::Handle::current().id(),
@@ -775,14 +774,15 @@ impl NetworkContext {
                 .map_err(|error| grpc::connection_failure(&error, "grpc_connection_failed"))?
         };
         readiness.established();
-        let client = zingo_netutils::GrpcIndexer::from_transport(
-            uri,
-            zingo_netutils::IndexerTransport::new(grpc::ProgressChannel::new(
-                channel,
-                self.read_timeout(None),
-                readiness,
-            )),
-        );
+        let client = GrpcIndexer {
+            clear_net_client: zingo_netutils::lightwallet_protocol::CompactTxStreamerClient::new(
+                indexer::IndexerTransport::new(grpc::ProgressChannel::new(
+                    channel,
+                    self.read_timeout(None),
+                    readiness,
+                )),
+            ),
+        };
         let mut cache = self.grpc.lock().await;
         // Another caller may have populated this key while connection setup ran.
         if let Some(existing) = cache.get_mut(&key) {

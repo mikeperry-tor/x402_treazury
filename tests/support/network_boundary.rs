@@ -322,7 +322,7 @@ async fn grpc_eviction_release_and_runtime_recreation_keep_live_channels_usable(
         Indexer,
         lightwallet_protocol::{BlockId, BlockRange},
     };
-    async fn read(mut client: zingo_netutils::GrpcIndexer) {
+    async fn read(mut client: crate::network::GrpcIndexer) {
         let mut stream = client
             .get_block_range(
                 BlockRange {

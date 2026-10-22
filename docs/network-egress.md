@@ -398,9 +398,14 @@ storage-encryption secret. Changing it requires a new versioned domain separator
   provider type `()`, whose optional nonce/allowance lookups return no result without
   opening connections. Do not attach an SDK-owned RPC provider.
 - LightClient is created/restored offline and stays offline during backend
-  calculation and direct Pepper synchronization. The application passes a
-  `GrpcIndexer` built from its own tonic channel through the reviewed connector
-  patch to Pepper; every indexer clone retains that channel. SDK online constructors, URI setters,
+  calculation and direct Pepper synchronization. The application passes the
+  application `network::GrpcIndexer` to Pepper. Its nineteen public
+  `Indexer`/`TransparentIndexer` delegations wrap the generated gRPC client,
+  constructed only in `src/network.rs` over the existing progress transport.
+  Every clone retains that identity-bound channel. Generated request defaults,
+  streaming types and submission status/transaction-ID parsing are preserved;
+  the transport still removes total `grpc-timeout` metadata and owns response
+  inactivity below protobuf assembly. SDK online constructors, URI setters,
   migration transmission and optional nym/price workers are not used.
 - Sapling parameters are downloaded/embedded at build time. Runtime proposal code
   reads embedded parameters; it does not fetch them. Cargo/build traffic is outside

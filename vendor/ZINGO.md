@@ -73,15 +73,20 @@ application monetary accounting. Relying on SDK/blockchain spendability makes
 correct SDK reorg handling necessary; it does not require revalidating all historical
 source operations before allowing new work.
 
-`src/network.rs` constructs `GrpcIndexer::from_transport`;
-`src/treasury/mod.rs` passes it to the public Pepper engine, without installing
-an SDK indexer or using the SDK sync launcher.
+`src/network.rs` constructs the generated gRPC client over its progress transport
+and returns the application `network::GrpcIndexer`. Its nineteen public-trait
+wrappers in `src/network/indexer.rs` preserve messages, streaming types, nonzero
+send-code rejection as `Status::Unknown` with the original message, and safe
+quote-wrapped transaction-ID parsing. Concrete submission/cache consumers and
+Pepper all use this adapter. `src/treasury/mod.rs` passes it to the public Pepper
+engine, without installing an SDK indexer or using the SDK sync launcher.
 `src/treasury/send.rs` retains the public proposal and calls backend calculation
 without installing an SDK indexer. Its lazy Sapling prover uses embedded public
 parameter bytes; copied prover/RPC code retains attribution in
 `vendor/ZINGO-LICENSE-MIT`.
-Remove connector injection only when an upstream API preserves that same transport
-across every RPC and clone, including Tor remote DNS and no direct fallback.
+The retained SDK/netutils connector patches are now unused by the application;
+they remain only until the paired source transition is qualified. Every active
+RPC and clone still preserves Tor remote DNS and no direct fallback.
 `tests/network_audit.rs`, `tests/network.rs` and `tests/treasury_sync.rs`
 cover the relevant factory/consumer boundaries.
 
@@ -122,14 +127,14 @@ version selected in the lockfiles.
 
 The pinned v7 public APIs provide a candidate exit for `zingolib` and
 `zingo-netutils` together. Backend deposit calculation already uses this public
-route, and synchronization now calls Pepper directly; the adapter and source
-transitions remain to be implemented. The [checkout ledger](README.md#checkout-retirement-tracking)
+route, synchronization calls Pepper directly, and the application RPC adapter is
+active. Only the paired source transition remains to be qualified. The [checkout ledger](README.md#checkout-retirement-tracking)
 owns its decision and remaining qualification; the
 [implementation plan](../docs/plans/vendor_retirement.md) owns commit and review gates.
 
 | Maintained adaptation | Replacement or retained responsibility |
 | --- | --- |
-| Zingolib `set_indexer` and netutils channel/service injection | Application `Indexer`/`TransparentIndexer` implementation over the generated client, constructed only in `src/network.rs`. All 13 indexer and six transparent methods are required; Pepper still calls deprecated aliases. Keep generated defaults, concrete streaming types, nonzero send-code rejection as `Status::Unknown` and quote-wrapped transaction-ID parsing. `ping-very-insecure` and nym capabilities are not enabled consumers. |
+| Zingolib `set_indexer` and netutils channel/service injection | Application `Indexer`/`TransparentIndexer` implementation over the generated client, constructed only in `src/network.rs`. All 13 indexer and six transparent methods are required; Pepper still calls deprecated aliases. Keep generated defaults, concrete streaming types, nonzero send-code rejection as `Status::Unknown` and quote-wrapped transaction-ID parsing. The adapter ignores the traits' legacy total-timeout arguments; the transport still strips any `grpc-timeout` metadata and owns response inactivity below protobuf decoding. `ping-very-insecure` and nym capabilities are not enabled consumers. |
 | Zingolib sync startup/first-poll patch | One owned Pepper engine task inside the existing isolated `SyncSession` runtime, with a local mode/progress pair and existing checkpoints. No launch deadline, first-poll handshake or second controller is needed. Keep successful public `capture_migration_witnesses`, protocol checks and finite sync. |
 | Connected high-level deposit calculation | Keep the exact public proposal returned by `LightClient::propose_send` through authority acceptance, then call backend `create_proposed_transactions` by reference. Clear through public `LightClient::clear_proposal` after dropping the wallet guard. Private proposal management is unnecessary. |
 | Expanded standalone manifests, licenses and source hashes | Ordinary upstream Git sources for both crates at the exact cohort revision in both graphs, including the compatibility workspace's direct Zingolib dependency. Retain the Pepper override and coherent sibling identities; remove only obsolete verification/provenance entries with implementation. |
