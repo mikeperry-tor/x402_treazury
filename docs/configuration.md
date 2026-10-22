@@ -1313,6 +1313,9 @@ spending caps or signing. The supported version-1 metadata describes `baseCredit
 per-returned-record metering. Conditional surcharge amounts are shown as upper
 bounds, since the metadata may describe a maximum across multiple assets.
 The `includes` surcharge condition names a value in a query parameter's array.
+Optional `billableDomainErrors` entries name an error `code`, `httpStatus` and
+`credits`; estimates show each error's charge separately from successful-request
+costs. Error charges cannot exceed `maxCredits`.
 Recognized `x402ExactPolicy` hints (`always`, `fixed_price_only`) leave credit
 estimates unchanged; payment negotiation still uses the actual challenge.
 Original credit prose remains alongside the estimate. Missing, malformed or unknown

@@ -323,6 +323,87 @@ fn expect_estimate(metadata: Value, estimate: &str) {
 }
 
 #[test]
+fn tiktok_transcript_billable_domain_error_preserves_all_charges() {
+    // Faithful pricing metadata from SocialFetch GET /v1/tiktok/videos/transcript
+    // (2026-10-22): this new field previously rejected the whole tariff.
+    expect_estimate(
+        json!({"version":1,"baseCredits":1,"maxCredits":601,
+        "normalizationFailureCredits":0,"settlement":"actual_credits",
+        "x402ExactPolicy":"always","surcharges":[
+            {"queryParam":"useAiFallback","credits":10,"when":"boolean_true","label":"+10 credits when AI transcribes the audio (useAiFallback)"},
+            {"queryParam":"allowLongTranscription","credits":590,"when":"boolean_true","label":"+10 credits per started minute of AI transcript, replacing the flat +10 (allowLongTranscription)","badge":"+10 / started minute"}
+        ],"billableDomainErrors":[
+            {"code":"transcript_target_not_video","httpStatus":400,"credits":1}
+        ]}),
+        "0.014 USDC base; maximum 8.414 USDC/request; up to 0.14 USDC extra when useAiFallback is true (+10 credits when AI transcribes the audio (useAiFallback)); up to 8.26 USDC extra when allowLongTranscription is true (+10 credits per started minute of AI transcript, replacing the flat +10 (allowLongTranscription)); 0.014 USDC for transcript_target_not_video (HTTP 400)",
+    );
+}
+
+#[test]
+fn billable_domain_error_charges_preserve_order_zero_and_maximum() {
+    let mut p = tariff();
+    p["billableDomainErrors"] = json!([]);
+    assert_eq!(
+        tools(p.clone())[0].description,
+        tools(tariff())[0].description
+    );
+    p["normalizationFailureCredits"] = json!(1);
+    p["billableDomainErrors"] = json!([
+        {"code":"free_error","httpStatus":400,"credits":0},
+        {"code":"charged_error","httpStatus":422,"credits":1}
+    ]);
+    expect_estimate(
+        p.clone(),
+        "0.014 USDC/request; normalization-failure charge 0.014 USDC; 0 USDC for free_error (HTTP 400); 0.014 USDC for charged_error (HTTP 422)",
+    );
+    p["baseCredits"] = json!(u64::MAX);
+    p["maxCredits"] = json!(u64::MAX);
+    p["normalizationFailureCredits"] = json!(0);
+    p["billableDomainErrors"] = json!([
+        {"code":"maximum","httpStatus":400,"credits":u64::MAX}
+    ]);
+    expect_estimate(
+        p,
+        "258254417031933722.61 USDC/request; 258254417031933722.61 USDC for maximum (HTTP 400)",
+    );
+}
+
+#[test]
+fn malformed_billable_domain_errors_keep_original_terms_and_unknown_estimate() {
+    let error = json!({"code":"charged_error","httpStatus":400,"credits":1});
+    let mut invalid = vec![Value::Null, json!({}), json!([null]), json!([{}])];
+    for field in ["code", "httpStatus", "credits"] {
+        let mut entry = error.clone();
+        entry.as_object_mut().unwrap().remove(field);
+        invalid.push(json!([entry]));
+    }
+    for (field, value) in [
+        ("code", json!(400)),
+        ("httpStatus", json!("400")),
+        ("httpStatus", json!(-1)),
+        ("credits", json!(-1)),
+        ("credits", json!(1.5)),
+        ("credits", json!(2)), // Exceeds maxCredits.
+        ("unknown", json!(true)),
+    ] {
+        let mut entry = error.clone();
+        entry[field] = value;
+        invalid.push(json!([entry]));
+    }
+    // A later invalid entry must not expose a partial estimate.
+    invalid.push(json!([error, {"code":"missing_charge","httpStatus":400}]));
+    for errors in invalid {
+        let mut p = tariff();
+        p["billableDomainErrors"] = errors;
+        assert_eq!(
+            tools(p.clone()).remove(0).description,
+            "Original description. Pricing: \"Original credit conditions.\" [spec]. Per-call USDC estimate unavailable [conf].",
+            "{p}"
+        );
+    }
+}
+
+#[test]
 fn exact_policy_hints_and_instagram_include_surcharges_preserve_estimates() {
     for policy in ["always", "fixed_price_only"] {
         let mut p = tariff();

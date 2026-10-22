@@ -87,7 +87,7 @@ impl CreditPricing {
             )
         };
         p.append_charges(&mut line, rate)
-            .ok_or("invalid_or_unsupported_surcharge")?;
+            .ok_or("invalid_or_unsupported_charge")?;
         Ok(line)
     }
 }
@@ -107,6 +107,8 @@ struct Tariff {
     max_credits: u64,
     normalization_failure_credits: u64,
     surcharges: Vec<Surcharge>,
+    #[serde(default)]
+    billable_domain_errors: Vec<BillableDomainError>,
     batch: Option<Batch>,
     metered: Option<Metered>,
     settlement: Option<String>,
@@ -146,6 +148,13 @@ struct Surcharge {
     value: Option<String>,
     #[serde(rename = "badge")]
     _badge: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BillableDomainError {
+    code: String,
+    http_status: u64,
+    credits: u64,
 }
 
 impl Metered {
@@ -211,6 +220,17 @@ impl Tariff {
             line.push_str(&format!(
                 "; normalization-failure charge {}",
                 cost(self.normalization_failure_credits, rate)
+            ));
+        }
+        for error in &self.billable_domain_errors {
+            if error.credits > self.max_credits {
+                return None;
+            }
+            line.push_str(&format!(
+                "; {} for {} (HTTP {})",
+                cost(error.credits, rate),
+                error.code,
+                error.http_status
             ));
         }
         Some(())

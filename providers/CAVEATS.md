@@ -108,6 +108,11 @@ The observations below describe captured contracts, not live settlement.
 
 ## socialfetch.toml — SocialFetch
 
+TikTok transcript pricing includes `billableDomainErrors`: the
+`transcript_target_not_video` response (HTTP 400) costs one credit even though
+service failures are free. Credit conversion preserves this separate error charge
+alongside the AI-transcription surcharge terms.
+
 Uses the vendor's platform tags; all platforms are included by default.
 Account identity, monitor ownership and webhook lifecycle are excluded. Exact
 GET/POST parent exclusions preserve the public stateless
