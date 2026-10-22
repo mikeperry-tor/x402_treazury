@@ -438,16 +438,24 @@ Registrations are
 shared by agents using the same MCP server endpoint, but are not visible on other MCP server endpoints.
 Agent tools cannot change your configured API sources, wallet settings, or spending limits.
 
-An enabled endpoint advertises these six tools to the agent:
+An enabled endpoint advertises these seven tools to the agent:
 
 | Tool | How the agent uses it | Main inputs |
 | --- | --- | --- |
-| `x402_treazury_sources_search` | Browses APIs or asks x402 List for ranked recommendations. | Search query, browse/best mode, filters and ranking preferences. |
-| `x402_treazury_source_details` | Inspects a listing and discovers working specification/documentation URLs. | Exactly one directory `slug` or public HTTPS `base_url`. |
-| `x402_treazury_source_add` | Registers an API on this endpoint so its tools become available. | Public OpenAPI `spec_url` and optional readable source `name`. |
+| `x402_treazury_sources_search` | Searches bundled providers offline or asks x402 List for API leads. | `local_only=true` with query/pagination, or remote browse/best filters and ranking. |
+| `x402_treazury_source_details` | Resolves bundled provider matches or discovers specification/documentation URLs. | Exactly one directory `slug` or public HTTPS `base_url`. |
+| `x402_treazury_source_add` | Registers an API on this endpoint so its tools become available. | Exactly one bundled `provider_id` or public OpenAPI `spec_url`, plus optional `name`. |
+| `x402_treazury_providers_list` | Enumerates bundled provider metadata offline. | Optional `page` and `per_page`. |
 | `x402_treazury_tools_search` | Retrieves relevant tool descriptions, argument schemas and readable IDs. | Optional query, registered `source_name` and pagination. |
 | `x402_treazury_tool_call` | Invokes a currently available tool with normal wallet payment checks. | Readable `tool_id` and arguments matching its schema. |
 | `x402_treazury_raw_call` | Calls any documented public HTTPS x402 API URL with automatic payment handling. | HTTP `method`, `url`, optional query parameters and JSON body. |
+
+For offline discovery, call `x402_treazury_sources_search` with
+`{"local_only":true,"q":"web search"}`, or use `x402_treazury_providers_list`.
+Pass a selected ID directly to `source_add`, for example `{"provider_id":"exa"}`.
+Curated sources preserve reviewed compatibility settings and default to short names
+such as `dyn_exa__search`. Bundled metadata does not establish current reachability
+or live qualification. Remote directory search remains the default.
 
 Supply a readable source name when registering: `name = "netintel"` creates tools
 such as `dyn_netintel__ip_reputation_analyze`. Names are preserved exactly and are
@@ -458,7 +466,7 @@ must be updated explicitly; they are not rewritten.
 
 By default, registered API tools also appear in the endpoint's tool list; clients may cache that list. Tool IDs remain usable across turns and restarts while available.
 
-Set `discover_on_demand = true` to advertise only the six management tools and
+Set `discover_on_demand = true` to advertise only the seven management tools and
 let clients retrieve API schemas as needed, rather than fill the tool list
 with all added APIs. Tool arguments and the API discovery
 workflow are documented in [agent source management](docs/agent-sources.md#agent-tools).
@@ -474,7 +482,7 @@ target/release/x402_treazury sources inspect \
 ```
 
 Each source's `tools` list is rebuilt offline from its saved specification and
-selection, before current listener filters. Disabled sources still show their
+accepted settings or generic selection, before current listener filters. Disabled sources still show their
 saved tools; removed sources have an empty list. An unreadable saved catalog has
 `tools: null` and a `tools_error` instead. For current callable tools and full
 schemas, use `x402_treazury_tools_search` on the owning MCP endpoint.

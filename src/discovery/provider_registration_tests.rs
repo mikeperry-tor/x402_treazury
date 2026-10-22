@@ -1,0 +1,409 @@
+//! Curated discovery stays offline; registration retains endpoint ownership and idempotency.
+use super::*;
+
+async fn without_wallets() -> Arc<Manager> {
+    Manager::new(
+        policy(None),
+        listeners(false),
+        BTreeMap::new(),
+        Arc::new(CatalogState::default()),
+        vec![],
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn public_local_tools_dispatch_offline_and_report_display_truncation() {
+    let m = without_wallets().await;
+    let mut s = server(&m, "writer");
+    let search = s
+        .invoke(
+            "x402_treazury_sources_search",
+            json!({"local_only":true,"q":"no-such-provider-capability"})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let value: Value = serde_json::from_str(&search).unwrap();
+    assert_eq!(value["total"], 0);
+    assert_eq!(value["items"], json!([]));
+    s.max_response_chars = Some(32);
+    let listed = s
+        .invoke(local::NAME, json!({}).as_object().unwrap())
+        .await
+        .unwrap();
+    assert!(listed.contains("[truncated by --max-response-chars]"));
+    assert!(m.inner.lock().unwrap().state.records.is_empty());
+}
+
+#[tokio::test]
+async fn public_provider_repeat_retains_accepted_configuration_after_bundle_removal() {
+    let m = manager(None).await;
+    let id = super::curated_tests::commit_curated(&m, "retired").await;
+    let before = serde_json::to_value(&m.inner.lock().unwrap().state.records[&id]).unwrap();
+    let result = m
+        .invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"provider_id":"retired-provider-not-in-bundle","name":"ignored"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["name"], "retired");
+    assert_eq!(result["provider_id"], "retired-provider-not-in-bundle");
+    assert_eq!(
+        serde_json::to_value(&m.inner.lock().unwrap().state.records[&id]).unwrap(),
+        before
+    );
+    assert!(m.fetches.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn local_search_and_list_work_without_any_wallet_or_network_client() {
+    let m = without_wallets().await;
+    let list = m.invoke("writer", local::NAME, json!({})).await.unwrap();
+    let search: Value = serde_json::from_str(
+        &m.invoke_sources_search("writer", json!({"local_only":true}).as_object().unwrap())
+            .await
+            .unwrap()
+            .into_text()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(list, search);
+    assert_eq!(list["total"], crate::providers::all().len());
+    for item in list["items"].as_array().unwrap() {
+        assert!(item["provider_id"].is_string());
+        assert!(!item["description"].as_str().unwrap().trim().is_empty());
+        assert!(item.get("tools").is_none());
+    }
+    let found: Value = serde_json::from_str(
+        &m.invoke_sources_search(
+            "writer",
+            json!({"local_only":true,"q":"EXA","mode":"browse"})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .into_text()
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        found["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["provider_id"] == "exa")
+    );
+    let first = m
+        .invoke("writer", local::NAME, json!({"per_page":1}))
+        .await
+        .unwrap();
+    let second = m
+        .invoke("writer", local::NAME, json!({"per_page":1,"page":2}))
+        .await
+        .unwrap();
+    assert_eq!(first["next_page"], 2);
+    assert_ne!(
+        first["items"][0]["provider_id"],
+        second["items"][0]["provider_id"]
+    );
+    assert!(m.fetches.lock().unwrap().is_empty());
+    assert!(m.inner.lock().unwrap().state.records.is_empty());
+}
+
+#[tokio::test]
+async fn local_arguments_and_authority_reject_before_wallet_lookup() {
+    let m = without_wallets().await;
+    for args in [
+        json!({"local_only":"true"}),
+        json!({"local_only":null}),
+        json!({"local_only":true,"mode":"best"}),
+        json!({"local_only":true,"category":"finance"}),
+        json!({"local_only":true,"max_price_usd":1}),
+        json!({"local_only":true,"q":null}),
+        json!({"local_only":true,"page":0}),
+        json!({"local_only":true,"per_page":101}),
+    ] {
+        let error = m
+            .invoke_sources_search("writer", args.as_object().unwrap())
+            .await
+            .unwrap_err();
+        assert!(
+            !error.to_string().contains("wallet unavailable"),
+            "{args}: {error}"
+        );
+    }
+    for args in [
+        json!({"q":"exa"}),
+        json!({"mode":"browse"}),
+        json!({"page":null}),
+    ] {
+        assert!(m.invoke("writer", local::NAME, args).await.is_err());
+    }
+    assert!(m.invoke("hidden", local::NAME, json!({})).await.is_err());
+    assert!(
+        m.invoke_sources_search("hidden", json!({"local_only":true}).as_object().unwrap())
+            .await
+            .is_err()
+    );
+    // A false selector must be stripped before remote schema validation; with
+    // no wallet, valid remote dispatch reaches the normal wallet availability error.
+    for args in [json!({"local_only":false}), json!({})] {
+        let error = m
+            .invoke_sources_search("writer", args.as_object().unwrap())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("wallet unavailable"), "{error}");
+    }
+    let listed = tools::listener_definitions(false, true, None, None, &[]);
+    assert_eq!(listed.len(), 2);
+    assert!(!listed.iter().any(|t| t.name == local::NAME));
+    assert_eq!(
+        tools::listener_definitions(true, true, None, None, &[]).len(),
+        7
+    );
+    assert!(m.fetches.lock().unwrap().is_empty());
+    assert!(m.inner.lock().unwrap().state.records.is_empty());
+}
+
+#[tokio::test]
+async fn curated_details_match_without_documentation_identity_or_probes() {
+    let m = Manager::new(
+        policy(None),
+        listeners(false),
+        BTreeMap::from([("shared".into(), PaidClient::unsigned())]),
+        Arc::new(CatalogState::default()),
+        vec![],
+    )
+    .await
+    .unwrap();
+    for (base, count) in [
+        ("https://netintel.dev/", 1),
+        ("https://api.relayshield.net", 2),
+    ] {
+        let output = m
+            .invoke_source_details("writer", json!({"base_url":base}).as_object().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(output["url_discovery"]["status"], "bundled_provider_found");
+        assert_eq!(output["provider_matches"].as_array().unwrap().len(), count);
+        assert_eq!(output["url_discovery"]["results"], json!([]));
+    }
+    assert!(m.fetches.lock().unwrap().is_empty());
+    assert!(m.inner.lock().unwrap().state.records.is_empty());
+}
+
+#[tokio::test]
+async fn curated_details_preserve_the_single_directory_listing() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let listing =
+        json!({"data":{"service":{"base_url":"https://netintel.dev","name":"Listing metadata"}}});
+    let response = listing.clone();
+    let app = axum::Router::new().fallback(axum::routing::get(move || {
+        seen.fetch_add(1, Ordering::SeqCst);
+        let response = response.clone();
+        async move { axum::Json(response) }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let m = manager(None).await;
+    *m.fixture_directory.lock().unwrap() = Some(format!("http://{address}"));
+    let output = m
+        .invoke_source_details("writer", json!({"slug":"vendor"}).as_object().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(output["listing"], listing);
+    assert_eq!(output["url_discovery"]["status"], "bundled_provider_found");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    task.abort();
+}
+
+#[tokio::test]
+async fn local_provider_add_uses_bundled_schema_and_stable_short_registration_name() {
+    let m = manager(None).await;
+    let args = json!({"provider_id":"relayshield-phone-reputation"});
+    let first = m
+        .invoke("writer", "x402_treazury_source_add", args.clone())
+        .await
+        .unwrap();
+    assert_eq!(first["name"], "relayshield-phone-reputation");
+    assert_eq!(first["provider_id"], "relayshield-phone-reputation");
+    assert_eq!(first["schema"]["kind"], "bundled");
+    assert_eq!(first["tool_count"], 1);
+    let repeated = m
+        .invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"provider_id":"relayshield-phone-reputation","name":"ignored"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first, repeated);
+    let found = m
+        .search_tools(
+            "writer",
+            "x402_treazury_tools_search",
+            json!({"source_name":"relayshield-phone-reputation"}),
+        )
+        .unwrap();
+    assert_eq!(
+        found["items"][0]["tool_id"],
+        "dyn_relayshield-phone-reputation__phone_reputation"
+    );
+    assert!(m.fetches.lock().unwrap().is_empty());
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
+}
+
+fn netintel_document() -> Value {
+    json!({"openapi":"3.0.3","servers":[{"url":"https://broken.invalid"}],"paths":{"/dns/lookup":{"post":{"summary":"DNS lookup"}}}})
+}
+
+fn seed_netintel(m: &Manager) {
+    let provider = AcceptedProvider::current("netintel").unwrap();
+    let cell = OnceCell::new();
+    cell.set(Fetched {
+        completed: Instant::now(),
+        result: Ok(Arc::new(netintel_document().to_string().into_bytes())),
+    })
+    .unwrap();
+    m.fetches.lock().unwrap().insert(
+        FetchKey {
+            url: provider.settings.spec.clone(),
+            transport: provider.settings.transport(),
+            timeout: import::read_timeout(&m.policy, Some(&provider)),
+        },
+        Arc::new(cell),
+    );
+}
+
+#[tokio::test]
+async fn known_spec_and_provider_selectors_share_registration_under_racing_adds() {
+    let m = manager(None).await;
+    seed_netintel(&m);
+    let spec = crate::providers::get("netintel")
+        .unwrap()
+        .config
+        .spec
+        .clone();
+    let (by_id, by_url) = tokio::join!(
+        m.invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"provider_id":"netintel","name":"net"})
+        ),
+        m.invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"spec_url":spec,"name":"net"})
+        ),
+    );
+    assert_eq!(by_id.unwrap(), by_url.unwrap());
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
+    let snapshot = m.catalog.read();
+    assert!(
+        snapshot.views["writer"]
+            .iter()
+            .all(|b| b.base == "https://netintel.dev")
+    );
+    assert!(
+        snapshot.views["writer"]
+            .iter()
+            .any(|b| b.tool.name == "dyn_net__dns_lookup")
+    );
+    assert!(snapshot.views["reader"].is_empty());
+}
+
+#[tokio::test]
+async fn legacy_generic_url_repeat_wins_even_when_curated_source_coexists() {
+    let m = manager(None).await;
+    seed_netintel(&m);
+    let url = crate::providers::get("netintel")
+        .unwrap()
+        .config
+        .spec
+        .clone();
+    let mut c: Candidate =
+        serde_json::from_value(candidate("legacy", "process", "server")).unwrap();
+    c.spec_url = url.clone();
+    let mut legacy_document = netintel_document();
+    legacy_document["servers"] = json!([{ "url":"https://api.example.com" }]);
+    let doc = legacy_document.to_string();
+    let id = Uuid::new_v4().to_string();
+    m.commit(
+        "writer".into(),
+        false,
+        Record {
+            id,
+            owner: "writer".into(),
+            candidate: c,
+            targets: vec![],
+            revision: 1,
+            hash: hash(doc.as_bytes()),
+            document: doc,
+            format: FORMAT,
+            accepted_at: epoch(),
+            updated_at: epoch(),
+            removed: false,
+            disabled: None,
+        },
+    )
+    .await
+    .unwrap();
+    m.invoke(
+        "writer",
+        "x402_treazury_source_add",
+        json!({"provider_id":"netintel","name":"curated"}),
+    )
+    .await
+    .unwrap();
+    let repeat = m
+        .invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"spec_url":url,"name":"ignored"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(repeat["name"], "legacy");
+    assert!(repeat.get("provider_id").is_none());
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), 2);
+}
+
+#[tokio::test]
+async fn provider_add_rejects_unknown_null_mixed_and_unauthorized_inputs_before_io() {
+    let m = manager(None).await;
+    for args in [
+        json!({}),
+        json!({"provider_id":null}),
+        json!({"provider_id":"unknown-provider"}),
+        json!({"provider_id":"relayshield-phone-reputation","spec_url":null}),
+        json!({"provider_id":null,"spec_url":"https://api.example.com/openapi.json"}),
+        json!({"provider_id":"relayshield-phone-reputation","wallet":"spoofed"}),
+        json!({"provider_id":"relayshield-phone-reputation","name":"bad__name"}),
+    ] {
+        assert!(
+            m.invoke("writer", "x402_treazury_source_add", args)
+                .await
+                .is_err()
+        );
+    }
+    assert!(
+        m.invoke(
+            "hidden",
+            "x402_treazury_source_add",
+            json!({"provider_id":"relayshield-phone-reputation"})
+        )
+        .await
+        .is_err()
+    );
+    assert!(m.fetches.lock().unwrap().is_empty());
+    assert!(m.inner.lock().unwrap().state.records.is_empty());
+}

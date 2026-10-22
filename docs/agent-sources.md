@@ -4,7 +4,7 @@ For a smaller initial MCP tool list, set `discover_on_demand = true` in a
 `[servers.NAME]` table. This is independent of `source_management` and defaults to
 `false`. Static listeners advertise just `x402_treazury_tools_search` and
 `x402_treazury_tool_call`; listeners with source management enabled advertise all
-six management tools. API tools, including subsequently registered tools, stay
+seven management tools. API tools, including subsequently registered tools, stay
 out of `tools/list`.
 
 Agents search the listener's catalog with `x402_treazury_tools_search`, receive
@@ -90,8 +90,23 @@ Ranking preserves complete descriptions, schemas and payment bindings.
 
 ## External directory matching
 
-`x402_treazury_sources_search` searches x402 List rather than the endpoint's loaded
-tools. Matching is performed upstream: `mode=browse` (default) uses case-insensitive
+`x402_treazury_sources_search(local_only=true)` searches only bundled provider
+metadata: IDs, display names, capability descriptions and declared API bases use
+case-insensitive substring matching, ordered by stable provider ID. Omitted or
+blank `q` enumerates the bundle. `page` defaults to 1; `per_page` defaults to 25
+and accepts 1–100. Only omitted or `browse` mode is allowed; directory filters,
+ranking arguments and `best` fail before I/O. `x402_treazury_providers_list` accepts
+only the same pagination fields and shares this projection with blank local search.
+Both return `items`, `total`, `page`, `per_page` and `next_page`; each item includes
+`provider_id`, name, description, optional API base and schema provenance. Results
+are metadata leads, independent of installed tools, with no wallet identity lookup,
+network requests, registration or automatic remote fallback. Bundled means shipped
+configuration knowledge, not current reachability, funding or live qualification.
+
+With `local_only` false or omitted, `x402_treazury_sources_search` searches x402 List
+rather than the endpoint's loaded tools. The local selector is stripped before
+remote dispatch. Matching is performed upstream: `mode=browse` (default) uses
+case-insensitive
 substring matching across service name, description, category and base URL, with
 pagination. `mode=best` uses x402 List's relevance and quality ranking, matching
 service metadata plus AI-derived capability tags and summaries. Neither mode uses
@@ -120,7 +135,7 @@ remote catalogs are pending; it describes intended coverage, not current readine
 
 Put platform/capability summaries and useful search terms in the tool-search field
 when a client does not forward MCP server instructions to its model. Use the
-source-search field for guidance about finding new APIs in the external directory;
+source-search field for guidance about finding new APIs locally or in the external directory;
 `tools_search` searches APIs already available on the listener. To avoid repeating
 source guidance, override initialization with concise endpoint instructions.
 Keep essential operation requirements in the relevant tool descriptions or include
@@ -163,7 +178,8 @@ and may be cached; search results reflect current availability. The external
 
 
 Enable `source_management = true` on an HTTP deployment endpoint to let its agents
-search the built-in x402 List directory, add public OpenAPI APIs, inspect tool signatures and
+search bundled providers or the built-in x402 List directory, register curated or
+public OpenAPI APIs, inspect tool signatures and
 invoke them. It defaults to false. Standalone provider serving remains static.
 See the [README workflow](../README.md#agent-api-auto-discovery-and-tool-addition)
 and the [comprehensive example's toolbox endpoint](../examples/deployments/comprehensive.toml).
@@ -217,14 +233,15 @@ not removed by API filters.
 
 | Tool | Arguments |
 | --- | --- |
-| `x402_treazury_sources_search` | Optional `mode`: `browse` (default) or `best`, with upstream query/filter/ranking arguments. Server sets `network=BSE`. |
-| `x402_treazury_source_details` | Exactly one directory `slug` or public HTTPS `base_url`. Returns listing metadata and discovers working specification/documentation URLs. |
-| `x402_treazury_source_add` | Required public OpenAPI 3 JSON `spec_url`; optional readable `name`. |
+| `x402_treazury_sources_search` | `local_only=true`: optional `q`, `page`, `per_page` and `mode=browse`. Otherwise optional remote browse/best mode and upstream arguments; server sets `network=BSE`. |
+| `x402_treazury_source_details` | Exactly one directory `slug` or public HTTPS `base_url`. Returns listing metadata and bundled matches, or probes specification/documentation URLs. |
+| `x402_treazury_source_add` | Exactly one bundled `provider_id` or public OpenAPI 3 JSON `spec_url`, plus optional readable `name`. |
+| `x402_treazury_providers_list` | Optional `page` and `per_page`; enumerates bundled provider metadata offline. |
 | `x402_treazury_raw_call` | Required `method` and public HTTPS `url`; optional `query` object and JSON `body`. |
 | `x402_treazury_tools_search` | Optional `query`, registered `source_name`, `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Required readable `tool_id` and `arguments`. |
 
-Directory search uses embedded reviewed schemas and the live x402 List API. It
+Remote directory search uses embedded reviewed schemas and the live x402 List API. It
 requires no static directory source or startup catalog fetch. Browse dispatches to
 `GET /services`, with `page`, `per_page` and directory filters. Best dispatches to
 `GET /best`, with `prefer` (`balanced`, `cheapest`, `fastest`, `most_reliable`),
@@ -233,21 +250,27 @@ requires no static directory source or startup catalog fetch. Browse dispatches 
 `{"mode":"best","q":"weather","prefer":"cheapest","limit":3}`.
 The price filter controls recommendations, not payment admission. The local mode
 selector is stripped; invalid or mixed-mode fields fail before I/O. Each search
-makes one directory request. Reads share an IP-level free quota and may charge
+makes one directory request in remote mode. Reads share an IP-level free quota and may charge
 through the endpoint's source-management wallet and ordinary payment checks.
 Cite x402-list.com for its CC BY 4.0 directory data. Results are discovery leads,
 not executable schemas or delivery/payment guarantees.
 
 ### Listing and URL discovery
 
-`source_details` helps discover working OpenAPI, x402 discovery and LLM
-documentation URLs. With a directory `slug`, it fetches that service's listing once,
-then probes common URLs under its API base, origin root and allowed website origin.
+`source_details` resolves bundled provider definitions before discovering OpenAPI,
+x402 discovery and LLM documentation URLs. With a directory `slug`, it fetches that
+service's listing once. After validating the API base, exact normalized origin/base
+path matches return selectable `provider_matches` with provider IDs and schema
+provenance. Companion definitions sharing a base remain separate candidates; they
+are not combined. `url_discovery.status = "bundled_provider_found"` and empty
+`results` report that speculative probes were skipped. These offline matches make
+no reachability or qualification claim. Unknown bases retain common-URL probes
+under the API base, origin root and allowed website origin.
 With `base_url`, it skips the directory lookup. A slug is the external directory's
 service identifier, not a local registration name or UUID.
 
 The response contains `listing` (the exact parsed directory response, or null for a
-base URL) and `url_discovery`. Discovery includes an overall `status`, per-URL
+base URL), `provider_matches` (empty when none) and `url_discovery`. Discovery includes an overall `status`, per-URL
 `results`, and available base/website metadata. A received directory response is
 preserved when discovery cannot proceed, including missing/rejected API bases or an
 unavailable documentation identity. Non-JSON directory output is preserved as text
@@ -305,25 +328,40 @@ invocation is a new logical call and may authorize another payment.
 
 ### Registration and tool invocation
 
-`source_add` fetches and fully validates a public HTTPS OpenAPI 3 JSON document.
-The API base comes from the first root OpenAPI server, resolving relative URLs
-against the specification URL. It returns only `name`, `tool_prefix`, filtered
-`tool_count`, `status` and `next`; disabled registrations also include `reason`.
+`source_add` accepts exactly one `provider_id` or `spec_url`, plus optional `name`.
+For example, `{"provider_id":"exa"}` registers the bundled Exa definition. A curated
+registration uses its reviewed catalog configuration and acquires its remote or
+embedded schema server-side; it preserves base repair, selections, overrides,
+help, guidance and response mappings without activating provider recommendations.
+No agent-selectable local path or data installation is needed.
+
+A specification URL first returns any existing generic registration for that
+endpoint and canonical URL unchanged. Otherwise a unique exact match against
+current bundled remote specification URLs selects the curated definition; multiple
+matches require an explicit provider ID. Other URLs retain generic OpenAPI 3 JSON
+import, with the API base from the first root server resolved against the spec URL.
+An arbitrary document's `servers` claim never selects a curated provider.
+It returns `name`, `tool_prefix`, filtered `tool_count`, `status` and `next`; disabled registrations also include `reason`. Curated results and operator inspection also report the accepted `provider_id` and schema provenance.
 Registration never funds wallets or probes prices.
 
 Names preserve case and allow at most 64 ASCII letters/digits/underscores/hyphens;
 `__` is reserved as the source/operation separator. Explicit names must be unique
 within the endpoint, including disabled registrations and configured source names.
-When omitted, a readable hostname-derived name is generated (for example
-`api-example-com`), with a numeric suffix such as `-2` if occupied. Name allocation
+When omitted, curated sources use their short stable provider ID and generic
+sources use a readable hostname-derived name (for example `api-example-com`), with a numeric suffix such as `-2` if occupied. Name allocation
 and duplicate-URL checks share the existing publication lock. Choose `netintel` to
 produce `dyn_netintel__<operation>` tools; operation suffixes use normalized OpenAPI
 paths, adding method/numeric suffixes where necessary.
 
-The canonical specification URL identifies an existing live registration within the
-endpoint. Repeated additions return it without fetching again, regardless of a new
-requested label. Concurrent additions recheck under the publication lock. Busy
-errors can be retried with the same URL. Persistence follows operator configuration.
+Curated registrations deduplicate by authenticated owner and provider ID; generic
+registrations retain owner plus canonical specification URL. Repeating a provider
+ID returns its accepted registration before consulting the current bundle, without
+implicit refresh or a new label. Concurrent provider-ID and current known-spec
+additions converge under the publication lock. A legacy generic URL registration
+remains generic when its URL is repeated; explicitly selecting its provider ID can
+create a separate curated source, subject to existing name/tool collision checks.
+Busy errors can be retried with the same selector. Persistence follows operator
+configuration.
 Durable source records, UUIDs, revisions, hashes and tombstones remain internal and
 available through operator inspection; no registration-result receipt ledger is
 needed. Old registry receipt fields are ignored on read and omitted on later saves.
@@ -345,7 +383,7 @@ their captured binding even during publication/removal. Existing direct MCP tool
 calls use the same name-based semantics. API responses and payment admission remain
 unchanged.
 
-Source management contributes six definitions. Eager endpoints also advertise
+Source management contributes seven definitions. Eager endpoints also advertise
 registered API tools, including restored registrations; `discover_on_demand` keeps
 those API definitions out of `tools/list`. HTTP is stateless and does not advertise
 list-change notifications, so clients may cache their inventory. Search/call remains

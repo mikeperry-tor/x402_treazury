@@ -56,9 +56,19 @@ pub fn search_schema() -> Value {
             properties.insert(name.clone(), field);
         }
     }
+    properties.insert("local_only".into(), json!({
+        "type":"boolean","default":false,
+        "description":"When true, search bundled provider metadata offline with q and browse pagination only. No directory requests, wallet work or automatic remote fallback. False or omitted uses the external directory."
+    }));
+    if let Some(query) = properties.get_mut("q") {
+        let remote = query["description"].as_str().unwrap_or_default();
+        query["description"] = json!(format!(
+            "{remote} Local-only: case-insensitive substring across bundled provider IDs, names, descriptions and declared API bases; blank or omitted enumerates the bundle."
+        ));
+    }
     properties.insert("mode".into(), json!({
         "type":"string","enum":["browse","best"],"default":"browse",
-        "description":"browse: paginated directory search. best: ranked recommendations for a stated need, without pagination. Only send fields supported by the selected mode."
+        "description":"browse: paginated directory search. best: ranked recommendations for a stated need, without pagination. Only send fields supported by the selected mode. local_only=true permits only browse (or omission), q, page and per_page."
     }));
     let branch = |mode: &str, schema: &Value, required: Value| {
         let mut allowed: Map<String, Value> = schema["properties"]
@@ -69,11 +79,12 @@ pub fn search_schema() -> Value {
             .map(|name| (name.clone(), json!({})))
             .collect();
         allowed.insert("mode".into(), json!({"const":mode}));
+        allowed.insert("local_only".into(), json!({"const":false}));
         json!({"properties":allowed,"required":required,"additionalProperties":false})
     };
     json!({
         "type":"object","properties":properties,"additionalProperties":false,
-        "oneOf":[branch("browse",browse,json!([])),branch("best",best,json!(["mode"]))]
+        "oneOf":[branch("browse",browse,json!([])),branch("best",best,json!(["mode"])),super::local::search_branch()]
     })
 }
 

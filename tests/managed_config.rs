@@ -640,7 +640,13 @@ async fn managed_starter_exposes_exa_and_source_management_without_financial_sta
             .filter(|entry| entry.tool.name != "exa_help")
             .all(|entry| entry.tool.method == "POST")
     );
-    assert_eq!(inventory[0].management_tools.len(), 6);
+    assert_eq!(inventory[0].management_tools.len(), 7);
+    assert!(
+        inventory[0]
+            .management_tools
+            .iter()
+            .any(|tool| tool.name == "x402_treazury_providers_list")
+    );
     assert!(
         inventory[0]
             .management_tools

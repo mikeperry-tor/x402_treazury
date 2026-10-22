@@ -35,7 +35,7 @@ fn curated_candidate(name: &str) -> Candidate {
         .unwrap()
 }
 
-async fn commit_curated(m: &Arc<Manager>, name: &str) -> String {
+pub(super) async fn commit_curated(m: &Arc<Manager>, name: &str) -> String {
     let document = document().to_string();
     let mut candidate = curated_candidate(name);
     if m.policy.registry_file.is_none() {

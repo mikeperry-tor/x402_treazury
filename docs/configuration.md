@@ -270,7 +270,7 @@ and HTTP/2 authority validation still follow the MCP library's protocol rules.
 
 To reduce the initial tool context for a listener, add `discover_on_demand = true`
 to its `[servers.NAME]` table (default: `false`). It advertises only search/call
-wrappers, or all six management wrappers when `source_management = true`.
+wrappers, or all seven management wrappers when `source_management = true`.
 Search returns complete tool descriptions and schemas, five results at a time by
 default. Filters, payment routing, source permissions, and startup catalog loading
 are unchanged. Queries use BM25 keyword ranking over names, descriptions and
@@ -282,7 +282,7 @@ for query semantics, diagnostics and pagination.
 Endpoint `instructions_text` overrides composed source guidance (an empty string
 suppresses it), while generated pricing and operational notices remain.
 `discovery_search_tool_instructions_text` appends to the local tool-search description;
-`sources_search_tool_instructions_text` appends to external directory-search help.
+`sources_search_tool_instructions_text` appends to bundled/local and external source-search help.
 Neither setting enables discovery or source management. See
 [endpoint instruction placement](agent-sources.md#endpoint-instruction-placement)
 for defaults, client caching and guidance placement.
@@ -716,13 +716,31 @@ endpoint; they cannot be published to another endpoint. The operator selects per
 by configuring `source_management.registry_file`; agents cannot choose scope or lifetime.
 Existing listener filters still constrain imported API tools. Parallel callers on the
 same endpoint share one import slot. Concurrent additions publish complete snapshots;
-repeat a busy or lost add with the same specification URL. Duplicate URLs return the
-existing registration on that endpoint. See the [agent source guide](agent-sources.md).
+repeat a busy or lost add with the same selector. Repeated provider IDs and generic
+specification URLs return the accepted registration on that endpoint. See the [agent source guide](agent-sources.md).
 
-`x402_treazury_source_details` inspects directory metadata and discovers working
-specification/documentation URLs from exactly one directory slug or HTTPS API base
-URL. A slug causes one ordinary potentially paid directory lookup; a base URL skips
-it. Results retain the listing alongside URL-discovery status, even when a missing
+`x402_treazury_providers_list` enumerates the embedded provider catalog offline;
+`sources_search` with `local_only=true` searches the same metadata by case-insensitive
+substring across ID, name, description and declared API base. Both support `page`
+(default 1) and `per_page` (default 25, range 1–100). Local search accepts only `q`,
+those pagination fields and omitted or `browse` mode; directory filters/ranking are
+rejected before I/O. These tools perform no wallet or network work and never fall
+back to the remote directory. Omitted or false `local_only` retains remote search.
+
+`x402_treazury_source_add` accepts exactly one bundled `provider_id` or public
+OpenAPI `spec_url`, plus optional `name`. A unique exact known specification URL
+uses the bundled definition unless that URL already identifies an accepted generic
+registration. Repeated provider IDs return the accepted curated source without
+refresh; unknown or ambiguous selectors fail explicitly. Curated registration
+preserves provider compatibility settings and embedded schemas, defaults its name
+to the short ID (`exa` produces `dyn_exa__search`), and grants no funding or extra
+payment authority. Operator destination policy still applies.
+
+`x402_treazury_source_details` resolves exact bundled provider matches before
+probing specification/documentation URLs, from exactly one directory slug or HTTPS
+API base URL. Matches return IDs and schema provenance, skip speculative provider
+requests and make no live reachability/qualification claim. A slug causes one
+ordinary potentially paid directory lookup; a base URL skips it. Results retain the listing alongside URL-discovery status, even when a missing
 or rejected API base or unavailable identity prevents probing. Provider HEAD/GET
 probes stay unsigned and use the existing wallet identity and spec/help limits.
 No wallet is allocated or funded for probes.
@@ -735,7 +753,8 @@ response limits and network factory as imported APIs. It is independent of API
 tool-name filters and accepts no agent headers, wallet or payment settings.
 
 Registration returns a readable name, prefix, tool count, status and next step.
-An omitted name defaults to its specification hostname with collision suffixes.
+An omitted name defaults to its provider ID for curated sources or its specification
+hostname for generic sources, with collision suffixes.
 Search filters use optional `source_name`; calls use stable readable `tool_id`
 names resolved against the current endpoint catalog. Internal source UUIDs,
 revisions and operator registry inspection remain available. Legacy registration

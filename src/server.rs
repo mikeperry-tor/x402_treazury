@@ -140,7 +140,7 @@ impl Server {
             if name == "x402_treazury_sources_search" {
                 return Ok(self.limit(
                     manager
-                        .invoke_directory(&self.catalog_server, name, args)
+                        .invoke_sources_search(&self.catalog_server, args)
                         .await?,
                 ));
             }
@@ -157,7 +157,7 @@ impl Server {
                 return Ok(self.limit(manager.invoke_raw(&self.catalog_server, args).await?));
             }
             if name != "x402_treazury_tool_call" {
-                return Ok(crate::output::ToolOutput::text(serde_json::to_string(
+                let output = crate::output::ToolOutput::text(serde_json::to_string(
                     &manager
                         .invoke(
                             &self.catalog_server,
@@ -165,7 +165,12 @@ impl Server {
                             serde_json::Value::Object(args.clone()),
                         )
                         .await?,
-                )?));
+                )?);
+                return Ok(if name == "x402_treazury_providers_list" {
+                    self.limit(output)
+                } else {
+                    output
+                });
             }
             let call: crate::discovery::Call =
                 serde_json::from_value(serde_json::Value::Object(args.clone()))?;

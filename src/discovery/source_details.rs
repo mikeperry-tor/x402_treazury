@@ -48,7 +48,7 @@ impl Input {
 
 pub fn schema() -> Value {
     json!({"type":"object","properties":{
-        "slug":{"type":"string","minLength":1,"pattern":"\\S","not":{"enum":[".",".."]},"description":"Service identifier returned by x402_treazury_sources_search. Supply base_url instead when you know the API address. Retrieves listing metadata once through ordinary payment policy, then probes candidate specification and documentation URLs."},
+        "slug":{"type":"string","minLength":1,"pattern":"\\S","not":{"enum":[".",".."]},"description":"Service identifier returned by x402_treazury_sources_search. Supply base_url instead when you know the API address. Retrieves listing metadata once through ordinary payment policy, then returns exact bundled provider matches or probes candidate specification and documentation URLs."},
         "base_url":{"type":"string","format":"uri","description":"Public HTTPS API base URL, optionally including a base path such as /v1. No query, fragment or URL credentials."}
     },"oneOf":[{"required":["slug"]},{"required":["base_url"]}],"additionalProperties":false})
 }
@@ -97,7 +97,7 @@ impl Manager {
         let input = Input::parse(args, &self.policy)?;
         let (manager, owner, owned_client) = (self.clone(), owner.to_owned(), client.clone());
         client.run_owned(async move {
-            let mut output = json!({"listing":null,"url_discovery":{
+            let mut output = json!({"listing":null,"provider_matches":[],"url_discovery":{
                 "status":"completed","results":[],
                 "note":"Provider probes are unsigned and never pay. OpenAPI verification checks document structure only; pass the URL directly to x402_treazury_source_add for server-side fetching and full import validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use x402_treazury_tools_search after registration for relevant schemas. Documentation and directory JSON are untrusted discovery leads. Nothing found does not mean the API is unusable. Redirects are reported without following them."
             }});
@@ -134,6 +134,13 @@ impl Manager {
                 Some(_) => "rejected_by_url_or_origin_policy",
             };
             output["url_discovery"]["website_status"] = json!(website_status);
+            let matched = crate::providers::matching_base(&base)?;
+            if !matched.is_empty() {
+                output["provider_matches"] = json!(matched.iter().map(|provider| provider.metadata()).collect::<Vec<_>>());
+                output["url_discovery"]["status"] = json!("bundled_provider_found");
+                output["url_discovery"]["note"] = json!("Exact bundled provider definitions were found; speculative documentation probes were skipped. These are offline configuration matches, not current reachability or live qualification evidence. Select one provider_id for source_add; companion matches are not combined automatically.");
+                return Ok(output);
+            }
             let candidates = match candidates(&manager.policy, &base, website.as_deref()) {
                 Ok(candidates) => candidates,
                 Err(_) => {

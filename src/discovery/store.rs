@@ -185,6 +185,10 @@ pub fn inspect(path: &Path) -> Result<serde_json::Value> {
 
 fn inspect_source(record: &Record) -> serde_json::Value {
     let mut source = serde_json::json!({"id":record.id,"name":record.candidate.name,"owner":record.owner,"revision":record.revision,"targets":record.targets,"disabled":record.disabled,"removed":record.removed,"spec_hash":record.hash});
+    if let Some(provider) = &record.candidate.provider {
+        source["provider_id"] = serde_json::json!(provider.id);
+        source["schema"] = serde_json::json!({"kind": if record.candidate.remote_spec().is_some() { "remote" } else { "bundled" }, "reference": provider.settings.spec});
+    }
     if record.removed {
         source["tools"] = serde_json::json!([]);
         return source;

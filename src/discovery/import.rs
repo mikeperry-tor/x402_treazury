@@ -413,6 +413,12 @@ pub(super) fn saved_tools(c: &Candidate, bytes: &[u8]) -> Result<Vec<ToolSpec>> 
     selected_tools(c, &parse_document(bytes)?).map(|(tools, _)| tools)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RegistrationKey<'a> {
+    Provider(&'a str),
+    Specification(&'a str),
+}
+
 impl Candidate {
     pub(super) fn remote_spec(&self) -> Option<&str> {
         match &self.provider {
@@ -426,11 +432,10 @@ impl Candidate {
             None => Some(&self.spec_url),
         }
     }
-    pub(super) fn same_registration(&self, other: &Self) -> bool {
-        match (&self.provider, &other.provider) {
-            (Some(a), Some(b)) => a.id == b.id,
-            (None, None) => self.spec_url == other.spec_url,
-            _ => false,
+    pub(super) fn registration_key(&self) -> RegistrationKey<'_> {
+        match &self.provider {
+            Some(provider) => RegistrationKey::Provider(&provider.id),
+            None => RegistrationKey::Specification(&self.spec_url),
         }
     }
 }

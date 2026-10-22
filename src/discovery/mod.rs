@@ -2,6 +2,7 @@
 mod curated;
 mod directory;
 mod import;
+mod local;
 pub mod policy;
 mod publication;
 pub(crate) mod raw;
@@ -117,7 +118,8 @@ pub struct Manager {
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Add {
-    spec_url: String,
+    spec_url: Option<String>,
+    provider_id: Option<String>,
     name: Option<String>,
 }
 #[derive(Default, Deserialize)]
@@ -411,6 +413,10 @@ impl Manager {
             "status": if r.disabled.is_some() { "disabled" } else { "available" },
             "next": "Search tools with source_name=name, then invoke tool_id with arguments through x402_treazury_tool_call."
         });
+        if let Some(provider) = &r.candidate.provider {
+            result["provider_id"] = json!(provider.id);
+            result["schema"] = json!({"kind": if r.candidate.remote_spec().is_some() { "remote" } else { "bundled" }, "reference": provider.settings.spec});
+        }
         if let Some(reason) = &r.disabled {
             result["reason"] = json!(reason);
         }
@@ -532,33 +538,85 @@ impl Manager {
         ensure!(self.enabled(owner), "source_management_disabled");
         match name {
             "x402_treazury_source_add" => self.add_source(owner, args).await,
+            local::NAME => local::list(args.as_object().context("arguments must be an object")?),
             "x402_treazury_tools_search" => self.search_tools(owner, name, args),
             _ => anyhow::bail!("unknown management tool"),
         }
     }
+    fn existing_registration(
+        &self,
+        owner: &str,
+        key: import::RegistrationKey<'_>,
+    ) -> Option<Value> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .state
+            .records
+            .values()
+            .find(|record| {
+                !record.removed
+                    && record.owner == owner
+                    && record.candidate.registration_key() == key
+            })
+            .map(|record| self.result(record, owner, &self.catalog.read()))
+    }
+
     async fn add_source(self: &Arc<Self>, owner: &str, args: Value) -> Result<Value> {
-        let mut a: Add = serde_json::from_value(args)?;
         ensure!(self.enabled(owner), "source_management_disabled");
-        a.spec_url = import::endpoint(&self.policy, &a.spec_url)?.to_string();
-        {
-            let inner = self.inner.lock().unwrap();
-            if let Some(r) = inner
-                .state
-                .records
-                .values()
-                .find(|r| r.owner == owner && !r.removed && r.candidate.spec_url == a.spec_url)
-            {
-                return Ok(self.result(r, owner, &self.catalog.read()));
-            }
+        match (args.get("provider_id"), args.get("spec_url")) {
+            (Some(Value::String(_)), None) | (None, Some(Value::String(_))) => {}
+            _ => anyhow::bail!("provide exactly one string provider_id or spec_url"),
         }
+        let a: Add = serde_json::from_value(args)?;
+        let spec_url = a
+            .spec_url
+            .as_deref()
+            .map(|url| import::endpoint(&self.policy, url).map(|url| url.to_string()))
+            .transpose()?;
+        let key = match a.provider_id.as_deref() {
+            Some(id) => import::RegistrationKey::Provider(id),
+            None => import::RegistrationKey::Specification(spec_url.as_deref().unwrap()),
+        };
+        // Preserve accepted generic URL imports and stable provider identities;
+        // re-adding never refreshes configuration or schema bytes implicitly.
+        if let Some(result) = self.existing_registration(owner, key) {
+            return Ok(result);
+        }
+        let provider = match a.provider_id.as_deref() {
+            Some(id) => Some(curated::AcceptedProvider::current(id)?),
+            None => {
+                let matches = crate::providers::matching_spec(spec_url.as_deref().unwrap())?;
+                match matches.as_slice() {
+                    [] => None,
+                    [provider] => Some(curated::AcceptedProvider::current(provider.id)?),
+                    _ => anyhow::bail!(
+                        "ambiguous specification; select provider_id from: {}",
+                        matches.iter().map(|p| p.id).collect::<Vec<_>>().join(", ")
+                    ),
+                }
+            }
+        };
         let generated_name = a.name.is_none();
+        let name = a.name.unwrap_or_else(|| {
+            provider
+                .as_ref()
+                .map(|p| p.id.clone())
+                .unwrap_or_else(|| import::default_source_name(spec_url.as_deref().unwrap()))
+        });
         let candidate = Candidate {
-            name: a
-                .name
-                .unwrap_or_else(|| import::default_source_name(&a.spec_url)),
-            spec_url: a.spec_url,
+            name,
+            spec_url: provider
+                .as_ref()
+                .map(|p| {
+                    if p.settings.spec.starts_with("https://") {
+                        p.settings.spec.clone()
+                    } else {
+                        String::new()
+                    }
+                })
+                .unwrap_or_else(|| spec_url.unwrap()),
             base_url: None,
-            provider: None,
+            provider,
             selection: Selection::default(),
             visibility: Visibility::Server,
             targets: vec![],
@@ -568,6 +626,9 @@ impl Manager {
                 Lifetime::Process
             },
         };
+        if let Some(result) = self.existing_registration(owner, candidate.registration_key()) {
+            return Ok(result);
+        }
         if !generated_name {
             self.targets(owner, &candidate)?;
         }
@@ -635,7 +696,9 @@ impl Manager {
             let mut inner = this.inner.lock().unwrap();
             // Recheck duplicate URLs under the publication lock, including racing adds.
             if let Some(r) = inner.state.records.values().find(|r| {
-                !r.removed && r.owner == owner && r.candidate.same_registration(&record.candidate)
+                !r.removed
+                    && r.owner == owner
+                    && r.candidate.registration_key() == record.candidate.registration_key()
             }) {
                 return Ok(this.result(r, &owner, &this.catalog.read()));
             }
