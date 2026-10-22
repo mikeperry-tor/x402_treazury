@@ -35,6 +35,11 @@ mutation testing, cover shaping, broader lifecycle/cover acceptance, managed
 wallet extensions and [post-merge Zcash isolation recovery](plans/deferred/zcash_isolation_retries.md).
 Plans grant no execution or spending authority.
 
+The [uniform pagination and advisory inventory plan](plans/uniform_pagination_and_tool_inventory.md)
+covers shared 25-item defaults, replacement of the dynamic-tool quota with an
+advisory warning, clearer discovery guidance, and removal of completed-output
+character truncation.
+
 When implemented, move useful explanations into maintained guides, retain concrete
 unfinished work in a focused plan, fix links and remove the completed plan. Do not
 keep an implemented-plan archive. Generated reports, audit inventories and metrics
