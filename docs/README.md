@@ -22,8 +22,6 @@ and CLI usage. Maintained implementation and operational explanations live here:
 [remaining vendor retirement assessments](plans/vendor_retirement.md). The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.
-The [curated source management plan](plans/curated_source_management.md) covers
-bundled provider matching, registration and accepted configuration persistence.
 The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
 describe advisory estimates, per-wallet attempts, no top-ups, SDK-owned Zcash
 funds, owner recovery and automatic owned-transparent shielding. The
