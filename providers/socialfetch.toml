@@ -1,3 +1,4 @@
+description = "Social-platform and web data search, profiles, posts and content retrieval."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://www.socialfetch.dev/openapi.json"
 name = "SocialFetch"

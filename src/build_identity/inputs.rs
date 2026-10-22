@@ -4,6 +4,17 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
 };
+// Membership is shared with the runtime bundle; private provider overrides are excluded.
+include!("../providers/assets.rs");
+macro_rules! provider_files {
+    ($(($id:literal, $path:literal, $kind:ident $(($local:literal))?)),* $(,)?) => {
+        &[$($path, $($local,)?)* "providers/x402-list/directory.openapi.json"]
+    };
+}
+pub fn provider_files() -> &'static [&'static str] {
+    provider_manifest!(provider_files)
+}
+
 fn walk(path: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
@@ -57,6 +68,9 @@ pub fn source_hash(root: &Path) -> io::Result<String> {
     ] {
         walk(&root.join(name), &mut files)?;
     }
+    for name in provider_files() {
+        walk(&root.join(name), &mut files)?;
+    }
     files.sort();
     let mut hash = Sha256::new();
     hash.update(b"x402_treazury-build-inputs-v1\0");
@@ -75,7 +89,7 @@ pub fn source_hash(root: &Path) -> io::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::source_hash;
+    use super::{provider_files, source_hash};
 
     #[test]
     fn relocated_runner_inputs_affect_fingerprint_without_private_live_inputs() {
@@ -97,10 +111,20 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, b"fixture").unwrap();
         }
+        for name in provider_files() {
+            let path = root.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"fixture").unwrap();
+        }
         let initial = source_hash(root).unwrap();
         // Unrelated private live inputs are outside the compilation fingerprint.
         std::fs::write(
             root.join("tests/live/private.local.toml"),
+            b"private fixture",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("providers/private.local.toml"),
             b"private fixture",
         )
         .unwrap();
@@ -109,6 +133,9 @@ mod tests {
             "tests/live/live_integration.rs",
             "tests/live/runner/driver.rs",
             "tests/live/runner/fixtures/reporting_complete.txt",
+            "providers/exa.toml",
+            "providers/locus/openapi.json",
+            "providers/x402-list/directory.openapi.json",
         ] {
             let path = root.join(name);
             std::fs::write(&path, b"changed fixture").unwrap();

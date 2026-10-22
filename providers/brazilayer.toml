@@ -1,3 +1,4 @@
+description = "Brazilian CNPJ company registries, public procurement, sanctions and economic data."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://api.brazilayer.com/openapi.json"
 name = "Brazilayer — Brazilian Company Data (CNPJ)"

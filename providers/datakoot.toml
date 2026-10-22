@@ -1,3 +1,4 @@
+description = "Public-data intelligence across security, software, filings, economics, weather and domains."
 # Datakoot public-data and Koot synthesis tools; /api is a naming anchor.
 spec = "https://x402.datakoot.com/openapi.json"
 name = "Datakoot"

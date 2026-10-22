@@ -127,6 +127,8 @@ pub struct Config {
     pub max_spec_bytes: usize,
     pub spec: String,
     pub name: Option<String>,
+    /// Searchable provider capabilities, separate from agent instructions.
+    pub description: Option<String>,
     pub base_url: Option<String>,
     pub prefix: Option<String>,
     pub include: Vec<String>,
@@ -204,6 +206,7 @@ impl Default for Config {
             max_spec_bytes: crate::limits::SPEC_BYTES,
             spec: String::new(),
             name: None,
+            description: None,
             base_url: None,
             prefix: None,
             include: vec![],

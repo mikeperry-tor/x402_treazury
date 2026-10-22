@@ -1,3 +1,4 @@
+description = "Threat and breach intelligence, IP and wallet risk, supply-chain checks and URL scanning."
 # x402 payg and three public keyless checks; metered/account ownership and file jobs excluded.
 # /v1/payg shortens paid names; the root fallback retains distinct v1_* public names.
 spec = "https://api.relayshield.net/openapi.json"

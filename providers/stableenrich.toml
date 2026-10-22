@@ -1,3 +1,4 @@
+description = "Web search, scraping, maps, company enrichment and supported image tools."
 # Supported JSON/image catalog; only documented async/SIWX workflows are excluded.
 spec = "https://stableenrich.dev/openapi.json"
 name = "StableEnrich"

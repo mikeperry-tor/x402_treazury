@@ -96,6 +96,26 @@ still applies. Listings do not guarantee compatible payment or supply executable
 schemas. Pricing probes, owner-token workflows and an unrepresentable submit
 schema are excluded. Embedded source management deliberately keeps three reads.
 
+## Bundled provider metadata
+
+The executable embeds the shipped definitions and referenced local OpenAPI assets.
+`src/providers/assets.rs` is the membership manifest: stable IDs are normally the
+TOML stem, a directory's `provider.toml` uses its directory name, and the phone
+companion is `relayshield-phone-reputation`. Add new shipped definitions there;
+keep settings and descriptions in their TOML, without copying them into the
+manifest. Local schemas load independently of the installation directory.
+No separate data installation, filesystem scan or writable index is required.
+Private local overrides are neither bundled nor compilation identity inputs.
+
+Every shipped definition has a concise root `description` of supported
+capabilities for offline search. This metadata is separate from operation
+descriptions and `instructions_text`; external definitions may omit it. API-base
+lookup uses exact normalized HTTPS origin and base path, retaining ambiguous
+companions. A remote specification matches its complete URL. Definitions without
+an explicit `base_url` have no API-base lookup key; a schema URL is not an API
+identity. Bundled metadata does not establish registration, availability, funding
+or live qualification.
+
 ## Provider policy
 
 Reusable definitions should expose supported functionality, including newly added

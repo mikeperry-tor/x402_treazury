@@ -1,3 +1,4 @@
+description = "Google Trends keyword interest over time and by region, related queries and topics."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://google-trends.use.x402atlas.com/openapi.json"
 name = "Google Trends SEO Keyword Data (x402 Atlas)"

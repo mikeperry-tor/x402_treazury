@@ -1,3 +1,4 @@
+description = "Web search and retrieval of page contents for known URLs."
 # Only these two operations support x402; the public spec also contains API-key APIs.
 spec = "https://api.exa.ai/openapi.json"
 name = "Exa"

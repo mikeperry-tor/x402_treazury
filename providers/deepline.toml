@@ -1,3 +1,4 @@
+description = "Go-to-market contact lookup, enrichment waterfalls and advertising research."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://stable-deepline.dev/openapi.json"
 name = "Deepline GTM"

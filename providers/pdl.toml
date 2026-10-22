@@ -1,3 +1,4 @@
+description = "People Data Labs person and company data lookup and enrichment."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://stablepeopledata.dev/openapi.json"
 name = "People Data Labs"

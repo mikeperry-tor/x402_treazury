@@ -1,3 +1,4 @@
+description = "HTTP request relay returning upstream status, response headers and body text."
 # Pinned vendor schema: https://curl-http-request.underscoredone.com/openapi.json
 spec = "openapi.json"
 name = "Curl HTTP Request"

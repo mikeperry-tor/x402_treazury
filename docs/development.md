@@ -27,6 +27,22 @@ are separate: [release reproducibility](reproducible-builds.md) and
 [real-Tor confinement](../tests/TOR.md) currently have macOS-specific evidence.
 Keep those claims narrow until equivalent backends are implemented and qualified.
 
+## Embedded provider inputs
+
+The provider bundle uses `src/providers/assets.rs` as its asset membership manifest;
+settings and capability descriptions remain in provider TOML. Adding a shipped
+provider requires a manifest entry and every referenced local schema. The offline
+bundle test validates all entries and builds local catalogs without installation
+paths or network access. API/spec lookup and local metadata search share this
+bundle rather than scanning a deployment directory.
+
+Build rebuild triggers, source fingerprints and source dirty status include those
+exact TOML/schema files and the embedded directory schema. Private provider
+configuration files outside the manifest remain excluded. The runtime qualification
+check uses the same fingerprint inputs as the build script, so a shipped provider
+edit changes binary identity and qualification compatibility. See
+[release inputs](reproducible-builds.md#prepare-inputs).
+
 ## Application configuration
 
 Zcash support is unconditional in the executable and library. Static-wallet and

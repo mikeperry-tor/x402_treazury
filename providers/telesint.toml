@@ -1,3 +1,4 @@
+description = "Stateless Telegram, cyber-threat and open-source intelligence across actors, indicators and breaches."
 # Stateless CTI and OSINT; wallet-owned watch state is incompatible with rotating payers.
 spec = "https://telesint-api.onrender.com/openapi.json"
 name = "TeleSINT"

@@ -1,3 +1,4 @@
+description = "Strait of Hormuz shipping, oil markets, vessel activity, sanctions and crisis indicators."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "openapi.json"
 name = "Straits.live Hormuz monitor"

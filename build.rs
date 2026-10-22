@@ -19,6 +19,9 @@ fn main() {
     ] {
         println!("cargo:rerun-if-changed={input}");
     }
+    for input in inputs::provider_files() {
+        println!("cargo:rerun-if-changed={input}");
+    }
     for (name, value) in [
         (
             "TREAZURY_SOURCE_HASH",
@@ -40,8 +43,8 @@ fn main() {
         ),
         (
             "TREAZURY_BUILD_DIRTY",
-            git(
-                &[
+            {
+                let mut paths = vec![
                     "status",
                     "--porcelain",
                     "--untracked-files=all",
@@ -54,10 +57,10 @@ fn main() {
                     "Cargo.lock",
                     "build.rs",
                     "rust-toolchain.toml",
-                ],
-                root,
-            )
-            .is_none_or(|s| !s.is_empty())
+                ];
+                paths.extend_from_slice(inputs::provider_files());
+                git(&paths, root).is_none_or(|s| !s.is_empty())
+            }
             .to_string(),
         ),
     ] {

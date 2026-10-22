@@ -1,3 +1,4 @@
+description = "US federal grant search, award details, fit analysis and research briefs."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://genuinegood.online/openapi.json"
 name = "Genuine Good Grants"

@@ -1,3 +1,4 @@
+description = "Crypto market indicators, company and funding research, and supported model gateways."
 # Market and crypto-company research; sparse RootData schemas preserve open JSON body routing.
 spec = "https://claw402.ai/openapi.json"
 name = "Claw402"

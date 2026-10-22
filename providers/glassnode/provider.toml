@@ -1,3 +1,4 @@
+description = "On-chain crypto analytics with metric discovery, parameter metadata and time-series data."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "openapi.json"
 name = "Glassnode x402"

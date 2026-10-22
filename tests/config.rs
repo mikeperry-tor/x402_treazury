@@ -588,3 +588,44 @@ sources=['second']
         json!(["api_other"])
     );
 }
+
+#[tokio::test]
+async fn provider_description_inherits_and_replaces_with_field_origins() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='schema.json'\ndescription='Corporate registry search'\n",
+    )
+    .unwrap();
+    let source = dir.path().join("source.toml");
+    let inherited = config::resolve(toml::from_str("extends='provider.toml'").unwrap(), &source)
+        .await
+        .unwrap();
+    assert_eq!(
+        inherited.settings.description.as_deref(),
+        Some("Corporate registry search")
+    );
+    assert!(inherited.origins["description"].ends_with("provider.toml"));
+    let replaced = config::resolve(
+        toml::from_str("extends='provider.toml'\ndescription='Local research view'").unwrap(),
+        &source,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        replaced.settings.description.as_deref(),
+        Some("Local research view")
+    );
+    assert_eq!(
+        replaced.origins["description"],
+        source.display().to_string()
+    );
+    let serialized = serde_json::to_value(&replaced.settings).unwrap();
+    assert_eq!(serialized["description"], "Local research view");
+    assert!(
+        toml::from_str::<x402_treazury::catalog::Config>("spec='schema.json'")
+            .unwrap()
+            .description
+            .is_none()
+    );
+}

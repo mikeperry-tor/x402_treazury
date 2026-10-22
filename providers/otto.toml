@@ -1,3 +1,4 @@
+description = "Market news, token intelligence, DeFi data, financial statements and web research."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://x402.ottoai.services/openapi.json"
 name = "Otto AI x402 — Market Intelligence, DeFi & Trading"

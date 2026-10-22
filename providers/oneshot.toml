@@ -1,3 +1,4 @@
+description = "Synchronous web search and public service discovery."
 reliability_tags = ["catalog_http_403"]
 reliability_note = "Catalog access and unsigned API requests have returned HTTP 403 while help remained available. Tor causation is not established."
 

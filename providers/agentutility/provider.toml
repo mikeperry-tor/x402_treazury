@@ -1,3 +1,4 @@
+description = "Web research, scraping, structured extraction and supported developer data utilities."
 reliability_tags = ["upstream_rate_limited"]
 reliability_note = "Paid web_search can return HTTP 424 for an upstream HTTP 429. Tor causation is not established."
 

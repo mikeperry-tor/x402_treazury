@@ -1,3 +1,4 @@
+description = "Synchronous model gateways, web research and fixed-target crypto market data."
 # Supported synchronous gateways and fixed-target market reads; async/owned jobs stay excluded.
 spec = "https://blockrun.ai/api/openapi"
 name = "BlockRun"

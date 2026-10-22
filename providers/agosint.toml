@@ -1,3 +1,4 @@
+description = "Corporate registry, company due diligence, domain, network, VAT and sanctions intelligence."
 # Registry fan-out: /x402 anchors names; MPP aliases are the unsupported payment rail.
 spec = "https://agosint.shveik.dev/openapi.json"
 name = "AgOSINT"

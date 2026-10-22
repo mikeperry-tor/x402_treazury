@@ -137,7 +137,7 @@ optional wallet templates and an automatic assignment policy:
 
 - `sources`: provider settings written inline or imported with
   `extends = "../providers/pdl.toml"`. Every generic catalog setting is
-  available here, including `spec`, `base_url`, `prefix`, `read_timeout_seconds` (inherits the network default of 60),
+  available here, including `spec`, `name`, `description`, `base_url`, `prefix`, `read_timeout_seconds` (inherits the network default of 60),
   path/tag filters, `include_tools`, `exclude_tools`, pricing options, overrides
   and guidance. A deployment source
   can also set `wallet` to override the server default; this field is forbidden
@@ -150,6 +150,11 @@ optional wallet templates and an automatic assignment policy:
   `wallet` and optional
   `include_tools`, `exclude_tools`, `tags`, `exclude_tags`, and `max_response_chars`.
   Resource identifiers use lowercase letters, digits and `_`, starting with a letter.
+
+Provider/source `description` is optional searchable capability metadata. It inherits
+and replaces as an ordinary whole field and appears in `config show` with its
+origin. It does not replace tool descriptions or `instructions_text`. Shipped
+providers require nonblank descriptions; see [bundle membership](../providers/README.md#bundled-provider-metadata).
 
 Provider/source `include_operations` and `exclude_operations` match exact original
 `METHOD path` identities (uppercase GET, POST, PUT, PATCH or DELETE), independently

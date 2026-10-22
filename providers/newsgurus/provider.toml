@@ -1,3 +1,4 @@
+description = "Market signals, institutional filings, primary-source news, X Spaces and sports research."
 # Local request projection of the vendor x402 catalog; see CAVEATS.md.
 spec = "openapi.json"
 name = "News Gurus Intel API"

@@ -1,3 +1,4 @@
+description = "Synchronous job-board and social-media scraping."
 # Scrapers plus future supported schema arrivals; exclude the documented SIWX lifecycle paths.
 spec = "https://hirescrape.com/openapi.json"
 name = "HireScrape"

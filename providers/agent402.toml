@@ -1,3 +1,4 @@
+description = "Web search, answers, page extraction, document conversion and supported model utilities."
 # Full supported catalog; recommendations select a compact web-research view only on opt-in.
 spec = "https://agent402.tools/openapi.json"
 name = "Agent402"

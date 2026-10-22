@@ -7,6 +7,7 @@ pub mod network;
 pub mod payment;
 pub mod pricing;
 pub mod provider_status;
+pub mod providers;
 pub mod qualification;
 pub mod rotation;
 pub mod server;

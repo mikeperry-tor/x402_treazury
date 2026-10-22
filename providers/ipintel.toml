@@ -1,3 +1,4 @@
+description = "Domain, DNS, IP and email intelligence, satellite data and developer utilities."
 # Domain, DNS, IP, satellite and developer tools; recommendations do not restrict availability.
 spec = "https://tools.ipintel.ai/openapi.json"
 name = "IPIntel.ai"

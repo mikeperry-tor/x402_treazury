@@ -29,6 +29,13 @@ profile and equivalent OS network sandbox before support is claimed.
 
 ## Prepare inputs
 
+Shipped provider TOML and their local schemas are compilation inputs embedded in
+the executable. The asset manifest in `src/providers/assets.rs` drives both bundle
+membership and source fingerprints/rebuild triggers; the directory's embedded
+schema is included as well. Commit changes to these assets with the candidate.
+Private provider overrides outside that manifest are excluded. An installation
+does not need a separate provider data directory for bundled source discovery.
+
 Preparation may use the network. From the repository root:
 
 ```sh

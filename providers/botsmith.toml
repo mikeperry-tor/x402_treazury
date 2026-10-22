@@ -1,3 +1,4 @@
+description = "Market signals covering X/Twitter intelligence, Polymarket, perpetual funding, open interest and stablecoin pegs."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://x402.botsmith.dev/openapi.json"
 name = "botsmith"

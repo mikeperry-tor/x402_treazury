@@ -1,3 +1,4 @@
+description = "US economic indicators, SEC filings, on-chain public data and deterministic text utilities."
 reliability_tags = ["upstream_timeout"]
 reliability_note = "Paid treasury_yield_curve can return nested upstream timeout errors despite outer HTTP/MCP success. Tor causation is not established."
 

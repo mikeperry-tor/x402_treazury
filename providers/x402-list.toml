@@ -1,3 +1,4 @@
+description = "Directory search, service metadata, assessments and suggestions for x402 APIs."
 # Public API directory; read traffic can become x402-metered after the shared-IP quota.
 spec = "https://x402-list.com/api/v1/openapi.json"
 base_url = "https://x402-list.com/api/v1"

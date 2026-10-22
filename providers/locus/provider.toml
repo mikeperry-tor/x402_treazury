@@ -1,3 +1,4 @@
+description = "Cited US property and public-record context, zoning, permits, flood and environmental reports."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "openapi.json"
 name = "Locus — US property & public-records context"
