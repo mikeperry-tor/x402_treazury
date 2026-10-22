@@ -24,6 +24,9 @@ not document contents. Remote discovery uses an existing endpoint wallet's
 identity and transport. There is no Coinbase directory, bundle interface or
 general advertised-document reader.
 
+The plan and documentation-index entry are committed at `498f2570`; the
+implementation baseline above remains unchanged.
+
 Read and maintain these owning guides:
 
 - [Agent sources](../agent-sources.md): tools, discovery workflows, identities,
@@ -134,6 +137,84 @@ actually requires credentials, revise its design before implementation.
    policy solely to populate an inventory.
 
 ## Preimplementation design and clarity gate
+
+### Access gate: unresolved
+
+Unsigned contract checks found an external blocker before D01. Direct search at
+`https://api.cdp.coinbase.com/platform/v2/x402/discovery/search` returned HTTP 200
+with resource metadata and `partialResults=true` for `query=weather`,
+`curatedOnly=true`, `network=eip155:8453`, `scheme=exact`, `limit=1`.
+Direct bundle list and `bundles/defi-trading` returned HTTP 401 with
+`Unauthorized`, including a repeat with an explicit JSON Accept header.
+The public-discovery guide therefore does not establish working unauthenticated
+bundle access on these routes.
+
+The user additionally requires keyless discovery over Tor and authorized testing
+through `127.0.0.1:9150`. All three routes returned HTTP 403 HTML with
+`cf-mitigated: challenge` through SOCKS5 with remote DNS. These are upstream
+access failures, not evidence that request parsing or Tor transport succeeded at
+the API layer. No paid calls, credentials, redirects or direct fallback were used.
+Minimal diagnostic evidence is under ignored `target/coinbase-contract-gate/`.
+
+After explicit operator authorization, one live toolbox `raw_call` to the paid
+Curl relay fetched the same Coinbase search URL successfully: HTTP 200 JSON,
+one complete resource with Bazaar metadata/payment offers, `partialResults=true`,
+and no redirects or relay error. No Coinbase API key or headers were supplied.
+The operator identified `comprehensive.toml` as live; its network policy uses Tor
+at `127.0.0.1:9150`. This establishes search through the live Tor-configured
+client to Curl's own target egress, not direct Tor-exit access to Coinbase or
+independent packet-level route verification. The test reused the running server;
+no second process opened wallet state. Exact settlement/charge was not exposed by
+the MCP result. Sanitized evidence is `target/coinbase-contract-gate/relay-search.json`.
+Bundle access through Curl remains untested. Integrating an operator-opted-in
+paid search relay requires a design revision; the existing automatic relay
+integration covers catalog/pricing discovery, not this search tool.
+
+Independent read-only review agrees that this gate cannot pass unchanged.
+Resolve public bundle access and the Tor requirement, or explicitly revise the
+scope and acceptance criteria before D01. A pending scope question offers public
+search/document inspection with honest Tor failures and deferred bundle tools,
+or retaining the original scope until upstream access is resolved. Neither
+alternative establishes working Tor discovery. Preserve this unfinished plan
+and its index entry while these requirements remain unresolved; do not retire it
+as completed work. Do not infer permission to acquire credentials or substitute a
+relay, direct fallback or challenge workaround. The subsequent one-call relay
+test was separately authorized; it does not by itself authorize automatic paid
+fallback for future discovery calls.
+
+### Reviewed input/output sketch
+
+The independent clarity review identified the following implementation contract;
+external access remains unresolved as above. Existing outputs remain unchanged
+except for the demonstrated registration-guidance defect described below.
+
+| Tool (all names prefixed `x402_treazury_`) | Inputs and result contract |
+| --- | --- |
+| `sources_search` | Flat `local_only`, `directory`, optional `mode`, and branch-specific fields. No global `mode` default: omission means browse for local/x402 List and ranked search for Coinbase. Local accepts only `q`, `page`, `per_page`, optional browse mode and its true selector; any explicit directory or remote field rejects before payer lookup/I/O. Omitted directory preserves x402 List with its existing browse/best arguments and outputs. Coinbase accepts omitted mode or best, rejects browse/pagination/x402-only fields, defaults curated filtering on, and translates only reviewed upstream filters. Return explicit directory provenance, complete upstream metadata and upstream partial state without invented totals or continuation. |
+| `source_details` | Exactly one x402 List `slug`, exact API `base_url`, or explicit `documentation_url`. Preserve legacy listing/matching/discovery outputs. Document reading uses one unsigned GET, the source client's documentation identity/transport, accepted-work ownership, origin policy and help bounds. Return requested URL, caller-supplied URL provenance, content type and complete accepted UTF-8 text or a visible failure. Reject HTML/non-text; never treat a caller-supplied URL as verified Coinbase advertisement. |
+| `source_add` | Exactly one known `provider_id` or OpenAPI `spec_url`, optional `name`; existing import, endpoint ownership and registration outputs. Tailor `next` to disabled/zero-visible-tool registrations instead of promising an executable call. |
+| `providers_list` | Optional `page`/`per_page`; existing complete offline metadata and pagination without payer lookup. |
+| `raw_call` | Exact documented `method`/`url`, optional `query`/`body`; preserve body omission versus explicit null, ordinary payment authority and no automatic replay. Sufficient resource metadata can support a direct documented call. |
+| `tools_search` | Optional endpoint-local `source_name`, `query`, `cursor`, `limit`; existing live complete schemas, BM25/enumeration and pagination. |
+| `tool_call` | Exact endpoint-local `tool_id` and `arguments`; current binding resolution, with no management-tool recursion. |
+| `bundles_list` | Empty object; explicit Coinbase provenance and unpaginated upstream summaries. Subject to unresolved public-access gate. |
+| `bundle_details` | Exact `bundle_slug`; explicit Coinbase provenance, ordered members and the same complete resource representation as search. Subject to unresolved public-access gate. |
+
+Keep each complete upstream resource object intact, with any local support
+annotation outside that object. Preserve unknown fields, missing contracts,
+same-URL method variants and all payment offers. Do not convert the Bazaar
+envelope schema or examples into invented request schemas. Existing location
+probing's HEAD/GET sequence and markdown classifier are unsuitable as the
+explicit document-reader contract. Catalog metadata cannot extend
+`allowed_origins`; a separate skill-host origin must satisfy the existing policy.
+Do not add provenance tokens, result caches or a same-origin requirement.
+
+The seven baseline-tool walkthroughs retain direct known-ID/spec registration,
+optional details/help, schema-server resolution for absent configured bases,
+unknown-price honesty, endpoint-local identities, live search rather than cached
+source summaries, complete outputs and tools/list continuation. Full synthetic
+result and emitted-definition walkthroughs remain D03/G2 work, not accomplished
+by this input/output sketch.
 
 Before D01, an independent read-only reviewer challenges the proposed schema,
 metadata representation, documentation branch and full user workflows. Give the
