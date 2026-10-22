@@ -570,8 +570,10 @@ No production trust changes, real Tor, live provider calls or payments are invol
 Ordinary serving startup can also make a TCP-only connection to its configured
 literal loopback SOCKS endpoint. This shared, cancellation-owned prerequisite
 check carries no credentials or destination and performs no SOCKS handshake.
-An unreachable endpoint emits one ERROR naming the local address and safe I/O
-kind; retry cadence is five seconds after a failed connection attempt, using the
+An unreachable endpoint emits an immediate ERROR naming the local address and
+safe I/O kind, then repeats it on the next failed probe at least 60 seconds after
+the preceding ERROR while the shared startup wait remains pending. No separate
+logging timer or probe is created. Retry cadence is five seconds after a failed connection attempt, using the
 existing network connection timeout. Pending startup catalog/pricing network
 misses and captured wallet discovery resume after the first reachable observation;
 an INFO after a failure reports TCP reachability, never Tor bootstrap success.
@@ -635,7 +637,7 @@ financial or qualification authority.
 | Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Storage/resource/diagnostic contention policy; cache persistence failure does not invalidate a complete response. |
 | Optional cover episodes and three-second task cleanup | Bound optional unsigned work; cannot cut off the real paid call. |
 | Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. |
-| Serving startup SOCKS prerequisite | Five-second retry cadence after a failed local TCP connection, using `connect_timeout_seconds` per attempt; stops after first reachability or owner cancellation. No whole-work deadline or change to financial observation backoff. |
+| Serving startup SOCKS prerequisite | Five-second retry cadence after a failed local TCP connection, using `connect_timeout_seconds` per attempt; stops after first reachability or owner cancellation. ERROR reminders on failed probes at least 60 seconds apart. No whole-work deadline or change to financial observation backoff. |
 | Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
 | Sync mempool drain window | Returns control while scan workers remain, not a whole-sync deadline. |
 

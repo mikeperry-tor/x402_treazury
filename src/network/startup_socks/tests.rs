@@ -20,6 +20,34 @@ async fn direct_startup_needs_no_socks_observation() {
 
 #[tokio::test]
 async fn unavailable_socks_coalesces_waiters_and_resumes_once_without_a_monitor() {
+    use std::{future::Future, path::Path, pin::Pin};
+
+    async fn wait_for_error_count(
+        mut waiters: Pin<&mut impl Future<Output = ()>>,
+        log: &Path,
+        expected: usize,
+    ) {
+        // Keep the paused runtime runnable while the real local TCP refusal arrives.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "missing ERROR reminder"
+            );
+            tokio::select! {
+                biased;
+                _ = waiters.as_mut() => panic!("unreachable proxy released startup discovery"),
+                _ = tokio::task::yield_now() => {},
+            }
+            let text = std::fs::read_to_string(log).unwrap();
+            let count = text.matches("ERROR").count();
+            assert!(count <= expected, "duplicate reminder: {text}");
+            if count == expected {
+                return;
+            }
+        }
+    }
+
     let reserved = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = reserved.local_addr().unwrap();
     drop(reserved);
@@ -51,6 +79,12 @@ async fn unavailable_socks_coalesces_waiters_and_resumes_once_without_a_monitor(
     assert!(text.contains("ConnectionRefused"), "{text}");
     assert!(!context.startup_socks.initialized());
 
+    tokio::time::pause();
+    for expected in [2, 3] {
+        tokio::time::advance(Duration::from_secs(60)).await;
+        wait_for_error_count(waiters.as_mut(), log.path(), expected).await;
+    }
+    tokio::time::resume();
     let listener = TcpListener::bind(endpoint).await.unwrap();
     tokio::time::timeout(RETRY * 2, &mut waiters)
         .await
@@ -65,7 +99,7 @@ async fn unavailable_socks_coalesces_waiters_and_resumes_once_without_a_monitor(
         "completed startup observation must leave no monitor"
     );
     let text = std::fs::read_to_string(log.path()).unwrap();
-    assert_eq!(text.matches("ERROR").count(), 1, "{text}");
+    assert_eq!(text.matches("ERROR").count(), 3, "{text}");
     assert_eq!(text.matches("INFO").count(), 1, "{text}");
     assert!(text.contains("endpoint is reachable"), "{text}");
     assert!(
@@ -73,6 +107,7 @@ async fn unavailable_socks_coalesces_waiters_and_resumes_once_without_a_monitor(
         "{text}"
     );
     assert!(!text.contains("<torS0X>") && !text.contains("tor-isolation"));
+    assert!(text.contains("error_repeat_after_seconds=60"), "{text}");
 }
 
 #[tokio::test]

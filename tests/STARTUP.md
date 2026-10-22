@@ -42,7 +42,8 @@ pending for completeness; cancellation cannot dispatch delayed retries.
 
 Wallet discovery uses the [wallet observation policy](../docs/wallet-rotation.md#wallet-observation-policy).
 `network::startup_socks::tests` covers a late local SOCKS listener, shared and
-cancelled waiters, sanitized ERROR/recovery INFO, completed observation without a
+cancelled waiters, sanitized ERROR/recovery INFO, minute ERROR reminders during
+a continuing outage, completed observation without a
 permanent monitor, and fresh catalog/pricing cache hits while the proxy is absent.
 `deployment::deferred::startup_socks_tests` verifies that a bound authenticated MCP
 listener and local tools remain available, then remote catalogs and captured Base

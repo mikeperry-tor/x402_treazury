@@ -190,7 +190,9 @@ funding progress. Download, parse and protocol details belong at debug; warnings
 identify failures, degraded operation or actionable configuration problems.
 
 An unreachable configured local Tor SOCKS endpoint during serving startup emits
-one shared ERROR with the local address, safe I/O kind and retry cadence. Recovery
+an immediate shared ERROR with the local address, safe I/O kind, retry cadence and
+reminder interval. Failed probes repeat the ERROR after at least 60 seconds while
+the shared startup wait remains pending. Recovery
 emits INFO describing TCP reachability, without asserting Tor bootstrap or remote
 service health. No upstream prose, credentials or destination URLs are included.
 
