@@ -407,9 +407,10 @@ storage-encryption secret. Changing it requires a new versioned domain separator
   the transport still removes total `grpc-timeout` metadata and owns response
   inactivity below protobuf assembly. SDK online constructors, URI setters,
   migration transmission and optional nym/price workers are not used.
-- Sapling parameters are downloaded/embedded at build time. Runtime proposal code
-  reads embedded parameters; it does not fetch them. Cargo/build traffic is outside
-  the runtime policy.
+- Sapling parameters are downloaded/embedded at build time. Deposit proving reads
+  embedded bytes lazily; unchanged backend shielding reads the provisioned standard
+  parameter cache. Neither runtime path downloads parameters. Cargo/build traffic
+  is outside the runtime policy.
 - reqwest uses `no_proxy`, explicit `socks5h` when enabled, no redirects, and no
   automatic retries. Both reqwest and tonic SOCKS paths use hyper-util's authenticated
   SOCKS5 connector with remote DNS. Authentication negotiation cannot downgrade to
@@ -582,7 +583,7 @@ financial or qualification authority.
 | Participating Tor HTTP scope retries: up to 3 attempts total (`1` selected + `2` candidates); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery and `PaidClient` unsigned API/directory/raw stages (internal discovery relay calls remain `SelectionPolicy::Legacy`; Base read-only RPC also participates). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
 | HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
-| Legacy indexer duration arguments | Required by the vendor API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
+| Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
 | Pepper drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. One independently polled engine task preserves progress during checkpoint lock waits; runtime teardown owns cancellation and worker joins. Scan retirement drains without a cutoff. |
 | MCP SSE keepalive cadence: two seconds | Sends connection-liveness comments while awaiting the result; never renews remote-read inactivity, financial authority, or client whole-tool deadlines. |
 | MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |

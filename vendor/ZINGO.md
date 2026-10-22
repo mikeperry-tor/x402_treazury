@@ -1,194 +1,109 @@
-# Zingo vendored patches
+# Zingo integration and Pepper patches
 
-`zingolib/`, `zingo-netutils/` and `pepper-sync/` contain source from zingolib revision
-`bfb0a2156819ea7f75a9b09b1724abfd06c8925e` (v7.0.0). Upstream licenses are
-included. `zingo-connector.patch` records the connector Rust source changes:
+Both the application and `compat/zingolib` use ordinary upstream `zingolib` and
+`zingo-netutils` Git sources at revision
+`bfb0a2156819ea7f75a9b09b1724abfd06c8925e` (v7.0.0). Neither crate has a local
+snapshot or override. The same cohort's `pepper-sync/` remains patched; both
+workspaces retain its path override. The root workspace includes Pepper only so
+its private merge regression can execute with the application lockfile.
 
-- `GrpcIndexer::from_channel` wraps an application-owned tonic channel.
-- `LightClient::set_indexer` installs that indexer without creating a direct socket.
+`zingo-sources.json` records the upstream source archive hash, every retained
+Pepper snapshot file, its patches and the copied-code license notice.
+`python3 vendor/verify_zingo.py` verifies those files and rejects unexpected Pepper
+files. `zingo-progress.patch` contains only Pepper's `client.rs` and `scan/task.rs`
+changes; `pepper-sync-diagnostics.patch` covers `client/fetch.rs`, `error.rs`,
+`sync.rs` and `wallet/traits.rs`. Standalone manifest adaptations and Pepper's
+upstream unit-test dependencies remain necessary. Never edit Cargo caches or
+reference checkouts to implement a dependency patch. The
+[checkout ledger](README.md#checkout-retirement-tracking) owns remaining blockers
+and candidate qualification.
 
-`zingo-progress.patch` applies after the connector and diagnostic patches. It
-adds `GrpcIndexer::from_transport` for clone-preserving service middleware
-(constructed only by `src/network.rs`), removes
-complete-message timers on sync streams, replaces sync-start polling/abort with
-an owned first-poll acknowledgement, and drains loaders/workers with periodic
-stage diagnostics instead of forced timeout success. Application transport owns
-header/body inactivity; legacy constructors retain library request metadata.
-Read retries, protobuf size bounds, mempool drain and financial authority are
-unchanged. The added Tower utility dependency supports cloneable injected services.
+## Application SDK boundaries
 
-`pepper-sync-diagnostics.patch` records the additional sync diagnostic changes.
-Returned shard-tree errors retain their pool and operation (scan merge, reorg
-rollback, or pool-recovery rollback) in a typed error. Existing recovery
-recommendations are preserved. No tree insertion, truncation, retention,
-serialization, request, or retry policy changes. The application extracts fixed
-labels and discards the underlying error before logs and saved status; no tree
-positions or hashes are exposed. The synthetic `scan_merge_conflict_preserves_pool_context`
-unit fixture exercises actual conflicting merges in all three shielded pools,
-without wallet keys or network requests. Pepper Sync retains its upstream unit-test
-dependencies for this fixture.
-It is selected explicitly by `scripts/check.sh` through Pepper's root workspace
-membership; ordinary root tests alone do not execute dependency unit tests. See
-[workspace verification](../docs/development.md#combined-workspace-verification).
-The diagnostic patch also removes raw `err` events from metadata, latest-block
-and tree-state fetch instrumentation and places those spans at debug level.
-Mempool failures emit fixed events (a numeric gRPC code when available), not
-status prose or cause chains. The application owns
-sanitized failure reporting and describes retries according to its caller's schedule;
-no upstream status prose is emitted by those spans, including at debug level.
+LightClient is created/restored offline and stays offline. The application does
+not use SDK online constructors, URI setters, sync launching, migration
+transmitters, price fetchers or optional nym workers.
 
-Upstream v7 detects a changed same-height tip and truncates wallet data below
-the verification range before scanning its replacement. Deeper seam mismatches
-continue backward verification and truncation. Its synthetic indexer reports the
-actual stored branch's `tip_hash()`. These upstream behaviors replace the local
-tip-reorg and mock-chain patches. The application's
-[lifecycle regressions](../tests/LIFECYCLE.md) still cover tip-only and deeper
-forks, immutable source facts, retained pending input claims and canonical return.
-Historical source facts do not veto new preparation: SDK/blockchain state owns
-current spendability, while accepted unresolved inputs remain fenced.
+`src/network.rs` alone constructs the generated gRPC client over the existing
+progress transport and returns `network::GrpcIndexer`. The thirteen `Indexer`
+and six `TransparentIndexer` methods in `src/network/indexer.rs` retain generated
+request defaults, concrete streams, clone ownership and request metadata. Pepper
+still calls deprecated aliases. Nonzero submission codes produce
+`Status::Unknown` with the original message; successful transaction IDs retain
+safe quote stripping. Submission validates the result against the durable exact
+transaction. The adapter ignores the traits' legacy total-timeout arguments. The transport
+removes any total `grpc-timeout` metadata and measures response inactivity below
+protobuf decoding. Identity, authenticated SOCKS remote
+DNS and no-direct-fallback rules remain in [network policy](../docs/network-egress.md).
+`ping-very-insecure` and nym capabilities are not enabled consumers.
 
-Every existing RPC, cloned indexer and pepper-sync stream uses the supplied channel.
-The application constructs both direct and authenticated SOCKS channels through
-`network.rs`; it keeps LightClient offline and passes that indexer directly to
-Pepper sync. Deposit selection and backend calculation also remain offline. It does not use upstream online constructors, URI setters,
-migration transmitters, price fetchers or optional nym workers.
+`src/treasury/mod.rs` runs one public Pepper engine task inside the existing
+isolated session runtime, with local mode/progress state and finite
+`shutdown_on_completion=true` configuration, including restored v6 snapshots.
+Pepper can hold the wallet write lock across asynchronous recovery fetches; the
+engine must remain independently polled while encrypted checkpointing waits for
+that lock. Cancellation destroys the runtime and joins blocking workers before
+the final snapshot. There is no SDK online handle, first-poll handshake or second
+controller to maintain. Successful scans call public `capture_migration_witnesses`
+before final tip validation. Both join boundaries discard panic payloads into a
+fixed diagnostic. `tests/treasury_sync.rs` covers the actual lock-held recovery
+interleaving, periodic/final snapshots, cancellation, teardown and reopen.
 
-Cargo manifests expand workspace-inherited dependencies, pin sibling Git crates to
-the same revision and omit upstream standalone test/example/bench targets and dev
-dependencies, except Pepper Sync’s unit-test dependencies. Library sources
-(including testutils used by our consensus suite),
-build scripts and licenses are preserved; the upstream root MIT license is copied
-into the Zingolib and netutils directories. The combined compatibility manifest uses
-these same patches. Run `python3 vendor/verify_zingo.py` to check all
-reviewed files against `zingo-sources.json`; compare `zingo-connector.patch` with the
-pinned upstream commit when updating; review the diagnostic and progress patches
-alongside it. `zingo-sources.json` also records the upstream source archive hash.
-Never edit a reference checkout or Cargo's Git cache to implement these patches.
+`src/treasury/send.rs` retains the exact public proposal through durable input
+acceptance and calls backend `create_proposed_transactions` by reference. It uses
+the SDK's original account key, system randomness, clock and sender OVK policy,
+with explicit `Some(wallet::expiry::tx_expiry_height(chain,
+proposal.min_target_height().into()))` for ordinary NU7-aware expiry. Leaving the
+high-level SDK calculation offline would instead choose epoch-end expiry.
+Public `clear_proposal` runs after releasing the wallet guard; no private proposal
+manager or parallel input ledger is needed. The actor reuses canonical validation
+without a redundant connection; direct preparation retains network validation.
+The lazy Sapling prover uses embedded public parameter bytes only when needed.
+Copied RPC/prover code retains its exact upstream revision and the full notice in
+`ZINGO-LICENSE-MIT`. Financial authority, retained bytes, publication and recovery
+remain in [wallet ownership](../docs/wallet-rotation.md) and
+[lifecycle coverage](../tests/LIFECYCLE.md).
 
-## Current consumers and removal criteria
+## Remaining Pepper responsibilities
 
-The [complete inventory](README.md#current-reasons-and-removal-evidence) separates
-runtime requirements, diagnostics and test-only fixes. None of these changes adds
-application monetary accounting. Relying on SDK/blockchain spendability makes
-correct SDK reorg handling necessary; it does not require revalidating all historical
-source operations before allowing new work.
+The progress patch removes complete-message timers on sync streams and retains
+loader/worker ownership while draining, with periodic stage diagnostics instead
+of forced timeout success. Header/body inactivity remains in the application
+transport. Read retries, protobuf size bounds and mempool drain contracts remain
+unchanged. Remove these hunks only with equivalent progressing/stalled response,
+cancellation/restart and worker-drain evidence through the full sync chain.
 
-`src/network.rs` constructs the generated gRPC client over its progress transport
-and returns the application `network::GrpcIndexer`. Its nineteen public-trait
-wrappers in `src/network/indexer.rs` preserve messages, streaming types, nonzero
-send-code rejection as `Status::Unknown` with the original message, and safe
-quote-wrapped transaction-ID parsing. Concrete submission/cache consumers and
-Pepper all use this adapter. `src/treasury/mod.rs` passes it to the public Pepper
-engine, without installing an SDK indexer or using the SDK sync launcher.
-`src/treasury/send.rs` retains the public proposal and calls backend calculation
-without installing an SDK indexer. Its lazy Sapling prover uses embedded public
-parameter bytes; copied prover/RPC code retains attribution in
-`vendor/ZINGO-LICENSE-MIT`.
-The retained SDK/netutils connector patches are now unused by the application;
-they remain only until the paired source transition is qualified. Every active
-RPC and clone still preserves Tor remote DNS and no direct fallback.
-`tests/network_audit.rs`, `tests/network.rs` and `tests/treasury_sync.rs`
-cover the relevant factory/consumer boundaries.
+The diagnostic patch retains typed shielded-pool and operation context for actual
+scan merge, reorg rollback and pool-recovery rollback failures. Recovery
+recommendations are unchanged. The application extracts fixed labels and discards
+underlying errors before logs/status; no tree positions, hashes or upstream prose
+are exposed. Fetch spans are debug-only; mempool events contain fixed labels and
+numeric status codes. Replace these changes only with equivalent safe context and
+instrumentation. The private three-pool merge-conflict fixture must remain
+executable, not just copied in a dependency:
 
-The application no longer uses the retained SDK first-poll startup patch. Remove
-Pepper progress changes only with equivalent response inactivity below protobuf
-assembly and retained loader/worker ownership until draining finishes. Inspect
-`src/network/grpc.rs`, `tests/network.rs` and `tests/treasury_sync.rs`; restoring whole-message or forced drain deadlines
-would change current policy even if monetary accounting stays unchanged.
+```sh
+scripts/zcash.sh test -p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context -- --exact
+```
 
-The diagnostic patch is a deliberate observability choice. Its typed context is
-consumed by `src/treasury/diagnostics.rs`, whose tests cover fixed labels and
-redaction; the Pepper fixture covers real merge conflicts. Replace it only with
-equivalent context and safe instrumentation, or explicitly revise the documented
-diagnostic contract. It does not change tree recovery recommendations or authority.
-
-Treasury scans explicitly select `shutdown_on_completion=true` before launching
-sync, including snapshots read from v6. This preserves one-pass observation and
-the application checkpoint/cancellation owner despite the SDK's continuous-sync
-default. Cancellation destroys the scan's owned runtime and joins its blocking
-workers before saving the final snapshot. The SDK client stays offline throughout;
-there is no SDK online handle to clear in sync, publication, reconstruction or close. The session owns one spawned Pepper
-engine task with local mode and progress state; checkpoints can wait for the
-wallet lock while that task continues polling recovery fetches. Successful scans
-use public `capture_migration_witnesses` before final tip validation. Both task
-join boundaries discard panic payloads into the existing fixed failure category. This preserves cancellation
-while a network read is stalled and leaves interrupted scan ranges recoverable
-on the next scan; it does not authorize financial replay.
-Wallet format 45 adds nested sync settings and scan-state fields; the
-public v6 upgrade fixture in `tests/treasury.rs` exercises the old reader, retained
-scan targets, save/reopen and next-address continuity. See
-[wallet administration](../docs/wallet-cli.md) for upgrade and downgrade boundaries.
-The SDK additionally requires a server-advertised lightwallet protocol of at
-least 0.5.0; [indexer requirements](../docs/wallet-cli.md#treasury-and-managed-pools)
-describe the operational failure behavior. This is distinct from the Rust crate
-version selected in the lockfiles.
-
-## Two-checkout replacement boundary
-
-The pinned v7 public APIs provide a candidate exit for `zingolib` and
-`zingo-netutils` together. Backend deposit calculation already uses this public
-route, synchronization calls Pepper directly, and the application RPC adapter is
-active. Only the paired source transition remains to be qualified. The [checkout ledger](README.md#checkout-retirement-tracking)
-owns its decision and remaining qualification; the
-[implementation plan](../docs/plans/vendor_retirement.md) owns commit and review gates.
-
-| Maintained adaptation | Replacement or retained responsibility |
-| --- | --- |
-| Zingolib `set_indexer` and netutils channel/service injection | Application `Indexer`/`TransparentIndexer` implementation over the generated client, constructed only in `src/network.rs`. All 13 indexer and six transparent methods are required; Pepper still calls deprecated aliases. Keep generated defaults, concrete streaming types, nonzero send-code rejection as `Status::Unknown` and quote-wrapped transaction-ID parsing. The adapter ignores the traits' legacy total-timeout arguments; the transport still strips any `grpc-timeout` metadata and owns response inactivity below protobuf decoding. `ping-very-insecure` and nym capabilities are not enabled consumers. |
-| Zingolib sync startup/first-poll patch | One owned Pepper engine task inside the existing isolated `SyncSession` runtime, with a local mode/progress pair and existing checkpoints. No launch deadline, first-poll handshake or second controller is needed. Keep successful public `capture_migration_witnesses`, protocol checks and finite sync. |
-| Connected high-level deposit calculation | Keep the exact public proposal returned by `LightClient::propose_send` through authority acceptance, then call backend `create_proposed_transactions` by reference. Clear through public `LightClient::clear_proposal` after dropping the wallet guard. Private proposal management is unnecessary. |
-| Expanded standalone manifests, licenses and source hashes | Ordinary upstream Git sources for both crates at the exact cohort revision in both graphs, including the compatibility workspace's direct Zingolib dependency. Retain the Pepper override and coherent sibling identities; remove only obsolete verification/provenance entries with implementation. |
-| Pepper progress/drain and diagnostics patches | Retain all changes in `client.rs`, `scan/task.rs`, `error.rs`, `sync.rs`, `client/fetch.rs` and `wallet/traits.rs`, plus manifest adaptations, unit-test dependencies and explicit root merge-fixture selection. The adapter does not replace them. |
-
-Pepper can hold the wallet write lock across asynchronous fetches. Polling its
-future inline in a select that then awaits checkpoint acquisition can deadlock.
-An independently scheduled engine task preserves progress while a checkpoint waits;
-the session runtime still stops detached I/O and joins blocking workers before the
-final snapshot. No additional cancellation or mode-reset framework is needed for
-a session-local engine atomic that is never reused.
-
-Ordinary deposits need an explicit
-`Some(wallet::expiry::tx_expiry_height(chain, proposal.min_target_height().into()))`.
-Neither the backend default nor offline high-level calculation preserves the
-connected SDK's NU7-aware ordinary expiry. The accepted single transparent-payment
-shape cannot be a canonical ZIP 318 crossing, so no general crossing controller is
-needed. Keep original spending keys, `SystemClock`, the SDK CSPRNG and sender OVK.
-Preserve lazy Sapling proving from public embedded `SaplingParams` bytes; using
-shielding's runtime parameter-cache lookup would change deposit availability.
-
-The backend already scans calculated transactions into SDK pending state.
-Current send proposal selection uses no SDK output locks; proposal cleanup releases
-the stored proposal/pause, not a separate input-lock ledger. Existing snapshot
-publication marks the wallet dirty. Keep accepted-input journaling, retained
-publication, restart uncertainty and canonical recovery unchanged rather than
-duplicating these SDK/application responsibilities.
-
-The payoff is removal of two checkout snapshots, manifest expansion and connector/
-startup patch synchronization. It adds ownership of nineteen RPC delegations and
-a small lazy-prover trait adapter; it is not a reduction in handwritten behavioral
-lines. Retain upstream attribution for copied adapter/prover code when removing
-the checkout licenses. Upstream public injection or a public lazy prover could
-reduce that burden later, but neither is required to use the pinned
-public-trait/backend route.
-
-The upstream Git build also derives its embedded descriptor from checkout tags,
-revision and dirty status. Pinning source revision alone does not pin those Git
-metadata inputs. Release evidence must identify them and the actual generated
-descriptor when replacing the current vendored-archive fallback. That fallback
-uses the crate version and can add `_dirty` when Git finds no repository.
-Shared-cache, same-host comparisons do not prove
-reproducibility across independently populated caches. Do not alter Cargo caches
-to force a descriptor. Parameter staging and network denial remain separate checks.
+See [workspace verification](../docs/development.md#combined-workspace-verification).
+Upstream v7 owns same-height/deeper reorg truncation and synthetic branch hashes;
+application lifecycle tests retain exact historical facts and current SDK
+spendability without a historical capital veto. Wallet format 45 and the public
+v6 read/save/reopen/next-address fixture remain documented in
+[wallet administration](../docs/wallet-cli.md). Server protocol 0.5.0 capability
+requirements are distinct from the Rust protocol crate version.
 
 ## Build-time parameter downloads
 
-Sapling parameters are obtained and embedded by the upstream build script, not
-fetched by runtime wallet operations. v7 embeds the standard parameter-cache
-files through `SAPLING_SPEND_PARAMS` and `SAPLING_OUTPUT_PARAMS`; it does not copy
-them into the source checkout. Legacy v6 `zcash-params/*.params` copies remain
-ignored and excluded from snapshot verification. Build-time network acquisition is
-outside runtime Tor routing. Pre-populate the standard Sapling parameter cache for
-an offline first build.
+The upstream SDK build script obtains and embeds standard parameter-cache files
+through `SAPLING_SPEND_PARAMS` and `SAPLING_OUTPUT_PARAMS`; it does not copy them
+into its source checkout. Pre-populate the standard cache for an offline first
+build. Deposit proving reads embedded bytes lazily. Unchanged backend shielding
+uses `LocalTxProver::with_default_location` to read the provisioned runtime cache;
+it does not download parameters. Legacy v6 `vendor/zingolib/zcash-params/*.params`
+copies remain ignored, unused and preserved. Build-time acquisition is outside
+runtime Tor routing.
 
 The enabled `zcash_proofs` 0.31.0-pre.1 `download-params` build dependency uses
 `minreq` 2.14.1 with `rustls` 0.21.12, `rustls-webpki` 0.101.7 and
@@ -202,3 +117,16 @@ graph to a maintained TLS stack requires an upstream dependency migration or a
 separately reviewed vendor patch, rather than a compatible lockfile update.
 The [release runner](../docs/reproducible-builds.md#prepare-inputs) separately
 verifies prefetched parameters and denies network access during qualification.
+
+## Release descriptor inputs
+
+The upstream Git build derives its embedded descriptor from checkout revision,
+matching tags and dirty status. A source revision alone does not pin all those
+inputs. The release runner records the resolved SDK package/source, observed Git
+revision, matching tags and `diff-index` result under each isolated build
+environment, then records the actual generated `git_description.txt`. It does not
+predict the descriptor or modify cached sources/tags to force one. A repository-free
+archive falls back to the crate version; with Git installed, the failed dirty
+check can add `_dirty`. Shared-cache, same-host comparison does not qualify
+reproducibility across independently populated caches. Parameter staging, integrity
+checks and OS network denial remain separate release requirements.

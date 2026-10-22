@@ -12,7 +12,7 @@ debug = "line-tables-only"
 
 [dependencies]
 x402_treazury = { path = "../.." }
-zingolib = { path = "../../vendor/zingolib", default-features = false }
+zingolib = { git = "https://github.com/zingolabs/zingolib", rev = "bfb0a2156819ea7f75a9b09b1724abfd06c8925e", default-features = false }
 
 # Reviewed transport patches: see vendor/README.md.
 [patch.crates-io]
@@ -44,6 +44,4 @@ name = "crypto_vectors"
 path = "../../tests/crypto_vectors.rs"
 
 [patch."https://github.com/zingolabs/zingolib"]
-zingolib = { path = "../../vendor/zingolib" }
-zingo-netutils = { path = "../../vendor/zingo-netutils" }
 pepper-sync = { path = "../../vendor/pepper-sync" }

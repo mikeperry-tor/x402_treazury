@@ -11,7 +11,7 @@ actual build graph; vendored upstream lockfiles are provenance inputs.
 | --- | --- | --- |
 | `reqwest-transport.patch` | `src/network.rs` needs per-request post-connect header inactivity, nonempty body progress and disabled recovery of unstarted pooled requests. | Equivalent unpatched behavior through the production factory in `src/network/http_timeout_tests.rs` and `src/network/http_queue_tests.rs`, including retry policy review. |
 | `hyper-transport.patch`, `h2-transport.patch` | HTTP and gRPC queued cancellation must discard unopened streams before peer capacity returns; this includes signed payment HEADERS. | Queued timeout/cancellation regressions in `src/network/http_queue_tests.rs` and `tests/network.rs` pass with equivalent unpatched behavior. |
-| Zingo connector/progress patches | The connector and SDK startup hunks are unused; active RPCs use the application adapter. Pepper hunks still retain progressing streams and drain work. | Qualify paired SDK/netutils source removal while retaining Pepper's progress/drain patches and existing response inactivity. See [Zingo details](ZINGO.md). |
+| `zingo-progress.patch` (Pepper only) | Direct Pepper synchronization retains progressing stream responses and loader/worker drain ownership. RPC adaptation lives in the application. | Equivalent response inactivity, progress/stall, cancellation/restart and truthful drain behavior through the full sync chain. See [Zingo details](ZINGO.md). |
 | Pepper diagnostics patch | `src/treasury/diagnostics.rs` consumes typed pool/operation context without exposing raw upstream prose. | Equivalent sanitized diagnostics and tests; this is observability, not spendability or funding authority. |
 
 The [wallet rules](../docs/wallet-rotation.md#best-effort-wallet-rules) make
@@ -35,37 +35,29 @@ submission or local behavior change. A smaller patch can be a useful prerequisit
 but does not count as a retired checkout. Moving the same fork into another
 repository does not retire its maintenance responsibility.
 
-Six patched crate directories remain. Alloy uses unpatched registry sources;
-`lightwallet-protocol` 0.4.0 supplies Ironwood fields without a Git override. This
-table owns the current blockers, next actions and upstream follow-up.
-The [retirement assessment plan](../docs/plans/vendor_retirement.md) focuses on
-the Zingolib/netutils pair and retains the other unfinished assessment requirements.
-Z0 passed independent Gate A review for the paired public-trait/backend route at
-the pinned v7 revision. Production still uses all six checkouts. Pepper remains
-vendored under the proposed replacement.
+Four patched crate directories remain. Alloy uses unpatched registry sources;
+`zingolib` and `zingo-netutils` use the coherent pinned upstream Git cohort, and
+`lightwallet-protocol` 0.4.0 supplies Ironwood fields without a Git override.
+Pepper retains its path override and private merge-fixture workspace membership.
+The [unfinished assessment plan](../docs/plans/vendor_retirement.md) preserves
+remaining assessment requirements; this ledger owns current blockers, next actions
+and upstream follow-up.
 
 | Checkout | Complete local blocker set | Next action | Upstream reference and candidate |
 | --- | --- | --- | --- |
 | `hyper` | Pending-open cancellation in `hyper-transport.patch`. | Prepare a minimal upstream cancellation regression/fix; qualify a version containing equivalent behavior independently of h2's status. | No retirement candidate qualified. |
 | `h2` | Pending-open queue cleanup and scheduler wakeups in `h2-transport.patch`. | Prepare upstream zero-capacity/reset regressions and fix; qualify a version independently of Hyper's status. | No retirement candidate qualified. |
 | `reqwest` | Post-connect header timing, body inactivity/backpressure, and disabled unstarted-request recovery. | Identify a supported upstream implementation or hooks covering every hunk before selecting contributions or a local adapter. Retain current retry behavior. | No retirement candidate qualified. |
-| `zingo-netutils` | Unused connector/service injection changes and standalone manifest adaptations remain in the local snapshot. | The nineteen-method application adapter is active over the existing factory. Qualify paired upstream source replacement with Zingolib, concrete consumers and both graphs before removal. | Z0/Gate A passed at the pinned revision with no public-API blocker. No production replacement qualified. |
 | `pepper-sync` | Stream-message/drain changes and typed/sanitized diagnostics; standalone manifest adaptations and root membership for its private merge regression. | Establish a complete upstream route for both concerns before choosing contribution order; preserve lifecycle/merge regression evidence and remove local test membership when retiring the checkout. | No retirement candidate qualified. |
-| `zingolib` | Standalone manifest adaptations and direct compatibility-workspace dependency; unused SDK injection/startup changes remain in the snapshot. | Backend deposits, direct Pepper sync and the RPC adapter are active. Qualify paired upstream source replacement; preserve both graphs, attribution and release inputs. | Z0/Gate A passed at the pinned revision with no public-API blocker. No production replacement qualified. |
 
-The independently reviewed Z0 decision is to proceed with the paired Z1 design
-after separate implementation authorization. It removes two checkout
-snapshots and their manifest/patch synchronization, while adding narrow RPC and
-prover adapters; handwritten behavior does not shrink. The
-[replacement boundary](ZINGO.md#two-checkout-replacement-boundary) records the
-complete patch handoff and financial/network constraints. Reject inline engine
-polling that can deadlock checkpoint acquisition. The sync transition must cover
-that interleaving. Backend deposits omit the actor's redundant connection while
-retaining direct network validation.
-Record upstream descriptor/Git metadata in release evidence; parameter staging
-alone does not qualify a reproducible release. A material source/API change or a
-failure to retain these contracts reopens Gate A rather than weakening policy or
-switching retirement tracks.
+The application owns nineteen public-trait RPC delegations and a narrow lazy
+prover adapter instead of SDK/netutils source snapshots and manifest/patch
+synchronization. Handwritten behavior has not disappeared: retain copied-code
+attribution, complete factory/financial consumer coverage and actual SDK Git/
+descriptor release inputs. Direct Pepper execution keeps the existing runtime,
+checkpoint and cancellation owner; do not reintroduce a second controller or
+inline polling that deadlocks a wallet-lock checkpoint. Current contracts live in
+[Zingo integration](ZINGO.md), network policy and wallet ownership.
 
 Update each affected row during dependency work and when a relevant upstream
 response, accepted change or compatible release becomes known. Record actual
@@ -143,8 +135,8 @@ python3 vendor/verify_zingo.py
 `verify.py` calls `verify_transport.py`, which verifies
 patch hashes, reverses each HTTP transport patch in temporary copies and checks
 all restored files against the recorded published-source hashes.
-`verify_zingo.py` checks the complete reviewed Zingo snapshot and recorded patch
-files against `zingo-sources.json`, excluding generated proving parameters. It
+`verify_zingo.py` checks the retained Pepper snapshot, patches and copied-code
+notice against `zingo-sources.json`, rejecting every unexpected Pepper file. It
 does not independently reconstruct the original upstream tree by reversing patches.
 These are source-integrity checks, not behavior tests or evidence that upstream
 still needs a patch. Build/test commands and qualification boundaries are in

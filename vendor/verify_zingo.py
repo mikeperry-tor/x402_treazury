@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the complete reviewed Zingo vendor snapshot, excluding generated params."""
+"""Verify the retained Pepper snapshot, patches and copied-code license."""
 import hashlib
 import json
 from pathlib import Path
@@ -11,12 +11,11 @@ for name, expected in manifest["files"].items():
     path = root / name
     if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
         errors.append(name)
-for package in ("zingolib", "zingo-netutils", "pepper-sync"):
-    for path in (root / package).rglob("*"):
-        if not path.is_file() or path.suffix == ".params":
-            continue
-        if path.relative_to(root).as_posix() not in manifest["files"]:
-            errors.append(str(path.relative_to(root)))
+for path in (root / "pepper-sync").rglob("*"):
+    if not path.is_file():
+        continue
+    if path.relative_to(root).as_posix() not in manifest["files"]:
+        errors.append(str(path.relative_to(root)))
 if errors:
     raise SystemExit("Zingo vendor verification failed: " + ", ".join(errors))
 print(f"Verified {len(manifest['files'])} snapshot and patch files from {manifest['revision']}")

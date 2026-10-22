@@ -75,15 +75,26 @@ profiling settings, proxy variables or wallet credentials. Cargo registry/Git
 source caches are shared, but compiled output, Cargo configuration and credentials
 are not. Incremental compilation is disabled. Rust/C source paths are remapped;
 locale, timezone, deployment target and `SOURCE_DATE_EPOCH` are fixed. Git lookup
-stops before reaching the surrounding checkout. Zingolib's no-checkout fallback
-uses its crate version; with Git installed, the failed `diff-index` check also
-adds `_dirty`. This does not describe the surrounding checkout, and no additional
-vendor patch is required.
+stops before reaching the surrounding application checkout. The resolved Zingolib
+Git source has its own checkout: its descriptor depends on revision, matching
+`zingolib_v*` tags and dirty status, not just the pinned source revision. Under each
+build's isolated environment and network sandbox, the runner records the resolved
+SDK package/source, manifest path, full Git revision, matching tags and
+`diff-index` result, then the actual generated `git_description.txt` after building.
+It does not predict the descriptor or change Cargo caches/tags to force matching
+output. A repository-free SDK archive instead uses the crate-version fallback;
+with Git installed, its failed dirty check can add `_dirty`.
+
+Both attempts share downloaded Git sources. Matching binaries on one host with
+that shared cache do not establish reproducibility across independently populated
+caches and their Git metadata.
 
 Each run is retained under `target/reproducibility-runs/release-*` with:
 
 - `report.json`: success/failure, revision, source archive and lockfile hashes,
-  feature selection, compiler hashes, native tool versions and artifact hashes.
+  feature selection, compiler hashes, native tool versions and artifact hashes,
+  plus each build's resolved SDK/Git inputs and actual generated descriptor.
+  Failures retain available per-build inputs and output evidence.
 - Complete build logs for both attempts, including the exact commands.
 - Both source snapshots, separate build directories and resulting binaries.
 

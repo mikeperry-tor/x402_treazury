@@ -246,7 +246,7 @@ consume locked dependency changes. Vendored upstream lockfiles are provenance
 inputs, not the dependency resolution used by these two workspaces.
 
 The build-only legacy TLS dependency and parameter-integrity boundary are
-documented in [the Zingo connector guide](../vendor/ZINGO.md#build-time-parameter-downloads).
+documented in [the Zingo integration guide](../vendor/ZINGO.md#build-time-parameter-downloads).
 That graph still contains affected certificate-verification versions; these
 updates do not eliminate every advisory finding from the lockfiles.
 
@@ -296,13 +296,19 @@ Zingolib → bip32 0.6.0 → hmac 0.13.0 → digest 0.11.3
 ```
 
 `lightwallet-protocol` 0.4.0 supplies the required Ironwood fields without a
-separate root Git override. The [Zingo patches](../vendor/ZINGO.md) retain injected
-transport, progress/drain ownership and sanitized diagnostics. Upstream v7 handles
+separate root Git override. Both roots use ordinary upstream Zingolib/netutils
+Git sources at the same pinned revision, with no local checkout overrides. The
+[Zingo integration](../vendor/ZINGO.md) uses public RPC traits, direct Pepper sync
+and backend calculation over the application transport. Pepper's retained patches
+own progress/drain behavior and sanitized diagnostics. Upstream v7 handles
 same-height reorg truncation and synthetic branch hashes; the application keeps
 its lifecycle regressions. HTTP transport patches preserve the
 [network inactivity/cancellation contract](network-egress.md#timeout-budgets-and-concurrency).
 `vendor/verify.py` checks HTTP transport sources; `verify_zingo.py` checks the
-reviewed SDK snapshot. Upstream license texts are included.
+remaining Pepper snapshot, patches and copied-code notice. Upstream license
+texts are included. Deliberate source/extra-file mutations must still fail that
+verification. SDK Git revision, tags, dirty status and actual generated descriptor
+are release inputs; see [release qualification](reproducible-builds.md).
 
 The independent hash vectors are regenerated with
 `uv run --script scripts/generate_crypto_vectors.py`; normal Rust tests consume

@@ -7018,6 +7018,7 @@ dependencies = [
 [[package]]
 name = "zingo-netutils"
 version = "6.0.0"
+source = "git+https://github.com/zingolabs/zingolib?rev=bfb0a2156819ea7f75a9b09b1724abfd06c8925e#bfb0a2156819ea7f75a9b09b1724abfd06c8925e"
 dependencies = [
  "http",
  "hyper-util",
@@ -7029,7 +7030,6 @@ dependencies = [
  "tokio-rustls",
  "tokio-stream",
  "tonic",
- "tower",
 ]
 
 [[package]]
@@ -7062,6 +7062,7 @@ dependencies = [
 [[package]]
 name = "zingolib"
 version = "7.0.0"
+source = "git+https://github.com/zingolabs/zingolib?rev=bfb0a2156819ea7f75a9b09b1724abfd06c8925e#bfb0a2156819ea7f75a9b09b1724abfd06c8925e"
 dependencies = [
  "append-only-vec",
  "bech32",

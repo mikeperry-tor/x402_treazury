@@ -35,7 +35,12 @@ performs funded transactions. Local socket tests require permission to bind loca
 Cargo and Zingolib may download dependencies/public proving parameters on first build.
 Set `CARGO_NET_OFFLINE=true` to require cached Cargo inputs; it does not block
 network requests from build scripts. Release qualification adds an OS network
-sandbox and validates prefetched proving parameters.
+sandbox and validates prefetched proving parameters. The release runner discovers
+the resolved upstream SDK through frozen metadata in each isolated environment,
+records its observed Git inputs and actual generated descriptor, and retains that
+evidence on failure. Shared-cache comparison does not qualify independent caches.
+`vendor/verify_zingo.py` verifies only the retained Pepper snapshot/patches and
+copied-code notice; both graphs use ordinary pinned upstream SDK/netutils sources.
 
 `zcash.sh build` (also the default with no command) produces
 `target/release/x402_treazury` with incremental caches disabled, including for the

@@ -12,8 +12,6 @@ default-members = ["."]
 resolver = "3"
 # Only Pepper's private merge fixture needs dependency unit-test selection.
 exclude = [
-    "vendor/zingolib",
-    "vendor/zingo-netutils",
     "vendor/reqwest",
     "vendor/hyper",
     "vendor/h2",
@@ -109,8 +107,6 @@ name = "quote_near"
 path = "tools/diagnostics/quote_near.rs"
 
 [patch."https://github.com/zingolabs/zingolib"]
-zingolib = { path = "vendor/zingolib" }
-zingo-netutils = { path = "vendor/zingo-netutils" }
 pepper-sync = { path = "vendor/pepper-sync" }
 
 [target.'cfg(unix)'.dependencies]

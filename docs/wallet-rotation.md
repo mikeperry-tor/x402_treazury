@@ -474,8 +474,10 @@ transaction recovery attempts.
 
 
 The treasury receives/synchronizes Ironwood with capability checks on the injected
-lightwalletd transport. Network integration uses reviewed vendored channel-injection
-patches; it does not enable SDK-owned direct networking. The
+lightwalletd transport. Both workspaces use ordinary upstream Zingolib/netutils
+sources; the application's public-trait RPC adapter preserves the factory transport
+without SDK-owned direct networking. Direct Pepper sync retains its reviewed
+progress/drain and diagnostic patches. The
 [egress inventory](network-egress.md) explains treasury versus immutable recipient
 identities and the remaining upstream timeout boundaries.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build/test patched payments + pinned zingolib with connector injection, without funds.
+"""Build/test payments + pinned upstream Zingolib through the application adapter, without funds.
 Downloads Cargo dependencies and public Sapling parameters on the first build.
 """
 from pathlib import Path

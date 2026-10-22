@@ -110,6 +110,47 @@ def run_logged(command, cwd, env, log):
         subprocess.run(SANDBOX + command, cwd=cwd, env=env, stdout=stream, stderr=subprocess.STDOUT, check=True)
 
 
+def capture_logged(command, cwd, env, log):
+    # Cargo metadata is JSON on stdout; warnings on stderr must not corrupt it.
+    with log.open("ab") as stream:
+        stream.write((json.dumps(command) + "\n").encode())
+        stream.flush()
+        result = subprocess.run(SANDBOX + command, cwd=cwd, env=env,
+                                stdout=subprocess.PIPE, stderr=stream)
+        stream.write(result.stdout)
+        result.check_returncode()
+    return result.stdout.decode()
+
+
+def zingolib_inputs(metadata, env):
+    packages = [package for package in metadata["packages"] if package["name"] == "zingolib"]
+    if len(packages) != 1:
+        raise RuntimeError(f"Expected one resolved zingolib package, found {len(packages)}")
+    package = packages[0]
+    directory = Path(package["manifest_path"]).parent
+    observed = {}
+    for name, arguments in (
+        ("revision", ["rev-parse", "HEAD"]),
+        ("tags", ["tag", "--points-at", "HEAD", "--list", "zingolib_v*", "--sort=-version:refname"]),
+        ("diff_index", ["diff-index", "--quiet", "HEAD", "--"]),
+    ):
+        result = subprocess.run(SANDBOX + ["git", *arguments], cwd=directory, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # In particular, failed diff-index is not evidence of a clean tree.
+        # Preserve its status instead of predicting the upstream descriptor.
+        observed[name] = {"returncode": result.returncode, "stdout": result.stdout.rstrip(),
+                          "stderr": result.stderr.rstrip()}
+    return {key: package[key] for key in ("id", "source", "version", "manifest_path")} | {"git": observed}
+
+
+def generated_zingolib_descriptor(target):
+    # The runner uses a clean target for one release binary and one SDK version.
+    paths = list(target.glob("**/build/zingolib-*/out/git_description.txt"))
+    if len(paths) != 1:
+        raise RuntimeError(f"Expected one generated zingolib descriptor, found {len(paths)}")
+    return {"path": str(paths[0]), "text": paths[0].read_text()}
+
+
 def compare(first, second):
     hashes = [digest(first), digest(second)]
     if hashes[0] != hashes[1]:
@@ -118,7 +159,7 @@ def compare(first, second):
 
 
 def qualify(run):
-    report = {"status": "incomplete", "features": "default", "artifacts": []}
+    report = {"status": "incomplete", "features": "default", "artifacts": [], "builds": []}
     try:
         subprocess.run(["sh", str(ROOT / "scripts/check_toolchain.sh")], check=True)
         if output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT):
@@ -138,6 +179,8 @@ def qualify(run):
         cargo_cache = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo")).resolve()
         report["tools"] = {name: {"path": shutil.which(name), "sha256": digest(Path(shutil.which(name)).resolve())} for name in ("cargo", "rustc")}
         for label in ("first", "second-longer-path"):
+            build = {"label": label, "status": "incomplete"}
+            report["builds"].append(build)
             work = run / label
             source = work / "source"
             source.mkdir(parents=True)
@@ -151,19 +194,29 @@ def qualify(run):
             run_logged([sys.executable, "-c", probe], source, env, log)
             for verifier in ("verify.py", "verify_zingo.py"):
                 run_logged([sys.executable, str(source / "vendor" / verifier)], source, env, log)
+            metadata = json.loads(capture_logged(
+                ["cargo", "metadata", "--frozen", "--format-version", "1", "--manifest-path", "Cargo.toml",
+                 "--filter-platform", profile["host"]],
+                source, env, log,
+            ))
+            build["zingolib"] = zingolib_inputs(metadata, env)
             # Build the locked protoc helper independently in each clean target.
             run_logged(["cargo", "build", "--frozen", "--manifest-path", "compat/protoc/Cargo.toml"], source, env, log)
             env["PROTOC"] = output(SANDBOX + [str(work / "target/debug/x402-protoc-path")], cwd=source, env=env)
             command = ["cargo", "build", "--frozen", "--release", "--bin", "x402_treazury", "--target", profile["host"]]
             run_logged(command, source, env, log)
+            build["zingolib"]["descriptor"] = generated_zingolib_descriptor(Path(env["CARGO_TARGET_DIR"]))
             binary = work / "target" / profile["host"] / "release/x402_treazury"
             run_logged([str(binary), "--help"], source, env, log)
             report["artifacts"].append({"path": str(binary), "sha256": digest(binary), "bytes": binary.stat().st_size})
+            build["status"] = "passed"
         report["matching_sha256"] = compare(*(Path(a["path"]) for a in report["artifacts"]))
         report["status"] = "passed"
     except Exception as error:
         report["status"] = "failed"
         report["error"] = str(error)
+        if report["builds"] and report["builds"][-1]["status"] == "incomplete":
+            report["builds"][-1].update(status="failed", error=str(error))
         raise
     finally:
         (run / "report.json").write_text(json.dumps(report, indent=2) + "\n")
