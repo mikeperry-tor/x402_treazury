@@ -424,13 +424,13 @@ impl Manager {
     }
 
     #[cfg(test)]
-    async fn document(&self, owner: &str, url: &str, refresh: bool) -> Result<Arc<Vec<u8>>> {
-        self.document_with(owner, url, refresh, None).await
+    async fn document(&self, owner: &str, url: &str) -> Result<Arc<Vec<u8>>> {
+        self.document_with(owner, url, None).await
     }
     async fn source_document(&self, owner: &str, candidate: &Candidate) -> Result<Arc<Vec<u8>>> {
         match candidate.remote_spec() {
             Some(url) => {
-                self.document_with(owner, url, false, candidate.provider.as_ref())
+                self.document_with(owner, url, candidate.provider.as_ref())
                     .await
             }
             None => Ok(Arc::new(curated::local_document(
@@ -442,7 +442,6 @@ impl Manager {
         &self,
         owner: &str,
         url: &str,
-        refresh: bool,
         provider: Option<&curated::AcceptedProvider>,
     ) -> Result<Arc<Vec<u8>>> {
         let canonical = import::endpoint(&self.policy, url)?.to_string();
@@ -463,9 +462,6 @@ impl Manager {
                     done.completed.elapsed() < Duration::from_secs(retention)
                 })
             });
-            if refresh && cache.get(&key).is_some_and(|cell| cell.get().is_some()) {
-                cache.remove(&key);
-            }
             let max = (128 * 1024 * 1024 / self.policy.max_spec_bytes).min(8);
             if !cache.contains_key(&key) && cache.len() >= max {
                 // Never evict active work. Completed retention is optional;

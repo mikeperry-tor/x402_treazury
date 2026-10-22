@@ -1928,17 +1928,14 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
     let mut aliases = tokio::task::JoinSet::new();
     for _ in 0..20 {
         let m = m.clone();
-        aliases.spawn(async move {
-            m.document("writer", "https://api.example.com/active", false)
-                .await
-        });
+        aliases.spawn(async move { m.document("writer", "https://api.example.com/active").await });
     }
     arrived.notified().await;
     tokio::task::yield_now().await;
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     // A different URL still has capacity despite twenty coalesced waiters.
     assert!(
-        m.document("reader", "https://api.example.com/other", false)
+        m.document("reader", "https://api.example.com/other")
             .await
             .is_ok()
     );
@@ -1947,13 +1944,9 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
     // Churn completed retention beyond capacity; an active fetch is never evicted.
     for n in 0..12 {
         assert!(
-            m.document(
-                "reader",
-                &format!("https://api.example.com/churn{n}"),
-                false
-            )
-            .await
-            .is_ok()
+            m.document("reader", &format!("https://api.example.com/churn{n}"))
+                .await
+                .is_ok()
         );
     }
     assert!(Arc::ptr_eq(
@@ -1966,7 +1959,7 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
     }
     let before = calls.load(Ordering::SeqCst);
     assert!(
-        m.document("writer", "https://api.example.com/active", false)
+        m.document("writer", "https://api.example.com/active")
             .await
             .is_err()
     );
@@ -1977,7 +1970,7 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
     );
     tokio::time::sleep(Duration::from_millis(1100)).await;
     assert!(
-        m.document("writer", "https://api.example.com/active", false)
+        m.document("writer", "https://api.example.com/active")
             .await
             .is_ok()
     );

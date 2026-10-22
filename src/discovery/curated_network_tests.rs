@@ -258,8 +258,8 @@ async fn fixture() {
         },
     );
     let (strict, curated) = tokio::join!(
-        m.document_with("writer", schema_url, false, None),
-        m.document_with("reader", schema_url, false, Some(&compatible)),
+        m.document_with("writer", schema_url, None),
+        m.document_with("reader", schema_url, Some(&compatible)),
     );
     assert!(strict.is_err());
     let bytes = curated.unwrap();
@@ -269,7 +269,7 @@ async fn fixture() {
     );
     let before = requests.lock().unwrap().len();
     let repeated = m
-        .document_with("reader", schema_url, false, Some(&compatible))
+        .document_with("reader", schema_url, Some(&compatible))
         .await
         .unwrap();
     assert!(Arc::ptr_eq(&bytes, &repeated));

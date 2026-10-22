@@ -387,12 +387,8 @@ async fn saturated_import_and_mutation_capacity_warns_before_io() {
         let _held = permits
             .try_acquire_many_owned(if global { 4 } else { 1 })
             .unwrap();
-        let (result, logs) = capture_future_logs(m.document(
-            "writer",
-            "https://api.example.com/PRIVATE_SPEC",
-            false,
-        ))
-        .await;
+        let (result, logs) =
+            capture_future_logs(m.document("writer", "https://api.example.com/PRIVATE_SPEC")).await;
         let reason = if global {
             "imports_busy"
         } else {
