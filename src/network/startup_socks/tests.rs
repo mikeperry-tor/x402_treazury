@@ -204,3 +204,36 @@ async fn fresh_catalog_and_pricing_disk_hits_do_not_wait_for_absent_socks() {
     assert!(!context.startup_socks.initialized());
     assert_eq!(context.http_cache_len(), 0);
 }
+
+#[tokio::test]
+async fn cancelling_initializer_transfers_startup_probe_to_pending_waiter() {
+    let reserved = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = reserved.local_addr().unwrap();
+    drop(reserved);
+    let context = tor_context(endpoint);
+    let mut initializer = Box::pin(context.wait_for_startup_socks());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut initializer)
+            .await
+            .is_err()
+    );
+    let mut waiter = Box::pin(context.wait_for_startup_socks());
+    assert!(futures_util::poll!(&mut waiter).is_pending());
+    assert!(!context.startup_socks.initialized());
+    drop(initializer);
+
+    let listener = TcpListener::bind(endpoint).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), &mut waiter)
+        .await
+        .expect("the existing pending waiter must take over a cancelled initializer");
+    let (_connection, _) = listener.accept().await.unwrap();
+    assert!(context.startup_socks.initialized());
+    assert_eq!(context.http_cache_len(), 0);
+    context.wait_for_startup_socks().await;
+    assert!(
+        tokio::time::timeout(RETRY + Duration::from_millis(100), listener.accept())
+            .await
+            .is_err(),
+        "handoff completion must leave no startup monitor"
+    );
+}

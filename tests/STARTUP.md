@@ -42,7 +42,7 @@ pending for completeness; cancellation cannot dispatch delayed retries.
 
 Wallet discovery uses the [wallet observation policy](../docs/wallet-rotation.md#wallet-observation-policy).
 `network::startup_socks::tests` covers a late local SOCKS listener, shared and
-cancelled waiters, sanitized ERROR/recovery INFO, minute ERROR reminders during
+cancelled waiters (including initializer handoff to an existing waiter), sanitized ERROR/recovery INFO, minute ERROR reminders during
 a continuing outage, completed observation without a
 permanent monitor, and fresh catalog/pricing cache hits while the proxy is absent.
 `deployment::deferred::startup_socks_tests` verifies that a bound authenticated MCP
@@ -51,6 +51,13 @@ balance discovery and an idle treasury's initial scan resume in the same process
 when a fake SOCKS endpoint appears after a confirmed startup connectivity ERROR,
 without signed requests or new financial work. These are local TCP/SOCKS fixtures,
 not live Tor bootstrap qualification.
+`rotation::manager::maintenance::tests::startup_socks` verifies a requested Base
+refresh runs while startup waits for an absent SOCKS port, preserves its failure
+cooldown through proxy recovery and notification bursts, then succeeds after the
+cooldown. `treasury::actor::tests::startup_socks_preserves_commands_and_failed_scan_cooldown`
+checks command responsiveness during that outage and that a failed explicit scan's
+backoff survives proxy recovery before the pending startup scan resumes. Both use
+isolated Tor-policy subprocesses and assert that discovery creates no financial work.
 `rotation::manager::maintenance::tests` exercises finite Base discovery, successful
 zero refresh completion, notification bursts at 59 seconds, cancellation/restart,
 retired-wallet exclusion, startup inventory failure and first-positive initial

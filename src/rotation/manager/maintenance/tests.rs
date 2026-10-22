@@ -1,5 +1,6 @@
 //! Event barriers exercise the actual shared RPC and retained reconciliation owner.
 mod inventory;
+mod startup_socks;
 use super::*;
 use axum::{
     Json, Router,

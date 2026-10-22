@@ -330,6 +330,233 @@ impl TreasuryCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn startup_socks_preserves_commands_and_failed_scan_cooldown() {
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            tokio::process::Command::new(std::env::current_exe().unwrap())
+                .kill_on_drop(true)
+                .env_clear()
+                .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "treasury::actor::tests::startup_socks_commands_child",
+                    "--nocapture",
+                ])
+                .output(),
+        )
+        .await
+        .expect("treasury startup child exceeded its test deadline")
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
+
+    #[tokio::test]
+    #[ignore = "isolated Tor policy; invoked by parent"]
+    async fn startup_socks_commands_child() {
+        use std::{
+            collections::BTreeMap,
+            sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            },
+            time::Duration,
+        };
+        let log = tempfile::NamedTempFile::new().unwrap();
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .init();
+        let reserved = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = reserved.local_addr().unwrap();
+        drop(reserved);
+        crate::network::install(crate::network::NetworkPolicy {
+            mode: crate::network::Mode::Tor,
+            socks_endpoint: Some(endpoint),
+            connect_timeout_seconds: Some(1),
+            cover_traffic_enabled: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut owner = Treasury::create(
+            dir.path().join("state"), dir.path().join("key"), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into())),
+        ).await.unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = listener.local_addr().unwrap();
+        let app = axum::Router::new().fallback(move || {
+            let observed = observed.clone();
+            async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                (
+                    [("content-type", "application/grpc"), ("grpc-status", "14")],
+                    Vec::<u8>::new(),
+                )
+            }
+        });
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        owner.configure_sync(
+            super::super::SyncSettings::new(format!("http://{origin}"), 3).unwrap(),
+        );
+        let stop = CancellationToken::new();
+        let stopped = stop.clone();
+        let (handle, mut commands) = channel();
+        // Return the actual owner so the test can inspect its retained schedule.
+        let running = tokio::spawn(async move {
+            owner
+                .command_loop(&mut commands, &mut NoSubmission, &stopped)
+                .await
+                .unwrap();
+            owner
+        });
+        assert!(
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                handle.recover_funding("missing".into(), 1, false)
+            )
+            .await
+            .unwrap()
+            .is_err()
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !std::fs::read_to_string(log.path())
+            .unwrap()
+            .contains("tor_socks_unreachable")
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "startup did not report the absent SOCKS endpoint"
+            );
+            tokio::task::yield_now().await;
+        }
+        tokio::time::pause();
+        let failed_at = tokio::time::Instant::now();
+        let runnable = tokio::spawn(async {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        let sync = handle.sync();
+        tokio::pin!(sync);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "explicit sync was blocked by absent startup SOCKS"
+            );
+            tokio::select! {
+                biased;
+                result = &mut sync => { assert!(result.is_err()); break; },
+                _ = tokio::task::yield_now() => {},
+            }
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let socks = crate::test_socks::Socks::start_on(
+            tokio::net::TcpListener::bind(endpoint).await.unwrap(),
+            BTreeMap::from([("127.0.0.1".into(), origin)]),
+            crate::test_socks::Fault::None,
+        )
+        .await;
+        // Exercise real sockets and the retained probe's existing timer on the
+        // running clock; pause again only for the financial cooldown boundary.
+        runnable.abort();
+        tokio::time::resume();
+        assert!(
+            tokio::time::timeout(
+                Duration::from_secs(7),
+                crate::network::global().wait_for_startup_socks()
+            )
+            .await
+            .is_ok(),
+            "SOCKS recovery was not observed: {}",
+            std::fs::read_to_string(log.path()).unwrap()
+        );
+        tokio::time::pause();
+        let runnable = tokio::spawn(async {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        assert!(
+            handle
+                .recover_funding("missing".into(), 1, false)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "SOCKS recovery cannot reset failed scan cooldown"
+        );
+        assert!(tokio::time::Instant::now() < failed_at + Duration::from_secs(59));
+        tokio::time::advance(
+            (failed_at + Duration::from_secs(59)).duration_since(tokio::time::Instant::now()),
+        )
+        .await;
+        assert!(
+            handle
+                .recover_funding("missing".into(), 1, false)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "commands cannot shorten scan cooldown"
+        );
+        tokio::time::advance(
+            (failed_at + Duration::from_secs(61)).duration_since(tokio::time::Instant::now()),
+        )
+        .await;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while calls.load(Ordering::SeqCst) == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "pending startup scan never resumed after cooldown"
+            );
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            handle
+                .recover_funding("missing".into(), 1, false)
+                .await
+                .is_err()
+        );
+        stop.cancel();
+        let owner = running.await.unwrap();
+        assert!(owner.observation.failed());
+        assert!(owner.observation.due() > failed_at + Duration::from_secs(61));
+        assert!(!owner.startup_discovery);
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        for table in ["outgoing", "treasury_operations", "funding_recovery"] {
+            let count: i64 = db
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                count, 0,
+                "startup recovery created financial work in {table}"
+            );
+        }
+        drop(db);
+        owner.close().await.unwrap();
+        runnable.abort();
+        tokio::time::resume();
+        drop(socks);
+        server.abort();
+    }
+
     struct NoSubmission;
     impl TransactionSubmission for NoSubmission {
         async fn submit(
