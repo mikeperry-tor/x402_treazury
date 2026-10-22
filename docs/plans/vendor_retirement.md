@@ -77,12 +77,27 @@ submission. Select a track explicitly, capture a fresh baseline and complete an
 independent assessment before defining its implementation commits and gates.
 Current status, blockers and candidate revisions stay in the ledger.
 
+Prioritize H (Hyper), followed by H2 (h2). Hyper has one contained pending-open
+cancellation responsibility; h2 additionally changes queue reclamation, reset
+handling and scheduler wakeups. Inspect the combined cancellation chain in each
+assessment, but qualify Hyper with the retained h2 patch if supported. Do not
+couple retirements without a demonstrated version/API dependency. Reqwest and
+Pepper remain later assessments because each has multiple independent blockers.
+
 | ID | Assessment and exit evidence |
 | --- | --- |
-| H / H2 | Assess Hyper and h2 independently against exact upstream revisions; inspect both sides of pending-open cancellation even if only one checkout can exit. Preserve raw HEADERS absence, zero-peer-capacity cleanup, explicit/implicit cancellation, no stale bodies and healthy multiplexed reuse. Require queue/timeout tests in `src/network/`, HTTP/gRPC cases in `tests/network.rs`, network audit and independent compatibility. Combine removals only for a demonstrated version/API dependency. |
+| H | Recheck existing Hyper reports and contribution instructions, then prepare a minimal pending-open cancellation reproducer distinguishing the gap from the dispatched body-task cancellation fixed by [#4042](https://github.com/hyperium/hyper/pull/4042) for [#4040](https://github.com/hyperium/hyper/issues/4040). No exact pending-open report was identified by the initial search; do not treat that as proof none exists. Assess exact upstream revisions for cancellation observation and waker registration before waiting for h2 readiness, retaining the h2 patch during independent Hyper qualification. |
+| H2 | Review and coordinate with [h2 #962](https://github.com/hyperium/h2/pull/962), which addresses cancelled pending-open streams, rather than prepare a duplicate. At the ledger's reviewed head, cleanup still requires available peer capacity, recognizes only scheduled resets and adds no cancellation scheduler wakeups. Assess zero-capacity reclamation, explicit reset state and explicit/implicit wakeups with focused regressions; the existing PR regression releases the occupied stream and does not establish zero-capacity cleanup. |
 | R | Assess a complete Reqwest replacement for post-connect header timing, nonempty body progress, backpressure and disabled unstarted-request recovery. Compare supported hooks/adapters and any proposed policy change across each affected request type, with before/after behavior and whole-checkout payoff. Use the owning HTTP timeout/queue and network/compatibility regressions; reducing one retry hunk alone is not a retirement. |
 | P | Assess Pepper message-timeout control, truthful retained loader/worker drain and typed sanitized diagnostics together, including standalone manifests and the private merge fixture/workspace membership. Require progress/stall, cancellation/restart, diagnostics and synthetic lifecycle/merge evidence. Relaxing logs alone does not remove this checkout; do not replace sync algorithms locally merely to avoid a dependency fork. |
 | E | Watch for upstream typed canonical recovery evidence that can replace local proof plumbing while preserving exact accepted inputs/bytes and release authority. A network adapter, NEAR status or Base credit alone is not such evidence. Assess a concrete API when one exists; do not add a watcher, ledger or new proof framework in anticipation. |
+
+For both H and H2, preserve raw HEADERS absence, zero-peer-capacity cleanup,
+explicit/implicit cancellation, no stale bodies and healthy multiplexed reuse.
+Require queue/timeout tests in `src/network/`, HTTP/gRPC cases in
+`tests/network.rs`, network audit and independent compatibility. Review both sides
+of pending-open cancellation even if only one checkout can exit. Initial upstream
+source and PR inspection is not executed regression or retirement evidence.
 
 For upstream work, first inspect contribution instructions and existing issues/PRs.
 Prepare independently useful fixes/APIs with small faithful upstream regressions,
