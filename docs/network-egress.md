@@ -256,11 +256,13 @@ Quote and transaction expiry, confirmations, canonical coverage and
 qualification authority remain independent of network progress. Submission failure
 still retains unknown outcome and exact saved bytes; no retry authority is added.
 
-Sync launch waits for an explicit first-poll acknowledgement, retaining the task
-handle across a cancelled waiter. Loader and scan-worker retirement drains useful
-work with periodic stage/elapsed diagnostics instead of aborting after ten seconds
-or reporting an aborted worker as successful. Explicit owner cancellation remains
-separate; the mempool's bounded drain policy is unchanged.
+The sync session owns one independently polled Pepper engine task. Periodic
+checkpoints can wait for the wallet lock while recovery fetches continue; no
+startup acknowledgement or launch deadline is required. Runtime teardown cancels
+network tasks and joins blocking workers before the final snapshot. Loader and
+scan-worker retirement drains useful work with periodic stage/elapsed diagnostics
+instead of aborting after ten seconds or reporting an aborted worker as successful.
+The mempool's bounded drain policy is unchanged.
 
 Stateless MCP HTTP responses use SSE framing with keepalive comments every two
 seconds while awaiting the tool result. These keep the client response connection
@@ -395,9 +397,10 @@ storage-encryption secret. Changing it requires a new versioned domain separator
 - The pinned x402 exact clients sign locally. The upto client is constructed with
   provider type `()`, whose optional nonce/allowance lookups return no result without
   opening connections. Do not attach an SDK-owned RPC provider.
-- LightClient is created/restored offline. The application installs a `GrpcIndexer`
-  built from its own tonic channel through the reviewed connector patch. Existing
-  pepper-sync/indexer clones retain that channel. SDK online constructors, URI setters,
+- LightClient is created/restored offline and stays offline during backend
+  calculation and direct Pepper synchronization. The application passes a
+  `GrpcIndexer` built from its own tonic channel through the reviewed connector
+  patch to Pepper; every indexer clone retains that channel. SDK online constructors, URI setters,
   migration transmission and optional nym/price workers are not used.
 - Sapling parameters are downloaded/embedded at build time. Runtime proposal code
   reads embedded parameters; it does not fetch them. Cargo/build traffic is outside
@@ -575,7 +578,7 @@ financial or qualification authority.
 | HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
 | Legacy indexer duration arguments | Required by the vendor API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
-| Startup/drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. Sync launch uses an owned acknowledgement; scan retirement drains without a cutoff. |
+| Pepper drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. One independently polled engine task preserves progress during checkpoint lock waits; runtime teardown owns cancellation and worker joins. Scan retirement drains without a cutoff. |
 | MCP SSE keepalive cadence: two seconds | Sends connection-liveness comments while awaiting the result; never renews remote-read inactivity, financial authority, or client whole-tool deadlines. |
 | MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
 | Treasury observation: 60-second minimum, errors back off to 300 seconds | Available treasury startup and explicit sync request one pass. Current enabled unfilled funding demand or validated pending source/shielding work owns recurring scans; idle treasury performs none. Shared scan timing is measured from attempt completion, so long later command work cannot postpone an already-due scan. Busy/locked read-only demand acquisition uses a 60-second local reevaluation wake while commands and notifications remain usable; unknown demand never authorizes a scan or resets observation timing. Scheduled source observers reuse healthy current-owner persisted scans without intervening tip probes; actual new-action validation still checks exact canonical height/hash and snapshot revision. Publication and SDK reconstruction have independent 60-second retries and never justify another scan alone. Owned shutdown retains identical completed-result publication retries without another calculation or submission. Scheduling/reuse never renews the original observation time or financial authority. Successful needed scans may start per-address owned-transparent shielding under current permission/fees. Removed age/lag gates remain removed; expiry/non-inclusion requires actual scanned coverage and signed protocol expiry remains authoritative. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |

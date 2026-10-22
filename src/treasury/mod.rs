@@ -498,14 +498,12 @@ impl Treasury {
         let _cancel_on_drop = cancelled.clone().drop_guard();
         // Upstream sync launches detached fetch/mempool tasks. Isolate each cycle
         // so cancellation/error cannot leave those tasks connected on the MCP runtime.
-        let (mut session, mut observation, outcome) =
+        let (session, mut observation, outcome) =
             tokio::task::spawn_blocking(move || session.run(settings, observation, cancelled))
                 .await
-                .context("treasury sync worker failed")??;
-        // v7 shutdown waits for the current batch. The owned runtime must first
-        // cancel network tasks and join scan workers, then SDK cleanup can reset
-        // its completed/cancelled handle before the final snapshot.
-        session.client.go_offline().await;
+                .map_err(|_| anyhow::anyhow!("treasury sync worker failed"))??;
+        // Runtime teardown has cancelled network tasks and joined scan workers.
+        // The SDK client stays offline throughout the session.
         self.revision = session.revision;
         self.client = Some(session.client);
         observation.phase = if stop.is_cancelled() {
@@ -548,9 +546,6 @@ impl Treasury {
                 Self::warn_publication_pending();
                 tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS)).await;
             }
-        }
-        if let Some(client) = &mut self.client {
-            client.go_offline().await;
         }
         // Serving can keep the serialized store alive for Base admission after
         // funding stops. Release the poisoned wallet before waiting for it.
@@ -617,7 +612,6 @@ impl SyncSession {
             .await
             .context("indexer connection failed")?;
         tracing::debug!("treasury sync: indexer connected; checking network and chain tip");
-        self.client.set_indexer(indexer.clone());
         let info = indexer
             .get_lightd_info(zingolib::lightclient::DEFAULT_REQUEST_TIMEOUT)
             .await
@@ -646,22 +640,39 @@ impl SyncSession {
             target_height,
             "treasury sync: indexer checks completed; scanning wallet history"
         );
-        self.client
-            .sync()
+        let chain = self.network.chain();
+        let wallet = self.client.wallet().clone();
+        let config = wallet.read().await.wallet_settings.sync_config.clone();
+        let mode = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+            pepper_sync::wallet::SyncMode::NotRunning as u8,
+        ));
+        let (progress_sender, progress) = tokio::sync::watch::channel(None);
+        let engine_indexer = indexer.clone();
+        let mut engine = tokio::spawn(async move {
+            pepper_sync::sync(
+                engine_indexer,
+                &chain,
+                wallet,
+                mode,
+                progress_sender,
+                config,
+            )
             .await
-            .map_err(|error| diagnostics::client_failure(error, true))?;
+        });
         let result = loop {
             tokio::select! {
-                result = self.client.await_sync() => break result.map_err(|error| {
-                    diagnostics::client_failure(error, false).context(diagnostics::SyncProgress {
+                result = &mut engine => break result.map_err(|_| anyhow::anyhow!("treasury sync worker failed"))?.map_err(|error| {
+                    diagnostics::client_failure(
+                        zingolib::lightclient::error::LightClientError::SyncError(error),
+                    ).context(diagnostics::SyncProgress {
                         phase: "scan",
                         elapsed_ms: started.elapsed().as_millis() as u64,
                         target_height,
-                        scanned_blocks: self.client.latest_sync_status().map_or(0, |p| u64::from(p.total_blocks_scanned)),
+                        scanned_blocks: progress.borrow().as_ref().map_or(0, |p| u64::from(p.total_blocks_scanned)),
                     })
                 })?,
                 _ = tokio::time::sleep(Duration::from_secs(30)) => {
-                    if let Some(progress) = self.client.latest_sync_status() {
+                    if let Some(progress) = progress.borrow().as_ref() {
                         observation.scanned_blocks = progress.total_blocks_scanned;
                     }
                     self.checkpoint(observation.clone()).await?;
@@ -674,9 +685,13 @@ impl SyncSession {
                 }
             }
         };
-        observation.scanned_blocks = self
-            .client
-            .latest_sync_status()
+        self.client
+            .capture_migration_witnesses()
+            .await
+            .map_err(diagnostics::client_failure)?;
+        observation.scanned_blocks = progress
+            .borrow()
+            .as_ref()
             .map_or(result.blocks_scanned, |progress| {
                 progress.total_blocks_scanned
             });

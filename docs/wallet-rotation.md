@@ -178,7 +178,12 @@ and wallet identifiers are omitted. These diagnostics do not change retry or fun
 policy; a successful sync is still required before new treasury preparation.
 
 
-The Zcash treasury is exclusively spent by this application. Direct and Tor sync
+The Zcash treasury is exclusively spent by this application. Synchronization calls
+the public Pepper engine on the existing isolated session runtime. One spawned
+engine task owns scan progress while periodic encrypted checkpoints wait for the
+wallet lock; successful scans capture migration witnesses through the public SDK
+API. Cancellation tears down that runtime and joins its workers before the final
+snapshot. Task failures retain fixed diagnostics without panic payloads. Direct and Tor sync
 retain completed work without a local age ceiling or ordinary three-block lag
 policy. SDK proposal selection enforces actual confirmations, witnesses, spend
 links and scan coverage. Snapshot revision and the serialized actor bind mutation

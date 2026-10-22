@@ -11,9 +11,6 @@ impl Treasury {
         self.healthy = false;
         self.reusable_sync_revision = None;
         self.last_completed_sync = None;
-        if let Some(client) = &mut self.client {
-            client.go_offline().await;
-        }
         drop(self.client.take());
         // This serialized read follows every accepted Store write, including a
         // commit whose acknowledgment was lost. Never save the failed SDK here.
@@ -28,7 +25,7 @@ impl Treasury {
             .release_grpc(&crate::network::IsolationId::treasury(&id))
             .await;
         ensure!(!stop.is_cancelled(), "treasury stopping");
-        let mut client = LightClient::from_reader(
+        let client = LightClient::from_reader(
             bytes.as_slice(),
             config(self._scratch.path(), WalletConfig::Read, self.network)?,
         )
@@ -38,10 +35,7 @@ impl Treasury {
             client.indexer_uri().is_none(),
             "reconstructed SDK must be offline"
         );
-        if stop.is_cancelled() {
-            client.go_offline().await;
-            anyhow::bail!("treasury stopping");
-        }
+        ensure!(!stop.is_cancelled(), "treasury stopping");
         self.client = Some(client);
         self.revision = revision;
         self.healthy = true;

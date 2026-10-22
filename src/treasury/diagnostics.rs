@@ -71,13 +71,9 @@ impl std::fmt::Display for SyncProgress {
 }
 impl std::error::Error for SyncProgress {}
 
-pub(crate) fn client_failure(error: LightClientError, launch: bool) -> anyhow::Error {
+pub(crate) fn client_failure(error: LightClientError) -> anyhow::Error {
     let mut diagnostic = SyncDiagnostic {
-        category: if launch {
-            "sync_launch_failed"
-        } else {
-            "sync_scan_failed"
-        },
+        category: "sync_scan_failed",
         reason: "lightclient_error",
         pool: None,
         operation: None,
@@ -325,7 +321,6 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
             "indexer Ironwood capability check failed" => "indexer_capability_failed",
             "indexer returned the wrong Ironwood tree height" => "indexer_tree_height_mismatch",
             "indexer missing Ironwood support" => "indexer_missing_ironwood",
-            "treasury sync launch failed" => "sync_launch_failed",
             "treasury sync failed" => "sync_scan_failed",
             "treasury sync worker failed" => "sync_worker_failed",
             "treasury sync interrupted; reopen required" => "sync_reopen_required",
@@ -357,12 +352,9 @@ mod tests {
                 .saturating_duration_since(tokio::time::Instant::now());
             assert_eq!(remaining.as_secs(), seconds);
             for retry_after in [Some(remaining), None] {
-                let error = client_failure(
-                    LightClientError::IndexerError(tonic::Status::deadline_exceeded(
-                        "grpc_headers_inactivity",
-                    )),
-                    false,
-                )
+                let error = client_failure(LightClientError::IndexerError(
+                    tonic::Status::deadline_exceeded("grpc_headers_inactivity"),
+                ))
                 .context("https://private-token@example.invalid/private-path");
                 let log = tempfile::NamedTempFile::new().unwrap();
                 let subscriber = tracing_subscriber::fmt()
@@ -518,7 +510,7 @@ mod tests {
                     cause.recovery_recommendation(),
                     SyncRecoveryObservables::Abort
                 );
-                let error = client_failure(LightClientError::SyncError(cause), false);
+                let error = client_failure(LightClientError::SyncError(cause));
                 assert_eq!(
                     error.to_string(),
                     format!(
@@ -576,7 +568,7 @@ mod tests {
                 LightClientError::SyncError(SyncError::ShardTreeError(cause.clone())),
                 LightClientError::WalletError(WalletError::ShardTreeError(cause)),
             ] {
-                let error = client_failure(error, false);
+                let error = client_failure(error);
                 assert_eq!(
                     error.to_string(),
                     format!("sync_scan_failed: reason={reason}")
@@ -607,7 +599,7 @@ mod tests {
                     MempoolError::ServerError(ServerError::RequestFailed(status)),
                 )),
             };
-            let error = client_failure(error, false);
+            let error = client_failure(error);
             assert_eq!(
                 error.chain().count(),
                 1,
@@ -754,7 +746,7 @@ mod tests {
         reason: &str,
         grpc_code: Option<tonic::Code>,
     ) {
-        let error = client_failure(error, false);
+        let error = client_failure(error);
         assert_eq!(sync_failure(&error), "sync_scan_failed");
         assert_eq!(error.chain().count(), 1);
         assert_eq!(
@@ -831,22 +823,19 @@ mod tests {
                 "mempool_shutdown_timeout",
             ),
             (LightClientError::SyncNotRunning, "sync_not_running"),
+            (LightClientError::SyncLaunchError, "sync_launch"),
         ];
         for (error, reason) in cases {
-            let error = client_failure(error, false);
+            let error = client_failure(error);
             assert_eq!(
                 error.to_string(),
                 format!("sync_scan_failed: reason={reason}")
             );
             assert!(!format!("{error:?}").contains("private"));
         }
-        let error = client_failure(LightClientError::SyncLaunchError, true);
-        assert_eq!(sync_failure(&error), "sync_launch_failed");
-        assert!(error.to_string().contains("reason=sync_launch"));
-        let error = client_failure(
-            LightClientError::IndexerError(tonic::Status::deadline_exceeded("private timeout")),
-            false,
-        );
+        let error = client_failure(LightClientError::IndexerError(
+            tonic::Status::deadline_exceeded("private timeout"),
+        ));
         assert!(
             error
                 .to_string()

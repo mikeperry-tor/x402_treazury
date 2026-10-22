@@ -109,6 +109,15 @@ struct Mock {
     stall_blocks: Arc<AtomicBool>,
     delay_first: Arc<AtomicBool>,
     reuse_probe: Option<Arc<ReuseProbe>>,
+    checkpoint_lock: Option<Arc<CheckpointLock>>,
+}
+// A real Pepper pool-recovery request made while holding the wallet write lock.
+#[derive(Default)]
+struct CheckpointLock {
+    mismatched_range_served: AtomicBool,
+    faithful: AtomicBool,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
 }
 #[derive(Default)]
 struct ReuseProbe {
@@ -174,7 +183,18 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
             );
             vec![[number(1, tip), bytes(2, &hash)].concat()]
         }
-        "GetBlock" => vec![block(height(request))],
+        "GetBlock" => {
+            let h = height(request);
+            if let Some(probe) = &mock.checkpoint_lock
+                && !probe.faithful.load(Ordering::SeqCst)
+                && probe.mismatched_range_served.load(Ordering::SeqCst)
+                && h == TIP - 3
+            {
+                probe.entered.notify_one();
+                probe.release.notified().await;
+            }
+            vec![block(h)]
+        }
         "GetBlockRange" => {
             if mock.delay_first.swap(false, Ordering::SeqCst) {
                 tokio::time::sleep(std::time::Duration::from_secs(6)).await;
@@ -189,7 +209,30 @@ async fn rpc(State(mock): State<Mock>, uri: Uri, body: Bytes) -> impl IntoRespon
                 end >= start && end - start < 1000,
                 "unexpected scan range {start}..{end}"
             );
-            (start..=end).map(block).collect()
+            let mismatch = mock
+                .checkpoint_lock
+                .as_ref()
+                .is_some_and(|probe| !probe.faithful.load(Ordering::SeqCst));
+            if mismatch {
+                mock.checkpoint_lock
+                    .as_ref()
+                    .unwrap()
+                    .mismatched_range_served
+                    .store(true, Ordering::SeqCst);
+            }
+            (start..=end)
+                .map(|h| {
+                    if mismatch && h == end {
+                        // Keep the first block truthful: Pepper seeds its initial
+                        // tree sizes from that block's metadata. Only the last
+                        // empty block reports a spurious commitment, entering
+                        // actual IncorrectTreeSize recovery under the wallet lock.
+                        [block(h), bytes(8, &number(2, 1))].concat()
+                    } else {
+                        block(h)
+                    }
+                })
+                .collect()
         }
         "GetTreeState" => {
             let h = height(request);
@@ -302,6 +345,7 @@ async fn mock_with_delay(
         stall_blocks: stall_blocks.clone(),
         delay_first: Arc::new(AtomicBool::new(delay)),
         reuse_probe: None,
+        checkpoint_lock: None,
     });
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -607,6 +651,126 @@ async fn interrupted_sync_checkpoints_can_resume_and_stop_network_tasks() {
         restored.status().await.unwrap().sync.unwrap().phase,
         SyncPhase::Ready
     );
+    restored.close().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn checkpoint_waiting_for_pepper_wallet_lock_does_not_stop_engine_progress() {
+    use std::time::Duration;
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Arc::new(Mutex::new(vec![]));
+    let probe = Arc::new(CheckpointLock::default());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let app = axum::Router::new().fallback(rpc).with_state(Mock {
+        chain: "main",
+        tip: TIP,
+        final_tip: None,
+        ironwood: b"000000",
+        calls: calls.clone(),
+        stall_blocks: Arc::new(AtomicBool::new(false)),
+        delay_first: Arc::new(AtomicBool::new(false)),
+        reuse_probe: None,
+        checkpoint_lock: Some(probe.clone()),
+    });
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let mut treasury = Treasury::create(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        (TIP - 2) as u32,
+        Some(zeroize::Zeroizing::new(SEED.into())),
+    )
+    .await
+    .unwrap();
+    let initial = treasury.status().await.unwrap();
+    let settings = SyncSettings::new(endpoint.clone(), 3).unwrap();
+    treasury.configure_sync(settings.clone());
+    let stop = CancellationToken::new();
+    let cancel = stop.clone();
+    let mut work = tokio::spawn(async move {
+        let result = treasury.sync_once(&cancel).await;
+        (treasury, result)
+    });
+    if tokio::time::timeout(Duration::from_secs(10), probe.entered.notified())
+        .await
+        .is_err()
+    {
+        stop.cancel();
+        probe.release.notify_one();
+        let drained = tokio::time::timeout(Duration::from_secs(5), &mut work).await;
+        server.abort();
+        assert!(
+            drained.is_ok(),
+            "sync owner did not drain after fixture failure"
+        );
+        let outcome = drained.unwrap().map(|(_, result)| result);
+        panic!(
+            "Pepper did not reach pool-recovery GetBlock under the wallet lock; outcome={outcome:#?}; RPCs={:?}",
+            calls.lock().unwrap()
+        );
+    }
+    // The production checkpoint cadence is 30 seconds. Hold the response past
+    // that tick, within ordinary 60-second inactivity, then let real recovery
+    // release the wallet lock. An inline engine is no longer polled once the
+    // checkpoint awaits this lock, so it cannot make progress after release.
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    probe.release.notify_one();
+    let finished = tokio::time::timeout(Duration::from_secs(10), &mut work).await;
+    let joined = match finished {
+        Ok(joined) => joined,
+        Err(_) => {
+            stop.cancel();
+            probe.release.notify_one();
+            let drained = tokio::time::timeout(Duration::from_secs(5), &mut work).await;
+            server.abort();
+            assert!(
+                drained.is_ok(),
+                "sync owner did not drain after checkpoint stall"
+            );
+            panic!("checkpoint blocked the Pepper engine holding its wallet lock");
+        }
+    };
+    let (treasury, result) = joined.unwrap();
+    let error = result.unwrap_err();
+    let status = treasury.status().await.unwrap();
+    let observation = status.sync.unwrap();
+    assert_eq!(observation.phase, SyncPhase::Failed);
+    // Initial pre-scan checkpoint, periodic checkpoint, then final checkpoint.
+    assert_eq!(status.snapshot_revision, initial.snapshot_revision + 3);
+    assert_eq!(observation.snapshot_revision, status.snapshot_revision);
+    assert!(observation.checkpoint_at > 0);
+    assert!(format!("{error:#}").contains("pool_history_reopened"));
+    assert!(
+        observation
+            .last_error
+            .as_deref()
+            .is_some_and(|e| !e.contains(&endpoint))
+    );
+    assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
+    let count = calls.lock().unwrap().len();
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(
+        calls.lock().unwrap().len(),
+        count,
+        "sync I/O survived runtime teardown"
+    );
+    treasury.close().await.unwrap();
+    probe.faithful.store(true, Ordering::SeqCst);
+    let mut restored = Treasury::open(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        initial.treasury_id,
+    )
+    .await
+    .unwrap();
+    restored.configure_sync(settings);
+    restored.sync_once(&CancellationToken::new()).await.unwrap();
+    assert_eq!(
+        restored.status().await.unwrap().sync.unwrap().phase,
+        SyncPhase::Ready
+    );
+    assert!(!calls.lock().unwrap().iter().any(|m| m.contains("Send")));
     restored.close().await.unwrap();
     server.abort();
 }
@@ -1216,6 +1380,7 @@ async fn command_sync_reuse_preserves_observation_and_rescans_after_mutation_res
         stall_blocks: Arc::new(AtomicBool::new(false)),
         delay_first: Arc::new(AtomicBool::new(false)),
         reuse_probe: Some(probe.clone()),
+        checkpoint_lock: None,
     });
     let peers = Arc::new(Mutex::new(std::collections::HashSet::new()));
     let observed_peers = peers.clone();

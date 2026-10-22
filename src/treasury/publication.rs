@@ -73,9 +73,6 @@ impl Treasury {
             })
             .await?;
         self.revision = revision;
-        if let Some(client) = &mut self.client {
-            client.go_offline().await;
-        }
         self.completed = None;
         self.healthy = validated;
         Ok(prepared)

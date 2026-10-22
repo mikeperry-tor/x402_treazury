@@ -49,8 +49,8 @@ current spendability, while accepted unresolved inputs remain fenced.
 
 Every existing RPC, cloned indexer and pepper-sync stream uses the supplied channel.
 The application constructs both direct and authenticated SOCKS channels through
-`network.rs`; it creates LightClient offline and installs that indexer for SDK
-sync. Deposit selection and backend calculation keep the client offline. It does not use upstream online constructors, URI setters,
+`network.rs`; it keeps LightClient offline and passes that indexer directly to
+Pepper sync. Deposit selection and backend calculation also remain offline. It does not use upstream online constructors, URI setters,
 migration transmitters, price fetchers or optional nym workers.
 
 Cargo manifests expand workspace-inherited dependencies, pin sibling Git crates to
@@ -74,7 +74,8 @@ correct SDK reorg handling necessary; it does not require revalidating all histo
 source operations before allowing new work.
 
 `src/network.rs` constructs `GrpcIndexer::from_transport`;
-`src/treasury/mod.rs` installs it on the offline LightClient for SDK sync.
+`src/treasury/mod.rs` passes it to the public Pepper engine, without installing
+an SDK indexer or using the SDK sync launcher.
 `src/treasury/send.rs` retains the public proposal and calls backend calculation
 without installing an SDK indexer. Its lazy Sapling prover uses embedded public
 parameter bytes; copied prover/RPC code retains attribution in
@@ -84,11 +85,10 @@ across every RPC and clone, including Tor remote DNS and no direct fallback.
 `tests/network_audit.rs`, `tests/network.rs` and `tests/treasury_sync.rs`
 cover the relevant factory/consumer boundaries.
 
-Remove progress changes only with equivalent response inactivity below protobuf
-assembly, first-poll startup acknowledgement and retained loader/worker ownership
-until draining finishes. Inspect `src/network/grpc.rs`,
-`tests/network.rs`, `tests/treasury_sync.rs` and the startup implementation in
-`vendor/zingolib/src/lightclient/sync.rs`; restoring whole-message or forced drain deadlines
+The application no longer uses the retained SDK first-poll startup patch. Remove
+Pepper progress changes only with equivalent response inactivity below protobuf
+assembly and retained loader/worker ownership until draining finishes. Inspect
+`src/network/grpc.rs`, `tests/network.rs` and `tests/treasury_sync.rs`; restoring whole-message or forced drain deadlines
 would change current policy even if monetary accounting stays unchanged.
 
 The diagnostic patch is a deliberate observability choice. Its typed context is
@@ -100,9 +100,13 @@ diagnostic contract. It does not change tree recovery recommendations or authori
 Treasury scans explicitly select `shutdown_on_completion=true` before launching
 sync, including snapshots read from v6. This preserves one-pass observation and
 the application checkpoint/cancellation owner despite the SDK's continuous-sync
-default. v7's `go_offline` waits for the current batch, so cancellation first
-destroys the scan's owned runtime and joins its blocking workers, then clears
-the SDK handle before saving the final snapshot. This preserves cancellation
+default. Cancellation destroys the scan's owned runtime and joins its blocking
+workers before saving the final snapshot. The SDK client stays offline throughout;
+there is no SDK online handle to clear in sync, publication, reconstruction or close. The session owns one spawned Pepper
+engine task with local mode and progress state; checkpoints can wait for the
+wallet lock while that task continues polling recovery fetches. Successful scans
+use public `capture_migration_witnesses` before final tip validation. Both task
+join boundaries discard panic payloads into the existing fixed failure category. This preserves cancellation
 while a network read is stalled and leaves interrupted scan ranges recoverable
 on the next scan; it does not authorize financial replay.
 Wallet format 45 adds nested sync settings and scan-state fields; the
@@ -118,7 +122,8 @@ version selected in the lockfiles.
 
 The pinned v7 public APIs provide a candidate exit for `zingolib` and
 `zingo-netutils` together. Backend deposit calculation already uses this public
-route; the sync, adapter and source transitions remain to be implemented. The [checkout ledger](README.md#checkout-retirement-tracking)
+route, and synchronization now calls Pepper directly; the adapter and source
+transitions remain to be implemented. The [checkout ledger](README.md#checkout-retirement-tracking)
 owns its decision and remaining qualification; the
 [implementation plan](../docs/plans/vendor_retirement.md) owns commit and review gates.
 
