@@ -19,7 +19,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
 [Plans](plans/) describe unfinished work, including artifact storage and the
-[Zingo checkout retirement assessment](plans/vendor_retirement.md). The maintained
+[remaining vendor retirement assessments](plans/vendor_retirement.md). The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.
 The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
