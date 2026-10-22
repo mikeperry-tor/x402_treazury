@@ -994,6 +994,12 @@ also exposes the vendor's other target-method choices. See
 
 ## relayshield.toml — RelayShield
 
+Both RelayShield provider configurations disable cover traffic: the API-origin
+catalog and `llms.txt` ignore unsigned byte-range requests (HTTP 200 rather than
+the required 206). The phone companion additionally has a local catalog and no
+help URL, so it has no automatic cover candidate. API calls retain the configured
+network policy; deployments inherit these provider opt-outs.
+
 The provider exposes supported pay-per-call operations and public checks from the
 vendor OpenAPI, plus lazy `llms.txt` help. Compact recommendations are advisory. Embedded
 `x-payment-info` prices are advisory; pricing probes are disabled. Account and

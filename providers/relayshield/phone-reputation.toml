@@ -26,6 +26,9 @@ include = ["/v1/payg", ""]
 
 pricing_key = "x-payment-info"
 probe_pricing = false
+# Local catalog and no help URL; the API's catalog/llms.txt also ignore byte ranges.
+# Disable cover because no resource supports the required unsigned HTTP 206 reads.
+cover_traffic_enabled = false
 
 read_timeout_seconds = 90
 
