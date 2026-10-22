@@ -90,13 +90,7 @@ async fn seed(m: &Manager) {
 }
 
 fn server(m: &Arc<Manager>, id: &str) -> Server {
-    let mut s = Server::new(
-        vec![],
-        payer(),
-        "https://api.example.com".into(),
-        None,
-        None,
-    );
+    let mut s = Server::new(vec![], payer(), "https://api.example.com".into(), None);
     s.catalog = m.catalog.clone();
     s.catalog_server = id.into();
     s.discovery = Some(m.clone());
@@ -2200,13 +2194,7 @@ async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
                 .contains("source_management_disabled")
         );
     }
-    let standalone = Server::new(
-        vec![],
-        payer(),
-        "https://api.example.com".into(),
-        None,
-        None,
-    );
+    let standalone = Server::new(vec![], payer(), "https://api.example.com".into(), None);
     assert!(standalone.get_tool(raw::NAME).is_none());
     let enabled = server(&manager, "writer");
     for (name, args) in [

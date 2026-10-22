@@ -11,7 +11,7 @@ use rmcp::ServerHandler;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[tokio::test]
-async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
+async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
     let captured = Arc::new(Mutex::new(Vec::new()));
     let mode = Arc::new(AtomicUsize::new(0));
     let (c, md) = (captured.clone(), mode.clone());
@@ -36,6 +36,8 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
                             tokio::time::sleep(Duration::from_secs(2)).await;
                             "late".into_response()
                         }
+                        4 => axum::Json(json!({"nested":{"values":vec!["雪🙂é";1000]}}))
+                            .into_response(),
                         _ => "雪🙂é".into_response(),
                     }
                 }
@@ -72,9 +74,9 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
             .is_none()
     );
     let reference = m.catalog.read().views["writer"][0].tool.name.clone();
-    for limit in [0, 2, 3, 4] {
-        let mut s = s.clone();
-        s.max_response_chars = Some(limit);
+    for response_mode in [0, 4] {
+        mode.store(response_mode, Ordering::SeqCst);
+        let s = s.clone();
         let (base, task) = listen(crate::server::http_app(s, "test-token".into())).await;
         for fallback in [false, true] {
             let args = json!({"id":"a/b?雪","q":["x y","雪"],"flag":true,"q_body":"body🙂"});
@@ -88,15 +90,16 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
             } else {
                 call(&base, &name, args).await
             };
-            let expected = if limit < 3 {
-                format!(
-                    "{}\n[truncated by --max-response-chars]",
-                    "雪🙂é".chars().take(limit).collect::<String>()
-                )
+            let text = result["content"][0]["text"].as_str().unwrap();
+            if response_mode == 4 {
+                assert_eq!(
+                    serde_json::from_str::<Value>(text).unwrap(),
+                    json!({"nested":{"values":vec!["雪🙂é";1000]}})
+                );
             } else {
-                "雪🙂é".into()
-            };
-            assert_eq!(result["content"][0]["text"], expected);
+                assert_eq!(text, "雪🙂é");
+            }
+            assert!(result.get("structuredContent").is_none());
             assert_ne!(result["isError"], true);
         }
         let structured = call(&base, "x402_treazury_tools_search", json!({})).await;
@@ -110,7 +113,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
     }
     {
         let captures = captured.lock().unwrap();
-        assert_eq!(captures.len(), 8);
+        assert_eq!(captures.len(), 4);
         for (uri, headers, body) in captures.iter() {
             assert_eq!(uri.split('?').next().unwrap(), "/items/a%2Fb%3F%E9%9B%AA");
             let parsed = reqwest::Url::parse(&format!("http://localhost{uri}")).unwrap();
@@ -143,7 +146,7 @@ async fn direct_and_fallback_wire_routing_errors_and_unicode_limits() {
     ] {
         assert_eq!(call(&base, tool, args).await["isError"], true);
     }
-    assert_eq!(captured.lock().unwrap().len(), 8);
+    assert_eq!(captured.lock().unwrap().len(), 4);
     for fail in [1, 2, 3] {
         mode.store(fail, Ordering::SeqCst);
         for fallback in [false, true] {

@@ -128,8 +128,6 @@ pub struct Serve {
     input: Input,
     #[arg(long)]
     max_api_payment_usdc: Option<String>,
-    #[arg(long)]
-    max_response_chars: Option<usize>,
     #[arg(long, default_value = "stdio", value_parser = ["stdio", "http"])]
     transport: String,
     #[arg(long, default_value = "127.0.0.1")]
@@ -278,7 +276,6 @@ impl From<Serve> for Args {
         let Serve {
             input,
             max_api_payment_usdc,
-            max_response_chars,
             transport,
             host,
             port,
@@ -294,7 +291,6 @@ impl From<Serve> for Args {
         } = serve;
         Self {
             max_api_payment_usdc,
-            max_response_chars,
             transport,
             host,
             port,

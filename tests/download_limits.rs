@@ -127,8 +127,8 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
         payer().with_download_limits(7, 6),
         vendor.clone(),
     ));
-    let mut s = Server::from_bindings(bindings, None, Some(2));
-    // Download success then explicit display truncation, not a download error.
+    let s = Server::from_bindings(bindings, None);
+    // Accepted help remains complete; download rejection stays explicit.
     let (base, server) = serve(http_app(s.clone(), "fixture".into())).await;
     let result = call(&http, &base, "t_help").await;
     assert_ne!(result["isError"], true);
@@ -156,10 +156,9 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
     assert!(!error.contains("PRIVATE-CONTENT"));
     assert_eq!(signed.load(Ordering::SeqCst), 1);
     assert_eq!(unsigned.load(Ordering::SeqCst), 1);
-    s.max_response_chars = Some(1);
     assert_eq!(
         s.invoke("t_help", &Default::default()).await.unwrap(),
-        "雪\n[truncated by --max-response-chars]"
+        "雪🙂"
     );
     assert!(
         format!(
@@ -222,7 +221,6 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
         "max_help_bytes",
         "max_spec_bytes",
         "no partial content returned",
-        "tool output truncated",
         "tool description truncated",
         "MCP request rejected",
         "pricing discovery capped",
@@ -230,6 +228,7 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
     ] {
         assert!(log.contains(evidence), "missing {evidence}: {log}");
     }
+    assert!(!log.contains("tool output truncated"));
     assert!(!log.contains("PRIVATE-CONTENT"));
     server.abort();
     v.abort();

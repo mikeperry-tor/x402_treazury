@@ -248,7 +248,10 @@ success. Typed results flow through `PaidClient::execute_response`,
 `BoundTool::invoke_output` and `Server::invoke_output`, including dynamic fallback.
 Text-only Rust convenience methods reject attachments. Image mapping and validation
 contracts are in the [provider guide](../providers/README.md).
-Display limits and download limits are different controls. Durable
+Accepted tool text, JSON and image metadata remain complete through direct and
+wrapper invocation. There is no completed-output character slicing; provider
+`max_description_chars` remains a separate explicit description control. Download
+and image bounds still reject oversized resources with explicit errors. Durable
 [artifact storage](plans/artifact_storage.md) and
 [polling workflows](plans/deferred/polling_tool_support.md) remain future work.
 

@@ -117,3 +117,15 @@ fn executable_name_version_and_example_inspection_are_portable() {
         }
     }
 }
+
+#[test]
+fn retired_response_character_flag_is_rejected_by_name() {
+    let result = Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+        .args(["serve", "--max-response-chars", "1"])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("--max-response-chars"));
+}

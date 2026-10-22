@@ -176,7 +176,6 @@ async fn paid_fixture() {
         client.clone(),
         "https://api.example.com".into(),
         None,
-        None,
     );
     use rmcp::ServerHandler;
     assert!(mcp.get_tool("x402_treazury_cover_status").is_none());

@@ -250,7 +250,7 @@ async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversio
     let client = PaidClient::new(
         Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
     );
-    let server = Server::new(tools, client, vendor, None, Some(8));
+    let server = Server::new(tools, client, vendor, None);
     let (base, task) = serve(http_app(server, "fixture".into())).await;
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
     for name in ["media_raw", "media_json", "media_bad", "media_unknown"] {
@@ -264,12 +264,22 @@ async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversio
         assert_eq!(result["result"]["content"][1]["type"], "image");
         assert_eq!(result["result"]["content"][1]["data"], PNG);
         assert_eq!(result["result"]["content"][1]["mimeType"], "image/png");
-        assert!(
-            result["result"]["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("truncated by --max-response-chars")
-        );
+        let text = result["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(result["result"].get("structuredContent").is_none());
+        if name == "media_json" {
+            let (guidance, metadata) = text.split_once('\n').unwrap();
+            assert_eq!(
+                guidance,
+                "Image payloads extracted into numbered MCP image attachments; metadata follows:"
+            );
+            let metadata: Value = serde_json::from_str(metadata).unwrap();
+            assert_eq!(metadata["model"], "fixture");
+            assert_eq!(metadata["image"]["treazury_attachment"], 1);
+            assert_eq!(metadata["image"]["mime_type"], "image/png");
+        } else {
+            assert!(text.starts_with("Inline image attachment 1: image/png,"));
+            assert!(text.ends_with(" bytes."));
+        }
     }
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     task.abort();

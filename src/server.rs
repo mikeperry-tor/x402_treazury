@@ -30,7 +30,6 @@ pub struct Server {
     pub name: String,
     pub host_policy: host::HostPolicy,
     pub instructions: Option<String>,
-    pub max_response_chars: Option<usize>,
 }
 impl Server {
     pub fn new(
@@ -38,7 +37,6 @@ impl Server {
         client: PaidClient,
         base_url: String,
         instructions: Option<String>,
-        max_response_chars: Option<usize>,
     ) -> Self {
         Self::from_bindings(
             tools
@@ -46,13 +44,11 @@ impl Server {
                 .map(|t| (t, client.clone(), base_url.clone()))
                 .collect(),
             instructions,
-            max_response_chars,
         )
     }
     pub fn from_bindings(
         tools: Vec<(ToolSpec, PaidClient, String)>,
         instructions: Option<String>,
-        max_response_chars: Option<usize>,
     ) -> Self {
         Self {
             work: Default::default(),
@@ -69,7 +65,6 @@ impl Server {
             catalog_server: "default".into(),
             name: "x402_treazury".into(),
             instructions,
-            max_response_chars,
         }
     }
     fn definition(t: &ToolSpec) -> Tool {
@@ -120,7 +115,7 @@ impl Server {
                         &self.catalog_server,
                         &call.tool_id,
                     )?;
-                    return Ok(self.limit(bound.invoke_output(&call.arguments).await?));
+                    return bound.invoke_output(&call.arguments).await;
                 }
                 _ => {}
             }
@@ -133,23 +128,19 @@ impl Server {
                 "unknown tool"
             );
             if name == "x402_treazury_sources_search" {
-                return Ok(self.limit(
-                    manager
-                        .invoke_sources_search(&self.catalog_server, args)
-                        .await?,
-                ));
+                return manager
+                    .invoke_sources_search(&self.catalog_server, args)
+                    .await;
             }
             if name == crate::discovery::source_details::NAME {
-                return Ok(
-                    self.limit(crate::output::ToolOutput::text(serde_json::to_string(
-                        &manager
-                            .invoke_source_details(&self.catalog_server, args)
-                            .await?,
-                    )?)),
-                );
+                return Ok(crate::output::ToolOutput::text(serde_json::to_string(
+                    &manager
+                        .invoke_source_details(&self.catalog_server, args)
+                        .await?,
+                )?));
             }
             if name == crate::discovery::raw::NAME {
-                return Ok(self.limit(manager.invoke_raw(&self.catalog_server, args).await?));
+                return manager.invoke_raw(&self.catalog_server, args).await;
             }
             if name != "x402_treazury_tool_call" {
                 let output = crate::output::ToolOutput::text(serde_json::to_string(
@@ -161,22 +152,17 @@ impl Server {
                         )
                         .await?,
                 )?);
-                return Ok(if name == "x402_treazury_providers_list" {
-                    self.limit(output)
-                } else {
-                    output
-                });
+                return Ok(output);
             }
             let call: crate::discovery::Call =
                 serde_json::from_value(serde_json::Value::Object(args.clone()))?;
             let bound = manager.find_tool(&self.catalog_server, &call.tool_id)?;
-            return Ok(self.limit(bound.invoke_output(&call.arguments).await?));
+            return bound.invoke_output(&call.arguments).await;
         }
         let snapshot = self.catalog.read();
-        let text = catalog_state::find(&snapshot, &self.catalog_server, name)?
+        catalog_state::find(&snapshot, &self.catalog_server, name)?
             .invoke_output(args)
-            .await?;
-        Ok(self.limit(text))
+            .await
     }
     fn management_tools(&self) -> Vec<Tool> {
         crate::discovery::tools::listener_definitions(
@@ -187,24 +173,6 @@ impl Server {
             self.discovery_search_tool_instructions_text.as_deref(),
             self.sources_search_tool_instructions_text.as_deref(),
         )
-    }
-
-    fn limit(&self, mut output: crate::output::ToolOutput) -> crate::output::ToolOutput {
-        let text = output.text;
-        output.text = match self.max_response_chars {
-            Some(max) if text.chars().count() > max => {
-                tracing::warn!(
-                    limit_chars = max,
-                    "tool output truncated by max_response_chars"
-                );
-                format!(
-                    "{}\n[truncated by --max-response-chars]",
-                    text.chars().take(max).collect::<String>()
-                )
-            }
-            _ => text,
-        };
-        output
     }
 }
 impl ServerHandler for Server {

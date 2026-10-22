@@ -14,9 +14,9 @@ async fn without_wallets() -> Arc<Manager> {
 }
 
 #[tokio::test]
-async fn public_local_tools_dispatch_offline_and_report_display_truncation() {
+async fn public_local_tools_dispatch_offline_with_complete_json() {
     let m = without_wallets().await;
-    let mut s = server(&m, "writer");
+    let s = server(&m, "writer");
     let search = s
         .invoke(
             "x402_treazury_sources_search",
@@ -29,12 +29,13 @@ async fn public_local_tools_dispatch_offline_and_report_display_truncation() {
     let value: Value = serde_json::from_str(&search).unwrap();
     assert_eq!(value["total"], 0);
     assert_eq!(value["items"], json!([]));
-    s.max_response_chars = Some(32);
     let listed = s
         .invoke(local::NAME, json!({}).as_object().unwrap())
         .await
         .unwrap();
-    assert!(listed.contains("[truncated by --max-response-chars]"));
+    let listed: Value = serde_json::from_str(&listed).unwrap();
+    assert_eq!(listed["per_page"], 25);
+    assert!(listed["items"].is_array());
     assert!(m.inner.lock().unwrap().state.records.is_empty());
 }
 

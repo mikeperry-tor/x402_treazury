@@ -24,7 +24,7 @@ async fn host_policies_preserve_auth_and_match_hosts_and_ports() {
         (None, true, "remote.example", 200),
         (Some(vec![]), false, "remote.example", 200),
     ] {
-        let mut server = Server::from_bindings(vec![], None, None);
+        let mut server = Server::from_bindings(vec![], None);
         server.host_policy = HostPolicy::new(
             allowed.map(|hosts| hosts.into_iter().map(String::from).collect()),
             disabled,

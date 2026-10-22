@@ -40,7 +40,6 @@ struct Args {
     exclude_tags: Option<Vec<String>>,
     env_file: Option<String>,
     max_api_payment_usdc: Option<String>,
-    max_response_chars: Option<usize>,
     max_response_bytes: Option<usize>,
     max_help_bytes: Option<usize>,
     max_spec_bytes: Option<usize>,
@@ -355,7 +354,6 @@ async fn prepare_standalone_server(
             .with_download_limits(cfg.max_response_bytes, cfg.max_help_bytes),
         base,
         cfg.instructions_text,
-        args.max_response_chars,
     );
     if let Some(name) = cfg.name {
         server.name = name;

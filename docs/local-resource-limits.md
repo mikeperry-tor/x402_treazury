@@ -56,7 +56,8 @@ marker, HTTP error or CLI error. Identify the resource, limit and adjustment
 setting where applicable. Do not log private content, credentials or sensitive
 URLs to explain it. Tests verify consumer-visible evidence and logs.
 
-Never present an incomplete document as complete. Display truncation is separate
-from a download/memory bound. An oversized paid response may already have settled
+Never present an incomplete document as complete. Completed tool outputs are returned in full; retired `max_response_chars` settings
+reject visibly. Explicit provider `max_description_chars` controls only descriptions,
+separately from download/memory and image bounds. An oversized paid response may already have settled
 and grants no automatic retry. These visibility requirements do not justify adding
 another bound.

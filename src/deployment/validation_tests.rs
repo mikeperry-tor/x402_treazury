@@ -91,7 +91,6 @@ fn listener_checks_keep_their_first_error_and_context() {
     s["bearer_token_env"] = json!(" ");
     s["wallet"] = json!("missing");
     s["sources"] = json!([]);
-    s["max_response_chars"] = json!(0);
     s["include_tools"] = json!([""]);
     error(
         &v,
@@ -115,8 +114,6 @@ fn listener_checks_keep_their_first_error_and_context() {
     v["servers"]["one"]["wallet"] = json!("payer");
     error(&v, "server one: sources cannot be empty");
     v["servers"]["one"]["sources"] = json!(["missing"]);
-    error(&v, "server one: max_response_chars must be positive");
-    v["servers"]["one"]["max_response_chars"] = json!(1);
     error(&v, "server one: unknown source missing");
     v["servers"]["one"]["sources"] = json!(["a", "a", "missing"]);
     error(&v, "server one: duplicate source a");
@@ -296,4 +293,12 @@ fn complete_generated_resolution_and_explicit_managed_resolution() {
         "bindings":{"one":{"a":{"wallet":"payer","origin":"sources.a.wallet"},"b":{"wallet":"payer","origin":"servers.one.wallet"}}},
         "summary":{"managed_pool_count":1,"generated_pool_count":0,"initial_inventory_target_atomic":"5000000","initial_inventory_target_usdc":"5.000000"}})
     );
+}
+
+#[test]
+fn retired_response_character_setting_is_rejected_by_name() {
+    let mut value = fixture();
+    value["servers"]["one"]["max_response_chars"] = json!(1);
+    let error = serde_json::from_value::<MetaConfig>(value).err().unwrap();
+    assert!(error.to_string().contains("max_response_chars"));
 }

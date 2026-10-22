@@ -96,7 +96,6 @@ pub struct ListenerConfig {
     pub exclude_tags: Vec<String>,
     #[serde(default)]
     pub exclude_tools: Vec<String>,
-    pub max_response_chars: Option<usize>,
 }
 #[derive(Clone)]
 struct Source {
@@ -252,10 +251,6 @@ impl MetaConfig {
             ensure!(
                 !server.sources.is_empty() || server.source_management,
                 "server {name}: sources cannot be empty"
-            );
-            ensure!(
-                server.max_response_chars != Some(0),
-                "server {name}: max_response_chars must be positive"
             );
             let mut seen = BTreeSet::new();
             for source in &server.sources {
@@ -1201,11 +1196,8 @@ impl Deployment {
             {
                 instructions.push_str(&format!("\n\nUNAVAILABLE ambiguous tool names: {}. Multiple configured sources define these names; all conflicting bindings are omitted. Configure distinct prefixes or source selections and restart.", conflicts.join(", ")));
             }
-            let mut server = Server::from_bindings(
-                bindings,
-                (!instructions.is_empty()).then_some(instructions),
-                cfg.max_response_chars,
-            );
+            let mut server =
+                Server::from_bindings(bindings, (!instructions.is_empty()).then_some(instructions));
             server.name = name.clone();
             server.discover_on_demand = cfg.discover_on_demand;
             server.discovery_search_tool_instructions_text =

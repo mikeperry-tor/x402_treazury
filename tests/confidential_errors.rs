@@ -98,7 +98,7 @@ async fn fetch_help_payment_and_rpc_errors_exclude_url_credentials() {
     )
     .unwrap();
     let app = http_app(
-        Server::new(tools, payer(), origin, None, None),
+        Server::new(tools, payer(), origin, None),
         "DUMMY_BEARER".into(),
     );
     let mcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

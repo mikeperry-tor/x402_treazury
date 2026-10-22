@@ -148,7 +148,7 @@ optional wallet templates and an automatic assignment policy:
   The cap applies per payment; it is not an aggregate budget.
 - `servers`: `listen`, `sources`, and `bearer_token_env` when `auth = true` (the default), with an optional default
   `wallet` and optional
-  `include_tools`, `exclude_tools`, `tags`, `exclude_tags`, and `max_response_chars`.
+  `include_tools`, `exclude_tools`, `tags`, and `exclude_tags`.
   Resource identifiers use lowercase letters, digits and `_`, starting with a letter.
 
 Provider/source `description` is optional searchable capability metadata. It inherits
@@ -647,10 +647,12 @@ stderr logs the rejection. No partial content is returned or cached as success.
 A paid response may already have settled before its size is known; an oversize
 response does not trigger another payment attempt.
 
-`max_response_chars` and `max_description_chars` are separate display controls.
-When they shorten text, the text includes a truncation marker and stderr records
-the event; the marker is additional to the configured character allowance. They
-do not control download size. MCP HTTP requests have a 4 MiB incoming-body limit;
+Completed tool output is returned in full, including JSON and image metadata.
+The listener setting `max_response_chars` and CLI flag `--max-response-chars` have
+been removed and reject by name; remove them from existing configurations/commands.
+`max_description_chars` remains an explicit provider-description display control:
+shortened descriptions include a marker and stderr records the event. It does not
+control download size. MCP HTTP requests have a 4 MiB incoming-body limit;
 exceeding it returns HTTP 413 with the limit in its message and a stderr warning.
 
 ## Implemented behavior
@@ -684,7 +686,7 @@ exceeding it returns HTTP 413 with the limit in its message and a stderr warning
   immutable signer lease after challenge validation and durable admission.
 
 The CLI supports `--spec`, `--provider`, `--base-url`, `--prefix`, `--include`,
-`--exclude`, `--tags`, `--exclude-tags`, `--read-timeout-seconds`, `--max-response-chars`,
+`--exclude`, `--tags`, `--exclude-tags`, `--read-timeout-seconds`,
 `--transport`, `--host`, `--port`, `--bearer-token`, and `--env-file`.
 Filters accept comma-separated values. Supported
 `X402_MCP_GENERIC_*` overrides are `SPEC`, `BASE_URL`, `PREFIX`, `NAME`,

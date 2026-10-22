@@ -164,7 +164,7 @@ async fn dot_arguments_are_rejected_before_provider_io() {
         SpendPolicy::dollars("0.01").unwrap(),
     )
     .unwrap();
-    let server = Server::new(tools, PaidClient::new(payer), base, None, None);
+    let server = Server::new(tools, PaidClient::new(payer), base, None);
     for id in [".", ".."] {
         let error = server
             .invoke(&name, json!({"id":id}).as_object().unwrap())

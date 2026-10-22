@@ -87,7 +87,7 @@ async fn authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result
         SpendPolicy::dollars("0.20").unwrap(),
     )
     .unwrap();
-    let server = Server::new(tools, PaidClient::new(payer), vendor, None, None);
+    let server = Server::new(tools, PaidClient::new(payer), vendor, None);
     let (mcp, task) = serve(http_app(server, "test-token".into())).await;
     let http = reqwest::Client::builder().no_proxy().build().unwrap();
     let request = || {
@@ -142,7 +142,7 @@ async fn disabled_cover_does_not_shadow_an_ordinary_api_tool() {
     )
     .unwrap();
     assert_eq!(tools[0].name, "x402_treazury_cover_status");
-    let server = Server::new(tools, PaidClient::unsigned(), vendor, None, None);
+    let server = Server::new(tools, PaidClient::unsigned(), vendor, None);
     assert!(server.get_tool("x402_treazury_cover_status").is_some());
     assert_eq!(
         server
@@ -183,7 +183,7 @@ async fn authenticated_stateless_http_initializes_lists_and_calls() {
     let client = PaidClient::new(
         Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
     );
-    let server = Server::new(tools, client, vendor, cfg.instructions_text, None);
+    let server = Server::new(tools, client, vendor, cfg.instructions_text);
     let catalog = server.catalog.clone();
     let (base, task) = serve(http_app(server, "test-token".into())).await;
     let endpoint = format!("{base}/mcp");
@@ -354,7 +354,7 @@ async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
     )
     .unwrap()
     .remove(0);
-    let server = Server::new(vec![tool.clone()], client.clone(), url.clone(), None, None);
+    let server = Server::new(vec![tool.clone()], client.clone(), url.clone(), None);
     let old = server.clone();
     let name = tool.name.clone();
     let pending =
@@ -419,7 +419,7 @@ async fn help_failures_retry_concurrent_calls_coalesce_and_new_urls_get_new_cont
     let client = PaidClient::new(
         Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
     );
-    let server = Server::new(tools.clone(), client.clone(), url.clone(), None, None);
+    let server = Server::new(tools.clone(), client.clone(), url.clone(), None);
     assert_eq!(hits.load(Ordering::SeqCst), 0);
     assert!(
         server

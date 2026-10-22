@@ -387,7 +387,9 @@ list-change notifications, so clients may cache their inventory. Search/call rem
 usable with that cached inventory. Search cursors bind the running catalog,
 endpoint, query/filter and generation; stale cursors require restarting pagination.
 All listeners return at most 25 definitions per `tools/list` page. Follow `nextCursor` until absent; cursors bind the listener and snapshot, and catalog publication invalidates them. Descriptions and
-schemas are not silently truncated.
+schemas and accepted tool outputs are returned complete. The removed listener
+`max_response_chars` field and CLI flag reject visibly; byte acquisition and image
+bounds still reject oversized content explicitly.
 
 ## Limits and network policy
 

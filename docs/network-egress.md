@@ -642,7 +642,9 @@ financial or qualification authority.
 | Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
 | Sync mempool drain window | Returns control while scan workers remain, not a whole-sync deadline. |
 
-Buffered response limits remain: default API 16 MiB, help 4 MiB and catalog 32 MiB,
+Completed tool output has no character slicing; removed `max_response_chars`
+settings reject visibly. Provider `max_description_chars` remains a separate
+description control. Buffered response limits remain: default API 16 MiB, help 4 MiB and catalog 32 MiB,
 plus explicit MCP, NEAR JSON, protobuf, image and cache limits. They bound memory
 or stored data, not download duration. TLS/HTTP compatibility, authentication,
 canonical proofs, amount caps and signed-work no-replay rules remain enforced.
