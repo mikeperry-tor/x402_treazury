@@ -38,8 +38,10 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | --- | --- | --- |
 | Agent402 | `agent402.toml` | Full supported catalog; advisory web research recommendations and lowercase tags |
 | AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
+| AGProxy | `agproxy.toml` | Residential fetch and proxy packs; dual-protocol aliases and root server URL |
 | Datakoot | `datakoot.toml` | Public-data gateway; apex-domain help |
 | HireScrape | `hirescrape.toml` | Synchronous paid scraper namespace; SIWX lifecycle omitted |
+| Horizon Pulse | `horizonpulse.toml` | Web/HTTP, crypto and marketplace APIs; screenshot mapping and atomic-price caveat |
 | NetIntel | `netintel.toml` | Canonical POST/body contracts and image data-URI mapping |
 | TeleSINT | `telesint.toml` | Stateless Telegram intelligence; watch ownership unsupported |
 | RelayShield phone | `relayshield/phone-reputation.toml` | Authored vendor-omitted request contract |

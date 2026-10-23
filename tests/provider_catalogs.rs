@@ -1851,3 +1851,68 @@ async fn straits_public_formats_preserve_routes_tiers_and_historical_meaning() {
             .contains("straits_digest.json")
     );
 }
+
+#[tokio::test]
+async fn horizonpulse_free_write_exemption_atomic_price_and_screenshot_mapping() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let cfg =
+        config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/horizonpulse.toml"))
+            .await
+            .unwrap()
+            .settings;
+    // Minimal contracts for authored scope, price-display and image-mapping quirks.
+    let doc = json!({"openapi":"3.1.0","paths":{
+        "/api/http":{"post":{
+            "description":"HTTP request proxy API for public URLs. Price: $0.01 USDC per call (10000 atomic).",
+            "x-payment-info":{"protocol":"x402","priceUsd":"$0.01","amount":"10000","decimals":6}
+        }},
+        "/api/screenshot":{"get":{"description":"Screenshot as imageBase64 with mimeType."}},
+        "/api/feedback":{"post":{"description":"Stores a message without an x402 payment gate."}},
+        "/api/money-market-rates":{"get":{"description":"Free public market data."}}
+    }});
+    let tools = catalog::build_tools(&cfg, &doc, "horizonpulse").unwrap();
+    assert!(
+        !tools
+            .iter()
+            .any(|t| t.path == "/api/feedback" && t.method == "POST")
+    );
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.path == "/api/money-market-rates" && t.method == "GET")
+    );
+    let http = tools.iter().find(|t| t.path == "/api/http").unwrap();
+    assert!(http.description.contains("Price: $0.01 USDC"));
+    assert!(http.description.ends_with("Cost: unknown."));
+    assert!(!http.description.contains("Cost: ~10000"));
+    assert!(http.response_mapping.is_none());
+    let screenshot = tools.iter().find(|t| t.path == "/api/screenshot").unwrap();
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
+    let output = x402_treazury::output::HttpOutput {
+        advisories: vec![],
+        bytes: serde_json::to_vec(&json!({
+            "imageBase64":png,"mimeType":"image/png","finalUrl":"https://example.com/",
+            "pageStatus":200,"width":1,"height":1,"title":"Fixture screenshot"
+        }))
+        .unwrap(),
+        mime_type: Some("application/json".into()),
+        paid_submission: false,
+    }
+    .render(
+        screenshot.response_mapping.as_ref(),
+        &screenshot.image_limits,
+    )
+    .unwrap();
+    assert_eq!(output.images.len(), 1);
+    assert_eq!(output.images[0].data, png);
+    assert_eq!(output.images[0].mime_type, "image/png");
+    assert!(!output.text.contains(png));
+    let metadata: Value = serde_json::from_str(output.text.split_once('\n').unwrap().1).unwrap();
+    assert_eq!(metadata["finalUrl"], "https://example.com/");
+    assert_eq!(metadata["pageStatus"], 200);
+    assert_eq!(metadata["width"], 1);
+    assert_eq!(metadata["height"], 1);
+    assert_eq!(metadata["title"], "Fixture screenshot");
+    assert_eq!(metadata["imageBase64"]["treazury_attachment"], 1);
+}

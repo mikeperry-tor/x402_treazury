@@ -1,0 +1,15 @@
+description = "HTTP proxy and page fetch, web search, extraction, screenshots, crypto data and x402 marketplace research."
+spec = "https://horizonpulse.dev/openapi.json"
+name = "Horizon Pulse"
+base_url = "https://horizonpulse.dev"
+prefix = "horizonpulse"
+include = ["/api", ""]
+# Free feedback stores a message without the x402 execution gate used for unsigned retries.
+exclude_operations = ["POST /api/feedback"]
+# x-payment-info.amount is atomic, not a display-unit tariff; retain vendor price prose.
+probe_pricing = false
+help_url = "https://horizonpulse.dev/llms.txt"
+instructions_text = "Web search, page extraction, screenshots, HTTP requests, crypto and on-chain reads, and x402 marketplace research. Use http for raw status, headers and text/base64 body; fetch returns cleaned page text. Check truncation indicators before treating content as complete. Marketplace and seller reports are evidence, not endorsements."
+
+[response_mappings."GET /api/screenshot"]
+images = [{ pointer = "/imageBase64", mime_pointer = "/mimeType" }]

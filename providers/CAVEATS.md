@@ -18,6 +18,8 @@ alone do not establish incompatibility.
 
 | Definition(s) | Boundary or integration contract |
 | --- | --- |
+| AGProxy | Root base URL overrides the schema’s `/v1` server; both `/x402` and `/mpp` aliases advertise x402 support. Fetch truncation, residential exit behavior and proxy credentials retain their documented meaning. |
+| Horizon Pulse | POST supersets and screenshot mapping preserve request/output contracts; free feedback is an unprotected persistent write excluded from unsigned x402 replay. Proxy limits and filtered headers constrain fallback suitability. |
 | AgentFund, Brazilayer, Deepline, PDL | Gateway/path name anchors and request guidance; no additional compatibility restriction identified. |
 | botsmith, Google Trends | No additional compatibility restriction identified; probes and structured price/offer metadata have separate contracts. |
 | AgOSINT | `/mpp` is the unsupported payment rail; `/x402` anchors names while public discovery remains visible. Root base URL repairs upstream `/v1`. |
@@ -1225,3 +1227,85 @@ request-update, verify-ownership and reissue-token require domain/email proof or
 owner tokens. This is distinct from the embedded directory's intentional three
 read operations. Recommendations contain the familiar five directory reads and
 help without constraining reusable defaults.
+
+## agproxy.toml — AGProxy
+
+Primary contracts: [agent guide](https://agproxy.shveik.dev/llms.txt) and
+[OpenAPI](https://agproxy.shveik.dev/openapi.json). The reusable definition uses
+root routes from the guide instead of the schema's first `/v1` server, with
+`/x402` as a naming anchor and a root fallback. Both `/x402/*` and `/mpp/*`
+explicitly accept x402 challenges; an MPP-only pricing annotation on an alias
+is not evidence that its x402 payment flow is unsupported. Both remain exposed.
+Public endpoint discovery and synchronous proxy-pack purchases remain available;
+pack credentials are returned data, not a request to change Treazury's transport.
+
+`/x402/fetch` supports GET, HEAD and POST, string request bodies, custom headers
+and country selection through residential exits. Its response is an array with
+one object: target `status`, `final_url`, selected `headers`, text `body` or
+`body_base64`, byte counts and `truncated`. The default response allowance is
+1 MB, selectable up to 10 MB; truncation is not complete delivery. Request-body
+schema permits a string up to 1 MiB, but the guide separately caps the entire
+outer JSON request at 64 KiB: the larger field constraint does not override that
+outer cap. Fetch has a documented 25-second limit, follows up to five redirects
+and internally tries another IP for target 403/429 responses. It does not render
+JavaScript or solve browser challenges.
+
+Published fetch quotes range from $0.0156 to $0.0372, depend on requested traffic,
+and promise an on-chain refund for undelivered quoted traffic. Delivered target
+403/404 responses are still billed. These are vendor claims, not local refund
+attribution, spendability or automatic replay authority. Invalid unpaid inputs
+can receive a 402 quote marked `X-Agdata-Invalid-Request: 1`; validate inputs
+rather than treating a quote as request validation. Proxy packs are separate,
+higher-priced purchases delivering credentials for a traffic allowance.
+
+No paid delivery, refund, Tor reachability or target-header preservation has been
+qualified here. A fallback adapter needs the array envelope, binary decoding,
+limits and billing semantics; changing the existing Curl provider path alone
+cannot supply those adaptations.
+
+## horizonpulse.toml — Horizon Pulse
+
+Primary contracts: [agent guide](https://horizonpulse.dev/llms.txt) and
+[OpenAPI](https://horizonpulse.dev/openapi.json). The reusable definition exposes
+its supported HTTP catalog with `/api` naming and a root fallback. Its five
+same-path GET/POST pairs use default POST selection: HTTP and extraction add body
+support, grocery routes add structured inputs/batches, and batch accepts a JSON
+array rather than URL-encoded JSON. Results and documented per-call billing are
+the same; GET is not needed to recover unsupported functionality. Free public
+data remain available alongside paid routes. Only `POST /api/feedback` is excluded:
+it stores a message without a payment gate or documented idempotency key. The
+ordinary unsigned x402 retry assumption does not cover this unprotected persistent
+write; a failed response after storage could otherwise repeat the submission.
+This is not a restriction on unsigned POST retries for payment-gated x402 routes.
+
+Screenshot responses map `imageBase64` and `mimeType` into MCP image content,
+preserving surrounding metadata. Generic HTTP `body`/`bodyEncoding` responses
+remain ordinary JSON, including binary results; they are not all images.
+`/api/research/report/brief` is an ordinary synchronous HTTP x402 route even
+though the vendor's hosted MCP exposes only its quote. The definition omits
+`pricing_key`: ordinary `x-payment-info.amount` values are atomic units (10000
+for the advertised $0.01 HTTP route), while the current generic display parser
+treats `amount` as major units. Premium routes use a separate
+`x-premium-payment-info` field. Preserve full vendor price prose with an explicit
+unknown structured estimate instead of displaying atomic amounts as call prices;
+live challenges and ordinary caps still govern payment. The seller report includes the vendor's own capped test
+payment and retains checked URLs/addresses for 90 days under its published terms.
+It does not receive or forward a Treazury target-payment signature. Its verdict
+is an evidence report, not an endorsement; price alone is not an exclusion.
+
+`/api/http` advertises a $0.01 price, target GET/POST/HEAD/PUT/PATCH/DELETE,
+custom allowlisted headers and string/JSON request bodies. The guide/schema cap
+responses at 384 KB, bodies at 64 KB, duration at 12 seconds and redirects at three.
+It returns target `status`, filtered `headers`, text/base64 `body`, `bodyEncoding`,
+`finalUrl`, `truncated` and byte counts. Target 4xx/5xx responses are billed data,
+not a failed unpaid relay call. `/api/fetch` instead returns cleaned page text;
+it is not a raw-response replacement. Filtered header support does not establish
+that x402 payment headers, duplicate headers or cookies survive unaltered.
+
+No paid delivery or Tor reachability has been qualified here. Both new providers
+follow redirects remotely and return a final URL rather than Curl's complete
+reported redirect chain; a final URL cannot establish every intermediate hop.
+Their response envelopes differ from the current Curl adapter. Selection and any
+ordered multi-provider fallback require the generalized relay plan to be revised
+and independently reviewed; these definitions do not change runtime defaults or
+permit another paid attempt after an ambiguous signed relay outcome.
