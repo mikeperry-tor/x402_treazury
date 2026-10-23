@@ -413,12 +413,26 @@ impl Manager {
         Ok(result)
     }
     fn result(&self, r: &Record, caller: &str, snapshot: &CatalogSnapshot) -> Value {
+        let tool_count = snapshot
+            .views
+            .get(caller)
+            .into_iter()
+            .flatten()
+            .filter(|t| t.source.as_ref().is_some_and(|s| s.0 == r.id))
+            .count();
+        let next = if r.disabled.is_some() {
+            "This registration is disabled. Ask the operator to inspect its reason, repair its configuration and refresh the source where applicable. Repeating source_add returns the same disabled registration. Use tools_search without source_name to look for other available tools on this MCP endpoint."
+        } else if tool_count == 0 {
+            "This registration has no visible tools on this MCP endpoint. Ask the operator to inspect source selections and listener tool filters. Use tools_search without source_name to look for other available endpoint tools; removing that search filter does not change operator filters."
+        } else {
+            "Search tools with source_name=name on this same MCP endpoint, then invoke tool_id with arguments through x402_treazury_tool_call. Optional advertised provider help may explain prices and request contracts before a paid call. Unknown cost is not free; registration and help do not establish paid-delivery qualification."
+        };
         let mut result = json!({
             "name": r.candidate.name,
             "tool_prefix": import::tool_prefix(&r.candidate.name).ok(),
-            "tool_count": snapshot.views.get(caller).into_iter().flatten().filter(|t| t.source.as_ref().is_some_and(|s| s.0 == r.id)).count(),
+            "tool_count": tool_count,
             "status": if r.disabled.is_some() { "disabled" } else { "available" },
-            "next": "Search tools with source_name=name on this same MCP endpoint, then invoke tool_id with arguments through x402_treazury_tool_call. Optional advertised provider help may explain prices and request contracts before a paid call. Unknown cost is not free; registration and help do not establish paid-delivery qualification."
+            "next": next
         });
         if let Some(provider) = &r.candidate.provider {
             result["provider_id"] = json!(provider.id);

@@ -562,7 +562,7 @@ Rust configuration is TOML-only. [providers/](../providers/README.md) contains
 the reusable provider definitions. AgentUtility, Glassnode, Concordance,
 Straits and Locus have a `provider.toml` and a locally curated `openapi.json` in their own directory.
 JSON remains the format for API documents, fixture data and inventory output.
-Dynamic curated catalogs retain accepted provider configuration with their schema
+Dynamic bundled provider catalogs retain accepted provider configuration with their schema
 bytes; restart and offline source inspection rebuild that accepted definition.
 Explicit source refresh adopts current bundled settings and schema together.
 Source-management byte limits and wallet/origin policy remain authoritative; its
@@ -753,8 +753,8 @@ request contracts; registration and help do not establish paid-delivery qualific
 `x402_treazury_source_add` accepts exactly one bundled `provider_id` or public
 OpenAPI `spec_url`, plus optional `name`. A unique exact known specification URL
 uses the bundled definition unless that URL already identifies an accepted generic
-registration. Repeated provider IDs return the accepted curated source without
-refresh; unknown or ambiguous selectors fail explicitly. Curated registration
+registration. Repeated provider IDs return the accepted bundled source without
+refresh; unknown or ambiguous selectors fail explicitly. Bundled registration
 preserves provider compatibility settings and embedded schemas, defaults its name
 to the short ID (`exa` produces `dyn_exa__search`), and grants no funding or extra
 payment authority. Operator destination policy still applies.
@@ -784,8 +784,11 @@ It uses the same resolved wallet, ordinary payment admission, allowed origins,
 response limits and network factory as imported APIs. It is independent of API
 tool-name filters and accepts no agent headers, wallet or payment settings.
 
-Registration returns a readable name, prefix, tool count, status and next step.
-An omitted name defaults to its provider ID for curated sources or its specification
+Registration returns a readable name, prefix, visible tool count, status and next step.
+Disabled registrations direct operator repair/refresh; enabled registrations with
+zero visible tools direct inspection of source selections and listener filters.
+Repeating registration does not refresh it or make hidden tools callable.
+An omitted name defaults to its provider ID for bundled sources or its specification
 hostname for generic sources, with collision suffixes.
 Search filters use optional `source_name`; calls use stable readable `tool_id`
 names resolved against the current endpoint catalog. Internal source UUIDs,

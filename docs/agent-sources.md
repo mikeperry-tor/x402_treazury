@@ -33,7 +33,7 @@ uses each source's actual generated names without prefix rewriting. Operator
 `catalog tools --all-tools` bypasses advice selection for inspection only and
 retains ordinary filters. Recommendation markers do not change MCP descriptions,
 source owners, payer bindings or invocation identity. Generic specification imports
-do not inherit provider advice. Accepted curated
+do not inherit provider advice. Accepted bundled
 definitions retain recommendation metadata without enabling recommendation selection;
 raw calls retain their separate authority.
 See [catalog selection](configuration.md) for composition and stale-advice behavior.
@@ -230,7 +230,7 @@ it. Use live tool search/enumeration for current endpoint-local availability and
 
 
 Enable `source_management = true` on an HTTP deployment endpoint to let its agents
-search bundled providers or the built-in x402 List directory, register curated or
+search bundled providers, x402 List or Coinbase resources, register bundled or
 public OpenAPI APIs, inspect tool signatures and
 invoke them. It defaults to false. Standalone provider serving remains static.
 See the [README workflow](../README.md#agent-api-auto-discovery-and-tool-addition)
@@ -285,7 +285,7 @@ not removed by API filters.
 
 | Tool | Arguments |
 | --- | --- |
-| `x402_treazury_sources_search` | `local_only=true`: optional `q`, `page`, `per_page` and `mode=browse`. Otherwise optional remote browse/best mode and upstream arguments; server sets `network=BSE`. |
+| `x402_treazury_sources_search` | `local_only=true`: optional `q`, `page`, `per_page` and `mode=browse`. Otherwise `directory=x402_list` (default) selects browse/best; `directory=coinbase` selects ranked resource search. Each branch has its own arguments and defaults. |
 | `x402_treazury_source_details` | Exactly one x402 List `slug`, public HTTPS API `base_url` or `documentation_url`. Returns listing/base discovery outcomes, or complete accepted usage text. |
 | `x402_treazury_source_add` | Exactly one bundled `provider_id` or public OpenAPI 3 JSON `spec_url`, plus optional readable `name`. |
 | `x402_treazury_providers_list` | Optional `page` and `per_page`; enumerates bundled provider metadata offline. |
@@ -293,7 +293,8 @@ not removed by API filters.
 | `x402_treazury_tools_search` | Optional `query`, registered `source_name`, `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Required readable `tool_id` and `arguments`. |
 
-Remote directory search uses embedded reviewed schemas and the live x402 List API. It
+With `directory` omitted or `x402_list`, remote search uses embedded reviewed schemas
+and the live x402 List API; the server sets `network=BSE`. It
 requires no static directory source or startup catalog fetch. Browse dispatches to
 `GET /services`, with `page`, `per_page` and directory filters. Best dispatches to
 `GET /best`, with `prefer` (`balanced`, `cheapest`, `fastest`, `most_reliable`),
@@ -301,11 +302,13 @@ requires no static directory source or startup catalog fetch. Browse dispatches 
 `include_facilitator_context`. For example:
 `{"mode":"best","q":"weather","prefer":"cheapest","limit":3}`.
 The price filter controls recommendations, not payment admission. The local mode
-selector is stripped; invalid or mixed-mode fields fail before I/O. Each search
-makes one directory request in remote mode. Reads share an IP-level free quota and may charge
+selector is stripped; invalid or mixed-mode fields fail before I/O. Each x402 List search
+makes one directory workflow. Reads share an IP-level free quota and may charge
 through the endpoint's source-management wallet and ordinary payment checks.
 Cite x402-list.com for its CC BY 4.0 directory data. Results are discovery leads,
-not executable schemas or delivery/payment guarantees.
+not registered tools or delivery/payment guarantees. Coinbase has a separate
+[resource-search contract](#coinbase-curated-resource-search), including unsigned
+origin attempts and optional paid fallback.
 
 ### Listing and URL discovery
 
@@ -401,7 +404,7 @@ invocation is a new logical call and may authorize another payment.
 ### Registration and tool invocation
 
 `source_add` accepts exactly one `provider_id` or `spec_url`, plus optional `name`.
-For example, `{"provider_id":"exa"}` registers the bundled Exa definition. A curated
+For example, `{"provider_id":"exa"}` registers the bundled Exa definition. A bundled
 registration uses its reviewed catalog configuration and acquires its remote or
 embedded schema server-side; it preserves base repair, selections, overrides,
 help, guidance and response mappings without activating provider recommendations.
@@ -409,17 +412,23 @@ No agent-selectable local path or data installation is needed.
 
 A specification URL first returns any existing generic registration for that
 endpoint and canonical URL unchanged. Otherwise a unique exact match against
-current bundled remote specification URLs selects the curated definition; multiple
+current bundled remote specification URLs selects the bundled definition; multiple
 matches require an explicit provider ID. Other URLs retain generic OpenAPI 3 JSON
 import, with the API base from the first root server resolved against the spec URL.
-An arbitrary document's `servers` claim never selects a curated provider.
-It returns `name`, `tool_prefix`, filtered `tool_count`, `status` and `next`; disabled registrations also include `reason`. Curated results and operator inspection also report the accepted `provider_id` and schema provenance.
+An arbitrary document's `servers` claim never selects a bundled provider.
+It returns `name`, `tool_prefix`, filtered `tool_count`, `status` and `next`; disabled registrations also include `reason`. Bundled results and operator inspection also report the accepted `provider_id` and schema provenance.
+`next` suggests search then invocation only when tools are visible. A disabled
+registration needs operator repair/refresh; repeating `source_add` returns that
+same registration. An enabled registration with zero visible tools retains
+`status="available"` and points to source selections and listener filters. Searching
+without `source_name` can find other endpoint tools, but does not alter operator
+filters or guarantee a callable result.
 Registration never funds wallets or probes prices.
 
 Names preserve case and allow at most 64 ASCII letters/digits/underscores/hyphens;
 `__` is reserved as the source/operation separator. Explicit names must be unique
 within the endpoint, including disabled registrations and configured source names.
-When omitted, curated sources use their short stable provider ID and generic
+When omitted, bundled sources use their short stable provider ID and generic
 sources use a readable hostname-derived name (for example `api-example-com`), with a numeric suffix such as `-2` if occupied. Name allocation
 and duplicate-URL checks share the existing publication lock. Choose `netintel` to
 produce `dyn_netintel__<operation>` tools; operation suffixes use normalized OpenAPI
@@ -431,7 +440,7 @@ ID returns its accepted registration before consulting the current bundle, witho
 implicit refresh or a new label. Concurrent provider-ID and current known-spec
 additions converge under the publication lock. A legacy generic URL registration
 remains generic when its URL is repeated; explicitly selecting its provider ID can
-create a separate curated source, subject to existing name/tool collision checks.
+create a separate bundled source, subject to existing name/tool collision checks.
 Busy errors can be retried with the same selector. Persistence follows operator
 configuration.
 Durable source records, UUIDs, revisions, hashes and tombstones remain internal and
@@ -483,7 +492,7 @@ are rejected as unknown fields; remove them from existing configuration.
 Specifications default to 32 MiB. Other advanced overrides in
 `[source_management]` are `max_spec_bytes`, `max_response_bytes`, `max_help_bytes`,
 `read_timeout_seconds`, and `allowed_origins`. The optional read-inactivity
-override takes precedence over an accepted curated provider value, which otherwise
+override takes precedence over an accepted bundled provider value, which otherwise
 inherits the network default (60 seconds in either transport). Generic imports and
 raw calls inherit the network default when the source-management value is omitted.
 Source-management response, help and specification byte limits govern dynamic
@@ -523,7 +532,7 @@ routes and help URLs are rejected; a cross-origin help URL requires its origin i
 `allowed_origins`. All production traffic uses the network factory. Dynamic API
 clients and lazy help retain public-destination restrictions at execution, including
 after binding, while help uses its own discovery-origin isolation identity. Accepted
-curated protocol compatibility applies to schema acquisition, refresh, API and help
+bundled protocol compatibility applies to schema acquisition, refresh, API and help
 through that factory; generic imports and raw calls retain strict defaults.
 
 Tor uses authenticated remote-DNS SOCKS with no direct fallback. Private DNS-answer
@@ -550,7 +559,7 @@ for connection, cover-state and Tor reuse limitations.
 ## Persistence and operator maintenance
 
 The separate owner-only SQLite registry holds accepted specification bytes, hashes,
-source UUIDs, endpoint ownership, revisions and tombstones. A curated source also
+source UUIDs, endpoint ownership, revisions and tombstones. A bundled source also
 saves its provider identity and effective catalog settings as one accepted
 definition. Catalog construction applies canonical provider names and name-keyed
 overrides before rebinding tools to `dyn_<registration-name>__<operation>`; the

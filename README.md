@@ -400,8 +400,10 @@ See [on-demand discovery](docs/agent-sources.md) for more details.
 
 ### Agent API Auto-Discovery and Tool Addition
 
-Source management lets agents find APIs through built-in [x402 List](https://x402-list.com) directory service tools,
-and add tools to an MCP endpoint themselves.
+Source management lets agents find bundled providers or APIs through
+[x402 List](https://x402-list.com) and Coinbase curated search, then add tools to an
+MCP endpoint themselves. Known provider IDs and specification URLs can be registered
+directly; discovery and usage-help inspection are optional.
 
 The feature is disabled by default.
 
@@ -442,8 +444,8 @@ An enabled endpoint advertises these seven tools to the agent:
 
 | Tool | How the agent uses it | Main inputs |
 | --- | --- | --- |
-| `x402_treazury_sources_search` | Searches bundled providers offline or asks x402 List for API leads. | `local_only=true` with query/pagination, or remote browse/best filters and ranking. |
-| `x402_treazury_source_details` | Resolves bundled provider matches or discovers specification/documentation URLs. | Exactly one directory `slug` or public HTTPS `base_url`. |
+| `x402_treazury_sources_search` | Searches bundled providers offline, x402 List, or Coinbase resources. | `local_only=true` with query/pagination; otherwise `directory` defaults to `x402_list`, or select `coinbase` for ranked curated search. |
+| `x402_treazury_source_details` | Resolves bundled matches, locates specifications/help, or reads exact usage text. | Exactly one x402 List `slug`, public HTTPS API `base_url`, or `documentation_url`. |
 | `x402_treazury_source_add` | Registers an API on this endpoint so its tools become available. | Exactly one bundled `provider_id` or public OpenAPI `spec_url`, plus optional `name`. |
 | `x402_treazury_providers_list` | Enumerates bundled provider metadata offline. | Optional `page` and `per_page`. |
 | `x402_treazury_tools_search` | Retrieves relevant tool descriptions, argument schemas and readable IDs. | Optional query, registered `source_name` and pagination. |
@@ -453,9 +455,25 @@ An enabled endpoint advertises these seven tools to the agent:
 For offline discovery, call `x402_treazury_sources_search` with
 `{"local_only":true,"q":"web search"}`, or use `x402_treazury_providers_list`.
 Pass a selected ID directly to `source_add`, for example `{"provider_id":"exa"}`.
-Curated sources preserve reviewed compatibility settings and default to short names
+Bundled sources preserve reviewed compatibility settings and default to short names
 such as `dyn_exa__search`. Bundled metadata does not establish current reachability
 or live qualification. Remote directory search remains the default.
+
+For Coinbase resources, use `{"directory":"coinbase","q":"weather","limit":3}`.
+Results preserve complete upstream metadata and partial-result indicators, with no
+pagination. Sufficient documented HTTP metadata can go directly to `raw_call`;
+an OpenAPI URL can go directly to `source_add`. A published usage link can optionally
+be read with `source_details(documentation_url=...)`, which never pays or follows
+redirects. Missing contracts remain missing: do not guess paid arguments.
+
+Coinbase origin search needs no API key. Tor uses one origin attempt plus up to two
+eligible isolation retries. `[discovery_relay].search = true` separately enables
+paid Curl fallback using the endpoint's source-management payer. It defaults false
+and reuses the configured [relay bootstrap](docs/configuration.md#paid-discovery-relay).
+Our connection to Curl retains the configured Tor/direct policy; Curl fetches the target from its own
+network and is trusted for the relayed content. Every search is fresh and repeating
+a fallback may authorize another payment. Valid empty/partial results do not trigger
+Curl; never automatically replay an uncertain paid search.
 
 Supply a readable source name when registering: `name = "netintel"` creates tools
 such as `dyn_netintel__ip_reputation_analyze`. Names are preserved exactly and are

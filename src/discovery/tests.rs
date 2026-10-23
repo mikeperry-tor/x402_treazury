@@ -3503,3 +3503,6 @@ async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
         other_task.abort();
     }
 }
+
+#[path = "registration_guidance_tests.rs"]
+mod registration_guidance_tests;
