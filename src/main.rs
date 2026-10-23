@@ -52,7 +52,6 @@ struct Args {
     allowed_hosts: Option<Vec<String>>,
     disable_host_check: bool,
     list_tools: bool,
-    discover_pricing: bool,
     all_tools: bool,
     list_tags: bool,
     route_tool: Option<String>,
@@ -143,7 +142,6 @@ async fn run() -> Result<()> {
                 &args.config,
                 &args.source,
                 args.direct,
-                args.discover_pricing,
                 policy.as_ref(),
             )
             .await?;
@@ -241,13 +239,13 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
         .prefix
         .clone()
         .unwrap_or(catalog::default_prefix(&base)?);
-    x402_treazury::pricing::validate(&cfg)?;
-    let mut tools = catalog::build_tools(&cfg, &root, &prefix)?;
+    x402_treazury::config::validate(&cfg)?;
+    let tools = catalog::build_tools(&cfg, &root, &prefix)?;
     tracing::info!(target: "x402_treazury::startup", tools = tools.len(), "Catalog ready");
-    if inspect_standalone(&args, &cfg, &root, &prefix, &base, &mut tools).await? {
+    if inspect_standalone(&args, &cfg, &base, &tools).await? {
         return Ok(());
     }
-    let server = prepare_standalone_server(&args, &env, cfg, &root, &prefix, base, tools).await?;
+    let server = prepare_standalone_server(&args, &env, cfg, base, tools).await?;
     if args.transport == "stdio" {
         serve_standalone_stdio(server).await?;
     } else {
@@ -270,20 +268,10 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
 async fn inspect_standalone(
     args: &Args,
     cfg: &Config,
-    root: &serde_json::Value,
-    prefix: &str,
     base: &str,
-    tools: &mut Vec<catalog::ToolSpec>,
+    tools: &[catalog::ToolSpec],
 ) -> Result<bool> {
     if args.list_tools {
-        if args.discover_pricing {
-            let prices = x402_treazury::pricing::process_cache()
-                .discover(cfg, root, tools, base)
-                .await?;
-            tracing::info!(target: "x402_treazury::startup", enabled = cfg.probe_pricing,
-                prices = prices.len(), "Startup pricing source finished");
-            *tools = catalog::build_tools_with_prices(cfg, root, prefix, &prices)?;
-        }
         let recommended = cfg.recommendation_matcher()?;
         let inventory: Vec<_> = tools
             .iter()
@@ -317,8 +305,6 @@ async fn prepare_standalone_server(
     args: &Args,
     env: &BTreeMap<String, String>,
     cfg: Config,
-    root: &serde_json::Value,
-    prefix: &str,
     base: String,
     tools: Vec<catalog::ToolSpec>,
 ) -> Result<Server> {
@@ -333,12 +319,6 @@ async fn prepare_standalone_server(
             .context("EVM_PRIVATE_KEY required")?,
         policy,
     )?;
-    let prices = x402_treazury::pricing::process_cache()
-        .discover(&cfg, root, &tools, &base)
-        .await?;
-    tracing::info!(target: "x402_treazury::startup", enabled = cfg.probe_pricing,
-        prices = prices.len(), "Startup pricing source finished");
-    let tools = catalog::build_tools_with_prices(&cfg, root, prefix, &prices)?;
     let mut server = Server::new(
         tools,
         PaidClient::new(payer)
@@ -419,7 +399,6 @@ fn validate_meta_arguments(
                     [
                         "meta_config",
                         "network_config",
-                        "discover_pricing",
                         "all_tools",
                         "env_file",
                         "qualification_no_new_funding",
@@ -589,9 +568,6 @@ async fn print_deployment_inspection(
         return Ok(true);
     }
     if args.list_tools {
-        if args.discover_pricing {
-            deployment.discover_prices().await?;
-        }
         println!("{}", serde_json::to_string_pretty(&deployment.inventory())?);
         return Ok(true);
     }

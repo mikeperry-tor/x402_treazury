@@ -8,30 +8,23 @@ per-alias overrides/filters/wallets, strict configuration, and JSON stdout with
 progress on stderr. The synchronous unsigned-serving loader can omit optional
 remote failures with explicit unavailable status; required sources, inspection and
 qualification stay strict in these synchronous tests. Its isolated SOCKS subprocess verifies that concurrent
-catalog and pricing requests retain origin-based discovery identities: same-origin paths
+catalog requests retain origin-based discovery identities: same-origin paths
 share credentials, different origins do not. It does not require real Tor.
 
 Run the focused regression suites sequentially:
 
 ```sh
-scripts/zcash.sh test --test startup --test deployment --test provider_catalogs --test pricing --test network_audit
+scripts/zcash.sh test --test startup --test deployment --test provider_catalogs --test network_audit
 scripts/zcash.sh build
 ```
 
 The application includes Zcash. The ignored SOCKS child is exercised by its parent.
-Pricing barriers additionally assert a shared 16-request cap, lower per-source limits, rolling progress past a
-stalled endpoint, duplicate-URL coalescing, and cancellation releasing permits.
-Pricing retry regressions additionally cover a delayed probe releasing a single
-source slot, sixteen delayed sources permitting a queued provider's description
-publication through the deferred runtime, and unchanged active request bounds.
 Relay ownership fixtures cover capacity retained after waiter cancellation and
 queued serialized fetches leaving unrelated request capacity available.
-The deployment suite verifies concurrent source discovery and complete, ordered
-priced inventories through synchronous loading. The `deployment::deferred::tests`
+The deployment suite verifies concurrent source discovery and complete, ordered inventories through synchronous loading. The `deployment::deferred::tests`
 unit tests cover ordinary deployment serving: listeners bind before slow remote
-catalogs or pricing finish, available tools remain callable, and a required remote
-failure becomes unavailable while strict inspection still rejects it. Pricing
-publication preserves tool order and existing callable snapshots. Deferred collision
+catalogs finish, available tools remain callable, and a required remote
+failure becomes unavailable while strict inspection still rejects it. Publication preserves authored prices, tool order and existing callable snapshots. Deferred collision
 regressions cover opposite completion orders, three owners, exact selectors,
 unique tools, listener isolation and captured bindings; strict loading still rejects
 duplicate names.
@@ -44,7 +37,7 @@ Wallet discovery uses the [wallet observation policy](../docs/wallet-rotation.md
 `network::startup_socks::tests` covers a late local SOCKS listener, shared and
 cancelled waiters (including initializer handoff to an existing waiter), sanitized ERROR/recovery INFO, minute ERROR reminders during
 a continuing outage, completed observation without a
-permanent monitor, and fresh catalog/pricing cache hits while the proxy is absent.
+permanent monitor, and fresh catalog cache hits while the proxy is absent.
 `deployment::deferred::startup_socks_tests` verifies that a bound authenticated MCP
 listener and local tools remain available, then remote catalogs and captured Base
 balance discovery and an idle treasury's initial scan resume in the same process
@@ -83,29 +76,22 @@ request contracts with nested arrays and a path template, a larger lookup
 inventory, and embedded-price/GET-POST variants. Five sources include two aliases
 sharing three unique spec URLs while retaining distinct prefixes. Localhost adds
 100 ms per request. The test compares complete inventories across three samples
-at each concurrency level, then exercises unsigned pricing with a fresh shared
-process-local cache at each source concurrency. Its declared workload expects
-34 unique probes: 32 larger-inventory lookups, one small lookup and one unpriced
-GET. Embedded prices, path templates and POST-preferred twins are not probed;
-aliases must not duplicate requests. Every possible probe destination is checked
-to be local and the server rejects payment-signature headers. No provider
-fixture, external service, Tor daemon, secret, funded wallet or signature is
+at each concurrency level. Aliases must not duplicate catalog requests, and no
+endpoint pricing requests are made. The server rejects payment-signature headers.
+No provider fixture, external service, Tor daemon, secret, funded wallet or signature is
 involved. Compiling this ignored test does not run a measurement or establish
 performance results.
 
 Candidate preparation and tool generation are synchronous. Measure queue, headers,
-body, parsing and price-description rebuild separately; full startup also includes
+body, parsing and tool construction separately; full startup also includes
 wallet binding. Record peak memory, request counts, failures and identical tool
 inventories, not only successful elapsed times. Keep results under ignored `target/`.
 
 ## Defaults and working theory
 
-Catalog concurrency defaults to 2 (configurable 1..64); pricing uses a shared
-16-request limit plus per-source limits. Pricing probes inspect status/challenge
-headers rather than consuming complete bodies, so evaluate them independently.
-Compatible catalog aliases share one download per load, while local files and
-separate loads remain independent. Empty discovered-price maps reuse original
-tools. A separate live comparison must declare its selected provider workload and
+Catalog concurrency defaults to 2 (configurable 1..64). Compatible catalog aliases
+share one download per load, while local files and separate loads remain independent.
+A separate live comparison must declare its selected provider workload and
 retain failures without changing runtime selection to improve the result.
 
 The catalog default reflects a working theory that leaving headroom below an

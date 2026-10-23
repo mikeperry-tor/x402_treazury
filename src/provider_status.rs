@@ -21,7 +21,7 @@ impl ReliabilityTag {
         match self {
             Self::SlowPricing => (
                 "slow_pricing",
-                "Unsigned pricing discovery has shown long response waits and may delay startup. This tag does not describe catalog or paid-call performance.",
+                "Historical price probes encountered long response waits. This tag does not establish catalog or paid-call performance.",
             ),
             Self::UpstreamTimeout => (
                 "upstream_timeout",

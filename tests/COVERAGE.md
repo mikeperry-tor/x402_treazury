@@ -18,7 +18,7 @@ not establish a coverage improvement.
 | Canonical balances/nonces, credit, quote binding and funding transitions | `tests/base.rs`, `src/rotation/` tests |
 | Encryption, migrations, ownership, unsafe links and atomic backup failures | Treasury/store integrity and filesystem tests, `tests/cli_contracts.rs` |
 | MCP auth, routes, fallback, pagination, process shutdown | `tests/server.rs`, `tests/stdio.rs`, `tests/shutdown.rs`, `tests/supervision.rs` |
-| Catalog complexity, concurrent startup and one-shot pricing | `src/catalog.rs`, `tests/provider_catalogs.rs`, `tests/startup.rs`, `tests/pricing.rs` |
+| Catalog complexity, concurrent startup, authored prices and passive payment hints | `src/catalog.rs`, `tests/provider_catalogs.rs`, `tests/startup.rs`, `src/pricing/runtime.rs` tests and payment selection tests |
 | Visible byte/display bounds, typed media and error redaction | `tests/download_limits.rs`, `tests/media.rs`, `tests/confidential_errors.rs` |
 | Registry claims, canonical settlement, no replay and frozen catalogs | `tests/integration_preparation.rs`, `tests/live/runner/` tests |
 

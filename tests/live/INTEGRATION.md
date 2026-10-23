@@ -49,8 +49,8 @@ paths when moving templates and owner-only evidence directories. Review exact to
 arguments, response assertions and source/listener/wallet assignments.
 
 The baseline reserves **$4.40 across 22 paid cases**, not a fee forecast. It
-permits zero new funding jobs/source exposure and disables automatic funding and
-startup pricing. Retain all declared pools, including those not used by the sweep.
+permits zero new funding jobs/source exposure and disables automatic funding.
+Startup does not probe endpoint prices. Retain all declared pools, including those not used by the sweep.
 Extra routes/providers, funding and repeated calls need separate reviewed bounds.
 
 Plan offline without catalogs, wallet keys, balances or requests:
@@ -114,7 +114,7 @@ changing the required pool/wallet scope. Explicit fixture substitution must pres
 the original failure and fixture origin/hash. Kronos and RegimeShift currently use
 local snapshots; local/frozen loading does not establish live catalog availability.
 When removing a startup source after case selection, remove its listener entries
-and pricing assertions too, then run `plan` again before preparation. Keep every
+too, then run `plan` again before preparation. Keep every
 wallet profile and record all omitted cases. Failed preparation evidence is never
 overwritten; use a new run ID for corrected inputs.
 
@@ -172,13 +172,12 @@ pricing, MCP result, body semantics and canonical debit proof separate. Flag sam
 offers above $0.01; missing prices/proofs are not zero. AgentUtility may still require
 manual semantic review. Preserve blocked/unattempted stages and every failure.
 
-The baseline disables pricing. Use a separate small eligible-provider configuration
-with [pricing assertions](INTEGRATION_REFERENCE.md#startup-pricing-assertions),
-preferably keyless/unsigned. Keep normal production discovery policy; do not force
-extra probes or paid requests. Observe cover failures/interference separately;
+Startup performs no endpoint pricing acquisition. Keep authored display prices,
+actual-call challenges and canonical debit evidence distinct; no advance price
+estimate authorizes a payment. Observe cover failures/interference separately;
 successful shaping is not a gate for this provider-workflow acceptance.
-Preparation still needs a `[treasury]` ID/state reference matching the existing
-registry, even for this unsigned run. Use a nonexistent `key_file` and unset
+For an unsigned run, preparation still needs a `[treasury]` ID/state reference
+matching the existing registry. Use a nonexistent `key_file` and unset
 indexer/submission environment references, no managed wallets or funding, and a
 zero-cap static placeholder with an unset private-key reference. Production unsigned
 serving never opens these keys or starts treasury workers.
@@ -190,7 +189,7 @@ bespoke scripts. Retain exact evidence links and manual gaps. Private financial 
 
 - [Scenario presets](integration/SCENARIO_PRESETS.md): smoke, shared/separate-wallet
   concurrency, rotation, lifecycle and treasury-only runs.
-- [Reference](INTEGRATION_REFERENCE.md): content/cache/pricing assertions, evidence
+- [Reference](INTEGRATION_REFERENCE.md): content/cache assertions, evidence
   limits, accounting and production supervision.
 - [Tor re-audit and receipt recovery](INTEGRATION_REFERENCE.md#offline-tor-re-audit):
   inspect retained evidence without authorizing new paid calls.

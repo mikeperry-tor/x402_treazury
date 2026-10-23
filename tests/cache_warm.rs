@@ -93,7 +93,7 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
                     ("cache-control", "max-age=600".into()),
                     ("etag", "\"one\"".into()),
                 ],
-                r#"{"operations":[{"method":"GET","path":"/read"},{"method":"GET","path":"/excluded"}]}"#,
+                r#"{"operations":[{"method":"GET","path":"/read","pricing":{"amount":"0.001","currency":"USD"}},{"method":"GET","path":"/excluded"}]}"#,
             ),
             "/read" => (
                 axum::http::StatusCode::PAYMENT_REQUIRED,
@@ -145,7 +145,6 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
         "--source",
         "api",
         "--direct",
-        "--discover-pricing",
     ])
     .await;
     assert!(
@@ -157,8 +156,9 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     assert_eq!(report["direct"], true);
     assert_eq!(report["sources"].as_array().unwrap().len(), 1);
     assert_eq!(report["sources"][0]["catalog_cache"], "fresh");
-    assert_eq!(report["sources"][0]["fresh_pricing_entries"], 1);
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(report["sources"][0].get("fresh_pricing_entries").is_none());
+    assert!(report["sources"][0].get("pricing").is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(tor_calls.load(Ordering::SeqCst), 0);
     assert!(String::from_utf8_lossy(&warmed.stderr).contains("Explicit direct cache warming"));
     // Normal loading still uses Tor policy. Remove the intentionally unselected
@@ -172,7 +172,7 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
         concat!(env!("CARGO_MANIFEST_DIR"), "/providers/curl/provider.toml"),
     );
     std::fs::write(path, configured).unwrap();
-    let inventory = cli(&["catalog", "tools", "--config", path, "--discover-pricing"]).await;
+    let inventory = cli(&["catalog", "tools", "--config", path]).await;
     assert!(
         inventory.status.success(),
         "{}",
@@ -183,7 +183,7 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
         String::from_utf8_lossy(&inventory.stderr)
             .contains("Using explicitly directly warmed discovery cache")
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(tor_calls.load(Ordering::SeqCst), 0);
     assert!(!dir.path().join("state/state.sqlite").exists());
     assert!(!dir.path().join("state/wallet.key").exists());
@@ -196,7 +196,7 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     .unwrap();
     let different = cli(&["catalog", "tools", "--config", path]).await;
     assert!(!different.status.success());
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     std::fs::write(
         path,
         original.replace("[sources.api]", "[sources.api]\nhttp_cache_enabled=false"),
@@ -205,7 +205,7 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     let disabled = cli(&["catalog", "warm", "--config", path, "--direct"]).await;
     assert!(!disabled.status.success());
     assert!(String::from_utf8_lossy(&disabled.stderr).contains("http_cache_enabled=false"));
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     std::fs::write(
         path,
         original.replace(
@@ -217,7 +217,7 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     let disabled = cli(&["catalog", "warm", "--config", path, "--direct"]).await;
     assert!(!disabled.status.success());
     assert!(String::from_utf8_lossy(&disabled.stderr).contains("catalog_cache_ttl_seconds=0"));
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     std::fs::write(path, original).unwrap();
     // Expired direct entries cannot be revalidated over Tor or trigger direct I/O.
     let db = rusqlite::Connection::open(dir.path().join("state/http-cache/discovery-v1.sqlite"))
@@ -230,7 +230,7 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     let expired = cli(&["catalog", "tools", "--config", path]).await;
     assert!(!expired.status.success());
     assert!(tor_calls.load(Ordering::SeqCst) > 0);
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     // Refresh is a separate explicit direct command.
     let refreshed = cli(&[
         "catalog", "warm", "--config", path, "--source", "api", "--direct",
@@ -241,7 +241,7 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
         "{}",
         String::from_utf8_lossy(&refreshed.stderr)
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
     origin_task.abort();
     socks_task.abort();
 }
@@ -269,7 +269,7 @@ async fn warming_requires_existing_state_and_cannot_be_selected_for_serving() {
 }
 
 #[tokio::test]
-async fn warming_sorts_local_and_shared_remote_sources_and_reuses_only_fresh_prices() {
+async fn warming_sorts_local_and_shared_remote_catalogs_without_endpoint_reads() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("state")).unwrap();
     let catalog_calls = Arc::new(AtomicUsize::new(0));
@@ -360,11 +360,8 @@ sources=['z_remote','m_local','a_remote']
     )
     .unwrap();
     let path = path.to_str().unwrap();
-    let run = |pricing: bool| async move {
-        let mut args = vec!["catalog", "warm", "--config", path, "--direct"];
-        if pricing {
-            args.push("--discover-pricing");
-        }
+    let run = || async move {
+        let args = ["catalog", "warm", "--config", path, "--direct"];
         let output = cli(&args).await;
         assert!(
             output.status.success(),
@@ -373,8 +370,8 @@ sources=['z_remote','m_local','a_remote']
         );
         serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
     };
-    let without_pricing = run(false).await;
-    let rows = without_pricing["sources"].as_array().unwrap();
+    let warmed = run().await;
+    let rows = warmed["sources"].as_array().unwrap();
     assert_eq!(
         rows.iter()
             .map(|r| r["source"].as_str().unwrap())
@@ -386,7 +383,7 @@ sources=['z_remote','m_local','a_remote']
     assert_eq!(rows[2]["catalog_cache"], "fresh");
     assert!(
         rows.iter()
-            .all(|r| r["pricing"].is_null() && r["fresh_pricing_entries"] == 0)
+            .all(|r| r.get("pricing").is_none() && r.get("fresh_pricing_entries").is_none())
     );
     assert_eq!(
         catalog_calls.load(Ordering::SeqCst),
@@ -395,39 +392,45 @@ sources=['z_remote','m_local','a_remote']
     );
     assert_eq!(price_calls.load(Ordering::SeqCst), 0);
 
-    for expected_calls in [1, 1] {
-        let priced = run(true).await;
-        for row in priced["sources"].as_array().unwrap() {
-            assert_eq!(row["fresh_pricing_entries"], 1);
-            assert_eq!(row["pricing"]["available_prices"], 1);
-            assert_eq!(row["pricing"]["observed"], 1);
-        }
+    for _ in 0..2 {
+        let repeated = run().await;
+        assert_eq!(
+            repeated["sources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| (&row["source"], &row["catalog_cache"]))
+                .collect::<Vec<_>>(),
+            rows.iter()
+                .map(|row| (&row["source"], &row["catalog_cache"]))
+                .collect::<Vec<_>>()
+        );
         assert_eq!(catalog_calls.load(Ordering::SeqCst), 1);
         assert_eq!(
             price_calls.load(Ordering::SeqCst),
-            expected_calls,
-            "shared route priced once, then reused from disk"
+            0,
+            "warming never acquires endpoint prices"
         );
     }
     let db = rusqlite::Connection::open(dir.path().join("state/http-cache/discovery-v1.sqlite"))
         .unwrap();
-    // Expire all cached observations: the next explicit warm must refresh both
-    // catalog and pricing, retaining sharing across aliases and the local source.
+    // Expire cached catalogs; the next explicit warm refreshes the shared document
+    // while the local source stays local.
     db.execute(
         "UPDATE entries SET metadata=json_set(metadata,'$.expires',0)",
         [],
     )
     .unwrap();
-    let refreshed = run(true).await;
+    let refreshed = run().await;
     assert!(
         refreshed["sources"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|r| r["fresh_pricing_entries"] == 1)
+            .all(|r| r.get("fresh_pricing_entries").is_none() && r.get("pricing").is_none())
     );
     assert_eq!(catalog_calls.load(Ordering::SeqCst), 2);
-    assert_eq!(price_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(price_calls.load(Ordering::SeqCst), 0);
     assert!(!dir.path().join("state/state.sqlite").exists());
     assert!(!dir.path().join("state/wallet.key").exists());
     task.abort();

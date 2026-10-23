@@ -15,7 +15,7 @@ async fn relay_startup_errors_finish_shutdown() {
         std::fs::write(dir.path().join("spec.json"), r#"{"openapi":"3.0.0","info":{"title":"fixture","version":"1"},"paths":{"/curl":{"post":{"operationId":"curl","responses":{"200":{"description":"ok"}}}}}}"#).unwrap();
         std::fs::write(
             dir.path().join("relay.toml"),
-            "spec=\"spec.json\"\nbase_url=\"https://relay.example.com\"\nprobe_pricing=false\n",
+            "spec=\"spec.json\"\nbase_url=\"https://relay.example.com\"\n",
         )
         .unwrap();
         let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -47,7 +47,6 @@ max_conversion_overhead_percent=5
 [sources.api]
 spec="spec.json"
 base_url="https://api.example.com"
-probe_pricing=false
 [servers.one]
 listen="{}"
 bearer_token_env="TOKEN"

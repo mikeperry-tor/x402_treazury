@@ -39,8 +39,7 @@ that mode does not validate a returned quote or authorize its use for funding.
 
 Preflight retrieves the configured spec, builds its catalog, retrieves configured
 help, and requests an unsigned challenge using a public dummy EVM transport
-identity. Actual spec/help/pricing production identities remain discovery-origin
-scoped. It does not sign, load wallet state, send a paid retry, call MCP, perform
+identity. Actual spec/help production identities remain discovery-origin scoped. It does not sign, load wallet state, send a paid retry, call MCP, perform
 startup pricing probes, test help cache behavior or qualify settlement. A raw HTTP
 200 does not prove a meaningful tool result. Combined spec/catalog errors need
 inspection to identify the precise substage. Request arguments are pinned in the

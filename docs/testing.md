@@ -53,7 +53,7 @@ exercise actual read consumers through fake
 SOCKS/TLS/HTTP2: endpoint-first scope ordering, validated promotion, pending receipts,
 fresh whole-view fallback, retained owners, cancellation and absent financial side
 effects. Direct transport fixtures remain in `rotation::base::transport::tests`.
-`network::tls_retry_tests` verifies TLS recovery and exhaustion in catalog/pricing,
+`network::tls_retry_tests` verifies TLS recovery and exhaustion in catalog,
 unsigned API and Base while retaining certificate checks and signed no-replay.
 These prove routing and credential boundaries, not live Tor circuits or settlement.
 
@@ -101,11 +101,11 @@ factory. Use barriers and controlled clocks to expose concurrency boundaries;
 sleeps alone do not prove ordering. Retain positive fixture controls so a broken
 fixture cannot make every negative test pass.
 
-CLI contract fixtures count unsigned probes and assert inspection output and
-credential/error order; stdio and shutdown suites exercise accepted-call ownership.
-Recorded-pricing fixtures reconstruct full inventories from session-bound events,
-reject route/schema drift and check that only descriptions change. The real startup
-regression verifies reconstruction introduces no extra probes.
+CLI contract fixtures count catalog/API requests and assert inspection output,
+credential/error order and the absence of unsolicited pricing requests. Authored
+prices and credit conversions retain focused rendering coverage; actual-call
+challenge tests cover passive hint validation and wallet selection. Stdio and
+shutdown suites exercise accepted-call ownership.
 
 Capacity lifecycle fixtures call `consumed_reserve` with claim, retained-wallet,
 retirement, vacant-replacement and allocated-replacement matrices. They pin exact
@@ -406,7 +406,7 @@ keys and do not establish consensus or live-funded settlement qualification.
 | Synthetic proving and local consensus | Optional suites exercise saved-byte recovery, mined deposits, reorg refusal, refunds and expiry. See LIFECYCLE and REGTEST; these results are separate from default coverage. |
 | Fresh HTTP scope recovery and qualification mapping | Local fixtures cover retry credentials and private scope-to-owner/origin handoff, strict STREAM audit and session isolation. The changed recovery paths have not been requalified with a real Tor daemon or funded provider run. |
 | Real Tor and confinement | Exercised on macOS with an installed Tor process, authenticated control events and OS egress controls. Local SOCKS tests do not prove this; other operating systems and all-network anonymity remain outside the claim. |
-| Funded provider workflow | The reusable runner has exercised treasury bootstrap, a selected provider sweep, help caching, canonical debit reporting and a separate startup-pricing check through Tor. Failed or omitted providers remain failed or unobserved; this is not universal provider compatibility or current health. The canonical GenuineGood POST migration has only offline evidence; historical funded GET results do not qualify it. |
+| Funded provider workflow | Historical funded runs exercised treasury bootstrap, a selected provider sweep, help caching, canonical debit reporting and the former startup-pricing check through Tor. Current runs require no startup-pricing stage. Failed or omitted providers remain failed or unobserved; this is not universal provider compatibility or current health. The canonical GenuineGood POST migration has only offline evidence; historical funded GET results do not qualify it. |
 | Shared/separate-wallet concurrency and refill service | Manual live tests exercised overlapping paid calls and continued service during pending refill. Runner assertions have offline coverage; manual evidence does not qualify every automated lifecycle preset. |
 | Automated lifecycle/restart | Full confirmed-refill/two-round restart acceptance remains deferred. Promotions or service during treasury insufficiency alone are insufficient. |
 | Cover with paid traffic | Unsigned cover checks are separate. A fully successful combined cover/payment qualification remains deferred; range refusal or missing samples cannot be hidden by payment success. |

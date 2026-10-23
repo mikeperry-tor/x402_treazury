@@ -60,7 +60,6 @@ pub struct Observation {
     pub scope: String,
     pub state: State,
     pub http_status: Option<u16>,
-    pub pricing_evidence: Option<x402_treazury::pricing::Evidence>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct CaseOutcome {
@@ -77,7 +76,6 @@ pub struct Provider {
     pub source: String,
     pub catalog: Vec<Observation>,
     pub help: Vec<Observation>,
-    pub pricing: Vec<Observation>,
     pub cases: Vec<CaseOutcome>,
 }
 #[derive(Serialize, Deserialize)]
@@ -125,7 +123,6 @@ fn observation(scope: String, outcome: &Value, code: &Value) -> Result<Observati
         scope,
         state: state(outcome),
         http_status,
-        pricing_evidence: None,
     })
 }
 fn empty_observation(state: State) -> Vec<Observation> {
@@ -133,7 +130,6 @@ fn empty_observation(state: State) -> Vec<Observation> {
         scope: "no_observation".into(),
         state,
         http_status: None,
-        pricing_evidence: None,
     }]
 }
 // Keep stage reads lazy and ordered: malformed unused sections must not change
@@ -243,31 +239,6 @@ fn verified_debit(proofs: &Value, case: &str) -> Result<Option<u64>> {
     }
 }
 
-fn pricing_observations(source: &str, r: &Value) -> Result<Vec<Observation>> {
-    let mut pricing = Vec::new();
-    for row in rows(r, "pricing_stages")?
-        .iter()
-        .filter(|p| p["source"] == source)
-    {
-        let mut observed = observation(
-            row["session"].as_str().unwrap_or("no_session").into(),
-            &row["stage"],
-            &Value::Null,
-        )?;
-        if !row["evidence"].is_null() {
-            let evidence: x402_treazury::pricing::Evidence =
-                serde_json::from_value(row["evidence"].clone())?;
-            evidence.validate()?;
-            observed.pricing_evidence = Some(evidence);
-        }
-        pricing.push(observed);
-    }
-    if pricing.is_empty() {
-        pricing = empty_observation(State::Unobserved);
-    }
-    Ok(pricing)
-}
-
 pub fn build(m: &Manifest, config: &Value, r: &Value) -> Result<Report> {
     // Older config-only archives may lack the source inventory. Keep their known
     // case sources visible and explicitly avoid an exhaustive-inventory claim.
@@ -295,12 +266,10 @@ pub fn build(m: &Manifest, config: &Value, r: &Value) -> Result<Report> {
     for source in &sources {
         let catalog = catalog_observations(source, r)?;
         let (help, outcomes) = case_observations(source, m, r, &cases, semantics, proofs)?;
-        let pricing = pricing_observations(source, r)?;
         providers.push(Provider {
             source: source.clone(),
             catalog,
             help,
-            pricing,
             cases: outcomes,
         });
     }
@@ -345,13 +314,12 @@ mod tests {
             "provider_semantics":[{"case":"call","status":"failed"}],
             "canonical_api_debits":{"status":"validated","cases":{"call":"14000"}},
             "catalog_stages":[{"phase":"initial_inspection","sources":[{"source":"api","state":"failed","http_status":429},{"source":"unused","state":"not_started"}]}],
-            "help_stages":[],"pricing_stages":[{"source":"api","stage":"failed"}],"rotation":[],
+            "help_stages":[],"rotation":[],
             "treasury_accounting":{"status":"unobserved"},"source_reserved_zatoshis":20,"funding_jobs_reserved":1});
         let report = build(&m, &config, &r).unwrap();
         let p = &report.providers[0];
         assert_eq!(p.catalog[0].http_status, Some(429));
         assert_eq!(p.help[0].state, State::NotAttempted);
-        assert_eq!(p.pricing[0].state, State::Failed);
         assert_eq!(p.cases[0].semantics, State::Failed);
         assert_eq!(p.cases[0].payment, State::Completed);
         assert_eq!(report.source_funding.saved_accounting, State::Unobserved);
@@ -372,13 +340,13 @@ mod tests {
         json!({"cases":[{"case":"call","execution":"COMPLETED","semantic":"PASSED"}],
             "provider_semantics":[{"case":"call","status":"failed"}],
             "canonical_api_debits":{"status":"incomplete","cases":{}},
-            "catalog_stages":[],"help_stages":[],"pricing_stages":[],"rotation":[],
+            "catalog_stages":[],"help_stages":[],"rotation":[],
             "treasury_accounting":{"status":"recorded","observations":[{}]},
             "source_reserved_zatoshis":20,"funding_jobs_reserved":1})
     }
 
     fn unobserved(value: &str) -> Value {
-        json!([{"scope":"no_observation","state":value,"http_status":null,"pricing_evidence":null}])
+        json!([{"scope":"no_observation","state":value,"http_status":null}])
     }
 
     #[test]
@@ -398,7 +366,7 @@ mod tests {
                 json!({
                     "version":1,"source_inventory_complete":false,
                     "providers":[{"source":"api","catalog":unobserved("unobserved"),
-                        "help":unobserved("unobserved"),"pricing":unobserved("unobserved"),
+                        "help":unobserved("unobserved"),
                         "cases":[{"case":"call","execution":"completed","mcp":"completed",
                             "semantics":"failed","payment":"not_requested","verified_atomic":null}]}],
                     "source_funding":{"saved_accounting":"completed","observations":1,
@@ -435,10 +403,6 @@ mod tests {
         r["catalog_stages"] = json!([{"phase":"first","sources":[
             {"source":"api","state":"failed","http_status":429},
             {"source":"api","state":"completed","http_status":200}]}]);
-        let evidence = serde_json::to_value(x402_treazury::pricing::Evidence::default()).unwrap();
-        r["pricing_stages"] = json!([
-            {"source":"api","session":"one","stage":"disabled","evidence":evidence},
-            {"source":"api","session":"two","stage":"not_observed"}]);
         for zero in [json!("0"), json!(0)] {
             r["canonical_api_debits"] = json!({"status":"validated","cases":{"call":zero}});
             let report = serde_json::to_value(build(&m, &json!({}), &r).unwrap()).unwrap();
@@ -446,12 +410,9 @@ mod tests {
                 report["providers"][0],
                 json!({"source":"api",
                 "catalog":[
-                    {"scope":"first","state":"failed","http_status":429,"pricing_evidence":null},
-                    {"scope":"first","state":"completed","http_status":200,"pricing_evidence":null}],
-                "help":[{"scope":"call","state":"not_attempted","http_status":204,"pricing_evidence":null}],
-                "pricing":[
-                    {"scope":"one","state":"disabled","http_status":null,"pricing_evidence":evidence},
-                    {"scope":"two","state":"unobserved","http_status":null,"pricing_evidence":null}],
+                    {"scope":"first","state":"failed","http_status":429},
+                    {"scope":"first","state":"completed","http_status":200}],
+                "help":[{"scope":"call","state":"not_attempted","http_status":204}],
                 "cases":[{"case":"call","execution":"not_attempted","mcp":"completed",
                     "semantics":"failed","payment":"completed","verified_atomic":0}]})
             );
@@ -470,7 +431,6 @@ mod tests {
         r["catalog_stages"] = json!([{"phase":"load","sources":[
             {"source":"api","state":"failed","http_status":99}]}]);
         r["help_stages"] = Value::Null;
-        r["pricing_stages"] = Value::Null;
         let error = |r: &Value| build(&m, &config, r).err().unwrap().to_string();
         assert_eq!(error(&r), "invalid stage HTTP status");
         r["catalog_stages"] = json!([]);
@@ -482,13 +442,6 @@ mod tests {
         r["canonical_api_debits"] = json!({"status":"validated","cases":{"call":-1}});
         assert_eq!(error(&r), "invalid canonical debit amount");
         r["canonical_api_debits"] = json!({"status":"incomplete"});
-        assert_eq!(error(&r), "missing report section pricing_stages");
-        let mut invalid =
-            serde_json::to_value(x402_treazury::pricing::Evidence::default()).unwrap();
-        invalid["observed"] = json!(1);
-        r["pricing_stages"] = json!([{"source":"api","evidence":invalid}]);
-        assert_eq!(error(&r), "pricing observation totals disagree");
-        r["pricing_stages"] = json!([]);
         r["source_reserved_zatoshis"] = json!("20");
         assert_eq!(error(&r), "invalid report amount source_reserved_zatoshis");
         r["cases"] = json!([{ "case":"different" }]);

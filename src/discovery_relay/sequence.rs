@@ -93,7 +93,6 @@ fn label(format: Format) -> &'static str {
 #[derive(Clone, Copy)]
 pub(crate) enum Contract {
     Catalog,
-    Pricing,
     Document,
     Api,
     Search(fn(&[u8]) -> Result<()>),
@@ -101,11 +100,6 @@ pub(crate) enum Contract {
 impl Contract {
     pub(super) fn decision(self, response: &Decoded) -> Decision {
         let status = response.status;
-        // Pricing observes headers, not target body delivery. A relayed challenge
-        // is terminal even if unusable; it never authorizes target signing.
-        if matches!(self, Self::Pricing) && (status == 402 || (200..300).contains(&status)) {
-            return Decision::Accept;
-        }
         if status == 402 {
             return Decision::Terminal("target_payment_required");
         }
@@ -141,7 +135,6 @@ impl Contract {
             Self::Catalog => Decision::Accept,
             Self::Document | Self::Api if (200..300).contains(&status) => Decision::Accept,
             Self::Document | Self::Api => Decision::Next("http_status"),
-            Self::Pricing => Decision::Next("http_status"),
             Self::Search(_) if status != 200 => Decision::Next("http_status"),
             Self::Search(validate) if validate(&response.body).is_err() => {
                 Decision::Next("response_rejected")

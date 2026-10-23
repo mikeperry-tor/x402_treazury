@@ -18,8 +18,7 @@ spending authority.
 
 Standalone commands separate inspection/routing from server construction. Tags can
 return before base-URL validation; ordinary tools/check/route inspection needs no
-payment credentials. Serving validates spending policy and credentials before
-pricing discovery. The stdio lifecycle retains one pinned service waiter and the
+payment credentials. Serving validates spending policy and credentials before accepting calls. The stdio lifecycle retains one pinned service waiter and the
 accepted-work owner through cancellation, drain and cover shutdown.
 
 `src/config.rs` composes inline source settings with one level of provider TOML
@@ -43,11 +42,11 @@ Tool-name filters apply after collision resolution. Recommendation metadata is
 advisory until provider/source `use_recommended_tools` opts in. Include, exclude
 and recommendation selectors validate against the same compatible named inventory
 including help, then a single intersection selects tools. Listeners narrow that
-result; pricing rebuilds use the same selection. Empty active advice fails without
+result. Empty active advice fails without
 expansion, while unused stale advice only warns. Operator inventories add
 recommendation markers separately from `ToolSpec` and MCP publication. Explicit
 `catalog tools --all-tools` bypasses only advice after typed configuration resolution,
-retains ordinary filters, and cannot run pricing discovery. Digest metadata copying and
+retains ordinary filters. Digest metadata copying and
 OpenAPI operation conversion remain separate; conversion retains operation-level
 parameters and the existing reference-resolution rules. Input construction collects
 parameters before merging body properties; renamed body arguments retain their
@@ -63,8 +62,7 @@ source overrides, listener defaults and optional automatic assignment. Local
 catalogs load before ordinary deployment serving. Remote catalogs share capacity
 for 2 active downloads by default (`startup.catalog_concurrency`, 1..64), after
 listeners bind. Server-directed retry waits release download capacity while their
-logical loads remain pending. Available tools remain callable while remote catalogs and
-pricing are pending; failed remote sources remain unavailable with status in MCP
+logical loads remain pending. Available tools remain callable while remote catalogs are pending; failed remote sources remain unavailable with status in MCP
 instructions. Strict inspection/qualification wait for complete catalogs. The
 synchronous unsigned-serving loader cancels unfinished loads on required failure
 and can omit an explicitly `optional_startup` remote failure. Source
@@ -79,23 +77,19 @@ are loaded, including those unused by listeners. Remote aliases share fetching
 and immutable parsed JSON within a load only for the same exact URL, requested
 timeout, byte limit, transport policy and discovery identity. Filters, overrides, base URLs and
 wallet bindings remain per alias. Local files and later loads do not reuse this
-cache. Progress/timings go to stderr. Startup pricing discovery runs after tool
-selection, uses unsigned eligible GETs and caches both success and failure for
-the process lifetime. Empty price results reuse the original tools instead of
-regenerating identical definitions. TTL expiry never initiates a refresh. Lazy help fetches on
+cache. Progress/timings go to stderr. Lazy help fetches on
 first invocation; successful content is cached, failed initialization can retry,
 and simultaneous requests for the same resource coalesce. These caches are
 independent of fresh payment challenges.
 
 `src/http_cache.rs` adds disposable HTTP-aware persistence under an existing
 treasury state directory. Complete remote catalogs use the configured local lifetime
-and conditional GET validators after expiry; pricing stores only explicitly fresh derived estimates,
-never challenges. It partitions network/transport identities, bounds storage and
+and conditional GET validators after expiry. It partitions network/transport identities, bounds storage and
 bypasses qualification. See [discovery disk caching](configuration.md#automatic-discovery-disk-cache).
 
 `src/network/acquisition.rs` owns the single unsigned origin sequence, including
 fresh Tor scope selection, typed delivery failure and server delays. Static
-catalog/pricing and Coinbase consumers retain their own content acceptance,
+catalog and Coinbase consumers retain their own content acceptance,
 cache/revalidation and publication rules. Runtime imports, help and document probes
 use `discovery_relay/document.rs` for complete unsigned acquisition and typed
 failures. Consumer validation promotes only accepted origin content and preserves
@@ -122,8 +116,7 @@ Definitive eligible provider/target outcomes may advance through the list once;
 uncertain paid failure or an unattributable envelope stops. Static uncertainty
 disables that provider for the run without disabling independent providers.
 Delivered target errors/truncation may already be billed, and every authorization
-retains its liability. Relayed pricing `402` always terminates; no relayed challenge
-reaches target signing. Relay content never promotes an origin transport.
+retains its liability. No relayed challenge reaches target signing. Relay content never promotes an origin transport.
 
 Configured relays may follow redirects remotely while origin HTTP remains
 no-follow. Requested/reported final destinations and every Curl-reported hop pass
@@ -196,11 +189,11 @@ authority govern binding and execution. Source-management read inactivity takes
 precedence over an accepted provider value, then the network default; reviewed
 provider HTTP/TLS permissions reach schema acquisition, refresh, API and help via
 the network factory. Generic imports and raw calls remain strict. Accepted catalog
-settings do not activate static caches, warming, relays, probes, cover configuration
+settings do not activate static caches, warming, relays, cover configuration
 or recommendation selection. Agent-added sources use the same execution path; see
 [agent source management](agent-sources.md) for endpoint-local registration, persistence and refresh.
 Ordinary serving publishes available local tools before running remote catalog
-discovery, retained relay continuations and startup pricing. Late sources publish complete listener
+discovery and retained relay continuations. Late sources publish complete listener
 views through the same mutation boundary as dynamic registrations. Instructions
 report pending or unavailable sources. Each `tools/list` response also exposes
 listener-specific current instructions, catalog generation and publication-stop
@@ -325,7 +318,7 @@ opening still authenticates the encrypted snapshot under exclusive ownership.
 
 `src/network.rs` is the shared factory for both direct and optional Tor traffic.
 Connection pools are keyed by identity and destination; enabling Tor does not
-create a second execution stack. Catalog/help/pricing use discovery-origin
+create a second execution stack. Catalog/help use discovery-origin
 identities; payment and recipient-specific funding work use immutable EVM
 identities; wallet scans use the treasury UUID. The
 [egress inventory](network-egress.md) records callers, SDK integration, credential
@@ -386,12 +379,10 @@ does not sweep idle managed USDC wallets. Shared scalar acquisition ownership is
 separate from payment authorization and canonical qualification.
 Qualification retains its existing run permits and charges every attempt.
 
-Keep three caches/flows distinct. Catalog/help discovery retains its existing caching
-and coalescing. Startup pricing remains one-shot and cached, with HTTP-supported disk
-freshness for derived display estimates; payment challenges are not persisted as reusable
-authority. Runtime hints learn from actual invocation challenges and only guide selection.
-The current invocation path still makes an ordinary unsigned request even when a display
-estimate is cached. The selected design also creates new identities over time; its reuse objective depends
+Keep catalog/help caching and coalescing separate from passive runtime hints.
+Hints learn from actual invocation challenges and only guide selection. Every
+invocation still makes its ordinary unsigned request; authored display prices do
+not replace the live challenge. The selected design also creates new identities over time; its reuse objective depends
 on the HTTP and cover retention fixes in the [network retention contract](network-egress.md).
 Reclamation may require cover requalification and does not guarantee indefinite state retention.
 Conversely, a fresh-identity design must account for repeated cover qualification rather

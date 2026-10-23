@@ -302,10 +302,8 @@ fn summarize(registry: &Registry, m: &Manifest) -> Result<u8> {
         .all(|r| matches!(r["status"].as_str(), Some("passed" | "failed")));
     let (provider_complete, provider_passed) = crate::semantics::qualification(&report, None)?;
     let (help_complete, help_passed) = crate::help::qualification(&report, None)?;
-    let (pricing_complete, pricing_passed) = crate::pricing_stages::qualification(&report)?;
     let (reliability_complete, reliability_passed) = crate::reliability::qualification(&report)?;
-    let complete = pricing_complete
-        && help_complete
+    let complete = help_complete
         && reliability_complete
         && provider_complete
         && rotation_complete
@@ -321,8 +319,7 @@ fn summarize(registry: &Registry, m: &Manifest) -> Result<u8> {
                 )
                 && debit_complete(c, m, &debits)
         });
-    let passed = pricing_passed
-        && help_passed
+    let passed = help_passed
         && reliability_passed
         && provider_passed
         && rotation.iter().all(|r| r["status"] == "passed")
@@ -371,7 +368,6 @@ async fn ready(
     clients: &BTreeMap<String, mcp::Client>,
     snapshot: &Value,
     child: &mut Process,
-    pricing: (&Registry, &str, &str),
     limit: usize,
     deadline: Instant,
     stop: &CancellationToken,
@@ -398,10 +394,7 @@ async fn ready(
                 Err(e) => return Err(e.context("MCP initialization failed")),
             }
         }
-        let observations = pricing.0.report(Some(pricing.1), now()?)?;
-        let priced =
-            crate::pricing_stages::inventory(snapshot, &observations["runtime_events"], pricing.2)?;
-        let expected = priced["inventory"]
+        let expected = snapshot["inventory"]
             .as_array()
             .context("missing inventory")?
             .iter()
@@ -451,7 +444,6 @@ async fn execute(
             m,
             (phase, phase_deadline),
             clients,
-            child,
             &snapshot,
             runtime,
         )
@@ -808,12 +800,10 @@ async fn prepare_execution(
         .directory;
     let snapshot: Value =
         serde_json::from_slice(&files::read_catalog(&dir.join("snapshot.json"))?)?;
-    let session = child.current.binding.session.clone();
     ready(
         clients,
         &snapshot,
         child.running()?,
-        (registry, &m.run_id, &session),
         m.limits.result_bytes,
         deadline,
         stop,
@@ -864,7 +854,6 @@ async fn prepare_outage(
     m: &Manifest,
     (phase, phase_deadline): (&Phase, Instant),
     clients: &BTreeMap<String, mcp::Client>,
-    child: &mut session::Application<'_>,
     snapshot: &Value,
     runtime: &mut Option<&mut crate::tor::session::Runtime>,
 ) -> Result<()> {
@@ -890,14 +879,8 @@ async fn prepare_outage(
         )
         .await
         .context("outage preparation deadline exceeded")??;
-        let observations = registry.report(Some(&m.run_id), now()?)?;
-        let priced = crate::pricing_stages::inventory(
-            snapshot,
-            &observations["runtime_events"],
-            &child.current.binding.session,
-        )?;
         for (name, client) in clients {
-            let expected = priced["inventory"]
+            let expected = snapshot["inventory"]
                 .as_array()
                 .context("inventory missing")?
                 .iter()

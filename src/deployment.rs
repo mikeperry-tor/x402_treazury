@@ -1111,41 +1111,6 @@ impl Deployment {
         })
     }
 
-    /// Prepare startup prices without binding listeners or opening additional wallets.
-    /// Inspection is unsigned; a serving load may have explicitly prepared a paid relay.
-    /// Uses the process cache; repeated calls never refresh completed attempts.
-    pub async fn discover_prices(&mut self) -> Result<()> {
-        let started = std::time::Instant::now();
-        tracing::info!(target: "x402_treazury::startup", request_concurrency = crate::pricing::CONCURRENCY, "Startup pricing discovery started; serving waits for discovery");
-        let mut pending = Vec::new();
-        for (id, source) in &self.sources {
-            let selected: Vec<_> = self
-                .selected
-                .values()
-                .flatten()
-                .filter(|(s, _)| s == id)
-                .map(|(_, t)| t.clone())
-                .collect();
-            if !selected.is_empty() {
-                pending.push(startup::price_source(id, source, selected));
-            }
-        }
-        use futures_util::{TryStreamExt, stream};
-        let completed: Vec<_> = stream::FuturesUnordered::from_iter(pending)
-            .try_collect()
-            .await?;
-        // Apply only after every source succeeds; completion order cannot change inventory.
-        for (id, tools) in completed {
-            for (s, t) in self.selected.values_mut().flatten() {
-                if s == id {
-                    *t = tools[&t.name].clone();
-                }
-            }
-        }
-        tracing::info!(target: "x402_treazury::startup", elapsed_ms = started.elapsed().as_millis() as u64, "Startup pricing discovery finished");
-        Ok(())
-    }
-
     fn build_servers(&self, wallets: &BTreeMap<String, PaidClient>) -> BTreeMap<String, Server> {
         let mut servers = BTreeMap::new();
         for (name, cfg) in &self.config.servers {
@@ -1380,9 +1345,6 @@ impl Deployment {
         wallets: BTreeMap<String, PaidClient>,
         mut tokens: BTreeMap<String, Option<String>>,
     ) -> Result<BoundListeners> {
-        if !self.defer_discovery {
-            self.discover_prices().await?;
-        }
         let mut servers = self.build_servers(&wallets);
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         for (name, server) in &servers {
@@ -1991,7 +1953,6 @@ funding_amount_usdc="5"
 [sources.test]
 spec="spec.json"
 base_url="https://example.com"
-probe_pricing=false
 [servers.one]
 listen="127.0.0.1:0"
 wallet="shared"
@@ -2055,7 +2016,6 @@ version=1
 [sources.test]
 spec="spec.json"
 base_url="https://example.com"
-probe_pricing=false
 [wallets.shared]
 mode="static"
 private_key_env="KEY"
@@ -2219,7 +2179,6 @@ version = 1
 [sources.test]
 spec = "spec.json"
 base_url = "https://example.com"
-probe_pricing = false
 [wallets.shared]
 mode = "static"
 private_key_env = "KEY"

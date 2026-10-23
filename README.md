@@ -43,7 +43,7 @@ Zcash treasury funds govern enabled funding; the API payment cap is separate.
 Payment requests, wallet-specific balance checks and swap jobs use the current
 payer wallet address as the Tor circuit isolation identity. Switching payers
 changes the Tor isolation identity. API catalog
-retrieval, llm help text, and pricing queries use separate Tor identities
+retrieval and llm help text use separate Tor identities
 grouped by origin. Zcash treasury synchronization has its own identity. Tor mode
 uses remote DNS and has no direct-network fallback.
 
@@ -90,7 +90,7 @@ target/release/x402_treazury serve --config examples/deployments/managed.local.t
 ```
 
 `--network-config` replaces the complete `[network]` policy and, when present,
-`[discovery_relay]` for that invocation. This Tor example enables configured paid relay fallback for catalog/pricing,
+`[discovery_relay]` for that invocation. This Tor example enables configured paid relay fallback for catalog,
 document reads, Coinbase search and supported unsigned API requests using the
 deployment’s existing payers. Without the option, the managed starter uses its own settings.
 For treasury initialization over Tor, pass the same option to `wallet init`, or
@@ -264,7 +264,7 @@ See the [wallet observation policy](docs/wallet-rotation.md#wallet-observation-p
 for the discovery scopes and unavailable-treasury exception.
 
 The comprehensive example uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
-over Tor when catalog or pricing requests are blocked, rate limited or time out.
+over Tor when catalog requests are blocked, rate limited or time out.
 Relay fees depend on the configured provider and request; relay-dependent catalogs
 appear when their payer wallet becomes usable.
 

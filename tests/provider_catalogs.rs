@@ -53,7 +53,6 @@ async fn directory_defaults_include_public_operations_and_exclude_ownership() {
         .await
         .unwrap()
         .settings;
-    assert!(!cfg.probe_pricing);
     let mut doc: Value =
         serde_json::from_str(include_str!("fixtures/x402_list_openapi.json")).unwrap();
     doc["paths"]["/services"]["post"] = serde_json::json!({"description":"new supported request"});
@@ -111,7 +110,6 @@ async fn exa_curates_paid_operations_and_preserves_request_contracts() {
         .await
         .unwrap()
         .settings;
-    assert!(!cfg.probe_pricing);
     let mut doc: Value = serde_json::from_str(include_str!("fixtures/exa_openapi.json")).unwrap();
     // New diagnostic methods and same-prefix subroutes must not enlarge the default catalog.
     doc["paths"]["/search"]["get"] = json!({"summary":"Diagnostic"});
@@ -205,7 +203,6 @@ async fn oneshot_keeps_synchronous_search_without_authenticated_job_workflows() 
         .await
         .unwrap()
         .settings;
-    assert!(!cfg.probe_pricing);
     let mut doc: Value =
         serde_json::from_str(include_str!("fixtures/oneshot_openapi.json")).unwrap();
     // A new diagnostic method or nested paid route must not expand the catalog.
@@ -286,7 +283,6 @@ async fn stableenrich_keeps_sync_images_and_json_without_async_workflows() {
             .await
             .unwrap()
             .settings;
-    assert!(!cfg.probe_pricing);
     let mut doc: Value =
         serde_json::from_str(include_str!("fixtures/stableenrich_openapi.json")).unwrap();
     doc["paths"]["/api/health"] = json!({"get":{"summary":"Health"}});
@@ -664,7 +660,6 @@ async fn blockrun_fixed_targets_and_hosted_audio_preserve_boundaries() {
         .await
         .unwrap()
         .settings;
-    assert!(!cfg.probe_pricing);
     assert!(!cfg.allow_http1 && !cfg.allow_tls12);
     let mut doc: Value = serde_json::from_slice(
         &std::fs::read(root.join(format!("tests/fixtures/{name}_openapi.json"))).unwrap(),
@@ -783,7 +778,6 @@ async fn claw402_open_rootdata_bodies_preserve_prose_guided_arguments() {
         .await
         .unwrap()
         .settings;
-    assert!(!cfg.probe_pricing);
     assert!(!cfg.allow_http1 && !cfg.allow_tls12);
     let mut doc: Value = serde_json::from_slice(
         &std::fs::read(root.join(format!("tests/fixtures/{name}_openapi.json"))).unwrap(),
@@ -853,7 +847,6 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
         .settings;
     assert_eq!(cfg.prefix.as_deref(), Some("relayshield"));
     assert_eq!(cfg.pricing_key.as_deref(), Some("x-payment-info"));
-    assert!(!cfg.probe_pricing);
     assert_eq!(cfg.read_timeout_seconds, Some(90.0));
     let mut doc: Value =
         serde_json::from_str(include_str!("fixtures/relayshield_openapi.json")).unwrap();
@@ -917,7 +910,6 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
     assert_eq!(companion.base_url, cfg.base_url);
     assert_eq!(companion.pricing_key, cfg.pricing_key);
     assert_eq!(companion.read_timeout_seconds, cfg.read_timeout_seconds);
-    assert!(!companion.probe_pricing);
     assert!(companion.help_url.is_none());
     // Read the resolved relative local path, with no catalog HTTP request.
     let phone_doc: Value =
@@ -1030,7 +1022,6 @@ async fn newsgurus_uses_catalog_templates_and_preserves_parameter_contracts() {
         .await
         .unwrap()
         .settings;
-    assert!(!cfg.probe_pricing);
     let raw: Value =
         serde_json::from_str(include_str!("fixtures/newsgurus_x402_catalog.json")).unwrap();
     let mut doc: Value =
@@ -1137,7 +1128,6 @@ async fn vaaya_selects_synchronous_x402_research_and_routes_json_filters() {
         .await
         .unwrap()
         .settings;
-    assert!(!cfg.probe_pricing);
     assert!(!cfg.allow_http1 && !cfg.allow_tls12);
     assert!(cfg.additional_properties.is_none());
     let mut doc: Value = serde_json::from_str(include_str!("fixtures/vaaya_openapi.json")).unwrap();

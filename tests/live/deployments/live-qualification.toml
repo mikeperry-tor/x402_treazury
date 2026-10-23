@@ -52,12 +52,10 @@ extends = "../../../providers/socialfetch.toml"
 wallet = "coverage_a"
 prefix = "shared"
 overrides = {}
-probe_pricing = false
 [sources.isolated_social]
 extends = "../../../providers/socialfetch.toml"
 prefix = "isolated"
 overrides = {}
-probe_pricing = false
 [servers.a]
 listen = "127.0.0.1:8381"
 bearer_token_env = "QUALIFICATION_A_TOKEN"

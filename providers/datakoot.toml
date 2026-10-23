@@ -6,7 +6,6 @@ base_url = "https://x402.datakoot.com"
 prefix = "datakoot"
 include = ["/api", ""]
 pricing_key = "x-payment-info"
-probe_pricing = false
 read_timeout_seconds = 90
 # x402.datakoot.com/llms.txt returns 404; the vendor guide is hosted on the apex domain.
 help_url = "https://datakoot.com/llms.txt"

@@ -137,7 +137,7 @@ async fn cancelled_startup_observation_can_be_requested_again() {
 }
 
 #[tokio::test]
-async fn fresh_catalog_and_pricing_disk_hits_do_not_wait_for_absent_socks() {
+async fn fresh_catalog_disk_hit_does_not_wait_for_absent_socks() {
     let reserved = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = reserved.local_addr().unwrap();
     drop(reserved);
@@ -159,28 +159,13 @@ async fn fresh_catalog_and_pricing_disk_hits_do_not_wait_for_absent_socks() {
     headers.insert("cache-control", "max-age=600".parse().unwrap());
     let metadata =
         crate::http_cache::Metadata::from_headers(&headers, Duration::ZERO, None).unwrap();
-    for (url, kind, limit, data) in [
-        (
-            cfg.spec.clone(),
-            "catalog",
-            cfg.max_spec_bytes,
-            serde_json::to_vec(&document).unwrap(),
-        ),
-        (
-            format!("{base}/price"),
-            "pricing",
-            64 * 1024,
-            b"Cost: $0.001 USDC".to_vec(),
-        ),
-    ] {
-        crate::http_cache::Slot::new(&cfg, &url, kind, limit)
-            .unwrap()
-            .write(Some(crate::http_cache::Entry {
-                metadata: metadata.clone(),
-                data,
-            }))
-            .await;
-    }
+    crate::http_cache::Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes)
+        .unwrap()
+        .write(Some(crate::http_cache::Entry {
+            metadata,
+            data: serde_json::to_vec(&document).unwrap(),
+        }))
+        .await;
     let loaded = tokio::time::timeout(
         Duration::from_secs(2),
         crate::catalog::load_json_discovery_with(&cfg, &context),
@@ -191,16 +176,6 @@ async fn fresh_catalog_and_pricing_disk_hits_do_not_wait_for_absent_socks() {
     assert_eq!(loaded, document);
     let tools = crate::catalog::build_tools(&cfg, &loaded, "fixture").unwrap();
     assert_eq!(tools.len(), 1);
-    let cache = crate::pricing::PricingCache::default();
-    let prices = tokio::time::timeout(
-        Duration::from_secs(2),
-        cache.discover_observed_with(&context, &cfg, &loaded, &tools, base),
-    )
-    .await
-    .expect("fresh pricing must remain available while SOCKS is absent")
-    .unwrap();
-    assert_eq!(prices.evidence.available_prices, 1);
-    assert_eq!(prices.evidence.cache[&crate::pricing::CachePath::Disk], 1);
     assert!(!context.startup_socks.initialized());
     assert_eq!(context.http_cache_len(), 0);
 }

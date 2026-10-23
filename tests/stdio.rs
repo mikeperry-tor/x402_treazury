@@ -55,9 +55,7 @@ async fn cli_stdio_initializes_lists_calls_and_exits_cleanly() {
     let config = dir.path().join("provider.toml");
     std::fs::write(
         &config,
-        format!(
-            "spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\nprobe_pricing = false\n"
-        ),
+        format!("spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\n"),
     )
     .unwrap();
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))

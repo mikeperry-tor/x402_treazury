@@ -12,7 +12,6 @@ private_key_env = "UNSET_UNSIGNED_KEY"
 extends = "../../../providers/x402-list.toml"
 prefix = "directory"
 overrides = {}
-probe_pricing = false
 [servers.directory]
 listen = "127.0.0.1:18484"
 wallet = "keyless"

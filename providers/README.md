@@ -26,7 +26,7 @@ values: lists do not concatenate, an empty list clears a selection, and a local
 `overrides` table replaces the provider's entire override map. Providers cannot
 extend other files. Unknown keys fail validation. All generic catalog fields
 can be overridden at the source, including `spec`, `base_url`, `prefix`,
-`include`, `exclude`, `tags`, `exclude_tags`, descriptions and probe settings.
+`include`, `exclude`, `tags`, `exclude_tags`, descriptions and HTTP policy.
 Use listener tag/tool filters for multiple views of one shared source catalog.
 
 `--provider providers/pdl.toml` runs a single provider. `--config` loads
@@ -98,7 +98,7 @@ for route exclusions, pricing semantics and vendor-specific workflows.
 The x402-list provider exposes public directory reads, assessments and suggestions.
 Directory reads can become paid after a shared-IP free quota; the ordinary wallet cap
 still applies. Listings do not guarantee compatible payment or supply executable API
-schemas. Pricing probes, owner-token workflows and an unrepresentable submit
+schemas. Owner-token workflows and an unrepresentable submit
 schema are excluded. Embedded source management deliberately keeps three reads.
 
 Optional advertised provider help may explain prices and request contracts before

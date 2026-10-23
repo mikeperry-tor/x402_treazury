@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     path::{Path, PathBuf},
 };
 
@@ -23,8 +23,6 @@ pub struct Manifest {
     pub windows: Vec<Window>,
     pub cases: Vec<Case>,
     pub phases: Vec<Phase>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub pricing_checks: BTreeMap<String, crate::pricing_stages::Expectation>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

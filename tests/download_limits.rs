@@ -202,19 +202,6 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
             .description
             .contains("[truncated by max_description_chars=1]")
     );
-    let capped = Config {
-        probe_max_endpoints: 0,
-        ..Default::default()
-    };
-    let spec = json!({"paths":{"/skipped":{"get":{}}}});
-    let tools = build_tools(&capped, &spec, "t").unwrap();
-    assert!(
-        x402_treazury::pricing::PricingCache::default()
-            .discover(&capped, &spec, &tools, &vendor)
-            .await
-            .unwrap()
-            .is_empty()
-    );
     let log = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     for evidence in [
         "max_response_bytes",
@@ -223,7 +210,6 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
         "no partial content returned",
         "tool description truncated",
         "MCP request rejected",
-        "pricing discovery capped",
         "x402 challenge description truncated",
     ] {
         assert!(log.contains(evidence), "missing {evidence}: {log}");
@@ -242,7 +228,13 @@ async fn static_spec_limits_are_visible_in_cli_and_cli_overrides_toml() {
     ))
     .await;
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join("provider.toml"),format!("spec = '{vendor}/spec'\nbase_url = '{vendor}'\nprefix = 'test'\nmax_spec_bytes = 8\nprobe_pricing = false\n")).unwrap();
+    std::fs::write(
+        tmp.path().join("provider.toml"),
+        format!(
+            "spec = '{vendor}/spec'\nbase_url = '{vendor}'\nprefix = 'test'\nmax_spec_bytes = 8\n"
+        ),
+    )
+    .unwrap();
     for override_limit in [false, true] {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
         command
@@ -305,7 +297,7 @@ async fn deployment_sources_sharing_a_wallet_keep_distinct_response_caps() {
         "version = 1\n[wallets.shared]\nmode = 'static'\nprivate_key_env = 'KEY'\n".to_owned();
     for (id, limit) in [("small", 8), ("large", 9)] {
         config += &format!(
-            "[sources.{id}]\nspec = 'spec.json'\nbase_url = '{vendor}'\nprefix = 'test'\nmax_response_bytes = {limit}\nprobe_pricing = false\n[servers.{id}]\nlisten = '127.0.0.1:0'\nwallet = 'shared'\nsources = ['{id}']\nbearer_token_env = 'TOKEN'\n"
+            "[sources.{id}]\nspec = 'spec.json'\nbase_url = '{vendor}'\nprefix = 'test'\nmax_response_bytes = {limit}\n[servers.{id}]\nlisten = '127.0.0.1:0'\nwallet = 'shared'\nsources = ['{id}']\nbearer_token_env = 'TOKEN'\n"
         );
     }
     let path = tmp.path().join("servers.toml");

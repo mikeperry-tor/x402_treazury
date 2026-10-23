@@ -102,12 +102,10 @@ pub(super) async fn perform(
         "restart cancelled or deadline reached after safe drain; no new application started"
     );
     application.reopen(registry, m)?;
-    let session = application.current.binding.session.clone();
     ready(
         wait.clients,
         wait.snapshot,
         application.running()?,
-        (registry, &m.run_id, &session),
         m.limits.result_bytes,
         wait.deadline,
         wait.stop,

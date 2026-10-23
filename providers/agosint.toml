@@ -8,7 +8,6 @@ prefix = "agosint"
 include = ["/x402", ""]
 exclude = ["/mpp"]
 pricing_key = "x-payment-info"
-probe_pricing = false
 read_timeout_seconds = 120
 help_url = "https://agosint.shveik.dev/llms.txt"
 instructions_text = "AgOSINT corporate, registry, network, domain, VAT and sanctions intelligence via x402 USDC on Base. Supply valid mutually exclusive lookup keys before calling: an invalid body still receives an unpaid 402 quote (with X-Agdata-Invalid-Request: 1) before failing with 400 after payment signing. For agosint_company and agosint_due_diligence pass exactly one of id, name, lei, vat, or domain (country is required with id or name, and not used with lei, vat, or domain). For agosint_network pass exactly one of ip or asn. For agosint_sanctions pass exactly one of name or wallet (birth_date, country, kind, and threshold apply only to name). Live multi-registry fan-out (especially agosint_company_de) can take up to 90–120 seconds. Treazury handles x402 payment automatically and never replays signed payment headers on HTTP 202 or timeouts; missing receipts do not prove nothing was charged."

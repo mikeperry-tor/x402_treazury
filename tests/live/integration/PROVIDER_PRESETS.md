@@ -27,12 +27,10 @@ declared pools remain configured; the preset does not remove or fund them.
 
 Each paid provider has an independent phase with no dependencies on other
 providers or help success. Available help tools have unsigned fetch/hit checks in
-optional phases. Startup pricing is asserted disabled for the 23 selected sources.
+optional phases. Startup makes no endpoint pricing requests.
 Help assertion failures remain visible and can leave overall qualification
-incomplete; independent paid phases still proceed.
-This is the probe-disabled baseline; it does not replace the separate required
-empty/nonempty pricing and wallet-isolation acceptance cases. Tor and cover policy
-are inherited from the reviewed deployment. Kronos and RegimeShift currently use
+incomplete; independent paid phases still proceed. Wallet-isolation acceptance
+remains separate. Tor and cover policy are inherited from the reviewed deployment. Kronos and RegimeShift currently use
 explicit local snapshots in that template; their loading cannot qualify live
 catalog availability. Replace those references explicitly for a live-fetch run.
 Startup still requires the complete configured inventory; case selection alone

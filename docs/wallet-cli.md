@@ -147,7 +147,7 @@ claim even when retained timeout diagnostics remain; exact pending source work
 stays owned and continues reconciling during serving.
 
 Ordinary managed `serve` binds listeners and exposes available tools before starting
-initial or replacement funding. Remote catalog/pricing discovery and pending paid
+initial or replacement funding. Remote catalog discovery and pending paid
 relay discovery continue during serving under the retained owner; relay discovery
 waits for its assigned payer without allocating wallets itself. Serving does not
 wait for bootstrap completeness. `auto_fund=false` pauses new funding and makes

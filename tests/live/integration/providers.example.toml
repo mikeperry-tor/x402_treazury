@@ -38,31 +38,6 @@ not_after = 0
 # Each reservation must cover the configured wallet cap, not merely the quoted fee.
 
 
-[pricing_checks]
-agent402 = "disabled"
-agentfund = "disabled"
-agentutility = "disabled"
-arkham = "disabled"
-botsmith = "disabled"
-brazilayer = "disabled"
-concordance = "disabled"
-deepline = "disabled"
-exa = "disabled"
-genuinegood = "disabled"
-glassnode = "disabled"
-google_trends = "disabled"
-kronos = "disabled"
-locus = "disabled"
-lonestar = "disabled"
-otto = "disabled"
-pdl = "disabled"
-regimeshift = "disabled"
-socialfetch = "disabled"
-stableenrich = "disabled"
-straits = "disabled"
-x402_list = "disabled"
-x402stock = "disabled"
-
 [[cases]]
 id = "help_agent402_fetch"
 server = "b"

@@ -65,7 +65,6 @@ private_key_env="ABSENT_KEY"
 spec="spec.json"
 base_url="https://snapshot.invalid"
 prefix="test"
-probe_pricing=false
 max_spec_bytes={}
 [servers.one]
 listen="127.0.0.1:0"

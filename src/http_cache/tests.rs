@@ -1,8 +1,5 @@
 use super::*;
-use crate::{
-    catalog::{self, Config},
-    pricing::{CachePath, PricingCache},
-};
+use crate::catalog::{self, Config};
 use axum::{
     Router,
     extract::{Request, State},
@@ -110,25 +107,6 @@ async fn handler(State(state): State<Arc<Mutex<Origin>>>, request: Request) -> R
             "invalid JSON",
         )
             .into_response(),
-        5..=7 => {
-            use base64::Engine;
-            let challenge = base64::engine::general_purpose::STANDARD
-                .encode(r#"{"accepts":[{"amount":"1000","asset":"USDC"}]}"#);
-            let cache = match state.mode {
-                5 => "max-age=600",
-                6 => "no-store",
-                _ => "no-cache",
-            };
-            (
-                axum::http::StatusCode::PAYMENT_REQUIRED,
-                [
-                    ("cache-control", cache),
-                    ("payment-required", challenge.as_str()),
-                ],
-                "",
-            )
-                .into_response()
-        }
         9 => (axum::http::StatusCode::OK, "{\"value\":9}").into_response(),
         10 => (
             axum::http::StatusCode::OK,
@@ -265,75 +243,6 @@ async fn catalogs_survive_reopen_revalidate_replace_and_never_serve_stale_errors
     task.abort();
 }
 #[tokio::test]
-async fn pricing_persists_only_fresh_estimates_and_never_challenges() {
-    let dir = tempfile::tempdir().unwrap();
-    let cfg = config(dir.path());
-    let (url, origin, task) = fixture().await;
-    origin.lock().unwrap().mode = 5;
-    let root = serde_json::json!({"operations":[{"method":"GET","path":"/catalog"}]});
-    let tools = catalog::build_tools(&cfg, &root, "test").unwrap();
-    let base = url.strip_suffix("/catalog").unwrap();
-    let first = PricingCache::default()
-        .discover_observed(&cfg, &root, &tools, base)
-        .await
-        .unwrap();
-    assert_eq!(first.evidence.available_prices, 1);
-    let second = PricingCache::default()
-        .discover_observed(&cfg, &root, &tools, base)
-        .await
-        .unwrap();
-    assert_eq!(second.prices, first.prices);
-    assert_eq!(second.evidence.cache[&CachePath::Disk], 1);
-    assert_eq!(origin.lock().unwrap().calls.len(), 1);
-    let slot = Slot::new(&cfg, &url, "pricing", 64 * 1024).unwrap();
-    let mut entry = slot.read().await.unwrap();
-    assert_eq!(
-        String::from_utf8(entry.data.clone()).unwrap(),
-        "Cost: ~$0.001/call [x402 probe]."
-    );
-    assert!(
-        !serde_json::to_string(&entry.metadata)
-            .unwrap()
-            .contains("payment-required")
-    );
-    entry.metadata.stored -= 30;
-    slot.write(Some(entry.clone())).await;
-    let process = PricingCache::default();
-    process
-        .discover_observed(&cfg, &root, &tools, base)
-        .await
-        .unwrap();
-    let mut shorter = cfg.clone();
-    shorter.probe_ttl_seconds = 10.0;
-    let expired = process
-        .discover_observed(&shorter, &root, &tools, base)
-        .await
-        .unwrap();
-    assert!(expired.prices.is_empty());
-    assert_eq!(expired.evidence.expired, 1);
-    assert_eq!(origin.lock().unwrap().calls.len(), 1);
-    entry.metadata.expires = 0;
-    slot.write(Some(entry)).await;
-    for mode in [6, 7] {
-        origin.lock().unwrap().mode = mode;
-        PricingCache::default()
-            .discover_observed(&cfg, &root, &tools, base)
-            .await
-            .unwrap();
-        assert!(slot.read().await.is_none());
-        assert!(
-            !origin
-                .lock()
-                .unwrap()
-                .calls
-                .last()
-                .unwrap()
-                .contains_key("if-none-match")
-        );
-    }
-    task.abort();
-}
-#[tokio::test]
 async fn opt_out_isolation_missing_state_and_corruption() {
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = config(dir.path());
@@ -443,7 +352,6 @@ private_key_env="UNUSED_TEST_KEY"
 max_api_payment_usdc="0.01"
 [sources.api]
 spec="{url}"
-probe_pricing=false
 [servers.test]
 listen="127.0.0.1:0"
 bearer_token_env="UNUSED_TEST_TOKEN"
@@ -790,23 +698,23 @@ fn lists_extensions_private_variants_and_304_refresh_are_supported() {
 }
 
 #[tokio::test]
-async fn catalog_ttl_zero_and_changes_are_isolated_from_pricing() {
+async fn catalog_ttl_changes_partition_cache_and_zero_disables_it() {
     let dir = tempfile::tempdir().unwrap();
     let (url, origin, task) = fixture().await;
     let mut cfg = config(dir.path());
     catalog(&url, &cfg).await.unwrap();
-    let pricing = Slot::new(&cfg, &url, "pricing", 1024).unwrap();
+    let original = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
     cfg.catalog_cache_ttl_seconds = 120;
     catalog(&url, &cfg).await.unwrap();
     let slot = Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).unwrap();
+    assert_ne!(
+        original.key, slot.key,
+        "catalog lifetime changes cannot reuse a different policy slot"
+    );
     let metadata = slot.read().await.unwrap().metadata;
     assert_eq!(metadata.expires - metadata.stored, 120);
     cfg.catalog_cache_ttl_seconds = 0;
     assert!(Slot::new(&cfg, &url, "catalog", cfg.max_spec_bytes).is_none());
-    assert_eq!(
-        pricing.key,
-        Slot::new(&cfg, &url, "pricing", 1024).unwrap().key
-    );
     catalog(&url, &cfg).await.unwrap();
     catalog(&url, &cfg).await.unwrap();
     assert_eq!(origin.lock().unwrap().calls.len(), 4);

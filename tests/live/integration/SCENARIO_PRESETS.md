@@ -29,7 +29,7 @@ an unused second managed pool initialized. The shared SocialFetch source assigns
 that wallet explicitly across listeners A and B. The two-pool deployment adds
 an independent SocialFetch source on listener C using `independent_pool`, and an
 Arkham depletion source on A using `test_pool`. Each source has a distinct tool
-prefix, an exact listener allowlist and startup pricing disabled.
+prefix and an exact listener allowlist. Startup does not probe endpoint prices.
 
 The standard preset first runs a shared-wallet A/B pair, then a separate-wallet
 A/C pair. Both batches have two calls. Existing concurrency qualification reports

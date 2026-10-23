@@ -28,13 +28,18 @@ fn recommendations_are_advisory_and_selection_preserves_named_contracts() {
     cfg.exclude_tools = vec!["api_other".into()];
     let selected = build_tools(&cfg, &document(), "api").unwrap();
     assert_eq!(selected.len(), 2);
-    let priced = build_tools_with_prices(
-        &cfg,
-        &document(),
-        "api",
-        &BTreeMap::from([(("POST".into(), "/read".into()), "$0.01".into())]),
-    )
-    .unwrap();
+    let mut authored = document();
+    authored["paths"]["/read"]["post"]["x-price"] = json!({"amount":"0.01","currency":"USDC"});
+    cfg.pricing_key = Some("x-price".into());
+    let priced = build_tools(&cfg, &authored, "api").unwrap();
+    assert!(
+        priced
+            .iter()
+            .find(|t| t.name == "api_read")
+            .unwrap()
+            .description
+            .contains("$0.01")
+    );
     assert_eq!(
         priced.iter().map(|t| &t.name).collect::<Vec<_>>(),
         selected.iter().map(|t| &t.name).collect::<Vec<_>>()

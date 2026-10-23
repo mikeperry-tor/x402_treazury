@@ -150,7 +150,6 @@ pub fn write(options: Options) -> Result<Value> {
         spec: "spec.json".into(),
         base_url: Some(base_url.into()),
         prefix: Some("api".into()),
-        probe_pricing: false,
         cover_traffic: cover.clone(),
         ..Default::default()
     };
@@ -159,7 +158,7 @@ pub fn write(options: Options) -> Result<Value> {
         .next()
         .unwrap()
         .name;
-    let mut deployment = json!({"version":1,"treasury":{"id":id,"state_dir":"state","key_file":"nonexistent-key","indexer_url_env":"ABSENT_INDEXER","submission_url_env":"ABSENT_SUBMISSION","max_refund_shielding_fee_zec":"0.001"},"network":{"mode":"tor","socks_endpoint":format!("127.0.0.1:{}",options.socks_port),"isolation_namespace":format!("cover_{}",uuid::Uuid::new_v4().simple()),"cover_traffic_enabled":cover.is_some()},"wallets":{"test":{"mode":"static","private_key_env":"ABSENT_KEY"}},"sources":{"api":source,"trace":{"spec":"help.json","base_url":"https://www.cloudflare.com","prefix":"trace","help_url":"https://www.cloudflare.com/cdn-cgi/trace","probe_pricing":false},"fresh":{"spec":"help.json","base_url":"https://www.cloudflare.com","prefix":"fresh","help_url":"https://www.cloudflare.com/cdn-cgi/trace?treazury_cover_qualification=uncached","probe_pricing":false}},"servers":{"main":{"listen":format!("127.0.0.1:{}",options.mcp_port),"sources":["api","trace","fresh"],"wallet":"test","bearer_token_env":"TOKEN"}}});
+    let mut deployment = json!({"version":1,"treasury":{"id":id,"state_dir":"state","key_file":"nonexistent-key","indexer_url_env":"ABSENT_INDEXER","submission_url_env":"ABSENT_SUBMISSION","max_refund_shielding_fee_zec":"0.001"},"network":{"mode":"tor","socks_endpoint":format!("127.0.0.1:{}",options.socks_port),"isolation_namespace":format!("cover_{}",uuid::Uuid::new_v4().simple()),"cover_traffic_enabled":cover.is_some()},"wallets":{"test":{"mode":"static","private_key_env":"ABSENT_KEY"}},"sources":{"api":source,"trace":{"spec":"help.json","base_url":"https://www.cloudflare.com","prefix":"trace","help_url":"https://www.cloudflare.com/cdn-cgi/trace"},"fresh":{"spec":"help.json","base_url":"https://www.cloudflare.com","prefix":"fresh","help_url":"https://www.cloudflare.com/cdn-cgi/trace?treazury_cover_qualification=uncached"}},"servers":{"main":{"listen":format!("127.0.0.1:{}",options.mcp_port),"sources":["api","trace","fresh"],"wallet":"test","bearer_token_env":"TOKEN"}}});
     deployment["servers"]["main"]["include_tools"] = json!([tool, "trace_help", "fresh_help"]);
     // JSON optional nulls must not be emitted as TOML values.
     fn strip_null(v: &mut Value) {

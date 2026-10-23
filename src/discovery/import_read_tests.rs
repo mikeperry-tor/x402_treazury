@@ -532,7 +532,11 @@ async fn supported_paid_cli_refresh(state: &PaidImport) {
         r#"{"operations":[{"method":"POST","path":"/curl"}]}"#,
     )
     .unwrap();
-    std::fs::write(&provider, "spec='relay.json'\nrelay_format='curl'\nbase_url='https://spec.example.com'\nprobe_pricing=false\n").unwrap();
+    std::fs::write(
+        &provider,
+        "spec='relay.json'\nrelay_format='curl'\nbase_url='https://spec.example.com'\n",
+    )
+    .unwrap();
     let url = "https://api.example.com/imports/cli-paid";
     let m = manager(Some(registry.clone())).await;
     let cell = OnceCell::new();

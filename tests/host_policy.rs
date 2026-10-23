@@ -91,7 +91,7 @@ async fn standalone_flags_reach_http_and_disabled_check_warns() {
     .unwrap();
     std::fs::write(
         dir.path().join("provider.toml"),
-        "spec='spec.json'\nbase_url='http://127.0.0.1:1'\nprobe_pricing=false\n",
+        "spec='spec.json'\nbase_url='http://127.0.0.1:1'\n",
     )
     .unwrap();
     let address_pattern = regex::Regex::new(r"127\.0\.0\.1:\d+").unwrap();

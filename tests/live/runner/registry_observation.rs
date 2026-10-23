@@ -66,7 +66,7 @@ impl Registry {
             );
         }
         ensure!(
-            observed["state"]["treasury_id"] == self.manifest(run)?.treasury_id,
+            observed["state"]["treasury_id"] == self.observed_manifest(run)?.treasury_id,
             "pool observation treasury mismatch"
         );
         ensure!(

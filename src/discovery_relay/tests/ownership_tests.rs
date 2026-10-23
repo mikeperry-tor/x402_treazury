@@ -91,7 +91,7 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
                 let capacity = capacity.clone();
                 async move {
                     relay
-                        .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", capacity, None)
+                        .fetch_with_capacity(TARGET, 4096, "max_spec_bytes", capacity, None)
                         .await
                 }
             });
@@ -130,7 +130,7 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             second.state = relay.state.clone();
             second.key = "second-wallet".into();
             second.client = second_wallet(&relay).client;
-            let mut queued = Box::pin(other.fetch(other_url, 200, 4096, "max_spec_bytes"));
+            let mut queued = Box::pin(other.fetch(other_url, 4096, "max_spec_bytes"));
             assert!(
                 tokio::time::timeout(std::time::Duration::from_millis(50), queued.as_mut())
                     .await
@@ -156,7 +156,7 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             // Lost delivery must publish success, a definitive provider/target
             // failure, or the provider's uncertainty breaker before repetition.
             let calls = f.calls.load(Ordering::SeqCst);
-            let repeated = relay.fetch(TARGET, 200, 4096, "max_spec_bytes").await;
+            let repeated = relay.fetch(TARGET, 4096, "max_spec_bytes").await;
             assert_eq!(repeated.is_ok(), matches!(outcome, Outcome::Success));
             if matches!(outcome, Outcome::TargetFailure) {
                 assert!(repeated.err().unwrap().is::<TargetFailure>());
@@ -232,7 +232,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
         let capacity = capacity.clone();
         async move {
             relay
-                .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![capacity], None)
+                .fetch_with_capacity(TARGET, 4096, "max_spec_bytes", vec![capacity], None)
                 .await
         }
     });
@@ -247,7 +247,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
             let capacity = capacity.clone();
             async move {
                 relay
-                    .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![capacity], None)
+                    .fetch_with_capacity(TARGET, 4096, "max_spec_bytes", vec![capacity], None)
                     .await
             }
         }));
@@ -292,7 +292,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
     let unavailable = Arc::new(tokio::sync::Semaphore::new(0));
     tokio::time::timeout(
         std::time::Duration::from_millis(500),
-        relay.fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![unavailable], None),
+        relay.fetch_with_capacity(TARGET, 4096, "max_spec_bytes", vec![unavailable], None),
     )
     .await
     .expect("cached relay result waited for request capacity")

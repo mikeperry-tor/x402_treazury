@@ -10,9 +10,9 @@ Stages are independent observations. Saved source accounting is not a fresh bala
 Owned Tor requires its separate control audit; Tor-only failures do not establish Tor causation.
 Providers follow private JSON order; unselected calls remain not attempted.
 
-| Provider | Catalog | Help | Pricing | Execution | Provider semantics | Canonical payment |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | failed | not attempted | not attempted | not attempted | not attempted | not attempted |
+| Provider | Catalog | Help | Execution | Provider semantics | Canonical payment |
+| --- | --- | --- | --- | --- | --- |
+| 1 | failed | not attempted | not attempted | not attempted | not attempted |
 
 Historical source inventory is incomplete; this table includes known case sources only.
 
@@ -79,12 +79,6 @@ Catalog inspection (initial inputs may be local or remote; shared loads are not 
 | --- | ---: | ---: | ---: | ---: |
 | Initial inputs | unobserved | unobserved | unobserved | unobserved |
 | Frozen reload | 1 | 1 | 1 | 1 |
-
-| Pricing observation | Stage | Assertion | Observed endpoints | Available prices | Cache initializations | Cache hits | Shared results | Expired | Capped | HTTP codes (count) |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 1 | completed | passed | 2 | 0 | 1 | 1 | 0 | 1 | 3 | 403 (1), 429 (1) |
-
-Pricing completion is not provider health or payment qualification. Cached failure/success outcomes are observations, not fresh requests; cache initialization does not prove a request reached the provider. Startup prices never authorize payment.
 
 | Help case | Assessment | Cache path | Retrieval | Required |
 | --- | --- | --- | --- | --- |

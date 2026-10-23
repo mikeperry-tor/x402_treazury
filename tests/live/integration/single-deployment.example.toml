@@ -38,7 +38,6 @@ funding_amount_usdc = "2.00"
 extends = "../../../providers/socialfetch.toml"
 prefix = "shared"
 overrides = {}
-probe_pricing = false
 wallet = "test_pool"
 [servers.a]
 listen = "127.0.0.1:18481"

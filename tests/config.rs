@@ -165,7 +165,6 @@ version = 1
 spec = "api.json"
 prefix = "api"
 base_url = "http://127.0.0.1:1"
-probe_pricing = false
 [wallets.default]
 mode = "static"
 private_key_env = "PRIVATE_ENV_REFERENCE"
@@ -359,7 +358,6 @@ private_key_env='NEVER_LOAD_THIS_KEY'
 spec='api.json'
 base_url='https://example.com'
 wallet='used'
-probe_pricing=false
 [servers.test]
 listen='127.0.0.1:0'
 bearer_token_env='AUTH_FIXTURE_TOKEN'
@@ -474,33 +472,30 @@ async fn comprehensive_example_enables_source_wallet_discovery_offline() {
 }
 
 #[tokio::test]
-async fn read_timeout_migration_preserves_composition_and_historical_settings() {
+async fn read_timeout_composition_preserves_general_alias_and_rejects_probe_alias() {
     let dir = tempfile::tempdir().unwrap();
     let provider = dir.path().join("provider.toml");
     std::fs::write(&provider, "spec='api.json'\nread_timeout_seconds=90").unwrap();
     let resolve = |text: &str| toml::from_str(text).unwrap();
     let source = dir.path().join("source.toml");
-    let inherited = config::resolve(
-        resolve("extends='provider.toml'\ntimeout=42\nprobe_timeout=5"),
-        &source,
-    )
-    .await
-    .unwrap();
-    assert_eq!(inherited.settings.read_timeout_seconds, Some(42.0));
-    assert!(inherited.origins["read_timeout_seconds"].ends_with("source.toml"));
-    let probe_only = config::resolve(resolve("spec='api.json'\nprobe_timeout=5"), &source)
+    let inherited = config::resolve(resolve("extends='provider.toml'\ntimeout=42"), &source)
         .await
         .unwrap();
-    assert_eq!(probe_only.settings.read_timeout_seconds, Some(5.0));
+    assert_eq!(inherited.settings.read_timeout_seconds, Some(42.0));
+    assert!(inherited.origins["read_timeout_seconds"].ends_with("source.toml"));
+    let explicit = config::resolve(resolve("spec='api.json'\nread_timeout_seconds=5"), &source)
+        .await
+        .unwrap();
+    assert_eq!(explicit.settings.read_timeout_seconds, Some(5.0));
     for text in [
         "spec='api.json'\ntimeout=42\nread_timeout_seconds=60",
         "spec='api.json'\ntimeout=42\nprobe_timeout=0",
+        "spec='api.json'\nprobe_timeout=5",
     ] {
         assert!(config::resolve(resolve(text), &source).await.is_err());
     }
     let historical: x402_treazury::catalog::Config =
-        serde_json::from_value(json!({"spec":"api.json","timeout":30.0,"probe_timeout":5.0}))
-            .unwrap();
+        serde_json::from_value(json!({"spec":"api.json","timeout":30.0})).unwrap();
     assert_eq!(historical.read_timeout_seconds, Some(30.0));
 }
 
@@ -728,7 +723,7 @@ provider="missing-local-provider.toml"
     );
     assert!(Deployment::load(&path).await.is_ok());
     let provider = format!(
-        "spec={:?}\nbase_url='https://spec.example.com'\nprobe_pricing=false\n",
+        "spec={:?}\nbase_url='https://spec.example.com'\n",
         Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/openapi.json")
     );
     std::fs::write(dir.path().join("relay.toml"), provider).unwrap();

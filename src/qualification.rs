@@ -17,12 +17,10 @@ mod payment;
 pub(crate) use payment::managed_claim_fixture;
 pub(crate) use payment::{PaymentContext, RetryAuthorityDenied};
 pub(crate) use payment::{capture_case, inherit_case};
-mod pricing;
 mod receipt;
 pub use payment::{
     HelpCache, check_retry_authority, payment_context, record_challenge, record_help, unsigned_case,
 };
-pub use pricing::{PricingStage, record as record_pricing};
 
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OpenFlags, params};

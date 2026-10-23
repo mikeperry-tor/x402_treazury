@@ -119,7 +119,7 @@ impl Registry {
     }
     /// Recompute skipped-case legitimacy from the immutable manifest and retained snapshots.
     pub fn validated_skips(&self, run: &str) -> Result<BTreeSet<String>> {
-        let m = self.manifest(run)?;
+        let m = self.observed_manifest(run)?;
         validate(&self.db, &m, run)
     }
 }

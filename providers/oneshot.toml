@@ -10,7 +10,6 @@ prefix = "oneshot"
 recommended_tools = ["oneshot_search", "oneshot_help"]
 include = ["/v1/tools", ""]
 include_operations = ["POST /v1/tools/search", "GET /.well-known/acp/manifest.json", "GET /health", "GET /v1/soul", "GET /v1/soul/browse", "GET /v1/soul/search", "GET /v1/soul/service-types", "GET /v1/soul/stats", "GET /v1/soul/templates", "GET /v1/soul/{wallet}", "GET /v1/stats", "GET /v1/status"]
-probe_pricing = false
 help_url = "https://docs.oneshotagent.com/api-reference/web-search.md"
 instructions_text = "OneShot synchronous web search and verified public discovery reads. oneshot_search returns results inline; public soul/status/manifest tools use their declared GET path/query schemas without account ownership proofs. Recommendations select search and its lazy guide. Async tools, account state and SIWX/EIP-712 job retrieval remain excluded; discovery does not implement those workflows. Treazury owns x402 challenge/sign/retry; legacy Authorization, X-Quote-ID or X-Payment-Proof examples are not agent-settable payment instructions. Live challenge and configured cap govern payment; never automatically replay an uncertain signed request."
 

@@ -435,7 +435,6 @@ fn selected_tools(c: &Candidate, root: &Value) -> Result<(Vec<ToolSpec>, Option<
         exclude: c.selection.exclude.clone(),
         tags: c.selection.tags.clone(),
         exclude_tags: c.selection.exclude_tags.clone(),
-        probe_pricing: false,
         pricing_key: Some("x-payment-info".into()),
         ..Default::default()
     };

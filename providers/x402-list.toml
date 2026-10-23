@@ -5,7 +5,6 @@ base_url = "https://x402-list.com/api/v1"
 prefix = "x402_list"
 recommended_tools = ["x402_list_services", "x402_list_services_slug", "x402_list_best", "x402_list_categories", "x402_list_networks", "x402_list_help"]
 exclude = ["/submit", "/services/{slug}/request-update", "/services/{slug}/verify-ownership", "/services/{slug}/reissue-token"]
-probe_pricing = false
 include = [""]
 instructions_text = "Search x402 services and inspect their details, scores and metadata; listings and prices are leads, not payment/delivery guarantees or executable schemas. Reusable provider recommendations select the ordinary directory reads, while the embedded source-management directory intentionally retains three read operations. x402_list_assess returns a fresh paid JSON assessment; an optional seller-side probe is included in its single quoted charge and is non-refundable. x402_list_suggestions pays to submit a suggestion and returns an acknowledgment, not a promise it will be accepted. Owner-update/domain-proof/email-token flows and the unsupported full-oneOf submission body are excluded. Directory reads share an IP free quota and may require payment; live challenges and ordinary wallet caps remain authoritative. Use source_url_info to locate published specifications and source_add for server-side registration; do not paste large catalogs into agent context. No call authorizes automatic replay of an uncertain signed payment."
 

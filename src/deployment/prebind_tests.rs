@@ -7,7 +7,7 @@ fn fixture(dir: &Path, managed: bool) -> PathBuf {
     let config = if managed {
         super::initialization_tests::managed_config().replace("auto_fund=false", "auto_fund=true")
     } else {
-        "version=1\n[wallets.selected]\nmode='static'\nprivate_key_env='KEY'\n[sources.api]\nspec='spec.json'\nbase_url='https://example.com'\nprobe_pricing=false\n[servers.one]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='selected'\nsources=['api']\n".into()
+        "version=1\n[wallets.selected]\nmode='static'\nprivate_key_env='KEY'\n[sources.api]\nspec='spec.json'\nbase_url='https://example.com'\n[servers.one]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='selected'\nsources=['api']\n".into()
     };
     let provider = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
     let path = dir.join("deployment.toml");

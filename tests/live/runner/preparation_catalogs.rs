@@ -163,7 +163,12 @@ fn verify_build(build: &BuildIdentity, pins: &Pins) -> Result<()> {
 }
 fn validate_cases(m: &Manifest, snapshot: &Value) -> Result<()> {
     if snapshot.get("catalog_stages").is_some() {
-        let sources = snapshot["sources"].as_object().context("missing catalog sources")?.keys().cloned().collect();
+        let sources = snapshot["sources"]
+            .as_object()
+            .context("missing catalog sources")?
+            .keys()
+            .cloned()
+            .collect();
         crate::catalog_stages::project(snapshot, &sources, "inspection")?;
     }
     crate::tor::outage::validate(m, snapshot)?;
@@ -312,11 +317,7 @@ pub async fn collect_catalogs_confined(
     validate_cases(m, &snapshot)?;
     let mut config: MetaConfig = serde_json::from_value(snapshot["deployment"].clone())?;
     ensure!(
-        config.source_management.is_none()
-            && config
-                .servers
-                .values()
-                .all(|s| !s.source_management),
+        config.source_management.is_none() && config.servers.values().all(|s| !s.source_management),
         "qualification refuses source management"
     );
     for listener in config.servers.values() {
@@ -352,8 +353,8 @@ pub async fn collect_catalogs_confined(
                 .context("missing resolved base URL")?
                 .into(),
         );
-        // Inspection does not probe. Preserve serving policy; recorded startup
-        // price lines reconstruct expected descriptions before inventory checks.
+        // Preserve authored descriptions and policy. No startup price probe
+        // or runtime reconstruction changes the frozen expected inventory.
         source.provider = toml::Value::try_from(settings)?
             .as_table()
             .context("source settings must be table")?

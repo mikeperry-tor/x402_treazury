@@ -602,7 +602,7 @@ definition. Catalog construction applies canonical provider names and name-keyed
 overrides before rebinding tools to `dyn_<registration-name>__<operation>`; the
 provider prefix is not repeated. Accepted settings preserve base repairs,
 compatibility filters, descriptions, help, instructions, pricing metadata and image
-mappings. They do not activate static caches, warming, relays, pricing probes,
+mappings. They do not activate static caches, warming, relays,
 cover configuration or recommendation selection, and grant no wallet/payment
 authority. Legacy generic records retain their existing settings and identity.
 

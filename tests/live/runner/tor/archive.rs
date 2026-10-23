@@ -73,7 +73,7 @@ pub fn audit_run(state: &Path, run: &str, output: &Path) -> Result<u8> {
     let registry = Registry::open(state, true)?;
     // Do not race a serving owner or read its incomplete wallet transitions.
     let _treasury = files::lock(&state.join("owner.lock"))?;
-    let manifest = registry.manifest(run)?;
+    let manifest = registry.observed_manifest(run)?;
     let pins = registry.pins(run)?;
     let catalogs = pins
         .catalogs

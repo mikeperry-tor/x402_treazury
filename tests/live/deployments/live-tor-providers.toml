@@ -51,120 +51,94 @@ funding_amount_usdc = "2.00"
 
 [sources.agent402]
 extends = "../../../providers/agent402.toml"
-probe_pricing = false
 tags = ["network"]
 
 [sources.agentfund]
 extends = "../../../providers/agentfund.toml"
-probe_pricing = false
 
 [sources.agentutility]
 extends = "../../../providers/agentutility/provider.toml"
-probe_pricing = false
 
 [sources.arkham]
 extends = "../../../providers/arkham.toml"
-probe_pricing = false
 
 [sources.botsmith]
 extends = "../../../providers/botsmith.toml"
-probe_pricing = false
 
 [sources.brazilayer]
 extends = "../../../providers/brazilayer.toml"
-probe_pricing = false
 
 [sources.concordance]
 extends = "../../../providers/concordance/provider.toml"
-probe_pricing = false
 
 [sources.deepline]
 extends = "../../../providers/deepline.toml"
-probe_pricing = false
 
 [sources.exa]
 extends = "../../../providers/exa.toml"
-probe_pricing = false
 
 [sources.genuinegood]
 extends = "../../../providers/genuinegood.toml"
-probe_pricing = false
 
 [sources.glassnode]
 extends = "../../../providers/glassnode/provider.toml"
-probe_pricing = false
 
 [sources.google_trends]
 extends = "../../../providers/google-trends.toml"
-probe_pricing = false
 
 [sources.locus]
 extends = "../../../providers/locus/provider.toml"
-probe_pricing = false
 
 [sources.lonestar]
 extends = "../../../providers/lonestar.toml"
-probe_pricing = false
 
 [sources.otto]
 extends = "../../../providers/otto.toml"
-probe_pricing = false
 
 [sources.pdl]
 extends = "../../../providers/pdl.toml"
-probe_pricing = false
 
 [sources.socialfetch]
 extends = "../../../providers/socialfetch.toml"
-probe_pricing = false
 
 [sources.stableenrich]
 extends = "../../../providers/stableenrich.toml"
-probe_pricing = false
 
 [sources.straits]
 extends = "../../../providers/straits/provider.toml"
-probe_pricing = false
 
 [sources.x402stock]
 extends = "../../../providers/x402stock.toml"
-probe_pricing = false
 
 [sources.x402_list]
 extends = "../../../providers/x402-list.toml"
-probe_pricing = false
 
 [sources.regimeshift]
 # Qualification-only pinned catalog: live availability failures remain in the report.
 spec = "../../fixtures/regimeshift_openapi.json"
 extends = "../../../providers/regimeshift.toml"
-probe_pricing = false
 
 [sources.kronos]
 # Qualification-only pinned catalog: live availability failures remain in the report.
 spec = "../../fixtures/kronos_openapi.json"
 extends = "../../../providers/kronos.toml"
-probe_pricing = false
 
 [sources.rotation]
 extends = "../../../providers/arkham.toml"
 prefix = "rotation"
 overrides = {}
-probe_pricing = false
 wallet = "coverage_a"
 
 [sources.shared_social]
 extends = "../../../providers/socialfetch.toml"
 prefix = "shared"
 overrides = {}
-probe_pricing = false
 wallet = "coverage_a"
 
 [sources.isolated_social]
 extends = "../../../providers/socialfetch.toml"
 prefix = "isolated"
 overrides = {}
-probe_pricing = false
 
 [servers.a]
 listen = "127.0.0.1:8381"

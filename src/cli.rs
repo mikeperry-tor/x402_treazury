@@ -38,7 +38,7 @@ pub enum Command {
 pub enum Catalog {
     /// Warm discovery caches; configured relay may pay. --direct bypasses Tor without relay.
     Warm(Warm),
-    /// List selected tools; optionally discover unsigned x402 prices.
+    /// List selected tools with authored pricing metadata.
     Tools(Tools),
     /// List available OpenAPI tags.
     Tags(Input),
@@ -176,20 +176,14 @@ pub struct Warm {
     /// Fetch directly and explicitly permit fresh cached data in this deployment's network policy.
     #[arg(long)]
     pub direct: bool,
-    /// Also discover/cache eligible unsigned pricing estimates, respecting listener filters.
-    #[arg(long)]
-    pub discover_pricing: bool,
 }
 
 #[derive(ClapArgs)]
 pub struct Tools {
     #[command(flatten)]
     input: Input,
-    /// Run unsigned startup pricing discovery; respects source probe opt-outs.
-    #[arg(long)]
-    discover_pricing: bool,
     /// Inspect tools without applying recommendation opt-in; ordinary filters remain.
-    #[arg(long, conflicts_with = "discover_pricing")]
+    #[arg(long)]
     all_tools: bool,
 }
 
@@ -314,7 +308,6 @@ impl From<Catalog> for Args {
             Catalog::Warm(_) => unreachable!("cache warming is dispatched separately"),
             Catalog::Tools(tools) => Self {
                 list_tools: true,
-                discover_pricing: tools.discover_pricing,
                 all_tools: tools.all_tools,
                 ..tools.input.into()
             },

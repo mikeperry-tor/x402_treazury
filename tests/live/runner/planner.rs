@@ -44,7 +44,6 @@ pub fn build(m: &Manifest, config: &Value) -> Result<Plan> {
             "live qualification requires authenticated listeners"
         );
     }
-    crate::pricing_stages::validate(m, config)?;
     let wallets = config["resolved_wallets"]
         .as_object()
         .context("resolved wallets missing")?;

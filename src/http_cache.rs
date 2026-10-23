@@ -426,14 +426,13 @@ impl Slot {
             "{:x}",
             Sha256::digest(
                 serde_json::to_vec(&(
-                    "discovery-get-identity-v2",
+                    "discovery-get-identity-v3",
                     kind,
                     url,
                     network,
                     cfg.allow_http1,
                     cfg.allow_tls12,
                     cfg.read_timeout_seconds.map(f64::to_bits),
-                    cfg.probe_ttl_seconds.to_bits(),
                     limit
                 ))
                 .ok()?

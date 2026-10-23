@@ -23,7 +23,6 @@ max_api_payment_usdc = "1.00"
 funding_amount_usdc = "2.00"
 [sources.api]
 spec = "spec.json"
-probe_pricing = false
 [servers.main]
 listen = "127.0.0.1:0"
 bearer_token_env = "TOKEN"

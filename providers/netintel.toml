@@ -7,7 +7,6 @@ base_url = "https://netintel.dev"
 prefix = "netintel"
 recommended_tools = ["netintel_dns_lookup", "netintel_whois_rdap_lookup", "netintel_ip_report_full", "netintel_domain_report_full", "netintel_web_search", "netintel_web_extract", "netintel_help"]
 pricing_key = "x-payment-info"
-probe_pricing = false
 read_timeout_seconds = 90
 help_url = "https://netintel.dev/llms.txt"
 instructions_text = "NetIntel network, domain, IP, email, crypto, web and model tools via x402 USDC on Base. Default POST preference collapses equivalent same-path twins before naming, avoiding URL secrets and query-array serialization. Compatible /api/v1 gateway aliases remain available under their full names; /v1/embeddings and /embeddings stay distinct. netintel_ai_image_generate extracts its PNG data URI as an MCP image. Recommendations offer a small research view without restricting the default inventory. Published prices are estimates; live challenges and the configured cap govern payment. Do not automatically replay uncertain signed requests."

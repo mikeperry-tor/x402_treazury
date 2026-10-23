@@ -1,4 +1,4 @@
-//! Configured retry counts exercised through real catalog/pricing consumers.
+//! Configured retry counts exercised through real catalog consumers.
 use super::*;
 use axum::{
     body::Body,
@@ -197,24 +197,8 @@ fn catalog_config() -> crate::catalog::Config {
     }
 }
 
-async fn pricing(fixture: &Running) -> crate::pricing::Discovery {
-    let cfg = catalog_config();
-    let root = serde_json::json!({"openapi":"3.0.0","paths":{"/price":{"get":{"operationId":"price","responses":{"200":{"description":"complete"}}}}}});
-    let tools = crate::catalog::build_tools(&cfg, &root, "fixture").unwrap();
-    crate::pricing::PricingCache::default()
-        .discover_observed_with(
-            &fixture.network,
-            &cfg,
-            &root,
-            &tools,
-            "https://spec.example.com",
-        )
-        .await
-        .unwrap()
-}
-
 #[tokio::test]
-async fn catalog_and_pricing_use_one_configured_status_attempt_sequence() {
+async fn catalog_uses_one_configured_status_attempt_sequence() {
     for retries in [Some(0), Some(1), None] {
         for status in [
             400, 403, 408, 429, 500, 502, 503, 504, 401, 404, 410, 501, 505, 520,
@@ -231,24 +215,12 @@ async fn catalog_and_pricing_use_one_configured_status_attempt_sequence() {
                     .is_err()
             );
             catalog.assert_attempts(expected);
-            let probe = Running::new(retries, status, "", 0).await;
-            let result = pricing(&probe).await;
-            assert_eq!(result.evidence.observed, 1);
-            assert_eq!(result.evidence.http_statuses.get(&status), Some(&1));
-            assert_eq!(
-                result
-                    .evidence
-                    .outcomes
-                    .get(&crate::pricing::Outcome::UnexpectedHttpStatus),
-                Some(&1)
-            );
-            probe.assert_attempts(expected);
         }
     }
 }
 
 #[tokio::test]
-async fn catalog_body_failures_retry_but_complete_validation_and_pricing_bodies_do_not() {
+async fn catalog_body_failures_retry_but_complete_validation_does_not() {
     for retries in [Some(0), Some(1), None] {
         let allowed = retries.unwrap_or(2) + 1;
         let recovery = Running::new(retries, 200, "{}", 1).await;
@@ -270,16 +242,5 @@ async fn catalog_body_failures_retry_but_complete_validation_and_pricing_bodies_
                 .is_err()
         );
         malformed.assert_attempts(1);
-        let probe = Running::new(retries, 200, "", usize::MAX).await;
-        let result = pricing(&probe).await;
-        assert_eq!(result.evidence.observed, 1);
-        assert_eq!(
-            result
-                .evidence
-                .outcomes
-                .get(&crate::pricing::Outcome::NoPaymentChallenge),
-            Some(&1)
-        );
-        probe.assert_attempts(1);
     }
 }

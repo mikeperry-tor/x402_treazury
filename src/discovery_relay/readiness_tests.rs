@@ -74,7 +74,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     Arc::get_mut(&mut relay).unwrap().client = PaidClient::managed(manager.clone());
     for _ in 0..8 {
         let error = relay
-            .fetch(TARGET, 200, 4096, "max_spec_bytes")
+            .fetch(TARGET, 4096, "max_spec_bytes")
             .await
             .err()
             .unwrap();
@@ -91,7 +91,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     assert!(store.call(|s| s.funding_jobs()).await.unwrap().is_empty());
     set_stopped(&relay, true).await;
     let error = relay
-        .fetch(TARGET, 200, 4096, "max_spec_bytes")
+        .fetch(TARGET, 4096, "max_spec_bytes")
         .await
         .err()
         .unwrap();
@@ -100,7 +100,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
         RetryDisposition::Terminal
     );
     set_stopped(&relay, false).await;
-    let mut blocked = Box::pin(relay.fetch_when_ready(TARGET, 200, 4096, "max_spec_bytes"));
+    let mut blocked = Box::pin(relay.fetch_when_ready(TARGET, 4096, "max_spec_bytes"));
     assert!(
         tokio::time::timeout(Duration::from_millis(20), &mut blocked)
             .await
@@ -108,12 +108,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     );
     let (mut sibling, sibling_fixture, sibling_task) = fixture(envelope(TARGET), true, false).await;
     Arc::get_mut(&mut sibling).unwrap().state = relay.state.clone();
-    assert!(
-        sibling
-            .fetch(TARGET, 200, 4096, "max_spec_bytes")
-            .await
-            .is_err()
-    );
+    assert!(sibling.fetch(TARGET, 4096, "max_spec_bytes").await.is_err());
     let error = tokio::time::timeout(Duration::from_secs(5), &mut blocked)
         .await
         .unwrap()
@@ -133,7 +128,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     assert!(
         tokio::time::timeout(
             Duration::from_millis(20),
-            relay.fetch_when_ready(TARGET, 200, 4096, "max_spec_bytes")
+            relay.fetch_when_ready(TARGET, 4096, "max_spec_bytes")
         )
         .await
         .is_err()
@@ -145,7 +140,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     }
     assert_eq!(f.calls.load(Ordering::SeqCst), 0);
     assert_eq!(f.signed.load(Ordering::SeqCst), 0);
-    let mut waiting = Box::pin(relay.fetch_when_ready(TARGET, 200, 4096, "max_spec_bytes"));
+    let mut waiting = Box::pin(relay.fetch_when_ready(TARGET, 4096, "max_spec_bytes"));
     assert!(
         tokio::time::timeout(Duration::from_millis(20), &mut waiting)
             .await
@@ -206,7 +201,6 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     assert!(relay.client.discovery_ready().await.unwrap());
     let mut delayed = Box::pin(relay.fetch_with_capacity(
         TARGET,
-        200,
         4096,
         "max_spec_bytes",
         Vec::new(),
@@ -246,11 +240,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     let capacity_changes = relay.client.discovery_changes().await.unwrap().unwrap();
     let waiting = tokio::spawn({
         let relay = relay.clone();
-        async move {
-            relay
-                .fetch_when_ready(TARGET, 200, 4096, "max_spec_bytes")
-                .await
-        }
+        async move { relay.fetch_when_ready(TARGET, 4096, "max_spec_bytes").await }
     });
     tokio::time::timeout(Duration::from_secs(2), dependency_wait.notified())
         .await
@@ -286,12 +276,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     )
     .unwrap();
     let error = relay
-        .fetch(
-            "https://example.com/other.json",
-            200,
-            4096,
-            "max_spec_bytes",
-        )
+        .fetch("https://example.com/other.json", 4096, "max_spec_bytes")
         .await
         .err()
         .unwrap();
@@ -312,10 +297,7 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
         rusqlite::params![pool, cap],
     )
     .unwrap();
-    relay
-        .fetch(TARGET, 200, 4096, "max_spec_bytes")
-        .await
-        .unwrap();
+    relay.fetch(TARGET, 4096, "max_spec_bytes").await.unwrap();
     assert_eq!(
         f.calls.load(Ordering::SeqCst),
         2,
@@ -360,7 +342,7 @@ async fn definitive_unsigned_failure_is_published_once_without_a_second_retry_lo
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     for _ in 0..3 {
         let error = relay
-            .fetch(TARGET, 200, 4096, "max_spec_bytes")
+            .fetch(TARGET, 4096, "max_spec_bytes")
             .await
             .err()
             .unwrap();
@@ -381,7 +363,6 @@ async fn definitive_unsigned_failure_is_published_once_without_a_second_retry_lo
     let error = relay
         .fetch(
             "https://example.com/independent.json",
-            200,
             4096,
             "max_spec_bytes",
         )
@@ -410,7 +391,7 @@ async fn immutable_unavailability_is_terminal_and_drain_retains_cancelled_paid_o
         crate::rotation::error::AdmissionError::WalletNotReady("fixture configuration unavailable"),
     );
     let error = relay
-        .fetch(TARGET, 200, 4096, "max_spec_bytes")
+        .fetch(TARGET, 4096, "max_spec_bytes")
         .await
         .err()
         .unwrap();
@@ -441,7 +422,7 @@ async fn immutable_unavailability_is_terminal_and_drain_retains_cancelled_paid_o
     let accepted = relay.clone();
     let request = tokio::spawn(async move {
         accepted
-            .fetch_when_ready(TARGET, 200, 4096, "max_spec_bytes")
+            .fetch_when_ready(TARGET, 4096, "max_spec_bytes")
             .await
     });
     tokio::time::timeout(Duration::from_secs(2), f.arrived.notified())
@@ -456,12 +437,7 @@ async fn immutable_unavailability_is_terminal_and_drain_retains_cancelled_paid_o
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
     assert!(
         relay
-            .fetch(
-                "https://other.example.com/spec",
-                200,
-                4096,
-                "max_spec_bytes"
-            )
+            .fetch("https://other.example.com/spec", 4096, "max_spec_bytes")
             .await
             .is_err()
     );
@@ -506,21 +482,13 @@ async fn bounded_deferred_waiters_leave_room_for_an_independent_ready_wallet() {
         let gate = gate.clone();
         waiters.push(tokio::spawn(async move {
             relay
-                .fetch_when_ready_bounded(
-                    TARGET,
-                    200,
-                    4096,
-                    "max_spec_bytes",
-                    Some(gate),
-                    None,
-                    None,
-                )
+                .fetch_when_ready_bounded(TARGET, 4096, "max_spec_bytes", Some(gate), None, None)
                 .await
         }));
     }
     tokio::time::timeout(
         Duration::from_secs(5),
-        ready.fetch_when_ready_bounded(TARGET, 200, 4096, "max_spec_bytes", Some(gate), None, None),
+        ready.fetch_when_ready_bounded(TARGET, 4096, "max_spec_bytes", Some(gate), None, None),
     )
     .await
     .unwrap()

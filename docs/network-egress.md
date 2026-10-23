@@ -42,7 +42,7 @@ an existing canonical slot only when it still holds the exact originally acquire
 `Arc<HttpTransport>`. Evicted, missing, reinserted or already-promoted entries are
 never overwritten or resurrected, and no separate winner registry, history cache
 or counter is kept; a miss after normal LRU eviction or restart creates a fresh
-scope. Static catalog and pricing discovery use participating selection per origin
+scope. Static catalog discovery use participating selection per origin
 (`SelectionPolicy::Participating`): in Tor mode, eligible status (`400`, `403`, `408`, `429`, `500`, `502`, `503`, `504`)
 or eligible transport/timeout failures retry on fresh candidate scopes according to
 `network.tor_isolation_retries` (default 2, plus the initial attempt), honoring valid `Retry-After` headers on `429`/`503`
@@ -56,20 +56,16 @@ coalesced owner. Unfollowed catalog redirects retain baseline
 complete-body parsing: a valid JSON catalog succeeds, while rejected content can
 use existing relay fallback, without another origin circuit attempt. A
 candidate promotes only after complete valid JSON parse or valid HTTP 304
-revalidation for catalogs, or a usable HTTP 402 challenge or 2xx response for
-pricing; fresh disk-cache hits and relay-supplied results never promote a scope.
-Pricing's process-wide and per-source request permits cover active attempts;
-`Retry-After` waits reserve neither. Queued relay work acquires these permits only
-after serialization, cache and readiness checks, for each HTTP attempt and its
-body collection. Retry delays and wallet traversal release these permits; the
+revalidation for catalogs; fresh disk-cache hits and relay-supplied results never promote a scope.
+Relay request permits cover each HTTP attempt/body after serialization, cache and
+readiness checks. Retry delays and wallet traversal release these permits; the
 accepted-work owner retains same-provider serialization through decoding and
-publication even if its waiter disconnects; other providers and cached results
-remain available. Logical probe ownership
-and one-shot coalescing span the complete retry sequence without a second source gate.
+publication even if its waiter disconnects. Other providers and cached results
+remain available.
 Ordinary API, directory and raw-call clients also use participating selection as
 specified below. Base RPC uses participating selection for each logical read;
 excluded infrastructure callers remain legacy. TLS failures are eligible for fresh
-scopes in catalog/pricing, unsigned API and Base because a Tor exit may interfere;
+scopes in catalog, unsigned API and Base because a Tor exit may interfere;
 every attempt retains certificate, hostname and protocol verification. Other API
 transport failures retain their existing terminal behavior. Signed requests never
 gain replay authority from TLS failure. `payment.rs` pins its
@@ -106,7 +102,6 @@ renew another response's inactivity timer or signed authority.
 | Caller | Transport and identity |
 | --- | --- |
 | `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, participating discovery origin (configured Tor attempt count; promotes on valid JSON or 304) |
-| `pricing.rs` | Startup-only unsigned GET probe, participating discovery origin (configured Tor attempt count; promotes on usable 402 or 2xx); successes/failures remain cached |
 | `catalog_state.rs` | Shared complete-document help reader, help URL discovery origin; source-bound relay authority and retained cache publication |
 | `discovery/coinbase.rs` | On-demand unsigned resource search, existing endpoint wallet documentation identity, participating origin retries; optional ordered paid relay list via endpoint payer |
 | `discovery/import.rs` | Shared complete-document OpenAPI reader, URL discovery origin, public destinations and source-bound relay authority |
@@ -145,14 +140,14 @@ a permanent local failure. The Reqwest SOCKS boundary preserves the underlying
 local connector cause to make this distinction. Hyper parse/user/canceled errors,
 request construction and redirect failures remain excluded. Other 5xx outside
 the explicit status set (for example 501/505/520) do not earn fresh origin scopes.
-The common classifier applies to catalog, pricing, Coinbase, document reads,
+The common classifier applies to catalog, Coinbase, document reads,
 relay-service unsigned requests, Base, and unsigned API GET/HEAD and x402 POST.
 Other API methods retain their existing TLS-only transport recovery. Startup's local SOCKS
 reachability prerequisite remains separate from per-operation attempts.
 
 ## Paid discovery relay
 
-Static catalog/pricing acquisition and Coinbase resource search share
+Static catalog acquisition and Coinbase resource search share
 `network::acquisition`: one configured origin sequence, with complete-body
 transport failures classified separately from complete content validation. Direct
 mode attempts once; Tor uses the initial attempt plus
@@ -168,7 +163,7 @@ empty/partial search-result metadata finishes without fallback.
 provider-path lists; a missing/empty list is origin-only. Selection uses the original
 target method. Provider-owned `relay_format` identifies Curl, AGProxy or Horizon
 Pulse translation, with no host/name inference. Bootstrap validates local pinned
-schemas, operations and filters without remote schema/help/pricing acquisition.
+schemas, operations and filters without remote schema/help acquisition.
 Legacy `provider` becomes one GET Curl entry and cannot coexist with `fallbacks`.
 See [configuration](configuration.md#paid-discovery-relay) for paths and inspection.
 
@@ -202,12 +197,10 @@ failure or invalid/unattributable paid envelope stops the sequence. Static
 uncertainty disables that provider for the run without disabling an independent
 provider. No signed pre-send or timeout exception permits replay.
 
-Relayed pricing `402` is terminal, yielding a usable estimate or unknown pricing;
-relayed `2xx` also terminates with unknown pricing. Only an unusable origin `402`
-retains pricing fallback. Target challenge signing is never negotiated through
-a relay. Relay results never promote an origin scope or supply origin validators.
+A relay never supplies target challenge-signing authority. Relay results never
+promote an origin scope or supply origin validators.
 Static process outcomes share the first acquisition for the same wallet,
-catalog/pricing contract, authored provider position and target URL, including a
+catalog contract, authored provider position and target URL, including a
 terminal decoded-bound failure despite a later larger allowance. Successful cached
 responses still check the requesting bound; disk slots remain bound-specific. See
 [cache semantics](configuration.md#paid-discovery-relay). Runtime source-management
@@ -251,7 +244,7 @@ An uncertain paid failure stops the sequence and disables that static provider f
 
 All outbound HTTP uses `read_timeout_seconds`, defaulting to 60 seconds in both
 direct and Tor mode. Each successful response read renews the inactivity budget;
-there is no total HTTP response deadline. This covers catalogs, lazy help, pricing,
+there is no total HTTP response deadline. This covers catalogs, lazy help,
 imports, ordinary paid API responses and relay envelopes, including large
 binary bodies. Waiting for response headers is also subject to this budget.
 Byte limits remain enforced, and partial documents are never published.
@@ -289,10 +282,9 @@ unchanged.
 
 For compatibility, network `request_timeout_seconds` is an alias for
 `read_timeout_seconds`, with its literal value now specifying inactivity. Provider
-`timeout`, legacy pricing `probe_timeout`, import `fetch_timeout_seconds` and CLI
+`timeout`, import `fetch_timeout_seconds` and CLI
 `--timeout` are accepted as legacy spellings. New configurations use only
-`read_timeout_seconds` / `--read-timeout-seconds`. When old provider settings contain
-both `timeout` and `probe_timeout`, the general `timeout` wins. Authored Tor examples
+`read_timeout_seconds` / `--read-timeout-seconds`. Authored Tor examples
 now specify 60 seconds; operator-owned files are not rewritten automatically.
 
 Base read RPCs, complete chain views and receipt verification use connection and
@@ -412,7 +404,7 @@ recovery. Qualification rechecks current authority immediately before every runt
 API, relay, document or Coinbase search send, after server delays and capacity
 admission. A claim does not renew authority while a request waits; accepted work
 can still finish. Unavailable authority reports a fixed safe reason and grants no
-new request. Static catalog and pricing preparation retain their startup authority. Relay results do not promote origin transports. Relay fee evidence is
+new request. Static catalog preparation retain their startup authority. Relay results do not promote origin transports. Relay fee evidence is
 separate from target-paid evidence and survives output conversion and subsequent
 directory processing. No new cache, breaker, wallet allocation or funding wait is
 introduced. Successful raw HEAD returns empty text; representation headers such
@@ -452,8 +444,8 @@ inspection and warming. Concurrent catalogs retain discovery-origin
 credentials; paths on the same origin share an identity, different origins do not.
 Compatible aliases coalesce downloads within the load. See
 [runtime architecture](architecture.md#catalog-configuration-and-execution) for
-independent loading and background pricing. Frozen catalogs and disabled probes
-avoid those startup dependencies in live qualification.
+independent loading and publication. Frozen catalogs avoid those startup
+dependencies in live qualification.
 
 ## Retry ownership
 
@@ -474,7 +466,7 @@ observations. The current layers are:
 
 | Request/activity | Current retry or observation owner |
 | --- | --- |
-| Catalog downloads, price discovery, help and imports | The shared unsigned acquisition sequence owns catalog/pricing retries; their consumers own parsing/cache publication. Help/import workflows retain their current acquisition policy. Relay-service unsigned legs use the shared sequence while paid exposure stays with the payment owner. |
+| Catalog downloads, help and imports | The shared unsigned acquisition sequence owns catalog retries; their consumers own parsing/cache publication. Help/import workflows retain their current acquisition policy. Relay-service unsigned legs use the shared sequence while paid exposure stays with the payment owner. |
 | Unsigned x402 GET/POST | The payment caller owns permitted unsigned retries under the [x402 execution model](architecture.md#unsigned-x402-requests-and-post-retries). |
 | Signed-payment HTTP requests | The payment owner retains each authorization. Generic errors, timeouts and missing responses grant no chargeable repetition; structured insufficient-funds wallet traversal remains separately permitted. |
 | USDC balances, receipts and other Base read RPCs | The Base read layer owns request retries/fallback; the reconciliation owner schedules recurring observations. Reads do not submit transfers. |
@@ -676,7 +668,7 @@ compatibility. No alternative production HTTP constructor exists.
 
 Provider HTTPS uses HTTP/2-only ALPN/client mode and a TLS 1.3 minimum by default.
 Provider/source `allow_http1` and `allow_tls12` independently permit older versions,
-without weakening trust, redirect, retry or proxy policy. Catalog, pricing, help
+without weakening trust, redirect, retry or proxy policy. Catalog, help
 and paid requests carry the same source policy. Accepted curated dynamic sources
 preserve their reviewed compatibility permissions through remote schema
 acquisition, explicit refresh, bound API execution and lazy help. Their
@@ -687,7 +679,7 @@ policy; explicit cleartext HTTP remains unchanged. See the
 [configuration guide](configuration.md#provider-http-and-tls-policy).
 
 Pool keys include protocol permissions as well as origin, isolation identity,
-timeout, runtime and public-destination policy. Catalog/pricing caches also
+timeout, runtime and public-destination policy. Catalog caches also
 separate differing protocol permissions. HTTP/2 streams within a connection share
 one SOCKS identity; they cannot cross wallet/discovery boundaries. DEBUG response
 logs record HTTP version and request stage, without URLs or credentials. TLS
@@ -708,7 +700,7 @@ An unreachable endpoint emits an immediate ERROR naming the local address and
 safe I/O kind, then repeats it on the next failed probe at least 60 seconds after
 the preceding ERROR while the shared startup wait remains pending. No separate
 logging timer or probe is created. Retry cadence is five seconds after a failed connection attempt, using the
-existing network connection timeout. Pending startup catalog/pricing network
+existing network connection timeout. Pending startup catalog network
 misses and captured wallet discovery resume after the first reachable observation;
 an INFO after a failure reports TCP reachability, never Tor bootstrap success.
 Fresh caches, listener binding, commands and independently demanded financial
@@ -744,7 +736,7 @@ financial or qualification authority.
 | --- | --- |
 | Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote directory browse retains upstream maximum 100. Follow continuations for complete inventories. |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
-| Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery, runtime imports/help/documents/probes, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static/runtime relay-service unsigned stages and Base read-only RPC also participate). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
+| Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog discovery, runtime imports/help/documents/probes, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static/runtime relay-service unsigned stages and Base read-only RPC also participate). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
 | HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP uses explicit source-management override, then accepted provider value, then network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
 | Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
@@ -753,7 +745,6 @@ financial or qualification authority.
 | MCP two/five-second library response drains | Bound response delivery only; application-owned accepted calls continue until drain or explicit force. |
 | Treasury observation: 60-second minimum, errors back off to 300 seconds | Available treasury startup and explicit sync request one pass. Current enabled unfilled funding demand or validated pending source/shielding work owns recurring scans; idle treasury performs none. Shared scan timing is measured from attempt completion, so long later command work cannot postpone an already-due scan. Busy/locked read-only demand acquisition uses a 60-second local reevaluation wake while commands and notifications remain usable; unknown demand never authorizes a scan or resets observation timing. Scheduled source observers reuse healthy current-owner persisted scans without intervening tip probes; actual new-action validation still checks exact canonical height/hash and snapshot revision. Publication and SDK reconstruction have independent 60-second retries and never justify another scan alone. Owned shutdown retains identical completed-result publication retries without another calculation or submission. Scheduling/reuse never renews the original observation time or financial authority. Successful needed scans may start per-address owned-transparent shielding under current permission/fees. Removed age/lag gates remain removed; expiry/non-inclusion requires actual scanned coverage and signed protocol expiry remains authoritative. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
 | Base resource ownership: 64 query owners, 32 active RPCs, 128 RPC callers | Bounds acquired query memory, active transports, and RPC work including callers awaiting transport capacity. Caller/query ownership survives retry waits; active RPC permits cover individual requests/body collection and are released before backoff or `Retry-After`. Saturation rejects unsigned acquisition; no whole-work timeout or spending limit. Production owners acquire wallet and authorization pages of at most 64 rows each. Identical in-flight background balance reads share one retained query owner under these same bounds; completed results are not retained by that sharing layer and no local age policy is applied. |
-| Pricing requests: 16 process-wide; `probe_concurrency` per source | Bounds active origin attempts and admitted relay work. Logical probes release request capacity during server delays; queued relay callers and cache hits hold no request permit. Relay permits cover each HTTP attempt/body and release before retry delays or wallet traversal. Each accepted exchange retains its provider gate through publication despite waiter cancellation; the shared state mutex is brief and independent providers/cached results remain available. No separate source-wide scheduling gate. |
 | Catalog downloads: `startup.catalog_concurrency`, default 2 | Bounds active origin downloads and admitted relay work per deployment load or deferred runtime. Logical retry delays, relay serialization/readiness waits and cache hits reserve no download capacity. Strict loads/warming retain completeness and single-fetch relay semantics; serving may wait for discovery readiness. |
 | Managed payment owners: 128 | Bounds completed financial observations and private signing work retained while waiting for the group gate or signed dispatch. Saturation cannot sign or create a liability. |
 | Advisory maintenance: four balance reads per group | One finite startup inventory pass, then explicitly requested refreshes only. Shared per-wallet acquisitions wait at least 60 seconds after completion, with independent error backoff up to 300 seconds; idle wallets are not swept. Zero success completes a request; failures and notifications arriving during reads retain pending work. Accepted scalar owners survive waiter cancellation. Indexed 64-row pages cover pending requests and the captured startup boundary. The five-second local scheduler/owner-restart cadence does not authorize Base reads during cooldown. Canonical pending authorization traversal remains qualification-only. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |

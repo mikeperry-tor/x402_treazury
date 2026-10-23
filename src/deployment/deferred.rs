@@ -20,7 +20,6 @@ pub(super) struct Runtime {
 enum Event {
     OperatorStatus(String, Option<bool>, tokio::sync::watch::Receiver<bool>),
     Catalog(String, Result<Box<Source>>),
-    Pricing(String, Result<BTreeMap<String, ToolSpec>>),
 }
 fn status_change(
     id: String,
@@ -69,26 +68,6 @@ impl Runtime {
     pub fn relays(&self) -> Vec<Arc<crate::discovery_relay::Relay>> {
         self.relays.clone()
     }
-    fn pricing(&self, id: &str) -> futures_util::future::BoxFuture<'static, Event> {
-        let id = id.to_owned();
-        let mut source = self.deployment.sources[&id].clone();
-        source.config.wait_for_startup_socks = true;
-        let selected = self
-            .deployment
-            .selected
-            .values()
-            .flatten()
-            .filter(|(s, _)| s == &id)
-            .map(|(_, t)| t.clone())
-            .collect();
-        async move {
-            let result = startup::price_source(&id, &source, selected)
-                .await
-                .map(|(_, tools)| tools);
-            Event::Pricing(id, result)
-        }
-        .boxed()
-    }
     async fn publish(&self) -> Result<()> {
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         let old = match &self.manager {
@@ -97,7 +76,7 @@ impl Runtime {
         };
         for (name, server) in self.deployment.build_servers(&self.wallets) {
             let mut tools = server.catalog.read().views["default"].clone();
-            // Pricing and unrelated source publication preserve successful help.
+            // Unrelated source publication preserves successful help.
             for tool in &mut tools {
                 if let Some(previous) = old.views.get(&name).and_then(|tools| {
                     tools.iter().find(|old| {
@@ -183,20 +162,7 @@ impl Runtime {
             Ok((selected, conflicts))
         });
         match selected {
-            Ok((mut selected, conflicts)) => {
-                for (listener, tools) in &mut selected {
-                    for (source, tool) in tools {
-                        if source != id
-                            && let Some((_, previous)) = self.deployment.selected[listener]
-                                .iter()
-                                .find(|(old_source, old)| {
-                                    old_source == source && old.name == tool.name
-                                })
-                        {
-                            *tool = previous.clone();
-                        }
-                    }
-                }
+            Ok((selected, conflicts)) => {
                 self.deployment.selected = selected;
                 self.deployment.conflicting_tools = conflicts;
                 Ok(())
@@ -257,9 +223,6 @@ impl Runtime {
                 .boxed(),
             );
         }
-        for id in self.deployment.sources.keys() {
-            work.push(self.pricing(id));
-        }
         loop {
             let event = tokio::select! {
                 biased;
@@ -284,7 +247,6 @@ impl Runtime {
                     let result = result.and_then(|source| self.accept_source(&id, *source));
                     match result {
                         Ok(()) => {
-                            work.push(self.pricing(&id));
                             tracing::info!(source = id, "Deferred catalog ready");
                         }
                         Err(_) => tracing::warn!(
@@ -294,22 +256,6 @@ impl Runtime {
                         ),
                     }
                 }
-                Event::Pricing(id, result) => match result {
-                    Ok(tools) => {
-                        for (source, tool) in self.deployment.selected.values_mut().flatten() {
-                            if source == &id
-                                && let Some(priced) = tools.get(&tool.name)
-                            {
-                                *tool = priced.clone();
-                            }
-                        }
-                    }
-                    Err(_) => tracing::warn!(
-                        source = id,
-                        category = "pricing_unavailable",
-                        "Deferred pricing unavailable; catalog remains usable"
-                    ),
-                },
             }
             // Do not abandon an accepted publication worker on cancellation.
             if stop.is_cancelled() {
@@ -336,150 +282,6 @@ mod tests {
     use axum::{Router, routing::get};
     use serde_json::json;
     use std::sync::atomic::Ordering;
-
-    #[tokio::test]
-    async fn delayed_pricing_sources_do_not_block_queued_description_publication() {
-        let output = tokio::process::Command::new(std::env::current_exe().unwrap())
-            .env_clear()
-            .envs(std::env::var("LLVM_PROFILE_FILE").map(|v| ("LLVM_PROFILE_FILE", v)))
-            .args([
-                "--ignored",
-                "--exact",
-                "deployment::deferred::tests::pricing_capacity_child",
-                "--nocapture",
-            ])
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{} {}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "private Tor policy; invoked by parent"]
-    async fn pricing_capacity_child() {
-        use axum::{
-            http::{HeaderMap, StatusCode, Uri},
-            response::IntoResponse,
-        };
-        use base64::Engine;
-        use std::sync::{Mutex, atomic::AtomicUsize};
-        let calls = Arc::new(Mutex::new(BTreeMap::<String, usize>::new()));
-        let healthy = Arc::new(AtomicUsize::new(0));
-        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = origin.local_addr().unwrap();
-        let app = Router::new().fallback({
-            let calls = calls.clone();
-            let healthy = healthy.clone();
-            move |uri: Uri, headers: HeaderMap| {
-                let calls = calls.clone();
-                let healthy = healthy.clone();
-                async move {
-                    assert!(!headers.contains_key("payment-signature"));
-                    assert!(!headers.contains_key("x-payment"));
-                    if uri.path() == "/healthy/price" {
-                        healthy.fetch_add(1, Ordering::SeqCst);
-                        while calls.lock().unwrap().len() < crate::pricing::CONCURRENCY {
-                            tokio::task::yield_now().await;
-                        }
-                        (
-                            StatusCode::PAYMENT_REQUIRED,
-                            [(
-                                "payment-required",
-                                base64::engine::general_purpose::STANDARD
-                                    .encode(r#"{"accepts":[{"amount":"2500","asset":"USDC"}]}"#),
-                            )],
-                        )
-                            .into_response()
-                    } else {
-                        *calls
-                            .lock()
-                            .unwrap()
-                            .entry(uri.path().to_owned())
-                            .or_default() += 1;
-                        (
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            [("retry-after", "18446744073709551615")],
-                        )
-                            .into_response()
-                    }
-                }
-            }
-        });
-        let api = tokio::spawn(async move { axum::serve(origin, app).await.unwrap() });
-        let socks = crate::test_socks::Socks::start(
-            BTreeMap::from([("pricing.example.com".into(), address)]),
-            crate::test_socks::Fault::None,
-        )
-        .await;
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("spec.json"),
-            r#"{"operations":[{"method":"GET","path":"/price"}]}"#,
-        )
-        .unwrap();
-        let mut config = format!(
-            "version=1\n[network]\nmode='tor'\nsocks_endpoint='{}'\ncover_traffic_enabled=false\n[wallets.payer]\nmode='static'\nprivate_key_env='KEY'\n",
-            socks.address
-        );
-        let mut sources = Vec::new();
-        for n in 0..crate::pricing::CONCURRENCY {
-            let id = format!("a{n:02}");
-            config.push_str(&format!(
-                "[sources.{id}]\nspec='spec.json'\nbase_url='http://pricing.example.com/{id}'\n"
-            ));
-            sources.push(format!("'{id}'"));
-        }
-        config.push_str(
-            "[sources.zhealthy]\nspec='spec.json'\nbase_url='http://pricing.example.com/healthy'\n",
-        );
-        sources.push("'zhealthy'".into());
-        config.push_str(&format!("[servers.one]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='payer'\nsources=[{}]\n", sources.join(",")));
-        let path = dir.path().join("deployment.toml");
-        std::fs::write(&path, config).unwrap();
-        let env = BTreeMap::from([
-            ("KEY".into(), format!("{:064x}", 2)),
-            ("TOKEN".into(), "fixture".into()),
-        ]);
-        let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
-            .await
-            .unwrap();
-        let running = deployment.bind(&env).await.unwrap();
-        let catalog = running.deferred.as_ref().unwrap().catalog.clone();
-        let stop = CancellationToken::new();
-        let serving = tokio::spawn(running.serve(stop.clone()));
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if catalog.read().views["one"].iter().any(|bound| {
-                    bound.base.ends_with("/healthy") && bound.tool.description.contains("$0.0025")
-                }) {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("healthy pricing must publish while all earlier providers await Retry-After");
-        assert_eq!(calls.lock().unwrap().len(), crate::pricing::CONCURRENCY);
-        assert!(calls.lock().unwrap().values().all(|count| *count == 1));
-        assert_eq!(healthy.load(Ordering::SeqCst), 1);
-        stop.cancel();
-        tokio::time::timeout(Duration::from_secs(5), serving)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        assert!(
-            calls.lock().unwrap().values().all(|count| *count == 1),
-            "shutdown must not dispatch delayed retries"
-        );
-        assert_eq!(healthy.load(Ordering::SeqCst), 1);
-        api.abort();
-    }
 
     #[tokio::test]
     async fn conflicting_catalogs_withdraw_all_owners_in_either_completion_order() {
@@ -509,7 +311,9 @@ mod tests {
                     .to_string(),
                 )
                 .unwrap();
-                config.push_str(&format!("[sources.{id}]\nspec='{id}.json'\nbase_url='{base}/{id}'\nprobe_pricing=false\n"));
+                config.push_str(&format!(
+                    "[sources.{id}]\nspec='{id}.json'\nbase_url='{base}/{id}'\n"
+                ));
             }
             for (name, sources) in [
                 ("combined", "['a','b','c']"),
@@ -750,17 +554,14 @@ private_key_env='KEY'
 [sources.healthy]
 spec='spec.json'
 base_url='{base}'
-probe_pricing=false
 [sources.a]
 spec='spec.json'
 prefix='{first}'
 base_url='{base}'
-probe_pricing=false
 [sources.b]
 spec='spec.json'
 prefix='{second}'
 base_url='{base}'
-probe_pricing=false
 [servers.one]
 listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
@@ -881,12 +682,10 @@ private_key_env='KEY'
 [sources.healthy]
 spec='spec.json'
 base_url='{base}'
-probe_pricing=false
 instructions_text='Inherited healthy guidance'
 [sources.late]
 spec='{base}/spec'
 base_url='{base}'
-probe_pricing=false
 [servers.one]
 listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
@@ -1009,65 +808,58 @@ discovery_search_tool_instructions_text='Pending platform guidance'
     }
 
     #[tokio::test]
-    async fn required_remote_failure_and_pending_pricing_do_not_block_ordinary_serving() {
-        use axum::{
-            http::{HeaderMap, StatusCode},
-            response::IntoResponse,
-        };
-        use base64::Engine;
+    async fn required_remote_failure_does_not_probe_prices_or_block_ordinary_serving() {
+        use axum::http::{HeaderMap, StatusCode};
         use std::sync::atomic::AtomicUsize;
-
         let dir = tempfile::tempdir().unwrap();
         let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", origin.local_addr().unwrap());
-        let entered = CancellationToken::new();
-        let release = CancellationToken::new();
         let probes = Arc::new(AtomicUsize::new(0));
         let catalogs = Arc::new(AtomicUsize::new(0));
         let api = Router::new()
-            .route("/read", get(|headers: HeaderMap| async move {
-                assert!(!headers.contains_key("payment-signature"));
-                assert!(!headers.contains_key("x-payment"));
-                "healthy"
-            }))
-            .route("/probe", get({
-                let entered = entered.clone();
-                let release = release.clone();
-                let probes = probes.clone();
-                move |headers: HeaderMap| {
-                    let entered = entered.clone();
-                    let release = release.clone();
+            .route(
+                "/read",
+                get(|headers: HeaderMap| async move {
+                    assert!(!headers.contains_key("payment-signature"));
+                    assert!(!headers.contains_key("x-payment"));
+                    "healthy"
+                }),
+            )
+            .route(
+                "/probe",
+                get({
                     let probes = probes.clone();
-                    async move {
-                        assert!(!headers.contains_key("payment-signature"));
-                        assert!(!headers.contains_key("x-payment"));
-                        probes.fetch_add(1, Ordering::SeqCst);
-                        entered.cancel();
-                        release.cancelled().await;
-                        (StatusCode::PAYMENT_REQUIRED, [("payment-required",
-                            base64::engine::general_purpose::STANDARD.encode(json!({
-                                "accepts":[{"scheme":"exact","amount":"14000","asset":"USDC","network":"eip155:8453"}]
-                            }).to_string()))]).into_response()
+                    move || {
+                        let probes = probes.clone();
+                        async move {
+                            probes.fetch_add(1, Ordering::SeqCst);
+                            StatusCode::PAYMENT_REQUIRED
+                        }
                     }
-                }
-            }))
-            .route("/spec", get({
-                let catalogs = catalogs.clone();
-                move |headers: HeaderMap| {
+                }),
+            )
+            .route(
+                "/spec",
+                get({
                     let catalogs = catalogs.clone();
-                    async move {
-                        assert!(!headers.contains_key("payment-signature"));
-                        assert!(!headers.contains_key("x-payment"));
-                        catalogs.fetch_add(1, Ordering::SeqCst);
-                        StatusCode::SERVICE_UNAVAILABLE
+                    move || {
+                        let catalogs = catalogs.clone();
+                        async move {
+                            catalogs.fetch_add(1, Ordering::SeqCst);
+                            StatusCode::SERVICE_UNAVAILABLE
+                        }
                     }
-                }
-            }));
+                }),
+            );
         let api = tokio::spawn(async move { axum::serve(origin, api).await.unwrap() });
         for (file, route) in [("healthy.json", "/read"), ("priced.json", "/probe")] {
             std::fs::write(
                 dir.path().join(file),
-                json!({"operations":[{"method":"GET","path":route}]}).to_string(),
+                json!({"operations":[{
+                    "method":"GET", "path":route,
+                    "pricing":{"amount":"0.014","currency":"USDC"}
+                }]})
+                .to_string(),
             )
             .unwrap();
         }
@@ -1083,15 +875,12 @@ private_key_env='KEY'
 [sources.healthy]
 spec='healthy.json'
 base_url='{base}'
-probe_pricing=false
 [sources.priced]
 spec='priced.json'
 base_url='{base}'
-probe_pricing=true
 [sources.failed]
 spec='{base}/spec'
 base_url='{base}'
-probe_pricing=false
 [servers.one]
 listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
@@ -1105,13 +894,9 @@ sources=['healthy','priced','failed']
             ("KEY".into(), format!("{:064x}", 2)),
             ("TOKEN".into(), "fixture".into()),
         ]);
-        let deployment = tokio::time::timeout(
-            Duration::from_secs(5),
-            Deployment::load_for_serving_with_relay(&path, &env, Default::default()),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
+            .await
+            .unwrap();
         assert!(!deployment.config.sources["failed"].optional_startup);
         assert_eq!(deployment.sources.len(), 2);
         assert_eq!(deployment.pending_sources.len(), 1);
@@ -1120,9 +905,6 @@ sources=['healthy','priced','failed']
         let catalog = running.deferred.as_ref().unwrap().catalog.clone();
         let stop = CancellationToken::new();
         let serving = tokio::spawn(running.serve(stop.clone()));
-        tokio::time::timeout(Duration::from_secs(5), entered.cancelled())
-            .await
-            .unwrap();
         let initial = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let snapshot = catalog.read();
@@ -1138,6 +920,12 @@ sources=['healthy','priced','failed']
         .unwrap();
         assert!(!catalog.publication_failed());
         assert_eq!(initial.views["one"].len(), 2);
+        assert!(
+            initial.views["one"].iter().any(
+                |t| t.tool.name.starts_with("priced_") && t.tool.description.contains("$0.014")
+            )
+        );
+        assert_eq!(probes.load(Ordering::SeqCst), 0);
         let healthy = initial.views["one"]
             .iter()
             .find(|t| t.tool.name.starts_with("healthy_"))
@@ -1147,12 +935,9 @@ sources=['healthy','priced','failed']
             healthy.invoke(&Default::default()).await.unwrap(),
             "healthy"
         );
-        assert!(!release.is_cancelled());
-        assert_eq!(probes.load(Ordering::SeqCst), 1);
         assert_eq!(catalogs.load(Ordering::SeqCst), 1);
-        let error = tokio::time::timeout(Duration::from_secs(5), Deployment::load(&path))
+        let error = Deployment::load(&path)
             .await
-            .unwrap()
             .err()
             .expect("strict inspection must reject required remote failure");
         assert!(
@@ -1160,44 +945,7 @@ sources=['healthy','priced','failed']
             "{error:#}"
         );
         assert_eq!(catalogs.load(Ordering::SeqCst), 2);
-        assert_eq!(probes.load(Ordering::SeqCst), 1);
-        release.cancel();
-        let priced = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let snapshot = catalog.read();
-                if snapshot.views["one"].iter().any(|t| {
-                    t.tool.name.starts_with("priced_") && t.tool.description.contains("$0.014")
-                }) {
-                    break snapshot;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-        assert!(priced.generation > initial.generation);
-        assert_eq!(
-            initial.views["one"]
-                .iter()
-                .map(|t| &t.tool.name)
-                .collect::<Vec<_>>(),
-            priced.views["one"]
-                .iter()
-                .map(|t| &t.tool.name)
-                .collect::<Vec<_>>()
-        );
-        assert!(
-            priced.instructions["one"]
-                .as_ref()
-                .unwrap()
-                .contains("Source failed: UNAVAILABLE")
-        );
-        assert_eq!(
-            healthy.invoke(&Default::default()).await.unwrap(),
-            "healthy"
-        );
-        assert_eq!(probes.load(Ordering::SeqCst), 1);
-        assert_eq!(catalogs.load(Ordering::SeqCst), 2);
+        assert_eq!(probes.load(Ordering::SeqCst), 0);
         assert!(!catalog.publication_failed());
         stop.cancel();
         tokio::time::timeout(Duration::from_secs(5), serving)
@@ -1206,7 +954,6 @@ sources=['healthy','priced','failed']
             .unwrap()
             .unwrap();
         api.abort();
-        let _ = api.await;
     }
 
     #[tokio::test]
@@ -1558,15 +1305,43 @@ sources=['healthy','priced','failed']
         }
         let (_dir, mut running, _catalog, _fixture, relay, api) = prepared(false, true, None).await;
         let runtime = running.deferred.as_mut().unwrap();
-        let healthy = runtime
+        let authored = Source::from_document(
+            "healthy",
+            runtime.deployment.sources["healthy"].config.clone(),
+            Arc::new(json!({"operations":[{"method":"GET","path":"/read",
+                "pricing":{"amount":"0.014","currency":"USDC"}}]})),
+        )
+        .unwrap();
+        runtime
+            .deployment
+            .sources
+            .insert("healthy".into(), authored);
+        let inventory = listener_tool_inventory(
+            "one",
+            &runtime.deployment.config.servers["one"],
+            &runtime.deployment.sources,
+            &runtime.deployment.unavailable_sources,
+            true,
+        )
+        .unwrap();
+        runtime
             .deployment
             .selected
-            .get_mut("one")
-            .unwrap()
-            .iter_mut()
+            .insert("one".into(), inventory.tools);
+        runtime
+            .deployment
+            .conflicting_tools
+            .insert("one".into(), inventory.conflicts);
+        runtime.publish().await.unwrap();
+        let initial = runtime.catalog.read();
+        let description = runtime.deployment.selected["one"]
+            .iter()
             .find(|(source, _)| source == "healthy")
-            .unwrap();
-        healthy.1.description = "recorded startup price fixture".into();
+            .unwrap()
+            .1
+            .description
+            .clone();
+        assert!(description.contains("$0.014"));
         let cfg = runtime.deployment.pending_sources["b"].config.clone();
         let source = Source::from_document(
             "b",
@@ -1575,6 +1350,17 @@ sources=['healthy','priced','failed']
         )
         .unwrap();
         runtime.accept_source("b", source).unwrap();
+        runtime.publish().await.unwrap();
+        assert!(
+            initial.views["one"]
+                .iter()
+                .any(|tool| tool.tool.description == description)
+        );
+        assert!(
+            runtime.catalog.read().views["one"]
+                .iter()
+                .any(|tool| tool.tool.description == description)
+        );
         assert_eq!(
             runtime.deployment.selected["one"]
                 .iter()
@@ -1582,7 +1368,7 @@ sources=['healthy','priced','failed']
                 .unwrap()
                 .1
                 .description,
-            "recorded startup price fixture"
+            description
         );
         drop(running);
         relay.abort();

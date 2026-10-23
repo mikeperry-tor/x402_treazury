@@ -36,7 +36,6 @@ private_key_env="ABSENT_KEY"
 spec="spec.json"
 base_url="https://example.invalid"
 prefix="api"
-probe_pricing=false
 [servers.main]
 listen="127.0.0.1:18777"
 sources=["api"]
@@ -60,7 +59,7 @@ bearer_token_env="TOKEN"
     (m, state)
 }
 #[tokio::test]
-async fn production_startup_records_pricing_modes_and_rebuilds_inventory_without_extra_probes() {
+async fn production_startup_preserves_inventory_without_endpoint_pricing_probes() {
     use std::sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -96,13 +95,13 @@ async fn production_startup_records_pricing_modes_and_rebuilds_inventory_without
     let vendor = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", vendor.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(vendor, app).await.unwrap() });
-    for (enabled, nonempty) in [(false, false), (true, false), (true, true)] {
+    for nonempty in [false, true] {
         price.store(nonempty, Ordering::SeqCst);
         let before = count.load(Ordering::SeqCst);
         let tmp = tempfile::tempdir().unwrap();
-        let (mut m, state) = fixture(tmp.path());
+        let (m, state) = fixture(tmp.path());
         // Keep /read's required argument intact: startup must never probe it.
-        // This independent argument-free route exercises eligible pricing.
+        // Even a free or challenge-returning argument-free route is never probed.
         let spec_path = tmp.path().join("spec.json");
         let mut spec: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&spec_path).unwrap()).unwrap();
@@ -114,19 +113,8 @@ async fn production_startup_records_pricing_modes_and_rebuilds_inventory_without
         let text = std::fs::read_to_string(&m.deployment)
             .unwrap()
             .replace("https://example.invalid", &base)
-            .replace("127.0.0.1:18777", &addr.to_string())
-            .replace("probe_pricing=false", &format!("probe_pricing={enabled}"));
+            .replace("127.0.0.1:18777", &addr.to_string());
         std::fs::write(&m.deployment, text).unwrap();
-        m.pricing_checks.insert(
-            "api".into(),
-            if nonempty {
-                pricing_stages::Expectation::Nonempty
-            } else if enabled {
-                pricing_stages::Expectation::Empty
-            } else {
-                pricing_stages::Expectation::Disabled
-            },
-        );
         let (plan, pins) = preparation::collect_catalogs(&m, &state).await.unwrap();
         let auth = registry::Authorization {
             version: 1,
@@ -149,22 +137,11 @@ async fn production_startup_records_pricing_modes_and_rebuilds_inventory_without
             report["catalog_stages"][1]["sources"][0]["state"],
             "completed"
         );
-        assert_eq!(report["pricing_stages"][0]["assessment"], "passed");
-        assert_eq!(
-            report["pricing_stages"][0]["evidence"]["available_prices"],
-            usize::from(nonempty)
-        );
-        assert_eq!(
-            report["pricing_stages"][0]["evidence"]["observed"],
-            usize::from(enabled)
-        );
-        assert_eq!(
-            report["pricing_stages"][0]["evidence"]["skipped_arguments"],
-            usize::from(enabled)
-        );
+        assert!(report.get("pricing_stages").is_none());
         assert_eq!(
             count.load(Ordering::SeqCst) - before,
-            1 + usize::from(enabled)
+            1,
+            "only the reviewed argument-bearing API case may dispatch"
         );
         assert_eq!(report["api_reserved_atomic"], 0);
     }
@@ -525,25 +502,21 @@ spec="spec.json"
 base_url="https://www.cloudflare.com"
 prefix="trace"
 help_url="https://www.cloudflare.com/cdn-cgi/trace"
-probe_pricing=false
 [sources.tor]
 spec="spec.json"
 base_url="https://www.torproject.org"
 prefix="tor"
 allow_http1=true
 help_url="https://www.torproject.org/"
-probe_pricing=false
 [sources.fresh]
 spec="spec.json"
 base_url="https://www.cloudflare.com"
 prefix="fresh"
 help_url="https://www.cloudflare.com/cdn-cgi/trace?treazury_qualification=uncached"
-probe_pricing=false
 [sources.catalog]
 spec="https://api.exa.ai/openapi.json"
 base_url="https://api.exa.ai"
 prefix="exa"
-probe_pricing=false
 [servers.main]
 listen="127.0.0.1:19877"
 sources=["trace","tor","fresh","catalog"]
@@ -865,13 +838,11 @@ spec="spec.json"
 base_url="https://api.example"
 prefix="api"
 wallet="alpha"
-probe_pricing=false
 [sources.other]
 spec="spec.json"
 base_url="https://other.example"
 prefix="other"
 wallet="beta"
-probe_pricing=false
 [servers.main]
 listen="127.0.0.1:18777"
 sources=["api","other"]

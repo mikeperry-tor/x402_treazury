@@ -7,7 +7,6 @@ prefix = "hirescrape"
 exclude = ["/api/skills/search", "/api/skills/runs", "/api/snapshots", "/api/reports", "/api/scraper-requests"]
 include = ["/api/tools", ""]
 pricing_key = "x-payment-info"
-probe_pricing = false
 read_timeout_seconds = 120
 help_url = "https://hirescrape.com/llms.txt"
 instructions_text = "HireScrape job-board and social-media scrapers paid via x402 USDC on Base. Keep requested record counts small (well below 200 total records, and within the configured payment cap): requests exceeding ~200 records or using async discovery modes switch to asynchronous snapshots whose GET /api/snapshots/{id} polling requires same-wallet SIWX authentication and session cookies not supported by Treazury. Follow each tool's input schema mode enum and limit/maxResults fields rather than divergent mode or num_of_posts names in vendor guidance. Published dynamic price ranges are estimates; the live 402 challenge and configured spend cap are authoritative. Missing receipts after a timeout do not prove nothing was charged; do not automatically replay a signed payment."

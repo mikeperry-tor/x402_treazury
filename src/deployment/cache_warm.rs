@@ -11,8 +11,6 @@ pub struct CacheWarmSummary {
 pub struct CacheWarmSource {
     pub source: String,
     pub catalog_cache: &'static str,
-    pub pricing: Option<crate::pricing::Evidence>,
-    pub fresh_pricing_entries: usize,
 }
 
 /// Warm only explicitly selected authored sources (all if selection is empty).
@@ -21,15 +19,13 @@ pub async fn warm_cache(
     path: &Path,
     selected: &[String],
     direct: bool,
-    discover_pricing: bool,
 ) -> Result<CacheWarmSummary> {
-    warm_cache_with_network(path, selected, direct, discover_pricing, None).await
+    warm_cache_with_network(path, selected, direct, None).await
 }
 pub async fn warm_cache_with_network(
     path: &Path,
     selected: &[String],
     direct: bool,
-    discover_pricing: bool,
     network_override: Option<&crate::network::NetworkConfig>,
 ) -> Result<CacheWarmSummary> {
     ensure!(
@@ -90,7 +86,7 @@ pub async fn warm_cache_with_network(
     if direct {
         tracing::warn!(
             sources = selected.len(),
-            "Explicit direct cache warming: selected unsigned catalogs/pricing bypass the configured network; fresh entries may be reused by that policy"
+            "Explicit direct cache warming: selected unsigned catalogs bypass the configured network; fresh entries may be reused by that policy"
         );
     }
     // Direct warming retains its unsigned behavior. Relay warming uses only the
@@ -144,48 +140,7 @@ pub async fn warm_cache_with_network(
     } else {
         Default::default()
     };
-    let sources = startup::warm(&config, path, &selected, direct, discover_pricing, relay).await?;
+    let sources = startup::warm(&config, path, &selected, direct, relay).await?;
     drop(owner);
     Ok(CacheWarmSummary { direct, sources })
-}
-
-/// Preserve listener tag/name restrictions without downloading unrelated sources.
-/// Unknown exact selectors belonging to another source are validated by normal
-/// deployment startup, not inferred from this deliberately partial inventory.
-pub(super) fn selected_tools(
-    config: &MetaConfig,
-    id: &str,
-    source: &Source,
-) -> Result<Vec<ToolSpec>> {
-    let operations = catalog::operations(&source.document, None)?;
-    let mut selected = BTreeMap::new();
-    for server in config
-        .servers
-        .values()
-        .filter(|s| s.sources.iter().any(|s| s == id))
-    {
-        let include = server
-            .include_tools
-            .iter()
-            .map(|s| pattern(s))
-            .collect::<Result<Vec<_>>>()?;
-        let exclude = server
-            .exclude_tools
-            .iter()
-            .map(|s| pattern(s))
-            .collect::<Result<Vec<_>>>()?;
-        for tool in &source.tools {
-            if catalog::matches_operation_tags(
-                &operations,
-                tool,
-                &server.tags,
-                &server.exclude_tags,
-            ) && (include.is_empty() || include.iter().any(|p| p.is_match(&tool.name)))
-                && !exclude.iter().any(|p| p.is_match(&tool.name))
-            {
-                selected.insert(tool.name.clone(), tool.clone());
-            }
-        }
-    }
-    Ok(selected.into_values().collect())
 }

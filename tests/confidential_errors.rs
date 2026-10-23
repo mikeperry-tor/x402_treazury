@@ -145,7 +145,7 @@ async fn executable_startup_and_inspection_do_not_print_environment_secrets() {
     .unwrap();
     std::fs::write(
         tmp.path().join("config.toml"),
-        "spec = 'spec.json'\nbase_url = 'https://example.com'\nprobe_pricing = false\n",
+        "spec = 'spec.json'\nbase_url = 'https://example.com'\n",
     )
     .unwrap();
     for inspect in [true, false] {

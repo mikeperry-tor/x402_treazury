@@ -283,8 +283,8 @@ async fn comprehensive_subsets_inherit_conversion_despite_source_and_endpoint_in
     }
 }
 
-#[tokio::test]
-async fn structured_credit_prices_skip_probes_and_support_digests() {
+#[test]
+fn structured_credit_prices_remain_authored_and_support_digests() {
     let cfg = Config {
         credit_pricing: Some(CreditPricing {
             credit_cost_key: "credit_tariff".into(),
@@ -303,13 +303,6 @@ async fn structured_credit_prices_skip_probes_and_support_digests() {
         let tools = catalog::build_tools(&cfg, &document, "api").unwrap();
         assert!(tools[0].description.contains("0.000025 USDC/request"));
         assert!(!tools[0].description.contains("Cost: unknown"));
-        let discovered = x402_treazury::pricing::PricingCache::default()
-            .discover_observed(&cfg, &document, &tools, "http://127.0.0.1:1")
-            .await
-            .unwrap();
-        assert!(discovered.prices.is_empty());
-        assert_eq!(discovered.evidence.skipped_embedded, 1);
-        assert_eq!(discovered.evidence.eligible, 0);
     }
 }
 

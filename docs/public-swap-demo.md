@@ -35,7 +35,7 @@ target/debug/x402_treazury catalog tools \
   --config tests/live/deployments/public-swap-demo.toml
 ```
 
-The example uses a committed request schema, disables pricing probes and exposes
+The example uses a committed request schema and exposes
 only `socialfetch_twitter_profiles_handle`. Inspection loads no wallet secrets and
 makes no vendor requests. These are configuration checks, not a promise that the
 live seller's current schema or price still matches the fixture.

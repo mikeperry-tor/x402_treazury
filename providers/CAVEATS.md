@@ -21,12 +21,12 @@ alone do not establish incompatibility.
 | AGProxy | Root base URL overrides the schema’s `/v1` server; both `/x402` and `/mpp` aliases advertise x402 support. Fetch truncation, residential exit behavior and proxy credentials retain their documented meaning. |
 | Horizon Pulse | POST supersets and screenshot mapping preserve request/output contracts; free feedback is an unprotected persistent write excluded from unsigned x402 replay. Proxy limits and filtered headers constrain fallback suitability. |
 | AgentFund, Brazilayer, Deepline, PDL | Gateway/path name anchors and request guidance; no additional compatibility restriction identified. |
-| botsmith, Google Trends | No additional compatibility restriction identified; probes and structured price/offer metadata have separate contracts. |
+| botsmith, Google Trends | No additional compatibility restriction identified; structured price/offer metadata remains advisory. |
 | AgOSINT | `/mpp` is the unsupported payment rail; `/x402` anchors names while public discovery remains visible. Root base URL repairs upstream `/v1`. |
 | Arkham | Three discovery routes demand SIWX; ordinary paid routes remain usable. |
 | Datakoot, IPIntel | Supported catalogs are open to new routes; request guidance and output interpretation remain provider-specific. |
 | GenuineGood | Bearer-token pass purchase unusable here; ordinary grant reads include expensive calls subject to payment caps. |
-| Kronos | Path name anchor; disabled probes reflect observed discovery slowness, not a tool gate. |
+| Kronos | Path name anchor; vendor prices remain prose, not a tool gate. |
 | LoneStarOracle, x402stock | Public previews, feeds and overlapping data remain available; compact research advice requires explicit opt-in. |
 | TeleSINT | `/watch` owns persistent wallet state and remains excluded. Public status and new stateless operations remain visible. |
 | Agent402 | Preserve wallet-owned and actual execution boundaries. JSON/base64 media, PNG/JPEG modes, planning and human onramp links are usable; raw speech and multipart transcription are unsupported. Compact tags/inventory are editorial. |
@@ -88,7 +88,7 @@ are separate from OpenAPI tool filtering.
 | AgentUtility | Repeated upstream rate limit in web search. |
 | Arkham | One paid response-body loss; subsequent responses completed. |
 | OneShot | Repeated catalog HTTP 403; help remained reachable. |
-| Kronos | Slow unsigned pricing discovery; separate intermittent catalog/help connection timeouts. |
+| Kronos | Intermittent catalog/help connection timeouts. |
 | RegimeShift | Intermittent catalog/help timeouts and partial upstream data. |
 | Concordance | One query/result-metadata relevance mismatch. |
 
@@ -138,8 +138,7 @@ that prose. This includes Instagram v2 `include` surcharges and the recognized
 `always` / `fixed_price_only` exact-payment hints; those hints do not select payment
 behavior. The configured 0.014 USDC/credit is a historical estimate, not a verified
 current x402 tariff; the payment challenge remains authoritative. Instruction
-overrides and platform filters retain estimates. Pricing probes are disabled;
-no endpoint sweep is needed. Fetching the live spec still requires one startup
+overrides and platform filters retain estimates. No endpoint sweep is needed. Fetching the live spec still requires one startup
 request. Use a 90-second timeout for slow search/transcript calls.
 
 `tests/fixtures/socialfetch_openapi.json` is a scoped source capture for real
@@ -179,10 +178,9 @@ and `size` hints. Tool schemas are closed via `additional_properties = false`.
 
 Market-signal API for trading agents (X/Twitter intel, Polymarket, perp
 funding/OI, stablecoin pegs). All routes are flat-price GETs ($0.015/call at
-the time of writing), so no `pricing_key` is configured: the server probes
-each route once at boot with an unpaid GET (expect `402` + challenge, $0
-spent) and renders the live price into every tool description, cached for the
-process lifetime.
+the time of writing). No `pricing_key` is configured, so structured display prices
+remain unknown. Actual calls obtain the current x402 challenge; no startup endpoint
+requests are sent.
 
 ## x402stock.toml — x402stock.xyz
 
@@ -196,9 +194,8 @@ is a write; no wallet-owned or unsupported-auth contract is established for it.
 
 `recommended_tools` suggests symbol discovery, company overview/disclosures and
 the FOMC calendar, plus help. This advice does not limit the default catalog or
-raise payment caps. Prices come from vendor metadata or eligible unsigned probes;
-restored routes without embedded pricing can now participate in that existing
-probe policy. Vendor `llms.txt` help remains lazy. Source instructions preserve
+raise payment caps. Prices come from vendor metadata; restored routes without structured pricing
+remain unknown until an actual call obtains a challenge. Vendor `llms.txt` help remains lazy. Source instructions preserve
 path placeholders and the `{ticker, data, source, as_of}` result convention.
 Only a selected calendar request schema is retained for offline qualification;
 the current complete spec/guide could not be retrieved during this audit. Neither
@@ -209,7 +206,7 @@ that schema nor the configured URL establishes current upstream availability.
 Four GET endpoints on [google-trends.use.x402atlas.com](https://google-trends.use.x402atlas.com):
 interest over time ($0.05/call, worldwide), interest by region, related
 queries and related topics ($0.03/call each, per-country). Prices surface
-from the `x-payment-info` extension, so boots make zero probe requests.
+from the `x-payment-info` extension.
 Guidance: long vendor descriptions describe each route's limits (empty
 result sets, established search terms) — never re-enable trimming for this
 spec; `help_url` serves the vendor `llms.txt` via `google_trends_help()`.
@@ -220,8 +217,7 @@ Blockchain-intelligence API (address/entity intelligence, balances, flows,
 HyperCore): paid POST requests put parameters in the JSON body.
 Every paid operation carries an `x-payment-info` block, which `pricing_key`
 surfaces into tool descriptions — prices mirror the classic credit weights at
-**$0.20 per credit**, so no probing happens (these are POST routes anyway,
-and the probe is GET-only by design). Most operation descriptions already
+**$0.20 per credit**. Most operation descriptions already
 state the price in prose (`… $0.20 per call.`), so the rendered extension
 line is dropped there and the price appears exactly once; the three
 dynamic-priced routes keep both texts because their prose lacks the max.
@@ -267,9 +263,7 @@ BTC/ETH options (GEX, IV surface, implied probabilities), ML forecasts
 ($0.05) with a **free** `kronos_track_record` accuracy audit, macro context,
 and the $0.10 all-in-one `briefing`. The `/api/v1` anchor keeps existing tool names short. Prices
 live in vendor prose (the spec's `x-x402` extension has the wrong shape for
-`pricing_key`). Startup probes are disabled (`probe_pricing = false`) because
-pricing discovery was repeatedly slow; a deployment source may explicitly
-re-enable them. Vendor prose and the free `kronos_track_record` override remain.
+`pricing_key`). No startup endpoint pricing requests are made. Vendor prose and the free `kronos_track_record` override remain.
 Actual paid calls still use the live challenge and enforce spend caps.
 
 The `/api/v1` anchor preserves existing names; an empty fallback exposes the
@@ -288,13 +282,11 @@ DefiLlama, finnhub/twelvedata/polygon quotes) surfaced as six paid POST tools
 ($0.01–$0.05/call, USDC on Base or Solana). The vendor publishes both an
 OpenAPI spec and an `llms.txt`; the spec's request bodies are FastAPI `$ref`s
 (these deref fine since the flatteners learned local refs) but the spec
-carries **no pricing at all** and POSTs are never probed — so the conf points
+carries **no pricing at all**, so the configuration points
 at the curated `providers/concordance/openapi.json`, with references inlined
 and prices embedded from vendor documentation and challenges. Selected original
 vendor source objects and their reference closure are retained in `tests/fixtures/concordance_openapi.json`; the curated tool
-contract is pinned by `tests/provider_catalogs.rs`. Boot
-makes zero probe requests (all paid routes are POST, and the probe is
-GET-only by design). The authored projection preserves the complete captured public GET objects for
+contract is pinned by `tests/provider_catalogs.rs`. The authored projection preserves the complete captured public GET objects for
 `/`, `/catalog` and `/healthz`, adding explicitly authored zero-price hints.
 `include = ["/tools", ""]` preserves paid names and adds `concordance_root`,
 `concordance_catalog` and `concordance_healthz` without changing wire paths.
@@ -318,7 +310,7 @@ Every request body is inline (no `$ref`), the spec carries an absolute
 `servers` URL, and every op publishes a correct-shape `x-payment-info` price
 ($0.001–$0.03/call, USDC on Base; failed upstream calls are never charged) —
 so the conf points at the **live vendor spec** and needs no base_url pin, no
-local catalog, no overrides, and makes zero probe requests. No vendor `llms.txt`;
+local catalog and no overrides. No vendor `llms.txt`;
 the spec's top-level `x-guidance` is condensed into `instructions_text`
 instead. (The vendor also serves these tools natively over MCP at `/mcp`;
 this conf exists so the wallet/spend-cap story stays in this server.)
@@ -333,8 +325,7 @@ tools (image/video gen, research, tx explainer), portfolio reads, a
 meta-intelligence router ($0.001) and a feedback/refund route (needs the
 original payment tx hash; vendor-capped at $0.01). Every op carries a
 correct-shape `x-payment-info` (fixed and dynamic min/max entries), so
-prices render from the **live vendor spec** with zero probes and no pricing
-overrides; where the vendor prose already states its own price the rendered
+prices render from the **live vendor spec** with no pricing overrides; where the vendor prose already states its own price the rendered
 line dedupes away — every tool still shows a
 price exactly once. Absolute `servers` URL, inline POST bodies. Lazy help reads
 `https://x402.ottoai.services/llms-full.txt`, the consolidated guide rather than its
@@ -377,8 +368,7 @@ five data routes — search, detail, fit, brief, preflight — each shipping
 GET+POST twins that share a path. Default POST selection exposes five API tools
 plus `genuinegood_help()` without redundant method suffixes. Every op publishes a correct-shape
 `x-payment-info` ($0.05 / $0.08 / $0.20 / $0.50, preflight $5.00 per call,
-USDC on Base), so prices render from the **live vendor spec** and boots make
-zero probe requests; the vendor prose states no dollar amounts, so the
+USDC on Base), so prices render from the **live vendor spec**; the vendor prose states no dollar amounts, so the
 rendered price line survives the dedupe and each tool shows its price exactly
 once. The `/v1/grants` naming anchor preserves existing names, with a root fallback
 for other supported paths. Search/detail/help recommendations are advisory;
@@ -408,8 +398,7 @@ closed via `additional_properties = false`. Caveats:
 The authored `providers/locus/openapi.json` exposes paid POST resources, a
 free list/call gateway, public discovery manifests and lazy help. Prices are
 embedded from the spec's `x-payment-info.price` blocks ($0.01–$2.49 per call),
-so boots make zero probe requests (`probe_pricing` is false), plus a **two-tool
-free gateway** mirroring the vendor's own remote-MCP shape: `locus_list`
+with a **two-tool free gateway** mirroring the vendor's own remote-MCP shape: `locus_list`
 (catalog of the 114 free tools with `compact`/`category` query knobs) and
 `locus_call` (wrapped `{name, arguments}` body; the `name` enum pins the 114
 valid tools, and the spec's oneOf-of-114-wrappers body — which the flattener
@@ -500,8 +489,7 @@ Glassnode publishes no OpenAPI spec; this pair works around it:
   gateway routes (the gateway mirrors `api.glassnode.com` paths one-to-one):
   one templated metrics tool (`/v1/metrics/{category}/{metric}`, **$0.05**)
   plus the metadata discovery trio (assets / metrics / metric, **$0.01**
-  each). Prices are embedded as `x-payment-info` blocks, so boots make zero probe
-  requests.
+  each). Prices are embedded as `x-payment-info` blocks.
 - `providers/glassnode/provider.toml` — the configuration: pins `base_url` + `prefix`, carries the
   discover→metadata→fetch workflow in `instructions_text`, and serves the
   vendor's x402 doc page via `glassnode_help()` (`help_url`).
@@ -534,8 +522,7 @@ loading the full multi-product documentation corpus into context.
 Vendor `x-payment-info` supplies dynamic price ranges, but these are not total
 request caps. Requested search type, result/page count and content options affect
 the actual price, calculated upfront. Authored descriptions make the live
-challenge authoritative and recommend small batches. Pricing probes are disabled:
-both paid operations are POSTs and pricing is request-dependent. One unsigned
+challenge authoritative and recommend small batches. Pricing is request-dependent. One unsigned
 request per operation returned HTTP 402 with x402 v2 exact Base USDC options;
 the sampled requests quoted 7000 and 1000 atomic units respectively. These were
 unpaid discovery checks, not funded settlement qualification or universal prices.
@@ -599,8 +586,7 @@ no wallet credentials or payment were sent.
 
 `x-payment-info` here contains authentication flags, not a price object. The
 provider therefore uses an authored $0.001 description from the vendor operation
-text, with the live challenge and configured payment cap authoritative. Pricing
-probes are disabled; the selected paid endpoint is POST. The schema's query-length
+text, with the live challenge and configured payment cap authoritative. The schema's query-length
 and result-count bounds and original JSON field names are preserved without repairs.
 
 The lazy help tool fetches the single search API guide, not the full service index.
@@ -656,8 +642,7 @@ JSON metadata passes through unchanged; returned asset URLs are not automaticall
 fetched. Solar data-layers returns metadata/signed GeoTIFF URLs, and Serper image
 search returns JSON search results. Neither triggers a second asset request.
 
-Embedded `x-payment-info.price` values supply tool pricing; startup probes are
-disabled. Some no-match enrichment/search results are documented as unbilled,
+Embedded `x-payment-info.price` values supply tool pricing. Some no-match enrichment/search results are documented as unbilled,
 and real challenges remain authoritative. FullEnrich requires actual filters;
 use `search_after` rather than relying on page/offset alone and verify returned
 company identity before further enrichment. Retain these vendor caveats and
@@ -755,8 +740,7 @@ to the existing deployment binding rules.
   approval requirements. Metered exact quotes and actual-usage `upto` ceilings are
   not interchangeable billing promises.
 
-The spec has embedded `x-payment-info.price`, including request-dependent prices;
-startup probes are disabled to avoid a large pricing sweep. The descriptions and
+The spec has embedded `x-payment-info.price`, including request-dependent prices. The descriptions and
 live challenges remain the source of each call's payment terms. A single unsigned
 `GET /api/search` returned x402 v2 Base USDC `exact` and `upto` offers for 10000
 atomic units ($0.01). This checks a representative challenge, not funded execution
@@ -829,7 +813,7 @@ applies. Local static and managed payer/seller fixtures verify selection, signin
 extension omission and retained reservations through rejection/restart. They do
 not qualify funded settlement or every endpoint.
 
-Startup pricing probes are disabled. Prices are frozen vendor estimates, while
+Prices are frozen vendor estimates, while
 live challenges and the existing per-payment cap remain authoritative. Some
 routes exceed the normal $1 cap or 90-second timeout. Missing responses/receipts
 must not cause automatic paid retries. Registry `requiredEnvVars` describes
@@ -909,7 +893,7 @@ fixed BTC-USD, XAU-USD, EUR-USD and Binance BTCUSDT paths remain usable with the
 literal targets and generated names. Do not invent symbol parameters or rewrite
 wire paths. Zero-address/token placeholders retain an unverified intended-target
 contract, not a general claim that every fixed target is invalid. Published
-vendor prices remain advisory; startup discovery is disabled.
+vendor prices remain advisory.
 
 Claw402 exposes its full catalog plus help, with advisory market-read
 recommendations and exact case-sensitive tags. RootData POST bodies are sparse open `type: object` schemas. They accept
@@ -920,8 +904,7 @@ undocumented-by-schema arguments in the JSON body: search uses `query` and optio
 `start_time`/`end_time`, USD `min_amount`/`max_amount`, `project_id`, `page` and
 `page_size`. Search supplies profile IDs. Preserve this prose and open-body
 routing rather than inventing required schemas or calling the requests unusable. Account/model diagnostics and AI/media remain available; image result envelopes
-are not independently qualified. Startup pricing discovery is disabled because
-prices are embedded. Help includes broader routes and manual retry suggestions;
+are not independently qualified. Prices are embedded. Help includes broader routes and manual retry suggestions;
 Treazury retains its own payment uncertainty/no-replay rules.
 
 Schema inspection and unsigned challenge observations do not qualify payment,
@@ -1010,7 +993,7 @@ network policy; deployments inherit these provider opt-outs.
 
 The provider exposes supported pay-per-call operations and public checks from the
 vendor OpenAPI, plus lazy `llms.txt` help. Compact recommendations are advisory. Embedded
-`x-payment-info` prices are advisory; pricing probes are disabled. Account and
+`x-payment-info` prices are advisory. Account and
 metered routes are excluded. Public keyless `POST /v1/email-check`,
 `POST /v1/link-check` and `POST /v1/wallet-risk` are compatible despite lying
 outside `/v1/payg`; a root fallback preserves their full `v1_*` names without
@@ -1039,7 +1022,7 @@ Uses vendor [OpenAPI](https://tools.ipintel.ai/openapi.json) and lazy
 [help](https://tools.ipintel.ai/llms.txt), without freezing the captured operation
 inventory. Recommendations cover DNS, IP, domain health and WHOIS lookups plus
 help; satellite and developer utilities remain available by default. Structured
-prices disable probing. Captured schemas retain nullability, enums and arbitrary
+prices supply display estimates. Captured schemas retain nullability, enums and arbitrary
 validator JSON without a local repair. Public document retrieval was unavailable
 in this audit; local tests do not qualify current availability, settlement or Tor.
 
@@ -1069,8 +1052,7 @@ Uses `newsgurus/openapi.json`, a local OpenAPI projection of the vendor's
 `https://api.newsgurus.ai/x402/catalog`, with lazy vendor `llms.txt` help. It
 preserves the captured catalog GET request contracts, descriptions, published
 prices and response examples, including `/x402/agents/status`. Recommendations
-remain separate from compatibility selection. Prices use `x-payment-info`
-without startup probes. The vendor advertises x402 v2, USDC on Base; the payment
+remain separate from compatibility selection. Prices use `x-payment-info`. The vendor advertises x402 v2, USDC on Base; the payment
 challenge remains authoritative. No API key is required by this integration.
 
 The vendor's `/openapi.json` is already x402-focused, rather than a separate

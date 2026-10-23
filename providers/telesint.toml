@@ -7,7 +7,6 @@ prefix = "telesint"
 recommended_tools = ["telesint_actor", "telesint_artifact", "telesint_asn", "telesint_breach", "telesint_c2", "telesint_claim_check", "telesint_darkweb", "telesint_feed", "telesint_intent", "telesint_ioc", "telesint_malware", "telesint_preparation", "telesint_ransomware", "telesint_search", "telesint_source", "telesint_target_mentions", "telesint_velocity", "telesint_vulnerability", "telesint_help"]
 exclude = ["/watch"]
 pricing_key = "x-payment-info"
-probe_pricing = false
 read_timeout_seconds = 90
 # Use SKILL.md (advertised via x-skill-url in openapi.json) because /llms.txt is truncated mid-line at line 25.
 help_url = "https://telesint-api.onrender.com/SKILL.md"

@@ -10,8 +10,8 @@ subcommand; running it without arguments displays help and never starts serving.
 | --- | --- |
 | `serve --config FILE` | Start a multi-listener deployment and its configured funding workers |
 | `serve --provider FILE` | Serve one provider, using stdio by default |
-| `catalog tools --config FILE` or `--provider FILE` | Print selected tool inventories as JSON; optional `--discover-pricing` runs unsigned probes |
-| `catalog warm --config FILE` | Warm catalogs and optional pricing; configured relay may pay, `--direct` stays unsigned |
+| `catalog tools --config FILE` or `--provider FILE` | Print selected tool inventories as JSON with authored prices |
+| `catalog warm --config FILE` | Warm catalogs; configured relay may pay, `--direct` stays unsigned |
 | `catalog tags --config FILE` or `--provider FILE` | Print available OpenAPI tags |
 | `catalog route TOOL --provider FILE --args '{...}'` | Preview an HTTP request without executing it; standalone providers only |
 | `config show --config FILE` or `--provider FILE` | Resolve file settings offline, including wallet bindings for deployments |
@@ -73,7 +73,7 @@ catalog_concurrency = 2
 Two catalog slots are a provisional default. The working theory is that fewer
 simultaneous large downloads leave headroom when Tor’s prebuilt Conflux capacity
 is unavailable. Current measurements do not establish that mechanism or an optimal
-limit; see [startup qualification](../tests/STARTUP.md). Pricing concurrency is separate.
+limit; see [startup qualification](../tests/STARTUP.md).
 
 A free slot starts the next ready download immediately. Logical loads waiting for
 `Retry-After` release download capacity while retaining their retry sequence and
@@ -82,8 +82,8 @@ inspection and warming still require their complete selected results. Relay work
 reserves capacity for each HTTP attempt/body after serialization/cache/readiness
 checks and releases it before retry delays. Accepted ownership retains publication. Synchronous relay fallback traverses its configured list once;
 only deferred serving waits for discovery readiness. Ordinary deployment serving loads
-local catalogs, binds listeners and exposes available tools while remote catalogs
-and pricing discovery run in the background. Stderr and MCP instructions identify
+local catalogs, binds listeners and exposes available tools while remote catalog discovery
+runs in the background. Stderr and MCP instructions identify
 pending or unavailable sources; a failed remote source's tools are omitted as a
 complete unit, including when `optional_startup` is false (the default). Local
 configuration errors remain fatal. Errors discovered when a remote catalog arrives,
@@ -95,8 +95,8 @@ remain errors; an unavailable source cannot hide a ready-source typo.
 Inspection, frozen inventories and qualification wait for complete catalogs and
 remain strict. The synchronous unsigned-serving loader can omit remote failures
 only with `sources.NAME.optional_startup = true`; required failures cancel its
-unfinished loads. Ordinary deployment serving publishes remote catalogs and price
-descriptions as they finish. Failed sources are not retried during the run;
+unfinished loads. Ordinary deployment serving publishes remote catalogs as they
+finish. Failed sources are not retried during the run;
 restart to retry them. A source that keeps downloading occupies its normal slot
 until completion. Tool ordering and wallet bindings do not depend on completion
 order for unambiguous names. If loaded catalogs define the same tool name on a
@@ -108,13 +108,12 @@ original provider and wallet. Exact selectors still recognize ambiguous names.
 Strict inspection rejects duplicate names. `config check`, `catalog tools` and
 `catalog tags` use strict loading;
 `config show` remains offline and reports the effective limit. Progress, source
-fetch/parse and generation timings, and pricing timings go to stderr; a ten-second
+fetch/parse and generation timings go to stderr; a ten-second
 waiting message identifies remaining work. No response content or source URL is
 included in these progress messages. Remote spec aliases share a download and parsed document within one deployment
 load when the exact URL, requested timeout, byte limit, transport compatibility flags and discovery identity match.
 Each alias retains its own tools, filters, base URL and wallet binding. Local files
 are read independently. Compatible remote responses can also use the disk cache described below.
-Pricing discovery rolls across sources and endpoints with a shared 16-request cap.
 
 
 [examples/deployments/managed.toml](../examples/deployments/managed.toml) exposes
@@ -234,7 +233,7 @@ today's inventory.
 `catalog tools` JSON marks every tool with `recommended: true` or `false`; these
 markers are operator metadata and never modify MCP schemas or descriptions.
 `catalog tools --all-tools` bypasses only recommendation opt-in, after typed
-configuration resolution, and conflicts with `--discover-pricing`. Ordinary path,
+configuration resolution. Ordinary path,
 operation, tag, source-name and listener filters remain effective. Clear those
 filters explicitly in a separate inspection configuration to inspect a broader
 compatible inventory; set `prefer_post = false` to inspect both method twins.
@@ -609,9 +608,8 @@ names, never their values.
 `config check` validates and reports inventories; `catalog tools` prints per-server
 JSON including source attribution. `catalog tags` reports unfiltered source tag
 counts. These commands do not create signers, bind ports, or fetch help documents.
-Pricing probes require the explicit `catalog tools --discover-pricing` combination.
 Remote specs still require network access. Deployment operations accept `--env-file`
-except offline `config show`; `--discover-pricing` belongs only to `catalog tools`.
+except offline `config show`.
 Standalone CLI overrides cannot accompany a deployment `--config`; configure
 those values in its TOML instead. Serving/authentication flags belong only to
 `serve`.
@@ -833,7 +831,6 @@ These describe observed behavior, independently of OpenAPI tool-selection
 | `upstream_rate_limited` | An upstream dependency rate-limited the provider. |
 | `intermittent_response_body` | Response delivery failed after payment; a failed download can still be charged. Do not automatically replay it. |
 | `catalog_http_403` | Repeated catalog HTTP 403 responses can prevent live catalog startup. |
-| `slow_pricing` | Unsigned pricing discovery has been slow and may delay startup. |
 | `intermittent_catalog_connection` | Catalog connections have intermittently timed out. |
 | `intermittent_help_connection` | Help retrieval has intermittently timed out. |
 | `degraded_upstream_data` | Successful responses have contained failed or missing upstream inputs. |
@@ -864,8 +861,7 @@ apply in both network modes. See the [provider caveats](../providers/CAVEATS.md)
 `providers/socialfetch.toml` uses the vendor's live OpenAPI tags through the generic
 catalog. It exposes platform routes, excludes `Auth`, account/monitor ownership
 and webhook lifecycle operations, and deliberately omits `GET /health`.
-Other public `System` operations remain available. Pricing probes are disabled
-because credit prices are embedded in the spec.
+Other public `System` operations remain available. Credit prices are embedded in the spec.
 Each selected tool retains credit terms and a USDC estimate calculated with the
 provider’s explicit `credit_pricing` rate, independently of server instructions.
 
@@ -924,7 +920,7 @@ for participating callers and transient versus local setup failures.
 It limits inactivity while waiting for headers or reading the body. Every
 successful read renews the budget; catalogs and API responses have no total HTTP
 download deadline. The same setting on a provider/source or `source_management`
-overrides the network default for that scope, including pricing and help.
+overrides the network default for that scope, including catalogs and help.
 
 `connect_timeout_seconds` is separate, defaulting to 15 seconds direct and 120
 seconds Tor. Both settings work in either mode; there is no Tor read-timeout floor.
@@ -941,10 +937,9 @@ admission has no total timeout; legacy wallet `wait_seconds` is ignored with a
 warning and omitted from effective configuration.
 
 Legacy network `request_timeout_seconds` is accepted as an alias with its literal
-value now meaning read inactivity. Provider `timeout` and `probe_timeout`, import
+value now meaning read inactivity. Provider `timeout`, import
 `fetch_timeout_seconds`, and CLI `--timeout` remain compatibility spellings. Use
-only `read_timeout_seconds` in new configs. For old provider configs containing
-both timeout fields, `timeout` takes precedence. The bundled comprehensive example now
+only `read_timeout_seconds` in new configs. Do not combine it with `timeout`. The bundled comprehensive example now
 uses 60 seconds; user-owned local configs retain their existing explicit values.
 
 For deployment, standalone or wallet commands, use a separate network file:
@@ -962,7 +957,7 @@ provided. The external file replaces the entire network policy and any supplied
 relay section before validation or client creation; it does not rewrite the
 deployment or change wallet identities. This also applies to `catalog warm` and
 `sources refresh`. `examples/network/tor.toml` configures ordered paid relay fallback for
-deployment catalog/pricing discovery and Coinbase search. Standalone provider and
+deployment catalog discovery and Coinbase search. Standalone provider and
 wallet commands use only the transport policy and never load the relay provider.
 `catalog warm --direct` retains its
 explicit direct-fetch behavior even when a network override is supplied.
@@ -979,7 +974,7 @@ If that port is unreachable during ordinary serving startup, an ERROR names the
 configured SOCKS endpoint, with a reminder on the next failed probe after each
 minute while startup discovery is waiting. Finite startup discovery retries the local
 TCP connection every five seconds, then resumes automatically without a restart.
-Listeners, fresh cached catalogs/prices and independent financial work remain
+Listeners, fresh cached catalogs and independent financial work remain
 available. This checks TCP reachability only, not Tor bootstrap or destination
 connectivity, and stops after the first successful connection. Explicit sync,
 inspection and qualification retain their normal failure behavior.
@@ -993,7 +988,7 @@ and existing identity. They provide circuit isolation, not secrecy from local To
 
 Paid challenge/retry traffic, Base address queries and NEAR funding jobs use the
 actual EVM address identity. A rotated address gets a new pool of connections.
-Shared treasury sync uses the treasury UUID; specs, pricing and help use discovery
+Shared treasury sync uses the treasury UUID; specs and help use discovery
 origin identities. Pending operations keep their original recipient identity after
 restart and retirement. All modes use these same pools and payment state machines.
 Paid traversal follows the [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules):
@@ -1043,14 +1038,14 @@ when refreshing a vendor spec, including changes to the pinned catalog contracts
 
 ## Provider HTTP and TLS policy
 
-Participating catalog/pricing, unsigned API and Base reads may recover TLS
+Participating catalog, unsigned API and Base reads may recover TLS
 failures on `network.tor_isolation_retries` fresh Tor scopes after the selected
 scope (default 2). Every attempt
 retains certificate, hostname and configured protocol verification. This grants
 no replay authority to signed requests and does not change direct-mode recovery.
 
 HTTPS provider traffic requires **HTTP/2 and TLS 1.3** by default. This applies to
-catalogs, pricing discovery, lazy help and unsigned/signed API requests. Set
+catalogs, lazy help and unsigned/signed API requests. Set
 compatibility flags in the provider TOML or override them on a deployment source:
 
 ```toml
@@ -1074,7 +1069,7 @@ rotation never reuses the previous wallet's TLS connection. Server limits and
 connection closure can require additional connections. Protocol changes do not
 add signed-payment retries.
 
-DEBUG logs report the actual response `http_version` and stage (catalog, pricing,
+DEBUG logs report the actual response `http_version` and stage (catalog,
 help, agent import, payment challenge/result), without URLs or payment credentials.
 This is HTTP version telemetry, not negotiated TLS-version telemetry; a successful
 strict HTTPS handshake enforces the TLS 1.3 minimum. Provider compatibility has
@@ -1087,71 +1082,28 @@ can set `fallback_url` to a same-origin `llms.txt`. These requests use the same 
 [cover traffic](cover-traffic.md) for configuration, five bounded distributions,
 scoped status and experimental limitations. Periodic/randomized PINGs are not implemented.
 
-## Pricing discovery
+## Pricing metadata and runtime hints
 
-Serving can discover missing prices once at startup through unsigned GETs.
-Provider settings enable this by default (`probe_pricing = false` disables it).
-Inline sources use the same defaults; a deployment source can override the
-provider setting. Validation, ordinary inventory and `catalog route` never probe.
-To inspect descriptions with unsigned discovery enabled, without wallet keys,
-listener tokens, wallet state access or starting a server:
+Tool descriptions retain authored provider/schema prices and configured credit-to-USDC
+estimates. Missing structured prices remain unknown. Startup, inspection and warming
+never send endpoint requests to discover prices. Actual calls still acquire a fresh
+unsigned x402 challenge and enforce the selected payer's payment authority.
 
-```sh
-x402_treazury catalog tools --provider providers/botsmith.toml --discover-pricing
-x402_treazury catalog tools --config examples/deployments/comprehensive.local.toml --discover-pricing
-```
+Validated challenges from actual managed calls can teach the passive runtime price
+hint cache. Hints advise existing wallet selection; they never authorize signing,
+initiate HTTP, refresh catalogs or alter tool descriptions. Receipt age, identity
+partitioning and expiry are described in [architecture](architecture.md#wallet-selection-and-network-isolation)
+and [resource limits](local-resource-limits.md).
 
-The flag requires `catalog tools` and respects `probe_pricing = false`, route
-eligibility, caps, timeouts and the configured direct/Tor policy. Each invocation
-is a new process, so repeated CLI invocations can repeat probes. Failed or skipped
-discovery leaves prices explicitly unavailable; unpaid success does not establish
-that an API is free.
-
-Only tools selected by at least one listener are candidates. Routes with vendor
-pricing, templated paths, help tools and non-GET methods are skipped. Candidates
-are sorted by path/method and capped per source. TOML controls are
-`probe_max_endpoints` (default 200; zero disables requests), `probe_concurrency`
-(default 4) and `probe_ttl_seconds` (default 3600 seconds). Pricing uses the same
-`read_timeout_seconds` as the source's other HTTP requests. `probe_methods` accepts GET only. Process-wide concurrency is
-capped at 16 active requests, even when sources request a higher limit. Each
-source also bounds active requests by `probe_concurrency`. Logical probes waiting
-for `Retry-After` keep their coalesced owner but release both request permits, so
-queued endpoints and other sources can proceed. Relay calls acquire capacity after
-relay serialization and readiness checks for each HTTP attempt/body, releasing it
-before retry delays. Accepted ownership retains publication despite waiter cancellation. Ordinary deployment
-serving publishes price descriptions as discovery completes, without changing
-inventory order. Standalone provider serving and explicit priced inventories wait
-for pricing discovery.
-Sources with no discovered prices reuse their original tool definitions, preserving
-vendor prose and overrides. Kronos disables startup probing by default because
-of its observed slow pricing discovery; a source can explicitly re-enable it.
-Paid calls still validate the current challenge and enforce spend caps.
-
-A process-wide cache keys GET requests by their full routed URL (including any
-base URL path prefix), transport compatibility flags, disk-cache scope and opt-out. Sources and listeners
-with the same policy share results; concurrent matching requests coalesce. In Tor
-mode, static catalog and pricing origin fetches use participating per-origin
-isolation scopes and retry eligible status (`400`, `403`, `408`, `429`, `500`,
-`502`, `503`, `504`) or eligible transport/timeout failures on
-`network.tor_isolation_retries` fresh candidate scopes (default 2, plus the initial
-attempt), honoring valid `Retry-After` delays on `429`/`503` and promoting a
-winning candidate only after a valid catalog JSON/304 or usable 402/2xx pricing
-response. Terminal failures, malformed challenges, rate limits and
-unpaid successes are cached too. Redirects are not followed. Nothing refreshes
-a cached attempt during the process lifetime; TTL expiry makes its result
-unavailable to later catalog builds without making another request. Tool
-catalogs already built remain unchanged, so `tools/list` never performs network
-requests. Restarting allows a new discovery attempt or reuse of a still-fresh disk estimate.
-
-### Automatic discovery disk cache
+## Automatic discovery disk cache
 
 Deployments with an **existing** `treasury.state_dir` automatically use its
-`http-cache/discovery-v1.sqlite` for remote API catalogs and pricing estimates.
+`http-cache/discovery-v1.sqlite` for remote API catalogs.
 No wallet is opened and no state directory is created for caching. Standalone
 providers and deployments without existing treasury state retain their in-memory
 behavior. `config show` remains offline. A provider or source can opt out with
 `http_cache_enabled = false`; this also prevents sharing a disk-enabled alias's
-catalog load or pricing initialization.
+catalog load.
 
 Catalogs are local snapshots, using a provider/source setting:
 
@@ -1167,8 +1119,7 @@ A deployment source can override its provider's value. Any positive integer sets
 local retention regardless of upstream `Cache-Control` or `Expires`, including
 `no-store`, `no-cache` and `max-age=0`. INFO logs record
 `cache_policy="local_override"`, `ttl_seconds`, and a fixed `origin_policy` label.
-This setting does not affect pricing caching; `http_cache_enabled=false` disables
-both. Changing the catalog TTL separates disk entries and shared startup loads.
+`http_cache_enabled=false` disables disk caching. Changing the catalog TTL separates disk entries and shared startup loads.
 
 Caching uses the normal unsigned GET; there are no extra HEAD probes. The TTL
 starts after a complete catalog download. Once expired, catalogs with `ETag` or
@@ -1188,16 +1139,6 @@ response so sharing it cannot renew its lifetime.
 
 The local-policy cache key causes one initial miss for catalogs written by older
 versions; those disposable entries are left for eviction.
-
-Pricing persists only the derived display estimate from a usable HTTP 402 with
-explicit, positive freshness, capped by `probe_ttl_seconds`. Payment challenges,
-headers and paid responses are never stored or reused for signing. An expired
-estimate triggers one logical unsigned GET probe on a later startup, including
-eligible Tor recovery, with no conditional pricing request. Within a process,
-one-shot success/failure caching
-and expiry-without-refresh remain unchanged. Previously built descriptions are
-still startup estimates. A disk hit retains its remaining lifetime rather than
-receiving a new full TTL.
 
 Keys separate exact URLs, discovery network/isolation policy, transport flags,
 timeouts, limits and resource kind. The owner-only SQLite cache holds at most
@@ -1220,27 +1161,21 @@ without exposing raw headers or validators. A fresh policy is eligibility;
 `stored` confirms a successful disk write. Relay cache reuse and directly warmed
 cache provenance remain explicit.
 
-Startup pricing summaries report `disk_hits`, `process_hits`, `shared`, and
-`network_initializations` per source, including disabled discovery. These count
-probe initializations, not individual HTTP requests or advertised prices embedded
-in a catalog. Cache support is response-dependent, not a provider allowlist.
 Catalogs with `max-age=0, must-revalidate` reuse local snapshots until the configured
 TTL expires; then a 304 can reuse the saved body. Missing entries alone do not prove a provider forbids
 caching: expiration, eviction, network/timeout policy changes, and failed writes
 also affect reuse.
 
-#### Warming a selected source, including directly for a Tor deployment
+### Warming a selected source, including directly for a Tor deployment
 
 ```sh
 x402_treazury catalog warm --config deployment.toml --source provider_id
-x402_treazury catalog warm --config deployment.toml --source provider_id --direct --discover-pricing
+x402_treazury catalog warm --config deployment.toml --source provider_id --direct
 ```
 
 `--source` selects authored source IDs from the deployment, not provider file paths;
 repeat it or use a comma-separated list. Omitting it selects every declared source.
-Only selected catalogs are fetched. `--discover-pricing` also warms eligible unsigned
-GET estimates, respecting source opt-outs, endpoint caps and the union of listener
-filters. The command requires an existing treasury state directory and rejects
+Only selected catalogs are fetched. The command requires an existing treasury state directory and rejects
 `http_cache_enabled = false` or `catalog_cache_ttl_seconds = 0` on a selected source. Without `--direct`, it uses the
 deployment's network policy, replaced by `--network-config` when supplied. It starts
 no listeners or funding workers. It opens
@@ -1264,15 +1199,14 @@ imports and treasury traffic always retain their configured policy. Qualificatio
 continues to bypass all disk caches and cannot invoke this warm path.
 
 The command prints a JSON summary. `catalog_cache` distinguishes `fresh`,
-`fresh_via_relay`, `requires_revalidation`, `not_stored` and `local_file`; `fresh_pricing_entries`
-counts persistent, fresh estimates. Catalogs use the configured local TTL,
+`fresh_via_relay`, `requires_revalidation`, `not_stored` and `local_file`. Catalogs use the configured local TTL,
 including when upstream requests no storage or immediate revalidation. Variant,
 size and provenance restrictions still apply; `--direct` does not override them
 or extend lifetimes. A failed multi-source warm can leave completed disposable entries.
 
-#### Paid discovery relay
+## Paid discovery relay
 
-A deployment can configure ordered paid fallback for static catalog/pricing GETs
+A deployment can configure ordered paid fallback for static catalog GETs
 and Coinbase resource searches, in its own configuration or through
 `--network-config`. Origin acquisition has one attempt in direct mode, or the
 initial attempt plus `network.tor_isolation_retries` fresh owner-bound Tor scopes.
@@ -1322,7 +1256,7 @@ file; schemas/help paths inside providers resolve relative to their TOML.
 Runtime bootstrap validates every configured adapter, operation and filter using
 local schemas before payment. The bundled Curl schema, `agproxy-openapi.json` and
 `horizonpulse-openapi.json` are complete pinned runtime assets; bootstrap fetches
-no schema, help or pricing document and rejects nonlocal schema references.
+no schema or help document and rejects nonlocal schema references.
 [Provider caveats](../providers/CAVEATS.md) own provenance and update instructions.
 
 `on_demand` defaults true when this section exists. It controls supported runtime
@@ -1375,11 +1309,7 @@ timeout or vendor prose cannot prove nonpayment. Every actual authorization reta
 ordinary per-payment authority and possible liability; no cumulative spending
 counter is added. Local bounds/policy failures are terminal.
 
-An unusable origin pricing `402` can use fallback. Any relayed `402` terminates
-pricing, yielding an estimate when usable and unknown otherwise; relayed `2xx`
-without a challenge also terminates with unknown pricing. Pricing skips tools with
-required arguments and never supplies agent inputs; these cases remain
-`skipped_arguments`. A relayed challenge never authorizes target signing.
+A relayed challenge never authorizes target signing.
 
 Without `wallet`, each static source uses an effective assigned wallet profile.
 An explicit source wallet takes precedence through normal binding resolution.
@@ -1409,7 +1339,7 @@ on existing eligible-payer notifications without allocating funds or consuming
 network attempts. Available tools remain callable. Paid warming opens only its
 resolved wallets, denies new funding and starts no workers; bootstrap/fund them
 first. `--direct` warming stays unsigned and bypasses the relay. Ordinary
-`config check`, catalog inspection and `catalog tools --discover-pricing` never
+`config check` and catalog inspection never
 pay through the relay. Qualification rejects paid relay startup.
 
 Static paid fetches serialize per provider across wallets through decoding and
@@ -1419,7 +1349,7 @@ providers remain available during another provider's exchange. Initial
 origin-to-relay delay precedes accepted relay ownership/provider gates;
 between-provider delays retain the logical call owner without a provider gate.
 This partitions existing serialization without adding a resource cap. Static aliases
-with the same wallet, catalog/pricing contract, authored provider position and
+with the same wallet, catalog contract, authored provider position and
 target URL share their first process acquisition and outcome. A terminal decoded
 body-bound failure from that acquisition remains shared even if a later alias
 allows a larger body; changing the bound does not authorize a second fee. Reusing
@@ -1428,8 +1358,7 @@ paid failure stops that provider for the run, without disabling an independent
 provider; malformed paid envelopes likewise stop the sequence. There is no separate
 three-attempt counter or one-second backoff. Independent targets retain access after
 a definitive failure. Strict inspection/warming still require complete selected
-results; ordinary serving can expose a failed catalog as unavailable. Pricing
-failures remain unknown; successful cached results remain usable.
+results; ordinary serving can expose a failed catalog as unavailable. Successful cached results remain usable.
 
 Outer provider and decoded target bounds are separate allocations. JSON escaping
 or base64 can enlarge the envelope; raising only the target limit cannot enlarge
@@ -1439,23 +1368,19 @@ maximum alone does not make the request incompatible. Neither local size rejecti
 permits another paid acquisition. Explicit vendor truncation is distinct from a
 local limit or a target's unsolicited partial-document response.
 
-Relay catalogs use the configured local catalog lifetime; pricing estimates need
-explicit target HTTP freshness. Both use the existing private cache and reject
+Relay catalogs use the configured local catalog lifetime and the existing private cache, rejecting
 relay `Vary` metadata. Disk slots partition adapter/provider, authored position,
-payer, target URL, catalog/pricing kind and configured bounds, alongside ordinary
+payer, target URL and configured bounds, alongside ordinary
 HTTP-cache transport policy; their bound-specific keys differ from process outcome
 sharing. Relay-disabled inspection cannot reuse them. The outer relay's cache
 headers are ignored. Expired relay entries return to ordinary origin-first
-acquisition, without origin validator promotion or stale delivery. Pricing persists
-only display estimates. Warming scans all configured GET provider slots and reports
+acquisition, without origin validator promotion or stale delivery. Warming scans all configured GET provider slots and reports
 `fresh_via_relay` for a fresh catalog; responses excluded by cache policy report
 `not_stored`. No live paid delivery or Tor qualification is implied by offline tests.
 
 Pricing suffixes use compact provenance labels:
 
 - `Cost: ~$0.015/call [spec].` or `Cost: ~$0.01–$0.20/call [spec].`
-- `Cost: ~$0.015/call [x402 probe].`
-- `Max: $0.05/call [x402 probe].` for an `upto` offer.
 - `Cost: free [spec].` or `Cost: unknown.`
 
 An explicit vendor `unit` is preserved instead of `/call`. Dynamic fixed estimates
@@ -1505,11 +1430,9 @@ MCP server instructions preserve authored guidance and include this caveat once:
 
 > Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.
 
-Prices from v1/v2 challenge headers retain atomic units for unknown assets, while
-recognized USDC uses six decimal places. Authored
-description overrides apply last, and description limits remain explicit.
-Cached prices are informational: each paid invocation still obtains a fresh
-challenge and enforces its spend cap before signing.
+Authored description overrides apply last, and description limits remain explicit.
+Display prices and runtime hints are informational: each paid invocation still
+obtains a fresh challenge and enforces its spend cap before signing.
 
 `treasury.max_sync_age_seconds` and `funding.base_max_block_age_seconds` were removed.
 Remove these keys even if their old values were zero. Balances are advisory; SDK

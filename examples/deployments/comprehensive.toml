@@ -22,7 +22,7 @@
 version = 1
 
 # Tor Browser SOCKS endpoint; keep Tor Browser running while serving.
-# Catalog/help/pricing identities are discovery-scoped; paid calls follow wallets.
+# Catalog/help identities are discovery-scoped; paid calls follow wallets.
 [network]
 mode = "tor"
 socks_endpoint = "127.0.0.1:9150"
@@ -31,7 +31,7 @@ socks_auth = "tor_extended"
 connect_timeout_seconds = 120
 read_timeout_seconds = 60
 
-# Paid fallback for blocked catalog/pricing GETs, using each source's assigned
+# Paid fallback for blocked catalog GETs, using each source's assigned
 # wallet. Shared sources choose one assigned profile deterministically; config
 # show reports discovery_wallets. Paid API calls retain their listener bindings.
 # Listeners bind before funding; relay-dependent catalogs appear as payers become usable.

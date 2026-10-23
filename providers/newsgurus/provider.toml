@@ -6,6 +6,5 @@ base_url = "https://api.newsgurus.ai"
 prefix = "newsgurus"
 include = ["/x402", ""]
 pricing_key = "x-payment-info"
-probe_pricing = false
 help_url = "https://api.newsgurus.ai/llms.txt"
 instructions_text = "News Gurus x402 market intelligence: derived trading signals, institutional/congressional filings, primary-source scoops and X Spaces summaries, plus sports/fantasy research. Treazury handles x402 USDC on Base; no subscriber API key or manual payment headers are needed. Paths under /api/v1 are included only because the vendor explicitly advertises them in its x402 catalog. Supply ticker/token/path arguments separately; sample NVDA paths in the vendor OpenAPI are not fixed targets here. Preserve source timestamps, coverage, attribution and separately labeled our_opinion; vendor confidence scores and model output are not verified facts. primary_scoops is a broad feed without a company/ticker filter; spaces_intel supports ticker filtering. Public free regime/narratives alternatives exist outside this selected paid catalog. Advertised prices span $0.002-$5; some sports/fantasy calls exceed the default payment cap. Prices are estimates and the live challenge controls payment. Help covers the broader service. Do not automatically repeat uncertain paid submissions."

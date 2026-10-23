@@ -48,19 +48,16 @@ funding_amount_usdc = "2.00"
 extends = "../../../providers/arkham.toml"
 prefix = "depletion"
 overrides = {}
-probe_pricing = false
 wallet = "test_pool"
 [sources.shared]
 extends = "../../../providers/socialfetch.toml"
 prefix = "shared"
 overrides = {}
-probe_pricing = false
 wallet = "test_pool"
 [sources.independent]
 extends = "../../../providers/socialfetch.toml"
 prefix = "independent"
 overrides = {}
-probe_pricing = false
 wallet = "independent_pool"
 [servers.a]
 listen = "127.0.0.1:18481"

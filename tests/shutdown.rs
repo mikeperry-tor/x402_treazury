@@ -76,9 +76,8 @@ async fn scenario(meta: bool, signal: &str, finish: bool, disconnect: bool) {
         json!({"paths":{"/pay":{"post":{}}}}).to_string(),
     )
     .unwrap();
-    let source = format!(
-        "spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\nprobe_pricing = false\ntimeout = 60\n"
-    );
+    let source =
+        format!("spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\ntimeout = 60\n");
     let config = if meta {
         format!(
             "version = 1\n[sources.test]\n{source}\n[wallets.shared]\nmode = 'static'\nprivate_key_env = 'EVM_PRIVATE_KEY'\n[servers.one]\nlisten = '127.0.0.1:0'\nsources = ['test']\nwallet = 'shared'\nbearer_token_env = 'TEST_TOKEN'\n[servers.two]\nlisten = '127.0.0.1:0'\nsources = ['test']\nwallet = 'shared'\nbearer_token_env = 'TEST_TOKEN'\n"
@@ -300,9 +299,7 @@ async fn stdio_scenario(before_signing: bool, signal: bool, force: bool) {
     let config = dir.path().join("provider.toml");
     std::fs::write(
         &config,
-        format!(
-            "spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\nprobe_pricing = false\n"
-        ),
+        format!("spec = 'spec.json'\nbase_url = '{base}'\nprefix = 'test'\n"),
     )
     .unwrap();
     let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))

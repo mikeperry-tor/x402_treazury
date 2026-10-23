@@ -246,7 +246,7 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
         json!({"paths":{"/a":{"get":{}},"/b":{"get":{}}}}).to_string(),
     )
     .unwrap();
-    std::fs::write(dir.join("provider.toml"),"spec = 'spec.json'\nbase_url = 'https://config.example.com'\nprefix = 'config'\ninclude = ['/a']\nprobe_pricing = false\n").unwrap();
+    std::fs::write(dir.join("provider.toml"),"spec = 'spec.json'\nbase_url = 'https://config.example.com'\nprefix = 'config'\ninclude = ['/a']\n").unwrap();
     let env = [
         ("X402_MCP_GENERIC_PREFIX", "environment"),
         ("X402_MCP_GENERIC_BASE_URL", "https://env.example.com"),
@@ -387,7 +387,7 @@ async fn executable_bind_failure_rolls_back_prior_ports_and_rejects_meta_overrid
         json!({"paths":{"/hello":{"get":{}}}}).to_string(),
     )
     .unwrap();
-    let mut config="version = 1\n[sources.test]\nspec = 'spec.json'\nbase_url = 'https://example.com'\nprobe_pricing = false\n[wallets.shared]\nmode = 'static'\nprivate_key_env = 'KEY'\n".to_owned();
+    let mut config="version = 1\n[sources.test]\nspec = 'spec.json'\nbase_url = 'https://example.com'\n[wallets.shared]\nmode = 'static'\nprivate_key_env = 'KEY'\n".to_owned();
     for (id, address) in [("one", one), ("two", two)] {
         config += &format!(
             "[servers.{id}]\nlisten = '{address}'\nsources = ['test']\nwallet = 'shared'\nbearer_token_env = 'TOKEN'\n"
@@ -498,7 +498,6 @@ mode="static"
 private_key_env="UNSET_STATIC_KEY"
 [sources.api]
 spec="missing-catalog.json"
-probe_pricing=false
 [servers.web]
 listen="127.0.0.1:0"
 sources=["api"]
@@ -723,7 +722,7 @@ async fn removed_wallet_pool_fails_before_opening_state_with_migration_guidance(
 }
 
 #[tokio::test]
-async fn standalone_modes_preserve_inspection_and_unsigned_probe_order() {
+async fn standalone_modes_preserve_inspection_without_unsolicited_endpoint_io() {
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -847,18 +846,12 @@ async fn standalone_modes_preserve_inspection_and_unsigned_probe_order() {
     good(
         run(
             dir.path(),
-            &[
-                "catalog",
-                "tools",
-                "--provider",
-                "provider.toml",
-                "--discover-pricing",
-            ],
+            &["catalog", "tools", "--provider", "provider.toml"],
             &[],
         )
         .await,
     );
-    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert_eq!(count.load(Ordering::SeqCst), 0);
     let key = "0000000000000000000000000000000000000000000000000000000000000001";
     let auth = bad(run(
         dir.path(),
@@ -875,8 +868,8 @@ async fn standalone_modes_preserve_inspection_and_unsigned_probe_order() {
     assert!(auth.contains("HTTP transport requires"), "{auth}");
     assert_eq!(
         count.load(Ordering::SeqCst),
-        2,
-        "serving discovery precedes HTTP auth but follows valid payer setup"
+        0,
+        "valid payer setup and rejected HTTP auth never authorize unsolicited API requests"
     );
     server.abort();
 }
@@ -937,7 +930,7 @@ async fn recommendation_inspection_is_explicit_typed_and_never_widens_ordinary_f
         &[],
     )
     .await);
-    assert!(conflict.contains("cannot be used with"));
+    assert!(conflict.contains("unexpected argument '--discover-pricing'"));
     std::fs::write(dir.join("deployment.toml"), "version=1\n[sources.api]\nextends='provider.toml'\n[wallets.w]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.main]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='w'\nsources=['api']\nexclude_tools=['api_other']").unwrap();
     let all = good(
         run(
@@ -1050,7 +1043,6 @@ private_key_env='UNREAD_KEY'
 [sources.api]
 spec='http://catalog.invalid/spec'
 base_url='https://api.example.com'
-probe_pricing=false
 [servers.research]
 listen='127.0.0.1:0'
 bearer_token_env='UNREAD_TOKEN'
@@ -1257,7 +1249,7 @@ async fn network_override_relay_file_is_reusable_by_offline_standalone_and_walle
     .unwrap();
     std::fs::write(
         dir.path().join("provider.toml"),
-        "spec='spec.json'\nbase_url='https://api.example.com'\nprefix='api'\nprobe_pricing=false\n",
+        "spec='spec.json'\nbase_url='https://api.example.com'\nprefix='api'\n",
     )
     .unwrap();
     let tools = good(

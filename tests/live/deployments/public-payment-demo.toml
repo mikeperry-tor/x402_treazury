@@ -11,7 +11,6 @@ extends = "../../../providers/socialfetch.toml"
 # Scoped request capture includes this demo's selected Twitter profile contract.
 # It is not the complete SocialFetch inventory; inspection fetches no vendor data.
 spec = "../../fixtures/socialfetch_openapi.json"
-probe_pricing = false
 
 [servers.demo]
 listen = "127.0.0.1:8000"

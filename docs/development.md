@@ -125,7 +125,7 @@ cargo fmt --check
 
 Tests cover local x402 handshakes and signatures, spend limits, managed admission
 and rotation, HTTP authentication, actual stdio process framing, tool generation,
-configuration, pricing/help caches, Tor isolation, encrypted persistence and
+configuration, catalog/help caching, passive runtime price hints, Tor isolation, encrypted persistence and
 Zcash sync/recovery. They use localhost and public deterministic test keys;
 normal suites do not spend funds. A sandbox must permit binding localhost.
 
@@ -185,7 +185,7 @@ compiler's supported branch instrumentation, not every possible logical path.
 
 All application logs go to stderr; stdout carries the MCP wire or requested CLI
 JSON. Process `RUST_LOG` overrides the default `warn,x402_treazury=info` filter for
-every command. Info reports catalog/pricing completion, listener startup and
+every command. Info reports catalog completion, listener startup and
 funding progress. Download, parse and protocol details belong at debug; warnings
 identify failures, degraded operation or actionable configuration problems.
 

@@ -397,9 +397,7 @@ async fn optional_auth_is_explicit_and_independent_per_listener() {
     );
     write_config(dir.path(), &conflicting);
     assert!(Deployment::show_config(&path).await.is_err());
-    let text = original
-        .replace("bearer_token_env = \"RESEARCH_TOKEN\"", "auth = false")
-        .replace("spec = ", "probe_pricing = false\nspec = ");
+    let text = original.replace("bearer_token_env = \"RESEARCH_TOKEN\"", "auth = false");
     write_config(dir.path(), &text);
     let shown = Deployment::show_config(&path).await.unwrap();
     assert_eq!(shown["servers"]["research"]["auth"], false);
@@ -485,7 +483,6 @@ async fn extended_providers_keep_overrides_and_resolve_declaring_paths() {
 prefix = "alpha"
 instructions_text = "Use alpha_pay"
 help_url = "http://127.0.0.1:1/llms.txt"
-probe_pricing = false
 [overrides.alpha_pay]
 description = "Authored instructions"
 "#,
@@ -518,18 +515,16 @@ description = "Authored instructions"
 }
 
 #[tokio::test]
-async fn pricing_is_discovered_once_across_sources_and_listeners() {
+async fn serving_and_inventory_do_not_send_unsolicited_endpoint_requests() {
     let (base, state, vendor) = vendor("shared", "/api").await;
     let dir = tempfile::tempdir().unwrap();
     for file in ["alpha.json", "beta.json"] {
         std::fs::write(dir.path().join(file), spec(&base).to_string()).unwrap();
     }
-    let config = configuration()
-        .replace("spec = ", "probe_pricing = true\nspec = ")
-        .replace(
-            "include_tools = [\"alpha_*\", \"beta_pay\"]",
-            "include_tools = [\"alpha_pay\", \"beta_pay\"]",
-        );
+    let config = configuration().replace(
+        "include_tools = [\"alpha_*\", \"beta_pay\"]",
+        "include_tools = [\"alpha_pay\", \"beta_pay\"]",
+    );
     let path = write_config(dir.path(), &config);
     let deployment = Deployment::load(&path).await.unwrap();
     let _ = deployment.inventory();
@@ -543,7 +538,7 @@ async fn pricing_is_discovered_once_across_sources_and_listeners() {
     assert!(output.status.success());
     assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
     let running = deployment.bind(&env()).await.unwrap();
-    assert_eq!(state.unsigned.load(Ordering::SeqCst), 1);
+    assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
     let addresses = running.addresses();
     let stop = CancellationToken::new();
     let task = tokio::spawn(running.serve(stop.clone()));
@@ -563,11 +558,16 @@ async fn pricing_is_discovered_once_across_sources_and_listeners() {
             )
             .await;
             for tool in result["result"]["tools"].as_array().unwrap() {
-                assert!(tool["description"].as_str().unwrap().contains("$0.014"));
+                assert!(
+                    tool["description"]
+                        .as_str()
+                        .unwrap()
+                        .contains("Cost: unknown.")
+                );
             }
         }
     }
-    assert_eq!(state.unsigned.load(Ordering::SeqCst), 1);
+    assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
     assert_eq!(state.signed.load(Ordering::SeqCst), 0);
     stop.cancel();
     task.await.unwrap().unwrap();
@@ -741,7 +741,7 @@ include_tools=['beta_pay']
 }
 
 #[tokio::test]
-async fn pricing_sources_progress_together_before_inventory_publication() {
+async fn remote_catalogs_progress_together_before_complete_inventory_publication() {
     use std::time::Duration;
     let gates = Arc::new([
         tokio::sync::Semaphore::new(0),
@@ -761,37 +761,28 @@ async fn pricing_sources_progress_together_before_inventory_publication() {
             };
             arrived.send(id).unwrap();
             gates[id].acquire().await.unwrap().forget();
-            (
-                StatusCode::PAYMENT_REQUIRED,
-                [(
-                    "payment-required",
-                    STANDARD
-                        .encode(json!({"accepts":[{"amount":"1000","asset":"USDC"}]}).to_string()),
-                )],
-            )
+            axum::Json(json!({"paths":{"/pay":{"get":{"summary":"Pay","pricing":{"amount":"0.001","currency":"USD"}}}}}))
         }
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let vendor = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
-    for name in ["alpha", "beta"] {
-        std::fs::write(
-            dir.path().join(format!("{name}.json")),
-            json!({
-                "servers":[{"url":format!("{base}/{name}")}],
-                "paths":{"/pay":{"get":{"summary":"Pay"}}}
-            })
-            .to_string(),
-        )
-        .unwrap();
-    }
     let path = write_config(
         dir.path(),
-        &configuration().replace("exclude_tools = [\"alpha_hidden\"]", "exclude_tools = []"),
+        &configuration()
+            .replace("exclude_tools = [\"alpha_hidden\"]", "exclude_tools = []")
+            .replace(
+                "spec = \"alpha.json\"",
+                &format!("spec='{base}/alpha'\nbase_url='{base}/alpha'\npricing_key='pricing'"),
+            )
+            .replace(
+                "spec = \"beta.json\"",
+                &format!("spec='{base}/beta'\nbase_url='{base}/beta'\npricing_key='pricing'"),
+            ),
     );
-    let deployment = Deployment::load(&path).await.unwrap();
-    let pending = tokio::spawn(async move { deployment.bind(&env()).await });
+    let pending =
+        tokio::spawn(async move { Deployment::load(&path).await.unwrap().bind(&env()).await });
     let mut seen = Vec::new();
     for _ in 0..2 {
         seen.push(
@@ -805,7 +796,7 @@ async fn pricing_sources_progress_together_before_inventory_publication() {
     assert_eq!(
         seen,
         [0, 1],
-        "both sources must probe before either responds"
+        "both catalogs start downloading before either responds"
     );
     gates[1].add_permits(1);
     assert!(
@@ -853,11 +844,15 @@ async fn pricing_sources_progress_together_before_inventory_publication() {
     }
     stop.cancel();
     server.await.unwrap().unwrap();
+    assert!(
+        arrivals.try_recv().is_err(),
+        "catalog publication must not acquire API endpoint prices"
+    );
     vendor.abort();
 }
 
 #[tokio::test]
-async fn empty_pricing_results_preserve_authored_inventory_and_do_not_reprobe() {
+async fn repeated_inventory_reads_preserve_authored_guidance_without_endpoint_io() {
     let hits = Arc::new(AtomicUsize::new(0));
     let counter = hits.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -896,15 +891,14 @@ sources=['alpha']
 "#,
     )
     .unwrap();
-    let mut deployment = Deployment::load(&path).await.unwrap();
+    let deployment = Deployment::load(&path).await.unwrap();
     let original = serde_json::to_value(deployment.inventory()).unwrap();
     for _ in 0..2 {
-        deployment.discover_prices().await.unwrap();
         assert_eq!(
             serde_json::to_value(deployment.inventory()).unwrap(),
             original
         );
-        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
     }
     vendor.abort();
 }
@@ -927,8 +921,7 @@ async fn host_policy_is_listener_local_and_visible_in_config() {
         .replace(
             "[servers.beta_only]",
             "[servers.beta_only]\ndisable_host_check = true",
-        )
-        .replace("spec = ", "probe_pricing = false\nspec = ");
+        );
     let path = write_config(dir.path(), &text);
     let shown = Deployment::show_config(&path).await.unwrap();
     assert_eq!(
@@ -981,13 +974,10 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("alpha.json"), spec(&base).to_string()).unwrap();
     std::fs::write(dir.path().join("beta.json"), spec(&base).to_string()).unwrap();
-    let text = configuration()
-        .replace("[sources.alpha]", "[sources.alpha]\nprobe_pricing=false")
-        .replace("[sources.beta]", "[sources.beta]\nprobe_pricing=false")
-        .replace(
-            "[servers.research]",
-            "[servers.research]\ndiscover_on_demand=true",
-        );
+    let text = configuration().replace(
+        "[servers.research]",
+        "[servers.research]\ndiscover_on_demand=true",
+    );
     let path = write_config(dir.path(), &text);
     let deployment = Deployment::load(&path).await.unwrap();
     let inventory = deployment.inventory();
@@ -1126,11 +1116,9 @@ private_key_env='ALSO_UNUSED'
 [sources.a]
 spec='a.json'
 base_url='https://api.example.com'
-probe_pricing=false
 [sources.b]
 spec='b.json'
 base_url='https://api.example.com'
-probe_pricing=false
 [servers.one]
 listen='127.0.0.1:0'
 bearer_token_env='UNUSED_TOKEN'
@@ -1300,8 +1288,8 @@ async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() 
     for (on_demand, management) in [(false, false), (true, false), (false, true), (true, true)] {
         for authored in [None, Some(""), Some("Endpoint guidance")] {
             let mut text = configuration()
-                .replace("[sources.alpha]", "[sources.alpha]\nprobe_pricing=false\ninstructions_text='Alpha source guidance'")
-                .replace("[sources.beta]", "[sources.beta]\nprobe_pricing=false\ninstructions_text='Beta source guidance'")
+                .replace("[sources.alpha]", "[sources.alpha]\ninstructions_text='Alpha source guidance'")
+                .replace("[sources.beta]", "[sources.beta]\ninstructions_text='Beta source guidance'")
                 .replace("[servers.research]", &format!(
                     "[servers.research]\ndiscover_on_demand={on_demand}\nsource_management={management}\ndiscovery_search_tool_instructions_text='Research tool guidance'\nsources_search_tool_instructions_text='Research directory guidance'"))
                 .replace("[servers.beta_only]", "[servers.beta_only]\ndiscovery_search_tool_instructions_text='Other tool guidance'\nsources_search_tool_instructions_text='Other directory guidance'");

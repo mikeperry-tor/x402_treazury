@@ -422,6 +422,18 @@ impl Registry {
             |r| r.get(0),
         )?)?)
     }
+    /// Decode only retained observations. The stored bytes and pins stay intact;
+    /// execution continues to use the strict current manifest reader above.
+    pub(super) fn observed_manifest(&self, run: &str) -> Result<Manifest> {
+        let raw: String =
+            self.db
+                .query_row("SELECT manifest FROM runs WHERE id=?1", [run], |r| r.get(0))?;
+        let mut value: Value = serde_json::from_str(&raw)?;
+        if let Some(fields) = value.as_object_mut() {
+            fields.remove("pricing_checks");
+        }
+        Ok(serde_json::from_value(value)?)
+    }
     pub fn report(&self, run: Option<&str>, now: i64) -> Result<Value> {
         self.check_report_bounds(run)?;
         let rows = self.report_case_rows(run, now)?;
@@ -454,7 +466,10 @@ impl Registry {
             Value::Null
         };
         let managed = run
-            .map(|id| self.manifest(id).map(|m| !m.start.pools.is_empty()))
+            .map(|id| {
+                self.observed_manifest(id)
+                    .map(|m| !m.start.pools.is_empty())
+            })
             .transpose()?
             .unwrap_or(false);
         let (funding_jobs_reserved, source_reserved_zatoshis) = funding_usage(&self.db)?;
@@ -465,7 +480,7 @@ impl Registry {
         }
         if let Some(run) = run {
             report["summary"] = serde_json::to_value(crate::report_model::build(
-                &self.manifest(run)?,
+                &self.observed_manifest(run)?,
                 &self.pins(run)?.resolved_config,
                 &report,
             )?)?;
@@ -541,33 +556,29 @@ impl Registry {
     fn append_run_report_sections(&self, run: &str, report: &mut Value) -> Result<()> {
         report["treasury_accounting"] = self.accounting_report(run)?;
         report["catalog_stages"] =
-            crate::catalog_stages::report(&self.pins(run)?, &self.manifest(run)?)?;
+            crate::catalog_stages::report(&self.pins(run)?, &self.observed_manifest(run)?)?;
         report["provider_semantics"] =
-            crate::semantics::report(self, &self.manifest(run)?, report)?;
+            crate::semantics::report(self, &self.observed_manifest(run)?, report)?;
         report["canonical_api_debits"] = match self.verified_debits(run) {
             Ok(proofs) => {
                 json!({"status":"validated", "cases":proofs.into_iter().map(|(case, proof)| (case, proof["verified_total_atomic"].clone())).collect::<std::collections::BTreeMap<_,_>>() })
             }
             Err(_) => json!({"status":"invalid_or_incomplete","cases":{}}),
         };
-        report["pricing_stages"] = crate::pricing_stages::report(
-            &self.manifest(run)?,
-            &self.pins(run)?.resolved_config,
-            report,
-        )?;
-        report["help_stages"] = crate::help::report(&self.manifest(run)?, report)?;
+        report["help_stages"] = crate::help::report(&self.observed_manifest(run)?, report)?;
         report["fee_observations"] = crate::fees::report(report)?;
-        report["reliability"] = match crate::reliability::report(&self.manifest(run)?, report) {
-            Ok(value) => value,
-            Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
-        };
+        report["reliability"] =
+            match crate::reliability::report(&self.observed_manifest(run)?, report) {
+                Ok(value) => value,
+                Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
+            };
         report["rotation"] =
-            match crate::rotation_report::report(self, &self.manifest(run)?, report) {
+            match crate::rotation_report::report(self, &self.observed_manifest(run)?, report) {
                 Ok(value) => value,
                 Err(error) => json!([{"status":"invalid","reason":error.to_string()}]),
             };
         report["concurrency"] = match crate::concurrency::report(
-            &self.manifest(run)?,
+            &self.observed_manifest(run)?,
             &self.pins(run)?.resolved_config,
             report,
         ) {

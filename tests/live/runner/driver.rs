@@ -30,8 +30,6 @@ mod preparation;
 #[cfg(test)]
 #[path = "presets.rs"]
 mod presets;
-#[path = "pricing_stages.rs"]
-mod pricing_stages;
 #[path = "process.rs"]
 mod process;
 #[path = "receipt_recovery.rs"]
@@ -298,11 +296,9 @@ async fn execute(command: Command) -> Result<u8> {
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("eligibility requires one --run"))?;
                 let unstarted = registry.require_unstarted(id).is_ok();
-                report["eligibility"] = match resumption::inspect(
-                    &registry.manifest(id)?,
-                    &report,
-                    u64::try_from(now)?,
-                ) {
+                report["eligibility"] = match registry.manifest(id).and_then(|manifest| {
+                    resumption::inspect(&manifest, &report, u64::try_from(now)?)
+                }) {
                     Ok(windows) => {
                         serde_json::json!({"status":"observed","run_unstarted":unstarted,"execution_authorized":false,"windows":windows})
                     }

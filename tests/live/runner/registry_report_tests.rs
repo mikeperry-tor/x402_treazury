@@ -69,7 +69,6 @@ fn report_expected_selected(pins: &Pins) -> Value {
     report["catalog_stages"] = json!([]);
     report["provider_semantics"] = json!([{"case":"call","category":"response_not_completed","required":false,"status":"unobserved"}]);
     report["canonical_api_debits"] = json!({"status":"validated","cases":{}});
-    report["pricing_stages"] = json!([]);
     report["help_stages"] = json!([]);
     report["fee_observations"] = json!({"asset":"Base USDC","threshold_atomic":10000,
         "admissions_status":"invalid_or_incomplete","challenges_status":"invalid_or_incomplete",
@@ -81,9 +80,8 @@ fn report_expected_selected(pins: &Pins) -> Value {
     report["summary"] = json!({"version":1,"network":"direct","lifecycle":[],"source_inventory_complete":false,
         "source_funding":{"observations":0,"reserved_jobs":0,"reserved_zatoshis":0,"saved_accounting":"unobserved"},
         "providers":[{"source":"api","cases":[{"case":"call","execution":"not_attempted","mcp":"unobserved","payment":"not_attempted","semantics":"unobserved","verified_atomic":null}],
-        "catalog":[{"http_status":null,"pricing_evidence":null,"scope":"no_observation","state":"unobserved"}],
-        "help":[{"http_status":null,"pricing_evidence":null,"scope":"no_observation","state":"not_attempted"}],
-        "pricing":[{"http_status":null,"pricing_evidence":null,"scope":"no_observation","state":"unobserved"}]}]});
+        "catalog":[{"http_status":null,"scope":"no_observation","state":"unobserved"}],
+        "help":[{"http_status":null,"scope":"no_observation","state":"not_attempted"}]}]});
     report
 }
 fn report_prepared_fixture(managed: bool) -> (Fixture, Registry, Value) {
@@ -109,11 +107,9 @@ fn report_prepared_fixture(managed: bool) -> (Fixture, Registry, Value) {
         "scope":"application acceptance/completion, versioned admission-intent correlation and canonical receipt debit proofs; intent alone does not prove financial commit, settlement or Tor isolation",
         "seller_receipts":{"classifications":{},"recorded":0,"without_observation":0,"meaning":"seller claims only; transaction receipt and USDC debit still require chain verification"}});
     expected["catalog_stages"] = json!([{"phase":"initial_inspection","sources":[],"status":"unobserved"},{"phase":"frozen_reload","sources":[],"status":"unobserved"}]);
-    expected["pricing_stages"] = json!([{"source":"api","session":null,"stage":"not_observed","assessment":"not_required","required":false,"evidence":null,"expected":null,"failure":null}]);
     expected["fee_observations"]["admissions_status"] = json!("validated");
     expected["fee_observations"]["challenges_status"] = json!("validated");
     expected["summary"]["source_inventory_complete"] = json!(true);
-    expected["summary"]["providers"][0]["pricing"][0]["scope"] = json!("no_session");
     if managed {
         expected["qualification_scope"] = json!("managed_mcp_with_authorization_evidence");
         expected["funding_permits_available"] = json!(true);
@@ -317,7 +313,8 @@ fn report_composition_application_and_debit_failures_remain_nonfatal() {
             expected["canonical_api_debits"] = json!({"status":"invalid_or_incomplete","cases":{}});
             expected["rotation"] =
                 json!([{"status":"invalid","reason":"debit proof case missing"}]);
-            expected["summary"]["lifecycle"] = json!([{"http_status":null,"pricing_evidence":null,"scope":"rotation_0","state":"incomplete"}]);
+            expected["summary"]["lifecycle"] =
+                json!([{"http_status":null,"scope":"rotation_0","state":"incomplete"}]);
         }
         assert_eq!(r.report(Some("test_run"), 10).unwrap(), expected);
     }
@@ -406,4 +403,103 @@ fn report_composition_event_and_complete_document_bounds_are_not_partial_reports
         r.report(None, 10).unwrap_err().to_string(),
         "registry document exceeds 16777216 byte limit"
     );
+}
+
+#[tokio::test]
+async fn historical_pricing_evidence_is_readable_without_live_manifest_authority() {
+    let (f, r, _) = report_prepared_fixture(true);
+    let db = report_db(&f);
+    let mut historical = serde_json::to_value(&f.manifest).unwrap();
+    historical["pricing_checks"] = json!({"api":"nonempty"});
+    let raw = historical.to_string();
+    db.execute(
+        "UPDATE runs SET manifest=?1 WHERE id=?2",
+        rusqlite::params![raw, f.manifest.run_id],
+    )
+    .unwrap();
+    let event = json!({"session":"retained", "source":"api", "phase":"completed", "evidence":{"available_prices":1}});
+    r.event(&f.manifest.run_id, "application_pricing", &event, 3)
+        .unwrap();
+    let before = r.report(Some(&f.manifest.run_id), 3).unwrap();
+    assert!(before.get("pricing_stages").is_none());
+    assert!(
+        before["runtime_events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "application_pricing" && e["detail"] == event)
+    );
+    assert!(
+        serde_json::from_value::<crate::manifest::Manifest>(historical)
+            .unwrap_err()
+            .to_string()
+            .contains("pricing_checks")
+    );
+    assert!(
+        r.manifest(&f.manifest.run_id)
+            .unwrap_err()
+            .to_string()
+            .contains("pricing_checks")
+    );
+    drop(r);
+    // Exercise the real offline interface: a historical manifest must reach
+    // the original-run Tor constraint, never fail on its retired pricing field.
+    let audit_output = f.manifest.evidence_dir.join("audit.json");
+    let audit_error = crate::tor::archive::audit_run(&f.state, &f.manifest.run_id, &audit_output)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        audit_error,
+        "offline Tor audit requires an originally owned-Tor run"
+    );
+    assert!(
+        !audit_output.exists(),
+        "a direct archive must not be Tor-qualified"
+    );
+    let report_output = f.manifest.evidence_dir.join("historical-report.json");
+    assert_eq!(
+        crate::execute(crate::Command::Report {
+            state_dir: f.state.clone(),
+            run: Some(f.manifest.run_id.clone()),
+            output: Some(report_output.clone()),
+            format: crate::reporting::Format::Json,
+            eligibility: true,
+        })
+        .await
+        .unwrap(),
+        0
+    );
+    let projection: Value = serde_json::from_slice(&std::fs::read(report_output).unwrap()).unwrap();
+    assert_eq!(projection["eligibility"]["status"], "refused");
+    assert_eq!(projection["eligibility"]["execution_authorized"], false);
+    assert!(
+        projection["eligibility"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("pricing_checks")
+    );
+    assert!(
+        projection["runtime_events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "application_pricing" && e["detail"] == event)
+    );
+    let error = crate::execution::run(&f.state, &f.manifest.run_id)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("pricing_checks"), "{error:#}");
+    let r = Registry::open(&f.state, true).unwrap();
+    assert_eq!(r.report(Some(&f.manifest.run_id), 3).unwrap(), before);
+    assert_eq!(
+        db.query_row(
+            "SELECT manifest FROM runs WHERE id=?1",
+            [&f.manifest.run_id],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        raw
+    );
+    assert_eq!(db.query_row("SELECT COUNT(*) FROM events WHERE kind IN ('execution_started','application_claim','application_payment','funding_execution')", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(before["api_reserved_atomic"], 0);
 }

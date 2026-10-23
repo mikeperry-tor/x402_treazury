@@ -11,7 +11,7 @@ impl Registry {
         Ok(category)
     }
     pub fn application_evidence(&self, run: &str) -> Result<Value> {
-        let m = self.manifest(run)?;
+        let m = self.observed_manifest(run)?;
         let cases: BTreeMap<_, _> = m.cases.iter().map(|c| (c.id.as_str(), c)).collect();
         let mut query=self.db.prepare("SELECT kind,detail FROM events WHERE run=?1 AND kind IN ('application_claim','application_finished') ORDER BY seq LIMIT 20001")?;
         let rows = query
@@ -120,7 +120,12 @@ impl Registry {
             let event: Value = serde_json::from_str(raw)?;
             let case = event["case"].as_str().context("receipt case missing")?;
             ensure!(
-                seen.insert(event["attempt_id"].as_str().context("receipt attempt missing")?.to_owned()),
+                seen.insert(
+                    event["attempt_id"]
+                        .as_str()
+                        .context("receipt attempt missing")?
+                        .to_owned()
+                ),
                 "duplicate receipt observation"
             );
             let payment: String = self.db.query_row(
@@ -179,7 +184,7 @@ impl Registry {
         )
     }
     fn payment_evidence(&self, run: &str, claims: &BTreeMap<String, Value>) -> Result<usize> {
-        let m = self.manifest(run)?;
+        let m = self.observed_manifest(run)?;
         let mut query = self.db.prepare("SELECT detail FROM events WHERE run=?1 AND kind='application_payment' ORDER BY seq LIMIT 10001")?;
         let rows = query
             .query_map([run], |r| r.get::<_, String>(0))?
@@ -188,7 +193,7 @@ impl Registry {
             rows.len() <= 10000,
             "payment evidence exceeds 10000-attempt run limit"
         );
-        let mut totals = BTreeMap::<String,u64>::new();
+        let mut totals = BTreeMap::<String, u64>::new();
         let mut attempts = std::collections::BTreeSet::new();
         for raw in &rows {
             let event: Value = serde_json::from_str(raw)?;
@@ -206,8 +211,10 @@ impl Registry {
             ensure!(
                 !reviewed.unsigned
                     && claim["session"] == event["session"]
-                    && ((event["stage"] == "admitted_before_signing" && event.get("admission_evidence_version").is_none())
-                        || (event["stage"] == "signed_admission_pending" && event["admission_evidence_version"] == 2)),
+                    && ((event["stage"] == "admitted_before_signing"
+                        && event.get("admission_evidence_version").is_none())
+                        || (event["stage"] == "signed_admission_pending"
+                            && event["admission_evidence_version"] == 2)),
                 "payment differs from accepted case"
             );
             if event.get("ownership_evidence_version").is_some() {
@@ -217,19 +224,21 @@ impl Registry {
                 .as_str()
                 .context("payment amount missing")?
                 .parse()?;
-            let total=totals.entry(case.to_owned()).or_default();
-            *total=total.checked_add(amount).context("case attempt charges overflow")?;
+            let total = totals.entry(case.to_owned()).or_default();
+            *total = total
+                .checked_add(amount)
+                .context("case attempt charges overflow")?;
             ensure!(
                 amount > 0 && *total <= super::atomic_usdc(&reviewed.reserve_usdc)?,
                 "payment exceeds case reservation"
             );
             ensure!(
                 attempts.insert(
-                        event["attempt_id"]
-                            .as_str()
-                            .context("payment attempt missing")?
-                            .to_owned()
-                    ),
+                    event["attempt_id"]
+                        .as_str()
+                        .context("payment attempt missing")?
+                        .to_owned()
+                ),
                 "duplicate payment attempt evidence"
             );
         }

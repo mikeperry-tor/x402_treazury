@@ -103,7 +103,6 @@ private_key_env="ABSENT_KEY"
 spec="{spec}"
 base_url="{base}"
 prefix="test"
-probe_pricing=false
 [servers.one]
 listen="127.0.0.1:0"
 sources=["test"]

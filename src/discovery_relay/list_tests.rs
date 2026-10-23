@@ -404,23 +404,6 @@ async fn curl_delivery_errors_preserve_known_terminal_status_and_header_contract
             harness.assert_order(&[(0, false), (0, true)]);
         }
     }
-    // Pricing observes known headers and never buys another probe after 2xx/402.
-    for status in [200, 402] {
-        let mut failed = curl(status, "not a target document");
-        failed["error"] = json!("fixture delivery failure");
-        let harness = Harness::new(vec![
-            (Format::Curl, failed),
-            (Format::Agproxy, agproxy(200, "{}", false)),
-        ])
-        .await;
-        let response = harness
-            .acquire(&target(Method::GET), Contract::Pricing, 4096, None)
-            .await
-            .unwrap();
-        assert_eq!(response.status, status);
-        assert!(response.payment_may_have_occurred);
-        harness.assert_order(&[(0, false), (0, true)]);
-    }
 }
 
 #[tokio::test]
@@ -513,21 +496,6 @@ async fn prepared_document_needs_origin_eligibility_and_existing_authority_befor
         .unwrap_err();
     assert_eq!(error.to_string(), "fixture terminal origin");
     harness.assert_order(&[]);
-}
-
-#[tokio::test]
-async fn relayed_pricing_challenge_is_terminal_even_without_usable_metadata() {
-    let harness = Harness::new(vec![
-        (Format::Curl, curl(402, "unusable challenge")),
-        (Format::Agproxy, agproxy(200, "must not buy", false)),
-    ])
-    .await;
-    let response = harness
-        .acquire(&target(Method::GET), Contract::Pricing, 4096, None)
-        .await
-        .unwrap();
-    assert_eq!(response.status, 402);
-    harness.assert_order(&[(0, false), (0, true)]);
 }
 
 #[tokio::test]
@@ -1030,7 +998,7 @@ async fn disabled_paid_provider_rejects_new_target_without_waiting_for_origin_de
         let (relay, fixture, task) = super::tests::fixture(body, reject, false).await;
         assert!(
             relay
-                .fetch(super::tests::TARGET, 200, 4096, "max_spec_bytes")
+                .fetch(super::tests::TARGET, 4096, "max_spec_bytes")
                 .await
                 .is_err()
         );
@@ -1039,7 +1007,6 @@ async fn disabled_paid_provider_rejects_new_target_without_waiting_for_origin_de
             std::time::Duration::from_millis(30),
             relay.fetch_with_capacity(
                 "https://example.com/different-target.json",
-                200,
                 4096,
                 "max_spec_bytes",
                 Vec::new(),

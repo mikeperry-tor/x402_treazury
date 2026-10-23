@@ -31,7 +31,6 @@ max_conversion_overhead_percent=5
 [sources.api]
 spec='spec.json'
 base_url='http://127.0.0.1:1'
-probe_pricing=false
 [servers.one]
 listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
@@ -151,7 +150,6 @@ async fn selected_static_initialization_intersects_effective_dynamic_and_relay_w
 spec='spec.json'
 base_url='http://127.0.0.1:1'
 wallet='effective'
-probe_pricing=false
 [servers.api]
 listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
@@ -273,7 +271,7 @@ async fn relay_method_bootstrap_validates_all_local_entries_before_network_or_wa
     .unwrap();
     let provider = |format: &str, spec: &str, filters: &str| {
         format!(
-            "spec='{spec}'\nbase_url='https://relay.example.com'\nhelp_url='{remote}'\nprobe_pricing=true\n{format}\n{filters}\n"
+            "spec='{spec}'\nbase_url='https://relay.example.com'\nhelp_url='{remote}'\n{format}\n{filters}\n"
         )
     };
     std::fs::write(
@@ -436,7 +434,7 @@ async fn binding_completes_only_effective_static_payers_from_reused_relay_initia
             ));
         }
         config.push_str(
-            "[sources.api]\nspec='spec.json'\nbase_url='http://127.0.0.1:1'\nwallet='effective'\nprobe_pricing=false\n[servers.api]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='overridden'\nsources=['api']\n",
+            "[sources.api]\nspec='spec.json'\nbase_url='http://127.0.0.1:1'\nwallet='effective'\n[servers.api]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='overridden'\nsources=['api']\n",
         );
         std::fs::write(&path, config).unwrap();
         let mut deployment = Deployment::load(&path).await.unwrap();

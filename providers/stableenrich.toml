@@ -8,7 +8,6 @@ recommended_tools = ["stableenrich_exa_search", "stableenrich_exa_contents", "st
 exclude = ["/api/cloudflare/crawl", "/api/cloudflare/jobs", "/api/hunter/email-verifier", "/api/google-maps/aerial-view/render-video", "/api/google-maps/aerial-view/lookup-video"]
 include = ["/api", ""]
 pricing_key = "x-payment-info"
-probe_pricing = false
 read_timeout_seconds = 90
 help_url = "https://stableenrich.dev/llms.txt"
 instructions_text = "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. The full supported catalog remains available; recommendations and vendor tags select smaller research views only on request. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazury tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling; those workflows are not enabled. Solar rgb-image may return JSON asset metadata or PNG/JPEG image attachments. Asset URLs are not automatically downloaded; inline images have explicit size limits. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false."

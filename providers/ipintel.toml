@@ -6,6 +6,5 @@ base_url = "https://tools.ipintel.ai"
 prefix = "ipintel"
 recommended_tools = ["ipintel_dns_lookup", "ipintel_ip_lookup", "ipintel_domain_health", "ipintel_whois_lookup", "ipintel_help"]
 pricing_key = "x-payment-info"
-probe_pricing = false
 help_url = "https://tools.ipintel.ai/llms.txt"
 instructions_text = "IPIntel.ai domain, DNS, IP, email, satellite and developer utilities. Treazury handles x402 v2 USDC on Base; no API key or manual payment headers are needed. Published per-call prices are estimates; the live challenge governs payment. Domain availability is a likely-availability verdict, not a registration guarantee. Domain-health scores summarize DNS/email configuration, not company legitimacy; email validation does not prove mailbox reachability. JWT decoding does not verify signatures; send only tokens suitable for disclosure to the vendor. HTTP latency is measured from the handling Cloudflare Worker edge, defaults to HEAD and also accepts GET; it is not ICMP ping or the caller's network latency. Satellite results contain hosted image links, not inline images; preserve scene dates, fulfillment status, fallback warnings and attribution rather than assuming current or exact-date imagery. Do not automatically repeat an uncertain paid submission."

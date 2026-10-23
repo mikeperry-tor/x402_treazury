@@ -122,10 +122,6 @@ pub struct Config {
     pub allow_tls12: bool,
     #[serde(alias = "timeout")]
     pub read_timeout_seconds: Option<f64>,
-    /// Read compatibility for historical serialized qualification settings.
-    /// Live TOML composition canonicalizes this into read_timeout_seconds.
-    #[serde(rename = "probe_timeout", skip_serializing)]
-    pub legacy_probe_timeout: Option<f64>,
     pub max_response_bytes: usize,
     pub max_help_bytes: usize,
     pub max_spec_bytes: usize,
@@ -158,11 +154,6 @@ pub struct Config {
     pub pricing_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credit_pricing: Option<CreditPricing>,
-    pub probe_pricing: bool,
-    pub probe_ttl_seconds: f64,
-    pub probe_concurrency: usize,
-    pub probe_max_endpoints: usize,
-    pub probe_methods: Vec<String>,
     pub overrides: Value,
     pub additional_properties: Option<bool>,
     pub instructions_text: Option<String>,
@@ -208,7 +199,6 @@ impl Default for Config {
             allow_http1: false,
             allow_tls12: false,
             read_timeout_seconds: None,
-            legacy_probe_timeout: None,
             max_response_bytes: crate::limits::RESPONSE_BYTES,
             max_help_bytes: crate::limits::HELP_BYTES,
             max_spec_bytes: crate::limits::SPEC_BYTES,
@@ -231,11 +221,6 @@ impl Default for Config {
             exclude_tags: vec![],
             pricing_key: None,
             credit_pricing: None,
-            probe_pricing: true,
-            probe_ttl_seconds: 3600.0,
-            probe_concurrency: 4,
-            probe_max_endpoints: 200,
-            probe_methods: vec!["GET".into()],
             overrides: json!({}),
             additional_properties: None,
             instructions_text: None,
@@ -490,7 +475,6 @@ impl RelayContinuation {
             relay
                 .fetch_when_ready_bounded(
                     &cfg.spec,
-                    200,
                     cfg.max_spec_bytes,
                     "max_spec_bytes",
                     gate,
@@ -502,7 +486,6 @@ impl RelayContinuation {
             relay
                 .fetch_with_capacity(
                     &cfg.spec,
-                    200,
                     cfg.max_spec_bytes,
                     "max_spec_bytes",
                     gate.into_iter().collect(),
@@ -1187,13 +1170,13 @@ fn money(value: &Value) -> Option<String> {
     })
 }
 
-fn price(op: &Value) -> (String, bool) {
+fn price(op: &Value) -> String {
     let p = &op["pricing"];
     if p.is_null() || p == &json!({}) {
-        return (DEFAULT_PRICE.into(), false);
+        return DEFAULT_PRICE.into();
     }
     if p["authMode"] == "free" && p.get("price").is_none() {
-        return ("Cost: free [spec].".into(), true);
+        return "Cost: free [spec].".into();
     }
     let block = p.get("price").filter(|v| v.is_object()).unwrap_or(p);
     let block = block
@@ -1211,7 +1194,7 @@ fn price(op: &Value) -> (String, bool) {
         Some(c) => format!("{amount} {c}"),
         None => amount,
     };
-    let line = if let Some(amount) = money(&block["amount"]) {
+    if let Some(amount) = money(&block["amount"]) {
         let dynamic = block["mode"]
             .as_str()
             .is_some_and(|s| s.eq_ignore_ascii_case("dynamic"));
@@ -1224,20 +1207,10 @@ fn price(op: &Value) -> (String, bool) {
         format!("Cost: ~{}–{}/{unit} [spec].", show(lo), show(hi))
     } else {
         format!("Pricing: {p} [spec].")
-    };
-    (line, true)
+    }
 }
 
 pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolSpec>> {
-    build_tools_with_prices(cfg, root, prefix, &BTreeMap::new())
-}
-
-pub fn build_tools_with_prices(
-    cfg: &Config,
-    root: &Value,
-    prefix: &str,
-    prices: &BTreeMap<(String, String), String>,
-) -> Result<Vec<ToolSpec>> {
     if let Some(credits) = &cfg.credit_pricing {
         credits.validate().map_err(ToolConfigurationError)?;
     }
@@ -1245,7 +1218,7 @@ pub fn build_tools_with_prices(
     let mut credit_diagnostics = credit_pricing::Diagnostics::default();
     let mut tools = selected
         .into_iter()
-        .map(|(op, name)| operation_tool(cfg, &op, name, prices, &mut credit_diagnostics))
+        .map(|(op, name)| operation_tool(cfg, &op, name, &mut credit_diagnostics))
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
         tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description: format!(
@@ -1565,12 +1538,7 @@ fn preserve_body_required_alternatives(
     }
 }
 
-fn operation_description(
-    cfg: &Config,
-    op: &Value,
-    prices: &BTreeMap<(String, String), String>,
-    credit_estimate: Option<String>,
-) -> String {
+fn operation_description(cfg: &Config, op: &Value, credit_estimate: Option<String>) -> String {
     let method = op["method"].as_str().unwrap();
     let text = op["description"]
         .as_str()
@@ -1578,15 +1546,7 @@ fn operation_description(
         .or_else(|| op["summary"].as_str().filter(|s| !s.is_empty()))
         .map(str::to_owned)
         .unwrap_or_else(|| format!("{} {}", method.to_uppercase(), op["path"].as_str().unwrap()));
-    let (mut price, vendor) = price(op);
-    if !vendor
-        && let Some(line) = prices.get(&(
-            method.to_uppercase(),
-            op["path"].as_str().unwrap().to_owned(),
-        ))
-    {
-        price = line.clone();
-    }
+    let mut price = price(op);
     if let Some(estimate) = credit_estimate {
         price = if price == DEFAULT_PRICE {
             estimate
@@ -1620,7 +1580,6 @@ fn operation_tool(
     cfg: &Config,
     op: &Value,
     name: String,
-    prices: &BTreeMap<(String, String), String>,
     credit_diagnostics: &mut credit_pricing::Diagnostics,
 ) -> Result<ToolSpec> {
     let input = operation_input(op)?;
@@ -1630,7 +1589,7 @@ fn operation_tool(
         credit_diagnostics.record(&name, reason);
         description
     });
-    let description = operation_description(cfg, op, prices, credit_estimate);
+    let description = operation_description(cfg, op, credit_estimate);
     Ok(ToolSpec {
         response_mapping: cfg
             .response_mappings

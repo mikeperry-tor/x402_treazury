@@ -10,10 +10,18 @@ pub enum Format {
     Markdown,
 }
 fn optional_atomics(value: &Value) -> Result<String> {
-    if value.is_null() { Ok("unavailable".into()) } else { Ok(atomics(value)?.to_string()) }
+    if value.is_null() {
+        Ok("unavailable".into())
+    } else {
+        Ok(atomics(value)?.to_string())
+    }
 }
 fn optional_change(value: &Value) -> Result<String> {
-    if value.is_null() { Ok("unavailable".into()) } else { Ok(signed_atomics(value)?.to_string()) }
+    if value.is_null() {
+        Ok("unavailable".into())
+    } else {
+        Ok(signed_atomics(value)?.to_string())
+    }
 }
 fn atomics(value: &Value) -> Result<u64> {
     match value {
@@ -109,7 +117,6 @@ pub fn markdown(report: &Value) -> Result<String> {
     render_treasury_accounting(&mut out, report)?;
     render_fee_observations(&mut out, report, cases)?;
     render_catalog_stages(&mut out, report)?;
-    render_pricing_stages(&mut out, report)?;
     render_help_stages(&mut out, report, cases)?;
     render_assertions(&mut out, report, cases)?;
     render_eligibility(&mut out, report)?;
@@ -129,7 +136,7 @@ fn render_provider_stages(out: &mut String, report: &Value) -> Result<()> {
             "provider summary exceeds 10000 rows; no partial report"
         );
         let mut overview = String::from(
-            "## Provider stages\n\nStages are independent observations. Saved source accounting is not a fresh balance.\nOwned Tor requires its separate control audit; Tor-only failures do not establish Tor causation.\nProviders follow private JSON order; unselected calls remain not attempted.\n\n| Provider | Catalog | Help | Pricing | Execution | Provider semantics | Canonical payment |\n| --- | --- | --- | --- | --- | --- | --- |\n",
+            "## Provider stages\n\nStages are independent observations. Saved source accounting is not a fresh balance.\nOwned Tor requires its separate control audit; Tor-only failures do not establish Tor causation.\nProviders follow private JSON order; unselected calls remain not attempted.\n\n| Provider | Catalog | Help | Execution | Provider semantics | Canonical payment |\n| --- | --- | --- | --- | --- | --- |\n",
         );
         fn labels(values: impl Iterator<Item = crate::report_model::State>) -> String {
             let values: std::collections::BTreeSet<_> = values.map(|v| v.label()).collect();
@@ -142,11 +149,10 @@ fn render_provider_stages(out: &mut String, report: &Value) -> Result<()> {
         for (i, provider) in view.providers.iter().enumerate() {
             writeln!(
                 overview,
-                "| {} | {} | {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {} |",
                 i + 1,
                 labels(provider.catalog.iter().map(|s| s.state)),
                 labels(provider.help.iter().map(|s| s.state)),
-                labels(provider.pricing.iter().map(|s| s.state)),
                 labels(provider.cases.iter().map(|c| c.execution)),
                 labels(provider.cases.iter().map(|c| c.semantics)),
                 labels(provider.cases.iter().map(|c| c.payment))
@@ -154,21 +160,6 @@ fn render_provider_stages(out: &mut String, report: &Value) -> Result<()> {
         }
         if !view.source_inventory_complete {
             overview.push_str("\nHistorical source inventory is incomplete; this table includes known case sources only.\n");
-        }
-        if view.providers.iter().any(|p| {
-            p.pricing.iter().any(|s| {
-                s.pricing_evidence.as_ref().is_some_and(|e| {
-                    e.outcomes.iter().any(|(kind, count)| {
-                        !matches!(
-                            kind,
-                            x402_treazury::pricing::Outcome::Discovered
-                                | x402_treazury::pricing::Outcome::NoPaymentChallenge
-                        ) && *count > 0
-                    })
-                })
-            })
-        }) {
-            overview.push_str("\nPricing probe failures were observed even where the discovery stage completed; private JSON retains all outcome and HTTP-status counts.\n");
         }
         overview.push('\n');
         let index = out
@@ -275,7 +266,11 @@ fn render_treasury_observation(out: &mut String, observation: &Value, index: usi
             optional_atomics(&attributed["source_reserved_zatoshis"])?,
             atomics(&attributed["registry_unreleased_bounds_zatoshis"])?,
             atomics(&attributed["registry_released_bounds_zatoshis"])?,
-            optional_atomics(attributed.get("attempts_without_transaction_facts").unwrap_or(&attributed["attempts_without_treasury_budget"]))?,
+            optional_atomics(
+                attributed
+                    .get("attempts_without_transaction_facts")
+                    .unwrap_or(&attributed["attempts_without_treasury_budget"])
+            )?,
             optional_atomics(&attributed["recorded_refund_outputs_zatoshis"])?
         )?;
     } else {
@@ -513,74 +508,6 @@ fn render_catalog_stages(out: &mut String, report: &Value) -> Result<()> {
     Ok(())
 }
 
-fn render_pricing_stages(out: &mut String, report: &Value) -> Result<()> {
-    if let Some(rows) = report["pricing_stages"].as_array() {
-        out.push_str("\n| Pricing observation | Stage | Assertion | Observed endpoints | Available prices | Cache initializations | Cache hits | Shared results | Expired | Capped | HTTP codes (count) |\n| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
-        for (index, row) in rows.iter().enumerate() {
-            let stage = match row["stage"].as_str() {
-                Some("disabled") => "disabled",
-                Some("completed") => "completed",
-                Some("failed") => "failed",
-                Some("incomplete") => "incomplete",
-                _ => "not observed",
-            };
-            let assertion = if row["required"] == true {
-                status(&row["assessment"])
-            } else {
-                "not required"
-            };
-            let e = &row["evidence"];
-            let count = |v: &Value| {
-                v.as_u64()
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "unavailable".into())
-            };
-            let cache = |key: &str| {
-                if e.is_object() {
-                    count(&e["cache"].get(key).cloned().unwrap_or(serde_json::json!(0)))
-                } else {
-                    "unavailable".into()
-                }
-            };
-            let codes = pricing_http_codes(e);
-            writeln!(
-                out,
-                "| {} | {stage} | {assertion} | {} | {} | {} | {} | {} | {} | {} | {codes} |",
-                index + 1,
-                count(&e["observed"]),
-                count(&e["available_prices"]),
-                cache("initialized"),
-                cache("hit"),
-                cache("shared"),
-                count(&e["expired"]),
-                count(&e["capped"])
-            )?;
-        }
-        out.push_str("\nPricing completion is not provider health or payment qualification. Cached failure/success outcomes are observations, not fresh requests; cache initialization does not prove a request reached the provider. Startup prices never authorize payment.\n");
-    }
-    Ok(())
-}
-
-fn pricing_http_codes(evidence: &Value) -> String {
-    if let Some(codes) = evidence["http_statuses"].as_object() {
-        let mut rows = Vec::new();
-        for (code, n) in codes {
-            if let (Ok(code), Some(n)) = (code.parse::<u16>(), n.as_u64())
-                && (100..=999).contains(&code)
-            {
-                rows.push(format!("{code} ({n})"));
-            }
-        }
-        if rows.is_empty() {
-            "none observed".into()
-        } else {
-            rows.join(", ")
-        }
-    } else {
-        "unavailable".into()
-    }
-}
-
 fn render_help_stages(out: &mut String, report: &Value, cases: &[Value]) -> Result<()> {
     if let Some(rows) = report["help_stages"].as_array() {
         out.push_str("\n| Help case | Assessment | Cache path | Retrieval | Required |\n| --- | --- | --- | --- | --- |\n");
@@ -737,8 +664,8 @@ mod tests {
     fn complete_report() -> Value {
         let mut value = report();
         value["summary"] = json!({"version":1,"source_inventory_complete":false,
-            "providers":[{"source":"secret-provider","catalog":[{"scope":"secret-phase","state":"failed","http_status":429,"pricing_evidence":null}],
-                "help":[],"pricing":[],"cases":[]}],
+            "providers":[{"source":"secret-provider","catalog":[{"scope":"secret-phase","state":"failed","http_status":429}],
+                "help":[],"cases":[]}],
             "source_funding":{"saved_accounting":"unobserved","observations":0,"reserved_zatoshis":200000,"reserved_jobs":1},
             "lifecycle":[],"network":"owned_control_audit_required"});
         let data = crate::accounting::fixture();
@@ -763,8 +690,6 @@ mod tests {
             {"phase":"initial_inspection","status":"unobserved"},
             {"phase":"frozen_reload","status":"completed","sources":[{"source":"secret-source","state":"completed"},
                 {"state":"failed"},{"state":"cancelled"},{"state":"not_started"}]}]);
-        value["pricing_stages"] = json!([{"source":"secret-source","stage":"completed","required":true,"assessment":"passed",
-            "evidence":{"observed":2,"available_prices":0,"expired":1,"capped":3,"cache":{"initialized":1,"hit":1},"http_statuses":{"403":1,"429":1}}}]);
         // Deliberately reverse evidence order: the output must follow case order.
         value["help_stages"] = json!([
             {"case":"failed-case","required":false,"status":"passed","cache":"hit","result":{"status":"succeeded"}},
@@ -852,8 +777,8 @@ mod tests {
     fn joined_provider_table_redacts_identities_and_marks_partial_inventory() {
         let mut value = report();
         value["summary"] = json!({"version":1,"source_inventory_complete":false,
-            "providers":[{"source":"secret-provider","catalog":[{"scope":"secret-phase","state":"failed","http_status":429,"pricing_evidence":null}],
-                "help":[],"pricing":[],"cases":[]}],
+            "providers":[{"source":"secret-provider","catalog":[{"scope":"secret-phase","state":"failed","http_status":429}],
+                "help":[],"cases":[]}],
             "source_funding":{"saved_accounting":"unobserved","observations":0,"reserved_zatoshis":200000,"reserved_jobs":1},
             "lifecycle":[],"network":"owned_control_audit_required"});
         let text = markdown(&value).unwrap();
@@ -940,19 +865,21 @@ mod tests {
         assert!(markdown(&value).is_err());
     }
     #[test]
-    fn pricing_projection_keeps_counts_and_http_codes_without_source_identifiers() {
-        let mut value = report();
-        value["pricing_stages"] = json!([{"source":"secret-source","session":"secret-session","stage":"completed","required":true,"assessment":"passed",
-            "evidence":{"observed":2,"available_prices":0,"expired":1,"capped":3,"cache":{"initialized":1,"hit":1},"http_statuses":{"403":1,"429":1}}}]);
-        let text = markdown(&value).unwrap();
-        assert!(
-            text.contains(
-                "| 1 | completed | passed | 2 | 0 | 1 | 1 | 0 | 1 | 3 | 403 (1), 429 (1) |"
-            )
+    fn historical_pricing_fields_do_not_change_current_observations() {
+        let mut historical = complete_report();
+        let expected = markdown(&historical).unwrap();
+        historical["pricing_stages"] = json!([{"source":"old-private-source","stage":"completed","evidence":{"available_prices":1}}]);
+        historical["summary"]["providers"][0]["pricing"] = json!([{"state":"completed"}]);
+        historical["summary"]["providers"][0]["catalog"][0]["pricing_evidence"] =
+            json!({"available_prices":1});
+        let retained = historical.clone();
+        assert_eq!(markdown(&historical).unwrap(), expected);
+        assert_eq!(
+            historical, retained,
+            "reading must not rewrite historical JSON"
         );
-        assert!(text.contains("Startup prices never authorize payment"));
-        assert!(!text.contains("secret"));
     }
+
     #[test]
     fn catalog_projection_does_not_turn_frozen_success_into_live_success() {
         let mut value = report();

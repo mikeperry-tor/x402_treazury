@@ -26,8 +26,8 @@ restricted subset of GET operations. A separate passive runtime hint cache learn
 validated challenges from actual managed API calls and advises wallet selection.
 This plan changes the former behavior while preserving the latter.
 
-This task is planning only. Implementation needs a subsequent instruction. Future
-implementation validation uses local fixtures and public unfunded keys; this plan
+Implementation was authorized after the exact plan review at `3250fd98`; P01 is
+in progress. Validation uses local fixtures and public unfunded keys; this plan
 does not authorize live paid qualification, real wallet secrets or restarting the
 live server. Preserve existing discovery fixes, unrelated tracked/untracked/ignored
 files, private evidence and build caches. The current unrelated files include
@@ -214,8 +214,8 @@ timers, queues, budgets, readiness gates or parallel monetary tracking.
 ## Reviews, evidence and exit criteria
 
 Independent design and clarity reviews passed during plan creation, with no
-material findings remaining. Implementation has not started; material plan changes
-or new evidence reopen affected design concerns before P01. Every implementation
+material findings remaining. P01 implementation is in progress; material plan changes
+or new evidence reopen affected design concerns before dependent work. Every implementation
 commit receives an independent exact-SHA review of surrounding
 consumers, intent, baseline and actual validation evidence before dependent work.
 Address postcommit findings with `git commit --fixup=<introducing-SHA>` and review

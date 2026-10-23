@@ -1,5 +1,5 @@
 //! Unrepresentable server delays retain dispatch authority through discovery and relay.
-use crate::{catalog, network, pricing};
+use crate::{catalog, network};
 use axum::{
     http::{HeaderMap, StatusCode, Uri},
     response::IntoResponse,
@@ -109,46 +109,27 @@ async fn unrepresentable_retry_after_blocks_origin_and_relay_without_blocking_ot
     let (relay, fixture, relay_server) =
         crate::discovery_relay::tests::fixture(envelope, false, false).await;
 
-    for path in [
-        "/catalog-first",
-        "/catalog-final",
-        "/pricing-first",
-        "/pricing-final",
-    ] {
+    for path in ["/catalog-first", "/catalog-final"] {
         let expected = if path.ends_with("final") { 3 } else { 1 };
         let cfg = catalog::Config {
             spec: format!("{base}{path}"),
             discovery_relay: Some(relay.clone()),
-            probe_pricing: true,
             ..Default::default()
         };
         let owned_context = context.clone();
-        let owner = if path.starts_with("/catalog") {
-            tokio::spawn(async move {
-                // Explicitly retain and resume the final-status continuation;
-                // its scheduling authority must survive that handoff.
-                match catalog::prepare_json_discovery_with(&cfg, &owned_context)
-                    .await
-                    .unwrap()
-                {
-                    catalog::CatalogLoad::Ready(_) => {
-                        panic!("failed origin unexpectedly succeeded")
-                    }
-                    catalog::CatalogLoad::RelayPending(pending) => {
-                        pending.resume().await.unwrap();
-                    }
+        let owner = tokio::spawn(async move {
+            // Explicitly retain and resume the final-status continuation;
+            // its scheduling authority must survive that handoff.
+            match catalog::prepare_json_discovery_with(&cfg, &owned_context)
+                .await
+                .unwrap()
+            {
+                catalog::CatalogLoad::Ready(_) => panic!("failed origin unexpectedly succeeded"),
+                catalog::CatalogLoad::RelayPending(pending) => {
+                    pending.resume().await.unwrap();
                 }
-            })
-        } else {
-            tokio::spawn(async move {
-                let root = serde_json::json!({"paths":{(path):{"get":{"operationId":"price"}}}});
-                let tools = catalog::build_tools(&cfg, &root, "fixture").unwrap();
-                pricing::PricingCache::default()
-                    .discover_observed_with(&owned_context, &cfg, &root, &tools, base)
-                    .await
-                    .unwrap();
-            })
-        };
+            }
+        });
         observed.wait(path, expected).await;
         let ready = catalog::Config {
             spec: format!("{base}/ready"),

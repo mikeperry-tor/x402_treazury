@@ -10,7 +10,6 @@ exclude = ["/v1/whoami", "/v1/balance", "/v1/monitors/{id}", "/v1/webhook-endpoi
 include = ["/v1", ""]
 exclude_tags = ["Auth"]
 pricing_key = "x-socialfetch-credits-pricing"
-probe_pricing = false
 # API-origin catalog/help ignored byte ranges in the 2026-10-16 probe; HTTP/2
 # cover requires 206 responses. Canonical docs use a different origin.
 cover_traffic_enabled = false

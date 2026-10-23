@@ -179,12 +179,10 @@ pub(super) async fn restart(
         s.reopened_pid = Some(new_pid);
         Ok(())
     })?;
-    let session = application.current.binding.session.clone();
     ready(
         wait.clients,
         wait.snapshot,
         application.running()?,
-        (registry, &m.run_id, &session),
         m.limits.result_bytes,
         wait.deadline,
         wait.stop,
@@ -442,7 +440,9 @@ async fn endpoint(
     let clients = BTreeMap::from([(
         "main".into(),
         mcp::Client {
-            http: network.discovery(&endpoint, Duration::from_secs(5)).unwrap(),
+            http: network
+                .discovery(&endpoint, Duration::from_secs(5))
+                .unwrap(),
             endpoint,
             token: "fixture-token".into(),
         },
@@ -755,7 +755,6 @@ async fn outage_preparation_refuses_managed_application_before_any_dispatch() {
         &f.manifest,
         (&phase, Instant::now() + Duration::from_secs(5)),
         &BTreeMap::new(),
-        &mut application,
         &json!({}),
         &mut None,
     )

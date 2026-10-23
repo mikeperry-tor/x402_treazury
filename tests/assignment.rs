@@ -25,10 +25,8 @@ max_refund_shielding_fee_zec="0.001"
 base_rpc_url_env="BASE"
 [sources.a]
 spec="spec.json"
-probe_pricing=false
 [sources.b]
 spec="spec.json"
-probe_pricing=false
 [sources.unreferenced]
 spec="spec.json"
 [servers.one]
@@ -314,7 +312,7 @@ async fn serving_reuses_generated_pool_identity_and_retains_old_scopes() {
         )
         .replace("template=\"small\"", "template=\"another_template\"");
     let added = edited.replace("sources=[\"a\",\"b\"]", "sources=[\"a\",\"b\",\"c\"]")
-        + "\n[sources.c]\nspec='spec.json'\nprobe_pricing=false\n";
+        + "\n[sources.c]\nspec='spec.json'\n";
     let scopes = [
         base.clone(),
         edited,

@@ -301,18 +301,16 @@ impl Relay {
     pub async fn fetch_when_ready(
         &self,
         url: &str,
-        expected: u16,
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
-        self.fetch_when_ready_bounded(url, expected, limit, setting, None, None, None)
+        self.fetch_when_ready_bounded(url, limit, setting, None, None, None)
             .await
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fetch_when_ready_bounded(
         &self,
         url: &str,
-        expected: u16,
         limit: usize,
         setting: &'static str,
         gate: Option<Arc<tokio::sync::Semaphore>>,
@@ -343,7 +341,6 @@ impl Relay {
             let result = self
                 .fetch_with_capacity(
                     url,
-                    expected,
                     limit,
                     setting,
                     gate.iter().cloned().collect(),
@@ -373,17 +370,15 @@ impl Relay {
     pub async fn fetch(
         &self,
         url: &str,
-        expected: u16,
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
-        self.fetch_with_capacity(url, expected, limit, setting, Vec::new(), None)
+        self.fetch_with_capacity(url, limit, setting, Vec::new(), None)
             .await
     }
     pub(crate) async fn fetch_with_capacity(
         &self,
         url: &str,
-        expected: u16,
         limit: usize,
         setting: &'static str,
         capacity: Vec<Arc<tokio::sync::Semaphore>>,
@@ -396,25 +391,12 @@ impl Relay {
             body: None,
             allowed_origins: Vec::new(),
         };
-        let contract = match expected {
-            200 => sequence::Contract::Catalog,
-            402 => sequence::Contract::Pricing,
-            _ => anyhow::bail!("unsupported static discovery response contract"),
-        };
         let request = StaticFetch {
             prepared: self.sequence.prepare(&target, limit)?,
             target,
-            contract,
             limit,
             setting,
-            scope: static_scope(
-                &self.key,
-                if expected == 200 {
-                    "catalog"
-                } else {
-                    "pricing"
-                },
-            ),
+            scope: static_scope(&self.key, "catalog"),
         };
         if let Some(cached) = request
             .prepared
@@ -455,7 +437,7 @@ impl Relay {
             .acquire(
                 self.client.clone(),
                 &request.target,
-                request.contract,
+                sequence::Contract::Catalog,
                 request.limit,
                 request.setting,
                 None,
@@ -471,7 +453,6 @@ impl Relay {
 struct StaticFetch {
     prepared: sequence::Prepared,
     target: adapters::TargetRequest,
-    contract: sequence::Contract,
     scope: String,
     limit: usize,
     setting: &'static str,
@@ -519,7 +500,6 @@ pub(crate) fn slot(
 fn decode(
     bytes: &[u8],
     url: &str,
-    expected: u16,
     limit: usize,
     setting: &'static str,
     delay: std::time::Duration,
@@ -532,13 +512,12 @@ fn decode(
         allowed_origins: Vec::new(),
     };
     let decoded = adapters::Format::Curl.decode(bytes, &target, limit, setting)?;
-    let contract = match expected {
-        200 => sequence::Contract::Catalog,
-        _ => sequence::Contract::Pricing,
-    };
     // Legacy decoder fixture compatibility; runtime callers always use the common traversal.
     ensure!(
-        matches!(contract.decision(&decoded), sequence::Decision::Accept),
+        matches!(
+            sequence::Contract::Catalog.decision(&decoded),
+            sequence::Decision::Accept
+        ),
         "relay response rejected"
     );
     Ok(Response {
@@ -756,18 +735,9 @@ pub(crate) mod tests {
     async fn wallet_scopes_do_not_share_paid_results_but_share_failure_breaker() {
         let (first, f, task) = fixture(envelope(TARGET), false, false).await;
         let second = second_wallet(&first);
-        first
-            .fetch(TARGET, 200, 4096, "max_spec_bytes")
-            .await
-            .unwrap();
-        second
-            .fetch(TARGET, 200, 4096, "max_spec_bytes")
-            .await
-            .unwrap();
-        first
-            .fetch(TARGET, 200, 4096, "max_spec_bytes")
-            .await
-            .unwrap();
+        first.fetch(TARGET, 4096, "max_spec_bytes").await.unwrap();
+        second.fetch(TARGET, 4096, "max_spec_bytes").await.unwrap();
+        first.fetch(TARGET, 4096, "max_spec_bytes").await.unwrap();
         assert_eq!(f.signed.load(Ordering::SeqCst), 2);
         let payers = f.payers.lock().unwrap().clone();
         assert_eq!(payers.len(), 2);
@@ -776,8 +746,8 @@ pub(crate) mod tests {
         let (first, f, task) = fixture(envelope(TARGET), true, false).await;
         let second = second_wallet(&first);
         let (a, b) = tokio::join!(
-            first.fetch(TARGET, 200, 4096, "max_spec_bytes"),
-            second.fetch(TARGET, 200, 4096, "max_spec_bytes")
+            first.fetch(TARGET, 4096, "max_spec_bytes"),
+            second.fetch(TARGET, 4096, "max_spec_bytes")
         );
         assert!(a.is_err() && b.is_err());
         assert_eq!(f.signed.load(Ordering::SeqCst), 1);
@@ -931,21 +901,11 @@ pub(crate) mod tests {
             format!("http://{}/", listener.local_addr().unwrap()),
         );
         drop(listener);
-        assert!(
-            relay
-                .fetch(TARGET, 200, 4096, "max_spec_bytes")
-                .await
-                .is_err()
-        );
+        assert!(relay.fetch(TARGET, 4096, "max_spec_bytes").await.is_err());
         let other_url = "https://other.example.com/spec";
         let (mut other, f, other_task) = fixture(envelope(other_url), false, false).await;
         Arc::get_mut(&mut other).unwrap().state = relay.state.clone();
-        assert!(
-            other
-                .fetch(other_url, 200, 4096, "max_spec_bytes")
-                .await
-                .is_ok()
-        );
+        assert!(other.fetch(other_url, 4096, "max_spec_bytes").await.is_ok());
         assert_eq!(f.signed.load(Ordering::SeqCst), 1);
         task.abort();
         other_task.abort();
@@ -1031,7 +991,7 @@ pub(crate) mod tests {
                 entry.cfg.read_timeout_seconds = Some(0.2);
             }
             let error = relay
-                .fetch(TARGET, 200, 4096, "max_spec_bytes")
+                .fetch(TARGET, 4096, "max_spec_bytes")
                 .await
                 .err()
                 .unwrap();
@@ -1042,7 +1002,7 @@ pub(crate) mod tests {
             assert!(!format!("{error:#}").contains("PRIVATE_UPSTREAM_DETAIL"));
             assert!(
                 relay
-                    .fetch("https://example.com/other", 200, 4096, "max_spec_bytes")
+                    .fetch("https://example.com/other", 4096, "max_spec_bytes")
                     .await
                     .is_err()
             );
@@ -1064,12 +1024,7 @@ pub(crate) mod tests {
             let relay = relay.clone();
             async move {
                 relay
-                    .fetch(
-                        &format!("https://example.com/{i}"),
-                        200,
-                        4096,
-                        "max_spec_bytes",
-                    )
+                    .fetch(&format!("https://example.com/{i}"), 4096, "max_spec_bytes")
                     .await
             }
         }))
@@ -1083,8 +1038,8 @@ pub(crate) mod tests {
     async fn aliases_share_paid_success_and_invalid_catalog_is_not_retried() {
         let (relay, f, task) = fixture(envelope(TARGET), false, false).await;
         let (a, b) = tokio::join!(
-            relay.fetch(TARGET, 200, 4096, "max_spec_bytes"),
-            relay.fetch(TARGET, 200, 4096, "max_spec_bytes")
+            relay.fetch(TARGET, 4096, "max_spec_bytes"),
+            relay.fetch(TARGET, 4096, "max_spec_bytes")
         );
         assert!(Arc::ptr_eq(&a.unwrap(), &b.unwrap()));
         assert_eq!(f.signed.load(Ordering::SeqCst), 1);
@@ -1092,18 +1047,8 @@ pub(crate) mod tests {
         let mut invalid = envelope(TARGET);
         invalid["body"] = json!("broken JSON");
         let (relay, f, task) = fixture(invalid, false, false).await;
-        assert!(
-            relay
-                .fetch(TARGET, 200, 4096, "max_spec_bytes")
-                .await
-                .is_err()
-        );
-        assert!(
-            relay
-                .fetch(TARGET, 200, 4096, "max_spec_bytes")
-                .await
-                .is_err()
-        );
+        assert!(relay.fetch(TARGET, 4096, "max_spec_bytes").await.is_err());
+        assert!(relay.fetch(TARGET, 4096, "max_spec_bytes").await.is_err());
         assert_eq!(f.signed.load(Ordering::SeqCst), 1);
         task.abort();
     }
@@ -1137,17 +1082,10 @@ pub(crate) mod tests {
                 }
                 let (relay, fixture, task) = fixture(body, false, false).await;
                 let results = futures_util::future::join_all(
-                    (0..4).map(|_| relay.fetch(TARGET, expected, 4096, "max_spec_bytes")),
+                    (0..4).map(|_| relay.fetch(TARGET, 4096, "max_spec_bytes")),
                 )
                 .await;
-                if expected == 402 && failure == "invalid_content" {
-                    assert!(
-                        results.iter().all(Result::is_ok),
-                        "relayed pricing 402 is terminal even without usable pricing"
-                    );
-                } else {
-                    assert!(results.iter().all(Result::is_err));
-                }
+                assert!(results.iter().all(Result::is_err));
                 assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
                 let other_url = "https://other.example.com/spec";
                 // Two local handlers model Curl's different responses per target;
@@ -1155,7 +1093,7 @@ pub(crate) mod tests {
                 let (mut other, other_fixture, other_task) =
                     self::fixture(envelope(other_url), false, false).await;
                 Arc::get_mut(&mut other).unwrap().state = relay.state.clone();
-                let result = other.fetch(other_url, 200, 4096, "max_spec_bytes").await;
+                let result = other.fetch(other_url, 4096, "max_spec_bytes").await;
                 if failure == "wrong_target" {
                     assert!(result.is_err());
                     assert_eq!(other_fixture.signed.load(Ordering::SeqCst), 0);
@@ -1192,7 +1130,6 @@ pub(crate) mod tests {
                 decode(
                     &serde_json::to_vec(&v).unwrap(),
                     TARGET,
-                    200,
                     4096,
                     "max_spec_bytes",
                     Default::default()
@@ -1204,7 +1141,6 @@ pub(crate) mod tests {
         let err = decode(
             &serde_json::to_vec(&envelope(TARGET)).unwrap(),
             TARGET,
-            200,
             1,
             "max_spec_bytes",
             Default::default(),
@@ -1221,12 +1157,11 @@ pub(crate) mod tests {
             decode(
                 &serde_json::to_vec(&v).unwrap(),
                 TARGET,
-                402,
                 4096,
                 "max_response_bytes",
                 Default::default()
             )
-            .is_ok()
+            .is_err()
         );
         v["headers"]["payment-required"] =
             json!(STANDARD.encode(r#"{"accepts":[{"amount":"1000","asset":"USDC"}]}"#));
@@ -1234,12 +1169,11 @@ pub(crate) mod tests {
             decode(
                 &serde_json::to_vec(&v).unwrap(),
                 TARGET,
-                402,
                 4096,
                 "max_response_bytes",
                 Default::default()
             )
-            .is_ok()
+            .is_err()
         );
     }
     #[test]
@@ -1247,7 +1181,6 @@ pub(crate) mod tests {
         let mut response = decode(
             &serde_json::to_vec(&envelope(TARGET)).unwrap(),
             TARGET,
-            200,
             4096,
             "max_spec_bytes",
             Default::default(),

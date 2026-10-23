@@ -198,10 +198,6 @@ async fn catalog(State(s): State<StateData>) -> Response {
     s.calls.lock().unwrap().push("catalog".into());
     axum::Json(json!({"openapi":"3.0.0","paths":{}})).into_response()
 }
-async fn pricing(State(s): State<StateData>) -> Response {
-    s.calls.lock().unwrap().push("pricing".into());
-    ([("content-type", "text/plain")], "free").into_response()
-}
 async fn api(State(s): State<StateData>, headers: HeaderMap) -> Response {
     assert!(!headers.contains_key("payment-signature"));
     s.calls.lock().unwrap().push("api".into());
@@ -303,7 +299,6 @@ async fn serve(
     let handshake_eofs = s.handshake_eofs.clone();
     let app = axum::Router::new()
         .route("/catalog", get(catalog))
-        .route("/pricing", get(pricing))
         .route("/api", get(api))
         .route("/base", post(base))
         .route("/signed", get(signed))
@@ -433,7 +428,7 @@ async fn fixture() {
         if eof && !tor {
             continue;
         }
-        for consumer in ["catalog", "pricing", "api", "base"] {
+        for consumer in ["catalog", "api", "base"] {
             for failures in if eof {
                 vec![1]
             } else if tor {
@@ -482,25 +477,6 @@ async fn fixture() {
                             ..Default::default()
                         };
                         crate::catalog::load_json_discovery(&cfg).await.is_ok()
-                    }
-                    "pricing" => {
-                        let cfg = crate::catalog::Config {
-                            http_cache_enabled: false,
-                            ..Default::default()
-                        };
-                        let root = json!({"openapi":"3.0.0","paths":{"/pricing":{"get":{"operationId":"pricing","responses":{"200":{"description":"free"}}}}}});
-                        let tools = crate::catalog::build_tools(&cfg, &root, "tls").unwrap();
-                        let origin = endpoint.strip_suffix("/pricing").unwrap();
-                        let result = crate::pricing::PricingCache::default()
-                            .discover_observed(&cfg, &root, &tools, origin)
-                            .await
-                            .unwrap();
-                        assert_eq!(result.evidence.observed, 1);
-                        result
-                            .evidence
-                            .outcomes
-                            .get(&crate::pricing::Outcome::NoPaymentChallenge)
-                            == Some(&1)
                     }
                     "api" => crate::payment::PaidClient::new(payer)
                         .execute_response(crate::catalog::RoutedRequest {

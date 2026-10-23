@@ -49,7 +49,7 @@ impl Registry {
         Ok(())
     }
     pub(super) fn accounting_report(&self, run: &str) -> Result<Value> {
-        let manifest = self.manifest(run)?;
+        let manifest = self.observed_manifest(run)?;
         let (raw_baseline, expected_hash): (String, String) = self.db.query_row(
             "SELECT baseline,baseline_hash FROM identity WHERE singleton=1",
             [],

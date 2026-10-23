@@ -42,8 +42,8 @@ invalid reliability groups, and lifecycle/concurrency inputs fail. The output us
 resolved absolute paths so moving the file does not silently change deployment
 inputs. It never overwrites files or resets registry reservations. Review `plan`
 and prepare/authorize the new run through the ordinary flow before execution.
-This filters **calls only**: unselected sources still load, pricing checks still
-apply, and all declared managed pools retain their configuration. To exclude a
+This filters **calls only**: unselected sources still load, and all declared
+managed pools retain their configuration. To exclude a
 provider from startup, author and review a separate deployment explicitly.
 
 ## Provider content assertions
@@ -171,47 +171,17 @@ HTTP failure code when available, cache path and output byte count without the
 document or URL. An interrupted lookup retains a start without a fabricated result.
 Help cache observations do not establish Tor isolation or connection reuse.
 
-## Startup pricing assertions
+## Pricing and retained observations
 
-Startup pricing appears separately in `pricing_stages`, once per source and
-application session. A completed discovery records selected/skipped/eligible/capped
-endpoint counts, cache initialization/hit/shared counts, expired results, available
-prices, fixed outcome categories and numeric HTTP codes. Cached failures retain
-their original outcome; a cache observation is not a fresh HTTP request. Transport
-failure, non-402 status, missing/malformed challenge and unusable first offer stay
-distinct. Aggregate stage summaries contain no URLs, challenge prose or provider
-response bodies. Private runtime events additionally retain constructed price lines
-and their method/path keys to reproduce expected tool descriptions; treat the raw
-JSON as private. These are not complete challenge bodies.
+Catalog preparation, startup and warming do not query API endpoints for prices.
+Authored prices and credit conversion remain advisory; actual reviewed API calls
+supply challenge observations and validated runtime wallet-selection hints. No
+pricing manifest checks or startup pricing stage is required or generated.
 
-Optional manifest assertions apply to every application session in that run:
-
-```toml
-[pricing_checks]
-api_without_probes = "disabled"
-api_with_empty_discovery = "empty"
-api_with_discovered_prices = "nonempty"
-```
-
-Use actual source IDs and omit assertions that the run does not need. `disabled`
-requires the pinned source policy to disable probes; `empty` and `nonempty` require
-enabled discovery with zero or positive available prices respectively. An empty
-map may result from ineligible tools, an endpoint cap, failures or expiry; its
-counts explain which occurred. Passing an empty-map assertion does not qualify the
-provider's health. Source/session mismatch or inconsistent counters fail validation;
-an interrupted start or missing session observation remains incomplete. These
-assertions affect the final result, not payment authority, and never enable probes,
-refresh cache entries or buy another API call. Live payment challenges remain the
-only input to payment admission. Fresh application sessions have fresh caches.
-
-The report bounds pricing rows at 10000 source/session pairs and explicitly refuses
-a larger projection instead of omitting rows. A source's private pricing event is
-limited to 16 MiB; exceeding it logs a warning and fails publication explicitly. Unselected sources can have no
-pricing stage; request an assertion only for a source that will be priced. Catalog
-inspection (`config check`/preparation) still does not probe. The real-executable suite
-in `tests/integration_preparation.rs` shares the runner entry code in
-`tests/live/runner/driver.rs`, preventing module/CLI drift.
-Keep CLI and module wiring in this shared driver; do not duplicate it in tests.
+Reports retain historical `application_pricing` events as private raw evidence.
+Only the observation reader ignores the retired `pricing_checks` field in saved
+manifests; current manifest loading and execution reject it. Saved JSON, pins and
+financial events are not rewritten, and historical observations grant no replay.
 
 ## Report output
 
@@ -234,11 +204,10 @@ Tor/cover qualification and actual treasury fees/balances still require their ow
 evidence; this projection does not assert overall suite success.
 
 Single-run JSON includes a versioned `summary` built from the same validated facts
-used by the detailed report. Its provider rows keep catalog, help, pricing,
-execution, MCP success, provider semantics and canonical payment separate. Missing
-proof amounts are null, never zero. Pricing retains all HTTP-status/outcome counts:
-a completed discovery stage may still contain failed probes. Empty or unavailable
-observations stay explicitly not-attempted, unobserved or incomplete.
+used by the detailed report. Its provider rows keep catalog, help, execution, MCP
+success, provider semantics and canonical payment separate. Missing proof amounts
+are null, never zero. Empty or unavailable observations stay explicitly
+not-attempted, unobserved or incomplete.
 
 Markdown leads with the corresponding numbered provider-stage table and then the
 detailed accounting. Private identifiers and provider prose remain omitted. Older
@@ -592,10 +561,9 @@ do not establish independent remote availability. Missing old observations stay 
 Qualification inspection continues independent loads within the rolling bound;
 aliases share failures without retries. Ordinary serving fails fast. Failed snapshot
 commands retain a failure envelope and exit nonzero, never a partial executable
-inventory. Execution still requires complete validated preparation. Pricing stays
-probe-free during preparation and preserves source policy; runtime descriptions are
-validated against that session's production price observations as described under
-[startup pricing](#startup-pricing-assertions).
+inventory. Execution still requires complete validated preparation. Inventory
+checks compare the frozen authored descriptions; preparation and startup never
+query endpoints to augment their prices.
 
 ### Dispatch and supervised lifetime
 

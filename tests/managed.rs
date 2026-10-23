@@ -1389,10 +1389,8 @@ mode="static"
 private_key_env="KEY"
 [sources.api]
 spec="spec.json"
-probe_pricing=false
 [sources.managed]
 spec="spec.json"
-probe_pricing=false
 wallet="research"
 [servers.one]
 listen="127.0.0.1:0"
@@ -2262,7 +2260,6 @@ max_funding_spend_zec="0.02"
 max_conversion_overhead_percent=5
 [sources.api]
 spec="spec.json"
-probe_pricing=false
 [servers.one]
 listen="127.0.0.1:0"
 bearer_token_env="TOKEN"

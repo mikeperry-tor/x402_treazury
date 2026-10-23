@@ -3,7 +3,7 @@ use crate::http_cache::{Entry, Metadata, Slot};
 use std::sync::atomic::Ordering;
 
 #[tokio::test]
-async fn warm_prefers_fresh_relay_catalog_and_counts_each_price_route_once() {
+async fn warm_prefers_fresh_relay_catalog_without_endpoint_requests() {
     let dir = tempfile::tempdir().unwrap();
     let (relay, fixture, task) =
         crate::discovery_relay::tests::fixture(serde_json::json!({}), false, false).await;
@@ -53,15 +53,6 @@ sources=['api']
         crate::discovery_relay::slot(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
     direct_catalog.write(Some(catalog.clone())).await;
     relay_catalog.write(Some(catalog.clone())).await;
-    let url = "http://127.0.0.1:1/read";
-    let direct_price = Slot::new(&cfg, url, "pricing", 64 * 1024).unwrap();
-    let relay_price = crate::discovery_relay::slot(&cfg, url, "pricing", 64 * 1024).unwrap();
-    let price = Entry {
-        metadata,
-        data: b"$0.001".to_vec(),
-    };
-    direct_price.write(Some(price.clone())).await;
-    relay_price.write(Some(price)).await;
     let selected = ["api".to_owned()].into_iter().collect();
     let relays = BTreeMap::from([("api".to_owned(), relay)]);
     for relay_catalog_fresh in [true, false] {
@@ -69,11 +60,8 @@ sources=['api']
             let mut stale = catalog.clone();
             stale.metadata.expires = 0;
             relay_catalog.write(Some(stale)).await;
-            // The direct slot may be absent: the same route is still fresh via
-            // the relay price slot, without another discovery request.
-            direct_price.write(None).await;
         }
-        let results = warm(&config, &path, &selected, false, true, relays.clone())
+        let results = warm(&config, &path, &selected, false, relays.clone())
             .await
             .unwrap();
         assert_eq!(results.len(), 1);
@@ -85,13 +73,7 @@ sources=['api']
                 "fresh"
             }
         );
-        assert_eq!(
-            results[0].fresh_pricing_entries, 1,
-            "two fresh slots represent one route"
-        );
-        assert_eq!(results[0].pricing.as_ref().unwrap().available_prices, 1);
-        assert_eq!(results[0].pricing.as_ref().unwrap().selected_tools, 2);
-        assert_eq!(results[0].pricing.as_ref().unwrap().skipped_duplicate, 1);
+        assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
         assert_eq!(fixture.signed.load(Ordering::SeqCst), 0);
     }
     task.abort();

@@ -5,7 +5,7 @@ pub mod deployment;
 pub mod mcp_wire;
 pub mod network;
 pub mod payment;
-pub mod pricing;
+pub(crate) mod pricing;
 pub mod provider_status;
 pub mod providers;
 pub mod qualification;

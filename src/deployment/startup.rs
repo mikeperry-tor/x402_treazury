@@ -520,63 +520,6 @@ impl Source {
     }
 }
 
-/// Discover/rebuild a source without mutating any published listener inventory.
-pub(super) async fn price_source<'a>(
-    id: &'a str,
-    source: &Source,
-    selected: Vec<catalog::ToolSpec>,
-) -> Result<(&'a str, BTreeMap<String, catalog::ToolSpec>)> {
-    let mut progress = Progress {
-        source: id,
-        phase: "pricing",
-        started: Instant::now(),
-        finished: false,
-    };
-    tracing::debug!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing,
-        "Startup pricing source started");
-    crate::qualification::record_pricing(id, crate::qualification::PricingStage::Started).await?;
-    let result = async {
-        let discovery = crate::pricing::process_cache()
-            .discover_observed(&source.config, &source.document, &selected, &source.base_url).await;
-        let stage=match &discovery {
-            Ok(d)=>crate::qualification::PricingStage::Completed{evidence:d.evidence.clone(),prices:d.prices.iter().map(|((method,path),line)|crate::pricing::Price{method:method.clone(),path:path.clone(),line:line.clone()}).collect()},
-            Err(error)=>crate::qualification::PricingStage::Failed{failure:crate::qualification::failure_category(error)},
-        };
-        crate::qualification::record_pricing(id,stage).await?;
-        let discovery = discovery?;
-        let counts = &discovery.evidence.cache;
-        let cache_count = |path| counts.get(&path).copied().unwrap_or(0);
-        let disk_hits = cache_count(crate::pricing::CachePath::Disk);
-        let process_hits = cache_count(crate::pricing::CachePath::Hit);
-        let shared = cache_count(crate::pricing::CachePath::Shared);
-        let network_initializations = cache_count(crate::pricing::CachePath::Initialized);
-        let prices=discovery.prices;
-        tracing::info!(target: "x402_treazury::startup", source = id, enabled = source.config.probe_pricing, prices = prices.len(),
-            disk_hits, process_hits, shared, network_initializations,
-            disk_cache = crate::http_cache::Slot::availability(&source.config, "pricing"),
-            skipped_embedded = discovery.evidence.skipped_embedded,
-            elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing source finished");
-        if prices.is_empty() {
-            tracing::debug!(target: "x402_treazury::startup", source = id,
-                "No discovered prices; reusing original tool definitions");
-            return Ok((id, source.tools.iter().cloned().map(|t| (t.name.clone(), t)).collect()));
-        }
-        let rebuild_started = Instant::now();
-        let tools = catalog::build_tools_with_prices(
-            &source.config, &source.document, source.config.prefix.as_deref().unwrap(), &prices,
-        )?.into_iter().map(|t| (t.name.clone(), t)).collect();
-        tracing::debug!(target: "x402_treazury::startup", source = id,
-            elapsed_ms = rebuild_started.elapsed().as_millis() as u64, "Startup pricing descriptions rebuilt");
-        Ok((id, tools))
-    }.await;
-    progress.finished = true;
-    if result.is_err() {
-        tracing::warn!(target: "x402_treazury::startup", source = id,
-            elapsed_ms = progress.started.elapsed().as_millis() as u64, "Startup pricing discovery failed");
-    }
-    result
-}
-
 async fn catalog_cache_status(cfg: &catalog::Config) -> &'static str {
     let mut catalog_cache = if cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://") {
         let slot = crate::http_cache::Slot::new(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes);
@@ -601,63 +544,11 @@ async fn catalog_cache_status(cfg: &catalog::Config) -> &'static str {
     catalog_cache
 }
 
-async fn discover_warm_pricing(
-    config: &MetaConfig,
-    id: &str,
-    source: &Source,
-    pricing: &crate::pricing::PricingCache,
-) -> Result<(crate::pricing::Evidence, usize)> {
-    let tools = super::cache_warm::selected_tools(config, id, source)?;
-    let discovery = pricing
-        .discover_observed(&source.config, &source.document, &tools, &source.base_url)
-        .await?;
-    let fresh_entries = fresh_pricing_entries(source, &tools, &discovery.prices).await?;
-    Ok((discovery.evidence, fresh_entries))
-}
-
-async fn fresh_pricing_entries(
-    source: &Source,
-    tools: &[catalog::ToolSpec],
-    prices: &BTreeMap<(String, String), String>,
-) -> Result<usize> {
-    let cfg = &source.config;
-    let mut fresh_pricing_entries = 0;
-    let mut inspected = std::collections::BTreeSet::new();
-    for tool in tools {
-        if prices.contains_key(&(tool.method.clone(), tool.path.clone())) {
-            let url = tool.route(&source.base_url, &serde_json::Map::new())?.url;
-            if !inspected.insert(url.clone()) {
-                continue;
-            }
-            for slot in crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024)
-                .into_iter()
-                .chain(crate::discovery_relay::slots(
-                    cfg,
-                    &url,
-                    "pricing",
-                    64 * 1024,
-                ))
-            {
-                if slot
-                    .read()
-                    .await
-                    .is_some_and(|entry| entry.metadata.fresh())
-                {
-                    fresh_pricing_entries += 1;
-                    break;
-                }
-            }
-        }
-    }
-    Ok(fresh_pricing_entries)
-}
-
 pub(super) async fn warm(
     config: &MetaConfig,
     path: &Path,
     selected: &std::collections::BTreeSet<String>,
     direct: bool,
-    discover_pricing: bool,
     relay: crate::discovery_relay::Relays,
 ) -> Result<Vec<super::cache_warm::CacheWarmSource>> {
     let downloads = Downloads {
@@ -674,7 +565,6 @@ pub(super) async fn warm(
             .map(|t| t.state_dir.join("http-cache")),
         direct_warm_target: direct.then(|| config.network.clone()),
     };
-    let pricing = crate::pricing::PricingCache::default();
     let mut loads = Vec::with_capacity(selected.len());
     for id in selected {
         loads.push(async {
@@ -684,18 +574,9 @@ pub(super) async fn warm(
                 anyhow::bail!("cache warming cannot defer catalog discovery");
             };
             let catalog_cache = catalog_cache_status(&source.config).await;
-            let (evidence, fresh_pricing_entries) = if discover_pricing {
-                let (evidence, fresh_entries) =
-                    discover_warm_pricing(config, id, &source, &pricing).await?;
-                (Some(evidence), fresh_entries)
-            } else {
-                (None, 0)
-            };
             Ok::<_, anyhow::Error>(super::cache_warm::CacheWarmSource {
                 source: id.clone(),
                 catalog_cache,
-                pricing: evidence,
-                fresh_pricing_entries,
             })
         });
     }

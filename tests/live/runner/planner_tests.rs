@@ -229,17 +229,8 @@ fn planner_deployment_validation_preserves_exact_first_failures() {
         planner_error(&invalid, &Value::Null),
         "unsupported version or invalid run/authorization identifier"
     );
-    let mut m = base.clone();
-    m.pricing_checks.insert(
-        "missing".into(),
-        crate::pricing_stages::Expectation::Disabled,
-    );
-    let mut c = Value::Null;
-    assert_eq!(
-        planner_error(&m, &c),
-        "pricing_checks names an unknown source"
-    );
-    c = json!({"servers":{"main":{"auth":false}}});
+    let m = base.clone();
+    let c = json!({"servers":{"main":{"auth":false}}});
     assert_eq!(
         planner_error(&m, &c),
         "live qualification requires authenticated listeners"

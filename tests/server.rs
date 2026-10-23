@@ -514,8 +514,7 @@ fn catalog_rejects_ambiguous_names_and_preserves_nested_constraints_and_override
         overrides: json!({"t_x":{"description":"Authored instructions"}}),
         ..Default::default()
     };
-    let prices = BTreeMap::from([(("POST".into(), "/x".into()), "Discovered price".into())]);
-    let tools = x402_treazury::catalog::build_tools_with_prices(&cfg, &doc, "t", &prices).unwrap();
+    let tools = x402_treazury::catalog::build_tools(&cfg, &doc, "t").unwrap();
     assert_eq!(tools[0].description, "Authored instructions");
     let route = tools[0]
         .route(

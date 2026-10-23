@@ -95,7 +95,7 @@ fn config(
     }
     value += "[wallets.w]\nmode='static'\nprivate_key_env='UNUSED_TEST_KEY'\nmax_api_payment_usdc='0.01'\n";
     for id in 0..count {
-        value += &format!("[sources.s{id:02}]\nspec='{origin}/{id}'\nprobe_pricing=false\n");
+        value += &format!("[sources.s{id:02}]\nspec='{origin}/{id}'\n");
     }
     let names: Vec<_> = (0..count).rev().map(|id| format!("s{id:02}")).collect();
     value += &format!(
@@ -330,30 +330,9 @@ async fn tor_catalog_child() {
         fixture.release(id);
     }
     task.await.unwrap().unwrap();
-    // Pricing uses the same production discovery factory concurrently, including
-    // multiple paths sharing one origin. Unsigned 200s are cached as no price.
-    let pricing = tokio::spawn(async {
-        let cache = x402_treazury::pricing::PricingCache::default();
-        let cfg = x402_treazury::catalog::Config::default();
-        let a = serde_json::json!({"paths":{"/0":{"get":{}},"/1":{"get":{}}}});
-        let b = serde_json::json!({"paths":{"/2":{"get":{}}}});
-        let ta = x402_treazury::catalog::build_tools(&cfg, &a, "a").unwrap();
-        let tb = x402_treazury::catalog::build_tools(&cfg, &b, "b").unwrap();
-        let (a, b) = tokio::join!(
-            cache.discover(&cfg, &a, &ta, "http://a.test"),
-            cache.discover(&cfg, &b, &tb, "http://b.test")
-        );
-        assert!(a.unwrap().is_empty());
-        assert!(b.unwrap().is_empty());
-    });
-    for _ in 0..3 {
-        let id = fixture.next().await;
-        fixture.release(id);
-    }
-    pricing.await.unwrap();
     let context = NetworkContext::new(policy).unwrap();
     let records = proxy.records.lock().unwrap();
-    assert_eq!(records.len(), 6);
+    assert_eq!(records.len(), 3);
     for record in records.iter() {
         assert_eq!(record.address_type, 3);
         let legacy = context
@@ -364,10 +343,10 @@ async fn tor_catalog_child() {
         assert!(record.password.starts_with("x402_treazury:v1:"));
     }
     let a: Vec<_> = records.iter().filter(|r| r.host == "a.test").collect();
-    assert_eq!(a.len(), 4);
+    assert_eq!(a.len(), 2);
     assert!(a.iter().all(|r| r.password == a[0].password));
     let b: Vec<_> = records.iter().filter(|r| r.host == "b.test").collect();
-    assert_eq!(b.len(), 2);
+    assert_eq!(b.len(), 1);
     assert!(b.iter().all(|r| r.password == b[0].password));
     assert_ne!(a[0].password, b[0].password);
 }
@@ -529,9 +508,8 @@ async fn aliases_share_fetch_and_parse_but_keep_tools_overrides_and_wallets() {
         + "\n[wallets.other]\nmode='static'\nprivate_key_env='UNUSED_OTHER_KEY'\n[sources.s01.overrides.s01_read]\ndescription='Authored alias description'\n";
     std::fs::write(&path, text).unwrap();
     let task = tokio::spawn(async move {
-        let mut deployment = Deployment::load(&path).await.unwrap();
+        let deployment = Deployment::load(&path).await.unwrap();
         let before = serde_json::to_value(deployment.inventory()).unwrap();
-        deployment.discover_prices().await.unwrap(); // Disabled: unchanged definitions, including overrides.
         assert_eq!(
             before,
             serde_json::to_value(deployment.inventory()).unwrap()
@@ -837,7 +815,7 @@ async fn optional_remote_base_url_failures_are_isolated_but_authored_urls_are_st
     .unwrap();
     let path = dir.path().join("config.toml");
     let config = format!(
-        "version=1\n[sources.good]\nspec='good.json'\nbase_url='http://127.0.0.1:9'\nprobe_pricing=false\n[sources.optional]\nspec='http://{address}/spec'\noptional_startup=true\nprobe_pricing=false\n[wallets.w]\nmode='static'\nprivate_key_env='UNFUNDED'\n[servers.test]\nlisten='127.0.0.1:0'\nwallet='w'\nsources=['good','optional']\nbearer_token_env='TOKEN'\n"
+        "version=1\n[sources.good]\nspec='good.json'\nbase_url='http://127.0.0.1:9'\n[sources.optional]\nspec='http://{address}/spec'\noptional_startup=true\n[wallets.w]\nmode='static'\nprivate_key_env='UNFUNDED'\n[servers.test]\nlisten='127.0.0.1:0'\nwallet='w'\nsources=['good','optional']\nbearer_token_env='TOKEN'\n"
     );
     for remote in [None, Some("not a URL"), Some("ftp://example.com")] {
         *document.lock().unwrap() = serde_json::json!({"paths":{"/read":{"get":{}}}, "servers":remote.map(|url| serde_json::json!([{"url":url}]))});

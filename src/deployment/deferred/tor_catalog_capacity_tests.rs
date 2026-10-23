@@ -58,7 +58,7 @@ fn config(mode: &str, socks: std::net::SocketAddr) -> String {
     );
     for id in ["a", "b", "z"] {
         config.push_str(&format!(
-            "[sources.{id}]\nspec='http://catalog.example.com/{mode}/{id}'\nbase_url='http://catalog.example.com'\nprobe_pricing=false\n"
+            "[sources.{id}]\nspec='http://catalog.example.com/{mode}/{id}'\nbase_url='http://catalog.example.com'\n"
         ));
     }
     config.push_str("[servers.one]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='w'\nsources=['a','b','z']\n");
@@ -169,7 +169,6 @@ async fn catalog_capacity_child() {
                     &cfg,
                     &path,
                     &BTreeSet::from(["a".into(), "b".into(), "z".into()]),
-                    false,
                     false,
                     Default::default(),
                 )

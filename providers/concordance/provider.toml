@@ -12,7 +12,6 @@ additional_properties = false
 instructions_text = "Concordance aggregates 18 refreshed-on-schedule data sources (SEC EDGAR, FRED, World Bank, UN Comtrade, GDELT news, CourtListener, govinfo, arXiv/CORE, Hacker News, Stack Exchange, Wikipedia, weather, DefiLlama, finnhub/twelvedata/polygon quotes) into six paid tools, $0.01-$0.05 per call in USDC (Base or Solana). The paid research tools take flat JSON bodies; responses cite real sources, never black-box summaries. concordance_search: one-query full-text search with optional source/category/since filters. concordance_digest: one call groups a topic across every category with counts (not an LLM summary). concordance_timeline: coverage ordered oldest-first for tracking a story. concordance_corroboration: counts DISTINCT sources backing a claim - the trust signal. concordance_company_brief: quotes from 3 market providers + SEC filings + mentions for one ticker or company name; partial sections are normal. concordance_series: tabular series by source + series_id (fred GDP/CPIAUCSL/UNRATE/FEDFUNDS/DGS10; world_bank US-<indicator>). Use concordance_catalog for current source/series discovery, concordance_healthz for diagnostics and concordance_root for the public homepage. concordance_help faithfully fetches the vendor's /llms.txt document."
 help_url = "https://concordancehq.duckdns.org/llms.txt"
 pricing_key = "x-payment-info"
-probe_pricing = false
 
 [overrides]
 

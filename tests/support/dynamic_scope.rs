@@ -92,7 +92,15 @@ async fn scope_child() {
     };
     let (address, task) = crate::test_tls::serve(
         axum::Router::new()
-            .route("/openapi.json", get(|| async { axum::Json(spec()) }))
+            .route(
+                "/openapi.json",
+                get(|| async {
+                    let mut document = spec();
+                    document["paths"]["/read"]["get"]["x-payment-info"] =
+                        json!({"amount":"0.025","currency":"USD"});
+                    axum::Json(document)
+                }),
+            )
             .route("/help", get(|| async { "fixture help" }))
             .route("/read", get(seller)),
     )
@@ -157,7 +165,7 @@ async fn scope_child() {
             .unwrap();
         assert_eq!(registration.targets, [owner]);
     }
-    // Help and pricing are discovery traffic even when invoked from a paid binding.
+    // Help remains discovery traffic; prices come only from accepted metadata.
     let mut help = m.catalog.read().views["writer"]
         .iter()
         .find(|b| b.tool.method == "GET")
@@ -172,20 +180,19 @@ async fn scope_child() {
         help.invoke(&Default::default()).await.unwrap(),
         "fixture help"
     );
-    let cfg = crate::catalog::Config {
-        probe_pricing: true,
-        ..Default::default()
-    };
-    let tools = m.catalog.read().views["writer"]
-        .iter()
-        .map(|b| b.tool.clone())
-        .collect::<Vec<_>>();
-    let prices = crate::pricing::PricingCache::default()
-        .discover(&cfg, &spec(), &tools, "https://api.example.com")
-        .await
-        .unwrap();
-    assert_eq!(prices.len(), 1);
-    assert_eq!(requests.swap(0, Ordering::SeqCst), 1);
+    for owner in ["writer", "reader", "sibling"] {
+        let inventory = m.catalog.read();
+        let tool = inventory.views[owner]
+            .iter()
+            .find(|bound| bound.tool.method == "GET")
+            .unwrap();
+        assert!(tool.tool.description.contains("Cost: ~$0.025/call [spec]."));
+    }
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        0,
+        "registration, help and authored prices never request a business endpoint"
+    );
     let name = m.catalog.read().views["writer"]
         .iter()
         .find(|b| b.tool.method == "GET")
@@ -278,25 +285,9 @@ async fn scope_child() {
     let public_credentials = crate::network::global().credentials(&public_transport.scope);
     assert_eq!(public_credentials.0, canonical_discovery.0);
     assert_ne!(public_credentials.1, canonical_discovery.1);
-    let pricing_transport = crate::network::global()
-        .http_participating(
-            &discovery_id,
-            "https://api.example.com",
-            None,
-            false,
-            Default::default(),
-        )
-        .unwrap();
-    let pricing_credentials = crate::network::global().credentials(&pricing_transport.scope);
-    assert_eq!(pricing_credentials.0, canonical_discovery.0);
-    assert_ne!(pricing_credentials.1, canonical_discovery.1);
-    assert_ne!(pricing_credentials.1, public_credentials.1);
-    let mut expected = vec![
-        // Public imports/help share their participating discovery transport;
-        // pricing has a distinct non-public-only transport key.
-        public_credentials,
-        pricing_credentials,
-    ];
+    // Public imports and help share their guarded discovery transport; actual
+    // business calls below retain their distinct captured payer identities.
+    let mut expected = vec![public_credentials];
     for key in [1, 2] {
         let signer: alloy_signer_local::PrivateKeySigner = format!("{key:064x}").parse().unwrap();
         let id = IsolationId::evm(&signer.address().to_string()).unwrap();
@@ -317,8 +308,8 @@ async fn scope_child() {
         let records = proxy.records.lock().unwrap();
         assert_eq!(
             records.len(),
-            4,
-            "public help shares guarded discovery; identities and selection stay separate"
+            3,
+            "public help shares guarded discovery; actual API payer transports stay separate"
         );
         assert_eq!(
             records

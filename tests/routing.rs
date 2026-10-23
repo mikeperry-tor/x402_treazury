@@ -49,8 +49,8 @@ fn assembled_template_cannot_form_normalized_dot_segments() {
     }
 }
 
-#[tokio::test]
-async fn inherited_parameters_route_and_prevent_incomplete_pricing_probes() {
+#[test]
+fn inherited_parameters_preserve_required_arguments_when_routing() {
     let root = json!({"openapi":"3.1.0","components":{"parameters":{
         "id":{"name":"id","in":"path","required":true,"schema":{"type":"string"}},
         "query":{"name":"q","in":"query","required":true,"schema":{"type":"string"}}
@@ -77,13 +77,6 @@ async fn inherited_parameters_route_and_prevent_incomplete_pricing_probes() {
     assert_eq!(route.query["q"], 7);
     let delete = tools.iter().find(|t| t.method == "DELETE").unwrap();
     assert_eq!(delete.input_schema["required"], json!(["id", "q"]));
-    let discovery = x402_treazury::pricing::PricingCache::default()
-        .discover_observed(&cfg, &root, &tools, "http://127.0.0.1:1")
-        .await
-        .unwrap();
-    assert_eq!(discovery.evidence.skipped_arguments, 1);
-    assert_eq!(discovery.evidence.eligible, 0);
-    assert!(discovery.prices.is_empty());
 }
 
 #[tokio::test]
