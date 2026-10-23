@@ -181,6 +181,9 @@ async fn origin(
         selected.clone(),
         false,
         |transport, _, _| async move {
+            crate::qualification::check_retry_authority()
+                .await
+                .map_err(Failure::local)?;
             let response = transport
                 .client
                 .get(url.clone())

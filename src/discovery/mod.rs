@@ -361,6 +361,7 @@ impl Manager {
                 .cloned()
                 .unwrap_or_else(PaidClient::unsigned)
                 .with_document_relay(self.search_relay.clone())
+                .with_relay_origins(self.policy.allowed_origins.clone())
                 .with_transport(
                     record
                         .candidate

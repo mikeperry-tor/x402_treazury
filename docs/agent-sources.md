@@ -156,9 +156,8 @@ exact URLs, methods, Bazaar metadata, offers, skill links, unknown fields and
 missing contracts without normalizing resources into services. `partialResults`
 remains upstream metadata, with no invented totals or continuations. Empty or
 partial results do not prove absence and never trigger a paid fallback. HTTP
-responses marked with Content-Range fail the complete-response contract; a rejected
-origin response may use the explicitly enabled fallback, while a rejected relayed
-response fails without automatic paid replay. HTTP
+206 responses and responses marked with Content-Range fail the complete-response
+contract on both origin and relay paths, without fallback or automatic paid replay. HTTP
 examples and a Bazaar envelope schema are not invented request argument schemas.
 Documented HTTP requests may go straight to `raw_call`; known OpenAPI URLs go to
 `source_add`. MCP/unknown protocols remain metadata only.
@@ -169,6 +168,15 @@ identity fails that request. Under Tor they use one origin attempt plus
 `network.tor_isolation_retries` eligible fresh-isolation retries (default 2), with the shared eligibility and `Retry-After`
 policy, including the terminal delay before fallback. Direct mode uses one
 origin attempt. Only complete valid search JSON may promote an origin scope.
+
+Configured runtime fallback also applies to API/directory/raw GET and HEAD, and
+otherwise-authorized unsigned x402 POST when a listed adapter represents the exact
+request. The original method selects its list. Origin challenges retain ordinary
+payment handling; relay-supplied target challenges are terminal. Any earlier target
+signature suppresses generic fallback. Complete invalid directory JSON/output and
+terminal HTTP statuses do not buy another read. API ranges remain legitimate;
+raw HEAD succeeds with empty text. Typed possible-charge facts survive directory
+processing and output conversion, separately from relay advisories and JSON text.
 
 With `[discovery_relay]` configured, the ordered GET relay list is enabled by
 default for supported on-demand reads. Set `on_demand=false` to disable it; legacy

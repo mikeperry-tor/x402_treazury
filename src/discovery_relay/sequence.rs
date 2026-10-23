@@ -95,6 +95,7 @@ pub(crate) enum Contract {
     Catalog,
     Pricing,
     Document,
+    Api,
     Search(fn(&[u8]) -> Result<()>),
 }
 impl Contract {
@@ -111,18 +112,19 @@ impl Contract {
         if matches!(self, Self::Catalog) && status == 304 {
             return Decision::Terminal("unsolicited_not_modified");
         }
-        if status == 206
-            || response
-                .headers
-                .contains_key(reqwest::header::CONTENT_RANGE)
+        if !matches!(self, Self::Api)
+            && (status == 206
+                || response
+                    .headers
+                    .contains_key(reqwest::header::CONTENT_RANGE))
         {
             return Decision::Terminal("partial_response");
         }
         // Terminal runtime statuses remain terminal even when the relay also
         // reports failed delivery. Such metadata grants no second paid read.
-        if matches!(self, Self::Document)
+        if matches!(self, Self::Document | Self::Api)
             && !(200..300).contains(&status)
-            && !matches!(status, 400 | 403 | 408 | 429 | 500..=599)
+            && !crate::network::acquisition::blocking_status(status)
         {
             return Decision::Terminal("http_status");
         }
@@ -137,8 +139,8 @@ impl Contract {
                 Decision::Next("catalog_parse")
             }
             Self::Catalog => Decision::Accept,
-            Self::Document if (200..300).contains(&status) => Decision::Accept,
-            Self::Document => Decision::Next("http_status"),
+            Self::Document | Self::Api if (200..300).contains(&status) => Decision::Accept,
+            Self::Document | Self::Api => Decision::Next("http_status"),
             Self::Pricing => Decision::Next("http_status"),
             Self::Search(_) if status != 200 => Decision::Next("http_status"),
             Self::Search(validate) if validate(&response.body).is_err() => {
@@ -217,6 +219,27 @@ impl SearchRelay {
                 }],
             )]),
         }
+    }
+    #[cfg(test)]
+    pub(crate) fn fixture_methods(
+        methods: BTreeMap<String, Vec<(String, String, Config)>>,
+    ) -> Result<Self> {
+        let mut entries = BTreeMap::new();
+        for (method, positions) in methods {
+            let mut selected = Vec::new();
+            for (position, (format, endpoint, cfg)) in positions.into_iter().enumerate() {
+                selected.push(Entry {
+                    key: format!("{method}:{position}"),
+                    provider_key: format!("{format}:{endpoint}"),
+                    endpoint,
+                    cfg,
+                    format: format.parse()?,
+                    fixture: true,
+                });
+            }
+            entries.insert(method, selected);
+        }
+        Ok(Self { entries })
     }
     pub(crate) fn cache_keys(&self, wallet: &str) -> Vec<String> {
         self.entries
@@ -607,7 +630,28 @@ impl Entry {
                     definitive: attributable || local || !possible,
                 }
             })?;
-        match contract.decision(&response) {
+        // Refine only accepted complete responses: incomplete delivery must
+        // retain the consumer's advancement decision.
+        let decision = match contract.decision(&response) {
+            Decision::Accept
+                if matches!(contract, Contract::Api)
+                    && self.format == Format::Curl
+                    && target.method != Method::HEAD
+                    && response
+                        .headers
+                        .get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                        .is_some_and(|v| {
+                            !crate::output::text_mime(
+                                &v.split(';').next().unwrap().trim().to_ascii_lowercase(),
+                            )
+                        }) =>
+            {
+                Decision::Terminal("unsupported_response")
+            }
+            decision => decision,
+        };
+        match decision {
             Decision::Accept => Ok((response, started.elapsed(), possible)),
             decision => {
                 let (reason, advance) = match decision {

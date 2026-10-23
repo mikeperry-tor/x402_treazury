@@ -187,7 +187,10 @@ impl BoundTool {
             owner
                 .run_owned(async move {
                     let text = help.invoke(&client, &url).await?;
-                    Ok(crate::output::ToolOutput::text(text))
+                    let mut output = crate::output::ToolOutput::text(text);
+                    output.payment_may_have_occurred =
+                        help.result.get().is_some_and(|result| result.possible);
+                    Ok(output)
                 })
                 .await?
         } else {

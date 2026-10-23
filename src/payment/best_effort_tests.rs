@@ -1306,25 +1306,16 @@ async fn tor_unsigned_retry_child() {
         .with_ansi(false)
         .with_writer(log.reopen().unwrap())
         .finish();
-    assert!(
-        client
-            .execute_response(make_route())
-            .with_subscriber(subscriber)
-            .await
-            .is_err()
+    let error = client
+        .execute_response(make_route())
+        .with_subscriber(subscriber)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<HttpFailure>().unwrap().status,
+        StatusCode::SERVICE_UNAVAILABLE
     );
     let logs = std::fs::read_to_string(log.path()).unwrap();
-    let retries: Vec<_> = logs
-        .lines()
-        .filter(|line| line.contains("Retrying unsigned API request"))
-        .collect();
-    assert_eq!(retries.len(), 2, "{logs}");
-    assert!(
-        retries
-            .iter()
-            .all(|line| line.contains("INFO") && line.contains("max_attempts=3")),
-        "{logs}"
-    );
     let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
     assert_eq!(warnings.len(), 1, "{logs}");
     for expected in [
@@ -1438,19 +1429,23 @@ async fn tor_unsigned_retry_child() {
             "ineligible unsigned status {code} must not retry"
         );
     }
-    let before_dead = proxy.records.lock().unwrap().len();
-    let dead_route = RoutedRequest {
-        method: "GET".into(),
-        url: "http://dead.example.com/pay".into(),
-        query: BTreeMap::new(),
-        body: None,
-    };
-    assert!(client.execute_response(dead_route).await.is_err());
-    assert_eq!(
-        proxy.records.lock().unwrap().len() - before_dead,
-        1,
-        "unsigned API transport failure outside scope stays single-attempt"
-    );
+    for method in ["GET", "POST"] {
+        let before_dead = proxy.records.lock().unwrap().len();
+        let before_signed = script_a.signed_payers.lock().unwrap().len();
+        let dead_route = RoutedRequest {
+            method: method.into(),
+            url: "http://dead.example.com/pay".into(),
+            query: BTreeMap::new(),
+            body: (method == "POST").then(|| json!({"original":"same"})),
+        };
+        assert!(client.execute_response(dead_route).await.is_err());
+        assert_eq!(
+            proxy.records.lock().unwrap().len() - before_dead,
+            3,
+            "eligible unsigned {method} transport failures use the shared attempt sequence"
+        );
+        assert_eq!(script_a.signed_payers.lock().unwrap().len(), before_signed);
+    }
 
     // 3. No promotion on malformed 402, oversized/invalid output, or failed rendered output;
     //    other-origin and discovery independence; internal relay stays Legacy single-shot.
@@ -1587,6 +1582,15 @@ async fn tor_unsigned_retry_child() {
             body_failure.clone(),
         ]
         .into();
+        let transport_failure =
+            matches!(body_failure, TorStep::Interrupted200 | TorStep::Stalled200);
+        if transport_failure {
+            script_a
+                .steps
+                .lock()
+                .unwrap()
+                .push_back(body_failure.clone());
+        }
         let error = bounded.execute_response(make_route()).await.unwrap_err();
         if matches!(body_failure, TorStep::Interrupted200 | TorStep::Stalled200) {
             assert!(
@@ -1596,7 +1600,10 @@ async fn tor_unsigned_retry_child() {
                 "must fail collecting the response body: {error:#}"
             );
         }
-        assert_eq!(script_a.observed.lock().unwrap().len(), 2);
+        assert_eq!(
+            script_a.observed.lock().unwrap().len(),
+            if transport_failure { 3 } else { 2 }
+        );
         assert!(script_a.signed_payers.lock().unwrap().is_empty());
         assert!(
             Arc::ptr_eq(&before_bodies, &bounded_selected()),
@@ -1916,4 +1923,281 @@ async fn tor_unsigned_retry_child() {
 
     server_a.abort();
     server_b.abort();
+}
+
+#[tokio::test]
+async fn prior_wallet_liability_suppresses_relay_after_later_unsigned_exhaustion() {
+    let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+        .args([
+            "--ignored",
+            "--exact",
+            "payment::best_effort_tests::prior_wallet_liability_relay_child",
+            "--nocapture",
+        ])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "private Tor policy; invoked by parent"]
+async fn prior_wallet_liability_relay_child() {
+    use crate::network::{IsolationId, Mode, NetworkContext, NetworkPolicy};
+    let scopes = Arc::new(Mutex::new(Vec::<crate::network::ScopeObservation>::new()));
+    let observed_scopes = scopes.clone();
+    crate::network::install_http_scope_observer(move |observation| {
+        observed_scopes.lock().unwrap().push(observation.clone());
+        Ok(())
+    })
+    .unwrap();
+    let script = TorScript::default();
+    let relay_calls = Arc::new(AtomicUsize::new(0));
+    let rpc_calls = Arc::new(AtomicUsize::new(0));
+    // Existing scripted response semantics are reused; peer matching is not part
+    // of this fixture. Canonical payer identities are checked on the SOCKS wire.
+    let app = Router::new()
+        .route("/pay", any(tor_script_handler))
+        .with_state(script.clone())
+        .layer(axum::Extension(ConnectInfo("127.0.0.1:1".parse::<SocketAddr>().unwrap())))
+        .route("/relay", post({
+            let calls = relay_calls.clone();
+            move |Json(request): Json<Value>| {
+                let calls = calls.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    assert_eq!(request["method"], "GET");
+                    assert_eq!(request["url"], "https://api.example.com/pay?original=same+%26+bytes");
+                    Json(json!({"url":request["url"],"method":"GET","statusCode":200,"headers":{"content-type":"text/plain"},"body":"relay-positive-control","redirectChain":[],"error":null}))
+                }
+            }
+        }))
+        .route("/rpc", post({
+            let calls = rpc_calls.clone();
+            move |Json(request): Json<Value>| {
+                let calls = calls.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Json(json!({"jsonrpc":"2.0","id":request["id"],"result":format!("0x{:064x}",17)}))
+                }
+            }
+        }));
+    let (address, server) = crate::test_tls::serve(app).await;
+    let proxy = crate::test_socks::Socks::start(
+        BTreeMap::from([
+            ("api.example.com".into(), address),
+            ("spec.example.com".into(), address),
+        ]),
+        crate::test_socks::Fault::None,
+    )
+    .await;
+    crate::network::install_test_context(
+        NetworkContext::new(NetworkPolicy {
+            mode: Mode::Tor,
+            socks_endpoint: Some(proxy.address),
+            cover_traffic_enabled: Some(false),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_test_root(crate::test_tls::CA),
+    );
+    let relay = Arc::new(crate::discovery_relay::SearchRelay::fixture(
+        "https://spec.example.com/relay".into(),
+        crate::catalog::Config::default(),
+    ));
+    let route = || RoutedRequest {
+        method: "GET".into(),
+        url: "https://api.example.com/pay".into(),
+        query: BTreeMap::from([("original".into(), json!("same & bytes"))]),
+        body: None,
+    };
+    let static_client = PaidClient::new(
+        Payer::new(&format!("{:064x}", 13), SpendPolicy::dollars("1").unwrap()).unwrap(),
+    )
+    .with_document_relay(Some(relay.clone()));
+    *script.steps.lock().unwrap() = [
+        TorStep::Status(StatusCode::FORBIDDEN, None),
+        TorStep::Status(StatusCode::FORBIDDEN, None),
+        TorStep::Status(StatusCode::FORBIDDEN, None),
+    ]
+    .into();
+    assert_eq!(
+        static_client.execute_response(route()).await.unwrap().bytes,
+        b"relay-positive-control"
+    );
+    assert_eq!(
+        relay_calls.load(Ordering::SeqCst),
+        1,
+        "the same public URL and configured handle must have an operative fallback path"
+    );
+    assert_eq!(script.observed.lock().unwrap().len(), 3);
+    assert!(script.signed_payers.lock().unwrap().is_empty());
+    relay_calls.store(0, Ordering::SeqCst);
+    proxy.records.lock().unwrap().clear();
+    scopes.lock().unwrap().clear();
+    script.observed.lock().unwrap().clear();
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"managed relay liability fixture",
+    )
+    .unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        store,
+        "pool",
+        crate::rotation::test_capacity::two_reserves("5"),
+        Some(U256::from(5_000_000)),
+        0
+    )
+    .unwrap();
+    for job in store.funding_jobs().unwrap() {
+        store
+            .record_credit(&job.wallet_id, "5000000", "fixture", 100)
+            .unwrap();
+    }
+    let captured = store.status().unwrap().pools.remove(0).addresses;
+    assert_eq!(captured.len(), 2);
+    let (handle, worker) = StoreHandle::spawn(store);
+    let manager = Arc::new(
+        ManagedPool::new(
+            handle.clone(),
+            pool,
+            BaseRpc::new("https://api.example.com/rpc", 12).unwrap(),
+            SpendPolicy::dollars("1").unwrap(),
+        )
+        .unwrap(),
+    );
+    let managed = PaidClient::managed(manager.clone()).with_document_relay(Some(relay));
+    *script.steps.lock().unwrap() = [
+        TorStep::Valid402(1),
+        TorStep::SignedInsufficient402,
+        TorStep::Status(StatusCode::SERVICE_UNAVAILABLE, None),
+        TorStep::Status(StatusCode::SERVICE_UNAVAILABLE, None),
+        TorStep::Status(StatusCode::SERVICE_UNAVAILABLE, None),
+    ]
+    .into();
+    let error = managed.execute_response(route()).await.unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<HttpFailure>().unwrap().status,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let observed = script.observed.lock().unwrap().clone();
+    assert_eq!(
+        observed.len(),
+        5,
+        "A's challenge/signature, then B's complete unsigned attempt sequence"
+    );
+    assert_eq!(
+        observed.iter().map(|request| request.4).collect::<Vec<_>>(),
+        [false, true, false, false, false]
+    );
+    let payers = script.signed_payers.lock().unwrap().clone();
+    assert_eq!(payers.len(), 1, "B never receives a challenge or signs");
+    let a = payers[0].to_string();
+    assert!(
+        captured
+            .iter()
+            .any(|wallet| wallet.address.eq_ignore_ascii_case(&a))
+    );
+    let b = &captured
+        .iter()
+        .find(|wallet| !wallet.address.eq_ignore_ascii_case(&a))
+        .unwrap()
+        .address;
+    let owner_a = crate::network::global().credentials(&IsolationId::evm(&a).unwrap());
+    let owner_b = crate::network::global().credentials(&IsolationId::evm(b).unwrap());
+    assert_ne!(owner_a, owner_b);
+    let records = proxy.records.lock().unwrap().clone();
+    assert!(
+        records
+            .iter()
+            .all(|record| record.host == "api.example.com")
+    );
+    let observations = scopes.lock().unwrap().clone();
+    let mut order: Vec<_> = records
+        .into_iter()
+        .map(|record| {
+            let wire_scope = (record.user, record.password);
+            observations
+                .iter()
+                .find(|observation| observation.scope == wire_scope)
+                .expect("every actual SOCKS request belongs to an observed owner-bound scope")
+                .canonical
+                .clone()
+        })
+        .collect();
+    order.dedup();
+    assert_eq!(
+        order,
+        [owner_a, owner_b],
+        "actual SOCKS scope credentials preserve the captured A-to-B payer handoff"
+    );
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let (journaled, payer): (i64, String) = db
+        .query_row("SELECT count(*),payer FROM payment_attempts", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(journaled, 1);
+    assert!(payer.eq_ignore_ascii_case(&a));
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM wallets", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM funding_jobs", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        rpc_calls.load(Ordering::SeqCst),
+        0,
+        "unsigned failure and handoff cannot start funding or balance RPC"
+    );
+    assert_eq!(
+        relay_calls.load(Ordering::SeqCst),
+        0,
+        "A's possible liability suppresses relay handoff after B's unsigned failure"
+    );
+    drop(db);
+
+    // The operative handle must also remain unused after a signed HTTP, body or
+    // output failure in an ordinary single-wallet call.
+    for failure in [
+        TorStep::SignedStatus(StatusCode::SERVICE_UNAVAILABLE),
+        TorStep::Free200(vec![0xff]),
+        TorStep::Interrupted200,
+    ] {
+        script.observed.lock().unwrap().clear();
+        script.signed_payers.lock().unwrap().clear();
+        *script.steps.lock().unwrap() = [
+            TorStep::Valid402(1),
+            failure,
+            TorStep::Signed200(b"forbidden replay".to_vec()),
+        ]
+        .into();
+        assert!(static_client.execute(route()).await.is_err());
+        assert_eq!(script.observed.lock().unwrap().len(), 2);
+        assert_eq!(script.signed_payers.lock().unwrap().len(), 1);
+        assert_eq!(relay_calls.load(Ordering::SeqCst), 0);
+    }
+    managed.drain().await;
+    static_client.drain().await;
+    drop(managed);
+    drop(manager);
+    drop(handle);
+    worker.await.unwrap();
+    server.abort();
 }

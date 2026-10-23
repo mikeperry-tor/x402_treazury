@@ -494,17 +494,32 @@ async fn unsigned_child_uses_discovery_isolation_and_has_no_direct_fallback() {
             .credentials(&IsolationId::discovery("http://unsigned.invalid/paid").unwrap());
         {
             let records = proxy.records.lock().unwrap();
-            assert_eq!(records.len(), 1);
-            let record = &records[0];
-            assert_eq!(record.address_type, 3);
-            assert_eq!(record.host, "unsigned.invalid");
-            assert_eq!(record.user, credentials.0);
-            assert_ne!(
-                record.password, credentials.1,
-                "participating unsigned API calls use a fresh scope token rather than the legacy identity token"
+            let attempts = if matches!(fault, socks::Fault::Refuse) {
+                3
+            } else {
+                1
+            };
+            assert_eq!(records.len(), attempts);
+            assert_eq!(
+                records
+                    .iter()
+                    .map(|r| r.password.as_str())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len(),
+                attempts,
+                "every retry must use a fresh isolation scope"
             );
-            assert_eq!(record.password.len(), credentials.1.len());
-            assert!(record.password.starts_with("x402_treazury:v1:"));
+            for record in records.iter() {
+                assert_eq!(record.address_type, 3);
+                assert_eq!(record.host, "unsigned.invalid");
+                assert_eq!(record.user, credentials.0);
+                assert_ne!(
+                    record.password, credentials.1,
+                    "participating unsigned API calls use a fresh scope token rather than the legacy identity token"
+                );
+                assert_eq!(record.password.len(), credentials.1.len());
+                assert!(record.password.starts_with("x402_treazury:v1:"));
+            }
         }
         drop(pipe);
         assert!(exit(&mut child).await.success());

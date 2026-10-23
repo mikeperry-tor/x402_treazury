@@ -382,6 +382,11 @@ impl NetworkContext {
     /// A fixture CA changes trust only in unit-test binaries, never URL policy,
     /// SNI, certificate verification, identities, redirects or proxy selection.
     #[cfg(test)]
+    pub(crate) fn with_test_dns(mut self, resolver: Arc<dyn reqwest::dns::Resolve>) -> Self {
+        self.test_dns = Some(resolver);
+        self
+    }
+    #[cfg(test)]
     pub(crate) fn with_test_root(mut self, root: &'static [u8]) -> Self {
         self.test_root = Some(root);
         self

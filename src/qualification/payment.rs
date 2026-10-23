@@ -32,17 +32,24 @@ pub(crate) async fn inherit_case<T>(
 pub fn unsigned_case() -> bool {
     CASE.try_with(|c| c.unsigned).unwrap_or(false)
 }
+#[derive(Debug)]
+pub(crate) struct RetryAuthorityDenied;
+impl std::fmt::Display for RetryAuthorityDenied {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("qualification current retry authority could not be established")
+    }
+}
+impl std::error::Error for RetryAuthorityDenied {}
+
 pub async fn check_retry_authority() -> Result<()> {
     match CASE.try_with(Clone::clone) {
         Ok(context) => context.check_retry_start().await,
-        Err(_) => {
-            ensure!(
-                ACTIVE.get().is_none(),
-                "qualification_payment_denied: payment has no reviewed case context"
-            );
-            Ok(())
-        }
+        Err(_) if ACTIVE.get().is_some() => Err(anyhow::anyhow!(
+            "qualification_payment_denied: payment has no reviewed case context"
+        )),
+        Err(_) => Ok(()),
     }
+    .context(RetryAuthorityDenied)
 }
 pub fn payment_context() -> Result<Option<PaymentContext>> {
     match CASE.try_with(Clone::clone) {
@@ -746,5 +753,238 @@ mod tests {
         worker.await.unwrap();
         server.abort();
         let _ = server.await;
+    }
+
+    #[test]
+    fn relay_rechecks_case_window_after_origin_retry_after() {
+        if std::env::var_os("TREAZURY_QUALIFIED_RELAY_WINDOW_CHILD").is_some() {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(relay_window_fixture());
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "qualification::payment::tests::relay_rechecks_case_window_after_origin_retry_after",
+                "--nocapture",
+            ])
+            .env("TREAZURY_QUALIFIED_RELAY_WINDOW_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    async fn relay_window_fixture() {
+        use crate::{
+            network::{Mode, NetworkContext, NetworkPolicy},
+            payment::{PaidClient, Payer, SpendPolicy},
+            test_socks::{Fault, Socks},
+        };
+        use axum::{
+            http::StatusCode,
+            response::IntoResponse,
+            routing::{get, post},
+        };
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let (_dir, guard, db) = fixture(true);
+        let claim = claim(guard.clone()).await;
+        let expire = Arc::new(AtomicBool::new(false));
+        let origin_calls = Arc::new(AtomicUsize::new(0));
+        let (expires, observed, binding) =
+            (expire.clone(), origin_calls.clone(), guard.binding.clone());
+        let origin = axum::Router::new().route(
+            "/read",
+            get(move |headers: axum::http::HeaderMap| {
+                let (expires, observed, binding) =
+                    (expires.clone(), observed.clone(), binding.clone());
+                async move {
+                    assert!(!headers.contains_key("payment-signature"));
+                    observed.fetch_add(1, Ordering::SeqCst);
+                    if expires.load(Ordering::SeqCst) {
+                        // A two-second absolute case window ends during the valid
+                        // origin-requested delay, before the first relay exchange.
+                        connection(&binding)
+                            .unwrap()
+                            .execute("UPDATE cases SET window_end=?1", [now().unwrap() + 2])
+                            .unwrap();
+                    }
+                    (StatusCode::SERVICE_UNAVAILABLE, [("retry-after", "2")]).into_response()
+                }
+            }),
+        );
+        let (origin_address, origin_task) = crate::test_tls::serve(origin).await;
+        let relay_calls = Arc::new(AtomicUsize::new(0));
+        let seen = relay_calls.clone();
+        let relay = axum::Router::new().route("/curl", post(move |headers: axum::http::HeaderMap, axum::Json(request): axum::Json<Value>| {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                assert!(!headers.contains_key("payment-signature"), "free relay must not sign");
+                assert_eq!(request["method"], "GET");
+                axum::Json(json!({"url":request["url"],"method":"GET","statusCode":200,"headers":{"content-type":"text/plain"},"body":"complete free relay result","redirectChain":[],"error":null}))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let relay_address = listener.local_addr().unwrap();
+        let relay_task = tokio::spawn(async move {
+            axum::serve(listener, relay).await.unwrap();
+        });
+        let socks = Socks::start(
+            std::collections::BTreeMap::from([
+                ("api.example.com".into(), origin_address),
+                ("127.0.0.1".into(), relay_address),
+            ]),
+            Fault::None,
+        )
+        .await;
+        crate::network::install_test_context(
+            NetworkContext::new(NetworkPolicy {
+                mode: Mode::Tor,
+                socks_endpoint: Some(socks.address),
+                tor_isolation_retries: Some(0),
+                cover_traffic_enabled: Some(false),
+                ..Default::default()
+            })
+            .unwrap()
+            .with_test_root(crate::test_tls::CA),
+        );
+        let relay = Arc::new(crate::discovery_relay::SearchRelay::fixture(
+            format!("http://{relay_address}/curl"),
+            Default::default(),
+        ));
+        // No managed pool, wallet allocation, or funding service is constructed.
+        let client = PaidClient::new(
+            Payer::new(
+                &format!("{:064x}", 1),
+                SpendPolicy::dollars("0.01").unwrap(),
+            )
+            .unwrap(),
+        )
+        .with_document_relay(Some(relay));
+        let route = || crate::catalog::RoutedRequest {
+            method: "GET".into(),
+            url: "https://api.example.com/read".into(),
+            query: Default::default(),
+            body: None,
+        };
+        let positive = claim
+            .invoke(client.execute_response(route()))
+            .await
+            .unwrap();
+        assert_eq!(positive.bytes, b"complete free relay result");
+        assert!(!positive.paid_submission);
+        assert!(!positive.relay_payment_may_have_occurred);
+        assert_eq!(
+            relay_calls.load(Ordering::SeqCst),
+            1,
+            "current case must dispatch the configured relay"
+        );
+
+        expire.store(true, Ordering::SeqCst);
+        let error = claim
+            .invoke(client.execute_response(route()))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("qualification_authority"),
+            "{error:#}"
+        );
+        assert!(!error.is::<crate::payment::PossiblePayment>());
+        assert_eq!(origin_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            relay_calls.load(Ordering::SeqCst),
+            1,
+            "expired case must start zero new unsigned or signed relay HTTP requests"
+        );
+        let options = crate::discovery_relay::document::Options::new(
+            "https://api.example.com/read",
+            crate::network::IsolationId::discovery("https://api.example.com/read").unwrap(),
+            1024,
+            "max_help_bytes",
+        );
+        let document_error = claim
+            .invoke(crate::discovery_relay::document::origin(&options))
+            .await
+            .unwrap_err();
+        assert!(document_error.error.is::<RetryAuthorityDenied>());
+        assert!(!document_error.fallback);
+        assert_eq!(
+            origin_calls.load(Ordering::SeqCst),
+            2,
+            "expired original document reads must not start HTTP"
+        );
+
+        // The first original API request can also wait on existing exchange
+        // capacity. Observe its first acquired permit to prove it has entered
+        // admission, then expire its authority before releasing the second.
+        expire.store(false, Ordering::SeqCst);
+        db.execute("UPDATE cases SET window_end=?1", [now().unwrap() + 600])
+            .unwrap();
+        let entered = Arc::new(tokio::sync::Semaphore::new(1));
+        let blocked = Arc::new(tokio::sync::Semaphore::new(1));
+        let gated = client
+            .clone()
+            .with_attempt_capacity(&[entered.clone(), blocked.clone()]);
+        let control = claim.invoke(gated.execute_response(route())).await.unwrap();
+        assert_eq!(control.bytes, b"complete free relay result");
+        assert_eq!(origin_calls.load(Ordering::SeqCst), 3);
+        assert_eq!(relay_calls.load(Ordering::SeqCst), 2);
+        let held = blocked.clone().acquire_owned().await.unwrap();
+        let request = route();
+        let pending =
+            tokio::spawn(async move { claim.invoke(gated.execute_response(request)).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while entered.available_permits() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!pending.is_finished());
+        db.execute("UPDATE cases SET window_end=0", []).unwrap();
+        drop(held);
+        let queued_error = pending.await.unwrap().unwrap_err();
+        assert!(
+            queued_error.is::<RetryAuthorityDenied>(),
+            "{queued_error:#}"
+        );
+        assert!(!queued_error.is::<crate::payment::PossiblePayment>());
+        client.drain().await;
+        assert_eq!(
+            origin_calls.load(Ordering::SeqCst),
+            3,
+            "an expired first request must not send after capacity admission"
+        );
+        assert_eq!(
+            relay_calls.load(Ordering::SeqCst),
+            2,
+            "local authority denial must not buy relay delivery"
+        );
+        assert_eq!(entered.available_permits(), 1);
+        assert_eq!(blocked.available_permits(), 1);
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM events WHERE kind='application_payment'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row("SELECT execution FROM cases LIMIT 1", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "DISPATCHING",
+            "retained accepted case is not abandoned or reported complete"
+        );
+        origin_task.abort();
+        relay_task.abort();
     }
 }

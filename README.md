@@ -90,9 +90,9 @@ target/release/x402_treazury serve --config examples/deployments/managed.local.t
 ```
 
 `--network-config` replaces the complete `[network]` policy and, when present,
-`[discovery_relay]` for that invocation. This Tor example enables paid Curl fallback
-for catalog/pricing discovery and curated Coinbase search using the deployment’s
-existing payers. Without the option, the managed starter uses its own settings.
+`[discovery_relay]` for that invocation. This Tor example enables configured paid relay fallback for catalog/pricing,
+document reads, Coinbase search and supported unsigned API requests using the
+deployment’s existing payers. Without the option, the managed starter uses its own settings.
 For treasury initialization over Tor, pass the same option to `wallet init`, or
 initialize using the deployment with the embedded policy.
 
@@ -265,8 +265,8 @@ for the discovery scopes and unavailable-treasury exception.
 
 The comprehensive example uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
 over Tor when catalog or pricing requests are blocked, rate limited or time out.
-Relayed requests cost $0.01 each; relay-dependent catalogs appear when their payer
-wallet becomes usable.
+Relay fees depend on the configured provider and request; relay-dependent catalogs
+appear when their payer wallet becomes usable.
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
 `Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.
@@ -466,18 +466,21 @@ For Coinbase resources, use `{"directory":"coinbase","q":"weather","limit":3}`.
 Results preserve complete upstream metadata and partial-result indicators, with no
 pagination. Sufficient documented HTTP metadata can go directly to `raw_call`;
 an OpenAPI URL can go directly to `source_add`. A published usage link can optionally
-be read with `source_details(documentation_url=...)`, which never pays or follows
-redirects. Missing contracts remain missing: do not guess paid arguments.
+be read with `source_details(documentation_url=...)`. Configured relay fallback
+can charge for that read. Missing contracts remain missing: do not guess paid arguments.
 
-Coinbase origin search needs no API key. Tor uses one origin attempt plus up to two
-eligible isolation retries. A configured `[discovery_relay]` enables paid Curl
-search fallback by default using the endpoint's source-management payer; set
-`search = false` to disable it. With no relay section, searches use only the origin.
+Coinbase origin search needs no API key. Tor uses one origin attempt plus
+`network.tor_isolation_retries` fresh attempts (default two). Configured
+`[discovery_relay]` method lists enable runtime fallback using the endpoint’s
+source-management payer; set `on_demand = false` to disable it (`search` remains
+an input alias). With no relay section, searches use only the origin.
 See the [relay bootstrap settings](docs/configuration.md#paid-discovery-relay).
-Our connection to Curl retains the configured Tor/direct policy; Curl fetches the target from its own
-network and is trusted for the relayed content. Every search is fresh and repeating
-a fallback may authorize another payment. Valid empty/partial results do not trigger
-Curl; never automatically replay an uncertain paid search.
+Connections to relays retain the configured Tor/direct policy. Relays fetch from
+their own networks; their redirect policy, unreported hops and plaintext content
+remain trusted. Requested and reported destinations are checked against the
+caller’s policy. Every search is fresh and repeating fallback may authorize
+another payment. Valid empty/partial results do not trigger fallback; never
+automatically replay an uncertain paid search.
 
 Supply a readable source name when registering: `name = "netintel"` creates tools
 such as `dyn_netintel__ip_reputation_analyze`. Names are preserved exactly and are

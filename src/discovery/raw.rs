@@ -55,6 +55,7 @@ impl Manager {
         let route = request(self, args)?;
         self.source_client(owner)?
             .with_source_identity("builtin:raw")
+            .with_relay_origins(self.policy.allowed_origins.clone())
             .public_destinations()
             .execute_rendered_scoped(route, None, None, &Default::default())
             .await

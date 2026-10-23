@@ -44,7 +44,7 @@ replaces the complete deployment `[network]` section for that invocation; omitte
 fields use network defaults rather than inheriting deployment values. A supplied
 relay section replaces the complete deployment relay section; an omitted section
 preserves the deployment relay. Its provider paths resolve relative to the file
-that declares them. Relay settings apply to deployment discovery; standalone provider
+that declares them. Relay settings apply to deployment reads; standalone provider
 and wallet commands accept the same file without loading relay providers. Other
 standalone provider options still cannot be combined with `--config`.
 
@@ -1290,7 +1290,7 @@ search-result metadata is terminal success.
 [discovery_relay]
 serve = true   # static serving startup; defaults false
 warm = true    # static catalog warm; defaults false
-on_demand = true # runtime document/Coinbase fallback; defaults true
+on_demand = true # supported runtime reads; defaults true
 # wallet = "web" # optional static payer override
 # sources = ["social"] # optional static source selection; empty selects all
 
@@ -1302,9 +1302,9 @@ HEAD = ["../../providers/agproxy.toml"]
 
 Method keys are exactly `GET`, `HEAD` and `POST`, selected by the original target
 method. A missing or empty list means origin-only for that method; lists do not
-inherit from GET. These settings declare relay eligibility; they do not extend the
-supported consumers beyond static discovery, Coinbase searches, source imports,
-help, explicit usage documents and URL-discovery probes. Ordering is
+inherit from GET. Supported consumers are static discovery, Coinbase searches,
+source imports, help, explicit usage documents, URL-discovery probes and
+representable unsigned API, directory and raw GET/HEAD/POST requests. Ordering is
 operator-authored, with no implicit vendor ranking or extra provider. Each listed
 provider declares `relay_format = "curl"`, `"agproxy"` or `"horizonpulse"` in its
 own TOML. Ordinary providers need no format field. Unsupported request bodies,
@@ -1326,10 +1326,11 @@ no schema, help or pricing document and rejects nonlocal schema references.
 [Provider caveats](../providers/CAVEATS.md) own provenance and update instructions.
 
 `on_demand` defaults true when this section exists. It controls supported runtime
-document reads and Coinbase fallback. `search` remains an input alias; specifying
+document, Coinbase, API, directory and raw GET/HEAD fallback, plus faithfully
+representable otherwise-authorized unsigned x402 POST requests. `search` remains an input alias; specifying
 both spellings is an error, and inspection emits only `on_demand`. Legacy
 `search=false` now also disables fallback for imports, help and documentation
-probes. Without the section no paid relay is created. `serve`/`warm` retain their
+probes and API/directory/raw calls. Without the section no paid relay is created. `serve`/`warm` retain their
 static-acquisition meanings. `wallet` and `sources` apply only to static work;
 runtime reads retain the source or authenticated endpoint's existing payer.
 No runtime read allocates wallets, starts funding or waits for funding. For document reads, missing
@@ -1340,6 +1341,18 @@ Repeated Coinbase searches are fresh operations and may authorize new payments.
 The caller's response bound covers the outer envelope; its spec/help/response
 bound applies to decoded content. Inactivity precedence is source management,
 relay provider, then network. Provider transport permissions govern the relay leg.
+
+Unsigned API/directory/raw requests use the original method's list after the
+common eligible origin sequence. Origin `402` retains normal payment handling;
+relay-supplied target `402` is terminal and never signed. Any earlier signed target
+attempt suppresses generic fallback, including later wallets' unsigned failures.
+Requests preserve their built URL/query, bytes and required headers. Unsupported
+entries skip before payment; complete invalid output cannot purchase another read.
+Legitimate API `206`/`Content-Range` responses remain allowed. Curl's text envelope
+cannot establish binary response bytes and rejects such API responses terminally;
+AGProxy/Horizon decode only their documented binary encodings. HEAD returns empty
+text regardless of representation MIME. Relay fees stay distinct from a target
+payment, with possible fees retained through output and directory processing.
 
 Runtime document readers use the common unsigned origin sequence and ordered GET
 relay list after blocking transport failures or HTTP `400`, `403`, `408`, `429`

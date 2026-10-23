@@ -110,7 +110,10 @@ pub struct HttpOutput {
     pub advisories: Vec<String>,
     pub bytes: Vec<u8>,
     pub mime_type: Option<String>,
+    /// Target authorization was submitted; relay fees do not set this flag.
     pub paid_submission: bool,
+    /// Separate possible liability for acquiring this response through a relay.
+    pub relay_payment_may_have_occurred: bool,
 }
 #[derive(Debug)]
 pub struct InlineImage {
@@ -119,6 +122,8 @@ pub struct InlineImage {
 }
 #[derive(Debug)]
 pub struct ToolOutput {
+    /// Aggregate operation evidence for subsequent fallible output consumers.
+    pub payment_may_have_occurred: bool,
     pub advisories: Vec<String>,
     pub text: String,
     pub images: Vec<InlineImage>,
@@ -126,16 +131,23 @@ pub struct ToolOutput {
 impl ToolOutput {
     pub fn text(text: String) -> Self {
         Self {
+            payment_may_have_occurred: false,
             text,
             advisories: vec![],
             images: vec![],
         }
     }
     pub fn into_text(self) -> Result<String> {
-        ensure!(
-            self.images.is_empty(),
-            "image result requires the typed MCP result interface"
-        );
+        crate::payment::with_payment_context(
+            self.payment_may_have_occurred,
+            if self.images.is_empty() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(
+                    "image result requires the typed MCP result interface"
+                ))
+            },
+        )?;
         Ok(if self.advisories.is_empty() {
             self.text
         } else {
@@ -168,7 +180,7 @@ fn image_signature_matches(bytes: &[u8], mime: &str) -> bool {
         _ => false,
     }
 }
-fn text_mime(mime: &str) -> bool {
+pub(crate) fn text_mime(mime: &str) -> bool {
     mime.is_empty()
         || mime.starts_with("text/")
         || mime == "application/json"
@@ -232,13 +244,20 @@ impl HttpOutput {
         mapping: Option<&ResponseMapping>,
         limits: &ImageLimits,
     ) -> Result<ToolOutput> {
-        let paid = self.paid_submission;
+        let paid = self.paid_submission || self.relay_payment_may_have_occurred;
         let advisories = std::mem::take(&mut self.advisories);
-        self.render_inner(mapping, limits).map(|mut output|{output.advisories=advisories;output}).map_err(|error| {
-            tracing::warn!("API output conversion rejected; no partial result returned");
-            if paid { error.context("API output unavailable; a payment may already have settled. Do not automatically retry a paid request") }
-            else { error }
-        })
+        crate::payment::with_payment_context(
+            paid,
+            self.render_inner(mapping, limits)
+                .map(|mut output| {
+                    output.advisories = advisories;
+                    output.payment_may_have_occurred = paid;
+                    output
+                })
+                .inspect_err(|_| {
+                    tracing::warn!("API output conversion rejected; no partial result returned");
+                }),
+        )
     }
     fn render_inner(
         self,
@@ -252,6 +271,7 @@ impl HttpOutput {
             bound(1, limits.max_images, "image_limits.max_images")?;
             let attachment = image(&self.bytes, mime, limits, &mut total)?;
             return Ok(ToolOutput {
+                payment_may_have_occurred: false,
                 advisories: vec![],
                 text: format!(
                     "Inline image attachment 1: {mime}, {} bytes.",
@@ -319,6 +339,7 @@ fn mapped_output(
             json!({"treazury_attachment": index + 1, "mime_type": images[index].mime_type});
     }
     Ok(ToolOutput {
+        payment_may_have_occurred: false,
         advisories: vec![],
         text: format!(
             "Image payloads extracted into numbered MCP image attachments; metadata follows:\n{}",
@@ -395,6 +416,7 @@ mod tests {
                 bytes: bytes.to_vec(),
                 mime_type: mime.map(str::to_owned),
                 paid_submission: false,
+                relay_payment_may_have_occurred: false,
             };
             assert_eq!(output.is_valid_unmapped(), expected, "{mime:?}");
             assert_eq!(output.render(None, &limits).is_ok(), expected, "{mime:?}");
@@ -410,6 +432,7 @@ mod tests {
                 bytes,
                 mime_type: Some("image/png".into()),
                 paid_submission: false,
+                relay_payment_may_have_occurred: false,
             };
             assert_eq!(output.is_valid_unmapped(), expected);
             assert_eq!(output.render(None, &limits).is_ok(), expected);

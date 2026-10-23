@@ -472,7 +472,7 @@ async fn fixture() {
         "{:#}",
         invoke(&m, "writer", "relay-range").await.unwrap_err()
     );
-    assert!(error.contains("response_rejected"));
+    assert!(error.contains("partial_response"));
     assert!(error.contains("do not automatically repeat"));
     assert_eq!(
         sequence(&f, "relay-range"),

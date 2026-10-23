@@ -3584,3 +3584,6 @@ mod registration_guidance_tests;
 
 #[path = "import_read_tests.rs"]
 mod import_read_tests;
+
+#[path = "directory_relay_tests.rs"]
+mod directory_relay_tests;

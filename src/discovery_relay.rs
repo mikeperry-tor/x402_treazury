@@ -1,5 +1,6 @@
 //! Ordered paid read relays; static cache/readiness ownership stays with discovery.
 mod adapters;
+pub(crate) mod api;
 pub(crate) mod document;
 mod policy;
 mod sequence;
@@ -80,6 +81,12 @@ struct RelayFailure {
 }
 impl RelayFailure {
     fn from_error(error: &anyhow::Error) -> Self {
+        if error.is::<crate::qualification::RetryAuthorityDenied>() {
+            return Self {
+                reason: "qualification_authority",
+                status: None,
+            };
+        }
         if error.is::<crate::payment::IncompleteRelayResponse>() {
             return Self {
                 reason: "partial_response",

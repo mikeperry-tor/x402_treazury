@@ -513,6 +513,7 @@ async fn agent402_exposes_supported_media_json_and_preserves_request_contracts()
         bytes: serde_json::to_vec(&json!({"pages":2,"bytes":3,"pdfBase64":"YWJj"})).unwrap(),
         mime_type: Some("application/json".into()),
         paid_submission: false,
+        relay_payment_may_have_occurred: false,
     }
     .render(pdf.response_mapping.as_ref(), &pdf.image_limits)
     .unwrap();
@@ -601,6 +602,7 @@ async fn agentutility_preserves_aliases_json_modes_and_explicit_recommendations(
         bytes: serde_json::to_vec(&body).unwrap(),
         mime_type: Some("application/json".into()),
         paid_submission: false,
+        relay_payment_may_have_occurred: false,
     }
     .render(satellite.response_mapping.as_ref(), &satellite.image_limits)
     .unwrap();
@@ -1441,6 +1443,7 @@ async fn netintel_post_bodies_aliases_and_canonical_image_mapping() {
         .unwrap(),
         mime_type: Some("application/json".into()),
         paid_submission: false,
+        relay_payment_may_have_occurred: false,
     }
     .render(image.response_mapping.as_ref(), &image.image_limits)
     .unwrap();
@@ -1898,6 +1901,7 @@ async fn horizonpulse_free_write_exemption_atomic_price_and_screenshot_mapping()
         .unwrap(),
         mime_type: Some("application/json".into()),
         paid_submission: false,
+        relay_payment_may_have_occurred: false,
     }
     .render(
         screenshot.response_mapping.as_ref(),

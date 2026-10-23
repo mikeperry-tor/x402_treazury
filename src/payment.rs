@@ -223,23 +223,15 @@ impl Payer {
         Ok(Self { client, address })
     }
 }
-/// Monotonic evidence set before durable signed intent or a static paid send.
-/// It is deliberately independent of response decoding and error text.
-#[derive(Clone, Default)]
-pub(crate) struct SubmissionProgress(std::sync::Arc<std::sync::atomic::AtomicBool>);
-impl SubmissionProgress {
-    pub(crate) fn mark_possible(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::Release);
-    }
-    pub(crate) fn possible(&self) -> bool {
-        self.0.load(std::sync::atomic::Ordering::Acquire)
-    }
-}
+mod submission;
+pub(crate) use submission::{PossiblePayment, SubmissionProgress, with_payment_context};
 
 pub(crate) mod diagnostics;
 pub(crate) mod ownership;
 #[cfg(test)]
 mod ownership_tests;
+#[cfg(test)]
+mod relay_tests;
 #[cfg(test)]
 mod saturation_tests;
 
@@ -252,6 +244,7 @@ pub struct PaidClient {
     /// Relay exchanges use common unsigned transport recovery and never recurse.
     relay_call: bool,
     document_relay: Option<Arc<crate::discovery_relay::SearchRelay>>,
+    relay_origins: Arc<Vec<String>>,
     attempt_capacity: Vec<Arc<tokio::sync::Semaphore>>,
     unavailable: Option<crate::rotation::error::AdmissionError>,
     selection: crate::network::SelectionPolicy,
@@ -272,6 +265,7 @@ impl PaidClient {
             unsigned_only: false,
             relay_call: false,
             document_relay: None,
+            relay_origins: Arc::new(Vec::new()),
             attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
@@ -292,6 +286,7 @@ impl PaidClient {
             unsigned_only: false,
             relay_call: false,
             document_relay: None,
+            relay_origins: Arc::new(Vec::new()),
             attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
@@ -313,6 +308,7 @@ impl PaidClient {
             unsigned_only: true,
             relay_call: false,
             document_relay: None,
+            relay_origins: Arc::new(Vec::new()),
             attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
@@ -381,7 +377,12 @@ impl PaidClient {
     pub(crate) fn for_relay(mut self) -> Self {
         self.relay_call = true;
         self.document_relay = None;
+        self.relay_origins = Arc::new(Vec::new());
         self.selection = crate::network::SelectionPolicy::Participating;
+        self
+    }
+    pub(crate) fn with_relay_origins(mut self, origins: Vec<String>) -> Self {
+        self.relay_origins = Arc::new(origins);
         self
     }
     /// Existing acquisition gates apply to active attempts, never retry delays.
@@ -594,11 +595,7 @@ impl PaidClient {
                         Ok(output)
                     });
                 diagnostics::finish(&result, &progress);
-                if progress.possible() {
-                    result.context("An authorization may still charge or execute; do not automatically repeat this logical call")
-                } else {
-                    result
-                }
+                with_payment_context(progress.possible(), result)
             })
             .instrument(span),
         )
@@ -652,6 +649,14 @@ impl PaidClient {
             _ => None,
         };
         let (response, mut cover, unsigned_promotion, _attempt_capacity) = loop {
+            let stage = self
+                .unsigned_stage(
+                    &request,
+                    unsigned_only,
+                    candidate.as_ref(),
+                    payer.as_deref(),
+                )
+                .await;
             let UnsignedStage {
                 selected,
                 transport,
@@ -660,15 +665,21 @@ impl PaidClient {
                 receipt,
                 mut cover,
                 mut attempt_capacity,
-            } = self
-                .unsigned_stage(
-                    &request,
-                    unsigned_only,
-                    candidate.as_ref(),
-                    payer.as_deref(),
-                    !attempted.is_empty(),
-                )
-                .await?;
+            } = match stage {
+                Ok(stage) => stage,
+                Err(failure) => {
+                    return self
+                        .relay_after_unsigned_failure(
+                            failure,
+                            &request,
+                            payer.as_ref(),
+                            progress,
+                            unsigned_only,
+                        )
+                        .await
+                        .map(|output| (output, None));
+                }
+            };
             let mut stage_paid = false;
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
                 diagnostics::stage("challenge_preparation");
@@ -799,7 +810,13 @@ impl PaidClient {
             );
         };
         diagnostics::stage("response_body");
-        let result = self.response_output(response, paid_submission).await;
+        let result = self
+            .response_output(
+                response,
+                paid_submission,
+                request.method() == reqwest::Method::HEAD,
+            )
+            .await;
         if let Some(call) = &mut cover
             && result.is_ok()
         {
@@ -813,46 +830,83 @@ impl PaidClient {
         }
     }
 
+    /// A failed unsigned phase can hand off without entering target signing.
+    /// Captured payer and whole-call liability stay together at this boundary.
+    async fn relay_after_unsigned_failure(
+        &self,
+        failure: crate::network::acquisition::Failure,
+        request: &reqwest::Request,
+        payer: Option<&Arc<Payer>>,
+        progress: &SubmissionProgress,
+        unsigned_only: bool,
+    ) -> Result<crate::output::HttpOutput> {
+        if self.relay_call {
+            return Err(failure.into());
+        }
+        // An earlier signed wallet remains chargeable, even on a later wallet's
+        // unsigned failure. Qualification's unsigned-only mode grants no fee.
+        if unsigned_only || progress.possible() {
+            return Err(failure.error);
+        }
+        let mut relay_client = self.clone();
+        if let Some(payer) = payer {
+            relay_client.payer = Some(Arc::new(RwLock::new(payer.clone())));
+        }
+        crate::discovery_relay::api::fallback(
+            &relay_client,
+            request,
+            &self.relay_origins,
+            failure,
+            progress,
+            &self.attempt_capacity,
+        )
+        .await
+    }
+
     async fn unsigned_stage(
         &self,
         request: &reqwest::Request,
         unsigned_only: bool,
         candidate: Option<&crate::rotation::manager::PaymentCandidateHandle>,
         payer: Option<&Payer>,
-        prior_wallet_attempts: bool,
-    ) -> Result<UnsignedStage> {
+    ) -> std::result::Result<UnsignedStage, crate::network::acquisition::Failure> {
+        use crate::network::acquisition::{self, Failure, FallbackPolicy};
         let identity = if unsigned_only {
-            crate::network::IsolationId::discovery(request.url().as_str())?
+            crate::network::IsolationId::discovery(request.url().as_str())
         } else {
             let address = candidate
                 .map(|c| c.address.as_str())
                 .or_else(|| payer.map(|p| p.address.as_str()))
-                .context("network_identity_missing: payer")?;
-            crate::network::IsolationId::evm(address)?
-        };
+                .context("network_identity_missing: payer")
+                .map_err(Failure::local)?;
+            crate::network::IsolationId::evm(address)
+        }
+        .map_err(Failure::local)?;
         let factory = crate::network::global();
         diagnostics::stage("transport_selection");
-        let selected = factory.http_transport(
-            &identity,
-            request.url().as_str(),
-            self.timeout,
-            self.public_only,
-            self.transport,
-            self.selection,
-        )?;
+        let selected = factory
+            .http_transport(
+                &identity,
+                request.url().as_str(),
+                self.timeout,
+                self.public_only,
+                self.transport,
+                self.selection,
+            )
+            .map_err(Failure::local)?;
         let participating_tor = self.selection == crate::network::SelectionPolicy::Participating
             && factory.policy.mode == crate::network::Mode::Tor;
-        use crate::network::acquisition::{self, Failure, FallbackPolicy};
+        let enrolled_method = matches!(request.method().as_str(), "GET" | "HEAD" | "POST");
+        let runtime_relay = enrolled_method && self.document_relay.is_some();
+        let common_transport = self.relay_call || enrolled_method;
+        let collect_unsigned = (runtime_relay
+            || (participating_tor && (common_transport || request.url().scheme() == "https")))
+            .then_some((self.max_response_bytes, unsigned_only));
         let acquired = acquisition::run(
             factory,
             selected.clone(),
             false,
             |transport, attempt, max_attempts| async move {
-                if attempt > 1 || prior_wallet_attempts {
-                    crate::qualification::check_retry_authority()
-                        .await
-                        .map_err(Failure::local)?;
-                }
                 diagnostics::stage("transport_selection");
                 let mut cover = self.begin_cover(&transport).await;
                 diagnostics::unsigned_attempt(attempt, max_attempts);
@@ -861,18 +915,22 @@ impl PaidClient {
                     .acquire_attempt_capacity()
                     .await
                     .map_err(Failure::local)?;
+                // A claim may expire while waiting for transport or capacity.
+                // Check current authority at every new unsigned dispatch.
+                crate::qualification::check_retry_authority()
+                    .await
+                    .map_err(Failure::local)?;
                 let (response, retry, receipt) = unsigned_response(
                     &transport,
                     request,
                     cover.as_mut(),
                     self.relay_call,
-                    (participating_tor && (self.relay_call || request.url().scheme() == "https"))
-                        .then_some((self.max_response_bytes, unsigned_only)),
+                    collect_unsigned,
                 )
                 .await
                 .map_err(|error| {
-                    // D02 enrolls relay legs in common transport recovery. Ordinary
-                    // API transport expansion belongs to D04; retain TLS-only here.
+                    // Preserve other methods' existing TLS-only recovery. Public
+                    // GET/HEAD and authorized unsigned x402 POST share the classifier.
                     let ordinary_retry = error
                         .downcast_ref::<reqwest::Error>()
                         .is_some_and(crate::network::tls_failure);
@@ -881,8 +939,9 @@ impl PaidClient {
                     } else {
                         Failure::body(error)
                     };
-                    if !self.relay_call {
+                    if !common_transport {
                         failure.retry &= ordinary_retry;
+                        failure.fallback = false;
                     }
                     failure
                 })?;
@@ -893,13 +952,14 @@ impl PaidClient {
                     && status != reqwest::StatusCode::PAYMENT_REQUIRED;
                 if relay_rejected
                     || (participating_tor && crate::network::eligible_retry_status(status))
+                    || (runtime_relay && acquisition::blocking_status(status.as_u16()))
                 {
                     let error = HttpFailure {
                         status,
                         detail: if participating_tor {
                             "unsigned Tor isolation attempts exhausted"
                         } else {
-                            "unsigned relay HTTP rejection"
+                            "unsigned HTTP rejection"
                         }
                         .into(),
                     };
@@ -926,16 +986,7 @@ impl PaidClient {
                 Ok((response, retry, receipt, cover, attempt_capacity))
             },
         )
-        .await
-        .map_err(|failure| {
-            if self.relay_call {
-                // The list traversal needs the terminal Retry-After and typed
-                // local/transport distinction. No signed dispatch reaches here.
-                anyhow::Error::new(failure)
-            } else {
-                failure.error
-            }
-        })?;
+        .await?;
         let (response, retry, receipt, cover, attempt_capacity) = acquired.value;
         Ok(UnsignedStage {
             selected,
@@ -975,6 +1026,7 @@ impl PaidClient {
         &self,
         response: reqwest::Response,
         paid_submission: bool,
+        head: bool,
     ) -> Result<crate::output::HttpOutput> {
         let status = response.status();
         let mime_type = response
@@ -1003,8 +1055,13 @@ impl PaidClient {
         Ok(crate::output::HttpOutput {
             advisories: vec![],
             bytes,
-            mime_type,
+            mime_type: if head {
+                Some("text/plain".into())
+            } else {
+                mime_type
+            },
             paid_submission,
+            relay_payment_may_have_occurred: false,
         })
     }
 }
@@ -1077,13 +1134,11 @@ async fn unsigned_response(
     }
     crate::network::log_http(&response, "payment_challenge");
     complete_relay_response(&response, relay)?;
-    // Complete unsigned TLS I/O inside the same finite attempt sequence. A body
+    // Collect successful unsigned bodies inside the same finite attempt sequence. A body
     // failure cannot restart payer selection or enter the signed dispatch path.
     let response = if let Some((limit, unsigned_only)) = collect_unsigned
-        && !crate::network::eligible_retry_status(response.status())
-        && !(relay
-            && !response.status().is_success()
-            && response.status() != reqwest::StatusCode::PAYMENT_REQUIRED)
+        && (response.status().is_success()
+            || response.status() == reqwest::StatusCode::PAYMENT_REQUIRED)
         && !(unsigned_only && response.status() == reqwest::StatusCode::PAYMENT_REQUIRED)
     {
         if response.status() != reqwest::StatusCode::PAYMENT_REQUIRED

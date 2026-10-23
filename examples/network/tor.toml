@@ -18,7 +18,7 @@ tor_isolation_retries = 2
 [discovery_relay]
 serve = true
 warm = true
-on_demand = true # runtime document and Coinbase fallback; legacy search is an alias
+on_demand = true # runtime document/search/API fallback; legacy search is an alias
 
 # Select by original target method; absent/empty lists mean origin-only.
 [discovery_relay.fallbacks]

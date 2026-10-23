@@ -15,7 +15,7 @@ Ordinary CLI commands select the deployment's `[network]` policy unless an expli
 validation or client creation; omitted fields use defaults. The external file can
 also contain `[discovery_relay]`, replacing that entire deployment section when
 present and preserving it when omitted. Its provider-list paths resolve relative to the
-external file. Relay settings apply to deployment discovery; standalone provider,
+external file. Relay settings apply to deployment reads; standalone provider,
 wallet and diagnostic commands accept the same file without loading relay providers.
 The Tor example enables paid relay fallback with existing deployment payers.
 The same resolved policy flows through serving, catalog inspection/warming, source refresh and wallet
@@ -145,8 +145,9 @@ a permanent local failure. The Reqwest SOCKS boundary preserves the underlying
 local connector cause to make this distinction. Hyper parse/user/canceled errors,
 request construction and redirect failures remain excluded. Other 5xx outside
 the explicit status set (for example 501/505/520) do not earn fresh origin scopes.
-The existing API transport integration remains TLS-only; the broader classifier
-already applies to catalog, pricing, Coinbase, relay-service unsigned requests and Base. Startup's local SOCKS
+The common classifier applies to catalog, pricing, Coinbase, document reads,
+relay-service unsigned requests, Base, and unsigned API GET/HEAD and x402 POST.
+Other API methods retain their existing TLS-only transport recovery. Startup's local SOCKS
 reachability prerequisite remains separate from per-operation attempts.
 
 ## Paid discovery relay
@@ -387,18 +388,35 @@ covering generated MCP tools, directory tools and `raw_call`) may try
 unsigned HTTP `400`, `403`, `408`, `429`, `500`, `502`, `503`, and `504` while keeping the canonical payer
 pinned, honoring valid `Retry-After` headers on `429` and `503`, and conditionally
 promoting the winning candidate after valid `402` challenge validation or a
-completed valid unsigned output. Unsigned TLS failures also consume the remaining
-fresh-scope attempts with unchanged verification. Non-TLS API transport errors, ineligible HTTP
-statuses, malformed `402` challenges, failed outputs and signed responses do not
-retry on new scopes or promote candidates. Relay-service unsigned requests use
-participating selection and the common transport classifier, with recursive
-fallback disabled. TLS failures during unsigned dispatch or body collection consume the same finite
-sequence; body recovery never restarts payer selection. Eligible failed participating-Tor unsigned status
-responses are dropped without collecting their bodies, including the final
-exhausted attempt, which returns the known status with a fixed error. There is no
-Retry-After wait after ordinary API exhaustion because no further request is
-dispatched. A relay-service failure carries the terminal delay to an authorized
-next-provider handoff; no signed failure gains another attempt.
+completed valid unsigned output. Unsigned GET/HEAD and otherwise-authorized x402
+POST dispatch and successful-response body transport failures use the common
+classifier and the same finite sequence; body recovery never restarts payer
+selection. Local destination, authority and byte-bound failures are terminal.
+Other methods retain their existing TLS-only transport recovery. Known terminal
+non-success statuses keep their status semantics even if their unused error body
+stalls or resets. Complete malformed content and output conversion failures never
+retry or buy another response. Eligible blocking statuses are classified from
+headers before collecting an unused body.
+
+With `discovery_relay.on_demand`, exhausted eligible unsigned GET/HEAD/POST can
+traverse the original method's configured relay list once. Direct mode hands off
+after its single origin attempt; other 5xx such as 501/505/520 can hand off without
+fresh origin retries. Valid `Retry-After` applies before an authorized handoff;
+without a continuation no terminal delay is awaited. API ranges remain legitimate,
+unlike complete-document readers. A relay-supplied target `402` is terminal and
+never enters target signing. Once any target authorization was signed, including
+an earlier wallet in insufficient-funds traversal, generic failures cannot use a
+relay. The relay uses the same captured static payer or existing managed pool;
+its own payment client disables recursive fallback while retaining common Tor
+recovery. Qualification rechecks current authority immediately before every runtime unsigned
+API, relay, document or Coinbase search send, after server delays and capacity
+admission. A claim does not renew authority while a request waits; accepted work
+can still finish. Unavailable authority reports a fixed safe reason and grants no
+new request. Static catalog and pricing preparation retain their startup authority. Relay results do not promote origin transports. Relay fee evidence is
+separate from target-paid evidence and survives output conversion and subsequent
+directory processing. No new cache, breaker, wallet allocation or funding wait is
+introduced. Successful raw HEAD returns empty text; representation headers such
+as image Content-Type do not cause an empty HEAD body to be decoded as an image.
 Once an unsigned `402` challenge is accepted,
 signing and the single signed submission remain pinned to that exact winning
 `HttpTransport` record even if a concurrent caller replaces or evicts the cache

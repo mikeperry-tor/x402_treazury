@@ -11,6 +11,11 @@ pub(crate) enum FallbackPolicy {
     BlockingFailures,
 }
 
+/// Runtime fallback is broader than the explicit fresh-origin retry status set.
+pub(crate) fn blocking_status(status: u16) -> bool {
+    matches!(status, 400 | 403 | 408 | 429 | 500..=599)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FailureKind {
     Transport,
@@ -61,9 +66,7 @@ impl Failure {
             error,
             kind: FailureKind::HttpStatus(status),
             retry: super::eligible_retry_status(status),
-            fallback: policy == FallbackPolicy::RemoteFailures
-                || matches!(status.as_u16(), 400 | 403 | 408 | 429)
-                || status.is_server_error(),
+            fallback: policy == FallbackPolicy::RemoteFailures || blocking_status(status.as_u16()),
             retry_after: super::parse_retry_after(status, headers).map(RetryAfter::after),
         }
     }

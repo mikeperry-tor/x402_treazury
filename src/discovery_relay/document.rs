@@ -105,25 +105,7 @@ impl Document {
     }
 }
 
-/// Apply the acquisition's existing fee fact through final publication/output.
-pub(crate) fn with_payment_context<T>(possible: bool, result: Result<T>) -> Result<T> {
-    result.map_err(|error| {
-        if possible && !error.is::<PossiblePayment>() {
-            error.context(PossiblePayment)
-        } else {
-            error
-        }
-    })
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct PossiblePayment;
-impl std::fmt::Display for PossiblePayment {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Relay response_rejected or delivery failed; a relay authorization may still charge; do not automatically repeat this logical call")
-    }
-}
-impl std::error::Error for PossiblePayment {}
+pub(crate) use crate::payment::{PossiblePayment, with_payment_context};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct IncompleteDocument {
@@ -254,6 +236,9 @@ pub(crate) async fn origin(options: &Options) -> Result<Document, Failure> {
         false,
         |current, _, _| async move {
             let policy = FallbackPolicy::BlockingFailures;
+            crate::qualification::check_retry_authority()
+                .await
+                .map_err(Failure::local)?;
             let response = current
                 .client
                 .get(&options.url)

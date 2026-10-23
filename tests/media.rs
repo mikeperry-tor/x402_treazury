@@ -10,6 +10,7 @@ fn response(bytes: Vec<u8>, mime: &str, paid: bool) -> HttpOutput {
         bytes,
         mime_type: Some(mime.into()),
         paid_submission: paid,
+        relay_payment_may_have_occurred: false,
     }
 }
 fn mapping(fields: Value) -> ResponseMapping {
@@ -422,5 +423,24 @@ async fn reviewed_provider_envelopes_render_without_guessing_fields() {
             .unwrap();
         assert_eq!(output.images[0].mime_type, mime);
         assert_eq!(STANDARD.decode(&output.images[0].data).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn text_only_conversion_keeps_target_and_relay_fee_evidence_after_image_rendering() {
+    for (target_paid, relay_possible) in [(false, false), (true, false), (false, true)] {
+        let mut input = response(STANDARD.decode(PNG).unwrap(), "image/png", target_paid);
+        input.relay_payment_may_have_occurred = relay_possible;
+        assert_eq!(input.paid_submission, target_paid);
+        let output = input.render(None, &Default::default()).unwrap();
+        assert_eq!(
+            output.payment_may_have_occurred,
+            target_paid || relay_possible
+        );
+        let error = output.into_text().unwrap_err();
+        assert_eq!(
+            format!("{error:#}").contains("do not automatically repeat"),
+            target_paid || relay_possible
+        );
     }
 }

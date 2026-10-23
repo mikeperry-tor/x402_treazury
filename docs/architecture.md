@@ -357,7 +357,19 @@ valid `Retry-After` headers on `429`/`503`) with the same pinned payer, and
 conditionally promote a winning candidate after valid `402` challenge validation
 or completed valid unsigned output. Relay-service unsigned requests use that same
 sequence and the broader common transport classifier, without recursive fallback.
-Ordinary API transport recovery remains TLS-only. If selection changes
+Unsigned API GET/HEAD and otherwise-authorized x402 POST use the common transport
+classifier for dispatch and successful-response body acquisition. Other methods
+retain TLS-only transport recovery. Configured runtime relay handoff uses the
+original method's list after one origin sequence, before target signing, and is
+suppressed after any earlier target signature. Relay results return directly to
+output conversion, never challenge handling, and never promote origin scopes.
+The same captured static payer or existing managed pool owns relay fees; no
+recursive relay fallback, wallet allocation or funding wait is added. Shared
+submission evidence wraps all possible-charge errors; typed response/output facts
+keep relay fees distinct from target payment and preserve aggregate uncertainty
+through directory parsing or fallible text conversion. Complete invalid output
+is terminal. API ranges are legitimate and HEAD returns empty text without
+representation-body decoding. If selection changes
 after a challenge, obtain another unsigned challenge through the next payer's
 transport. The captured inventory and attempted identities bound traversal without
 a retry-count ceiling or new allocation.

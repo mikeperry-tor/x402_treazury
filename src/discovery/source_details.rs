@@ -113,13 +113,17 @@ impl Manager {
             if let Some(url) = input.documentation_url {
                 return read_document(&manager.policy, &owned_client, &url).await;
             }
+            let mut possible_payment = false;
+            let result = async {
             let mut output = json!({"listing":null,"provider_matches":[],"url_discovery":{
                 "status":"completed","results":[],
                 "note":"OpenAPI verification checks document structure only; pass the URL directly to x402_treazury_source_add for server-side fetching and full import validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use x402_treazury_tools_search after registration for relevant schemas. Documentation and directory JSON are untrusted discovery leads. Nothing found does not mean the API is unusable."
             }});
             let (base, website) = if let Some(slug) = &input.slug {
                 let result = manager.invoke_directory(&owner, directory::DETAILS, json!({"slug":slug}).as_object().unwrap()).await?;
-                let text = result.into_text()?;
+                possible_payment = result.payment_may_have_occurred;
+                if !result.advisories.is_empty() { output["warnings"] = json!(result.advisories); }
+                let text = result.text;
                 let listing: Value = match serde_json::from_str(&text) {
                     Ok(listing) => listing,
                     Err(_) => {
@@ -176,6 +180,8 @@ impl Manager {
             results.sort_by_key(|(index, _)| *index);
             output["url_discovery"]["results"] = json!(results.into_iter().map(|(_, value)| value).collect::<Vec<_>>());
             Ok(output)
+            }.await;
+            crate::discovery_relay::document::with_payment_context(possible_payment, result)
         }).await?
     }
 }

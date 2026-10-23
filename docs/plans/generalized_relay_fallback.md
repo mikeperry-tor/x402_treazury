@@ -467,13 +467,12 @@ Clippy, formatting and source-matched exact-baseline complexity evidence passed.
 The consumer decision table was simplified after reviewing both CogC and CycC.
 No live qualification is claimed.
 
-D03 implements the common complete-document reader, `on_demand`/legacy alias,
-pinned help/import authority, retained publication and lazy selected-authority CLI
-refresh. Focused tests passed (180 in the combined run, plus the corrected paid
-CLI fixture); configuration/server/Clippy and independent exact-SHA review remain
-in progress. Exact-baseline complexity is complete with source hashes verified.
-Early review findings about post-fetch fees, lazy preflight, cached observation
-failures and financial versus document authority were resolved with regressions.
+D03 and exact fixups passed independent review (`8819763c`, `c42106ce`,
+`840162d4`). Focused document/ownership tests, paid CLI refresh, 51 integration
+tests, Clippy, formatting and source-matched exact-baseline complexity passed.
+D04 is in progress: API request translation, typed fee/output evidence and focused
+method/transport/financial regressions are implemented; validation, exact-SHA
+review and combined G2 reviews remain pending.
 
 ## Ordered implementation commits
 

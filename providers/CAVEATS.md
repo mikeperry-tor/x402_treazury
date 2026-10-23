@@ -986,7 +986,9 @@ Local signing regressions do not prove live settlement.
 
 `curl/provider.toml` pins the vendor's public OpenAPI schema for `POST /curl`.
 It advertises $0.01 per call on Base USDC and returns origin status, headers and
-body text. Redirects are automatically followed by the vendor; relay use validates
+body text. Its text envelope cannot establish binary API bytes: complete binary
+API responses fail terminally rather than being converted to text or repurchased.
+Bodyless HEAD remains valid regardless of representation MIME. Redirects are automatically followed by the vendor; relay use validates
 the requested URL, final URL and every reported redirect hop under the caller's
 destination and origin policies. The documented request cannot forward
 conditional headers, and binary bodies, body-size limits and completeness are not
