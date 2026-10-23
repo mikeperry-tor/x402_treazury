@@ -65,9 +65,12 @@ add a link only if an enduring contract gains a new owner.
   `Retry-After` and at most one fallback handoff. Migrate the existing static and
   Coinbase paths as well as new callers; do not leave vendor-specific retry loops
   or wrap an existing retry loop in another loop. Base and the existing x402 POST
-  path share count/selection primitives without being forced into a GET response
-  abstraction. Preserve existing unsigned x402 POST retry authority; this work
-  does not extend Curl to target POSTs or broaden POST replay behavior.
+  path share origin count/selection/retry-classification primitives without being
+  forced into a GET response abstraction. Unsigned x402 POST and GET have the same
+  origin retry eligibility; unifying API transport failure handling must apply to
+  both. Curl target-POST support remains excluded because its bundled interface
+  cannot carry the required request body/headers, not because POST needs an
+  additional idempotency or side-effect proof. No signed replay is authorized.
 - Retry existing eligible blocking statuses/transient transport failures on fresh
   owner-bound scopes, with unchanged certificate/hostname/public-destination checks.
   Honor valid server delays, including the terminal delay before relay handoff.
@@ -111,6 +114,73 @@ add a link only if an enduring contract gains a new owner.
   [unfinished audit](deferred/document_response_completeness.md) for help/import,
   static catalogs and relay decoding. Preserve complete schemas/help and visible
   failures; never cache or publish a partial document as complete.
+
+### Explicit origin retry conditions and current gaps
+
+An origin retry means another request to the original target on a fresh Tor
+isolation scope. It is distinct from the single paid Curl handoff, normal x402
+challenge/signing, and structured-insufficient-funds wallet traversal. A failure
+can qualify for one of these without qualifying for the others.
+
+The proposed common origin retry requires all of the following:
+
+1. A participating Tor operation has an unused configured isolation retry. Zero
+   extra retries, direct mode and an explicit direct-warming override do not earn
+   a fresh Tor attempt. Base's preexisting direct transport recovery stays separate.
+2. The operation still has authority to make that unsigned attempt. No generic
+   retry is granted after target signing, after the logical operation actually
+   loses authority, on local policy denial, or by resetting the counter when a
+   helper/caller resumes. A disconnected waiter does not cancel retained accepted
+   work or remove its existing authority. Qualification retains
+   its existing per-attempt authority checks.
+3. The failed attempt has either an eligible HTTP status or an eligible transport
+   failure, as defined below. The HTTP method alone does not disqualify an unsigned
+   x402 POST. A successful HTTP response failing later API output conversion is
+   not a transport failure.
+
+| Condition | Fresh Tor origin retry? | Meaning and examples |
+| --- | --- | --- |
+| HTTP 400, 403, 429 or 503 | Yes, while retries remain | Existing fixed blocking-status set. A remote 400 remains eligible even though it may be an application error; do not guess from upstream prose. Valid `Retry-After` delays on 429/503 are honored before the next attempt and before eligible relay handoff. |
+| TLS errors accepted by `network::tls_failure` | Yes, while unsigned and retries remain | Nested `rustls::Error`, or the existing fixed TLS-handshake EOF markers. Keep certificate/hostname checks on every attempt; trying a new scope does not disable validation. |
+| Other errors accepted by `network::eligible_retry_transport` | Yes in the shared transport path | Includes eligible connection establishment failures, remote name-resolution failures, connection resets, response-header failures, read-inactivity timeouts and incomplete-body I/O. Classification examines the actual error chain, not just an error label. See the current API gap below. |
+| HTTP 408, 500, 502 or 504 | No under the existing origin status policy | Common examples that sound transient but are outside 400/403/429/503. The proposed new on-demand fallback accepts 5xx after this terminal origin attempt; 408 remains terminal. Do not quietly expand the origin status set. |
+| HTTP 401, 404, 405, 410 or 422 | No | Missing credentials, absent endpoint, unsupported method, gone resource or validation rejection do not earn a new circuit. Static discovery can still have its explicitly preserved broader relay behavior. |
+| HTTP 402 | No generic status retry | Direct-origin 402 enters normal challenge handling when authorized; a pricing probe may inspect it. It is neither evidence of a Tor blockage nor automatic authority for another signed attempt. |
+| Redirect response/error | No | Do not follow redirects or purchase another request merely to evade the caller's redirect policy. Preserve static catalog body parsing/legacy fallback where specifically documented. |
+| Local request construction, destination/allowlist, authority, or byte-limit rejection | No | Examples: malformed URL, forbidden private destination, missing payer authority or exceeded `max_spec_bytes`. These also cannot earn the new paid fallback. |
+| Hyper parse/user/canceled errors rejected by the shared classifier | No | Examples: a malformed HTTP response rejected as a protocol parse error or an internally canceled request. Do not relabel a parser/caller error as network instability. |
+| Explicitly rejected SOCKS failures | No | Error-chain markers for failure to create the underlying proxy connection, proxy authentication/credentials rejection, or a listener that is not a SOCKS proxy. A fresh target circuit cannot repair this local setup. Preserve the actual classifier, not broad substring guesses elsewhere. |
+| Complete invalid JSON/schema/text, unsolicited partial document, or API mapping failure | No | A fully delivered malformed OpenAPI document, an HTML page instead of accepted usage text, or a valid HTTP 200 that cannot be mapped to tool output. Static catalog/coinbase parse fallback remains a separately specified exception, not an origin retry. |
+| Any generic failure after signing the target request | No | A timeout, TLS error, reset, 503 or unreadable body after signing may already have charged/executed. Neither fresh isolation nor Curl can be used to replay it. Preserve only the separately authorized structured-insufficient-funds traversal. |
+
+Baseline implementation differences must be visible in implementation review:
+
+- Static catalog/pricing, Coinbase and Base already use the shared status/transport
+  classification in their participating loops. Caller response validation remains
+  separate; Base also has its own method/result acceptance and direct recovery.
+- Ordinary `PaidClient` unsigned GET **and POST** currently use the shared status
+  set but retry transport failures only when `tls_failure` matches. Ordinary DNS/
+  connection failures, resets and read-inactivity/incomplete-body errors that do
+  not match TLS are therefore currently terminal there, even if the broader shared
+  classifier would accept them. D04 unifies those unsigned transport cases for
+  GET and POST together; do not describe this as merely moving unchanged code.
+- Dynamic OpenAPI import, lazy provider help and source-details document/probe
+  reads currently use single-request legacy acquisition, so even an otherwise
+  eligible 403/503 or transport failure does not automatically receive the common
+  isolation sequence. D03 supplies that missing path.
+- A general timeout/reset label does not prove retriability: phase, authority and
+  concrete error-chain exclusions still govern. The shared classifier accepts
+  remaining transport errors after its explicit exclusions; avoid narrowing it
+  accidentally with a newly invented list of only the examples above.
+
+The maintained [unsigned x402 POST policy](../architecture.md#unsigned-x402-requests-and-post-retries)
+explicitly assumes protected x402 execution is gated on payment acceptance. Under
+that accepted model, unsigned POST is retryable on the same otherwise-authorized
+basis as GET, without an extra provider idempotency proof or side-effect gate.
+This is not a claim that arbitrary non-x402 HTTP POSTs are side-effect-free, or
+that signed requests may be repeated. Keep this rule in the permanent guide and
+its affected tests; a GET/HEAD-only Curl request representation must not be used
+as a reason to restrict origin retries of unsigned x402 POSTs.
 
 ### Failure/response matrix
 
@@ -196,7 +266,9 @@ implementation approach. The user reviews this plan first. Reopen the affected
 contract/gate when implementation evidence requires a material change.
 
 Planning gate status: independent design and clarity reviews passed after resolving
-the failure/response matrix and GET/HEAD scope. User review remains pending; D01
+the failure/response matrix and GET/HEAD scope. The retry-condition and unsigned
+POST clarification also passed renewed independent review. User review remains
+pending; D01
 has not started. Material changes reopen the affected concerns.
 
 ## Ordered implementation commits
@@ -233,11 +305,14 @@ has not started. Material changes reopen the affected concerns.
    operator configuration/network/architecture guides and affected examples.
 4. **D04 — Ordinary unsigned API and directory reads.** Wire supported public GET
    and HEAD responses, including x402 List browse/best/details and raw GET/HEAD
-   calls, through
-   the same fallback while preserving normal origin 402 signing and existing POST
-   behavior. Cover exact query/response/output mapping, supported text MIME/status,
+   calls, through the same fallback while preserving normal origin 402 signing
+   and existing unsigned POST authority. Apply the common unsigned transport retry classification to API GET
+   and POST together; the existing TLS-only transport handling is an explicit
+   baseline gap. Cover exact query/response/output mapping, supported text MIME/status,
    unsupported body/headers/binary handling, relayed 402 without target signing,
-   signed failures without fallback/replay, relay recursion exclusion, managed/static
+   eligible and rejected transport errors for unsigned GET/POST, nonretryable
+   statuses such as 408/500/502/504 despite 5xx fallback eligibility, signed failures
+   without fallback/replay, relay recursion exclusion, managed/static
    payer bindings, payment uncertainty and concurrent cancellation/drain. Verify
    preexisting typed insufficient-funds traversal and forbidden financial side
    effects. Do not buy another relay call for the same accepted attempt. Update
