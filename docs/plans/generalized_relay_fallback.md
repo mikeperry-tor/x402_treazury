@@ -216,8 +216,9 @@ HEAD = ["../../providers/agproxy.toml"]
   `head_status` consumers/tests rather than inventing a HEAD result from GET.
   The shared primitive still supports ordinary API/raw HEAD with empty-body and
   header/status semantics. Do not introduce a new cross-call cache.
-- Enforce each caller's origin allowlist, public URL policy, transport permissions,
-  exact query encoding, body bounds and redirect policy on both paths. All three
+- Enforce each caller's public URL/allowed-origin policy on the requested and
+  reported relay destinations, retaining transport permissions, exact query
+  encoding and body bounds. Origin requests retain no-follow behavior. All three
   services follow redirects remotely. Curl reports a chain; reject disallowed
   chains. AGProxy/Horizon Pulse report only a final URL: validate that destination
   and explicitly document trust in their remote redirect/public-destination
@@ -279,7 +280,7 @@ The proposed common origin retry requires all of the following:
 | Other 5xx, for example 501, 505 or nonstandard 520 | No fresh origin retry | These remain outside the explicit origin set; proposed on-demand fallback may still use the relay list after one origin attempt. Do not silently treat every 5xx as a new-circuit trigger. |
 | HTTP 401, 404, 405, 410 or 422 | No | Missing credentials, absent endpoint, unsupported method, gone resource or validation rejection do not earn a new circuit. Static discovery can still have its explicitly preserved broader relay behavior. |
 | HTTP 402 | No generic status retry | Direct-origin 402 enters normal challenge handling when authorized; a pricing probe may inspect it. It is neither evidence of a Tor blockage nor automatic authority for another signed attempt. |
-| Redirect response/error | No | Do not follow redirects or purchase another request merely to evade the caller's redirect policy. Preserve static catalog body parsing/legacy fallback where specifically documented. |
+| Origin redirect response/error | No | Do not follow an origin redirect or purchase another request merely because it redirected. Preserve static catalog body parsing/legacy fallback where specifically documented. Configured relays may follow redirects remotely under the explicit trust contract above. |
 | Local request construction, destination/allowlist, authority, or byte-limit rejection | No | Examples: malformed URL, forbidden private destination, missing payer authority or exceeded `max_spec_bytes`. These also cannot earn the new paid fallback. |
 | Hyper parse/user/canceled errors rejected by the shared classifier | No | Examples: a malformed HTTP response rejected as a protocol parse error or an internally canceled request. Do not relabel a parser/caller error as network instability. |
 | Transient SOCKS target connection/remote-resolution timeout, reset or temporary failure | Yes, while unsigned and retries remain; then eligible relay fallback | A different Tor circuit/exit can help. Use the connector error chain and actual failure stage; do not confuse target refusal with refusal by the local SOCKS listener. |
@@ -449,8 +450,8 @@ the affected concerns.
 
 ## Implementation status
 
-D01 is implemented and validated; exact-commit review follows the implementation
-commit before D02 builds on it. The configured count, expanded classifications,
+D01 is implemented and validated; independent exact-SHA review approved
+`8efe79e6` before D02 began. The configured count, expanded classifications,
 zero-retry body handling and connector-cause preservation are in the owning guides.
 Focused offline/local tests, formatting, all-target Clippy and exact-baseline
 complexity analysis passed. The unsigned API transport classifier remains TLS-only
@@ -458,8 +459,11 @@ until the D04 integration, as specified above.
 
 The operator accepted the relay redirect/visibility limitation during implementation;
 renewed independent design review passed that explicit contract. It grants no target
-signing, credential forwarding or uncertain-payment replay authority. D02 has not
-started.
+signing, credential forwarding or uncertain-payment replay authority. D02 implements shared acquisition, ordered adapters and static/Coinbase consumers.
+The affected library union passed 151 tests with one readiness-admission failure;
+the correction then passed all 45 relay tests, including that unchanged regression.
+Configuration/CLI validation, exact-SHA review and G1 remain pending. Method-list
+examples do not establish live qualification.
 
 ## Ordered implementation commits
 

@@ -38,10 +38,10 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | --- | --- | --- |
 | Agent402 | `agent402.toml` | Full supported catalog; advisory web research recommendations and lowercase tags |
 | AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
-| AGProxy | `agproxy.toml` | Residential fetch and proxy packs; dual-protocol aliases and root server URL |
+| AGProxy | `agproxy.toml` | Complete pinned `agproxy-openapi.json`; residential fetch and proxy packs |
 | Datakoot | `datakoot.toml` | Public-data gateway; apex-domain help |
 | HireScrape | `hirescrape.toml` | Synchronous paid scraper namespace; SIWX lifecycle omitted |
-| Horizon Pulse | `horizonpulse.toml` | Web/HTTP, crypto and marketplace APIs; screenshot mapping and atomic-price caveat |
+| Horizon Pulse | `horizonpulse.toml` | Complete pinned `horizonpulse-openapi.json`; screenshot mapping and atomic-price caveat |
 | NetIntel | `netintel.toml` | Canonical POST/body contracts and image data-URI mapping |
 | TeleSINT | `telesint.toml` | Stateless Telegram intelligence; watch ownership unsupported |
 | RelayShield phone | `relayshield/phone-reputation.toml` | Authored vendor-omitted request contract |
@@ -76,8 +76,11 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | x402-list | `x402-list.toml` | Public directory reads, assessments and suggestions |
 | x402stock | `x402stock.toml` | Full supported market/economic catalog; compact research recommendations |
 
-Curl additionally pins the vendor-published OpenAPI response envelope for discovery
-relay use; see [relay configuration](../docs/configuration.md#paid-discovery-relay).
+Curl, AGProxy and Horizon Pulse pin complete vendor OpenAPI documents as runtime
+assets. This lets relay bootstrap validate operations locally without buying or
+fetching another catalog. Their reusable catalogs remain pinned until a deliberate
+update; see [capture provenance and update instructions](CAVEATS.md#pinned-relay-contracts)
+and [relay configuration](../docs/configuration.md#paid-discovery-relay).
 
 Authored local catalogs are explicitly labeled rather than presented as vendor
 OpenAPI documents. Preserve complete documented request contracts, source
@@ -112,6 +115,17 @@ keep settings and descriptions in their TOML, without copying them into the
 manifest. Local schemas load independently of the installation directory.
 No separate data installation, filesystem scan or writable index is required.
 Private local overrides are neither bundled nor compilation identity inputs.
+
+Providers selected in a relay method list declare `relay_format = "curl"`,
+`"agproxy"` or `"horizonpulse"` once in their TOML. This selects the documented
+request/response envelope; provider names, hosts and schema shapes do not infer it.
+The field is optional for ordinary API providers. Listed providers require a
+supported format and compatible operation/filter selection before paid dispatch.
+Legacy `[discovery_relay].provider` syntax grants implicit Curl format only to
+that entry and rejects conflicting metadata. Operator-authored GET, HEAD and POST
+lists determine selection and order; an adapter still checks whether it can
+preserve the actual request. This metadata does not enter agent tool descriptions
+or input schemas.
 
 With `source_management = true`, `x402_treazury_providers_list` enumerates this
 catalog, and `sources_search(local_only=true)` filters it without vendor requests

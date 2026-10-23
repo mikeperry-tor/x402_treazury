@@ -1,4 +1,5 @@
 //! All runtime egress is constructed here. Policy is immutable after startup.
+pub(crate) mod acquisition;
 mod grpc;
 mod indexer;
 pub(crate) use grpc::ConnectionDiagnostic;
@@ -143,11 +144,7 @@ impl NetworkConfig {
                 .context("invalid network config")?;
         file.network.validate()?;
         if let Some(relay) = &mut file.discovery_relay {
-            relay.provider = std::path::absolute(
-                path.parent()
-                    .unwrap_or(Path::new("."))
-                    .join(&relay.provider),
-            )?;
+            relay.resolve_paths(path)?;
         }
         Ok(file)
     }
@@ -682,6 +679,9 @@ pub(crate) fn eligible_retry_transport(error: &reqwest::Error) -> bool {
 fn eligible_retry_cause(mut error: &(dyn std::error::Error + 'static)) -> bool {
     let mut local_proxy = false;
     loop {
+        if error.is::<PublicDestinationRejected>() {
+            return false;
+        }
         if let Some(hyper) = error.downcast_ref::<hyper::Error>()
             && (hyper.is_parse() || hyper.is_user() || hyper.is_canceled())
         {
@@ -968,9 +968,18 @@ impl reqwest::dns::Resolve for PublicResolver {
 #[path = "../tests/support/network_boundary.rs"]
 mod boundary_tests;
 
+#[derive(Debug)]
+struct PublicDestinationRejected;
+impl std::fmt::Display for PublicDestinationRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("non-public DNS destination rejected")
+    }
+}
+impl std::error::Error for PublicDestinationRejected {}
+
 fn validate_public_addresses(addresses: &[std::net::SocketAddr]) -> std::io::Result<()> {
     if addresses.is_empty() || addresses.iter().any(|a| !public_ip(a.ip())) {
-        return Err(std::io::Error::other("non-public DNS destination rejected"));
+        return Err(std::io::Error::other(PublicDestinationRejected));
     }
     Ok(())
 }

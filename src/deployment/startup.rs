@@ -592,10 +592,11 @@ async fn catalog_cache_status(cfg: &catalog::Config) -> &'static str {
     } else {
         "local_file"
     };
-    if let Some(slot) = crate::discovery_relay::slot(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes)
-        && slot.read().await.is_some_and(|e| e.metadata.fresh())
-    {
-        catalog_cache = "fresh_via_relay";
+    for slot in crate::discovery_relay::slots(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes) {
+        if slot.read().await.is_some_and(|e| e.metadata.fresh()) {
+            catalog_cache = "fresh_via_relay";
+            break;
+        }
     }
     catalog_cache
 }
@@ -628,12 +629,14 @@ async fn fresh_pricing_entries(
             if !inspected.insert(url.clone()) {
                 continue;
             }
-            for slot in [
-                crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024),
-                crate::discovery_relay::slot(cfg, &url, "pricing", 64 * 1024),
-            ]
-            .into_iter()
-            .flatten()
+            for slot in crate::http_cache::Slot::new(cfg, &url, "pricing", 64 * 1024)
+                .into_iter()
+                .chain(crate::discovery_relay::slots(
+                    cfg,
+                    &url,
+                    "pricing",
+                    64 * 1024,
+                ))
             {
                 if slot
                     .read()

@@ -33,8 +33,10 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             let unsigned_release = CancellationToken::new();
             let body_release = CancellationToken::new();
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            Arc::get_mut(&mut relay).unwrap().endpoint =
-                format!("http://{}/curl", listener.local_addr().unwrap());
+            set_endpoint(
+                &mut relay,
+                format!("http://{}/curl", listener.local_addr().unwrap()),
+            );
             let app = Router::new().route(
                 "/curl",
                 post({
@@ -89,7 +91,7 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
                 let capacity = capacity.clone();
                 async move {
                     relay
-                        .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", capacity)
+                        .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", capacity, None)
                         .await
                 }
             });
@@ -108,8 +110,8 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             waiter.abort();
             assert!(matches!(waiter.await, Err(error) if error.is_cancelled()));
             assert!(
-                relay.state.try_lock().is_err(),
-                "accepted owner lost its lock: {outcome:?}"
+                !is_idle(&relay),
+                "accepted owner lost provider serialization: {outcome:?}"
             );
             for gate in &capacity {
                 assert_eq!(
@@ -120,8 +122,8 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
             }
 
             // A second wallet shares the breaker, but cannot borrow the first
-            // wallet's paid response. No provider I/O can start before publication.
-            let other_url = "https://other.example/spec";
+            // wallet's paid response. No same-provider I/O can start before publication.
+            let other_url = "https://other.example.com/spec";
             let (mut other, other_fixture, other_server) =
                 fixture(envelope(other_url), false, false).await;
             let second = Arc::get_mut(&mut other).unwrap();
@@ -151,21 +153,19 @@ async fn cancelled_waiters_keep_serialization_and_publish_terminal_outcomes() {
                 usize::from(!matches!(outcome, Outcome::UnsignedFailure))
             );
 
-            // Lost delivery must still publish the response, target-local failure,
-            // or global breaker before a repeated caller inspects it.
-            if !matches!(outcome, Outcome::UnsignedFailure) {
-                let calls = f.calls.load(Ordering::SeqCst);
-                let repeated = relay.fetch(TARGET, 200, 4096, "max_spec_bytes").await;
-                assert_eq!(repeated.is_ok(), matches!(outcome, Outcome::Success));
-                if matches!(outcome, Outcome::TargetFailure) {
-                    assert!(repeated.err().unwrap().is::<TargetFailure>());
-                }
-                assert_eq!(
-                    f.calls.load(Ordering::SeqCst),
-                    calls,
-                    "replayed cancelled work"
-                );
+            // Lost delivery must publish success, a definitive provider/target
+            // failure, or the provider's uncertainty breaker before repetition.
+            let calls = f.calls.load(Ordering::SeqCst);
+            let repeated = relay.fetch(TARGET, 200, 4096, "max_spec_bytes").await;
+            assert_eq!(repeated.is_ok(), matches!(outcome, Outcome::Success));
+            if matches!(outcome, Outcome::TargetFailure) {
+                assert!(repeated.err().unwrap().is::<TargetFailure>());
             }
+            assert_eq!(
+                f.calls.load(Ordering::SeqCst),
+                calls,
+                "replayed cancelled work"
+            );
             relay.client.drain().await;
             other.client.drain().await;
             for gate in &capacity {
@@ -190,7 +190,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
     let healthy_calls = Arc::new(AtomicUsize::new(0));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    Arc::get_mut(&mut relay).unwrap().endpoint = format!("http://{address}/curl");
+    set_endpoint(&mut relay, format!("http://{address}/curl"));
     let app = Router::new()
         .route(
             "/curl",
@@ -232,7 +232,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
         let capacity = capacity.clone();
         async move {
             relay
-                .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![capacity])
+                .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![capacity], None)
                 .await
         }
     });
@@ -247,7 +247,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
             let capacity = capacity.clone();
             async move {
                 relay
-                    .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![capacity])
+                    .fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![capacity], None)
                     .await
             }
         }));
@@ -292,7 +292,7 @@ async fn queued_and_cached_relay_calls_do_not_reserve_request_capacity() {
     let unavailable = Arc::new(tokio::sync::Semaphore::new(0));
     tokio::time::timeout(
         std::time::Duration::from_millis(500),
-        relay.fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![unavailable]),
+        relay.fetch_with_capacity(TARGET, 200, 4096, "max_spec_bytes", vec![unavailable], None),
     )
     .await
     .expect("cached relay result waited for request capacity")

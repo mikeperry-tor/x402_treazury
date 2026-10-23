@@ -84,11 +84,9 @@ async fn unrepresentable_retry_after_blocks_origin_and_relay_without_blocking_ot
             }
         }
     });
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (address, server) = crate::test_tls::serve(app).await;
     let socks = crate::test_socks::Socks::start(
-        BTreeMap::from([("delay.example.com".into(), address)]),
+        BTreeMap::from([("api.example.com".into(), address)]),
         crate::test_socks::Fault::None,
     )
     .await;
@@ -98,9 +96,10 @@ async fn unrepresentable_retry_after_blocks_origin_and_relay_without_blocking_ot
             socks_endpoint: Some(socks.address),
             ..Default::default()
         })
-        .unwrap(),
+        .unwrap()
+        .with_test_root(crate::test_tls::CA),
     );
-    let base = "http://delay.example.com";
+    let base = "https://api.example.com";
     let id = network::IsolationId::discovery(base).unwrap();
     let selected = context
         .http_participating(&id, base, None, false, Default::default())

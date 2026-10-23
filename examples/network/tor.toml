@@ -14,9 +14,14 @@ read_timeout_seconds = 60
 # Fresh isolation attempts after the initial unsigned request; zero means one attempt.
 tor_isolation_retries = 2
 
-# Paid Curl fallback after eligible origin attempts, using existing deployment payers.
+# Ordered paid fallback after eligible origin attempts, using existing deployment payers.
 [discovery_relay]
-provider = "../../providers/curl/provider.toml"
 serve = true
 warm = true
 # search defaults to true for Coinbase curated search.
+
+# Select by original target method; absent/empty lists mean origin-only.
+[discovery_relay.fallbacks]
+GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/agproxy.toml"]
+HEAD = ["../../providers/agproxy.toml"]

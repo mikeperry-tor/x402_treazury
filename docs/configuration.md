@@ -43,8 +43,8 @@ selects a file containing `[network]` and optionally `[discovery_relay]`. It
 replaces the complete deployment `[network]` section for that invocation; omitted
 fields use network defaults rather than inheriting deployment values. A supplied
 relay section replaces the complete deployment relay section; an omitted section
-preserves the deployment relay. Its `provider` path resolves relative to the file
-that declares it. Relay settings apply to deployment discovery; standalone provider
+preserves the deployment relay. Its provider paths resolve relative to the file
+that declares them. Relay settings apply to deployment discovery; standalone provider
 and wallet commands accept the same file without loading relay providers. Other
 standalone provider options still cannot be combined with `--config`.
 
@@ -79,8 +79,8 @@ A free slot starts the next ready download immediately. Logical loads waiting fo
 `Retry-After` release download capacity while retaining their retry sequence and
 deadline. The same scheduling applies to inspection, warming and deferred serving;
 inspection and warming still require their complete selected results. Relay work
-reserves capacity only after serialization/cache/readiness checks and retains it
-through terminal publication. Synchronous relay fallback remains a single fetch;
+reserves capacity for each HTTP attempt/body after serialization/cache/readiness
+checks and releases it before retry delays. Accepted ownership retains publication. Synchronous relay fallback traverses its configured list once;
 only deferred serving waits for discovery readiness. Ordinary deployment serving loads
 local catalogs, binds listeners and exposes available tools while remote catalogs
 and pricing discovery run in the background. Stderr and MCP instructions identify
@@ -959,7 +959,7 @@ including wallet commands, use their embedded policy unless `--network-config` i
 provided. The external file replaces the entire network policy and any supplied
 relay section before validation or client creation; it does not rewrite the
 deployment or change wallet identities. This also applies to `catalog warm` and
-`sources refresh`. `examples/network/tor.toml` enables paid Curl fallback for
+`sources refresh`. `examples/network/tor.toml` configures ordered paid relay fallback for
 deployment catalog/pricing discovery and Coinbase search. Standalone provider and
 wallet commands use only the transport policy and never load the relay provider.
 `catalog warm --direct` retains its
@@ -1115,8 +1115,8 @@ capped at 16 active requests, even when sources request a higher limit. Each
 source also bounds active requests by `probe_concurrency`. Logical probes waiting
 for `Retry-After` keep their coalesced owner but release both request permits, so
 queued endpoints and other sources can proceed. Relay calls acquire capacity after
-relay serialization and readiness checks; accepted work retains it through response
-consumption and publication despite waiter cancellation. Ordinary deployment
+relay serialization and readiness checks for each HTTP attempt/body, releasing it
+before retry delays. Accepted ownership retains publication despite waiter cancellation. Ordinary deployment
 serving publishes price descriptions as discovery completes, without changing
 inventory order. Standalone provider serving and explicit priced inventories wait
 for pricing discovery.
@@ -1179,8 +1179,8 @@ This owner-only private cache permits `private` responses and responses carrying
 pinning the unsigned discovery request profile (`Accept: */*`,
 `Accept-Encoding: identity`, no cookies, credentials or custom request headers).
 The profile version and URL are part of the cache key. `Vary: *`, conditional-header
-variants and credential-bearing URLs remain excluded. Curl's effective target
-request headers are unknown, so relay responses with `Vary` are not persisted.
+variants and credential-bearing URLs remain excluded. A relay's effective target
+request headers are not established by origin transport, so relay responses with `Vary` are not persisted.
 Relay catalogs use the same local TTL, measured from the original completed relay
 response so sharing it cannot renew its lifetime.
 
@@ -1270,148 +1270,154 @@ or extend lifetimes. A failed multi-source warm can leave completed disposable e
 
 #### Paid discovery relay
 
-A deployment can opt into Curl HTTP Request, in its own configuration or through
-`--network-config`, as a fallback for catalog and pricing
-GETs that fail, including HTTP errors, timeouts, connection resets, body/parse errors,
-and missing or unusable pricing headers on a 402 response. Successful 2xx pricing
-responses leave the price unknown and do not trigger paid fallback: no payment
-challenge was observed, which does not establish that the API is free.
-Pricing discovery skips tools with required arguments: it sends bare GETs and cannot
-supply agent inputs (for example, Straits’ `/api/v1/since` requires `at`).
-These exclusions are recorded as `skipped_arguments` and never invoke the relay.
-In direct mode, or for ineligible origin errors (such as `404`, `501`, oversized/invalid
-bodies, or malformed `402` challenges), origin failure proceeds to one configured relay
-fallback without origin retry; in Tor mode, eligible status (`400`, `403`, `408`,
-`429`, `500`, `502`, `503`, `504`) or eligible transport failures use
-`network.tor_isolation_retries` fresh Tor isolation scopes first (default 2), honoring any valid
-`Retry-After` on `429`/`503` before the next attempt or relay fallback. Relay-supplied
-responses never promote an origin transport scope. Local-file failures
-remain local. Warnings identify the source, catalog/pricing stage, fixed failure category
-and HTTP status when available, without logging request URLs or upstream error text.
+A deployment can configure ordered paid fallback for static catalog/pricing GETs
+and Coinbase resource searches, in its own configuration or through
+`--network-config`. Origin acquisition has one attempt in direct mode, or the
+initial attempt plus `network.tor_isolation_retries` fresh owner-bound Tor scopes.
+Eligible origin statuses are `400`, `403`, `408`, `429`, `500`, `502`, `503` and
+`504`; eligible transport/body failures share that sequence. Valid `Retry-After`
+on `429`/`503` applies before another attempt and before a configured relay handoff.
+No origin sequence restarts between relay entries. Local destination, authority,
+setup and download-limit rejections cannot purchase fallback. Complete catalogs
+reject unsolicited `206` or `Content-Range` responses without paid fallback.
+Static remote HTTP and JSON-parse failures retain their broader fallback contract;
+Coinbase also preserves remote-status/JSON fallback. Successful empty or partial
+search-result metadata is terminal success.
 
 ```toml
 [discovery_relay]
-provider = "../../providers/curl/provider.toml" # relative to this deployment file
-# wallet = "web" # optional override; otherwise choose from each source's bindings
-serve = true   # allow paid fallback during serving startup; defaults false
-warm = true    # allow paid fallback during catalog warm; defaults false
-search = true  # Coinbase search fallback; defaults true; false disables it
-# sources = ["social"] # optional authored source IDs; omitted/empty selects all
+serve = true   # static serving startup; defaults false
+warm = true    # static catalog warm; defaults false
+search = true  # Coinbase fallback; defaults true
+# wallet = "web" # optional static payer override
+# sources = ["social"] # optional static source selection; empty selects all
+
+[discovery_relay.fallbacks]
+GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/agproxy.toml"]
+HEAD = ["../../providers/agproxy.toml"]
 ```
 
-When `[discovery_relay]` is configured, `search` defaults to true for runtime
-Coinbase search fallback on source-management listeners. Set `search=false` to
-disable it. Without this section no search relay is created. The search setting
-does not enable serve/warm, select static sources,
-prepare wallets or start funding. Search always uses the authenticated endpoint's
-source-management payer; `wallet` and `sources` here apply only to static
-catalog/pricing relay work. `config show` exposes the flag and the existing
-`source_management.wallet_bindings`; `discovery_wallets` covers enabled static
-serve/warm work. Config-only inspection does not load relay catalogs; strict
-loading validates the local search-relay bootstrap before it can be used.
+Method keys are exactly `GET`, `HEAD` and `POST`, selected by the original target
+method. A missing or empty list means origin-only for that method; lists do not
+inherit from GET. These settings declare relay eligibility; they do not extend the
+supported consumers beyond static discovery and Coinbase searches. Ordering is
+operator-authored, with no implicit vendor ranking or extra provider. Each listed
+provider declares `relay_format = "curl"`, `"agproxy"` or `"horizonpulse"` in its
+own TOML. Ordinary providers need no format field. Unsupported request bodies,
+bytes or required headers skip the entry before paid I/O; headers and bodies are
+never silently discarded to fit another adapter. Target payment signatures and
+other credentials are not forwarded.
 
-Runtime searches retain no catalog response cache, sticky target failure, global
-relay breaker or readiness queue. Public origin requests never wait for relay
-funding. Each fallback is an ordinary retained paid workflow, including authorized
-insufficient-funds wallet traversal; an ambiguous signed outcome cannot trigger
-another workflow. Repeated searches are fresh and can authorize new payments.
-Existing static catalog/pricing caching and failure behavior remain unchanged.
+Legacy `provider = "../../providers/curl/provider.toml"` remains accepted as one
+GET Curl entry, including old Curl definitions without `relay_format`. Conflicting
+format metadata is rejected. `provider` cannot appear with `fallbacks`, even an
+explicitly empty map. Inspection emits canonical method lists without reading
+provider files. Paths in lists resolve relative to the declaring deployment/network
+file; schemas/help paths inside providers resolve relative to their TOML.
 
-For runtime search, source-management `max_response_bytes` governs both the paid
-outer envelope and decoded target. Its read-inactivity setting overrides the relay
-provider value, otherwise provider then network applies; the relay provider's
-transport compatibility settings apply to the Curl leg. Public Coinbase origin
-reads use source-management transport/inactivity policy. Coinbase targets must
-satisfy `allowed_origins`; Curl's separately configured public HTTPS endpoint does
-not extend that target allowlist or need its own entry there. Neither leg follows
-redirects as a successful result, and a local target-policy or body-bound rejection
-cannot authorize paid fallback. Search result provenance discloses Curl content.
+Runtime bootstrap validates every configured adapter, operation and filter using
+local schemas before payment. The bundled Curl schema, `agproxy-openapi.json` and
+`horizonpulse-openapi.json` are complete pinned runtime assets; bootstrap fetches
+no schema, help or pricing document and rejects nonlocal schema references.
+[Provider caveats](../providers/CAVEATS.md) own provenance and update instructions.
 
-The relay provider must have a local bootstrap catalog exposing `POST /curl` and
-an HTTPS `base_url`. The bundled provider pins the vendor schema and advertises
-$0.01 per fetch; the live challenge and the wallet's existing `max_api_payment_usdc` are
-authoritative. Its existing timeout, transport and `max_response_bytes` settings
-bound the relay call; the target's existing `max_spec_bytes` bounds decoded catalogs.
-These are separate allocations: the bootstrap provider’s `max_response_bytes`
-must also fit the JSON envelope, headers and escaped target text. In the worst
-case JSON text escaping uses six bytes per target byte, plus envelope overhead.
-Set the outer limit explicitly for expected documents; raising only the target
-limit cannot make it fit. Neither size failure authorizes a paid retry.
-No additional spending caps or download settings are introduced.
+`search` defaults true when this section exists and controls Coinbase fallback on
+source-management listeners. Without the section no paid relay is created.
+`serve`/`warm` retain static-acquisition meanings. `wallet` and `sources` apply only
+to static work; runtime search uses the authenticated endpoint's existing payer.
+Search neither prepares wallets nor starts funding and adds no sticky response
+cache, readiness queue or provider breaker. Repeated searches are fresh operations
+and may authorize new payments. Source-management `max_response_bytes` bounds its
+outer envelope and decoded target; inactivity precedence is source-management,
+relay provider, then network. Provider transport permissions govern the relay leg.
 
-Without `wallet`, each source uses one of its effective assigned wallet profiles.
-An explicit source wallet takes precedence through normal binding resolution. A
-source shared across listeners chooses one candidate by the highest SHA-256 score
-of the JSON tuple `["discovery-wallet-v1", source_id, wallet_name]` (wallet name
-breaks ties). This is stable across restarts and listener ordering; duplicate
-bindings to the same wallet do not add weight. Renaming a source or changing its
-candidate wallets can change the selection. No keys, balances, timing or current
-rotating addresses influence the choice. A failed wallet is never replaced by
-another candidate to retry relay spending. An unbound source needs either its own
-`wallet` or an explicit `discovery_relay.wallet` override.
+After exhausted origin attempts, each authored position has at most one logical
+acquisition. Its unsigned relay-service requests use the same configured Tor
+count, or one attempt in direct mode; signed requests never gain generic replay.
+A proven pre-payment provider failure or complete attributable failed target
+result can advance according to the consumer contract. Validated relay-declared
+truncation can advance; malformed/unattributable envelopes after possible payment
+stop. Delivered error/truncated results may already be billed. A refund promise,
+timeout or vendor prose cannot prove nonpayment. Every actual authorization retains
+ordinary per-payment authority and possible liability; no cumulative spending
+counter is added. Local bounds/policy failures are terminal.
 
-`config show` reports the resulting `discovery_wallets` source-to-profile map.
-The comprehensive example enables relay fallback without an override: `social` uses
-`company`, while `webinfo` and `exa` use `web`. Exa is available only on the web
-listener. Distinct source aliases using different wallets keep separate relay
-requests and caches,
-even if they fetch the same URL. Sharing a wallet intentionally retains that link;
-this removes a mandatory common discovery payer, not all correlation channels.
+An unusable origin pricing `402` can use fallback. Any relayed `402` terminates
+pricing, yielding an estimate when usable and unknown otherwise; relayed `2xx`
+without a challenge also terminates with unknown pricing. Pricing skips tools with
+required arguments and never supplies agent inputs; these cases remain
+`skipped_arguments`. A relayed challenge never authorizes target signing.
 
-Both modes use the resolved wallets through the ordinary paid client and the configured
-network factory. Under Tor, the connection to Curl remains over Tor; Curl sees the
-target URLs and its own egress reaches the targets. The target GET is unsigned.
-The relay supplies origin content, headers and status: our TLS connection verifies
-Curl, not the target's TLS policy. Never use it for authenticated discovery URLs.
-The provider can also be exposed as ordinary MCP tools by adding it as a source;
-the relay setting alone does not expose a tool to listeners.
+Without `wallet`, each static source uses an effective assigned wallet profile.
+An explicit source wallet takes precedence through normal binding resolution.
+A shared source chooses the highest SHA-256 score of the JSON tuple
+`["discovery-wallet-v1", source_id, wallet_name]`, with wallet name breaking ties.
+This remains stable across restarts/listener ordering; balances, keys and rotating
+addresses do not select it. A failed wallet does not select another profile to
+repeat relay spending. An unbound source needs its own wallet or the explicit
+relay override. `config show` reports `discovery_wallets`; distinct payer scopes
+keep separate requests/caches even for the same URL.
 
-With `funding.auto_fund=true`, ordinary managed serving starts funding only after
-listeners bind. Relay-dependent catalogs wait for an existing eligible payer using
-capacity notifications; they consume no relay attempts while waiting and never
-allocate funds themselves. Independent available tools remain callable. Initial
-unsigned remote catalogs and pricing also load after listeners bind.
-Static wallets require external funding. For paid warming, first use
-`wallet bootstrap --config FILE`; warming opens only the wallets resolved for its selected
-sources (including treasury ownership for managed wallets), denies new funding
-and starts no workers. Export
-static signing-key environment variables before warming. `--direct` always bypasses
-the relay and remains unsigned. Ordinary `config check`, catalog inspection and
-`catalog tools --discover-pricing` remain unsigned and never invoke the relay.
-Qualification rejects paid relay startup.
+Every relay connection uses the configured network factory and existing payer.
+Tor never falls back to direct egress. The relay sees target URLs and reaches them
+from its own network. Origin HTTP remains no-follow; configured relays may follow
+redirects remotely. Requested and reported final destinations must satisfy the
+caller's public/allowed-origin policy, and every Curl-reported hop is checked.
+AGProxy/Horizon Pulse expose only a final URL: intermediate destinations remain
+unknown, including when `allowed_origins` is nonempty. Missing chain evidence does
+not exclude an adapter. This explicitly trusts remote redirect/public-destination
+policy and the relay's plaintext content, headers and status; our TLS verifies
+the relay, without establishing target TLS or content authenticity. A relay service
+endpoint does not need an entry in the target's allowlist. Never use this path for
+authenticated target requests. Adding a relay does not expose it as an MCP tool.
 
-Paid relay calls are serialized across wallets. Successful results are shared within
-the same wallet/relay scope for each target URL. A valid, correctly attributed Curl
-response reporting an origin HTTP error, connection failure, unusable catalog or
-pricing response ends fallback for that target. Its failure is retained so aliases
-cannot retry it, while other targets can still use Curl. No upstream error text is logged.
-A monotonic submission marker distinguishes proven pre-submission failures from
-possibly paid work. A cancelled waiter leaves accepted work running through outcome publication.
-Proven pre-submission failure leaves unrelated targets
-usable; subsequent requests for that scoped target have at most three attempts
-with a one-second backoff. Once signed submission may have begun, failure
-or an invalid/unattributable envelope disables relay spending across
-all wallets for the run. No uncertain signed request is replayed. A new explicit command or
-process restart starts a new run and can spend again. Ordinary deployment serving
-marks a failed remote catalog unavailable; strict inspection and qualification
-still reject incomplete catalogs. Pricing failures remain unknown estimates. Existing successful results and
-fresh cache entries remain usable.
+Ordinary managed serving binds listeners before funding. Static fallback waits
+on existing eligible-payer notifications without allocating funds or consuming
+network attempts. Available tools remain callable. Paid warming opens only its
+resolved wallets, denies new funding and starts no workers; bootstrap/fund them
+first. `--direct` warming stays unsigned and bypasses the relay. Ordinary
+`config check`, catalog inspection and `catalog tools --discover-pricing` never
+pay through the relay. Qualification rejects paid relay startup.
 
-Relay responses must match the target URL and GET method and contain complete JSON
-catalog text, or a usable 402 payment header for pricing. Redirects and explicitly
-truncated results are rejected. Curl's documentation does not specify its body limit
-or guarantee a truncation flag; paid delivery, completeness on large documents and
-Tor reachability remain unqualified. Valid JSON alone cannot prove the relay has
-preserved every origin field.
+Static paid fetches serialize per provider across wallets through decoding and
+publication. Waiter cancellation does not release accepted ownership or duplicate
+same-provider I/O. Shared state locking is brief, so cached results and independent
+providers remain available during another provider's exchange. Initial
+origin-to-relay delay precedes accepted relay ownership/provider gates;
+between-provider delays retain the logical call owner without a provider gate.
+This partitions existing serialization without adding a resource cap. Static aliases
+with the same wallet, catalog/pricing contract, authored provider position and
+target URL share their first process acquisition and outcome. A terminal decoded
+body-bound failure from that acquisition remains shared even if a later alias
+allows a larger body; changing the bound does not authorize a second fee. Reusing
+a successful cached response still checks the requesting alias's bound. An uncertain
+paid failure stops that provider for the run, without disabling an independent
+provider; malformed paid envelopes likewise stop the sequence. There is no separate
+three-attempt counter or one-second backoff. Independent targets retain access after
+a definitive failure. Strict inspection/warming still require complete selected
+results; ordinary serving can expose a failed catalog as unavailable. Pricing
+failures remain unknown; successful cached results remain usable.
 
-Only explicitly fresh origin metadata permits disk storage, under the existing
-treasury cache directory. Resolved wallet, relay identity and target policy partition these entries;
-relay-disabled inspection cannot reuse them. The relay's outer caching headers are
-ignored. Curl does not expose conditional request headers, so expired relay entries
-are fetched anew through the normal origin-first fallback path, never revalidated
-with relay validators or served stale. Pricing persists only display estimates,
-never payment challenges. `catalog warm` reports `fresh_via_relay` for cached catalogs;
-a successful fetch without suitable origin headers reports `not_stored`.
+Outer provider and decoded target bounds are separate allocations. JSON escaping
+or base64 can enlarge the envelope; raising only the target limit cannot enlarge
+the provider's `max_response_bytes`. Adapter external request limits are checked
+against actual encoded bytes before payment. A caller's larger accepted-response
+maximum alone does not make the request incompatible. Neither local size rejection
+permits another paid acquisition. Explicit vendor truncation is distinct from a
+local limit or a target's unsolicited partial-document response.
+
+Relay catalogs use the configured local catalog lifetime; pricing estimates need
+explicit target HTTP freshness. Both use the existing private cache and reject
+relay `Vary` metadata. Disk slots partition adapter/provider, authored position,
+payer, target URL, catalog/pricing kind and configured bounds, alongside ordinary
+HTTP-cache transport policy; their bound-specific keys differ from process outcome
+sharing. Relay-disabled inspection cannot reuse them. The outer relay's cache
+headers are ignored. Expired relay entries return to ordinary origin-first
+acquisition, without origin validator promotion or stale delivery. Pricing persists
+only display estimates. Warming scans all configured GET provider slots and reports
+`fresh_via_relay` for a fresh catalog; responses excluded by cache policy report
+`not_stored`. No live paid delivery or Tor qualification is implied by offline tests.
 
 Pricing suffixes use compact provenance labels:
 

@@ -986,12 +986,16 @@ Local signing regressions do not prove live settlement.
 
 `curl/provider.toml` pins the vendor's public OpenAPI schema for `POST /curl`.
 It advertises $0.01 per call on Base USDC and returns origin status, headers and
-body text. Redirects are automatically followed by the vendor; discovery relay
-use rejects nonempty redirect chains. The documented request cannot forward
+body text. Redirects are automatically followed by the vendor; relay use validates
+the requested URL, final URL and every reported redirect hop under the caller's
+destination and origin policies. The documented request cannot forward
 conditional headers, and binary bodies, body-size limits and completeness are not
 qualified. No paid delivery or Tor qualification has been performed. The discovery
-adapter accepts only unsigned target GETs; enabling the provider as an MCP source
-also exposes the vendor's other target-method choices. See
+adapter accepts only faithfully representable unsigned target requests from its
+configured method lists. Enabling the provider as an MCP source also exposes the
+vendor's target-method choices. Reported URLs cannot prove hidden intermediate
+destinations or target TLS/plaintext integrity: configured relay use trusts the
+service for those properties. See
 [relay configuration](../docs/configuration.md#paid-discovery-relay).
 
 ## relayshield.toml — RelayShield
@@ -1231,7 +1235,8 @@ help without constraining reusable defaults.
 ## agproxy.toml — AGProxy
 
 Primary contracts: [agent guide](https://agproxy.shveik.dev/llms.txt) and
-[OpenAPI](https://agproxy.shveik.dev/openapi.json). The reusable definition uses
+[OpenAPI](https://agproxy.shveik.dev/openapi.json), pinned in full as
+`agproxy-openapi.json` for local bootstrap. The reusable definition uses
 root routes from the guide instead of the schema's first `/v1` server, with
 `/x402` as a naming anchor and a root fallback. Both `/x402/*` and `/mpp/*`
 explicitly accept x402 challenges; an MPP-only pricing annotation on an alias
@@ -1259,14 +1264,15 @@ rather than treating a quote as request validation. Proxy packs are separate,
 higher-priced purchases delivering credentials for a traffic allowance.
 
 No paid delivery, refund, Tor reachability or target-header preservation has been
-qualified here. A fallback adapter needs the array envelope, binary decoding,
-limits and billing semantics; changing the existing Curl provider path alone
-cannot supply those adaptations.
+qualified here. Its `relay_format = "agproxy"` adapter handles the array envelope,
+binary decoding, limits and billing semantics. Refund claims never authorize
+another payment after an unresolved signed outcome.
 
 ## horizonpulse.toml — Horizon Pulse
 
 Primary contracts: [agent guide](https://horizonpulse.dev/llms.txt) and
-[OpenAPI](https://horizonpulse.dev/openapi.json). The reusable definition exposes
+[OpenAPI](https://horizonpulse.dev/openapi.json), pinned in full as
+`horizonpulse-openapi.json` for local bootstrap. The reusable definition exposes
 its supported HTTP catalog with `/api` naming and a root fallback. Its five
 same-path GET/POST pairs use default POST selection: HTTP and extraction add body
 support, grocery routes add structured inputs/batches, and batch accepts a JSON
@@ -1302,10 +1308,38 @@ not a failed unpaid relay call. `/api/fetch` instead returns cleaned page text;
 it is not a raw-response replacement. Filtered header support does not establish
 that x402 payment headers, duplicate headers or cookies survive unaltered.
 
-No paid delivery or Tor reachability has been qualified here. Both new providers
-follow redirects remotely and return a final URL rather than Curl's complete
-reported redirect chain; a final URL cannot establish every intermediate hop.
-Their response envelopes differ from the current Curl adapter. Selection and any
-ordered multi-provider fallback require the generalized relay plan to be revised
-and independently reviewed; these definitions do not change runtime defaults or
-permit another paid attempt after an ambiguous signed relay outcome.
+No paid delivery or Tor reachability has been qualified here. AGProxy and Horizon
+Pulse follow redirects remotely and return a final URL rather than Curl's
+reported redirect chain. Relay use checks requested and final URLs against the
+caller's destination/origin policies, but a final URL cannot establish every
+intermediate hop. Configured use trusts the provider's remote redirect and public
+destination enforcement, hidden hops, and target TLS/plaintext integrity. This
+limited evidence alone does not skip a configured adapter, including under an
+origin allowlist. Header support still requires faithful representation; payment
+signatures and other target credentials gain no forwarding authority. Ordered
+lists never permit another paid attempt after an ambiguous signed relay outcome.
+
+## Pinned relay contracts
+
+`agproxy-openapi.json` and `horizonpulse-openapi.json` are complete, unmodified
+primary vendor OpenAPI downloads, embedded through `src/providers/assets.rs`.
+Their runtime consumer is offline relay bootstrap, and ordinary provider imports
+reuse the same complete catalogs. They are not reduced test fixtures. Curl's
+complete vendor schema remains in `curl/openapi.json`.
+
+Update from the primary sources deliberately:
+
+```sh
+curl --fail --location https://agproxy.shveik.dev/openapi.json -o providers/agproxy-openapi.json
+curl --fail --location https://horizonpulse.dev/openapi.json -o providers/horizonpulse-openapi.json
+```
+
+Review the corresponding primary guides at
+<https://agproxy.shveik.dev/llms.txt> and <https://horizonpulse.dev/llms.txt> alongside
+schema changes. Preserve the full documents, all supported reusable operations,
+filters, response contracts and pricing prose. Check every `$ref` resolves within
+its own document; external references require an explicit local reference closure
+before bootstrap can remain offline. Run the focused `relay_policy` asset tests
+and affected provider/adapter regressions, and review any request limits, encoding,
+redirect, header or billing changes before accepting the new contracts. Merely
+downloading a new schema does not qualify paid delivery, refunds or Tor.

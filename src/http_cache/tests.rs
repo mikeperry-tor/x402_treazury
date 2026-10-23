@@ -170,6 +170,21 @@ async fn handler(State(state): State<Arc<Mutex<Origin>>>, request: Request) -> R
             "",
         )
             .into_response(),
+        16 => (axum::http::StatusCode::PARTIAL_CONTENT, "{\"value\":16}").into_response(),
+        17 => (
+            axum::http::StatusCode::OK,
+            [("content-range", "bytes 0-11/100")],
+            "{\"value\":17}",
+        )
+            .into_response(),
+        18 => (axum::http::StatusCode::NO_CONTENT, "").into_response(),
+        19 => (axum::http::StatusCode::FOUND, "{\"value\":19}").into_response(),
+        20 => (
+            axum::http::StatusCode::NOT_MODIFIED,
+            [("content-range", "bytes 0-11/100")],
+            "",
+        )
+            .into_response(),
         _ => (
             axum::http::StatusCode::OK,
             [("cache-control", "max-age=600")],
@@ -1575,4 +1590,95 @@ async fn tor_catalog_retries_promote_only_valid_json_or_304_and_stop_on_local_or
     ));
 
     origin.abort();
+}
+
+#[tokio::test]
+async fn static_catalog_partial_documents_and_bounds_never_schedule_paid_fallback() {
+    use std::sync::atomic::Ordering;
+    let (url, origin, task) = fixture().await;
+    let (relay, observed, relay_task) =
+        crate::discovery_relay::tests::fixture(serde_json::json!({}), false, false).await;
+    let network = crate::network::NetworkContext::new(Default::default()).unwrap();
+    let cfg = Config {
+        spec: url.clone(),
+        max_spec_bytes: 1024,
+        discovery_relay: Some(relay),
+        ..Default::default()
+    };
+    for mode in [16, 17, 8, 20] {
+        origin.lock().unwrap().mode = mode;
+        let result = catalog::prepare_json_discovery_with(&cfg, &network).await;
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("partial/bounded catalog must fail before a relay continuation"),
+        };
+        assert_eq!(
+            error.downcast_ref::<catalog::LoadStage>(),
+            Some(&catalog::LoadStage::Body)
+        );
+        assert_eq!(observed.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(observed.signed.load(Ordering::SeqCst), 0);
+    }
+    assert_eq!(origin.lock().unwrap().calls.len(), 4);
+    // Complete malformed remote content retains the authored static fallback rule.
+    for mode in [4, 18] {
+        origin.lock().unwrap().mode = mode;
+        assert!(matches!(
+            catalog::prepare_json_discovery_with(&cfg, &network)
+                .await
+                .unwrap(),
+            catalog::CatalogLoad::RelayPending(_)
+        ));
+    }
+    origin.lock().unwrap().mode = 19;
+    let document = catalog::prepare_json_discovery_with(&cfg, &network)
+        .await
+        .unwrap();
+    assert!(matches!(document, catalog::CatalogLoad::Ready(value) if value["value"] == 19));
+    origin.lock().unwrap().mode = 0;
+    assert_eq!(
+        catalog::load_json_with_limit(&url, &client(&url), 1024)
+            .await
+            .unwrap()["value"],
+        1
+    );
+    origin.lock().unwrap().mode = 16;
+    assert!(
+        catalog::load_json_with_limit(&url, &client(&url), 1024)
+            .await
+            .is_err()
+    );
+    assert_eq!(observed.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(observed.signed.load(Ordering::SeqCst), 0);
+    task.abort();
+    relay_task.abort();
+}
+
+#[tokio::test]
+async fn static_catalog_proven_local_proxy_refusal_never_schedules_paid_fallback() {
+    use std::sync::atomic::Ordering;
+    let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = socket.local_addr().unwrap();
+    drop(socket);
+    let network = crate::network::NetworkContext::new(crate::network::NetworkPolicy {
+        mode: crate::network::Mode::Tor,
+        socks_endpoint: Some(endpoint),
+        ..Default::default()
+    })
+    .unwrap();
+    let (relay, observed, relay_task) =
+        crate::discovery_relay::tests::fixture(serde_json::json!({}), false, false).await;
+    let cfg = Config {
+        spec: "https://refusal.example.com/openapi.json".into(),
+        discovery_relay: Some(relay),
+        ..Default::default()
+    };
+    let result = catalog::prepare_json_discovery_with(&cfg, &network).await;
+    assert!(
+        result.is_err(),
+        "a permanent local proxy failure cannot schedule relay work"
+    );
+    assert_eq!(observed.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(observed.signed.load(Ordering::SeqCst), 0);
+    relay_task.abort();
 }

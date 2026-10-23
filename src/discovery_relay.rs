@@ -1,54 +1,15 @@
-//! Explicit paid discovery through the Curl response envelope, never a transport retry.
+//! Ordered paid read relays; static cache/readiness ownership stays with discovery.
+mod adapters;
+mod policy;
+mod sequence;
 use crate::{
     catalog::{Config, RoutedRequest},
     payment::PaidClient,
 };
 use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Instant,
-};
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct Policy {
-    pub provider: PathBuf,
-    #[serde(default)]
-    pub wallet: Option<String>,
-    #[serde(default)]
-    pub serve: bool,
-    #[serde(default)]
-    pub warm: bool,
-    /// Allow uncached Coinbase search fallback with the authenticated endpoint payer.
-    #[serde(default = "search_default")]
-    pub search: bool,
-    /// Empty means all authored sources.
-    #[serde(default)]
-    pub sources: Vec<String>,
-}
-fn search_default() -> bool {
-    true
-}
-impl Policy {
-    pub fn validate(&self, config: &crate::deployment::MetaConfig) -> Result<()> {
-        if let Some(wallet) = &self.wallet {
-            ensure!(
-                config.wallets.contains_key(wallet),
-                "discovery_relay.wallet must name a declared wallet"
-            );
-        }
-        for source in &self.sources {
-            ensure!(
-                config.sources.contains_key(source),
-                "discovery_relay: unknown source {source}"
-            );
-        }
-        Ok(())
-    }
-}
+pub use policy::Policy;
+pub(crate) use sequence::SearchRelay;
+use std::{collections::BTreeMap, path::Path, sync::Arc, time::Instant};
 /// The stable logical profile, never a current rotating address or listener order.
 pub(crate) fn resolve_wallets(
     policy: &Policy,
@@ -57,6 +18,9 @@ pub(crate) fn resolve_wallets(
     selected: impl IntoIterator<Item = String>,
 ) -> Result<BTreeMap<String, String>> {
     use sha2::{Digest, Sha256};
+    if !policy.has_method("GET") {
+        return Ok(BTreeMap::new());
+    }
     let mut result = BTreeMap::new();
     for source in selected {
         if !policy.sources.is_empty() && !policy.sources.contains(&source) {
@@ -107,43 +71,6 @@ pub(crate) async fn build(
     Ok(relays)
 }
 
-#[derive(Default)]
-struct State {
-    #[cfg(test)]
-    dependency_wait: Option<Arc<tokio::sync::Notify>>,
-    changes: Arc<tokio::sync::Notify>,
-    stopped: bool,
-    attempts: BTreeMap<(String, String), (u8, Instant)>,
-    responses: BTreeMap<(String, String), Arc<Response>>,
-    failures: BTreeMap<(String, String), TargetFailure>,
-}
-struct NotifyOnCompletion(Arc<tokio::sync::Notify>);
-impl Drop for NotifyOnCompletion {
-    fn drop(&mut self) {
-        self.0.notify_waiters();
-    }
-}
-/// A completed Curl response reporting failure for this target, not the relay service.
-#[derive(Clone, Copy, Debug)]
-struct TargetFailure {
-    reason: &'static str,
-    status: Option<u16>,
-    limit: Option<(&'static str, usize)>,
-}
-impl std::fmt::Display for TargetFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Curl target failed: {}; no retry for this target",
-            self.reason
-        )?;
-        if let Some((setting, limit)) = self.limit {
-            write!(f, "; relayed discovery body exceeds {setting}={limit}")?;
-        }
-        Ok(())
-    }
-}
-impl std::error::Error for TargetFailure {}
 /// Deliberately has no source: upstream errors can contain credentials or prose.
 #[derive(Debug)]
 struct RelayFailure {
@@ -152,6 +79,12 @@ struct RelayFailure {
 }
 impl RelayFailure {
     fn from_error(error: &anyhow::Error) -> Self {
+        if error.is::<crate::payment::IncompleteRelayResponse>() {
+            return Self {
+                reason: "partial_response",
+                status: None,
+            };
+        }
         if let Some(http) = error.downcast_ref::<reqwest::Error>() {
             let reason = if http.is_timeout() && http.is_connect() {
                 "connection_timeout"
@@ -219,12 +152,64 @@ impl std::fmt::Display for RelayFailure {
 }
 impl std::error::Error for RelayFailure {}
 
-/// Scheduling information only; a retry still passes the original relay breaker,
-/// target attempt bound and ordinary payment admission. Unknown failures are terminal.
+#[derive(Default)]
+pub(crate) struct State {
+    #[cfg(test)]
+    dependency_wait: Option<Arc<tokio::sync::Notify>>,
+    changes: Arc<tokio::sync::Notify>,
+    providers: BTreeMap<String, Arc<tokio::sync::Mutex<()>>>,
+    stopped: std::collections::BTreeSet<String>,
+    outcomes: BTreeMap<(String, String), std::result::Result<Arc<Response>, TargetFailure>>,
+}
+/// Redacted definitive target/provider facts retained by the static acquisition owner.
+#[derive(Clone, Copy, Debug)]
+struct TargetFailure {
+    reason: &'static str,
+    status: Option<u16>,
+    limit: Option<(&'static str, usize)>,
+    advance: bool,
+    possible: bool,
+    retry_after: Option<crate::network::RetryAfter>,
+}
+impl TargetFailure {
+    fn new(reason: &'static str, status: Option<u16>, advance: bool) -> Self {
+        Self {
+            reason,
+            status,
+            limit: None,
+            advance,
+            possible: false,
+            retry_after: None,
+        }
+    }
+    fn error(self, possible: bool) -> anyhow::Error {
+        let error = match self.limit {
+            Some((setting, limit)) => {
+                crate::limits::exceeded("relayed discovery body", setting, limit).context(self)
+            }
+            None => self.into(),
+        };
+        if possible || self.possible {
+            error.context("Relay response_rejected or delivery failed; a relay authorization may still charge; do not automatically repeat this logical call")
+        } else {
+            error
+        }
+    }
+}
+impl std::fmt::Display for TargetFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "relay target failed: {}", self.reason)?;
+        if let Some(status) = self.status {
+            write!(f, "; HTTP {status}")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for TargetFailure {}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RetryDisposition {
     DependencyWait,
-    Backoff(std::time::Duration),
     Terminal,
 }
 impl RetryDisposition {
@@ -241,7 +226,6 @@ impl std::fmt::Display for RetryDisposition {
             Self::DependencyWait => {
                 "discovery relay payment identity unavailable; waiting for capacity"
             }
-            Self::Backoff(_) => "discovery relay target retry backoff before paid intent",
             Self::Terminal => "discovery relay retry unavailable",
         })
     }
@@ -251,8 +235,7 @@ impl std::error::Error for RetryDisposition {}
 #[derive(Clone)]
 pub struct Relay {
     client: PaidClient,
-    endpoint: String,
-    response_limit: usize,
+    sequence: SearchRelay,
     pub key: String,
     sources: Vec<String>,
     state: Arc<tokio::sync::Mutex<State>>,
@@ -262,12 +245,17 @@ impl std::fmt::Debug for Relay {
         f.write_str("DiscoveryRelay")
     }
 }
+#[derive(Clone)]
 pub struct Response {
     pub status: u16,
     pub headers: reqwest::header::HeaderMap,
     pub body: Vec<u8>,
+    pub final_url: reqwest::Url,
     pub delay: std::time::Duration,
     received: Instant,
+    pub cache_key: String,
+    pub via: String,
+    pub payment_may_have_occurred: bool,
 }
 impl Response {
     pub fn catalog_cache_age(&self) -> std::time::Duration {
@@ -275,106 +263,6 @@ impl Response {
     }
     pub fn cache_delay(&self) -> std::time::Duration {
         self.delay.saturating_add(self.received.elapsed())
-    }
-}
-/// Immutable local relay bootstrap shared by static acquisition and live search.
-/// Search deliberately owns no URL cache, breaker, readiness queue or mutable state.
-#[derive(Clone)]
-pub(crate) struct SearchRelay {
-    endpoint: String,
-    cfg: Config,
-}
-impl SearchRelay {
-    #[cfg(test)]
-    pub(crate) fn fixture(endpoint: String, cfg: Config) -> Self {
-        Self { endpoint, cfg }
-    }
-    pub(crate) async fn load(policy: &Policy, path: &Path) -> Result<Self> {
-        let provider = if policy.provider.is_absolute() {
-            policy.provider.clone()
-        } else {
-            path.parent()
-                .unwrap_or(Path::new("."))
-                .join(&policy.provider)
-        };
-        let table = toml::from_str(&tokio::fs::read_to_string(&provider).await?)?;
-        let cfg = crate::config::resolve(table, &provider).await?.settings;
-        ensure!(
-            !cfg.spec.starts_with("http://") && !cfg.spec.starts_with("https://"),
-            "discovery relay requires a local bootstrap catalog"
-        );
-        let document: serde_json::Value =
-            serde_json::from_slice(&tokio::fs::read(&cfg.spec).await?)?;
-        let tools = crate::catalog::build_tools(&cfg, &document, "relay")?;
-        ensure!(
-            tools
-                .iter()
-                .any(|t| t.method == "POST" && t.path == "/curl"),
-            "discovery relay provider must expose POST /curl"
-        );
-        let base = cfg
-            .base_url
-            .as_deref()
-            .context("discovery relay requires base_url")?;
-        let endpoint = format!("{}/curl", base.trim_end_matches('/'));
-        crate::network::public_url(&endpoint)?;
-        Ok(Self { endpoint, cfg })
-    }
-
-    pub(crate) async fn fetch(
-        &self,
-        client: PaidClient,
-        url: &str,
-        policy: &crate::discovery::policy::Policy,
-    ) -> Result<Vec<u8>> {
-        // The target has already passed the source-management origin policy.
-        crate::network::public_url(url)?;
-        let client = client
-            .with_source_identity("builtin:coinbase-search-relay")
-            .with_transport(self.cfg.transport())
-            .with_timeout(
-                policy
-                    .read_timeout_seconds
-                    .map(std::time::Duration::from_secs)
-                    .or_else(|| {
-                        self.cfg
-                            .read_timeout_seconds
-                            .map(std::time::Duration::from_secs_f64)
-                    }),
-            )
-            .with_download_limits(policy.max_response_bytes, policy.max_help_bytes)
-            .public_destinations();
-        let progress = crate::payment::SubmissionProgress::default();
-        let started = Instant::now();
-        let output = client.execute_response_scoped(
-            RoutedRequest {
-                method: "POST".into(), url: self.endpoint.clone(),
-                query: BTreeMap::new(),
-                body: Some(serde_json::json!({"url":url,"method":"GET"})),
-            },
-            &progress,
-            client.operation_key(None, "POST", "/curl", &self.endpoint),
-        ).await.map_err(|error| {
-            let reason = if let Some(limit) = error.downcast_ref::<crate::limits::DownloadLimit>() {
-                limit.to_string()
-            } else { RelayFailure::from_error(&error).to_string() };
-            anyhow::anyhow!("coinbase_search stage=relay relay=failed {reason}; payment_may_have_occurred={}; do not automatically repeat the search", progress.possible())
-        })?;
-        decode(&output.bytes, url, 200, policy.max_response_bytes,
-            "max_response_bytes", started.elapsed())
-            .and_then(|response| {
-                ensure!(
-                    !response.headers.contains_key(reqwest::header::CONTENT_RANGE),
-                    "coinbase_search relay partial_response"
-                );
-                Ok(response.body)
-            })
-            .map_err(|error| {
-                let reason = if let Some(limit) = error.downcast_ref::<crate::limits::DownloadLimit>() {
-                    limit.to_string()
-                } else { "response_rejected".into() };
-                anyhow::anyhow!("coinbase_search stage=relay category={reason} relay=failed; payment may have occurred; do not automatically repeat the search")
-            })
     }
 }
 impl Relay {
@@ -387,31 +275,11 @@ impl Relay {
         client: PaidClient,
         state: Arc<tokio::sync::Mutex<State>>,
     ) -> Result<Arc<Self>> {
-        let SearchRelay { endpoint, cfg } = SearchRelay::load(policy, path).await?;
-        // Enablement and source selection gate access, but do not change the
-        // representation: warming must remain reusable after changing those flags.
-        let key = serde_json::to_string(&(
-            &policy.wallet,
-            &endpoint,
-            cfg.allow_http1,
-            cfg.allow_tls12,
-            cfg.read_timeout_seconds.map(f64::to_bits),
-            cfg.max_response_bytes,
-        ))?;
+        let sequence = SearchRelay::load(policy, path).await?;
         Ok(Arc::new(Self {
-            client: client
-                .with_source_identity("builtin:discovery-relay")
-                .with_selection(crate::network::SelectionPolicy::Legacy)
-                .with_transport(cfg.transport())
-                .with_timeout(
-                    cfg.read_timeout_seconds
-                        .map(std::time::Duration::from_secs_f64),
-                )
-                .with_download_limits(cfg.max_response_bytes, cfg.max_help_bytes)
-                .public_destinations(),
-            endpoint,
-            response_limit: cfg.max_response_bytes,
-            key,
+            client,
+            sequence,
+            key: serde_json::to_string(&policy.wallet)?,
             sources: policy.sources.clone(),
             state,
         }))
@@ -419,14 +287,9 @@ impl Relay {
     pub fn allows(&self, source: &str) -> bool {
         self.sources.is_empty() || self.sources.iter().any(|s| s == source)
     }
-    /// Deployment shutdown closes all new scheduling first, then drains every
-    /// shared client before closing treasury/store ownership.
     pub async fn drain(&self) {
         self.client.drain().await;
     }
-    /// Deferred serving may wait for an existing managed identity. Cancelling
-    /// this waiter cancels unsigned waiting only; accepted paid work retains its
-    /// ordinary owner. Deployment shutdown must still call `drain`.
     pub async fn fetch_when_ready(
         &self,
         url: &str,
@@ -434,9 +297,10 @@ impl Relay {
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
-        self.fetch_when_ready_bounded(url, expected, limit, setting, None, None)
+        self.fetch_when_ready_bounded(url, expected, limit, setting, None, None, None)
             .await
     }
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn fetch_when_ready_bounded(
         &self,
         url: &str,
@@ -445,16 +309,14 @@ impl Relay {
         setting: &'static str,
         gate: Option<Arc<tokio::sync::Semaphore>>,
         operator_status: Option<tokio::sync::watch::Sender<bool>>,
+        retry_after: Option<crate::network::RetryAfter>,
     ) -> Result<Arc<Response>> {
         let capacity = self.client.discovery_changes().await?;
         let relay_changes = self.state.lock().await.changes.clone();
         loop {
-            // Subscribe before the serialized fetch rechecks all target, breaker
-            // and identity facts. Events between that check and waiting survive.
             let relay_changed = relay_changes.notified();
             tokio::pin!(relay_changed);
             relay_changed.as_mut().enable();
-            // Notified must be enabled before fetch, not first polled afterwards.
             let capacity_notice = capacity
                 .as_ref()
                 .map(|changes| changes.clone().notified_owned());
@@ -477,27 +339,26 @@ impl Relay {
                     limit,
                     setting,
                     gate.iter().cloned().collect(),
+                    retry_after,
                 )
                 .await;
             match result {
-                Err(error) => match RetryDisposition::from_error(&error) {
-                    RetryDisposition::DependencyWait => {
-                        #[cfg(test)]
-                        if let Some(signal) = &self.state.lock().await.dependency_wait {
-                            signal.notify_one();
-                        }
-                        let notice = async {
-                            match capacity_notice {
-                                Some(notice) => notice.await,
-                                None => std::future::pending().await,
-                            }
-                        };
-                        tokio::select! { _ = notice => {}, _ = relay_changed => {} }
+                Err(error)
+                    if RetryDisposition::from_error(&error) == RetryDisposition::DependencyWait =>
+                {
+                    #[cfg(test)]
+                    if let Some(signal) = &self.state.lock().await.dependency_wait {
+                        signal.notify_one();
                     }
-                    RetryDisposition::Backoff(delay) => tokio::time::sleep(delay).await,
-                    RetryDisposition::Terminal => return Err(error),
-                },
-                success => return success,
+                    let notice = async {
+                        match capacity_notice {
+                            Some(notice) => notice.await,
+                            None => std::future::pending().await,
+                        }
+                    };
+                    tokio::select! { _ = notice => {}, _ = relay_changed => {} }
+                }
+                outcome => return outcome,
             }
         }
     }
@@ -508,7 +369,7 @@ impl Relay {
         limit: usize,
         setting: &'static str,
     ) -> Result<Arc<Response>> {
-        self.fetch_with_capacity(url, expected, limit, setting, Vec::new())
+        self.fetch_with_capacity(url, expected, limit, setting, Vec::new(), None)
             .await
     }
     pub(crate) async fn fetch_with_capacity(
@@ -518,183 +379,135 @@ impl Relay {
         limit: usize,
         setting: &'static str,
         capacity: Vec<Arc<tokio::sync::Semaphore>>,
+        retry_after: Option<crate::network::RetryAfter>,
     ) -> Result<Arc<Response>> {
-        let relay = self.clone();
-        let url = url.to_owned();
-        self.client
-            .run_owned(async move {
-                relay
-                    .fetch_owned(&url, expected, limit, setting, capacity)
-                    .await
-            })
-            .await?
-    }
-    async fn fetch_owned(
-        &self,
-        url: &str,
-        expected: u16,
-        limit: usize,
-        setting: &'static str,
-        capacity: Vec<Arc<tokio::sync::Semaphore>>,
-    ) -> Result<Arc<Response>> {
-        let target = reqwest::Url::parse(url)?;
-        ensure!(
-            target.scheme() == "https"
-                && target.username().is_empty()
-                && target.password().is_none(),
-            "discovery relay targets must be HTTPS without credentials"
-        );
-        let mut state = self.state.lock().await;
-        let key = (self.key.clone(), url.to_owned());
-        if let Some(failure) = state.failures.get(&key) {
-            return Err((*failure).into());
+        let target = adapters::TargetRequest {
+            method: reqwest::Method::GET,
+            url: url.parse()?,
+            headers: Default::default(),
+            body: None,
+            allowed_origins: Vec::new(),
+        };
+        let contract = match expected {
+            200 => sequence::Contract::Catalog,
+            402 => sequence::Contract::Pricing,
+            _ => anyhow::bail!("unsupported static discovery response contract"),
+        };
+        let request = StaticFetch {
+            prepared: self.sequence.prepare(&target, limit)?,
+            target,
+            contract,
+            limit,
+            setting,
+            scope: static_scope(
+                &self.key,
+                if expected == 200 {
+                    "catalog"
+                } else {
+                    "pricing"
+                },
+            ),
+        };
+        if let Some(cached) = request
+            .prepared
+            .cached(
+                self.state.clone(),
+                &request.scope,
+                &request.target,
+                limit,
+                setting,
+            )
+            .await
+        {
+            return cached;
         }
-        if let Some(response) = state.responses.get(&key).cloned() {
-            if response.status != expected {
-                anyhow::bail!("cached discovery relay origin status mismatch; no new fetch");
-            }
-            if response.body.len() > limit {
-                return Err(crate::limits::exceeded(
-                    "relayed discovery body",
-                    setting,
-                    limit,
-                ));
-            }
-            return Ok(response.clone());
-        }
-        ensure!(
-            !state.stopped,
-            "discovery relay disabled after error or cancellation; no paid retry"
-        );
-        if let Some((attempts, last)) = state.attempts.get(&key) {
-            ensure!(
-                *attempts < 3,
-                "discovery relay unsigned attempt limit reached for target"
-            );
-            let remaining = std::time::Duration::from_secs(1).saturating_sub(last.elapsed());
-            if !remaining.is_zero() {
-                return Err(RetryDisposition::Backoff(remaining).into());
-            }
-        }
-        // This read does not allocate or publish a role. The actual request still
-        // resolves its identity and performs ordinary challenge-time admission.
         if !self
             .client
             .discovery_ready()
             .await
-            .map_err(|error| RelayFailure::from_error(&error))?
+            .map_err(|e| RelayFailure::from_error(&e))?
         {
             return Err(RetryDisposition::DependencyWait.into());
         }
-        // Queue/cache/dependency checks reserve no active transport slots. Once
-        // admitted, this retained owner keeps capacity through publication even
-        // if its waiter disconnects. Callers order source capacity before global.
-        let mut permits = Vec::with_capacity(capacity.len());
-        for gate in capacity {
-            permits.push(gate.acquire_owned().await?);
-        }
-        let _permits = permits;
-        // The accepted owner retains this lock through payment, decoding and
-        // publication. Cancelling its waiter cannot admit another paid fetch.
-        // Leave the breaker closed if the owner fails before publishing an outcome.
-        let _notify_on_completion = NotifyOnCompletion(state.changes.clone());
-        state.stopped = true;
-        let progress = crate::payment::SubmissionProgress::default();
-        let attempt = state
-            .attempts
-            .entry(key.clone())
-            .or_insert((0, Instant::now()));
-        attempt.0 += 1;
-        attempt.1 = Instant::now();
-        tracing::info!(
-            "Using configured paid discovery relay; target content and headers are supplied by relay"
-        );
-        let started = Instant::now();
-        let result = async {
-            let output = self
-                .client
-                .execute_response_scoped(
-                    RoutedRequest {
-                        method: "POST".into(),
-                        url: self.endpoint.clone(),
-                        query: BTreeMap::new(),
-                        body: Some(serde_json::json!({"url":url,"method":"GET"})),
-                    },
-                    &progress,
-                    self.client
-                        .operation_key(None, "POST", "/curl", &self.endpoint),
-                )
-                .await
-                .map_err(|error| {
-                    let failure = RelayFailure::from_error(&error);
-                    tracing::warn!(
-                        reason = failure.reason,
-                        http_status = failure.status,
-                        connect_timeout_seconds =
-                            crate::network::global().policy.connect_timeout().as_secs(),
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        possible_submission = progress.possible(),
-                        relay_read_timeout_seconds = crate::network::global()
-                            .read_timeout(self.client.timeout())
-                            .as_secs_f64(),
-                        max_response_bytes = self.response_limit,
-                        "Discovery relay request failed"
-                    );
-                    failure
-                })?;
-            decode(
-                &output.bytes,
-                url,
-                expected,
-                limit,
-                setting,
-                started.elapsed(),
+        // The origin's handoff delay precedes accepted relay work. Cancellation
+        // here cannot abandon a relay authorization or retain serialization.
+        crate::network::sleep_retry_after(retry_after).await;
+        let relay = self.clone();
+        self.client
+            .run_owned(async move { relay.fetch_owned(request, capacity).await })
+            .await?
+    }
+    async fn fetch_owned(
+        &self,
+        request: StaticFetch,
+        capacity: Vec<Arc<tokio::sync::Semaphore>>,
+    ) -> Result<Arc<Response>> {
+        request
+            .prepared
+            .acquire(
+                self.client.clone(),
+                &request.target,
+                request.contract,
+                request.limit,
+                request.setting,
+                None,
+                crate::limits::HELP_BYTES,
+                None,
+                &capacity,
+                Some((self.state.clone(), &request.scope)),
+                None,
             )
-        }
-        .await;
-        match result {
-            Ok(response) => {
-                let response = Arc::new(response);
-                state.responses.insert(key, response.clone());
-                state.stopped = false;
-                Ok(response)
-            }
-            Err(error) if error.downcast_ref::<TargetFailure>().is_some() => {
-                let failure = *error
-                    .downcast_ref::<TargetFailure>()
-                    .expect("typed target failure");
-                state.failures.insert(key, failure);
-                state.stopped = false;
-                tracing::warn!(
-                    reason = failure.reason,
-                    http_status = failure.status,
-                    "Curl target fetch failed; no retry for this target, other targets remain enabled"
-                );
-                Err(error)
-            }
-            Err(error) if !progress.possible() => {
-                state.stopped = false;
-                let (attempts, last) = state.attempts.get(&key).expect("recorded relay attempt");
-                if *attempts < 3 {
-                    tracing::info!(
-                        attempt = attempts,
-                        max_attempts = 3,
-                        "Discovery relay failed before paid intent; retry available, unrelated targets remain enabled"
-                    );
-                    Err(error.context(RetryDisposition::Backoff(
-                        std::time::Duration::from_secs(1).saturating_sub(last.elapsed()),
-                    )))
-                } else {
-                    Err(error.context("discovery relay unsigned attempt limit reached for target"))
-                }
-            }
-            Err(error) => {
-                tracing::warn!("Discovery relay failed; disabled for this run, no paid retry");
-                Err(error.context("discovery relay disabled for this run; no paid retry"))
-            }
-        }
+            .await
     }
 }
+struct StaticFetch {
+    prepared: sequence::Prepared,
+    target: adapters::TargetRequest,
+    contract: sequence::Contract,
+    scope: String,
+    limit: usize,
+    setting: &'static str,
+}
+
+fn static_scope(wallet: &str, kind: &str) -> String {
+    serde_json::to_string(&(wallet, kind)).expect("serializable static request scope")
+}
+pub(crate) fn slots(
+    cfg: &Config,
+    url: &str,
+    kind: &str,
+    limit: usize,
+) -> Vec<crate::http_cache::Slot> {
+    let Some(relay) = &cfg.discovery_relay else {
+        return Vec::new();
+    };
+    relay
+        .sequence
+        .cache_keys(&static_scope(&relay.key, kind))
+        .iter()
+        .filter_map(|key| slot_for(cfg, url, kind, limit, key))
+        .collect()
+}
+pub(crate) fn slot_for(
+    cfg: &Config,
+    url: &str,
+    kind: &str,
+    limit: usize,
+    key: &str,
+) -> Option<crate::http_cache::Slot> {
+    crate::http_cache::Slot::new(cfg, url, kind, limit).map(|slot| slot.relay(key))
+}
+#[cfg(test)]
+pub(crate) fn slot(
+    cfg: &Config,
+    url: &str,
+    kind: &str,
+    limit: usize,
+) -> Option<crate::http_cache::Slot> {
+    slots(cfg, url, kind, limit).into_iter().next()
+}
+
+#[cfg(test)]
 fn decode(
     bytes: &[u8],
     url: &str,
@@ -703,89 +516,33 @@ fn decode(
     setting: &'static str,
     delay: std::time::Duration,
 ) -> Result<Response> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).context("invalid relay JSON")?;
-    ensure!(value["url"].as_str() == Some(url), "relay target mismatch");
-    ensure!(value["method"] == "GET", "relay method mismatch");
-    // Validate attribution and envelope shape before treating a failure as target-local.
-    ensure!(
-        value["error"].is_null() || value["error"].is_string(),
-        "invalid relay error field"
-    );
-    let status = value["statusCode"]
-        .as_u64()
-        .and_then(|s| u16::try_from(s).ok())
-        .context("invalid relay origin status")?;
-    ensure!(
-        value["headers"].is_object()
-            && value["body"].is_string()
-            && value["redirectChain"].is_array(),
-        "invalid relay response envelope"
-    );
-    let target_failure = |reason| TargetFailure {
-        reason,
-        status: (status != 0).then_some(status),
-        limit: None,
+    let target = adapters::TargetRequest {
+        method: reqwest::Method::GET,
+        url: url.parse()?,
+        headers: Default::default(),
+        body: None,
+        allowed_origins: Vec::new(),
     };
-    if value["error"].as_str().is_some_and(|s| !s.is_empty()) {
-        return Err(target_failure("origin_request").into());
-    }
-    if status != expected {
-        return Err(target_failure("http_status").into());
-    }
-    if !value["redirectChain"]
-        .as_array()
-        .expect("validated array")
-        .is_empty()
-    {
-        return Err(target_failure("redirect").into());
-    }
-    if !value.get("truncated").is_none_or(|v| v == false) {
-        return Err(target_failure("truncated_body").into());
-    }
-    let body = value["body"]
-        .as_str()
-        .context("relay body must be text")?
-        .as_bytes()
-        .to_vec();
-    if body.len() > limit {
-        return Err(
-            crate::limits::exceeded("relayed discovery body", setting, limit).context(
-                TargetFailure {
-                    limit: Some((setting, limit)),
-                    ..target_failure("body_limit")
-                },
-            ),
-        );
-    }
-    let mut headers = reqwest::header::HeaderMap::new();
-    for (name, value) in value["headers"]
-        .as_object()
-        .context("relay headers missing")?
-    {
-        headers.append(
-            reqwest::header::HeaderName::from_bytes(name.as_bytes())?,
-            reqwest::header::HeaderValue::from_str(
-                value.as_str().context("relay header must be text")?,
-            )?,
-        );
-    }
-    if expected == 200 {
-        let _: serde_json::Value =
-            serde_json::from_slice(&body).context(target_failure("catalog_parse"))?;
-    } else if expected == 402 {
-        ensure!(
-            crate::pricing::price_headers(&headers, Some(402), None)
-                .0
-                .is_some(),
-            target_failure("unusable_pricing")
-        );
-    }
+    let decoded = adapters::Format::Curl.decode(bytes, &target, limit, setting)?;
+    let contract = match expected {
+        200 => sequence::Contract::Catalog,
+        _ => sequence::Contract::Pricing,
+    };
+    // Legacy decoder fixture compatibility; runtime callers always use the common traversal.
+    ensure!(
+        matches!(contract.decision(&decoded), sequence::Decision::Accept),
+        "relay response rejected"
+    );
     Ok(Response {
-        status: expected,
-        headers,
-        body,
+        status: decoded.status,
+        headers: decoded.headers,
+        body: decoded.body,
+        final_url: decoded.final_url,
         delay,
         received: Instant::now(),
+        cache_key: "fixture".into(),
+        via: "curl".into(),
+        payment_may_have_occurred: false,
     })
 }
 pub(crate) fn log_fallback(cfg: &Config, stage: &str, reason: &str, http_status: Option<u16>) {
@@ -825,19 +582,10 @@ pub(crate) fn log_failure(cfg: &Config, stage: &str, error: &anyhow::Error) {
         http_status = failure
             .and_then(|f| f.status)
             .or_else(|| request.and_then(|f| f.status)),
-        "Curl relay fallback failed or unavailable; discovery fetch failed, no retry"
+        possible_submission = failure.is_some_and(|f| f.possible),
+        "Configured relay fallback failed or unavailable; discovery fetch failed, no retry"
     );
 }
-pub(crate) fn slot(
-    cfg: &Config,
-    url: &str,
-    kind: &str,
-    limit: usize,
-) -> Option<crate::http_cache::Slot> {
-    let relay = cfg.discovery_relay.as_ref()?;
-    crate::http_cache::Slot::new(cfg, url, kind, limit).map(|s| s.relay(&relay.key))
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -931,8 +679,7 @@ pub(crate) mod tests {
         (
             Arc::new(Relay {
                 client: PaidClient::new(payer),
-                endpoint,
-                response_limit: crate::limits::RESPONSE_BYTES,
+                sequence: SearchRelay::fixture(endpoint, Config::default()),
                 key: "fixture".into(),
                 sources: vec![],
                 state: Default::default(),
@@ -940,6 +687,25 @@ pub(crate) mod tests {
             f,
             task,
         )
+    }
+    pub(crate) fn set_endpoint(relay: &mut Arc<Relay>, endpoint: String) {
+        Arc::get_mut(relay)
+            .expect("unshared fixture")
+            .sequence
+            .entries
+            .get_mut("GET")
+            .unwrap()[0]
+            .endpoint = endpoint;
+    }
+    pub(crate) fn provider_key(relay: &Relay) -> String {
+        relay.sequence.entries["GET"][0].provider_key.clone()
+    }
+    pub(crate) async fn set_stopped(relay: &Relay, stopped: bool) {
+        if stopped {
+            relay.state.lock().await.stopped.insert(provider_key(relay));
+        } else {
+            relay.state.lock().await.stopped.clear();
+        }
     }
     pub(crate) async fn dependency_wait_signal(relay: &Relay) -> Arc<tokio::sync::Notify> {
         let signal = Arc::new(tokio::sync::Notify::new());
@@ -952,11 +718,17 @@ pub(crate) mod tests {
             .client = client;
     }
     pub(crate) fn is_idle(relay: &Relay) -> bool {
-        relay.state.try_lock().is_ok()
+        relay
+            .state
+            .try_lock()
+            .is_ok_and(|state| state.providers.values().all(|gate| gate.try_lock().is_ok()))
     }
     pub(crate) fn set_timeout(relay: &mut Arc<Relay>, timeout: std::time::Duration) {
         let inner = Arc::get_mut(relay).expect("fixture relay is unshared");
         inner.client = inner.client.clone().with_timeout(timeout);
+        for entry in inner.sequence.entries.values_mut().flatten() {
+            entry.cfg.read_timeout_seconds = Some(timeout.as_secs_f64());
+        }
     }
     fn second_wallet(first: &Relay) -> Relay {
         let payer = crate::payment::Payer::new(
@@ -966,8 +738,7 @@ pub(crate) mod tests {
         .unwrap();
         Relay {
             client: PaidClient::new(payer),
-            endpoint: first.endpoint.clone(),
-            response_limit: first.response_limit,
+            sequence: first.sequence.clone(),
             key: "second-wallet".into(),
             sources: vec![],
             state: first.state.clone(),
@@ -1032,6 +803,27 @@ pub(crate) mod tests {
             &relays["webinfo"].state
         ));
         assert_ne!(relays["social"].key, relays["webinfo"].key);
+    }
+    #[test]
+    fn absent_get_list_does_not_select_static_discovery_wallets() {
+        let config: crate::deployment::MetaConfig =
+            toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
+        let mut policy = config.discovery_relay.clone().unwrap();
+        policy.fallbacks.remove("GET");
+        policy.provider = None;
+        policy
+            .fallbacks
+            .insert("POST".into(), vec!["unused.toml".into()]);
+        assert!(
+            resolve_wallets(
+                &policy,
+                &config,
+                &crate::rotation::assignment::resolve(&config).unwrap(),
+                config.sources.keys().cloned()
+            )
+            .unwrap()
+            .is_empty()
+        );
     }
     #[test]
     fn default_wallet_selection_is_stable_scoped_and_honors_overrides() {
@@ -1126,8 +918,10 @@ pub(crate) mod tests {
     async fn pre_submission_failure_leaves_other_targets_available() {
         let (mut relay, _, task) = fixture(envelope(TARGET), false, false).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        Arc::get_mut(&mut relay).unwrap().endpoint =
-            format!("http://{}/", listener.local_addr().unwrap());
+        set_endpoint(
+            &mut relay,
+            format!("http://{}/", listener.local_addr().unwrap()),
+        );
         drop(listener);
         assert!(
             relay
@@ -1135,7 +929,7 @@ pub(crate) mod tests {
                 .await
                 .is_err()
         );
-        let other_url = "https://other.example/spec";
+        let other_url = "https://other.example.com/spec";
         let (mut other, f, other_task) = fixture(envelope(other_url), false, false).await;
         Arc::get_mut(&mut other).unwrap().state = relay.state.clone();
         assert!(
@@ -1224,13 +1018,16 @@ pub(crate) mod tests {
                 .clone()
                 .with_timeout(std::time::Duration::from_millis(200))
                 .with_download_limits(limit, 4096);
-            inner.response_limit = limit;
+            for entry in inner.sequence.entries.values_mut().flatten() {
+                entry.cfg.max_response_bytes = limit;
+                entry.cfg.read_timeout_seconds = Some(0.2);
+            }
             let error = relay
                 .fetch(TARGET, 200, 4096, "max_spec_bytes")
                 .await
                 .err()
                 .unwrap();
-            let failure = error.downcast_ref::<RelayFailure>().unwrap();
+            let failure = error.downcast_ref::<TargetFailure>().unwrap();
             assert_eq!(failure.reason, reason);
             assert_eq!(failure.status, reject.then_some(502));
             log_failure(&Config::default(), "catalog", &error);
@@ -1335,9 +1132,16 @@ pub(crate) mod tests {
                     (0..4).map(|_| relay.fetch(TARGET, expected, 4096, "max_spec_bytes")),
                 )
                 .await;
-                assert!(results.iter().all(Result::is_err));
+                if expected == 402 && failure == "invalid_content" {
+                    assert!(
+                        results.iter().all(Result::is_ok),
+                        "relayed pricing 402 is terminal even without usable pricing"
+                    );
+                } else {
+                    assert!(results.iter().all(Result::is_err));
+                }
                 assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
-                let other_url = "https://other.example/spec";
+                let other_url = "https://other.example.com/spec";
                 // Two local handlers model Curl's different responses per target;
                 // both relay clients use the same wallet key and shared failure state.
                 let (mut other, other_fixture, other_task) =
@@ -1414,7 +1218,7 @@ pub(crate) mod tests {
                 "max_response_bytes",
                 Default::default()
             )
-            .is_err()
+            .is_ok()
         );
         v["headers"]["payment-required"] =
             json!(STANDARD.encode(r#"{"accepts":[{"amount":"1000","asset":"USDC"}]}"#));
@@ -1562,7 +1366,7 @@ pub(crate) mod tests {
             // The continuation retains its original target/cache/relay after the
             // caller changes its configuration. Concurrent aliases share paid work.
             let original = cfg.clone();
-            cfg.spec = "https://other.example/spec".into();
+            cfg.spec = "https://other.example.com/spec".into();
             cfg.discovery_relay = None;
             let (a, b) = tokio::join!(pending.resume(), pending.resume());
             assert_eq!(a.unwrap(), b.unwrap());
@@ -1619,3 +1423,6 @@ pub(crate) mod tests {
 #[cfg(test)]
 #[path = "discovery_relay/readiness_tests.rs"]
 pub(crate) mod readiness_tests;
+
+#[cfg(test)]
+mod list_tests;

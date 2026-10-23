@@ -67,6 +67,11 @@ async fn origin(
     );
     assert!(fields.iter().any(|(k, v)| k == "scheme" && v == "exact"));
     f.calls.lock().unwrap().push(("origin".into(), q.clone()));
+    if let Some(status) = q.strip_prefix("status-") {
+        return StatusCode::from_u16(status.parse().unwrap())
+            .unwrap()
+            .into_response();
+    }
     match q.as_str() {
         "range-candidate" if sequence(&f, &q).len() == 1 => StatusCode::FORBIDDEN.into_response(),
         "range-initial" | "range-candidate" => (
@@ -455,15 +460,12 @@ async fn fixture() {
     assert_eq!(sequence(&f, "promotion"), ["origin", "origin", "origin"]);
 
     for (q, attempts) in [("range-initial", 1), ("range-candidate", 2)] {
-        let result = invoke(&m, "writer", q).await.unwrap();
-        assert_eq!(result["acquisition"]["via"], "curl");
-        assert_eq!(result["response"], search_response(q));
-        let mut expected = vec!["origin"; attempts];
-        expected.extend(["challenge", "signed"]);
-        assert_eq!(sequence(&f, q), expected);
+        let error = format!("{:#}", invoke(&m, "writer", q).await.unwrap_err());
+        assert!(error.contains("partial_response"), "{error}");
+        assert_eq!(sequence(&f, q), vec!["origin"; attempts]);
         assert!(
             Arc::ptr_eq(&winner, &selected()),
-            "ranged origin JSON cannot promote its candidate; Curl cannot promote it either"
+            "ranged origin JSON cannot promote its candidate or purchase fallback"
         );
     }
     let error = format!(
@@ -496,6 +498,34 @@ async fn fixture() {
             sequence(&f, q),
             ["origin", "challenge", "signed"],
             "complete invalid JSON and nonretryable statuses do not earn isolation retries"
+        );
+    }
+    for status in [
+        400, 403, 408, 429, 500, 502, 503, 504, 401, 404, 410, 501, 505, 520,
+    ] {
+        let q = format!("status-{status}");
+        let result = invoke(&m, "writer", &q).await.unwrap();
+        assert_eq!(result["acquisition"]["via"], "curl");
+        let attempts = if [400, 403, 408, 429, 500, 502, 503, 504].contains(&status) {
+            3
+        } else {
+            1
+        };
+        let mut expected = vec!["origin"; attempts];
+        expected.extend(["challenge", "signed"]);
+        assert_eq!(
+            sequence(&f, &q),
+            expected,
+            "status {status} has one origin sequence before one fallback"
+        );
+    }
+    for status in [206, 402] {
+        let q = format!("status-{status}");
+        assert!(invoke(&m, "writer", &q).await.is_err());
+        assert_eq!(
+            sequence(&f, &q),
+            ["origin"],
+            "partial delivery and unpaid target challenges are terminal"
         );
     }
     assert!(invoke(&m, "writer", "large").await.is_err());

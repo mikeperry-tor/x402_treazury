@@ -130,6 +130,9 @@ pub struct Config {
     pub max_help_bytes: usize,
     pub max_spec_bytes: usize,
     pub spec: String,
+    /// Optional protocol metadata for providers selected as relay adapters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay_format: Option<String>,
     pub name: Option<String>,
     /// Searchable provider capabilities, separate from agent instructions.
     pub description: Option<String>,
@@ -210,6 +213,7 @@ impl Default for Config {
             max_help_bytes: crate::limits::HELP_BYTES,
             max_spec_bytes: crate::limits::SPEC_BYTES,
             spec: String::new(),
+            relay_format: None,
             name: None,
             description: None,
             base_url: None,
@@ -432,7 +436,6 @@ pub(crate) enum CatalogLoad {
 pub(crate) struct RelayContinuation {
     config: Config,
     origin_error: anyhow::Error,
-    relay_slot: Option<crate::http_cache::Slot>,
     retry_after: Option<crate::network::RetryAfter>,
 }
 impl RelayContinuation {
@@ -482,7 +485,6 @@ impl RelayContinuation {
                 .and_then(reqwest::Error::status)
                 .map(|s| s.as_u16()),
         );
-        crate::network::sleep_retry_after(self.retry_after).await;
         let relay = cfg.discovery_relay.as_ref().expect("captured relay");
         let response = if wait_for_ready {
             relay
@@ -493,6 +495,7 @@ impl RelayContinuation {
                     "max_spec_bytes",
                     gate,
                     operator_status,
+                    self.retry_after,
                 )
                 .await
         } else {
@@ -503,6 +506,7 @@ impl RelayContinuation {
                     cfg.max_spec_bytes,
                     "max_spec_bytes",
                     gate.into_iter().collect(),
+                    self.retry_after,
                 )
                 .await
         }
@@ -511,7 +515,13 @@ impl RelayContinuation {
         })?;
         // The relay has already validated complete JSON before caching the response.
         let document = parse_document(&response.body)?;
-        if let Some(slot) = &self.relay_slot {
+        if let Some(slot) = crate::discovery_relay::slot_for(
+            cfg,
+            &cfg.spec,
+            "catalog",
+            cfg.max_spec_bytes,
+            &response.cache_key,
+        ) {
             let metadata = crate::http_cache::Metadata::from_relay_headers(
                 &response.headers,
                 response.catalog_cache_age(),
@@ -581,10 +591,10 @@ pub(crate) async fn prepare_json_discovery_bounded(
         cache = crate::http_cache::Slot::availability(cfg, "catalog"),
         "Catalog disk cache configuration"
     );
-    let relay_slot = crate::discovery_relay::slot(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes);
-    if let Some(slot) = &relay_slot
-        && let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh())
-    {
+    for slot in crate::discovery_relay::slots(cfg, &cfg.spec, "catalog", cfg.max_spec_bytes) {
+        let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh()) else {
+            continue;
+        };
         if let Ok(document) = parse_document(&entry.data) {
             tracing::warn!(
                 cache = "relay_disk_hit",
@@ -601,10 +611,15 @@ pub(crate) async fn prepare_json_discovery_bounded(
         gate.as_deref(),
     )
     .await;
-    let (error, retry_after) = match result {
+    let failure = match result {
         Ok(doc) => return Ok(CatalogLoad::Ready(doc)),
-        Err(e) => e,
+        Err(failure) => failure,
     };
+    if !failure.fallback {
+        return Err(failure.error);
+    }
+    let error = failure.error;
+    let retry_after = failure.retry_after;
     let Some(_) = &cfg.discovery_relay else {
         return Err(error);
     };
@@ -614,7 +629,6 @@ pub(crate) async fn prepare_json_discovery_bounded(
     Ok(CatalogLoad::RelayPending(Box::new(RelayContinuation {
         config: cfg.clone(),
         origin_error: error,
-        relay_slot,
         retry_after,
     })))
 }
@@ -624,15 +638,15 @@ async fn load_json_discovery_origin(
     network: &crate::network::NetworkContext,
     slot: Option<crate::http_cache::Slot>,
     gate: Option<&tokio::sync::Semaphore>,
-) -> std::result::Result<Value, (anyhow::Error, Option<crate::network::RetryAfter>)> {
+) -> std::result::Result<Value, crate::network::acquisition::Failure> {
     let source = &cfg.spec;
     if !source.starts_with("https://") && !source.starts_with("http://") {
         tracing::info!(cache = "local_file", "Catalog loading local file");
         let bytes = tokio::fs::read(source)
             .await
             .context(LoadStage::LocalRead)
-            .map_err(|e| (e, None))?;
-        return parse_document(&bytes).map_err(|e| (e, None));
+            .map_err(crate::network::acquisition::Failure::local)?;
+        return parse_document(&bytes).map_err(crate::network::acquisition::Failure::validation);
     }
 
     let cached = read_cached_catalog(slot.as_ref()).await;
@@ -687,105 +701,89 @@ async fn fetch_catalog_origin(
     conditional: Option<&crate::http_cache::Entry>,
     slot: Option<&crate::http_cache::Slot>,
     gate: Option<&tokio::sync::Semaphore>,
-) -> std::result::Result<Option<Value>, (anyhow::Error, Option<crate::network::RetryAfter>)> {
+) -> std::result::Result<Option<Value>, crate::network::acquisition::Failure> {
+    use crate::network::acquisition::{self, Failure, FallbackPolicy};
+    let policy = FallbackPolicy::RemoteFailures;
     let source = &cfg.spec;
-    let id = crate::network::IsolationId::discovery(source).map_err(|e| (e, None))?;
+    let id = crate::network::IsolationId::discovery(source).map_err(Failure::local)?;
     let timeout = cfg
         .read_timeout_seconds
         .map(std::time::Duration::from_secs_f64);
     let selected = network
         .http_participating(&id, source, timeout, false, cfg.transport())
-        .map_err(|e| (e, None))?;
-    let max_attempts = network.max_http_attempts(cfg.http_cache_direct_warm_target.is_some());
-
-    for attempt in 1..=max_attempts {
-        let permit = match gate {
-            Some(gate) => Some(gate.acquire().await.expect("owned catalog gate")),
-            None => None,
-        };
-        let current = network
-            .http_attempt(&selected, attempt)
-            .map_err(|e| (e, None))?;
-        let started = std::time::Instant::now();
-        let request = catalog_request(&current.client, source, conditional);
-        let response = match request.send().await.map_err(reqwest::Error::without_url) {
-            Ok(response) => response,
-            Err(err)
-                if attempt < max_attempts && crate::network::eligible_retry_transport(&err) =>
-            {
-                tracing::info!(
-                    stage = "catalog",
-                    attempt,
-                    max_attempts,
-                    "Catalog origin transport failed; retrying on fresh Tor isolation scope"
-                );
-                continue;
-            }
-            Err(err) => return Err((anyhow::Error::new(err).context(LoadStage::Headers), None)),
-        };
-        tracing::debug!(target: "x402_treazury::startup",
-            headers_ms = started.elapsed().as_millis() as u64,
-            "Catalog response headers received; reading body");
-        crate::network::log_http(&response, "catalog");
-        let status = response.status();
-        if status == reqwest::StatusCode::NOT_MODIFIED {
-            revalidate_cached_catalog(response.headers(), conditional, slot)
+        .map_err(Failure::local)?;
+    let acquired = acquisition::run(
+        network,
+        selected.clone(),
+        cfg.http_cache_direct_warm_target.is_some(),
+        |current, _, _| async move {
+            let _permit = match gate {
+                Some(gate) => Some(gate.acquire().await.expect("owned catalog gate")),
+                None => None,
+            };
+            let started = std::time::Instant::now();
+            let response = catalog_request(&current.client, source, conditional)
+                .send()
                 .await
-                .map_err(|e| (e, None))?;
-            network.promote_http(&selected, &current);
-            return Ok(None);
-        }
-        // Preserve ordinary reqwest status semantics: an unfollowed redirect's
-        // complete body may still be a valid catalog, and never earns a retry.
-        if status.is_client_error() || status.is_server_error() {
-            let retry_after = crate::network::parse_retry_after(status, response.headers())
-                .map(crate::network::RetryAfter::after);
-            let err = response
-                .error_for_status()
-                .expect_err("non-success status")
-                .without_url();
-            if attempt < max_attempts && crate::network::eligible_retry_status(status) {
-                tracing::info!(
-                    stage = "catalog",
-                    attempt,
-                    max_attempts,
-                    http_status = status.as_u16(),
-                    "Catalog origin HTTP status eligible for retry on fresh Tor isolation scope"
-                );
-                drop(permit);
-                crate::network::sleep_retry_after(retry_after).await;
-                continue;
+                .map_err(reqwest::Error::without_url)
+                .map_err(|error| {
+                    let mut failure = Failure::transport(error);
+                    failure.error = failure.error.context(LoadStage::Headers);
+                    failure
+                })?;
+            tracing::debug!(target: "x402_treazury::startup",
+                headers_ms = started.elapsed().as_millis() as u64,
+                "Catalog response headers received; reading body");
+            crate::network::log_http(&response, "catalog");
+            let status = response.status();
+            if status == reqwest::StatusCode::NOT_MODIFIED {
+                if response
+                    .headers()
+                    .contains_key(reqwest::header::CONTENT_RANGE)
+                {
+                    return Err(Failure::validation(
+                        anyhow::Error::new(IncompleteCatalog).context(LoadStage::Body),
+                    ));
+                }
+                revalidate_cached_catalog(response.headers(), conditional, slot)
+                    .await
+                    .map_err(Failure::validation)?;
+                return Ok(None);
             }
-            return Err((
-                anyhow::Error::new(err).context(LoadStage::Headers),
-                retry_after,
-            ));
-        }
-        let (status, headers, bytes) = match read_catalog_body(response, cfg.max_spec_bytes).await {
-            Ok(read) => read,
-            Err(err)
-                if attempt < max_attempts
-                    && err
-                        .downcast_ref::<reqwest::Error>()
-                        .is_some_and(crate::network::eligible_retry_transport) =>
-            {
-                tracing::info!(
-                    stage = "catalog",
-                    attempt,
-                    max_attempts,
-                    "Catalog origin body read failed; retrying on fresh Tor isolation scope"
-                );
-                continue;
+            // An unfollowed redirect may still carry a valid legacy catalog body.
+            if status.is_client_error() || status.is_server_error() {
+                let headers = response.headers().clone();
+                let error = response
+                    .error_for_status()
+                    .expect_err("non-success status")
+                    .without_url();
+                return Err(Failure::status(
+                    anyhow::Error::new(error).context(LoadStage::Headers),
+                    status,
+                    &headers,
+                    policy,
+                ));
             }
-            Err(err) => return Err((err.context(LoadStage::Body), None)),
-        };
-        // Only complete, valid JSON catalogs promote candidate scopes or reach persistent storage.
-        let document = parse_document(&bytes).map_err(|e| (e, None))?;
-        network.promote_http(&selected, &current);
-        persist_catalog_response(status, &headers, bytes, slot).await;
-        return Ok(Some(document));
-    }
-    unreachable!("finite attempt budget must return inside loop")
+            let (status, headers, bytes) = read_catalog_body(response, cfg.max_spec_bytes)
+                .await
+                .map_err(|error| {
+                    let mut failure = if error.is::<IncompleteCatalog>() {
+                        Failure::validation(error)
+                    } else {
+                        Failure::body(error)
+                    };
+                    failure.error = failure.error.context(LoadStage::Body);
+                    failure
+                })?;
+            let document =
+                parse_document(&bytes).map_err(|error| Failure::remote_content(error, policy))?;
+            persist_catalog_response(status, &headers, bytes, slot).await;
+            Ok(Some(document))
+        },
+    )
+    .await?;
+    network.promote_http(&selected, &acquired.current);
+    Ok(acquired.value)
 }
 
 fn catalog_request(
@@ -800,12 +798,26 @@ fn catalog_request(
     }
 }
 
+#[derive(Debug)]
+struct IncompleteCatalog;
+impl std::fmt::Display for IncompleteCatalog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("catalog partial_response")
+    }
+}
+impl std::error::Error for IncompleteCatalog {}
+
 async fn read_catalog_body(
     response: reqwest::Response,
     limit: usize,
 ) -> Result<(reqwest::StatusCode, reqwest::header::HeaderMap, Vec<u8>)> {
     let status = response.status();
     let headers = response.headers().clone();
+    if status == reqwest::StatusCode::PARTIAL_CONTENT
+        || headers.contains_key(reqwest::header::CONTENT_RANGE)
+    {
+        return Err(IncompleteCatalog.into());
+    }
     let body_started = std::time::Instant::now();
     let bytes = crate::limits::read(response, limit, "static URL spec", "max_spec_bytes").await?;
     tracing::debug!(target: "x402_treazury::startup",

@@ -1,7 +1,7 @@
 //! Curated resource search with shared ranked-search inputs.
 use super::{Manager, import};
 use crate::{network, output::ToolOutput};
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
@@ -138,100 +138,92 @@ impl Manager {
                 url
             }
         };
-        import::endpoint(&self.policy, url.as_str())
-            .context("coinbase_search policy rejected; Curl unused")?;
+        import::endpoint(&self.policy, url.as_str()).context("coinbase_search policy rejected")?;
         let client = self.source_client(owner)?;
         let manager = self.clone();
         let owned_client = client.clone();
         client.run_owned(async move {
-            let identity = owned_client.documentation_identity().await.map_err(|_| anyhow::anyhow!("coinbase_search identity unavailable; Curl unused"))?;
+            let identity = owned_client.documentation_identity().await.map_err(|_| anyhow::anyhow!("coinbase_search identity unavailable"))?;
             let factory = network::global();
             let selected = factory.http_participating(&identity, url.as_str(), import::read_timeout(&manager.policy, None), true, owned_client.transport())
-                .map_err(|_| anyhow::anyhow!("coinbase_search transport selection failed; Curl unused"))?;
-            match origin(&url, &selected, manager.policy.max_response_bytes, manager.search_relay.is_some()).await {
+                .map_err(|_| anyhow::anyhow!("coinbase_search transport selection failed"))?;
+            match origin(&url, &selected, manager.policy.max_response_bytes).await {
                 Ok(value) => output(value, "origin"),
-                Err(error) if error.downcast_ref::<crate::limits::DownloadLimit>().is_some() => Err(error.context("coinbase_search origin max_response_bytes rejected; Curl unused")),
-                Err(error) => {
+                Err(failure) if !failure.fallback => Err(failure.error.context("coinbase_search origin response rejected")),
+                Err(failure) => {
                     let Some(relay) = &manager.search_relay else {
-                        return Err(error.context("coinbase_search origin failed; Curl disabled"));
+                        return Err(failure.error.context("coinbase_search origin failed; fallback unavailable"));
                     };
-                    let bytes = relay.fetch(owned_client, url.as_str(), &manager.policy).await.context("coinbase_search Curl attempted and failed; do not automatically repeat: payment or side effects may have occurred")?;
-                    let value = parse_response(&bytes).context("coinbase_search Curl attempted but target response invalid; do not automatically repeat: payment may have occurred")?;
-                    output(value, "curl")
+                    let response = relay.fetch(owned_client, url.as_str(), &manager.policy, validate_response, failure.retry_after).await
+                        .context("coinbase_search fallback failed; do not automatically repeat: payment or side effects may have occurred")?;
+                    let value = parse_response(&response.body)
+                        .context("coinbase_search target response invalid; do not automatically repeat: payment may have occurred")?;
+                    output(value, &response.via)
                 }
             }
         }).await?
     }
 }
 
+fn validate_response(bytes: &[u8]) -> Result<()> {
+    parse_response(bytes).map(drop)
+}
+
 async fn origin(
     url: &reqwest::Url,
     selected: &Arc<network::HttpTransport>,
     limit: usize,
-    relay_enabled: bool,
-) -> Result<Value> {
+) -> std::result::Result<Value, network::acquisition::Failure> {
+    use network::acquisition::{self, Failure, FallbackPolicy};
     let factory = network::global();
-    let attempts = factory.max_http_attempts(false);
-    for attempt in 1..=attempts {
-        let transport = factory
-            .http_attempt(selected, attempt)
-            .map_err(|_| anyhow::anyhow!("coinbase_search origin transport unavailable"))?;
-        let result = transport.client.get(url.clone()).send().await;
-        let response = match result {
-            Ok(response) => response,
-            Err(error) if attempt < attempts && network::eligible_retry_transport(&error) => {
-                continue;
-            }
-            Err(_) => bail!("coinbase_search origin transport failed"),
-        };
-        network::log_http(&response, "coinbase_search");
-        let status = response.status();
-        if status != reqwest::StatusCode::OK {
-            let retry = network::eligible_retry_status(status);
-            let delay = network::parse_retry_after(status, response.headers())
-                .map(network::RetryAfter::after);
-            drop(response);
-            if (retry && attempt < attempts) || relay_enabled {
-                network::sleep_retry_after(delay).await;
-            }
-            if retry && attempt < attempts {
-                continue;
-            }
-            bail!("coinbase_search origin http_status {}", status.as_u16());
-        }
-        ensure!(
-            !response
-                .headers()
-                .contains_key(reqwest::header::CONTENT_RANGE),
-            "coinbase_search origin partial_response"
-        );
-        let bytes =
-            match crate::limits::read(response, limit, "Coinbase search", "max_response_bytes")
+    let acquired = acquisition::run(
+        factory,
+        selected.clone(),
+        false,
+        |transport, _, _| async move {
+            let response = transport
+                .client
+                .get(url.clone())
+                .send()
                 .await
+                .map_err(|error| Failure::transport(error.without_url()))?;
+            network::log_http(&response, "coinbase_search");
+            let status = response.status();
+            if status == reqwest::StatusCode::PARTIAL_CONTENT
+                || response
+                    .headers()
+                    .contains_key(reqwest::header::CONTENT_RANGE)
             {
-                Ok(bytes) => bytes,
-                Err(error)
-                    if attempt < attempts
-                        && error
-                            .downcast_ref::<reqwest::Error>()
-                            .is_some_and(network::eligible_retry_transport) =>
-                {
-                    continue;
+                return Err(Failure::validation(anyhow::anyhow!(
+                    "coinbase_search origin partial_response"
+                )));
+            }
+            if status != reqwest::StatusCode::OK {
+                let error =
+                    anyhow::anyhow!("coinbase_search origin http_status {}", status.as_u16());
+                // An unpaid target challenge is terminal; a relay must not turn it
+                // into another purchase or acquire target signing authority.
+                if status == reqwest::StatusCode::PAYMENT_REQUIRED {
+                    return Err(Failure::validation(error));
                 }
-                Err(error)
-                    if error
-                        .downcast_ref::<crate::limits::DownloadLimit>()
-                        .is_some() =>
-                {
-                    return Err(error);
-                }
-                Err(_) => bail!("coinbase_search origin response transport failed"),
-            };
-        let value = parse_response(&bytes)?;
-        factory.promote_http(selected, &transport);
-        return Ok(value);
-    }
-    unreachable!("at least one origin attempt")
+                return Err(Failure::status(
+                    error,
+                    status,
+                    response.headers(),
+                    FallbackPolicy::RemoteFailures,
+                ));
+            }
+            let bytes =
+                crate::limits::read(response, limit, "Coinbase search", "max_response_bytes")
+                    .await
+                    .map_err(Failure::body)?;
+            parse_response(&bytes)
+                .map_err(|error| Failure::remote_content(error, FallbackPolicy::RemoteFailures))
+        },
+    )
+    .await?;
+    factory.promote_http(selected, &acquired.current);
+    Ok(acquired.value)
 }
 
 #[cfg(test)]

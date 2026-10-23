@@ -522,7 +522,11 @@ impl Deployment {
         )>,
     ) -> Result<crate::discovery_relay::Relays> {
         Ok(
-            if let Some(policy) = self.config.discovery_relay.clone().filter(|p| p.serve)
+            if let Some(policy) = self
+                .config
+                .discovery_relay
+                .clone()
+                .filter(|p| p.serve && p.has_method("GET"))
                 && let Some((env, restriction)) = relay_env
             {
                 ensure!(
@@ -587,10 +591,12 @@ impl Deployment {
             t.resolve(path);
         }
         crate::discovery::policy::validate_registry_path(&config, path)?;
-        let search_relay = match config.discovery_relay.as_ref().filter(|p| p.search) {
-            Some(policy) => Some(std::sync::Arc::new(
-                crate::discovery_relay::SearchRelay::load(policy, path).await?,
-            )),
+        // Validate every configured method/format locally before wallet state or I/O.
+        let search_relay = match config.discovery_relay.as_ref() {
+            Some(policy) => {
+                let relay = crate::discovery_relay::SearchRelay::load(policy, path).await?;
+                policy.search.then(|| std::sync::Arc::new(relay))
+            }
             None => None,
         };
         let mut deployment = Self {

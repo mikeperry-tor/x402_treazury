@@ -97,11 +97,13 @@ pub async fn warm_cache_with_network(
     // resolved wallets and never starts treasury sync, funding workers or listeners.
     let policy = config.discovery_relay.clone().filter(|p| {
         p.warm
+            && p.has_method("GET")
             && !direct
             && (p.sources.is_empty() || selected.iter().any(|id| p.sources.contains(id)))
     });
     let mut owner = None;
     let relay = if let Some(policy) = policy {
+        crate::discovery_relay::SearchRelay::load(&policy, path).await?;
         if let Some(funding) = &mut config.funding {
             funding.auto_fund = false;
         }

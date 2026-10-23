@@ -105,10 +105,10 @@ pub fn inspection(config: &MetaConfig) -> serde_json::Value {
 pub fn protected_paths(config: &MetaConfig, path: &Path) -> Vec<PathBuf> {
     let mut paths = vec![path.to_owned()];
     if let Some(relay) = &config.discovery_relay {
-        paths.push(
-            path.parent()
-                .unwrap_or(Path::new("."))
-                .join(&relay.provider),
+        paths.extend(
+            relay
+                .provider_paths()
+                .map(|provider| path.parent().unwrap_or(Path::new(".")).join(provider)),
         );
     }
     for source in config.sources.values() {

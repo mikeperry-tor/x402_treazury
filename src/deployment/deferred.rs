@@ -655,6 +655,53 @@ mod tests {
         task.abort();
     }
 
+    struct DeferredFixtureDns;
+    impl reqwest::dns::Resolve for DeferredFixtureDns {
+        fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            let allowed = name.as_str() == "spec.example.com";
+            Box::pin(async move {
+                if !allowed {
+                    return Err(
+                        std::io::Error::other("unexpected deferred fixture DNS name").into(),
+                    );
+                }
+                let local: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+                Ok(Box::new([local].into_iter()) as reqwest::dns::Addrs)
+            })
+        }
+    }
+
+    // These tests exercise serving publication and accepted financial work. Keep
+    // their public logical target and loopback DNS mapping private to a child;
+    // neither the production target checks nor the parent network policy change.
+    async fn public_target_fixture(test: &str) -> bool {
+        const CHILD: &str = "TREAZURY_DEFERRED_PUBLIC_TARGET_CHILD";
+        if std::env::var(CHILD).ok().as_deref() == Some(test) {
+            crate::network::install_test_context(
+                crate::network::NetworkContext::new(Default::default())
+                    .unwrap()
+                    .with_test_dns(Arc::new(DeferredFixtureDns)),
+            );
+            return false;
+        }
+        let exact = format!("deployment::deferred::tests::{test}");
+        let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .env_clear()
+            .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+            .env(CHILD, test)
+            .args(["--exact", &exact, "--nocapture"])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        true
+    }
+
     async fn prepared(
         stall: bool,
         invalid_first: bool,
@@ -726,7 +773,10 @@ discover_on_demand=true
         let mut deployment = Deployment::load(&path).await.unwrap();
         // The unsigned origin fails locally before paid continuation is prepared.
         let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let target = format!("https://{}/spec", origin.local_addr().unwrap());
+        let target = format!(
+            "https://spec.example.com:{}/spec",
+            origin.local_addr().unwrap().port()
+        );
         drop(origin);
         let envelope = json!({"url":target,"method":"GET","statusCode":200,"headers":{},"body":r#"{"operations":[{"method":"GET","path":"/read"}]}"#,"redirectChain":[],"error":null});
         let (mut relay, fixture, relay_task) =
@@ -1160,6 +1210,13 @@ sources=['healthy','priced','failed']
 
     #[tokio::test]
     async fn canonical_capacity_wakes_deferred_publication_in_same_serving_process() {
+        if public_target_fixture(
+            "canonical_capacity_wakes_deferred_publication_in_same_serving_process",
+        )
+        .await
+        {
+            return;
+        }
         use crate::rotation::{
             base::BaseRpc,
             manager::ManagedPool,
@@ -1336,6 +1393,13 @@ sources=['healthy','priced','failed']
 
     #[tokio::test]
     async fn invalid_late_source_does_not_stop_alias_publication_or_existing_calls() {
+        if public_target_fixture(
+            "invalid_late_source_does_not_stop_alias_publication_or_existing_calls",
+        )
+        .await
+        {
+            return;
+        }
         for invalid_first in [false, true] {
             let (_dir, running, catalog, fixture, relay, api) =
                 prepared(false, invalid_first, None).await;
@@ -1395,6 +1459,13 @@ sources=['healthy','priced','failed']
 
     #[tokio::test]
     async fn available_calls_and_shutdown_do_not_abandon_accepted_deferred_payment() {
+        if public_target_fixture(
+            "available_calls_and_shutdown_do_not_abandon_accepted_deferred_payment",
+        )
+        .await
+        {
+            return;
+        }
         let (_dir, running, catalog, fixture, relay, api) = prepared(true, false, None).await;
         let stop = CancellationToken::new();
         let serving = tokio::spawn(running.serve(stop.clone()));
@@ -1426,6 +1497,13 @@ sources=['healthy','priced','failed']
     }
     #[tokio::test]
     async fn worker_panic_still_drains_relay_and_closes_store_before_returning() {
+        if public_target_fixture(
+            "worker_panic_still_drains_relay_and_closes_store_before_returning",
+        )
+        .await
+        {
+            return;
+        }
         let (dir, mut running, catalog, fixture, relay_task, api) =
             prepared(true, false, None).await;
         let state = dir.path().join("state");
@@ -1474,6 +1552,9 @@ sources=['healthy','priced','failed']
     }
     #[tokio::test]
     async fn late_source_keeps_already_published_price_descriptions() {
+        if public_target_fixture("late_source_keeps_already_published_price_descriptions").await {
+            return;
+        }
         let (_dir, mut running, _catalog, _fixture, relay, api) = prepared(false, true, None).await;
         let runtime = running.deferred.as_mut().unwrap();
         let healthy = runtime

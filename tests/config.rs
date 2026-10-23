@@ -260,6 +260,11 @@ async fn discovery_relay_policy_is_offline_explicit_and_validates_bindings() {
         .unwrap();
     assert_eq!(shown["discovery_relay"]["wallet"], "default");
     assert_eq!(shown["discovery_relay"]["serve"], true);
+    assert_eq!(
+        shown["discovery_relay"]["fallbacks"],
+        json!({"GET":["missing-local-provider.toml"]})
+    );
+    assert!(shown["discovery_relay"].get("provider").is_none());
     std::fs::write(&path,format!("{text}{relay}\n[source_management]\nwallet='default'\nregistry_file='missing-local-provider.toml'\n")).unwrap();
     let error = x402_treazury::deployment::Deployment::show_config(&path)
         .await
@@ -278,6 +283,46 @@ async fn discovery_relay_policy_is_offline_explicit_and_validates_bindings() {
                 .is_err()
         );
     }
+}
+
+#[tokio::test]
+async fn relay_method_lists_are_inspected_offline_and_every_provider_path_is_protected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deployment.toml");
+    let text = deployment_text();
+    let relay = "\n[discovery_relay]\nwallet='default'\nserve=true\n[discovery_relay.fallbacks]\nGET=['missing-first.toml','missing-second.toml']\nHEAD=[]\nPOST=['missing-post.toml']\n";
+    std::fs::write(&path, format!("{text}{relay}")).unwrap();
+    let shown = Deployment::show_config(&path).await.unwrap();
+    assert_eq!(
+        shown["discovery_relay"]["fallbacks"],
+        json!({"GET":["missing-first.toml","missing-second.toml"],"HEAD":[],"POST":["missing-post.toml"]})
+    );
+    assert_eq!(shown["discovery_relay"]["search"], true);
+    assert!(shown["discovery_relay"].get("provider").is_none());
+    for provider in [
+        "missing-first.toml",
+        "missing-second.toml",
+        "missing-post.toml",
+    ] {
+        assert!(!dir.path().join(provider).exists());
+        std::fs::write(
+            &path,
+            format!(
+                "{text}{relay}\n[source_management]\nwallet='default'\nregistry_file='{provider}'\n"
+            ),
+        )
+        .unwrap();
+        let error = Deployment::show_config(&path).await.err().unwrap();
+        assert!(format!("{error:#}").contains("aliases a protected"));
+    }
+    for invalid in [
+        "\n[discovery_relay.fallbacks]\nPUT=['missing.toml']\n",
+        "\n[discovery_relay]\nprovider='old.toml'\nfallbacks={}\n",
+    ] {
+        std::fs::write(&path, format!("{text}{invalid}")).unwrap();
+        assert!(Deployment::show_config(&path).await.is_err());
+    }
+    assert!(!dir.path().join("state").exists());
 }
 
 #[tokio::test]
@@ -666,12 +711,9 @@ provider="missing-local-provider.toml"
         std::fs::write(&path, format!("{text}{setting}\n")).unwrap();
         let shown = Deployment::show_config(&path).await.unwrap();
         assert_eq!(shown["discovery_relay"]["search"], setting == "search=true");
-        // Disabling search avoids loading the missing bootstrap, even though the
-        // relay section exists. No wallet secrets or network work are needed.
-        assert_eq!(
-            Deployment::load(&path).await.is_ok(),
-            setting == "search=false"
-        );
+        // Every configured adapter is validated locally, including when search
+        // is disabled. Invalid bootstrap fails before secrets or network work.
+        assert!(Deployment::load(&path).await.is_err());
     }
     let no_relay = text.split("[discovery_relay]").next().unwrap();
     std::fs::write(&path, no_relay).unwrap();

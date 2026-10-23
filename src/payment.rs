@@ -28,6 +28,26 @@ impl std::fmt::Display for HttpFailure {
 }
 impl std::error::Error for HttpFailure {}
 
+#[derive(Debug)]
+pub(crate) struct IncompleteRelayResponse;
+impl std::fmt::Display for IncompleteRelayResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("relay service partial_response")
+    }
+}
+impl std::error::Error for IncompleteRelayResponse {}
+fn complete_relay_response(response: &reqwest::Response, relay: bool) -> Result<()> {
+    ensure!(
+        !relay
+            || (response.status() != reqwest::StatusCode::PARTIAL_CONTENT
+                && !response
+                    .headers()
+                    .contains_key(reqwest::header::CONTENT_RANGE)),
+        IncompleteRelayResponse
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod best_effort_tests;
 #[cfg(test)]
@@ -227,6 +247,9 @@ pub struct PaidClient {
     source_identity: Arc<str>,
     cover: Option<(Arc<crate::cover::Config>, crate::cover::Scope)>,
     unsigned_only: bool,
+    /// Relay exchanges use common unsigned transport recovery and never recurse.
+    relay_call: bool,
+    attempt_capacity: Vec<Arc<tokio::sync::Semaphore>>,
     unavailable: Option<crate::rotation::error::AdmissionError>,
     selection: crate::network::SelectionPolicy,
     transport: crate::network::HttpPolicy,
@@ -244,6 +267,8 @@ impl PaidClient {
             source_identity: Arc::from("standalone"),
             cover: None,
             unsigned_only: false,
+            relay_call: false,
+            attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
             transport: Default::default(),
@@ -261,6 +286,8 @@ impl PaidClient {
             source_identity: Arc::from("standalone"),
             cover: None,
             unsigned_only: false,
+            relay_call: false,
+            attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
             transport: Default::default(),
@@ -279,6 +306,8 @@ impl PaidClient {
             source_identity: Arc::from("standalone"),
             cover: None,
             unsigned_only: true,
+            relay_call: false,
+            attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
             transport: Default::default(),
@@ -343,6 +372,32 @@ impl PaidClient {
         self.source_identity = Arc::from(source);
         self
     }
+    pub(crate) fn for_relay(mut self) -> Self {
+        self.relay_call = true;
+        self.selection = crate::network::SelectionPolicy::Participating;
+        self
+    }
+    /// Existing acquisition gates apply to active attempts, never retry delays.
+    pub(crate) fn with_attempt_capacity(
+        mut self,
+        capacity: &[Arc<tokio::sync::Semaphore>],
+    ) -> Self {
+        self.attempt_capacity = capacity.to_vec();
+        self
+    }
+    async fn acquire_attempt_capacity(&self) -> Result<Vec<tokio::sync::OwnedSemaphorePermit>> {
+        let mut permits = Vec::new();
+        for gate in &self.attempt_capacity {
+            permits.push(
+                gate.clone()
+                    .acquire_owned()
+                    .await
+                    .context("relay acquisition capacity closed")?,
+            );
+        }
+        Ok(permits)
+    }
+    #[cfg(test)]
     pub(crate) fn with_selection(mut self, selection: crate::network::SelectionPolicy) -> Self {
         self.selection = selection;
         self
@@ -589,7 +644,7 @@ impl PaidClient {
             ),
             _ => None,
         };
-        let (response, mut cover, unsigned_promotion) = loop {
+        let (response, mut cover, unsigned_promotion, _attempt_capacity) = loop {
             let UnsignedStage {
                 selected,
                 transport,
@@ -597,6 +652,7 @@ impl PaidClient {
                 retry,
                 receipt,
                 mut cover,
+                mut attempt_capacity,
             } = self
                 .unsigned_stage(
                     &request,
@@ -628,6 +684,10 @@ impl PaidClient {
                 )
                 .await?;
                 response = bounded?;
+                // The unsigned response is complete. The signed attempt gets its
+                // own permits; no acquisition slot spans retry/handoff delays.
+                attempt_capacity.clear();
+                attempt_capacity = self.acquire_attempt_capacity().await?;
                 if let Some(pool) = &self.managed {
                     match pool
                         .pay_with_cover_observed(
@@ -658,6 +718,7 @@ impl PaidClient {
                                 // Structured headers classify this failure. Its
                                 // unused body must not delay or veto fallback.
                                 drop(paid);
+                                attempt_capacity.clear();
                                 if let Some(call) = &mut cover {
                                     call.protocol(version);
                                     call.rejected_padding(status);
@@ -720,10 +781,14 @@ impl PaidClient {
             if let Some(call) = &mut cover {
                 call.response_headers();
             }
+            if stage_paid {
+                complete_relay_response(&response, self.relay_call)?;
+            }
             break (
                 response,
                 cover,
                 (!stage_paid).then_some((selected, transport)),
+                attempt_capacity,
             );
         };
         diagnostics::stage("response_body");
@@ -770,91 +835,110 @@ impl PaidClient {
         )?;
         let participating_tor = self.selection == crate::network::SelectionPolicy::Participating
             && factory.policy.mode == crate::network::Mode::Tor;
-        let max_attempts = if self.selection == crate::network::SelectionPolicy::Participating {
-            factory.max_http_attempts(false)
-        } else {
-            1
-        };
-        for attempt in 1..=max_attempts {
-            if attempt > 1 || prior_wallet_attempts {
-                crate::qualification::check_retry_authority().await?;
-            }
-            diagnostics::stage("transport_selection");
-            let transport = factory.http_attempt(&selected, attempt)?;
-            let mut cover = self.begin_cover(&transport).await;
-            diagnostics::unsigned_attempt(attempt, max_attempts);
-            diagnostics::stage("unsigned_request");
-            let (response, retry, receipt) = match unsigned_response(
-                &transport,
-                request,
-                cover.as_mut(),
-                (participating_tor && request.url().scheme() == "https")
-                    .then_some((self.max_response_bytes, unsigned_only)),
-            )
-            .await
-            {
-                Ok(response) => response,
-                Err(error)
-                    if attempt < max_attempts
-                        && error
-                            .downcast_ref::<reqwest::Error>()
-                            .is_some_and(crate::network::tls_failure) =>
-                {
-                    drop(cover);
-                    tracing::info!(
-                        stage = "unsigned_request",
-                        attempt,
-                        max_attempts,
-                        reason = "tls_failure",
-                        "Retrying unsigned API request on fresh Tor isolation scope"
-                    );
-                    continue;
+        use crate::network::acquisition::{self, Failure, FallbackPolicy};
+        let acquired = acquisition::run(
+            factory,
+            selected.clone(),
+            false,
+            |transport, attempt, max_attempts| async move {
+                if attempt > 1 || prior_wallet_attempts {
+                    crate::qualification::check_retry_authority()
+                        .await
+                        .map_err(Failure::local)?;
                 }
-                Err(error) => return Err(error),
-            };
-            diagnostics::response(&response);
-            let status = response.status();
-            if participating_tor && crate::network::eligible_retry_status(status) {
-                if attempt == max_attempts {
+                diagnostics::stage("transport_selection");
+                let mut cover = self.begin_cover(&transport).await;
+                diagnostics::unsigned_attempt(attempt, max_attempts);
+                diagnostics::stage("unsigned_request");
+                let attempt_capacity = self
+                    .acquire_attempt_capacity()
+                    .await
+                    .map_err(Failure::local)?;
+                let (response, retry, receipt) = unsigned_response(
+                    &transport,
+                    request,
+                    cover.as_mut(),
+                    self.relay_call,
+                    (participating_tor && (self.relay_call || request.url().scheme() == "https"))
+                        .then_some((self.max_response_bytes, unsigned_only)),
+                )
+                .await
+                .map_err(|error| {
+                    // D02 enrolls relay legs in common transport recovery. Ordinary
+                    // API transport expansion belongs to D04; retain TLS-only here.
+                    let ordinary_retry = error
+                        .downcast_ref::<reqwest::Error>()
+                        .is_some_and(crate::network::tls_failure);
+                    let mut failure = if error.is::<IncompleteRelayResponse>() {
+                        Failure::validation(error)
+                    } else {
+                        Failure::body(error)
+                    };
+                    if !self.relay_call {
+                        failure.retry &= ordinary_retry;
+                    }
+                    failure
+                })?;
+                diagnostics::response(&response);
+                let status = response.status();
+                let relay_rejected = self.relay_call
+                    && !status.is_success()
+                    && status != reqwest::StatusCode::PAYMENT_REQUIRED;
+                if relay_rejected
+                    || (participating_tor && crate::network::eligible_retry_status(status))
+                {
+                    let error = HttpFailure {
+                        status,
+                        detail: if participating_tor {
+                            "unsigned Tor isolation attempts exhausted"
+                        } else {
+                            "unsigned relay HTTP rejection"
+                        }
+                        .into(),
+                    };
+                    let failure = Failure::status(
+                        error.into(),
+                        status,
+                        response.headers(),
+                        if self.relay_call {
+                            FallbackPolicy::RemoteFailures
+                        } else {
+                            FallbackPolicy::BlockingFailures
+                        },
+                    );
                     drop(response);
                     drop(cover);
-                    return Err(HttpFailure {
-                        status,
-                        detail: "unsigned Tor isolation attempts exhausted".into(),
+                    drop(attempt_capacity);
+                    if attempt < max_attempts && failure.retry_after.is_some() {
+                        crate::qualification::check_retry_authority()
+                            .await
+                            .map_err(Failure::local)?;
                     }
-                    .into());
+                    return Err(failure);
                 }
-                let retry_after_delay =
-                    crate::network::parse_retry_after(status, response.headers());
-                let retry_after = retry_after_delay.map(crate::network::RetryAfter::after);
-                drop(response);
-                drop(cover);
-                if retry_after.is_some() {
-                    crate::qualification::check_retry_authority().await?;
-                }
-                tracing::info!(
-                    stage = "unsigned_request",
-                    attempt,
-                    max_attempts,
-                    reason = "http_status",
-                    http_status = status.as_u16(),
-                    retry_after_ms =
-                        retry_after_delay.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
-                    "Retrying unsigned API request on fresh Tor isolation scope"
-                );
-                crate::network::sleep_retry_after(retry_after).await;
-                continue;
+                Ok((response, retry, receipt, cover, attempt_capacity))
+            },
+        )
+        .await
+        .map_err(|failure| {
+            if self.relay_call {
+                // The list traversal needs the terminal Retry-After and typed
+                // local/transport distinction. No signed dispatch reaches here.
+                anyhow::Error::new(failure)
+            } else {
+                failure.error
             }
-            return Ok(UnsignedStage {
-                selected,
-                transport,
-                response,
-                retry,
-                receipt,
-                cover,
-            });
-        }
-        unreachable!("max_attempts is at least 1")
+        })?;
+        let (response, retry, receipt, cover, attempt_capacity) = acquired.value;
+        Ok(UnsignedStage {
+            selected,
+            transport: acquired.current,
+            response,
+            retry,
+            receipt,
+            cover,
+            attempt_capacity,
+        })
     }
 
     async fn begin_cover(
@@ -956,6 +1040,7 @@ async fn unsigned_response(
     transport: &crate::network::HttpTransport,
     request: &reqwest::Request,
     mut cover: Option<&mut crate::cover::runtime::Call>,
+    relay: bool,
     collect_unsigned: Option<(usize, bool)>,
 ) -> Result<(
     reqwest::Response,
@@ -984,10 +1069,14 @@ async fn unsigned_response(
         c.rejected_padding(response.status());
     }
     crate::network::log_http(&response, "payment_challenge");
+    complete_relay_response(&response, relay)?;
     // Complete unsigned TLS I/O inside the same finite attempt sequence. A body
     // failure cannot restart payer selection or enter the signed dispatch path.
     let response = if let Some((limit, unsigned_only)) = collect_unsigned
         && !crate::network::eligible_retry_status(response.status())
+        && !(relay
+            && !response.status().is_success()
+            && response.status() != reqwest::StatusCode::PAYMENT_REQUIRED)
         && !(unsigned_only && response.status() == reqwest::StatusCode::PAYMENT_REQUIRED)
     {
         if response.status() != reqwest::StatusCode::PAYMENT_REQUIRED
@@ -1015,6 +1104,7 @@ struct UnsignedStage {
     retry: reqwest::Request,
     receipt: Option<crate::pricing::runtime::Receipt>,
     cover: Option<crate::cover::runtime::Call>,
+    attempt_capacity: Vec<tokio::sync::OwnedSemaphorePermit>,
 }
 
 async fn static_payment(
@@ -1148,3 +1238,7 @@ fn insufficient_funds(headers: &reqwest::header::HeaderMap) -> bool {
             && v["accepts"].is_array()
     })
 }
+
+#[cfg(test)]
+#[path = "payment/relay_retry_tests.rs"]
+mod relay_retry_tests;

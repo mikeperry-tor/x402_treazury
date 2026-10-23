@@ -1,5 +1,7 @@
 description = "Residential HTTP fetch and relay with custom methods, headers and bodies, plus proxy traffic packs."
-spec = "https://agproxy.shveik.dev/openapi.json"
+# Complete pinned vendor schema; provenance/update policy in providers/CAVEATS.md.
+spec = "agproxy-openapi.json"
+relay_format = "agproxy"
 name = "AGProxy"
 # The guide documents root /x402 and /mpp routes; override the schema's /v1 server.
 base_url = "https://agproxy.shveik.dev"

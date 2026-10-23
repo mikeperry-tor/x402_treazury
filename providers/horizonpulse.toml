@@ -1,5 +1,7 @@
 description = "HTTP proxy and page fetch, web search, extraction, screenshots, crypto data and x402 marketplace research."
-spec = "https://horizonpulse.dev/openapi.json"
+# Complete pinned vendor schema; provenance/update policy in providers/CAVEATS.md.
+spec = "horizonpulse-openapi.json"
+relay_format = "horizonpulse"
 name = "Horizon Pulse"
 base_url = "https://horizonpulse.dev"
 prefix = "horizonpulse"

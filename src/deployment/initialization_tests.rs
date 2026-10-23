@@ -260,7 +260,88 @@ async fn managed_initialization_restricts_before_selected_pool_setup_and_release
 }
 
 #[tokio::test]
-async fn relay_setup_failure_after_initialization_releases_treasury_without_allocations() {
+async fn relay_method_bootstrap_validates_all_local_entries_before_network_or_wallet_io() {
+    let dir = tempfile::tempdir().unwrap();
+    let declaring = dir.path().join("deployment.toml");
+    let network = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let remote = format!("http://{}/schema", network.local_addr().unwrap());
+    let document = serde_json::json!({"openapi":"3.0.0","paths":{"/curl":{"post":{"operationId":"curl","responses":{"200":{"description":"complete"}}}}}});
+    std::fs::write(
+        dir.path().join("local.json"),
+        serde_json::to_vec(&document).unwrap(),
+    )
+    .unwrap();
+    let provider = |format: &str, spec: &str, filters: &str| {
+        format!(
+            "spec='{spec}'\nbase_url='https://relay.example.com'\nhelp_url='{remote}'\nprobe_pricing=true\n{format}\n{filters}\n"
+        )
+    };
+    std::fs::write(
+        dir.path().join("valid.toml"),
+        provider("relay_format='curl'", "local.json", ""),
+    )
+    .unwrap();
+    let valid: crate::discovery_relay::Policy =
+        toml::from_str("[fallbacks]\nGET=['valid.toml']").unwrap();
+    crate::discovery_relay::SearchRelay::load(&valid, &declaring)
+        .await
+        .unwrap();
+    for (metadata, spec, filters) in [
+        ("", "local.json", ""),
+        ("relay_format='unsupported'", "local.json", ""),
+        ("relay_format='agproxy'", "local.json", ""),
+        (
+            "relay_format='curl'",
+            "local.json",
+            "exclude_operations=['POST /curl']",
+        ),
+        ("relay_format='curl'", remote.as_str(), ""),
+    ] {
+        std::fs::write(
+            dir.path().join("bad.toml"),
+            provider(metadata, spec, filters),
+        )
+        .unwrap();
+        // A valid GET entry must not hide an invalid entry authored for another method.
+        let policy: crate::discovery_relay::Policy =
+            toml::from_str("[fallbacks]\nGET=['valid.toml']\nHEAD=['bad.toml']").unwrap();
+        assert!(
+            crate::discovery_relay::SearchRelay::load(&policy, &declaring)
+                .await
+                .is_err(),
+            "{metadata} {spec} {filters}"
+        );
+    }
+    std::fs::write(
+        dir.path().join("legacy.toml"),
+        provider("", "local.json", ""),
+    )
+    .unwrap();
+    let legacy = crate::discovery_relay::Policy::legacy("legacy.toml".into());
+    crate::discovery_relay::SearchRelay::load(&legacy, &declaring)
+        .await
+        .unwrap();
+    std::fs::write(
+        dir.path().join("legacy.toml"),
+        provider("relay_format='agproxy'", "local.json", ""),
+    )
+    .unwrap();
+    assert!(
+        crate::discovery_relay::SearchRelay::load(&legacy, &declaring)
+            .await
+            .is_err()
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), network.accept())
+            .await
+            .is_err(),
+        "local bootstrap must not fetch schema, help or pricing"
+    );
+    assert!(!dir.path().join("state").exists());
+}
+
+#[tokio::test]
+async fn relay_setup_preflight_failure_leaves_treasury_unmodified_without_allocations() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -279,17 +360,17 @@ async fn relay_setup_failure_after_initialization_releases_treasury_without_allo
     std::fs::write(
         &path,
         format!(
-            "{}\n[discovery_relay]\nprovider='missing-relay.toml'\nwallet='selected'\nserve=true\n",
+            "{}\n[discovery_relay]\nprovider='missing-relay.toml'\nwallet='selected'\nserve=true\nsearch=false\n",
             managed_config()
         ),
     )
     .unwrap();
-    let error = match Deployment::load_with_warnings(
+    // Static relay bootstrap must run before state even when runtime search is
+    // disabled; search enablement is not a bootstrap-validation prerequisite.
+    let error = match Deployment::load_for_serving_with_relay(
         &path,
-        true,
-        Some((&env(), FundingRestriction::DenyNewFunding)),
-        false,
-        None,
+        &env(),
+        FundingRestriction::DenyNewFunding,
     )
     .await
     {
@@ -297,17 +378,11 @@ async fn relay_setup_failure_after_initialization_releases_treasury_without_allo
         Err(error) => format!("{error:#}"),
     };
     assert!(error.contains("No such file or directory"), "{error}");
-    // An unstarted serialized store closes asynchronously after owner drop.
+    // Local relay bootstrap rejects before any treasury or pool initialization.
     let owner = reopen(&state, &key, &id).await;
     let status = owner.status().await.unwrap();
-    assert_eq!(
-        status
-            .pools
-            .iter()
-            .map(|p| p.name.as_str())
-            .collect::<BTreeSet<_>>(),
-        BTreeSet::from(["selected", "unselected"])
-    );
+    assert_eq!(status.treasury_id, id);
+    assert!(status.pools.is_empty());
     assert!(status.pools.iter().all(|p| p.addresses.is_empty()));
     assert!(status.funding_jobs.is_empty());
     owner.close().await.unwrap();

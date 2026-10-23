@@ -93,14 +93,44 @@ and conditional GET validators after expiry; pricing stores only explicitly fres
 never challenges. It partitions network/transport identities, bounds storage and
 bypasses qualification. See [discovery disk caching](configuration.md#automatic-discovery-disk-cache).
 
-`src/discovery_relay.rs` implements an explicitly configured paid Curl fallback.
-It resolves one assigned wallet per source (or an explicit override), uses the
-ordinary paid client, serializes requests across wallets and disables
-further relay spending across all wallets after a possibly submitted payment fails
-or returns an invalid envelope. Waiter cancellation retains serialized ownership
-through terminal outcome publication. Proven pre-submission failures retain bounded retry/backoff and
-do not disable unrelated targets. Local bootstrap metadata avoids
-a catalog dependency cycle. Serving binds listeners before starting initial or
+`src/network/acquisition.rs` owns the single unsigned origin sequence, including
+fresh Tor scope selection, typed delivery failure and server delays. Static
+catalog/pricing and Coinbase consumers retain their own content acceptance,
+cache/revalidation and publication rules. `src/discovery_relay/` shares one ordered
+method-specific relay traversal with small provider-owned encoders/decoders.
+Bootstrap uses complete pinned local schemas rather than another network fetch.
+It resolves one static wallet per source (or an explicit override); Coinbase uses
+the authenticated endpoint payer. The relay's ordinary paid client participates
+in unsigned recovery while recursive fallback is disabled.
+
+Static relay exchanges serialize per provider across wallets, retaining that
+provider's gate through payment, decoding and publication after waiter cancellation.
+The shared state mutex covers only cache/gate-map/stopped-state access and
+publication; it is released during I/O and waits. Cached results and independent
+providers remain available during another exchange. Relay request capacity covers
+each HTTP attempt and its body, releasing before retry delays or wallet traversal;
+accepted ownership spans those waits. The initial origin-to-relay delay precedes
+accepted relay ownership and provider gates. Between-provider delays retain the
+logical call owner but release provider gates. This partitions existing
+serialization without adding a resource cap. Cache/failure identity includes
+adapter/provider, authored position, payer and request scope. Readiness waits
+consume no network attempt. There is no separate static request counter/backoff.
+Definitive eligible provider/target outcomes may advance through the list once;
+possible paid failure or an unattributable envelope stops. Static uncertainty
+disables that provider for the run without disabling independent providers.
+Delivered target errors/truncation may already be billed, and every authorization
+retains its liability. Relayed pricing `402` always terminates; no relayed challenge
+reaches target signing. Relay content never promotes an origin transport.
+
+Configured relays may follow redirects remotely while origin HTTP remains
+no-follow. Requested/reported final destinations and every Curl-reported hop pass
+applicable public/allowed-origin checks. AGProxy/Horizon intermediate hops remain
+unknown even with `allowed_origins`; missing evidence does not exclude an adapter.
+The operator accepts the relay's remote redirect/public-destination enforcement
+and plaintext integrity. Relay TLS does not establish target TLS or content
+authenticity. Target credentials and payment signatures remain excluded.
+
+Serving binds listeners before starting initial or
 replacement funding, including when a relay payer has no capacity. The dormant
 owners start in the serving lifecycle. `deployment/bootstrap.rs` remains the
 catalog-free explicit `wallet bootstrap` path with captured-claim completeness.
@@ -306,8 +336,9 @@ static/managed payers, directory tools and `raw_call`) may try
 HTTP `400`, `403`, `408`, `429`, `500`, `502`, `503`, and `504` (honoring
 valid `Retry-After` headers on `429`/`503`) with the same pinned payer, and
 conditionally promote a winning candidate after valid `402` challenge validation
-or completed valid unsigned output. Internal discovery relay calls remain on
-`SelectionPolicy::Legacy` (single unsigned attempt). If selection changes
+or completed valid unsigned output. Relay-service unsigned requests use that same
+sequence and the broader common transport classifier, without recursive fallback.
+Ordinary API transport recovery remains TLS-only. If selection changes
 after a challenge, obtain another unsigned challenge through the next payer's
 transport. The captured inventory and attempted identities bound traversal without
 a retry-count ceiling or new allocation.

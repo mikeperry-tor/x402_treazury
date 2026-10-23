@@ -324,8 +324,8 @@ async fn probe_request(
     cfg: &Config,
     capacity: &Arc<Semaphore>,
 ) -> CachedProbe {
-    let relay_slot = crate::discovery_relay::slot(cfg, url, "pricing", 64 * 1024);
-    for slot in [&slot, &relay_slot].into_iter().flatten() {
+    let relay_slots = crate::discovery_relay::slots(cfg, url, "pricing", 64 * 1024);
+    for slot in slot.iter().chain(relay_slots.iter()) {
         if let Some(entry) = slot.read().await.filter(|e| e.metadata.fresh()) {
             if let Ok(line) = String::from_utf8(entry.data) {
                 tracing::debug!(
@@ -362,12 +362,13 @@ async fn probe_request(
         // payment challenge: persist only its derived display estimate with explicit freshness.
         slot.write(None).await;
     }
-    let (mut result, retry_after) =
-        probe_network(network, url, slot.is_some(), cfg, capacity).await;
+    let ProbeAcquisition {
+        mut result,
+        fallback,
+        retry_after,
+    } = probe_network(network, url, slot.is_some(), cfg, capacity).await;
     let mut write_slot = slot;
-    if !matches!(result.1, Outcome::Discovered | Outcome::NoPaymentChallenge)
-        && let Some(relay) = &cfg.discovery_relay
-    {
+    if fallback && let Some(relay) = &cfg.discovery_relay {
         let reason = match result.1 {
             Outcome::HttpTimeout => "timeout",
             Outcome::HttpConnect => "connection",
@@ -381,7 +382,6 @@ async fn probe_request(
             }
         };
         crate::discovery_relay::log_fallback(cfg, "pricing", reason, result.2);
-        crate::network::sleep_retry_after(retry_after).await;
         match relay
             .fetch_with_capacity(
                 url,
@@ -389,6 +389,7 @@ async fn probe_request(
                 64 * 1024,
                 "max_response_bytes",
                 vec![capacity.clone(), LIMIT.clone()],
+                retry_after,
             )
             .await
         {
@@ -398,8 +399,23 @@ async fn probe_request(
                     response.cache_delay(),
                     None,
                 );
-                result = price_headers(&response.headers, Some(402), metadata);
-                write_slot = relay_slot;
+                result = if (200..300).contains(&response.status) {
+                    (
+                        None,
+                        Outcome::NoPaymentChallenge,
+                        Some(response.status),
+                        None,
+                    )
+                } else {
+                    price_headers(&response.headers, Some(response.status), metadata)
+                };
+                write_slot = crate::discovery_relay::slot_for(
+                    cfg,
+                    url,
+                    "pricing",
+                    64 * 1024,
+                    &response.cache_key,
+                );
             }
             Err(error) => {
                 crate::discovery_relay::log_failure(cfg, "pricing", &error);
@@ -430,98 +446,94 @@ async fn probe_request(
         observed_age: Duration::ZERO,
     }
 }
+struct ProbeAcquisition {
+    result: ProbeResult,
+    fallback: bool,
+    retry_after: Option<crate::network::RetryAfter>,
+}
 async fn probe_network(
     network: &crate::network::NetworkContext,
     url: &str,
     persist: bool,
     cfg: &Config,
     capacity: &Arc<Semaphore>,
-) -> (ProbeResult, Option<crate::network::RetryAfter>) {
+) -> ProbeAcquisition {
+    use crate::network::acquisition::{self, Failure, FailureKind, FallbackPolicy};
     if cfg.wait_for_startup_socks {
         network.wait_for_startup_socks().await;
     }
     let timeout = cfg.read_timeout_seconds.map(Duration::from_secs_f64);
-    let Ok(selected) = crate::network::IsolationId::discovery(url)
-        .and_then(|id| network.http_participating(&id, url, timeout, false, cfg.transport()))
-    else {
-        return ((None, Outcome::HttpTransport, None, None), None);
+    let selected = crate::network::IsolationId::discovery(url)
+        .and_then(|id| network.http_participating(&id, url, timeout, false, cfg.transport()));
+    let result = match selected {
+        Err(error) => Err(Failure::local(error)),
+        Ok(selected) => {
+            let acquired = acquisition::run(
+                network, selected.clone(), cfg.http_cache_direct_warm_target.is_some(),
+                |current, _, _| async move {
+                    let _source_permit = capacity.acquire().await.expect("source probe semaphore open");
+                    let _permit = LIMIT.acquire().await.expect("probe semaphore open");
+                    let started = Instant::now();
+                    let response = crate::http_cache::discovery_get(&current.client, url)
+                        .send().await.map_err(|error| Failure::transport(error))?;
+                    crate::network::log_http(&response, "pricing");
+                    let http_status = response.status();
+                    let status = Some(http_status.as_u16());
+                    if http_status.is_success() {
+                        tracing::debug!(http_status = status,
+                            "Pricing probe succeeded without a payment challenge; price remains unknown");
+                        return Ok((None, Outcome::NoPaymentChallenge, status, None));
+                    }
+                    if http_status != reqwest::StatusCode::PAYMENT_REQUIRED {
+                        return Err(Failure::status(anyhow::anyhow!("pricing probe HTTP rejection"), http_status,
+                            response.headers(), FallbackPolicy::RemoteFailures));
+                    }
+                    let metadata = persist.then(|| crate::http_cache::Metadata::from_headers(
+                        response.headers(), started.elapsed(), None,
+                    )).flatten();
+                    Ok(price_headers(response.headers(), status, metadata))
+                },
+            ).await;
+            match acquired {
+                Ok(acquired) => {
+                    if matches!(
+                        acquired.value.1,
+                        Outcome::Discovered | Outcome::NoPaymentChallenge
+                    ) {
+                        network.promote_http(&selected, &acquired.current);
+                    }
+                    Ok(acquired.value)
+                }
+                Err(error) => Err(error),
+            }
+        }
     };
-    let max_attempts = network.max_http_attempts(cfg.http_cache_direct_warm_target.is_some());
-    for attempt in 1..=max_attempts {
-        let Ok(current) = network.http_attempt(&selected, attempt) else {
-            return ((None, Outcome::HttpTransport, None, None), None);
-        };
-        let source_permit = capacity
-            .acquire()
-            .await
-            .expect("source probe semaphore open");
-        let permit = LIMIT.acquire().await.expect("probe semaphore open");
-        let started = Instant::now();
-        let response = match crate::http_cache::discovery_get(&current.client, url)
-            .send()
-            .await
-        {
-            Ok(response) => response,
-            Err(e) if attempt < max_attempts && crate::network::eligible_retry_transport(&e) => {
-                tracing::info!(
-                    stage = "pricing",
-                    attempt,
-                    max_attempts,
-                    "Pricing probe transport failed; retrying on fresh Tor isolation scope"
-                );
-                continue;
-            }
-            Err(e) => return ((None, transport_outcome(&e), None, None), None),
-        };
-        crate::network::log_http(&response, "pricing");
-        let http_status = response.status();
-        let status = Some(http_status.as_u16());
-        if http_status.is_success() {
-            network.promote_http(&selected, &current);
-            tracing::debug!(
-                http_status = status,
-                "Pricing probe succeeded without a payment challenge; price remains unknown"
-            );
-            return ((None, Outcome::NoPaymentChallenge, status, None), None);
-        }
-        if http_status != reqwest::StatusCode::PAYMENT_REQUIRED {
-            let retry_after = crate::network::parse_retry_after(http_status, response.headers())
-                .map(crate::network::RetryAfter::after);
-            drop(response);
-            if attempt < max_attempts && crate::network::eligible_retry_status(http_status) {
-                tracing::info!(
-                    stage = "pricing",
-                    attempt,
-                    max_attempts,
-                    http_status = status,
-                    "Pricing probe HTTP status eligible for retry on fresh Tor isolation scope"
-                );
-                drop(permit);
-                drop(source_permit);
-                crate::network::sleep_retry_after(retry_after).await;
-                continue;
-            }
-            return (
-                (None, Outcome::UnexpectedHttpStatus, status, None),
-                retry_after,
-            );
-        }
-        let metadata = persist
-            .then(|| {
-                crate::http_cache::Metadata::from_headers(
-                    response.headers(),
-                    started.elapsed(),
+    match result {
+        Ok(result) => ProbeAcquisition {
+            fallback: !matches!(result.1, Outcome::Discovered | Outcome::NoPaymentChallenge),
+            result,
+            retry_after: None,
+        },
+        Err(failure) => {
+            let (outcome, status) = match failure.kind {
+                FailureKind::HttpStatus(status) => {
+                    (Outcome::UnexpectedHttpStatus, Some(status.as_u16()))
+                }
+                _ => (
+                    failure
+                        .error
+                        .downcast_ref::<reqwest::Error>()
+                        .map_or(Outcome::HttpTransport, transport_outcome),
                     None,
-                )
-            })
-            .flatten();
-        let parsed = price_headers(response.headers(), status, metadata);
-        if parsed.1 == Outcome::Discovered {
-            network.promote_http(&selected, &current);
+                ),
+            };
+            ProbeAcquisition {
+                result: (None, outcome, status, None),
+                fallback: failure.fallback,
+                retry_after: failure.retry_after,
+            }
         }
-        return (parsed, None);
     }
-    unreachable!("finite attempt budget must return inside loop")
 }
 fn transport_outcome(err: &reqwest::Error) -> Outcome {
     if err.is_timeout() {

@@ -44,8 +44,8 @@ version=1
 mode='tor'
 socks_endpoint='{socks}'
 isolation_namespace='direct-warm-fixture'
-# Direct warming and ordinary inspection must ignore even an enabled relay:
-# its bootstrap is deliberately missing and its wallet key is unavailable.
+# Explicit direct warming bypasses relay bootstrap and payment:
+# its provider is deliberately missing and its wallet key is unavailable.
 [discovery_relay]
 provider='missing-bootstrap.toml'
 wallet='w'
@@ -164,6 +164,14 @@ async fn direct_warm_is_scoped_and_reused_by_tor_but_never_becomes_live_fallback
     // Normal loading still uses Tor policy. Remove the intentionally unselected
     // source; this does not change the selected source's URL/settings/network keys.
     config(Path::new(path), &origin, socks_address, false);
+    // Ordinary catalog loading validates configured local relay metadata even
+    // when the catalog is cached. It still must not load the unavailable key,
+    // contact the relay, or create wallet state.
+    let configured = std::fs::read_to_string(path).unwrap().replace(
+        "missing-bootstrap.toml",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/providers/curl/provider.toml"),
+    );
+    std::fs::write(path, configured).unwrap();
     let inventory = cli(&["catalog", "tools", "--config", path, "--discover-pricing"]).await;
     assert!(
         inventory.status.success(),
