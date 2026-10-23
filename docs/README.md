@@ -18,7 +18,9 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Public swap demo](public-swap-demo.md) | Bounded operator workflows for treasury or static-wallet demos |
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
-[Plans](plans/) describe unfinished work, including artifact storage and the
+[Plans](plans/) describe unfinished work, including
+[generalized unsigned-read relay fallback](plans/generalized_relay_fallback.md),
+artifact storage and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md). The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.
