@@ -191,7 +191,7 @@ HEAD = ["../../providers/agproxy.toml"]
   POST when it faithfully preserves its body/required headers. Unsupported Curl
   payloads skip that entry before payment; they do not restrict POST retries or
   the other adapters. No signed replay is authorized.
-- Retry existing eligible blocking statuses/transient transport failures on fresh
+- Retry the expanded eligible HTTP statuses/transient transport failures on fresh
   owner-bound scopes, with unchanged certificate/hostname/public-destination checks.
   Honor valid server delays, including the terminal delay before relay handoff.
   Complete valid origin responses finish immediately, including valid empty or
@@ -264,21 +264,51 @@ The proposed common origin retry requires all of the following:
 
 | Condition | Fresh Tor origin retry? | Meaning and examples |
 | --- | --- | --- |
-| HTTP 400, 403, 429 or 503 | Yes, while retries remain | Existing fixed blocking-status set. A remote 400 remains eligible even though it may be an application error; do not guess from upstream prose. Valid `Retry-After` delays on 429/503 are honored before the next attempt and before eligible relay handoff. |
-| TLS errors accepted by `network::tls_failure` | Yes, while unsigned and retries remain | Nested `rustls::Error`, or the existing fixed TLS-handshake EOF markers. Keep certificate/hostname checks on every attempt; trying a new scope does not disable validation. |
+| HTTP 400, 403, 408, 429, 500, 502, 503 or 504 | Yes, while retries remain | Proposed set adds 408/500/502/504 to the baseline 400/403/429/503. These can reflect transient request/gateway/origin failures, although another exit cannot guarantee recovery. A remote 400 retains existing eligibility without guessing from upstream prose. Honor valid `Retry-After` on 429/503 before the next attempt and eligible relay handoff. Do not introduce a delay cap or broaden delay parsing implicitly. |
+| TLS handshake timeout, reset, EOF, or other errors accepted by `network::tls_failure` | Yes, while unsigned and retries remain; then eligible relay fallback | Includes connect-budget expiry during TLS and the existing nested `rustls::Error`/fixed handshake EOF cases. Keep certificate/hostname checks on every attempt; trying a new scope does not disable validation. |
 | Other errors accepted by `network::eligible_retry_transport` | Yes in the shared transport path | Includes eligible connection establishment failures, remote name-resolution failures, connection resets, response-header failures, read-inactivity timeouts and incomplete-body I/O. Classification examines the actual error chain, not just an error label. See the current API gap below. |
-| HTTP 408, 500, 502 or 504 | No under the existing origin status policy | Common examples that sound transient but are outside 400/403/429/503. The proposed new on-demand fallback accepts 5xx after this terminal origin attempt; 408 remains terminal. Do not quietly expand the origin status set. |
+| Other 5xx, for example 501, 505 or nonstandard 520 | No fresh origin retry | These remain outside the explicit origin set; proposed on-demand fallback may still use the relay list after one origin attempt. Do not silently treat every 5xx as a new-circuit trigger. |
 | HTTP 401, 404, 405, 410 or 422 | No | Missing credentials, absent endpoint, unsupported method, gone resource or validation rejection do not earn a new circuit. Static discovery can still have its explicitly preserved broader relay behavior. |
 | HTTP 402 | No generic status retry | Direct-origin 402 enters normal challenge handling when authorized; a pricing probe may inspect it. It is neither evidence of a Tor blockage nor automatic authority for another signed attempt. |
 | Redirect response/error | No | Do not follow redirects or purchase another request merely to evade the caller's redirect policy. Preserve static catalog body parsing/legacy fallback where specifically documented. |
 | Local request construction, destination/allowlist, authority, or byte-limit rejection | No | Examples: malformed URL, forbidden private destination, missing payer authority or exceeded `max_spec_bytes`. These also cannot earn the new paid fallback. |
 | Hyper parse/user/canceled errors rejected by the shared classifier | No | Examples: a malformed HTTP response rejected as a protocol parse error or an internally canceled request. Do not relabel a parser/caller error as network instability. |
-| Explicitly rejected SOCKS failures | No | Error-chain markers for failure to create the underlying proxy connection, proxy authentication/credentials rejection, or a listener that is not a SOCKS proxy. A fresh target circuit cannot repair this local setup. Preserve the actual classifier, not broad substring guesses elsewhere. |
+| Transient SOCKS target connection/remote-resolution timeout, reset or temporary failure | Yes, while unsigned and retries remain; then eligible relay fallback | A different Tor circuit/exit can help. Use the connector error chain and actual failure stage; do not confuse target refusal with refusal by the local SOCKS listener. |
+| Timeout connecting to the configured local SOCKS listener | Yes, within the same configured count | The timeout may be transient, even though fresh target isolation cannot repair the local socket. No extra proxy retry loop/backoff. A relay also uses that SOCKS listener: it cannot bypass the outage or use direct networking. Existing startup reachability waiting remains a separate prerequisite, not another per-request retry loop. |
+| Proven connection refusal by the local SOCKS listener | No; no relay handoff for this failure | The configured proxy is unavailable. A fresh circuit or another relay cannot repair that dependency. Do not infer local refusal from an unlocated connection-refused label. |
+| SOCKS authentication/credentials rejection, wrong proxy protocol or invalid local configuration | No; no relay handoff for this failure | Permanent setup errors are not exit failures. Preserve authentication and remote DNS requirements; do not downgrade or bypass them. |
 | Complete invalid JSON/schema/text, unsolicited partial document, or API mapping failure | No | A fully delivered malformed OpenAPI document, an HTML page instead of accepted usage text, or a valid HTTP 200 that cannot be mapped to tool output. Static catalog/coinbase parse fallback remains a separately specified exception, not an origin retry. |
-| Any generic failure after signing the target request | No | A timeout, TLS error, reset, 503 or unreadable body after signing may already have charged/executed. Neither fresh isolation nor another relay can be used to replay it. Preserve only the separately authorized structured-insufficient-funds traversal. |
+| Any generic failure after signing the target request | No | A timeout, TLS error, reset, 503 or unreadable body after signing may already have charged/executed. A connect/TLS/timeout label is not proof of nondispatch and creates no new signed pre-send replay exception. Neither fresh isolation nor another relay can be used to replay it. Preserve only the separately authorized structured-insufficient-funds traversal. |
+
+Connection setup is explicitly covered by the shared policy: TCP/local SOCKS,
+SOCKS negotiation and target connection, remote DNS, then TLS. A failure reliably
+identified before HTTP dispatch does not carry target execution uncertainty, but
+it still requires existing unsigned authority and a classified transient cause.
+Do not require dispatch-stage instrumentation merely to retry an already-eligible
+unsigned GET/x402 POST. Where the existing connector loses the cause/stage, inspect
+its concrete error types and preserve cause information at the smallest shared
+boundary needed to distinguish local setup from remote transient failure. A
+wrapper phrase such as “failed to create underlying connection” is not itself a
+permanent cause. Do not guess stages from arbitrary upstream prose, introduce a
+second connection scheduler, or change timeout budgets. Unlocated refusal must
+not be silently classified as proven local refusal; preserve other shared
+transport eligibility unless a concrete exclusion is established. If preserving
+connector causes requires a dependency patch, follow the existing vendor
+provenance/update guidance; do not add a separate connector implementation.
 
 Baseline implementation differences must be visible in implementation review:
 
+- The current HTTP origin set is exactly 400/403/429/503. D01 deliberately expands
+  it to 400/403/408/429/500/502/503/504 for every existing participating caller,
+  including Base and unsigned API status handling. Remaining 5xx retain the
+  separate fallback rule; the count and expanded classifications ship together.
+- The current shared transport classifier rejects a broad SOCKS wrapper containing
+  “failed to create underlying connection”, as well as authentication/protocol
+  markers. D01 replaces that blanket connection rejection with the explicit
+  transient/local-permanent distinctions above. Some timeouts already pass the
+  classifier depending on their error chain; this is not a claim that all setup
+  timeouts are currently excluded. Local permanent exclusions also prevent relay
+  handoff, including the historically broader static fallback catch paths in D02.
 - Static catalog/pricing, Coinbase and Base already use the shared status/transport
   classification in their participating loops. Caller response validation remains
   separate; Base also has its own method/result acceptance and direct recovery.
@@ -311,11 +341,15 @@ configured adapters.
 
 The same transport engine implements these caller contracts; the distinctions
 are response semantics, not vendor-specific retry loops or configuration flags.
-In Tor mode the existing retryable statuses are 400/403/429/503; other remote
+In Tor mode the proposed retryable statuses are
+400/403/408/429/500/502/503/504 (baseline: 400/403/429/503); other remote
 failures below may hand off directly to fallback without extra origin attempts.
 For the new on-demand readers, eligible connection/TLS/read failures and HTTP
-400/403/429 or 5xx can earn fallback. Keep the existing TLS eligibility while
-retaining certificate and hostname validation on every attempt. Direct mode can
+400/403/408/429 or 5xx can earn fallback. Local SOCKS refusal, authentication and
+protocol/configuration failures cannot earn fallback; a local connect timeout can
+use the common count, but any relay leg still depends on the same Tor proxy.
+Keep the existing TLS eligibility while retaining certificate and hostname
+validation on every attempt. Direct mode can
 hand off after its one origin attempt. Locally rejected or unsupported requests
 never earn fallback.
 
@@ -330,8 +364,8 @@ never earn fallback.
 The engine must distinguish transport/body-read failure from complete-but-invalid
 content and local limits with typed outcomes, rather than guessing from upstream
 error text. Directory validation does not become an excuse to replay successful
-HTTP delivery. Test 404/410, 400/403/429/503, other 5xx, complete malformed 200,
-204/206, redirects, headers/body failures and signed-phase suppression explicitly.
+HTTP delivery. Test 404/410, every status in 400/403/408/429/500/502/503/504,
+other 5xx, complete malformed 200, 204/206, redirects, headers/body failures and signed-phase suppression explicitly.
 
 ### Payments, ownership and agent interface
 
@@ -399,19 +433,30 @@ Planning gate status: independent design and clarity reviews passed after resolv
 the failure/response matrix and GET/HEAD scope. Retry conditions/unsigned POST
 clarification also passed review. The method-specific ordered provider lists and
 provider-owned format metadata passed renewed independent design and clarity
-review. User review remains pending; D01 has not started. Material changes reopen
-the affected concerns.
+review. The expanded HTTP/setup-failure policy also passed renewed independent
+design and clarity review, including the connector cause-retention approach.
+User review remains pending; D01 has not started. Material changes reopen the
+affected concerns.
 
 ## Ordered implementation commits
 
-1. **D01 — Configurable shared Tor isolation count.** Add the network setting,
-   defaults/inspection and validation; replace the hardcoded count for every
+1. **D01 — Configurable shared Tor isolation count and transient classification.**
+   Add the network setting, defaults/inspection and validation; replace the hardcoded count for every
    existing participating consumer together, including Base. Cover omitted/zero/
    positive values and overflow, whole network-file overrides, direct/pinned
    operations, zero-retry body handling and Base's existing endpoint-first behavior.
-   Existing callers keep their functional retry/fallback behavior in this commit.
+   Expand the common status set and classify connection-setup failures as specified
+   above in this same commit; preserve other consumer response/financial contracts.
+   Exercise TLS handshake timeout/reset/EOF, transient SOCKS target failures, local
+   SOCKS connect timeout, proven local refusal, authentication/wrong-protocol errors
+   and ambiguous wrapper errors using faithful connector chains and socket fixtures.
+   Verify counts at 0/1/default, no multiplied attempts, unchanged verification and
+   no direct escape. Preserve Base endpoint-first/direct behavior and the separate
+   startup SOCKS prerequisite. Freeze expanded status/transport expectations in
+   shared tests; D04 still supplies the broader API transport integration.
    Update `docs/configuration.md`, `docs/network-egress.md`, both timer/resource
-   inventories and `examples/network/tor.toml` with the count semantics. No new
+   inventories and `examples/network/tor.toml` with the count semantics, expanded
+   status set and connection-failure distinctions in their owning guides. No new
    total-work deadline, response timer, readiness gate or local cap.
 2. **D02 — Shared unsigned acquisition and relay exchange.** Establish one origin
    retry/handoff path, method-specific ordered lists, and adapter envelopes with
@@ -427,6 +472,11 @@ the affected concerns.
    Cover complete progress versus stalls, retries/body failures/delays at counts
    0/1/default, valid empty results, cancellation, limits, trust/redirect handling,
    no relay scope promotion, cache/304 provenance, and static accepted-work drain.
+   Test expanded statuses/setup failures through handoff: exhausted origin retries
+   precede one list traversal; relay unsigned legs use the same classifier/count;
+   local SOCKS refusal/auth/protocol errors do not purchase another provider, and
+   local connect timeouts never bypass Tor. A paid relay timeout remains uncertain,
+   even when labeled connect/TLS; no signed pre-send replay exception is introduced.
    Cover GET Curl-before-AG order, separate POST/HEAD lists, missing/empty lists,
    unknown keys/missing format/conflicting legacy metadata, no implicit vendor
    selection or repeated per-entry adapter fields, faithful body/header/byte encoding,
@@ -455,7 +505,8 @@ the affected concerns.
    baseline gap. Cover exact query/response/output mapping, supported text MIME/status,
    per-adapter unsupported body/headers/binary handling, relayed 402 without target signing,
    eligible and rejected transport errors for unsigned GET/POST, nonretryable
-   statuses such as 408/500/502/504 despite 5xx fallback eligibility, signed failures
+   statuses such as 401/404/405/410/422 and other-5xx fallback without fresh
+   origin retries, all newly retryable statuses/setup failures, signed failures
    without fallback/replay, relay recursion exclusion, managed/static
    payer bindings, payment uncertainty and concurrent cancellation/drain. Verify
    preexisting typed insufficient-funds traversal and forbidden financial side
@@ -487,6 +538,8 @@ reviewers do not run competing builds or edit sources by default.
   across configuration, HTTP selection, static downloads/pricing, Coinbase, Base,
   envelope validation, caches and paid ownership. Exit: exactly one origin attempt
   sequence plus one ordered method-list traversal, configured count everywhere,
+  expanded HTTP/setup classification with concrete connector evidence, correct
+  local-proxy exclusions and no signed pre-send exception,
   definitive-versus-uncertain fee handling, no lost validation/promotion/authority,
   no new unnecessary enforcement, and source-matched complexity evidence.
 - **G2, after D04 — Runtime and payment architecture.** Review every prior commit
