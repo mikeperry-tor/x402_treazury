@@ -254,7 +254,7 @@ async fn fixture() {
     let mut wallet = 1000;
     // Every eligible status, success at all three positions and finite exhaustion
     // through the real advisory balance consumer; all payload bytes stay equal.
-    for status in [400, 403, 429, 503] {
+    for status in [400, 403, 408, 429, 500, 502, 503, 504] {
         for failures in 0..=3 {
             f.reset();
             f.plan(
@@ -316,7 +316,7 @@ async fn fixture() {
             }
         }
     }
-    for status in [401, 404, 408, 500, 502, 504] {
+    for status in [401, 402, 404, 405, 410, 422, 501, 505, 520] {
         f.reset();
         let payer = address(wallet);
         wallet += 1;
@@ -370,7 +370,7 @@ async fn interrupted_read(f: &Fixture) {
 }
 
 async fn method_consumers(f: &Fixture) {
-    for status in [400, 403, 429, 503] {
+    for status in [400, 403, 408, 429, 500, 502, 503, 504] {
         for method in [
             "eth_chainId",
             "eth_getBlockByNumber",
@@ -428,7 +428,7 @@ async fn method_consumers(f: &Fixture) {
 
 async fn fallback_and_validation(f: &Fixture) {
     // The whole finite sequence on endpoint A completes before endpoint B.
-    for status in [400, 403, 429, 503] {
+    for status in [400, 403, 408, 429, 500, 502, 503, 504] {
         f.reset();
         f.plan(
             "/a",

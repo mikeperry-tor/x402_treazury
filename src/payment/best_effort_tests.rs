@@ -863,6 +863,10 @@ async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_s
     for code in [
         StatusCode::BAD_REQUEST,
         StatusCode::FORBIDDEN,
+        StatusCode::REQUEST_TIMEOUT,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        StatusCode::BAD_GATEWAY,
+        StatusCode::GATEWAY_TIMEOUT,
         StatusCode::TOO_MANY_REQUESTS,
         StatusCode::SERVICE_UNAVAILABLE,
     ] {
@@ -1137,6 +1141,10 @@ async fn tor_unsigned_retry_child() {
     for code in [
         StatusCode::BAD_REQUEST,
         StatusCode::FORBIDDEN,
+        StatusCode::REQUEST_TIMEOUT,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        StatusCode::BAD_GATEWAY,
+        StatusCode::GATEWAY_TIMEOUT,
         StatusCode::TOO_MANY_REQUESTS,
         StatusCode::SERVICE_UNAVAILABLE,
     ] {
@@ -1369,6 +1377,10 @@ async fn tor_unsigned_retry_child() {
     for code in [
         StatusCode::BAD_REQUEST,
         StatusCode::FORBIDDEN,
+        StatusCode::REQUEST_TIMEOUT,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        StatusCode::BAD_GATEWAY,
+        StatusCode::GATEWAY_TIMEOUT,
         StatusCode::TOO_MANY_REQUESTS,
         StatusCode::SERVICE_UNAVAILABLE,
     ] {
@@ -1405,11 +1417,11 @@ async fn tor_unsigned_retry_child() {
         }
     }
 
-    // 2. Ineligible unsigned statuses (401, 404, 500, 302) and unsigned transport failure:
+    // 2. Ineligible unsigned statuses (401, 404, 501, 302) and unsigned transport failure:
     for code in [
         StatusCode::UNAUTHORIZED,
         StatusCode::NOT_FOUND,
-        StatusCode::INTERNAL_SERVER_ERROR,
+        StatusCode::NOT_IMPLEMENTED,
         StatusCode::FOUND,
     ] {
         script_a.observed.lock().unwrap().clear();
@@ -1721,6 +1733,10 @@ async fn tor_unsigned_retry_child() {
     for code in [
         StatusCode::BAD_REQUEST,
         StatusCode::FORBIDDEN,
+        StatusCode::REQUEST_TIMEOUT,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        StatusCode::BAD_GATEWAY,
+        StatusCode::GATEWAY_TIMEOUT,
         StatusCode::TOO_MANY_REQUESTS,
         StatusCode::SERVICE_UNAVAILABLE,
     ] {

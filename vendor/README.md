@@ -9,7 +9,7 @@ actual build graph; vendored upstream lockfiles are provenance inputs.
 
 | Patch | Current reason / consumer | Evidence needed before removal |
 | --- | --- | --- |
-| `reqwest-transport.patch` | `src/network.rs` needs per-request post-connect header inactivity, nonempty body progress and disabled recovery of unstarted pooled requests. | Equivalent unpatched behavior through the production factory in `src/network/http_timeout_tests.rs` and `src/network/http_queue_tests.rs`, including retry policy review. |
+| `reqwest-transport.patch` | `src/network.rs` needs per-request post-connect header inactivity, nonempty body progress, disabled recovery of unstarted pooled requests and retained local SOCKS connection causes. | Equivalent unpatched behavior through the production factory in `src/network/http_timeout_tests.rs` and `src/network/http_queue_tests.rs`, including retry policy review; SOCKS setup regressions must distinguish local refusal from target/handshake failures without changing Tor routing. |
 | `hyper-transport.patch`, `h2-transport.patch` | HTTP and gRPC queued cancellation must discard unopened streams before peer capacity returns; this includes signed payment HEADERS. | Queued timeout/cancellation regressions in `src/network/http_queue_tests.rs` and `tests/network.rs` pass with equivalent unpatched behavior. |
 | `zingo-progress.patch` (Pepper only) | Direct Pepper synchronization retains progressing stream responses and loader/worker drain ownership. RPC adaptation lives in the application. | Equivalent response inactivity, progress/stall, cancellation/restart and truthful drain behavior through the full sync chain. See [Zingo details](ZINGO.md). |
 | Pepper diagnostics patch | `src/treasury/diagnostics.rs` consumes typed pool/operation context without exposing raw upstream prose. | Equivalent sanitized diagnostics and tests; this is observability, not spendability or funding authority. |
@@ -47,7 +47,7 @@ and upstream follow-up.
 | --- | --- | --- | --- |
 | `hyper` | Pending-open cancellation in `hyper-transport.patch`. | First assessment: recheck reports and prepare a minimal pending-open cancellation regression/fix beyond #4042; qualify independently with patched h2 retained. | [#4040](https://github.com/hyperium/hyper/issues/4040) was fixed by merged [#4042](https://github.com/hyperium/hyper/pull/4042), but covers dispatched body-task cancellation. Source inspected at `b07337878fe57b34b2065335ae8cae9ce5a780a0` still waits for h2 readiness before handling retained pending-open context. No exact pending-open report identified by the initial search; no retirement candidate qualified. |
 | `h2` | Pending-open queue cleanup and scheduler wakeups in `h2-transport.patch`. | Follow Hyper assessment; coordinate with #962 and assess zero-capacity cleanup, explicit resets and cancellation wakeups before qualification independently of Hyper's status. | [#962](https://github.com/hyperium/h2/pull/962) addresses [#878](https://github.com/hyperium/h2/issues/878); open/unmerged at inspection, head `26efaaabe9389d0bbf868787a75ef5a7c4676d1d`. Cleanup remains capacity-gated, checks only scheduled resets and lacks explicit/implicit cancellation scheduler wakeups. No retirement candidate qualified; recheck revised heads for all gaps. |
-| `reqwest` | Post-connect header timing, body inactivity/backpressure, and disabled unstarted-request recovery. | Identify a supported upstream implementation or hooks covering every hunk before selecting contributions or a local adapter. Retain current retry behavior. | No retirement candidate qualified. |
+| `reqwest` | Post-connect header timing, body inactivity/backpressure, disabled unstarted-request recovery and retained local SOCKS connection causes. | Identify a supported upstream implementation or hooks covering every hunk before selecting contributions or a local adapter. Hyper-util 0.1.21 hides its SOCKS underlying connector cause; removal also requires equivalent stage/cause evidence for local refusal versus target failure. Retain current retry behavior. | No retirement candidate qualified. |
 | `pepper-sync` | Stream-message/drain changes and typed/sanitized diagnostics; standalone manifest adaptations and root membership for its private merge regression. | Establish a complete upstream route for both concerns before choosing contribution order; preserve lifecycle/merge regression evidence and remove local test membership when retiring the checkout. | No retirement candidate qualified. |
 
 The application owns nineteen public-trait RPC delegations and a narrow lazy
@@ -122,6 +122,17 @@ is unchanged. Real direct/Tor DNS, SOCKS, TLS, stream contention,
 sibling response progress, body stalls and consumer backpressure are tested via
 the production factory. No large replacement timeout or connection-wide progress
 clock is used.
+
+The Reqwest SOCKS service boundary also retains the original underlying connector
+error when connecting to the configured proxy fails. Hyper-util 0.1.21's private
+SOCKS error wrapper does not expose that source. A small wrapper around the existing
+connector captures its error only, without adding I/O, replacing the connector or
+changing timeouts. The fixed local marker `SOCKS local proxy connection failed`
+identifies this stage, and its source preserves the original error chain. Other
+SOCKS failures retain their existing wrapper, so target refusal is not labeled as
+local proxy refusal. Handshake I/O remains subject to the shared transport policy;
+authentication and protocol/configuration errors remain terminal. Production
+factory tests exercise local refusal and transient target/handshake failures.
 
 ## Source verification boundaries
 

@@ -301,8 +301,9 @@ isolation scope (`cover::registry::Owner::from_transport`) from unsigned challen
 through admission, signing, signed dispatch and response body consumption.
 `src/network.rs` uses that canonical identity and effective scope for connection
 pooling and SOCKS isolation. Participating API clients (generated MCP tools,
-static/managed payers, directory tools and `raw_call`) may try up to 3
-Tor isolation scopes on unsigned HTTP `400`, `403`, `429`, and `503` (honoring
+static/managed payers, directory tools and `raw_call`) may try
+`1 + network.tor_isolation_retries` Tor isolation scopes (default 3) on unsigned
+HTTP `400`, `403`, `408`, `429`, `500`, `502`, `503`, and `504` (honoring
 valid `Retry-After` headers on `429`/`503`) with the same pinned payer, and
 conditionally promote a winning candidate after valid `402` challenge validation
 or completed valid unsigned output. Internal discovery relay calls remain on

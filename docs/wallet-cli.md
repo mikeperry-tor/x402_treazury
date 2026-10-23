@@ -636,8 +636,9 @@ authorized signing attempt.
 Unsigned `eth_chainId`, `eth_getBlockByNumber`, `eth_getTransactionReceipt` and
 constrained `eth_call` reads retain exact payloads and canonical block pins.
 Direct mode allows two same-client attempts for transport interruption, with
-200 ms backoff. Tor instead uses the selected transport plus up to two fresh
-owner-bound scopes for HTTP `400`, `403`, `429`, `503` or eligible typed transport
+200 ms backoff. Tor instead uses the selected transport plus `network.tor_isolation_retries` fresh
+owner-bound scopes (default 2) for HTTP `400`, `403`, `408`, `429`, `500`, `502`, `503`, `504`
+or eligible typed transport
 failures (including TLS failures) on one endpoint before provider fallback. Valid `Retry-After` delays only
 a remaining attempt; final exhaustion returns without waiting. RPC rejections,
 malformed results/envelopes and oversized bodies earn no circuit

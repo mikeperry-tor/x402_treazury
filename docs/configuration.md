@@ -905,7 +905,18 @@ isolation_namespace = "x402_treazury"
 socks_auth = "tor_extended"
 connect_timeout_seconds = 120
 read_timeout_seconds = 60
+tor_isolation_retries = 2
 ```
+
+`tor_isolation_retries` defaults to 2 and counts fresh owner-bound scopes after
+an initial unsigned Tor attempt. Zero allows one origin attempt. Nonnegative
+values are accepted when their total attempt count fits the platform's `usize`;
+overflow is rejected. Inspection exposes the effective value. Direct mode and
+explicit direct warming use one origin attempt (Base's existing direct transport
+recovery remains separate). This is an attempt count, not a timer or permission
+to replay a signed request. Whole-section network-file replacement also resets
+an omitted count to its default. See [retry policy](network-egress.md#retry-ownership)
+for participating callers and transient versus local setup failures.
 
 `read_timeout_seconds` defaults to 60 seconds in **both direct and Tor modes**.
 It limits inactivity while waiting for headers or reading the body. Every
@@ -919,7 +930,7 @@ Read timeout accepts 1..86400 seconds at network/source-management level and
 positive fractional seconds at provider level. Connection timeout accepts 1..300.
 Base RPCs, chain views and receipt verification have no separate total deadline;
 they use these connection and read-inactivity limits. Tor Base reads exhaust the
-selected scope plus up to two fresh scopes per endpoint before configured fallback;
+selected scope plus `tor_isolation_retries` fresh scopes per endpoint before configured fallback;
 direct mode retains its two-attempt transport recovery. See [Base policy](wallet-cli.md)
 and [network policy](network-egress.md) for status eligibility, validation and
 provider evidence boundaries. Protocol transaction expiry
@@ -1031,7 +1042,8 @@ when refreshing a vendor spec, including changes to the pinned catalog contracts
 ## Provider HTTP and TLS policy
 
 Participating catalog/pricing, unsigned API and Base reads may recover TLS
-failures on up to two fresh Tor scopes after the selected scope. Every attempt
+failures on `network.tor_isolation_retries` fresh Tor scopes after the selected
+scope (default 2). Every attempt
 retains certificate, hostname and configured protocol verification. This grants
 no replay authority to signed requests and does not change direct-mode recovery.
 
@@ -1117,9 +1129,10 @@ A process-wide cache keys GET requests by their full routed URL (including any
 base URL path prefix), transport compatibility flags, disk-cache scope and opt-out. Sources and listeners
 with the same policy share results; concurrent matching requests coalesce. In Tor
 mode, static catalog and pricing origin fetches use participating per-origin
-isolation scopes and retry eligible status (`400`, `403`, `429`, `503`) or
-transport/timeout failures up to 2 times on fresh candidate scopes (`3` attempts
-total), honoring valid `Retry-After` delays on `429`/`503` and promoting a
+isolation scopes and retry eligible status (`400`, `403`, `408`, `429`, `500`,
+`502`, `503`, `504`) or eligible transport/timeout failures on
+`network.tor_isolation_retries` fresh candidate scopes (default 2, plus the initial
+attempt), honoring valid `Retry-After` delays on `429`/`503` and promoting a
 winning candidate only after a valid catalog JSON/304 or usable 402/2xx pricing
 response. Terminal failures, malformed challenges, rate limits and
 unpaid successes are cached too. Redirects are not followed. Nothing refreshes
@@ -1266,10 +1279,11 @@ challenge was observed, which does not establish that the API is free.
 Pricing discovery skips tools with required arguments: it sends bare GETs and cannot
 supply agent inputs (for example, Straits’ `/api/v1/since` requires `at`).
 These exclusions are recorded as `skipped_arguments` and never invoke the relay.
-In direct mode, or for ineligible origin errors (such as `404`, `500`, oversized/invalid
+In direct mode, or for ineligible origin errors (such as `404`, `501`, oversized/invalid
 bodies, or malformed `402` challenges), origin failure proceeds to one configured relay
-fallback without origin retry; in Tor mode, eligible status (`400`, `403`, `429`, `503`)
-or transport failures try up to two fresh Tor isolation scopes first, honoring any valid
+fallback without origin retry; in Tor mode, eligible status (`400`, `403`, `408`,
+`429`, `500`, `502`, `503`, `504`) or eligible transport failures use
+`network.tor_isolation_retries` fresh Tor isolation scopes first (default 2), honoring any valid
 `Retry-After` on `429`/`503` before the next attempt or relay fallback. Relay-supplied
 responses never promote an origin transport scope. Local-file failures
 remain local. Warnings identify the source, catalog/pricing stage, fixed failure category

@@ -23,9 +23,8 @@ change the Curl-only runtime. The implementation baseline includes that commit;
 retain the original network/payment baseline above for accumulated comparisons.
 The method-list design below supersedes the earlier single-Curl assumption.
 
-This turn prepares the plan for user review only. No implementation commit starts
-before that review. Implementation uses offline/local fixtures and public unfunded
-keys. It does not authorize live paid calls, accessing real wallet secrets,
+User review authorized implementation after the design and clarity reviews through
+`23c7e450`. Implementation uses offline/local fixtures and public unfunded keys. It does not authorize live paid calls, accessing real wallet secrets,
 stopping the live server, or modifying unrelated local files. Preserve `TODO`,
 `discovery_confusion.md`, both `privacy.local*.toml` overrides and `run_servers.sh`.
 
@@ -222,9 +221,19 @@ HEAD = ["../../providers/agproxy.toml"]
   services follow redirects remotely. Curl reports a chain; reject disallowed
   chains. AGProxy/Horizon Pulse report only a final URL: validate that destination
   and explicitly document trust in their remote redirect/public-destination
-  enforcement, without claiming to establish intermediate hops. Their configured
-  use accepts this limited evidence; requests needing verified no-redirect or
-  every-hop evidence cannot use such an entry. Relay responses never promote an
+  enforcement, without claiming to establish intermediate hops. The operator
+  explicitly accepted those services following redirects during implementation
+  review. Configured relay use therefore permits their remote redirects even
+  though ordinary origin HTTP remains no-follow; check the requested and final
+  destinations and disclose this distinction in the owning operator guides.
+  The operator also explicitly rejected excluding adapters solely because they
+  cannot provide redirect-chain evidence. Apply the caller's URL/allowed-origin
+  policy to the requested destination, every reported Curl hop and each reported
+  final destination. AGProxy/Horizon intermediate destinations remain unknown;
+  their configured use accepts that limited control and visibility, including
+  when an origin allowlist is present. Document the remote redirect-policy and
+  plaintext-integrity trust boundary without claiming every-hop enforcement or
+  adding a new flag/evidence gate. Relay responses never promote an
   origin Tor scope or populate origin
   validators/caches as if obtained directly.
 - Eligibility requires a public unsigned request faithfully representable by its
@@ -435,8 +444,22 @@ clarification also passed review. The method-specific ordered provider lists and
 provider-owned format metadata passed renewed independent design and clarity
 review. The expanded HTTP/setup-failure policy also passed renewed independent
 design and clarity review, including the connector cause-retention approach.
-User review remains pending; D01 has not started. Material changes reopen the
-affected concerns.
+User review authorized implementation beginning with D01. Material changes reopen
+the affected concerns.
+
+## Implementation status
+
+D01 is implemented and validated; exact-commit review follows the implementation
+commit before D02 builds on it. The configured count, expanded classifications,
+zero-retry body handling and connector-cause preservation are in the owning guides.
+Focused offline/local tests, formatting, all-target Clippy and exact-baseline
+complexity analysis passed. The unsigned API transport classifier remains TLS-only
+until the D04 integration, as specified above.
+
+The operator accepted the relay redirect/visibility limitation during implementation;
+renewed independent design review passed that explicit contract. It grants no target
+signing, credential forwarding or uncertain-payment replay authority. D02 has not
+started.
 
 ## Ordered implementation commits
 

@@ -1876,6 +1876,7 @@ mod rustls_tls_conn {
 
 #[cfg(feature = "socks")]
 mod socks {
+    use std::sync::{Arc, Mutex};
     use tower_service::Service;
 
     use http::uri::Scheme;
@@ -1895,6 +1896,7 @@ mod socks {
     pub(super) enum SocksProxyError {
         SocksNoHostInUrl,
         SocksLocalResolve(BoxError),
+        SocksLocalConnect(Arc<dyn std::error::Error + Send + Sync>),
         SocksConnect(BoxError),
     }
 
@@ -1943,29 +1945,50 @@ mod socks {
         .parse::<Uri>()
         .map_err(|e| SocksProxyError::SocksConnect(e.into()))?;
 
+        // Hyper-util's SOCKS wrapper hides its underlying connector error. Retain
+        // that cause at the existing service boundary, so callers can distinguish
+        // failure to reach the proxy from a SOCKS target or handshake failure.
+        let local_failure = Arc::new(Mutex::new(None));
+        let failure = local_failure.clone();
+        let mut connector = tower::service_fn(move |destination| {
+            let connecting = http_connector.call(destination);
+            let failure = failure.clone();
+            async move {
+                connecting.await.map_err(|error| {
+                    let error: Arc<dyn std::error::Error + Send + Sync> = Arc::new(error);
+                    *failure.lock().expect("SOCKS connector cause") = Some(error.clone());
+                    error
+                })
+            }
+        });
+
         // TODO: can `Scheme::from_static()` be const fn, compare with a SOCKS5 constant?
-        match proxy.uri().scheme_str() {
+        let connected = match proxy.uri().scheme_str() {
             Some("socks4") | Some("socks4a") => {
-                let mut svc = SocksV4::new(proxy_uri, http_connector);
-                let stream = Service::call(&mut svc, dst_uri)
+                let mut svc = SocksV4::new(proxy_uri, &mut connector);
+                Service::call(&mut svc, dst_uri)
                     .await
-                    .map_err(|e| SocksProxyError::SocksConnect(e.into()))?;
-                Ok(stream.into_inner())
+                    .map(|stream| stream.into_inner())
             }
             Some("socks5") | Some("socks5h") => {
                 let mut svc = if let Some((username, password)) = proxy.raw_auth() {
-                    SocksV5::new(proxy_uri, http_connector)
+                    SocksV5::new(proxy_uri, &mut connector)
                         .with_auth(username.to_string(), password.to_string())
                 } else {
-                    SocksV5::new(proxy_uri, http_connector)
+                    SocksV5::new(proxy_uri, &mut connector)
                 };
-                let stream = Service::call(&mut svc, dst_uri)
+                Service::call(&mut svc, dst_uri)
                     .await
-                    .map_err(|e| SocksProxyError::SocksConnect(e.into()))?;
-                Ok(stream.into_inner())
+                    .map(|stream| stream.into_inner())
             }
             _ => unreachable!(),
-        }
+        };
+        connected.map_err(|error| {
+            match local_failure.lock().expect("SOCKS connector cause").take() {
+                Some(cause) => SocksProxyError::SocksLocalConnect(cause),
+                None => SocksProxyError::SocksConnect(error.into()),
+            }
+        })
     }
 
     impl std::fmt::Display for SocksProxyError {
@@ -1973,6 +1996,7 @@ mod socks {
             match self {
                 Self::SocksNoHostInUrl => f.write_str("socks proxy destination has no host"),
                 Self::SocksLocalResolve(_) => f.write_str("error resolving for socks proxy"),
+                Self::SocksLocalConnect(_) => f.write_str("SOCKS local proxy connection failed"),
                 Self::SocksConnect(_) => f.write_str("error connecting to socks proxy"),
             }
         }
@@ -1983,6 +2007,7 @@ mod socks {
             match self {
                 Self::SocksNoHostInUrl => None,
                 Self::SocksLocalResolve(ref e) => Some(&**e),
+                Self::SocksLocalConnect(ref e) => Some(&**e),
                 Self::SocksConnect(ref e) => Some(&**e),
             }
         }

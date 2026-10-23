@@ -216,7 +216,7 @@ the same canonical identity and origin cannot merge sessions or reuse
 qualification/negative capability; after transport record replacement or eviction,
 retained old sessions finish on their original client while new acquisitions attach
 only to their matching scope. When an unsigned API attempt in Tor mode fails with
-an eligible retry status (`400`, `403`, `429`, `503`), the caller drops that
+an eligible retry status (`400`, `403`, `408`, `429`, `500`, `502`, `503`, `504`), the caller drops that
 response and releases its cover lease before trying a fresh candidate scope, so
 the failed scope's session drains without closing active streams or resetting
 other origins, and the new scope qualifies independently (which can add cover

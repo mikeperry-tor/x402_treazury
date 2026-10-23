@@ -659,10 +659,7 @@ mod relay_tests {
             .get_with(&context, url.clone(), 600.0, &cfg)
             .await;
         assert_eq!(fresh.cache, CachePath::Disk);
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            crate::network::TOR_ISOLATION_RETRY_ATTEMPTS
-        );
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
         assert_eq!(fixture.signed.load(Ordering::SeqCst), 1);
         let saved = crate::discovery_relay::slot(&cfg, &url, "pricing", 64 * 1024)
             .unwrap()
@@ -685,7 +682,9 @@ mod relay_tests {
 
     #[tokio::test]
     async fn only_failed_http_or_challenge_probes_use_relay() {
-        for status in [0, 200, 201, 204, 206, 299, 400, 403, 429, 503, 500, 402] {
+        for status in [
+            0, 200, 201, 204, 206, 299, 400, 403, 408, 429, 500, 502, 503, 504, 501, 402,
+        ] {
             for reject in [false, true] {
                 let log = tempfile::NamedTempFile::new().unwrap();
                 let subscriber = tracing_subscriber::fmt()
@@ -741,21 +740,18 @@ mod relay_tests {
                 let result = cache.get_with(&context, url.into(), 60.0, &cfg).await;
                 let expected_calls = if status == 0 {
                     0
-                } else if matches!(status, 400 | 403 | 429 | 503) {
-                    crate::network::TOR_ISOLATION_RETRY_ATTEMPTS
+                } else if matches!(status, 400 | 403 | 408 | 429 | 500 | 502 | 503 | 504) {
+                    3
                 } else {
                     1
                 };
                 assert_eq!(calls.load(Ordering::SeqCst), expected_calls);
-                if status == 0 || matches!(status, 400 | 403 | 429 | 503) {
+                if status == 0 || matches!(status, 400 | 403 | 408 | 429 | 500 | 502 | 503 | 504) {
                     let records = socks.records.lock().unwrap();
-                    assert_eq!(records.len(), crate::network::TOR_ISOLATION_RETRY_ATTEMPTS);
+                    assert_eq!(records.len(), 3);
                     let passwords: BTreeSet<_> =
                         records.iter().map(|r| r.password.clone()).collect();
-                    assert_eq!(
-                        passwords.len(),
-                        crate::network::TOR_ISOLATION_RETRY_ATTEMPTS
-                    );
+                    assert_eq!(passwords.len(), 3);
                 } else {
                     assert_eq!(socks.records.lock().unwrap().len(), 1);
                 }

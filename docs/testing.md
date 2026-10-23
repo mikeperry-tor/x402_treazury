@@ -180,7 +180,7 @@ decrement per authorization, structured insufficient-funds traversal beyond a pa
 cloneable POST bodies, exhaustion and multiple retained authorizations. Refresh is
 independent and coalesced; failed reads preserve hints and low markers. In Tor mode,
 payment, managed and discovery fixtures also cover participating unsigned status
-retries (`400`, `403`, `429`, `503`), conditional winner promotion, retained
+retries (`400`, `403`, `408`, `429`, `500`, `502`, `503`, `504`), conditional winner promotion, retained
 challenge-to-signed scope across competing promotion and cache eviction, combined
 insufficient-funds handoff with per-wallet unsigned circuit retry and qualification
 accounting, and

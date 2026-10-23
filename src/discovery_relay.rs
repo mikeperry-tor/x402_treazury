@@ -1463,7 +1463,9 @@ pub(crate) mod tests {
     }
     #[tokio::test]
     async fn blocked_catalog_falls_back_once_and_only_relay_cache_reuses_result() {
-        for status in [403, 429, 503, 500, 404, 200, 302, 307] {
+        for status in [
+            400, 403, 408, 429, 500, 502, 503, 504, 501, 404, 200, 302, 307,
+        ] {
             let log = tempfile::NamedTempFile::new().unwrap();
             let subscriber = tracing_subscriber::fmt()
                 .without_time()
@@ -1521,11 +1523,12 @@ pub(crate) mod tests {
                 http_cache_directory: Some(dir.path().join("http-cache")),
                 ..Default::default()
             };
-            let expected_attempts = if matches!(status, 403 | 429 | 503) {
-                crate::network::TOR_ISOLATION_RETRY_ATTEMPTS
-            } else {
-                1
-            };
+            let expected_attempts =
+                if matches!(status, 400 | 403 | 408 | 429 | 500 | 502 | 503 | 504) {
+                    3
+                } else {
+                    1
+                };
             let identity = crate::network::IsolationId::discovery(&url).unwrap();
             let selected = context
                 .http_participating(&identity, &url, None, false, cfg.transport())

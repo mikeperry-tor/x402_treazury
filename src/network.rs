@@ -9,7 +9,11 @@ mod http_queue_tests;
 #[cfg(test)]
 #[path = "network/http_timeout_tests.rs"]
 mod http_timeout_tests;
+#[cfg(test)]
+mod retry_policy_tests;
 mod scope_observation;
+#[cfg(test)]
+mod setup_retry_tests;
 mod startup_socks;
 #[cfg(test)]
 mod tls_retry_tests;
@@ -52,6 +56,8 @@ pub struct NetworkPolicy {
     pub isolation_namespace: Option<String>,
     pub socks_auth: Option<SocksAuth>,
     pub connect_timeout_seconds: Option<u64>,
+    /// Fresh owner-bound Tor scopes after the initial unsigned attempt.
+    pub tor_isolation_retries: Option<usize>,
     /// Maximum HTTP read inactivity, identically in direct and Tor mode.
     #[serde(alias = "request_timeout_seconds")]
     pub read_timeout_seconds: Option<u64>,
@@ -63,6 +69,7 @@ impl NetworkPolicy {
 
     pub fn validate(&self) -> Result<()> {
         self.cover_limits.validate()?;
+        self.tor_attempts()?;
         if self.mode == Mode::Direct {
             ensure!(
                 self.socks_endpoint.is_none()
@@ -98,6 +105,12 @@ impl NetworkPolicy {
         );
         Ok(())
     }
+    fn tor_attempts(&self) -> Result<usize> {
+        self.tor_isolation_retries
+            .unwrap_or(2)
+            .checked_add(1)
+            .context("network.tor_isolation_retries overflows total attempt count")
+    }
     fn namespace(&self) -> &str {
         self.isolation_namespace
             .as_deref()
@@ -110,7 +123,7 @@ impl NetworkPolicy {
         }))
     }
     pub fn inspection(&self) -> serde_json::Value {
-        serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.connect_timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
+        serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.connect_timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"tor_isolation_retries":self.tor_isolation_retries.unwrap_or(2),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
     }
     pub fn load(path: &Path) -> Result<Self> {
         Ok(NetworkConfig::load(path)?.network)
@@ -469,7 +482,9 @@ impl NetworkContext {
     }
     pub(crate) fn max_http_attempts(&self, direct_override: bool) -> usize {
         if self.policy.mode == Mode::Tor && !direct_override {
-            TOR_ISOLATION_RETRY_ATTEMPTS
+            self.policy
+                .tor_attempts()
+                .expect("validated network policy")
         } else {
             1
         }
@@ -618,11 +633,11 @@ pub fn discovery(url: &str, timeout: impl Into<Option<Duration>>) -> Result<reqw
     global().discovery(url, timeout)
 }
 
-/// Finite per-operation attempt budget in Tor mode (1 selected + up to 2 fresh candidate scopes).
-pub(crate) const TOR_ISOLATION_RETRY_ATTEMPTS: usize = 3;
-
 pub(crate) fn eligible_retry_status(status: reqwest::StatusCode) -> bool {
-    matches!(status.as_u16(), 400 | 403 | 429 | 503)
+    matches!(
+        status.as_u16(),
+        400 | 403 | 408 | 429 | 500 | 502 | 503 | 504
+    )
 }
 
 pub(crate) fn tls_failure(error: &reqwest::Error) -> bool {
@@ -659,25 +674,56 @@ pub(crate) fn eligible_retry_transport(error: &reqwest::Error) -> bool {
     if tls_failure(error) {
         return true;
     }
-    let mut source = std::error::Error::source(error);
-    while let Some(err) = source {
-        if let Some(hyper) = err.downcast_ref::<hyper::Error>()
+    eligible_retry_cause(error)
+}
+
+// These exact labels come from the pinned local connector implementation, never
+// a remote response body. Unlocated refusals retain ordinary transport eligibility.
+fn eligible_retry_cause(mut error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut local_proxy = false;
+    loop {
+        if let Some(hyper) = error.downcast_ref::<hyper::Error>()
             && (hyper.is_parse() || hyper.is_user() || hyper.is_canceled())
         {
             return false;
         }
-        let text = err.to_string();
-        if text.starts_with("SOCKS error: ")
-            && (text.contains("failed to create underlying connection")
-                || text.contains("auth")
-                || text.contains("credentials not accepted")
-                || text.contains("not a SOCKS proxy"))
+        let text = error.to_string();
+        local_proxy |= text == "SOCKS local proxy connection failed";
+        if local_proxy
+            && error.downcast_ref::<std::io::Error>().is_some_and(|io| {
+                matches!(
+                    io.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::InvalidInput
+                )
+            })
         {
             return false;
         }
-        source = err.source();
+        if matches!(
+            text.as_str(),
+            "socks proxy destination has no host"
+                | "SOCKS error: server does not support user/pass authentication"
+                | "SOCKS error: server implements authentication incorrectly"
+                | "SOCKS error: credentials not accepted"
+                | "SOCKS error: failed parsing server response"
+                | "SOCKS error: failed serialize request"
+                | "SOCKS error: missing destination host"
+                | "SOCKS error: missing destination port"
+                | "SOCKS error: host address is more than 255 characters"
+                | "SOCKS error: IPV6 is not supported"
+        ) {
+            return false;
+        }
+        let next = error
+            .downcast_ref::<std::io::Error>()
+            .and_then(|io| io.get_ref())
+            .map(|inner| inner as &(dyn std::error::Error + 'static))
+            .or_else(|| error.source());
+        match next {
+            Some(next) => error = next,
+            None => return true,
+        }
     }
-    true
 }
 
 pub(crate) fn parse_retry_after(

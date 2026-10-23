@@ -1068,7 +1068,7 @@ async fn deployment_network_override_replaces_policy_without_inspection_io() {
     let dir = tempfile::tempdir().unwrap();
     network_override_fixture(
         dir.path(),
-        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\nisolation_namespace='embedded'\nread_timeout_seconds=19\n",
+        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\nisolation_namespace='embedded'\nread_timeout_seconds=19\ntor_isolation_retries=7\n",
     );
     std::fs::write(
         dir.path().join("network.toml"),
@@ -1089,6 +1089,7 @@ async fn deployment_network_override_replaces_policy_without_inspection_io() {
     assert_eq!(shown["network"]["isolation_namespace"], "x402_treazury");
     assert_eq!(shown["network"]["read_timeout_seconds"], 60);
     assert_eq!(shown["network"]["connect_timeout_seconds"], 15);
+    assert_eq!(shown["network"]["tor_isolation_retries"], 2);
     let original = good(
         run(
             dir.path(),
@@ -1099,6 +1100,7 @@ async fn deployment_network_override_replaces_policy_without_inspection_io() {
     );
     assert_eq!(original["network"]["isolation_namespace"], "embedded");
     assert_eq!(original["network"]["read_timeout_seconds"], 19);
+    assert_eq!(original["network"]["tor_isolation_retries"], 7);
     // Replacement precedes semantic validation of the embedded policy.
     network_override_fixture(dir.path(), "[network]\nmode='tor'\n");
     assert_eq!(
@@ -1123,6 +1125,7 @@ async fn deployment_network_override_replaces_policy_without_inspection_io() {
     let shown = good(run(dir.path(), &args, &[]).await);
     assert_eq!(shown["network"]["mode"], "tor");
     assert_eq!(shown["network"]["connect_timeout_seconds"], 120);
+    assert_eq!(shown["network"]["tor_isolation_retries"], 2);
     assert_eq!(shown["network"]["read_timeout_seconds"], 60);
     assert!(!dir.path().join("state").exists());
 }

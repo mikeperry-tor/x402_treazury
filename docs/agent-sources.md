@@ -166,8 +166,8 @@ Documented HTTP requests may go straight to `raw_call`; known OpenAPI URLs go to
 
 Public Coinbase reads are unsigned, using an existing endpoint wallet's
 documentation identity without allocation, funding or observation. Missing
-identity fails that request. Under Tor they use one origin attempt plus up to two
-eligible fresh-isolation retries, with the shared eligibility and `Retry-After`
+identity fails that request. Under Tor they use one origin attempt plus
+`network.tor_isolation_retries` eligible fresh-isolation retries (default 2), with the shared eligibility and `Retry-After`
 policy, including the terminal delay before fallback. Direct mode uses one
 origin attempt. Only complete valid search JSON may promote an origin scope.
 

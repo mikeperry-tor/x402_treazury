@@ -43,9 +43,9 @@ an existing canonical slot only when it still holds the exact originally acquire
 never overwritten or resurrected, and no separate winner registry, history cache
 or counter is kept; a miss after normal LRU eviction or restart creates a fresh
 scope. Static catalog and pricing discovery use participating selection per origin
-(`SelectionPolicy::Participating`): in Tor mode, eligible status (`400`, `403`,
-`429`, `503`) or transport/timeout failures retry up to 2 times on fresh candidate
-scopes (`3` attempts total), honoring valid `Retry-After` headers on `429`/`503`
+(`SelectionPolicy::Participating`): in Tor mode, eligible status (`400`, `403`, `408`, `429`, `500`, `502`, `503`, `504`)
+or eligible transport/timeout failures retry on fresh candidate scopes according to
+`network.tor_isolation_retries` (default 2, plus the initial attempt), honoring valid `Retry-After` headers on `429`/`503`
 before the next candidate attempt and before any paid discovery-relay fallback.
 A valid delay beyond the platform clock's range remains pending and cancellable;
 it cannot collapse into an immediate retry or relay dispatch. This introduces no
@@ -102,8 +102,8 @@ renew another response's inactivity timer or signed authority.
 
 | Caller | Transport and identity |
 | --- | --- |
-| `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, participating discovery origin (up to 3 Tor attempts; promotes on valid JSON or 304) |
-| `pricing.rs` | Startup-only unsigned GET probe, participating discovery origin (up to 3 Tor attempts; promotes on usable 402 or 2xx); successes/failures remain cached |
+| `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, participating discovery origin (configured Tor attempt count; promotes on valid JSON or 304) |
+| `pricing.rs` | Startup-only unsigned GET probe, participating discovery origin (configured Tor attempt count; promotes on usable 402 or 2xx); successes/failures remain cached |
 | `catalog_state.rs` | Lazy help fetch, help URL discovery origin; dynamic bindings retain public-destination policy |
 | `discovery/coinbase.rs` | On-demand unsigned resource search, existing endpoint wallet documentation identity, participating origin retries; optional paid Curl via endpoint payer |
 | `discovery/import.rs` | Agent OpenAPI fetch, discovery origin, public-destination policy |
@@ -130,12 +130,28 @@ conversion is needed. Missing/conflicting identities cannot reach submission or
 lookup; invalid completed facts can still retain exact local bytes. Do not guess
 identity from current pool roles.
 
+Participating unsigned transport recovery classifies concrete causes. A transient
+SOCKS target failure, remote-resolution failure, reset, TLS failure or timeout can
+use the remaining configured attempts; certificate and hostname verification stay
+enabled. A timeout connecting to the configured local SOCKS listener also uses
+that count, with no extra loop or direct escape. A proven refusal at that local
+connection stage, SOCKS authentication rejection, protocol parsing/serialization
+failure or invalid local configuration is terminal. An unlocated refusal or the
+opaque “failed to create underlying connection” wrapper alone does not establish
+a permanent local failure. The Reqwest SOCKS boundary preserves the underlying
+local connector cause to make this distinction. Hyper parse/user/canceled errors,
+request construction and redirect failures remain excluded. Other 5xx outside
+the explicit status set (for example 501/505/520) do not earn fresh origin scopes.
+The existing API transport integration remains TLS-only; the broader classifier
+already applies to catalog, pricing, Coinbase and Base. Startup's local SOCKS
+reachability prerequisite remains separate from per-operation attempts.
+
 ## Paid discovery relay
 
 Coinbase runtime resource search uses an existing endpoint source-management
 wallet's documentation identity for unsigned origin reads. It shares participating
 HTTP attempt selection, eligibility, complete-body transport recovery,
-`Retry-After` and conditional validated promotion: initial plus at most two fresh
+`Retry-After` and conditional validated promotion: initial plus `network.tor_isolation_retries` fresh
 Tor scopes, or one origin attempt in direct mode. Successful empty/partial
 results never fall back. Complete invalid JSON does not earn an isolation retry;
 local policy, identity and download-limit failures cannot trigger paid relay work.
@@ -234,7 +250,8 @@ Base read RPCs, complete chain views and receipt verification use connection and
 read-inactivity timeouts, with no separate total deadline in either network mode.
 Progressing reads can finish. Direct reads retain two same-client attempts for
 transport failures with 200 ms backoff. Tor reads instead use one selected scope
-plus up to two fresh scopes on HTTP `400`, `403`, `429`, `503` or eligible typed
+plus `network.tor_isolation_retries` fresh scopes on HTTP
+`400`, `403`, `408`, `429`, `500`, `502`, `503`, `504` or eligible typed
 transport failures (including TLS failures), exhausting one endpoint before considering the next. Valid
 `Retry-After` on `429`/`503` delays only a remaining attempt; exhaustion drops the
 unused body and returns without waiting. Caller/query ownership spans the logical
@@ -318,8 +335,8 @@ An x402 challenge and its single signed attempt are separate requests, each
 subject to connection and read-inactivity limits. In Tor mode, participating
 API clients (`PaidClient::new`, `PaidClient::managed`, and `PaidClient::unsigned`,
 covering generated MCP tools, directory tools and `raw_call`) may try
-up to three isolation scopes (`1` selected plus up to `2` private candidates) on
-unsigned HTTP `400`, `403`, `429`, and `503` while keeping the canonical payer
+`1 + network.tor_isolation_retries` isolation scopes (default 3) on
+unsigned HTTP `400`, `403`, `408`, `429`, `500`, `502`, `503`, and `504` while keeping the canonical payer
 pinned, honoring valid `Retry-After` headers on `429` and `503`, and conditionally
 promoting the winning candidate after valid `402` challenge validation or a
 completed valid unsigned output. Unsigned TLS failures also consume the remaining
@@ -643,7 +660,7 @@ financial or qualification authority.
 | --- | --- |
 | Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote directory browse retains upstream maximum 100. Follow continuations for complete inventories. |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
-| Participating Tor HTTP scope retries: up to 3 attempts total (`1` selected + `2` candidates); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static catalog/pricing relay calls remain `SelectionPolicy::Legacy`; Base read-only RPC also participates). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
+| Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static catalog/pricing relay calls remain `SelectionPolicy::Legacy`; Base read-only RPC also participates). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
 | HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP uses explicit source-management override, then accepted provider value, then network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
 | Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |

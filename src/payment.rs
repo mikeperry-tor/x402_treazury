@@ -768,6 +768,8 @@ impl PaidClient {
             self.transport,
             self.selection,
         )?;
+        let participating_tor = self.selection == crate::network::SelectionPolicy::Participating
+            && factory.policy.mode == crate::network::Mode::Tor;
         let max_attempts = if self.selection == crate::network::SelectionPolicy::Participating {
             factory.max_http_attempts(false)
         } else {
@@ -786,7 +788,7 @@ impl PaidClient {
                 &transport,
                 request,
                 cover.as_mut(),
-                (max_attempts > 1 && request.url().scheme() == "https")
+                (participating_tor && request.url().scheme() == "https")
                     .then_some((self.max_response_bytes, unsigned_only)),
             )
             .await
@@ -812,7 +814,7 @@ impl PaidClient {
             };
             diagnostics::response(&response);
             let status = response.status();
-            if max_attempts > 1 && crate::network::eligible_retry_status(status) {
+            if participating_tor && crate::network::eligible_retry_status(status) {
                 if attempt == max_attempts {
                     drop(response);
                     drop(cover);

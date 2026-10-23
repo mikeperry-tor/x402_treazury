@@ -343,7 +343,7 @@ impl reqwest::dns::Resolve for Loopback {
 #[test]
 fn tls_failures_retry_only_unsigned_tor_consumers_in_isolated_process() {
     if std::env::var_os("TREAZURY_TLS_RETRY_CHILD").is_none() {
-        for mode in ["tor", "direct"] {
+        for mode in ["tor", "tor0", "tor1", "direct"] {
             let output=std::process::Command::new(std::env::current_exe().unwrap()).env_clear()
                 .envs(std::env::var("LLVM_PROFILE_FILE").map(|v|("LLVM_PROFILE_FILE",v)))
                 .env("TREAZURY_TLS_RETRY_CHILD",mode)
@@ -360,7 +360,13 @@ fn tls_failures_retry_only_unsigned_tor_consumers_in_isolated_process() {
     tokio::runtime::Runtime::new().unwrap().block_on(fixture());
 }
 async fn fixture() {
-    let tor = std::env::var("TREAZURY_TLS_RETRY_CHILD").unwrap() == "tor";
+    let mode = std::env::var("TREAZURY_TLS_RETRY_CHILD").unwrap();
+    let tor = mode.starts_with("tor");
+    let retries = match mode.as_str() {
+        "tor0" => Some(0),
+        "tor1" => Some(1),
+        _ => None,
+    };
     let state = StateData::default();
     let remaining = Arc::new(AtomicUsize::new(0));
     let connections = Arc::new(AtomicUsize::new(0));
@@ -386,6 +392,7 @@ async fn fixture() {
         mode: if tor { Mode::Tor } else { Mode::Direct },
         socks_endpoint: tor.then_some(socks.address),
         read_timeout_seconds: Some(2),
+        tor_isolation_retries: retries,
         ..Default::default()
     })
     .unwrap()
@@ -510,12 +517,13 @@ async fn fixture() {
                         .await
                         .is_ok(),
                 };
-                let expected_success = tor && failures < 3;
+                let max_attempts = global().max_http_attempts(false);
+                let expected_success = tor && failures < max_attempts;
                 assert_eq!(
                     success, expected_success,
                     "{consumer} {failures} untrusted handshakes"
                 );
-                let attempts = if tor { (failures + 1).min(3) } else { 1 };
+                let attempts = (failures + 1).min(max_attempts);
                 assert_eq!(
                     connections.load(Ordering::SeqCst) - before_connections,
                     attempts,
@@ -712,13 +720,14 @@ async fn body_cases(
                 .await
                 .is_ok(),
         };
-        let expected_success = tor && failures < 3;
+        let max_attempts = global().max_http_attempts(false);
+        let expected_success = tor && failures + status_first < max_attempts;
         assert_eq!(
             success, expected_success,
             "{consumer} real TLS body corruption"
         );
         let attempts = if tor {
-            (failures + status_first + 1).min(3)
+            (failures + status_first + 1).min(max_attempts)
         } else {
             1
         };
@@ -729,7 +738,7 @@ async fn body_cases(
         );
         assert_eq!(
             state.body.flipped.load(Ordering::SeqCst) - flipped,
-            failures,
+            failures.min(attempts.saturating_sub(status_first)),
             "actual encrypted body records were corrupted after valid headers"
         );
         let calls = state.calls.lock().unwrap().clone();
