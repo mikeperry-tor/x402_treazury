@@ -443,15 +443,17 @@ A separate reconciliation owner keeps bounded advisory wallet reads moving
 independently; historical authorization reads are qualification-only. Cancellation
 of a response waiter does not abandon its accepted pass.
 Help coalesces requests for the same document without blocking other resources.
-Required catalogs must succeed; explicitly optional remote failures are reported
-as unavailable during serving. The active catalog-download limit defaults to 2
+Strict catalog loading requires complete selected results; its unsigned-serving
+loader can omit explicitly optional remote failures. Ordinary deployment serving
+publishes available tools while remote catalogs remain pending and reports failed
+sources as unavailable. The active catalog-download limit defaults to 2
 (configurable 1..64); server-delay waits hold no download permit, including during
 inspection and warming. Concurrent catalogs retain discovery-origin
 credentials; paths on the same origin share an identity, different origins do not.
 Compatible aliases coalesce downloads within the load. See
-[the deferred independent provider startup plan](plans/deferred/independent_provider_startup.md) for independent
-loading and background pricing. Frozen catalogs and disabled probes avoid those
-startup dependencies in the live qualification.
+[runtime architecture](architecture.md#catalog-configuration-and-execution) for
+independent loading and background pricing. Frozen catalogs and disabled probes
+avoid those startup dependencies in live qualification.
 
 ## Retry ownership
 

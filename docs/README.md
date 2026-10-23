@@ -18,9 +18,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Public swap demo](public-swap-demo.md) | Bounded operator workflows for treasury or static-wallet demos |
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
-[Plans](plans/) describe unfinished work, including
-[generalized unsigned-read relay fallback](plans/generalized_relay_fallback.md),
-artifact storage and the
+[Plans](plans/) describe unfinished work, including artifact storage and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md). The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.
@@ -32,11 +30,10 @@ USDC/ZEC discovery triggers, recurring cadence, stop rules and accepted-work
 exceptions.
 The [live runbook](../tests/live/INTEGRATION.md) is the provider execution walkthrough;
 [testing](testing.md#qualification-status) states qualification limits.
-[Deferred plans](plans/deferred/) cover independent provider startup, polling,
+[Deferred plans](plans/deferred/) cover polling,
 mutation testing, cover shaping, broader lifecycle/cover acceptance, managed
-wallet extensions, [post-merge Zcash isolation recovery](plans/deferred/zcash_isolation_retries.md),
-[Coinbase bundle access](plans/deferred/coinbase_bundles.md) and the
-[complete-document acquisition audit](plans/deferred/document_response_completeness.md).
+wallet extensions, [post-merge Zcash isolation recovery](plans/deferred/zcash_isolation_retries.md)
+and [Coinbase bundle access](plans/deferred/coinbase_bundles.md).
 Plans grant no execution or spending authority.
 
 When implemented, move useful explanations into maintained guides, retain concrete
