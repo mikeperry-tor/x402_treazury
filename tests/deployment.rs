@@ -1325,7 +1325,7 @@ async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() 
             assert_eq!(
                 expected_tools.len(),
                 if management {
-                    6
+                    7
                 } else if on_demand {
                     2
                 } else {
