@@ -1910,8 +1910,7 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
             let mut expected = field.clone();
             expected.as_object_mut().unwrap().remove("default");
             if name == "max_price_usd" {
-                assert_eq!(merged["type"], json!(["number", "string"]));
-                merged["type"] = json!("number");
+                assert_eq!(merged["type"], "number");
             }
             assert_eq!(merged, expected, "{path} {name}: schema constraint changed");
         }

@@ -294,6 +294,16 @@ async fn fixture() {
         json!({"directory":"coinbase","page":1}),
         json!({"directory":"coinbase","wallet":"split"}),
         json!({"directory":"coinbase","limit":21}),
+        json!({"directory":"coinbase","curated_only":true}),
+        json!({"directory":"coinbase","curated_only":false}),
+        json!({"directory":"coinbase","tags":["Weather"]}),
+        json!({"directory":"coinbase","bundle_slugs":["weather-kit"]}),
+        json!({"directory":"coinbase","extensions":["bazaar"]}),
+        json!({"directory":"coinbase","pay_to":"merchant"}),
+        json!({"directory":"coinbase","url_substring":"api/weather"}),
+        json!({"directory":"coinbase","max_price_usd":-0.05}),
+        json!({"directory":"coinbase","max_price_usd":"0.05"}),
+        json!({"directory":"coinbase","q":"é".repeat(401)}),
     ] {
         assert!(
             server(&m, "writer")
@@ -308,6 +318,18 @@ async fn fixture() {
     *m.fixture_coinbase.lock().unwrap() = Some(ORIGIN.into());
     assert_eq!(proxy.accepted.load(Ordering::SeqCst), before);
     assert!(f.calls.lock().unwrap().is_empty());
+    assert!(
+        f.payers.lock().unwrap().is_empty(),
+        "rejected inputs must not disclose payment signatures"
+    );
+    assert!(
+        m.inner.lock().unwrap().state.records.is_empty(),
+        "rejected inputs must not register sources"
+    );
+    assert!(
+        observations.lock().unwrap().is_empty(),
+        "rejected inputs must not even select an HTTP scope"
+    );
 
     let unsigned = Manager::new(
         m.policy.clone(),

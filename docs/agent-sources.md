@@ -134,19 +134,13 @@ Select `directory="coinbase"` for ranked resource search, optionally using `q`.
 Omitted mode or `mode="best"` selects this search; `browse`, page/per-page/cursor
 arguments and x402 List-only filters reject before I/O. Mode defaults are
 branch-specific: local and x402 List omission still means browse. There is no
-search federation or automatic directory fallback. `curated_only` defaults true;
-false includes non-curated matches. `limit` defaults to 20 and accepts 1–20, an
-upstream constraint rather than a local pagination limit.
-
-Coinbase accepts optional `tags` (up to five, case-sensitive OR), known
-`bundle_slugs` (up to five, OR), `extensions`, `pay_to` and `url_substring`.
-`q` accepts at most 400 Unicode characters. `max_price_usd` is a USD-price string
-such as `"0.05"` in this branch; x402 List best retains its nonnegative numeric
-price argument. Coinbase validates price-string syntax. The server supplies Base
-mainnet USDC/exact payment filters; callers cannot select networks/assets/schemes
-or a payer. All returned offers remain intact. Filters and prices are advisory,
-not evidence of spendability or useful delivery. A known bundle slug is only a
-search filter: bundle list/detail and authenticated CDP access are not exposed.
+search federation or automatic directory fallback. Search always uses curated
+resources. Its shared inputs are `q`, `limit` and numeric `max_price_usd`, just as
+for x402 List ranked search. `limit` defaults to 5 and accepts 1–20; Coinbase
+queries accept at most 400 Unicode characters. Price filters are advisory, not
+payment caps or evidence of useful delivery. Provider-specific filters and a
+non-curated mode are not exposed. The server supplies Base mainnet USDC/exact
+payment constraints; all returned offers remain intact.
 
 The response contains `directory="coinbase"`, `acquisition.via` (`origin` or
 `curl`), `response` (the complete upstream object) and guidance. It preserves

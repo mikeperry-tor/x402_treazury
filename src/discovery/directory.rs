@@ -47,22 +47,14 @@ pub fn search_schema() -> Value {
             ) {
                 continue;
             }
-            match properties.entry(name.clone()) {
-                serde_json::map::Entry::Vacant(entry) => {
-                    entry.insert(field.clone());
-                }
-                serde_json::map::Entry::Occupied(mut entry) => {
-                    let shared = entry.get_mut();
-                    if shared["type"] != field["type"] {
-                        shared["type"] = json!([shared["type"].clone(), field["type"].clone()]);
-                    }
-                }
-            }
+            properties
+                .entry(name.clone())
+                .or_insert_with(|| field.clone());
         }
     }
     // Describe the choices once, without concatenating upstream implementation prose.
     let help = json!({
-        "q":"Capability keywords. Coinbase ranks matches; x402 List browse and local search use case-insensitive substrings. Omit to browse or filter without keywords.",
+        "q":"Capability keywords. Browse/local use substring matching; ranked search uses relevance. Omit to search without keywords.",
         "category":"x402 List only: service category; omit for all categories.",
         "status":"x402 List browse only: service status.",
         "verified":"x402 List browse only: filter for its paid-delivery verification badge. Distinct from payment_ready; no guarantee for a future call.",
@@ -73,10 +65,10 @@ pub fn search_schema() -> Value {
         "page":"Local or x402 List browse page, starting at 1. Coinbase has no pagination.",
         "per_page":"Local or x402 List browse page size; default 25. x402 List maximum 100.",
         "prefer":"x402 List best only: ranking preference; default balanced.",
-        "max_price_usd":"Advisory USD price filter, not a payment cap. Coinbase takes a string such as \"0.05\"; x402 List best takes a number.",
+        "max_price_usd":"Advisory USD price filter, not a payment cap.",
         "require_verified":"x402 List best only: require its paid-delivery verification badge, not just payment_ready.",
         "include_facilitator_context":"x402 List best only: include separate ecosystem-level facilitator statistics.",
-        "limit":"Ranked result count, 1–20. Defaults to 20 for Coinbase or 5 for x402 List best; no pagination."
+        "limit":"Ranked result count, 1–20; default 5. No pagination."
     });
     // Shared fields must admit local sizes; remote branches retain upstream bounds.
     properties
@@ -91,7 +83,7 @@ pub fn search_schema() -> Value {
     }));
     properties.insert("mode".into(), json!({
         "type":"string","enum":["browse","best"],
-        "description":"x402 List: browse (default, paginated) or best (ranked recommendations). Coinbase: omit or use best. Local: omit or use browse."
+        "description":"x402 List: browse (default, paginated) or best (ranked recommendations). Curated search: omit or use best. Local: omit or use browse."
     }));
     for (name, field) in &mut properties {
         if let Some(description) = help.get(name) {
@@ -101,7 +93,7 @@ pub fn search_schema() -> Value {
             field.as_object_mut().unwrap().remove("default");
         }
     }
-    properties.insert("directory".into(), json!({"type":"string","enum":["x402_list","coinbase"],"description":"coinbase: curated ranked resources (curated_only=false broadens results). x402_list: broader service directory, the default. Omit with local_only=true."}));
+    properties.insert("directory".into(), json!({"type":"string","enum":["x402_list","coinbase"],"description":"coinbase: curated search. x402_list: broader service directory, the default. Omit with local_only=true."}));
     let branch = |mode: &str, schema: &Value, required: Value| {
         let mut allowed: Map<String, Value> = schema["properties"]
             .as_object()

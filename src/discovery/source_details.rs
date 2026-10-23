@@ -55,7 +55,7 @@ impl Input {
 
 pub fn schema() -> Value {
     json!({"type":"object","properties":{
-        "slug":{"type":"string","minLength":1,"pattern":"\\S","not":{"enum":[".",".."]},"description":"x402 List service slug, not a Coinbase resource URL or bundle slug. Use base_url instead when the exact API base is known."},
+        "slug":{"type":"string","minLength":1,"pattern":"\\S","not":{"enum":[".",".."]},"description":"x402 List service slug, not a resource URL. Use base_url instead when the exact API base is known."},
         "base_url":{"type":"string","format":"uri","description":"Exact public HTTPS API base, optionally with a path such as /v1. No query, fragment or credentials; do not infer it from a resource URL."},
         "documentation_url":{"type":"string","format":"uri","description":"Optional public HTTPS usage-document URL. Returns complete UTF-8 plain/Markdown text; rejects HTML/non-text. Query parameters allowed, credentials/fragments forbidden. Its host must be allowed. No charge, redirects or linked reading."}
     },"oneOf":[{"required":["slug"]},{"required":["base_url"]},{"required":["documentation_url"]}],"additionalProperties":false})

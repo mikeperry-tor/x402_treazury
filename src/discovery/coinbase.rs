@@ -1,4 +1,4 @@
-//! Coinbase-ranked resource metadata with curated results by default.
+//! Curated resource search with shared ranked-search inputs.
 use super::{Manager, import};
 use crate::{network, output::ToolOutput};
 use anyhow::{Context, Result, bail, ensure};
@@ -9,81 +9,25 @@ pub(super) const SEARCH_URL: &str =
     "https://api.cdp.coinbase.com/platform/v2/x402/discovery/search";
 
 pub(super) fn search_branch() -> Value {
-    json!({
+    // Share ranked-search controls with x402 List; provider-specific choices stay internal.
+    let ranked = &super::directory::tool("/best").input_schema["properties"];
+    let mut schema = json!({
         "properties": {
-            "q": {
-                "type": "string",
-                "maxLength": 400,
-                "description": "Optional ranked query, up to 400 characters. Omit for filter-only search; blank text is preserved."
-            },
-            "curated_only": {
-                "type": "boolean",
-                "default": true,
-                "description": "Coinbase: true (default) selects curated resources; false broadens results beyond the curated list."
-            },
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 20,
-                "description": "Coinbase: 1–20 resources, default 20. No pagination."
-            },
-            "max_price_usd": {
-                "type": "string",
-                "description": "Coinbase: USD price string, e.g. \"0.05\"; x402 List best uses a number. Search filter, not a payment cap."
-            },
-            "tags": {
-                "type": "array",
-                "maxItems": 5,
-                "items": {
-                    "type": "string"
-                },
-                "description": "Coinbase: up to five case-sensitive tags, exact OR matching. Empty means no tag filter."
-            },
-            "bundle_slugs": {
-                "type": "array",
-                "maxItems": 5,
-                "items": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-                },
-                "description": "Coinbase: up to five already-known bundle slugs, OR matching. Filters resources; does not list bundles or return complete ordered bundle details."
-            },
-            "extensions": {
-                "type": "array",
-                "items": {
-                    "type": "string"
-                },
-                "description": "Coinbase: protocol-extension filters. Empty means no extension filter."
-            },
-            "pay_to": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128,
-                "description": "Coinbase: merchant payment-address filter, not a payer selector."
-            },
-            "url_substring": {
-                "type": "string",
-                "minLength": 3,
-                "maxLength": 2048,
-                "description": "Coinbase: case-insensitive resource-URL substring filter, not an API base or specification URL."
-            },
-            "directory": {
-                "const": "coinbase"
-            },
-            "mode": {
-                "const": "best"
-            },
-            "local_only": {
-                "const": false
-            }
+            "q": {"type":"string", "maxLength":400, "description":"Optional capability keywords."},
+            "limit": ranked["limit"],
+            "max_price_usd": ranked["max_price_usd"],
+            "directory": {"const":"coinbase"},
+            "mode": {"const":"best"},
+            "local_only": {"const":false}
         },
-        "required": [
-            "directory"
-        ],
-        "additionalProperties": false
-    })
+        "required":["directory"],
+        "additionalProperties":false
+    });
+    schema["properties"]["limit"]["description"] =
+        json!("Maximum ranked results, 1–20; default 5.");
+    schema["properties"]["max_price_usd"]["description"] =
+        json!("Advisory USD price filter, not a payment cap.");
+    schema
 }
 
 /// Validate the exact branch before acquiring identities or making requests.
@@ -92,56 +36,27 @@ pub(super) fn request(args: &Map<String, Value>) -> Result<reqwest::Url> {
     let properties = schema["properties"].as_object().unwrap();
     for (name, value) in args {
         let field = properties.get(name).with_context(|| {
-            format!("coinbase_search argument {name} is unsupported in Coinbase ranked search")
+            format!("coinbase_search argument {name} is unsupported in curated search")
         })?;
         validate(name, value, field)?;
     }
     let mut url = reqwest::Url::parse(SEARCH_URL)?;
     let mut query = url.query_pairs_mut();
-    for (name, upstream) in [
-        ("q", "query"),
-        ("max_price_usd", "maxUsdPrice"),
-        ("pay_to", "payTo"),
-        ("url_substring", "urlSubstring"),
-    ] {
-        if let Some(value) = args.get(name) {
-            query.append_pair(upstream, value.as_str().unwrap());
-        }
+    if let Some(value) = args.get("q") {
+        query.append_pair("query", value.as_str().unwrap());
     }
-    query.append_pair(
-        "curatedOnly",
-        if args
-            .get("curated_only")
-            .and_then(Value::as_bool)
-            .unwrap_or(true)
-        {
-            "true"
-        } else {
-            "false"
-        },
-    );
+    if let Some(value) = args.get("max_price_usd") {
+        // Preserve the accepted JSON number when adapting to the upstream string field.
+        query.append_pair("maxUsdPrice", &value.as_number().unwrap().to_string());
+    }
+    query.append_pair("curatedOnly", "true");
     query.append_pair(
         "limit",
         &args
             .get("limit")
-            .and_then(Value::as_u64)
-            .unwrap_or(20)
+            .unwrap_or(&schema["properties"]["limit"]["default"])
             .to_string(),
     );
-    for (name, upstream) in [
-        ("tags", "tags"),
-        ("bundle_slugs", "bundleSlugs"),
-        ("extensions", "extensions"),
-    ] {
-        for item in args
-            .get(name)
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            query.append_pair(upstream, item.as_str().unwrap());
-        }
-    }
     query.append_pair("network", "eip155:8453");
     query.append_pair("asset", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
     query.append_pair("scheme", "exact");
@@ -160,9 +75,8 @@ fn validate(name: &str, value: &Value, field: &Value) -> Result<()> {
     let kind = field["type"].as_str().unwrap();
     let valid = match kind {
         "string" => value.is_string(),
-        "boolean" => value.is_boolean(),
+        "number" => value.is_number(),
         "integer" => value.as_u64().is_some(),
-        "array" => value.is_array(),
         _ => false,
     };
     ensure!(valid, "coinbase_search argument {name} must be {kind}");
@@ -173,33 +87,13 @@ fn validate(name: &str, value: &Value, field: &Value) -> Result<()> {
                 && field["maxLength"].as_u64().is_none_or(|max| length <= max),
             "coinbase_search argument {name} is outside documented character bounds"
         );
-        if field.get("pattern").is_some() {
-            ensure!(
-                text.split('-').all(|part| !part.is_empty()
-                    && part
-                        .bytes()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())),
-                "coinbase_search argument {name} must be a lowercase hyphenated bundle slug"
-            );
-        }
     }
-    if let Some(number) = value.as_u64() {
+    if let Some(number) = value.as_f64() {
         ensure!(
-            field["minimum"].as_u64().is_none_or(|min| number >= min)
-                && field["maximum"].as_u64().is_none_or(|max| number <= max),
+            field["minimum"].as_f64().is_none_or(|min| number >= min)
+                && field["maximum"].as_f64().is_none_or(|max| number <= max),
             "coinbase_search argument {name} is outside documented bounds"
         );
-    }
-    if let Some(items) = value.as_array() {
-        ensure!(
-            field["maxItems"]
-                .as_u64()
-                .is_none_or(|max| items.len() as u64 <= max),
-            "coinbase_search argument {name} has too many items"
-        );
-        for item in items {
-            validate(name, item, &field["items"])?;
-        }
     }
     Ok(())
 }

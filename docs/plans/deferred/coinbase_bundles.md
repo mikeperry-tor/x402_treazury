@@ -1,9 +1,8 @@
 # Coinbase bundle discovery
 
-Bundle listing and ordered bundle details remain outside the implemented Coinbase
-resource-search interface. `sources_search(directory="coinbase", bundle_slugs=[...])`
-only filters by already-known slugs; it cannot enumerate bundles or establish
-their membership, ordering or completeness.
+Bundle listing and ordered bundle details remain outside the implemented curated
+resource-search interface. Agent search exposes no bundle filters, enumeration or
+membership/order/completeness claims.
 
 The reviewed Coinbase
 [bundle list](https://docs.cdp.coinbase.com/api-reference/v2/rest-api/x402-facilitator/list-x402-bundles)
