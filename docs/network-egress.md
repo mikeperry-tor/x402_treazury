@@ -135,7 +135,8 @@ Tor scopes, or one origin attempt in direct mode. Successful empty/partial
 results never fall back. Complete invalid JSON does not earn an isolation retry;
 local policy, identity and download-limit failures cannot trigger paid relay work.
 
-The independent `[discovery_relay].search` opt-in permits an uncached Curl workflow
+A configured `[discovery_relay]` enables search fallback by default (`search=false`
+disables it), permitting an uncached Curl workflow
 with the authenticated endpoint payer, using ordinary payment and cancellation
 ownership. It bypasses static relay wallet resolution, URL caches, readiness
 queues and shared stopped state. It adds no retry loop or automatic signed replay.

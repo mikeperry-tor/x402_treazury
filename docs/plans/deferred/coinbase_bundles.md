@@ -22,7 +22,7 @@ Before proposing bundle tools:
 - Establish a usable transport and exact response, ordering and completeness
   contracts; resource-search results cannot stand in for ordered bundle details.
 - Review endpoint ownership, credential handling, Tor/relay trust and any payment
-  authority independently of resource search. Existing search relay opt-in grants
+  authority independently of resource search. Configured search relay authority grants
   no bundle-fetch or CDP credential authority.
 - Define the smallest interface that serves the verified contract, with independent
   design/clarity review and focused regressions. Do not add speculative workflow

@@ -1270,12 +1270,14 @@ provider = "../../providers/curl/provider.toml" # relative to this deployment fi
 # wallet = "web" # optional override; otherwise choose from each source's bindings
 serve = true   # allow paid fallback during serving startup; defaults false
 warm = true    # allow paid fallback during catalog warm; defaults false
-search = false # opt in separately for live Coinbase resource search
+search = true  # Coinbase search fallback; defaults true; false disables it
 # sources = ["social"] # optional authored source IDs; omitted/empty selects all
 ```
 
-`search=true` independently enables runtime Coinbase search fallback for
-source-management listeners. It does not enable serve/warm, select static sources,
+When `[discovery_relay]` is configured, `search` defaults to true for runtime
+Coinbase search fallback on source-management listeners. Set `search=false` to
+disable it. Without this section no search relay is created. The search setting
+does not enable serve/warm, select static sources,
 prepare wallets or start funding. Search always uses the authenticated endpoint's
 source-management payer; `wallet` and `sources` here apply only to static
 catalog/pricing relay work. `config show` exposes the flag and the existing

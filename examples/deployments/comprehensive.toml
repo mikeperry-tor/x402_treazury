@@ -37,10 +37,10 @@ read_timeout_seconds = 60
 # Listeners bind before funding; relay-dependent catalogs appear as payers become usable.
 # Explicit paid warming requires an eligible payer; wallet bootstrap can prepare reserves.
 # Curl receives target URLs; connections retain wallet-bound Tor isolation.
-# A failure/cancellation disables further relay calls across all wallets this run.
+# Static catalog/pricing relay failure disables further static relay work this run.
 [discovery_relay]
-# Separate opt-in for runtime Coinbase search fallback; uses the listener payer.
-search = false
+# Coinbase search fallback defaults on; set false to disable. Uses the listener payer.
+search = true
 provider = "../../providers/curl/provider.toml"
 serve = true
 warm = true

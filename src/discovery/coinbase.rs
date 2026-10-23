@@ -1,4 +1,4 @@
-//! Fresh Coinbase-curated discovery; unsigned origin attempts precede opt-in paid relay.
+//! Coinbase-ranked resource metadata with curated results by default.
 use super::{Manager, import};
 use crate::{network, output::ToolOutput};
 use anyhow::{Context, Result, bail, ensure};
@@ -14,23 +14,23 @@ pub(super) fn search_branch() -> Value {
             "q": {
                 "type": "string",
                 "maxLength": 400,
-                "description": "Optional relevance query. At most 400 Unicode characters; blank preserved, omitted permits filter-only ranked search."
+                "description": "Optional ranked query, up to 400 characters. Omit for filter-only search; blank text is preserved."
             },
             "curated_only": {
                 "type": "boolean",
                 "default": true,
-                "description": "Coinbase only. Default true selects Coinbase-curated resources; false includes non-curated matches. Curation does not establish reachability or useful paid delivery."
+                "description": "Coinbase: true (default) selects curated resources; false broadens results beyond the curated list."
             },
             "limit": {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 20,
                 "default": 20,
-                "description": "Coinbase only: maximum selected resources, 1–20, default 20. No pagination or continuation."
+                "description": "Coinbase: 1–20 resources, default 20. No pagination."
             },
             "max_price_usd": {
                 "type": "string",
-                "description": "Coinbase only: USD price string such as \"0.05\", sent unchanged. Upstream validates syntax. Advisory filter, not a payment cap."
+                "description": "Coinbase: USD price string, e.g. \"0.05\"; x402 List best uses a number. Search filter, not a payment cap."
             },
             "tags": {
                 "type": "array",
@@ -38,7 +38,7 @@ pub(super) fn search_branch() -> Value {
                 "items": {
                     "type": "string"
                 },
-                "description": "Coinbase only: up to five provider tags, upstream case-sensitive exact OR matching. Empty array sends no filter."
+                "description": "Coinbase: up to five case-sensitive tags, exact OR matching. Empty means no tag filter."
             },
             "bundle_slugs": {
                 "type": "array",
@@ -48,26 +48,26 @@ pub(super) fn search_branch() -> Value {
                     "maxLength": 64,
                     "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
                 },
-                "description": "Coinbase only: up to five already-known bundle slugs, OR matching. No bundle listing/detail tools or ordered/comprehensive bundle result. Empty array sends no filter."
+                "description": "Coinbase: up to five already-known bundle slugs, OR matching. Filters resources; does not list bundles or return complete ordered bundle details."
             },
             "extensions": {
                 "type": "array",
                 "items": {
                     "type": "string"
                 },
-                "description": "Coinbase only: protocol-extension filters, repeated upstream query keys. Not an OpenAPI import. Empty array sends no filter."
+                "description": "Coinbase: protocol-extension filters. Empty means no extension filter."
             },
             "pay_to": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 128,
-                "description": "Coinbase only: merchant payment-address filter. Never selects your payer, wallet or listener owner."
+                "description": "Coinbase: merchant payment-address filter, not a payer selector."
             },
             "url_substring": {
                 "type": "string",
                 "minLength": 3,
                 "maxLength": 2048,
-                "description": "Coinbase only: case-insensitive resource-URL substring filter. Not an exact-resource lookup or an API base/spec URL."
+                "description": "Coinbase: case-insensitive resource-URL substring filter, not an API base or specification URL."
             },
             "directory": {
                 "const": "coinbase"
@@ -221,7 +221,7 @@ pub(super) fn parse_response(bytes: &[u8]) -> Result<Value> {
 fn output(response: Value, via: &str) -> Result<ToolOutput> {
     Ok(ToolOutput::text(serde_json::to_string(&json!({
         "directory":"coinbase", "acquisition":{"via":via}, "response":response,
-        "guidance":"Fresh Coinbase discovery metadata, not registered tools or payment authority. Preserve missing contracts: never guess paid arguments, merge method variants or infer API bases. Exact documented supported HTTP requests may use raw_call; published OpenAPI URLs may go directly to source_add. MCP and other or missing protocols remain metadata only. Price, curation and quality do not guarantee reachability or useful delivery. Empty or partial matching is not proof of absence; no pagination is available. Curl supplies and is trusted for relayed target content, and fallback may spend Base USDC using this endpoint's source-management payer. Each repeated search can authorize another payment, including ordinary insufficient-funds traversal. Do not automatically repeat an uncertain paid fallback."
+        "guidance":"Resource metadata, not registered tools. Use exact documented HTTP requests with raw_call, published OpenAPI URLs with source_add, or optional usage URLs with source_details. Never guess missing methods/arguments or infer API bases; MCP/unknown protocols remain metadata only. Partial/empty results do not prove absence. Price/curation does not guarantee delivery. Remote search may charge; do not automatically repeat failed paid calls."
     }))?))
 }
 

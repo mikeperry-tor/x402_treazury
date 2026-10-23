@@ -126,6 +126,10 @@ IP-level free quota and can require payment through normal payment admission.
 
 ### Coinbase curated resource search
 
+The tool description leads with collection choices; parameter help carries branch
+constraints. Transport and relay mechanics belong in this guide and the operator
+configuration, rather than repeated agent-facing descriptions.
+
 Select `directory="coinbase"` for ranked resource search, optionally using `q`.
 Omitted mode or `mode="best"` selects this search; `browse`, page/per-page/cursor
 arguments and x402 List-only filters reject before I/O. Mode defaults are
@@ -164,8 +168,8 @@ eligible fresh-isolation retries, with the shared eligibility and `Retry-After`
 policy, including the terminal delay before fallback. Direct mode uses one
 origin attempt. Only complete valid search JSON may promote an origin scope.
 
-`[discovery_relay].search=true` separately enables paid Curl fallback after origin
-failure. Each search fetches fresh results; it inherits no catalog URL cache,
+With `[discovery_relay]` configured, paid Curl fallback after origin failure is
+enabled by default. Set `search=false` in that section to disable it. Each search fetches fresh results; it inherits no catalog URL cache,
 sticky failure, readiness queue or shared breaker. The relay uses this listener's
 source-management payer, regardless of the static relay wallet override; ordinary
 payment admission, journaling and insufficient-funds traversal still apply.
@@ -173,8 +177,8 @@ Each authorization may charge, and uncertain paid failure grants no automatic
 replay. The client connection to Curl retains its configured direct/Tor policy;
 Curl sees the query URL, reaches Coinbase from its own network and supplies target
 content/status/headers. Origin failures and relay failures remain request-scoped.
-See [relay configuration](configuration.md#paid-discovery-relay) for opt-in,
-settings precedence and trust. Local input/origin/identity/download-limit failures
+See [relay configuration](configuration.md#paid-discovery-relay) for settings,
+precedence and trust. Local input/origin/identity/download-limit failures
 never authorize relay spending. No Coinbase challenge is signed.
 
 ## Endpoint instruction placement

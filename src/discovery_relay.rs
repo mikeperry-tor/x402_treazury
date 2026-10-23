@@ -23,11 +23,14 @@ pub struct Policy {
     #[serde(default)]
     pub warm: bool,
     /// Allow uncached Coinbase search fallback with the authenticated endpoint payer.
-    #[serde(default)]
+    #[serde(default = "search_default")]
     pub search: bool,
     /// Empty means all authored sources.
     #[serde(default)]
     pub sources: Vec<String>,
+}
+fn search_default() -> bool {
+    true
 }
 impl Policy {
     pub fn validate(&self, config: &crate::deployment::MetaConfig) -> Result<()> {

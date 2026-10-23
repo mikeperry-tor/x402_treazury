@@ -1882,7 +1882,14 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
                 continue;
             }
             let branch = if path == "/services" { 0 } else { 1 };
-            assert_eq!(schema["oneOf"][branch]["properties"][name], *field);
+            let mut authored = schema["oneOf"][branch]["properties"][name].clone();
+            assert!(
+                authored["description"]
+                    .as_str()
+                    .is_some_and(|help| !help.is_empty())
+            );
+            authored["description"] = field["description"].clone();
+            assert_eq!(authored, *field, "{path} {name}: branch constraint changed");
             let mut merged = schema["properties"][name].clone();
             if name == "per_page" {
                 assert!(merged.get("maximum").is_none());
@@ -1894,12 +1901,10 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
                 );
                 continue;
             }
-            let original_description = field["description"].as_str().unwrap();
             assert!(
                 merged["description"]
                     .as_str()
-                    .unwrap()
-                    .contains(original_description)
+                    .is_some_and(|help| !help.is_empty())
             );
             merged["description"] = field["description"].clone();
             let mut expected = field.clone();

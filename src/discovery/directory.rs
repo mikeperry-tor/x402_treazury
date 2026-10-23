@@ -39,11 +39,7 @@ pub fn search_schema() -> Value {
     let best = &tool("/best").input_schema;
     let coinbase = super::coinbase::search_branch();
     let mut properties: Map<String, Value> = Map::new();
-    for (label, schema) in [
-        ("x402 List browse", browse),
-        ("x402 List best", best),
-        ("Coinbase", &coinbase),
-    ] {
+    for schema in [browse, best, &coinbase] {
         for (name, field) in schema["properties"].as_object().unwrap() {
             if matches!(
                 name.as_str(),
@@ -51,22 +47,12 @@ pub fn search_schema() -> Value {
             ) {
                 continue;
             }
-            let description = format!(
-                "{label}: {}",
-                field["description"].as_str().unwrap_or_default()
-            );
-            let mut incoming = field.clone();
-            incoming["description"] = json!(description);
             match properties.entry(name.clone()) {
                 serde_json::map::Entry::Vacant(entry) => {
-                    entry.insert(incoming);
+                    entry.insert(field.clone());
                 }
                 serde_json::map::Entry::Occupied(mut entry) => {
                     let shared = entry.get_mut();
-                    shared["description"] = json!(format!(
-                        "{} {description}",
-                        shared["description"].as_str().unwrap()
-                    ));
                     if shared["type"] != field["type"] {
                         shared["type"] = json!([shared["type"].clone(), field["type"].clone()]);
                     }
@@ -74,6 +60,24 @@ pub fn search_schema() -> Value {
             }
         }
     }
+    // Describe the choices once, without concatenating upstream implementation prose.
+    let help = json!({
+        "q":"Capability keywords. Coinbase ranks matches; x402 List browse and local search use case-insensitive substrings. Omit to browse or filter without keywords.",
+        "category":"x402 List only: service category; omit for all categories.",
+        "status":"x402 List browse only: service status.",
+        "verified":"x402 List browse only: filter for its paid-delivery verification badge. Distinct from payment_ready; no guarantee for a future call.",
+        "payment_ready":"x402 List browse only: filter for a recent valid payment challenge. Does not mean paid delivery was verified.",
+        "signable":"x402 List browse only: filter by whether the last observed payment challenge had the required signing fields.",
+        "source":"x402 List browse only: listing provenance, such as submitted or imported.",
+        "sort":"x402 List browse only: result order.",
+        "page":"Local or x402 List browse page, starting at 1. Coinbase has no pagination.",
+        "per_page":"Local or x402 List browse page size; default 25. x402 List maximum 100.",
+        "prefer":"x402 List best only: ranking preference; default balanced.",
+        "max_price_usd":"Advisory USD price filter, not a payment cap. Coinbase takes a string such as \"0.05\"; x402 List best takes a number.",
+        "require_verified":"x402 List best only: require its paid-delivery verification badge, not just payment_ready.",
+        "include_facilitator_context":"x402 List best only: include separate ecosystem-level facilitator statistics.",
+        "limit":"Ranked result count, 1–20. Defaults to 20 for Coinbase or 5 for x402 List best; no pagination."
+    });
     // Shared fields must admit local sizes; remote branches retain upstream bounds.
     properties
         .get_mut("per_page")
@@ -81,42 +85,40 @@ pub fn search_schema() -> Value {
         .as_object_mut()
         .unwrap()
         .remove("maximum");
-    properties["per_page"]["description"] = json!(
-        "Results per page, default 25. Local browsing accepts any positive integer; remote directory browse accepts at most 100."
-    );
     properties.insert("local_only".into(), json!({
         "type":"boolean","default":false,
-        "description":"When true, search bundled provider metadata offline with q and browse pagination only. No directory requests, wallet work or automatic remote fallback. False or omitted uses the external directory."
+        "description":"True searches bundled providers offline using q, page and per_page. Omit directory; mode must be omitted or browse. Default false searches a remote directory."
     }));
-    if let Some(query) = properties.get_mut("q") {
-        let remote = query["description"].as_str().unwrap_or_default();
-        query["description"] = json!(format!(
-            "{remote} Local-only: case-insensitive substring across bundled provider IDs, names, descriptions and declared API bases; blank or omitted enumerates the bundle."
-        ));
-    }
     properties.insert("mode".into(), json!({
         "type":"string","enum":["browse","best"],
-        "description":"Omit for browse with local/x402 List, ranked search with Coinbase. x402 List browse paginates; best ranks recommendations without pagination. Coinbase accepts omitted mode or best only. Only send fields supported by the selected branch. local_only=true permits only browse (or omission), q, page and per_page."
+        "description":"x402 List: browse (default, paginated) or best (ranked recommendations). Coinbase: omit or use best. Local: omit or use browse."
     }));
+    for (name, field) in &mut properties {
+        if let Some(description) = help.get(name) {
+            field["description"] = description.clone();
+        }
+        if name != "local_only" {
+            field.as_object_mut().unwrap().remove("default");
+        }
+    }
+    properties.insert("directory".into(), json!({"type":"string","enum":["x402_list","coinbase"],"description":"coinbase: curated ranked resources (curated_only=false broadens results). x402_list: broader service directory, the default. Omit with local_only=true."}));
     let branch = |mode: &str, schema: &Value, required: Value| {
         let mut allowed: Map<String, Value> = schema["properties"]
             .as_object()
             .unwrap()
             .keys()
             .filter(|name| name.as_str() != "network")
-            .map(|name| (name.clone(), schema["properties"][name].clone()))
+            .map(|name| {
+                let mut field = schema["properties"][name].clone();
+                field["description"] = properties[name]["description"].clone();
+                (name.clone(), field)
+            })
             .collect();
         allowed.insert("mode".into(), json!({"const":mode}));
         allowed.insert("directory".into(), json!({"const":"x402_list"}));
         allowed.insert("local_only".into(), json!({"const":false}));
         json!({"properties":allowed,"required":required,"additionalProperties":false})
     };
-    for (name, field) in &mut properties {
-        if name != "local_only" {
-            field.as_object_mut().unwrap().remove("default");
-        }
-    }
-    properties.insert("directory".into(), json!({"type":"string","enum":["x402_list","coinbase"],"description":"Remote directory selector. Omit for x402 List; coinbase selects curated ranked search. Forbidden with local_only=true. No automatic directory fallback."}));
     json!({
         "type":"object","properties":properties,"additionalProperties":false,
         "oneOf":[branch("browse",browse,json!([])),branch("best",best,json!(["mode"])),super::local::search_branch(),coinbase]

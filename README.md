@@ -467,9 +467,10 @@ be read with `source_details(documentation_url=...)`, which never pays or follow
 redirects. Missing contracts remain missing: do not guess paid arguments.
 
 Coinbase origin search needs no API key. Tor uses one origin attempt plus up to two
-eligible isolation retries. `[discovery_relay].search = true` separately enables
-paid Curl fallback using the endpoint's source-management payer. It defaults false
-and reuses the configured [relay bootstrap](docs/configuration.md#paid-discovery-relay).
+eligible isolation retries. A configured `[discovery_relay]` enables paid Curl
+search fallback by default using the endpoint's source-management payer; set
+`search = false` to disable it. With no relay section, searches use only the origin.
+See the [relay bootstrap settings](docs/configuration.md#paid-discovery-relay).
 Our connection to Curl retains the configured Tor/direct policy; Curl fetches the target from its own
 network and is trusted for the relayed content. Every search is fresh and repeating
 a fallback may authorize another payment. Valid empty/partial results do not trigger

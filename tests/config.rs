@@ -631,7 +631,7 @@ async fn provider_description_inherits_and_replaces_with_field_origins() {
 }
 
 #[tokio::test]
-async fn search_relay_opt_in_is_separate_from_static_bindings_and_wallet_selection() {
+async fn search_relay_defaults_on_without_static_bindings_and_can_be_disabled() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("deployment.toml");
     let text = r#"version=1
@@ -647,7 +647,6 @@ source_management=true
 sources=[]
 [discovery_relay]
 provider="missing-local-provider.toml"
-search=true
 "#;
     std::fs::write(&path, text).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
@@ -663,6 +662,26 @@ search=true
     // loading validates local bootstrap configuration before serving can use it.
     assert!(Deployment::load(&path).await.is_err());
     assert!(!dir.path().join("state").exists());
+    for setting in ["search=true", "search=false"] {
+        std::fs::write(&path, format!("{text}{setting}\n")).unwrap();
+        let shown = Deployment::show_config(&path).await.unwrap();
+        assert_eq!(shown["discovery_relay"]["search"], setting == "search=true");
+        // Disabling search avoids loading the missing bootstrap, even though the
+        // relay section exists. No wallet secrets or network work are needed.
+        assert_eq!(
+            Deployment::load(&path).await.is_ok(),
+            setting == "search=false"
+        );
+    }
+    let no_relay = text.split("[discovery_relay]").next().unwrap();
+    std::fs::write(&path, no_relay).unwrap();
+    let shown = Deployment::show_config(&path).await.unwrap();
+    assert!(
+        shown
+            .get("discovery_relay")
+            .is_none_or(serde_json::Value::is_null)
+    );
+    assert!(Deployment::load(&path).await.is_ok());
     let provider = format!(
         "spec={:?}\nbase_url='https://spec.example.com'\nprobe_pricing=false\n",
         Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/openapi.json")
@@ -684,6 +703,6 @@ search=true
     assert_eq!(bound.addresses().len(), 1);
     drop(bound);
     assert!(!dir.path().join("state").exists());
-    std::fs::write(&path, text.replace("search=true", "search=\"yes\"")).unwrap();
+    std::fs::write(&path, format!("{text}search=\"yes\"\n")).unwrap();
     assert!(Deployment::show_config(&path).await.is_err());
 }
