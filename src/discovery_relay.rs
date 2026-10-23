@@ -11,6 +11,14 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 pub use policy::Policy;
 pub(crate) use sequence::SearchRelay;
+/// Trusted acquisition purpose, never selected by agent arguments or target URLs.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum Purpose {
+    SourceDiscovery,
+    #[default]
+    ApiRequests,
+    ProviderMetadata,
+}
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Instant};
 /// The stable logical profile, never a current rotating address or listener order.
 pub(crate) fn resolve_wallets(
@@ -808,7 +816,12 @@ pub(crate) mod tests {
         let mut config: crate::deployment::MetaConfig =
             toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
         let policy = config.discovery_relay.clone().unwrap();
-        assert!(policy.wallet.is_none() && policy.serve && policy.warm);
+        assert!(
+            policy.wallet.is_none()
+                && policy.provider_metadata
+                && policy.source_discovery
+                && !policy.api_requests
+        );
         let resolve = |config: &crate::deployment::MetaConfig, policy: &Policy| {
             resolve_wallets(
                 policy,

@@ -20,7 +20,7 @@ async fn relay_startup_errors_finish_shutdown() {
         .unwrap();
         let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let policy = if relay {
-            "[discovery_relay]\nprovider=\"relay.toml\"\nwallet=\"research\"\nserve=true\n"
+            "[discovery_relay]\nprovider=\"relay.toml\"\nwallet=\"research\"\n"
         } else {
             ""
         };

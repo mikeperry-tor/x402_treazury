@@ -401,6 +401,72 @@ async fn fixture() {
         ["origin", "origin", "origin"],
         "ordinary deployments have no implied paid fallback authority"
     );
+    // Explicit discovery permission is independent of both sibling preferences.
+    for (enabled, api_requests, provider_metadata, q) in [
+        (false, true, true, "discovery-disabled"),
+        (true, false, false, "metadata-disabled"),
+    ] {
+        let configured = Manager::new_with_search(
+            m.policy.clone(),
+            m.listeners.clone(),
+            m.payers.clone(),
+            Arc::new(CatalogState::default()),
+            vec![],
+            Some(Arc::new(
+                SearchRelay::fixture(RELAY.into(), Default::default()).with_policy(
+                    crate::discovery_relay::Policy {
+                        source_discovery: enabled,
+                        api_requests,
+                        provider_metadata,
+                        ..Default::default()
+                    },
+                ),
+            )),
+        )
+        .await
+        .unwrap();
+        *configured.fixture_coinbase.lock().unwrap() = Some(ORIGIN.into());
+        let result = invoke(&configured, "writer", q).await;
+        assert_eq!(result.is_ok(), enabled);
+        let mut expected = vec!["origin"; 3];
+        if enabled {
+            expected.extend(["challenge", "signed"]);
+        }
+        assert_eq!(
+            sequence(&f, q),
+            expected,
+            "sibling permission cannot authorize or suppress Coinbase discovery"
+        );
+        if !enabled {
+            assert_eq!(
+                invoke(&configured, "writer", "healthy").await.unwrap()["acquisition"]["via"],
+                "origin"
+            );
+            assert_eq!(sequence(&f, "healthy"), ["origin"]);
+        }
+    }
+    // The same directory URL used by a raw API call remains API work.
+    let mut raw_url = reqwest::Url::parse(ORIGIN).unwrap();
+    raw_url.set_query(
+        super::super::coinbase::request(json!({"q":"raw-directory"}).as_object().unwrap())
+            .unwrap()
+            .query(),
+    );
+    assert!(
+        m.invoke_raw(
+            "writer",
+            json!({"method":"GET", "url":raw_url.as_str()})
+                .as_object()
+                .unwrap()
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        sequence(&f, "raw-directory"),
+        ["origin", "origin", "origin"],
+        "default API-off cannot reuse directory discovery permission"
+    );
     invoke(&m, "writer", "retry").await.unwrap();
     assert_eq!(
         sequence(&f, "retry").len(),

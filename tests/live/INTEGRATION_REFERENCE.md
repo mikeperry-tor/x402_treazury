@@ -121,8 +121,8 @@ this call ran the initializer, `hit` means the cache was ready at invocation, an
 response with the wrong cache path fails the assertion. Missing completion or
 invalid correlation remains incomplete and blocks dependent phases. These checks
 are independent of optional content `checks` and never authorize another request.
-Instrumentation observes the real production OnceCell initializer and pricing
-paths; it must not add probes or signed retries beyond the managed payment policy.
+Instrumentation observes the production OnceCell initializer and actual payment
+challenges; it must not add probes or signed retries beyond the managed payment policy.
 Observe concurrent initialization directly rather than inferring a cache hit from
 successful output. Failed help initialization remains uncached.
 
@@ -812,6 +812,12 @@ credentials must retain circuit separation, including scopes of the same owner.
 Unknown, conflicting or missing mappings fail qualification. Re-audit compares
 archived mappings with the registered interval, and never infers missing owner
 metadata from observed streams. These records grant no financial/replay authority.
+Offline Tor re-audit verifies the original pinned archive bytes before interpreting
+its deployment. Only that observation discards retired relay enable keys from an
+in-memory copy; wallet bindings, transport identities, stored artifacts and pins
+remain unchanged. Current preparation, execution, identity export and receipt
+recovery retain strict configuration parsing. This compatibility grants no relay
+permission, payment authority or replay.
 Local migration tests do not requalify the changed recovery paths on real Tor.
 
 Unsigned execution proves discovery identity behavior only. Managed execution

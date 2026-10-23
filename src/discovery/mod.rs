@@ -188,6 +188,7 @@ impl Manager {
     pub fn directory(&self, owner: &str) -> Result<BoundTool> {
         let client = self
             .source_client(owner)?
+            .with_relay_purpose(crate::discovery_relay::Purpose::SourceDiscovery)
             .with_source_identity("builtin:x402-list");
         let base = directory::BASE.to_owned();
         #[cfg(test)]
@@ -1028,7 +1029,7 @@ async fn maintain_cli_owned(
                 match crate::discovery_relay::document::origin(&options).await {
                     Ok(document) => document,
                     Err(failure) if failure.fallback => {
-                        let relay_policy = cfg.discovery_relay.as_ref().filter(|relay| relay.on_demand && relay.has_method("GET"));
+                        let relay_policy = cfg.discovery_relay.as_ref().filter(|relay| relay.provider_metadata && relay.has_method("GET"));
                         let Some(relay_policy) = relay_policy else { return Err(failure.error); };
                         let relay = Arc::new(crate::discovery_relay::SearchRelay::load(relay_policy, path).await?);
                         let Some(prepared) = crate::discovery_relay::document::prepare_fallback(&relay, &options)? else { return Err(failure.error); };

@@ -475,7 +475,7 @@ async fn all_unsupported_refresh_avoids_authority() {
         "network": fixture_network(),
         "wallets":{"shared":{"mode":"static","private_key_env":"IMPORT_UNSUPPORTED_MISSING_KEY"}},
         "source_management":{"wallet":"shared","registry_file":registry},
-        "discovery_relay":{"provider":provider,"on_demand":true,"serve":false,"warm":false},
+        "discovery_relay":{"provider":provider,"provider_metadata":true},
         "treasury":{"state_dir":dir.path().join("untouched-state"),"key_file":dir.path().join("untouched-key")},
         "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true}}
     });
@@ -568,7 +568,7 @@ async fn supported_paid_cli_refresh(state: &PaidImport) {
             "selected":{"mode":"static","private_key_env":"TREAZURY_IMPORT_CLI_SELECTED_KEY"},
             "unrelated":{"mode":"static","private_key_env":"TREAZURY_IMPORT_CLI_UNUSED_KEY"}},
         "source_management":{"wallet":"shared","registry_file":registry},
-        "discovery_relay":{"fallbacks":{"GET":[provider]},"on_demand":true,"serve":false,"warm":false},
+        "discovery_relay":{"fallbacks":{"GET":[provider]},"provider_metadata":true},
         "treasury":{"state_dir":dir.path().join("untouched-state"),"key_file":dir.path().join("untouched-key")},
         "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true,"wallet":"selected"}}
     });

@@ -153,8 +153,16 @@ pub(super) enum Decision {
 #[derive(Clone)]
 pub(crate) struct SearchRelay {
     pub(super) entries: BTreeMap<String, Vec<Entry>>,
+    pub(super) policy: Policy,
 }
 impl SearchRelay {
+    pub(crate) fn enabled(&self, purpose: Purpose) -> bool {
+        match purpose {
+            Purpose::SourceDiscovery => self.policy.source_discovery,
+            Purpose::ApiRequests => self.policy.api_requests,
+            Purpose::ProviderMetadata => self.policy.provider_metadata,
+        }
+    }
     pub(crate) async fn load(policy: &Policy, path: &Path) -> Result<Self> {
         let mut entries = BTreeMap::new();
         // Every configured position is validated locally before any request or key load.
@@ -195,11 +203,15 @@ impl SearchRelay {
             }
             entries.insert(method.clone(), configured);
         }
-        Ok(Self { entries })
+        Ok(Self {
+            entries,
+            policy: policy.clone(),
+        })
     }
     #[cfg(test)]
     pub(crate) fn fixture(endpoint: String, cfg: Config) -> Self {
         Self {
+            policy: Policy::default(),
             entries: BTreeMap::from([(
                 "GET".into(),
                 vec![Entry {
@@ -232,7 +244,15 @@ impl SearchRelay {
             }
             entries.insert(method, selected);
         }
-        Ok(Self { entries })
+        Ok(Self {
+            entries,
+            policy: Policy::default(),
+        })
+    }
+    #[cfg(test)]
+    pub(crate) fn with_policy(mut self, policy: Policy) -> Self {
+        self.policy = policy;
+        self
     }
     pub(crate) fn cache_keys(&self, wallet: &str) -> Vec<String> {
         self.entries

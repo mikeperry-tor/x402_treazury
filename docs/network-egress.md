@@ -167,9 +167,8 @@ schemas, operations and filters without remote schema/help acquisition.
 Legacy `provider` becomes one GET Curl entry and cannot coexist with `fallbacks`.
 See [configuration](configuration.md#paid-discovery-relay) for paths and inspection.
 
-The current runtime `search` switch defaults true for Coinbase fallback and uses
-the authenticated endpoint's existing payer and retained call owner. It adds no
-cache, readiness queue or provider breaker. Static `serve`/`warm` use deterministic
+Runtime fallback uses the authenticated endpoint's existing payer and retained
+call owner. It adds no cache, readiness queue or provider breaker. Static metadata fallback uses deterministic
 source wallet bindings, shared result/failure state and existing readiness
 notifications. Each accepted static exchange retains its provider gate through
 decoding and publication after waiter cancellation. Shared state locking is brief:
@@ -180,6 +179,17 @@ or wallet traversal. Missing-payer waiting reserves no request capacity and allo
 origin handoff delay precedes accepted relay work/provider gates. Delays between
 providers retain the logical call owner while releasing provider gates. There is
 no new concurrency cap or global relay scheduler.
+
+Enable preferences follow trusted request purpose: built-in directory/Coinbase
+requests use `source_discovery` (default true); ordinary/generated/raw API calls
+use `api_requests` (default false); schemas, help, imports, usage documents and
+provider probes use `provider_metadata` (default true). These defaults require a
+configured relay section. Mixed workflows classify each acquisition separately;
+method, hostname and agent arguments do not select a category. A disabled category
+cannot dispatch or sign a relay request. All categories share one immutable adapter
+context and existing payer/owner machinery; relay-service calls never recurse.
+See [configuration](configuration.md#paid-discovery-relay) for membership and static
+startup/warming authority.
 
 Each authored position permits at most one logical acquisition. Relay-service
 unsigned requests participate in the same Tor status/transport sequence (one
@@ -390,7 +400,7 @@ stalls or resets. Complete malformed content and output conversion failures neve
 retry or buy another response. Eligible blocking statuses are classified from
 headers before collecting an unused body.
 
-With `discovery_relay.on_demand`, exhausted eligible unsigned GET/HEAD/POST can
+When the trusted request category is enabled, exhausted eligible unsigned GET/HEAD/POST can
 traverse the original method's configured relay list once. Direct mode hands off
 after its single origin attempt; other 5xx such as 501/505/520 can hand off without
 fresh origin retries. Valid `Retry-After` applies before an authorized handoff;
@@ -404,7 +414,7 @@ recovery. Qualification rechecks current authority immediately before every runt
 API, relay, document or Coinbase search send, after server delays and capacity
 admission. A claim does not renew authority while a request waits; accepted work
 can still finish. Unavailable authority reports a fixed safe reason and grants no
-new request. Static catalog preparation retain their startup authority. Relay results do not promote origin transports. Relay fee evidence is
+new request. Static catalog preparation retains its startup authority. Relay results do not promote origin transports. Relay fee evidence is
 separate from target-paid evidence and survives output conversion and subsequent
 directory processing. No new cache, breaker, wallet allocation or funding wait is
 introduced. Successful raw HEAD returns empty text; representation headers such
@@ -608,8 +618,8 @@ such rules globally on a user's machine as part of an application test.
 Runtime OpenAPI imports/refresh, lazy help, explicit usage documents and URL
 probes use the common complete-document reader. Its unsigned origin sequence uses
 `network.tor_isolation_retries` and retained server delays; configured
-`discovery_relay.on_demand` permits the ordered GET relay list after blocking
-HTTP/transport failures. Legacy `search` is an input alias for the same switch.
+`discovery_relay.provider_metadata` permits the ordered GET relay list after blocking
+HTTP/transport failures.
 There is no HEAD-then-GET probe, target challenge signing or linked traversal.
 Terminal `401`/`404`/`410`, other non-blocking responses, complete invalid content,
 unsolicited `206`/`Content-Range`, local byte bounds and destination rejection never

@@ -183,7 +183,7 @@ async fn origin(
         .lock()
         .unwrap()
         .push((kind.clone(), "origin".into()));
-    if kind == "healthy" {
+    if matches!(kind.as_str(), "healthy" | "healthy-metadata-off") {
         "independent origin".into_response()
     } else {
         StatusCode::FORBIDDEN.into_response()
@@ -339,6 +339,73 @@ async fn paid_fixture() {
         signer.address().to_string().to_ascii_lowercase(),
         "the exact help-binding payer snapshot signed the relay request"
     );
+    // Help uses metadata permission even through the bound tool's API wrapper.
+    // Reusing both client and URL for an ordinary call cannot reuse that grant.
+    let url = "https://api.example.com/docs/api-default";
+    let help = bound(url, client.clone());
+    assert_eq!(
+        help.invoke(&Default::default()).await.unwrap(),
+        "complete relay help\n"
+    );
+    let mut ordinary = help.clone();
+    ordinary.tool.help_url = None;
+    ordinary.tool.path = url.into();
+    assert!(ordinary.invoke(&Default::default()).await.is_err());
+    assert_eq!(
+        sequence(&fixture, "api-default"),
+        ["origin", "challenge", "signed", "origin"]
+    );
+    assert_eq!(
+        help.invoke(&Default::default()).await.unwrap(),
+        "complete relay help\n"
+    );
+    assert_eq!(
+        sequence(&fixture, "api-default").len(),
+        4,
+        "help's metadata cache remains usable independently"
+    );
+
+    let metadata_off = client.clone().with_document_relay(Some(Arc::new(
+        SearchRelay::fixture("https://spec.example.com/relay".into(), Config::default())
+            .with_policy(crate::discovery_relay::Policy {
+                provider_metadata: false,
+                api_requests: true,
+                ..Default::default()
+            }),
+    )));
+    let url = "https://api.example.com/docs/metadata-off";
+    let help = bound(url, metadata_off.clone());
+    assert!(help.invoke(&Default::default()).await.is_err());
+    assert_eq!(
+        sequence(&fixture, "metadata-off"),
+        ["origin"],
+        "API permission cannot pay for help"
+    );
+    let mut ordinary = help.clone();
+    ordinary.tool.help_url = None;
+    ordinary.tool.path = url.into();
+    let output = ordinary.invoke_output(&Default::default()).await.unwrap();
+    assert_eq!(output.text, "complete relay help\n");
+    assert!(output.payment_may_have_occurred);
+    assert_eq!(
+        output.advisories,
+        ["This call may have charged; do not automatically repeat this logical call."]
+    );
+    assert_eq!(
+        sequence(&fixture, "metadata-off"),
+        ["origin", "origin", "challenge", "signed"]
+    );
+    assert_eq!(
+        bound(
+            "https://api.example.com/docs/healthy-metadata-off",
+            metadata_off
+        )
+        .invoke(&Default::default())
+        .await
+        .unwrap(),
+        "independent origin"
+    );
+    assert_eq!(sequence(&fixture, "healthy-metadata-off"), ["origin"]);
     for kind in ["uncertain", "partial"] {
         let help = bound(
             &format!("https://api.example.com/docs/{kind}"),

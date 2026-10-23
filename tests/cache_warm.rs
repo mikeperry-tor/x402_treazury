@@ -49,8 +49,6 @@ isolation_namespace='direct-warm-fixture'
 [discovery_relay]
 provider='missing-bootstrap.toml'
 wallet='w'
-serve=true
-warm=true
 [treasury]
 state_dir='state'
 max_refund_shielding_fee_zec='0.001'

@@ -22,7 +22,7 @@ pub(crate) fn fallback<'a>(
         if !failure.fallback || !client.has_document_authority() {
             return Err(failure.error);
         }
-        let Some(relay) = client.document_relay() else {
+        let Some(relay) = client.request_relay() else {
             return Err(failure.error);
         };
         let body = match request.body() {

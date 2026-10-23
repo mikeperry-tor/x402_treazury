@@ -53,7 +53,15 @@ async fn directory_relay_fixture() {
                 match uri.path() {
                     "/api/v1/services"
                     | "/api/v1/services/relayed"
-                    | "/api/v1/services/invalid" => StatusCode::FORBIDDEN.into_response(),
+                    | "/api/v1/services/invalid"
+                    | "/api/v1/services/mixed"
+                    | "/openapi.json"
+                    | "/llms.txt" => StatusCode::FORBIDDEN.into_response(),
+                    "/registered-openapi.json" => axum::Json(json!({
+                        "openapi":"3.0.3", "info":{"title":"Ordinary directory API","version":"1"},
+                        "servers":[{"url":"https://api.example.com"}],
+                        "paths":{"/api/v1/services":{"get":{"operationId":"registeredBrowse","responses":{"200":{"description":"Directory JSON"}}}}}
+                    })).into_response(),
                     "/api/v1/services/positive" => {
                         axum::Json(json!({"service":{"name":"Origin listing"}})).into_response()
                     }
@@ -63,6 +71,12 @@ async fn directory_relay_fixture() {
                         axum::Json(json!({"service":{"description":"No API base URL supplied"}}))
                             .into_response()
                     }
+                    "/api/openapi.json"
+                    | "/.well-known/openapi.json"
+                    | "/swagger.json"
+                    | "/.well-known/x402"
+                    | "/discovery/resources"
+                    | "/llms-full.txt" => StatusCode::NOT_FOUND.into_response(),
                     _ => panic!("unexpected directory or speculative probe request: {uri}"),
                 }
             }
@@ -88,12 +102,18 @@ async fn directory_relay_fixture() {
             assert_eq!(crate::test_signatures::recover_exact(&payload), expected.address());
             let body = if url.ends_with("/invalid") {
                 "complete but invalid directory JSON".to_owned()
+            } else if url.ends_with("/mixed") {
+                json!({"service":{"name":"Mixed listing","base_url":"https://api.example.com"}}).to_string()
+            } else if url.ends_with("/openapi.json") {
+                json!({"openapi":"3.0.0","info":{"title":"Category fixture","version":"1"},"paths":{}}).to_string()
+            } else if url.ends_with("/llms.txt") {
+                "# Provider usage\nExact usage instructions.".to_owned()
             } else if reqwest::Url::parse(&url).unwrap().path() == "/api/v1/services" {
                 json!({"services":[{"name":"Relayed search result"}]}).to_string()
             } else {
                 json!({"service":{"name":"Relayed listing"}}).to_string()
             };
-            axum::Json(json!({"url":url,"method":"GET","statusCode":200,"headers":{"content-type":"application/json"},"body":body,"redirectChain":[],"error":null})).into_response()
+            axum::Json(json!({"url":url,"method":"GET","statusCode":200,"headers":{"content-type":if url.ends_with("/llms.txt") {"text/plain"} else {"application/json"}},"body":body,"redirectChain":[],"error":null})).into_response()
         }
     }));
     let (relay_address, relay_task) = crate::test_tls::serve(relay).await;
@@ -127,7 +147,7 @@ async fn directory_relay_fixture() {
         BTreeMap::from([("shared".into(), payer())]),
         Arc::new(CatalogState::default()),
         vec![],
-        Some(relay),
+        Some(relay.clone()),
     )
     .await
     .unwrap();
@@ -220,6 +240,170 @@ async fn directory_relay_fixture() {
         manager.inner.lock().unwrap().state.records.is_empty(),
         "directory discovery never registers or funds a source"
     );
+    // The same public directory URL remains an ordinary API destination for raw calls.
+    let before = paid_calls.lock().unwrap().len();
+    assert!(
+        manager
+            .invoke_raw(
+                "writer",
+                json!({"method":"GET","url":"https://api.example.com/api/v1/services"})
+                    .as_object()
+                    .unwrap()
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        paid_calls.lock().unwrap().len(),
+        before,
+        "default API fallback is off even at the built-in directory hostname"
+    );
+
+    for discovery in [false, true] {
+        for metadata in [false, true] {
+            let mut p = policy(None);
+            p.allowed_origins = vec!["https://api.example.com".into()];
+            let configured = Arc::new((*relay).clone().with_policy(
+                crate::discovery_relay::Policy {
+                    source_discovery: discovery,
+                    provider_metadata: metadata,
+                    api_requests: !discovery,
+                    ..Default::default()
+                },
+            ));
+            let listeners = listeners(false);
+            let snapshot = CatalogSnapshot {
+                views: listeners
+                    .keys()
+                    .map(|owner| (owner.clone(), vec![]))
+                    .collect(),
+                ..Default::default()
+            };
+            let m = Manager::new_with_search(
+                p,
+                listeners,
+                BTreeMap::from([("shared".into(), payer())]),
+                Arc::new(CatalogState::new(snapshot)),
+                vec![],
+                Some(configured),
+            )
+            .await
+            .unwrap();
+            *m.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
+            let before = paid_calls.lock().unwrap().len();
+            let details = m
+                .invoke_source_details("writer", json!({"slug":"mixed"}).as_object().unwrap())
+                .await;
+            if discovery {
+                let details = details.unwrap();
+                assert_eq!(details["listing"]["service"]["name"], "Mixed listing");
+                let results = details["url_discovery"]["results"].as_array().unwrap();
+                let schema = results
+                    .iter()
+                    .find(|item| item["url"] == "https://api.example.com/openapi.json")
+                    .unwrap();
+                assert_eq!(
+                    schema["status"],
+                    if metadata {
+                        "verified_openapi"
+                    } else {
+                        "blocked"
+                    }
+                );
+                assert_eq!(
+                    paid_calls.lock().unwrap().len() - before,
+                    if metadata { 6 } else { 2 }
+                );
+            } else {
+                assert!(
+                    details.is_err(),
+                    "blocked directory cannot invent a base URL"
+                );
+                assert_eq!(paid_calls.lock().unwrap().len(), before);
+            }
+            // Explicit documentation follows metadata policy independently of directory/API policy.
+            let before = paid_calls.lock().unwrap().len();
+            let document = m
+                .invoke_source_details(
+                    "writer",
+                    json!({"documentation_url":"https://api.example.com/llms.txt"})
+                        .as_object()
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                document["documentation"]["status"],
+                if metadata { "ok" } else { "blocked" }
+            );
+            assert_eq!(
+                paid_calls.lock().unwrap().len() - before,
+                if metadata { 2 } else { 0 }
+            );
+            let before = paid_calls.lock().unwrap().len();
+            let raw = m
+                .invoke_raw(
+                    "writer",
+                    json!({"method":"GET","url":"https://api.example.com/api/v1/services"})
+                        .as_object()
+                        .unwrap(),
+                )
+                .await;
+            assert_eq!(
+                raw.is_ok(),
+                !discovery,
+                "raw directory hostname follows API category"
+            );
+            assert_eq!(
+                paid_calls.lock().unwrap().len() - before,
+                if discovery { 0 } else { 2 }
+            );
+            // Healthy origin results are usable even when their relay category is disabled.
+            let healthy = m
+                .invoke_source_details("writer", json!({"slug":"positive"}).as_object().unwrap())
+                .await
+                .unwrap();
+            assert_eq!(healthy["listing"]["service"]["name"], "Origin listing");
+            assert!(m.inner.lock().unwrap().state.records.is_empty());
+            // Registering a schema at the built-in directory path grants only ordinary API purpose.
+            let before = paid_calls.lock().unwrap().len();
+            m.invoke("writer", "x402_treazury_source_add", json!({
+                "name":"ordinary_directory", "spec_url":"https://api.example.com/registered-openapi.json"
+            })).await.unwrap();
+            assert_eq!(
+                paid_calls.lock().unwrap().len(),
+                before,
+                "healthy origin schema registers with metadata relay disabled too"
+            );
+            let tool_id = {
+                let catalog = m.catalog.read();
+                let published = &catalog.views["writer"];
+                assert_eq!(published.len(), 1);
+                assert_eq!(published[0].tool.path, "/api/v1/services");
+                published[0].tool.name.clone()
+            };
+            let before = paid_calls.lock().unwrap().len();
+            let registered = m
+                .find_tool("writer", &tool_id)
+                .unwrap()
+                .invoke_output(&Default::default())
+                .await;
+            assert_eq!(
+                registered.is_ok(),
+                !discovery,
+                "registered directory path follows API category"
+            );
+            let calls = paid_calls.lock().unwrap();
+            assert_eq!(calls.len() - before, if discovery { 0 } else { 2 });
+            assert!(
+                calls[before..]
+                    .iter()
+                    .all(|(url, _)| url == "https://api.example.com/api/v1/services")
+            );
+            drop(calls);
+            assert_eq!(m.inner.lock().unwrap().state.records.len(), 1);
+        }
+    }
     origin_task.abort();
     relay_task.abort();
 }

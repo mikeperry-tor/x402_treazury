@@ -328,7 +328,11 @@ fn relay_fixture() -> Arc<SearchRelay> {
             ("HEAD".into(), vec![entry("horizonpulse", 2)]),
             ("POST".into(), vec![entry("curl", 0), entry("agproxy", 1)]),
         ]))
-        .unwrap(),
+        .unwrap()
+        .with_policy(crate::discovery_relay::Policy {
+            api_requests: true,
+            ..Default::default()
+        }),
     )
 }
 
@@ -782,7 +786,11 @@ async fn fixture(mode: &str) {
                     crate::catalog::Config::default(),
                 )],
             )]))
-            .unwrap(),
+            .unwrap()
+            .with_policy(crate::discovery_relay::Policy {
+                api_requests: true,
+                ..Default::default()
+            }),
         );
         let binary = attached(relay)
             .execute_response(route("GET", "binary"))
@@ -861,7 +869,11 @@ async fn fixture(mode: &str) {
                 crate::catalog::Config::default(),
             )],
         )]))
-        .unwrap(),
+        .unwrap()
+        .with_policy(crate::discovery_relay::Policy {
+            api_requests: true,
+            ..Default::default()
+        }),
     );
     let head = attached(head_relay)
         .execute_response(route("HEAD", "binary"))
@@ -898,7 +910,12 @@ async fn fixture(mode: &str) {
             .all(|event| event.provider.is_none())
     );
     let origin_only = attached(Arc::new(
-        SearchRelay::fixture_methods(BTreeMap::new()).unwrap(),
+        SearchRelay::fixture_methods(BTreeMap::new())
+            .unwrap()
+            .with_policy(crate::discovery_relay::Policy {
+                api_requests: true,
+                ..Default::default()
+            }),
     ));
     let before = fixture.events("GET-status403").len();
     assert!(
@@ -937,7 +954,7 @@ async fn fixture(mode: &str) {
         Some(expected_address.as_str())
     );
 
-    let held = attached(configured);
+    let held = attached(configured.clone());
     let waiter = tokio::spawn({
         let client = held.clone();
         async move { client.execute_response(route("GET", "held")).await }
@@ -987,6 +1004,48 @@ async fn fixture(mode: &str) {
                 .any(|record| record.user == crate::network::global().credentials(&id).0)
         );
     }
+    // Opting out affects fallback only: origin successes and target x402 payment still work.
+    let defaults = attached(Arc::new(
+        (*configured).clone().with_policy(Default::default()),
+    ));
+    for method in ["GET", "HEAD", "POST"] {
+        let before = fixture.events.lock().unwrap().len();
+        assert!(
+            defaults
+                .execute_response(route(method, "status403"))
+                .await
+                .is_err()
+        );
+        {
+            let captured = fixture.events.lock().unwrap();
+            assert_eq!(captured.len() - before, attempts);
+            assert!(
+                captured[before..]
+                    .iter()
+                    .all(|event| event.provider.is_none() && event.signer.is_none()),
+                "default API-off never dispatches attached known-operative relay"
+            );
+        }
+        let before = fixture.events.lock().unwrap().len();
+        let healthy = defaults
+            .execute_response(route(method, "healthy"))
+            .await
+            .unwrap();
+        assert!(!healthy.relay_payment_may_have_occurred);
+        let paid = defaults
+            .execute_response(route(method, "origin-paid"))
+            .await
+            .unwrap();
+        assert!(paid.paid_submission && !paid.relay_payment_may_have_occurred);
+        let captured = fixture.events.lock().unwrap();
+        assert_eq!(captured.len() - before, 3);
+        assert!(
+            captured[before..]
+                .iter()
+                .all(|event| event.provider.is_none())
+        );
+    }
+    defaults.drain().await;
     client.drain().await;
     pinned.drain().await;
     server.abort();

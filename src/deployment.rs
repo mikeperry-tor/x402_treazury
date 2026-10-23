@@ -407,7 +407,7 @@ impl Deployment {
         let discovery_wallets = config
             .discovery_relay
             .as_ref()
-            .filter(|policy| policy.serve || policy.warm)
+            .filter(|policy| policy.provider_metadata && policy.has_method("GET"))
             .map(|policy| {
                 crate::discovery_relay::resolve_wallets(
                     policy,
@@ -527,7 +527,7 @@ impl Deployment {
                 .config
                 .discovery_relay
                 .clone()
-                .filter(|p| p.serve && p.has_method("GET"))
+                .filter(|p| p.provider_metadata && p.has_method("GET"))
                 && let Some((env, restriction)) = relay_env
             {
                 ensure!(
@@ -596,7 +596,7 @@ impl Deployment {
         let search_relay = match config.discovery_relay.as_ref() {
             Some(policy) => {
                 let relay = crate::discovery_relay::SearchRelay::load(policy, path).await?;
-                policy.on_demand.then(|| std::sync::Arc::new(relay))
+                Some(std::sync::Arc::new(relay))
             }
             None => None,
         };
@@ -621,7 +621,7 @@ impl Deployment {
                 .config
                 .discovery_relay
                 .as_ref()
-                .is_some_and(|p| p.serve)
+                .is_some_and(|p| p.provider_metadata && p.has_method("GET"))
         {
             ensure!(
                 !crate::qualification::active() && !catalog_evidence::collecting(),

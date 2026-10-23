@@ -252,13 +252,13 @@ async fn discovery_relay_policy_is_offline_explicit_and_validates_bindings() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("deployment.toml");
     let text = deployment_text();
-    let relay = "\n[discovery_relay]\nprovider='missing-local-provider.toml'\nwallet='default'\nserve=true\nwarm=true\nsources=['shared']\n";
+    let relay = "\n[discovery_relay]\nprovider='missing-local-provider.toml'\nwallet='default'\nsources=['shared']\n";
     std::fs::write(&path, format!("{text}{relay}")).unwrap();
     let shown = x402_treazury::deployment::Deployment::show_config(&path)
         .await
         .unwrap();
     assert_eq!(shown["discovery_relay"]["wallet"], "default");
-    assert_eq!(shown["discovery_relay"]["serve"], true);
+    assert_eq!(shown["discovery_relay"]["provider_metadata"], true);
     assert_eq!(
         shown["discovery_relay"]["fallbacks"],
         json!({"GET":["missing-local-provider.toml"]})
@@ -289,14 +289,14 @@ async fn relay_method_lists_are_inspected_offline_and_every_provider_path_is_pro
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("deployment.toml");
     let text = deployment_text();
-    let relay = "\n[discovery_relay]\nwallet='default'\nserve=true\n[discovery_relay.fallbacks]\nGET=['missing-first.toml','missing-second.toml']\nHEAD=[]\nPOST=['missing-post.toml']\n";
+    let relay = "\n[discovery_relay]\nwallet='default'\n[discovery_relay.fallbacks]\nGET=['missing-first.toml','missing-second.toml']\nHEAD=[]\nPOST=['missing-post.toml']\n";
     std::fs::write(&path, format!("{text}{relay}")).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
     assert_eq!(
         shown["discovery_relay"]["fallbacks"],
         json!({"GET":["missing-first.toml","missing-second.toml"],"HEAD":[],"POST":["missing-post.toml"]})
     );
-    assert_eq!(shown["discovery_relay"]["on_demand"], true);
+    assert_eq!(shown["discovery_relay"]["source_discovery"], true);
     assert!(shown["discovery_relay"].get("provider").is_none());
     for provider in [
         "missing-first.toml",
@@ -344,7 +344,6 @@ version=1
 [discovery_relay]
 provider='{}'
 wallet='relay'
-serve=true
 [wallets.relay]
 mode='static'
 private_key_env='RELAY_FIXTURE_KEY'
@@ -395,7 +394,7 @@ sources=['api']
     // With no override, only the source-assigned key is required for discovery.
     let automatic = std::fs::read_to_string(&path)
         .unwrap()
-        .replace("wallet='relay'\nserve=true", "serve=true");
+        .replace("wallet='relay'\n", "");
     std::fs::write(&path, automatic).unwrap();
     env.remove("RELAY_FIXTURE_KEY");
     let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
@@ -413,8 +412,8 @@ async fn comprehensive_example_enables_source_wallet_discovery_offline() {
     )
     .await
     .unwrap();
-    assert_eq!(shown["discovery_relay"]["serve"], true);
-    assert_eq!(shown["discovery_relay"]["warm"], true);
+    assert_eq!(shown["discovery_relay"]["provider_metadata"], true);
+    assert_eq!(shown["discovery_relay"]["source_discovery"], true);
     assert!(shown["discovery_relay"]["wallet"].is_null());
     assert_eq!(shown["discovery_wallets"]["exa"], "web");
     assert_eq!(shown["discovery_wallets"]["social"], "company");
@@ -690,9 +689,9 @@ provider="missing-local-provider.toml"
 "#;
     std::fs::write(&path, text).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
-    assert_eq!(shown["discovery_relay"]["on_demand"], true);
-    assert_eq!(shown["discovery_relay"]["serve"], false);
-    assert_eq!(shown["discovery_relay"]["warm"], false);
+    assert_eq!(shown["discovery_relay"]["source_discovery"], true);
+    assert_eq!(shown["discovery_relay"]["provider_metadata"], true);
+    assert_eq!(shown["discovery_relay"]["api_requests"], false);
     assert_eq!(shown["discovery_wallets"], json!({}));
     assert_eq!(
         shown["source_management"]["wallet_bindings"]["tools"],
@@ -702,12 +701,12 @@ provider="missing-local-provider.toml"
     // loading validates local bootstrap configuration before serving can use it.
     assert!(Deployment::load(&path).await.is_err());
     assert!(!dir.path().join("state").exists());
-    for setting in ["search=true", "search=false"] {
+    for setting in ["source_discovery=true", "source_discovery=false"] {
         std::fs::write(&path, format!("{text}{setting}\n")).unwrap();
         let shown = Deployment::show_config(&path).await.unwrap();
         assert_eq!(
-            shown["discovery_relay"]["on_demand"],
-            setting == "search=true"
+            shown["discovery_relay"]["source_discovery"],
+            setting == "source_discovery=true"
         );
         // Every configured adapter is validated locally, including when search
         // is disabled. Invalid bootstrap fails before secrets or network work.

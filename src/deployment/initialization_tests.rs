@@ -358,7 +358,7 @@ async fn relay_setup_preflight_failure_leaves_treasury_unmodified_without_alloca
     std::fs::write(
         &path,
         format!(
-            "{}\n[discovery_relay]\nprovider='missing-relay.toml'\nwallet='selected'\nserve=true\nsearch=false\n",
+            "{}\n[discovery_relay]\nprovider='missing-relay.toml'\nwallet='selected'\nsource_discovery=false\n",
             managed_config()
         ),
     )
@@ -691,7 +691,7 @@ async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_prov
     let provider_url = format!("http://{}", provider.local_addr().unwrap());
     let relay_provider = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
     let config = format!(
-        "{}\n[discovery_relay]\nprovider='{}'\nwallet='selected'\nserve=true\n",
+        "{}\n[discovery_relay]\nprovider='{}'\nwallet='selected'\n",
         managed_config()
             .replace("auto_fund=false", "auto_fund=true")
             .replace("http://127.0.0.1:1", &provider_url),

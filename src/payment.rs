@@ -244,6 +244,7 @@ pub struct PaidClient {
     /// Relay exchanges use common unsigned transport recovery and never recurse.
     relay_call: bool,
     document_relay: Option<Arc<crate::discovery_relay::SearchRelay>>,
+    relay_purpose: crate::discovery_relay::Purpose,
     relay_origins: Arc<Vec<String>>,
     attempt_capacity: Vec<Arc<tokio::sync::Semaphore>>,
     unavailable: Option<crate::rotation::error::AdmissionError>,
@@ -265,6 +266,7 @@ impl PaidClient {
             unsigned_only: false,
             relay_call: false,
             document_relay: None,
+            relay_purpose: Default::default(),
             relay_origins: Arc::new(Vec::new()),
             attempt_capacity: Vec::new(),
             unavailable: None,
@@ -286,6 +288,7 @@ impl PaidClient {
             unsigned_only: false,
             relay_call: false,
             document_relay: None,
+            relay_purpose: Default::default(),
             relay_origins: Arc::new(Vec::new()),
             attempt_capacity: Vec::new(),
             unavailable: None,
@@ -308,6 +311,7 @@ impl PaidClient {
             unsigned_only: true,
             relay_call: false,
             document_relay: None,
+            relay_purpose: Default::default(),
             relay_origins: Arc::new(Vec::new()),
             attempt_capacity: Vec::new(),
             unavailable: None,
@@ -897,7 +901,7 @@ impl PaidClient {
         let participating_tor = self.selection == crate::network::SelectionPolicy::Participating
             && factory.policy.mode == crate::network::Mode::Tor;
         let enrolled_method = matches!(request.method().as_str(), "GET" | "HEAD" | "POST");
-        let runtime_relay = enrolled_method && self.document_relay.is_some();
+        let runtime_relay = enrolled_method && self.request_relay().is_some();
         let common_transport = self.relay_call || enrolled_method;
         let collect_unsigned = (runtime_relay
             || (participating_tor && (common_transport || request.url().scheme() == "https")))

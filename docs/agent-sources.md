@@ -169,7 +169,7 @@ identity fails that request. Under Tor they use one origin attempt plus
 policy, including the terminal delay before fallback. Direct mode uses one
 origin attempt. Only complete valid search JSON may promote an origin scope.
 
-Configured runtime fallback also applies to API/directory/raw GET and HEAD, and
+When its category is enabled, runtime fallback also applies to API/directory/raw GET and HEAD, and
 otherwise-authorized unsigned x402 POST when a listed adapter represents the exact
 request. The original method selects its list. Origin challenges retain ordinary
 payment handling; relay-supplied target challenges are terminal. Any earlier target
@@ -178,9 +178,15 @@ terminal HTTP statuses do not buy another read. API ranges remain legitimate;
 raw HEAD succeeds with empty text. Typed possible-charge facts survive directory
 processing and output conversion, separately from relay advisories and JSON text.
 
-With `[discovery_relay]` configured, the ordered GET relay list is enabled by
-default for supported on-demand reads. Set `on_demand=false` to disable it; legacy
-`search=false` has the same expanded effect. Each search fetches fresh results; it inherits no catalog URL cache,
+With `[discovery_relay]` configured, `source_discovery=true` enables built-in
+Coinbase and x402 List fallback by default. `provider_metadata=true` independently
+enables schemas, imports/refresh, help, explicit usage documents and URL/spec probes.
+Actual API and raw calls require explicit `api_requests=true`; an ordinary call to
+a directory URL remains API work. In mixed `source_details` workflows, the directory
+lookup is discovery and each later provider document/probe is metadata. Categories
+are selected by trusted code, never agent arguments, method or hostname. With no
+relay section all requests remain origin-only. Each search fetches fresh results;
+it inherits no catalog URL cache,
 sticky failure, readiness queue or shared breaker. The relay uses this listener's
 source-management payer, regardless of the static relay wallet override; ordinary
 payment admission, journaling and insufficient-funds traversal still apply.

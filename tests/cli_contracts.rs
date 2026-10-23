@@ -1127,7 +1127,7 @@ async fn network_override_replaces_relay_at_its_declaration_without_inspection_i
     let dir = tempfile::tempdir().unwrap();
     network_override_fixture(
         dir.path(),
-        "[discovery_relay]\nwallet='shared'\nsources=['api']\nserve=true\nwarm=true\nsearch=false\n[discovery_relay.fallbacks]\nGET=['embedded-missing.toml','embedded-second.toml']\nHEAD=['embedded-head.toml']\n",
+        "[discovery_relay]\nwallet='shared'\nsources=['api']\nsource_discovery=false\n[discovery_relay.fallbacks]\nGET=['embedded-missing.toml','embedded-second.toml']\nHEAD=['embedded-head.toml']\n",
     );
     let external = dir.path().join("network");
     std::fs::create_dir(&external).unwrap();
@@ -1156,19 +1156,19 @@ async fn network_override_replaces_relay_at_its_declaration_without_inspection_i
             },
             "wallet": null,
             "sources": [],
-            "serve": false,
-            "warm": false,
-            "on_demand": true
+            "source_discovery": true,
+            "api_requests": false,
+            "provider_metadata": true
         })
     );
-    assert_eq!(shown["discovery_wallets"], json!({}));
+    assert_eq!(shown["discovery_wallets"], json!({"api":"shared"}));
 
     // Both serving and warming validate the selected relay against the
     // deployment before loading providers, keys or state. Ignoring the external
     // section would instead use the valid embedded wallet binding.
     std::fs::write(
         external.join("tor.toml"),
-        "[network]\nmode='direct'\n[discovery_relay]\nprovider='external-missing.toml'\nwallet='undeclared-network-relay-wallet'\nserve=true\nwarm=true\n",
+        "[network]\nmode='direct'\n[discovery_relay]\nprovider='external-missing.toml'\nwallet='undeclared-network-relay-wallet'\n",
     )
     .unwrap();
     for command in [vec!["serve"], vec!["catalog", "warm"]] {
@@ -1213,7 +1213,7 @@ async fn network_override_relay_file_is_reusable_by_offline_standalone_and_walle
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("network.toml"),
-        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n[discovery_relay]\nwallet='deployment-only'\nsources=['deployment-only']\nserve=true\nwarm=true\n[discovery_relay.fallbacks]\nGET=['missing-relay.toml','missing-second.toml']\nPOST=['missing-post.toml']\n",
+        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n[discovery_relay]\nwallet='deployment-only'\nsources=['deployment-only']\n[discovery_relay.fallbacks]\nGET=['missing-relay.toml','missing-second.toml']\nPOST=['missing-post.toml']\n",
     )
     .unwrap();
     std::fs::write(

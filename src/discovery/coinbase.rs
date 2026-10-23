@@ -151,7 +151,7 @@ impl Manager {
                 Ok(value) => output(value, "origin"),
                 Err(failure) if !failure.fallback => Err(failure.error.context("coinbase_search origin response rejected")),
                 Err(failure) => {
-                    let Some(relay) = &manager.search_relay else {
+                    let Some(relay) = manager.search_relay.as_ref().filter(|relay| relay.enabled(crate::discovery_relay::Purpose::SourceDiscovery)) else {
                         return Err(failure.error.context("coinbase_search origin failed; fallback unavailable"));
                     };
                     let response = relay.fetch(owned_client, url.as_str(), &manager.policy, validate_response, failure.retry_after).await

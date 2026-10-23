@@ -14,9 +14,9 @@ pub struct Policy {
     pub provider: Option<PathBuf>,
     pub fallbacks: BTreeMap<String, Vec<PathBuf>>,
     pub wallet: Option<String>,
-    pub serve: bool,
-    pub warm: bool,
-    pub on_demand: bool,
+    pub source_discovery: bool,
+    pub api_requests: bool,
+    pub provider_metadata: bool,
     pub sources: Vec<String>,
 }
 
@@ -27,17 +27,17 @@ struct Input {
     fallbacks: Option<BTreeMap<String, Vec<PathBuf>>>,
     #[serde(default)]
     wallet: Option<String>,
+    #[serde(default = "enabled_default")]
+    source_discovery: bool,
     #[serde(default)]
-    serve: bool,
-    #[serde(default)]
-    warm: bool,
-    #[serde(default = "on_demand_default", alias = "search")]
-    on_demand: bool,
+    api_requests: bool,
+    #[serde(default = "enabled_default")]
+    provider_metadata: bool,
     #[serde(default)]
     sources: Vec<String>,
 }
 
-fn on_demand_default() -> bool {
+fn enabled_default() -> bool {
     true
 }
 
@@ -67,9 +67,9 @@ impl TryFrom<Input> for Policy {
             provider: input.provider,
             fallbacks,
             wallet: input.wallet,
-            serve: input.serve,
-            warm: input.warm,
-            on_demand: input.on_demand,
+            source_discovery: input.source_discovery,
+            api_requests: input.api_requests,
+            provider_metadata: input.provider_metadata,
             sources: input.sources,
         })
     }
@@ -138,9 +138,9 @@ impl Default for Policy {
             provider: None,
             fallbacks: BTreeMap::new(),
             wallet: None,
-            serve: false,
-            warm: false,
-            on_demand: true,
+            source_discovery: true,
+            api_requests: false,
+            provider_metadata: true,
             sources: Vec::new(),
         }
     }

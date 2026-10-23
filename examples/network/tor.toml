@@ -16,9 +16,9 @@ tor_isolation_retries = 2
 
 # Ordered paid fallback after eligible origin attempts, using existing deployment payers.
 [discovery_relay]
-serve = true
-warm = true
-on_demand = true # runtime document/search/API fallback; legacy search is an alias
+source_discovery = true # directory search and service metadata
+api_requests = false # opt in to disclose actual API requests
+provider_metadata = true # schemas/help, startup and explicit non-direct warming
 
 # Select by original target method; absent/empty lists mean origin-only.
 [discovery_relay.fallbacks]

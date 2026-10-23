@@ -130,6 +130,7 @@ impl Harness {
             .collect();
         Self {
             sequence: SearchRelay {
+                policy: Default::default(),
                 entries: BTreeMap::from([("GET".into(), entries)]),
             },
             client: payer("0.01"),

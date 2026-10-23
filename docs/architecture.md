@@ -78,8 +78,9 @@ and immutable parsed JSON within a load only for the same exact URL, requested
 timeout, byte limit, transport policy and discovery identity. Filters, overrides, base URLs and
 wallet bindings remain per alias. Local files and later loads do not reuse this
 cache. Progress/timings go to stderr. Lazy help fetches on
-first invocation; successful content is cached, failed initialization can retry,
-and simultaneous requests for the same resource coalesce. These caches are
+first invocation; successful content and failures with possible relay charges are
+cached. Proven unpaid failures can retry, and simultaneous requests for the same
+resource coalesce. These caches are
 independent of fresh payment challenges.
 
 `src/http_cache.rs` adds disposable HTTP-aware persistence under an existing
@@ -126,8 +127,11 @@ The operator accepts the relay's remote redirect/public-destination enforcement
 and plaintext integrity. Relay TLS does not establish target TLS or content
 authenticity. Target credentials and payment signatures remain excluded.
 
-On-demand document relay calls retain the existing source-bound payer and owner;
-the shared `on_demand` switch accepts legacy `search` on input. Existing help/import
+Document relay calls retain the existing source-bound payer and owner and use
+`provider_metadata` permission. Trusted caller purpose selects `source_discovery`
+for built-in directory/Coinbase calls and `api_requests` for actual API calls. The
+shared immutable relay context retains all preferences; callers do not replace it
+with category-specific clients or caches. Existing help/import
 coalescing includes pinned financial authority and effective document policy.
 Static help pins the actual payer Arc separately from ordinary API payer replacement;
 managed help retains its existing pool Arc across rotation. A possible-paid help

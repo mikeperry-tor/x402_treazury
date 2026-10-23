@@ -311,6 +311,9 @@ pub(crate) fn prepare_fallback(
     relay: &SearchRelay,
     options: &Options,
 ) -> Result<Option<PreparedDocument>> {
+    if !relay.enabled(super::Purpose::ProviderMetadata) {
+        return Ok(None);
+    }
     network::public_url(&options.url)?;
     let target = options.target()?;
     let prepared = relay.prepare(&target, options.limit)?;

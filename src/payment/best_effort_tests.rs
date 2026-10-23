@@ -2008,10 +2008,16 @@ async fn prior_wallet_liability_relay_child() {
         .unwrap()
         .with_test_root(crate::test_tls::CA),
     );
-    let relay = Arc::new(crate::discovery_relay::SearchRelay::fixture(
-        "https://spec.example.com/relay".into(),
-        crate::catalog::Config::default(),
-    ));
+    let relay = Arc::new(
+        crate::discovery_relay::SearchRelay::fixture(
+            "https://spec.example.com/relay".into(),
+            crate::catalog::Config::default(),
+        )
+        .with_policy(crate::discovery_relay::Policy {
+            api_requests: true,
+            ..Default::default()
+        }),
+    );
     let route = || RoutedRequest {
         method: "GET".into(),
         url: "https://api.example.com/pay".into(),

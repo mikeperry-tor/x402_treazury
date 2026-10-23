@@ -663,7 +663,8 @@ exceeding it returns HTTP 413 with the limit in its message and a stderr warning
   local `$ref` resolution, path/tag selection, deterministic names, flattened
   schemas and routing, vendor prices, description overrides and explicit
   `max_description_chars`. Vendor text has no default truncation.
-- `help_url` adds a lazy, cached documentation tool. A failed fetch can retry.
+- `help_url` adds a lazy, cached documentation tool. Proven unpaid fetch failures
+  can retry; failures with possible relay charges remain cached.
   `instructions_text` and `name` populate the initialize response.
 - MCP stdio and Streamable HTTP. The HTTP bearer gate runs before MCP dispatch;
   no session header or sticky session is required. The SDK's default Host checks
@@ -1222,9 +1223,9 @@ search-result metadata is terminal success.
 
 ```toml
 [discovery_relay]
-serve = true   # static serving startup; defaults false
-warm = true    # static catalog warm; defaults false
-on_demand = true # supported runtime reads; defaults true
+source_discovery = true # directory/resource searches; default true
+api_requests = false # actual API data; default false
+provider_metadata = true # catalogs/help/imports/probes; default true
 # wallet = "web" # optional static payer override
 # sources = ["social"] # optional static source selection; empty selects all
 
@@ -1259,14 +1260,31 @@ local schemas before payment. The bundled Curl schema, `agproxy-openapi.json` an
 no schema or help document and rejects nonlocal schema references.
 [Provider caveats](../providers/CAVEATS.md) own provenance and update instructions.
 
-`on_demand` defaults true when this section exists. It controls supported runtime
-document, Coinbase, API, directory and raw GET/HEAD fallback, plus faithfully
-representable otherwise-authorized unsigned x402 POST requests. `search` remains an input alias; specifying
-both spellings is an error, and inspection emits only `on_demand`. Legacy
-`search=false` now also disables fallback for imports, help and documentation
-probes and API/directory/raw calls. Without the section no paid relay is created. `serve`/`warm` retain their
-static-acquisition meanings. `wallet` and `sources` apply only to static work;
-runtime reads retain the source or authenticated endpoint's existing payer.
+Relay preferences classify each request by trusted caller purpose, independently
+of HTTP method or destination:
+
+| Preference | Eligible fallback | Default |
+| --- | --- | --- |
+| `source_discovery` | Built-in Coinbase resource search and x402 List browse, recommendation and service-detail requests | `true` |
+| `api_requests` | Ordinary generated/configured API tools and `raw_call`, including application search APIs or direct calls to directory URLs | `false` |
+| `provider_metadata` | Static schemas at serving startup and explicit warming, imports/refreshes, help, usage documents and provider URL/specification probes | `true` |
+
+These defaults apply only when the section exists. Without it no paid relay is
+created. Disabled preferences leave origin retrieval available but authorize no
+relay request or signature. `serve`, `warm`, `on_demand` and `search` are rejected
+configuration keys. Method lists, formats and static `wallet`/`sources` bindings
+remain separate settings; runtime reads retain the authenticated endpoint/source's
+payer. Enabling metadata permits paid catalog fallback during ordinary serving and
+explicit non-direct warming. Inspection remains unsigned, `--direct` warming
+bypasses relays, and no warming starts automatically.
+
+A mixed `source_details` call applies discovery permission to its directory lookup
+and metadata permission to each later provider document/probe. Help remains
+metadata when invoked through a tool wrapper. No agent argument can override a
+category, and an application search API remains API work. Metadata contains no API
+argument map, but its URL and query string can still disclose sensitive information.
+Every enabled relay sees the request it handles and supplies its response plaintext.
+
 No runtime read allocates wallets, starts funding or waits for funding. For document reads, missing
 payment authority leaves unsigned origin retrieval available and relay fallback
 unavailable. Runtime relay exchange adds no sticky response cache, readiness queue

@@ -854,10 +854,16 @@ mod tests {
             .unwrap()
             .with_test_root(crate::test_tls::CA),
         );
-        let relay = Arc::new(crate::discovery_relay::SearchRelay::fixture(
-            format!("http://{relay_address}/curl"),
-            Default::default(),
-        ));
+        let relay = Arc::new(
+            crate::discovery_relay::SearchRelay::fixture(
+                format!("http://{relay_address}/curl"),
+                Default::default(),
+            )
+            .with_policy(crate::discovery_relay::Policy {
+                api_requests: true,
+                ..Default::default()
+            }),
+        );
         // No managed pool, wallet allocation, or funding service is constructed.
         let client = PaidClient::new(
             Payer::new(

@@ -11,8 +11,6 @@ fn policy(input: &str) -> Policy {
 fn method_lists_preserve_authored_order_without_inheritance_or_provider_io() {
     let parsed = policy(
         r#"
-serve = true
-warm = true
 wallet = "research"
 sources = ["docs"]
 [fallbacks]
@@ -22,7 +20,7 @@ POST = ["missing/post.toml"]
 "#,
     );
     assert!(!parsed.is_legacy());
-    assert!(parsed.on_demand && parsed.serve && parsed.warm);
+    assert!(parsed.source_discovery && parsed.provider_metadata && !parsed.api_requests);
     assert_eq!(
         parsed.fallbacks()["GET"],
         [
@@ -67,10 +65,9 @@ fn policy_from_json(value: Value) -> Policy {
 
 #[test]
 fn legacy_provider_is_one_get_entry_with_explicit_legacy_provenance() {
-    let legacy = policy("provider='missing.toml'\nsearch=false");
+    let legacy = policy("provider='missing.toml'");
     assert!(legacy.is_legacy());
-    assert!(!legacy.on_demand);
-    assert!(!legacy.serve && !legacy.warm);
+    assert!(legacy.source_discovery && legacy.provider_metadata && !legacy.api_requests);
     assert_eq!(legacy.fallbacks()["GET"], [PathBuf::from("missing.toml")]);
     assert_eq!(legacy.fallbacks().len(), 1);
     let canonical = serde_json::to_value(&legacy).unwrap();
@@ -203,19 +200,31 @@ fn relay_bootstrap_assets_preserve_complete_primary_catalogs_and_internal_refs()
 }
 
 #[test]
-fn on_demand_alias_is_defaulted_canonical_and_rejects_duplicate_spellings() {
-    use x402_treazury::discovery_relay::Policy;
+fn categories_are_independent_defaulted_and_retired_controls_reject() {
     let default: Policy = toml::from_str("").unwrap();
-    assert!(default.on_demand);
-    for spelling in ["on_demand", "search"] {
+    assert!(default.source_discovery && default.provider_metadata && !default.api_requests);
+    assert_eq!(
+        serde_json::to_value(&default).unwrap(),
+        serde_json::to_value(Policy::default()).unwrap()
+    );
+    for category in ["source_discovery", "provider_metadata", "api_requests"] {
         for enabled in [true, false] {
-            let policy: Policy = toml::from_str(&format!("{spelling}={enabled}")).unwrap();
-            assert_eq!(policy.on_demand, enabled);
+            let policy: Policy = toml::from_str(&format!("{category}={enabled}")).unwrap();
             let shown = serde_json::to_value(policy).unwrap();
-            assert_eq!(shown["on_demand"], enabled);
-            assert!(shown.get("search").is_none());
+            assert_eq!(shown[category], enabled);
+            for other in ["source_discovery", "provider_metadata", "api_requests"] {
+                if other != category {
+                    assert_eq!(shown[other], serde_json::to_value(&default).unwrap()[other]);
+                }
+            }
+            for retired in ["serve", "warm", "on_demand", "search"] {
+                assert!(shown.get(retired).is_none());
+            }
         }
     }
-    assert!(toml::from_str::<Policy>("on_demand=true\nsearch=false").is_err());
-    assert!(toml::from_str::<Policy>("search=true\non_demand=true").is_err());
+    for retired in ["serve", "warm", "on_demand", "search"] {
+        for value in ["true", "false", "'malformed'"] {
+            assert!(toml::from_str::<Policy>(&format!("{retired}={value}")).is_err());
+        }
+    }
 }

@@ -79,7 +79,18 @@ pub fn audit_run(state: &Path, run: &str, output: &Path) -> Result<u8> {
         .catalogs
         .as_ref()
         .context("run has no frozen catalog evidence")?;
-    let snapshot = catalogs.verify_archive(&manifest)?;
+    let mut snapshot = catalogs.verify_archive(&manifest)?;
+    // The archive bytes were verified above. Retired routing preferences do not
+    // affect wallet/transport identity derivation; ignore them only in this
+    // offline observation, never in live preparation or current session policy.
+    if let Some(relay) = snapshot
+        .pointer_mut("/deployment/discovery_relay")
+        .and_then(Value::as_object_mut)
+    {
+        for key in ["serve", "warm", "on_demand", "search"] {
+            relay.remove(key);
+        }
+    }
     ensure!(
         manifest.network.tor_mode == crate::manifest::TorMode::Owned,
         "offline Tor audit requires an originally owned-Tor run"
@@ -263,3 +274,7 @@ mod tests {
         assert!(complete(Some(&marker), bytes, 2).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "archive_category_tests.rs"]
+mod category_tests;

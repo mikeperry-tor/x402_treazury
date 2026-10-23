@@ -92,7 +92,7 @@ pub async fn warm_cache_with_network(
     // Direct warming retains its unsigned behavior. Relay warming uses only the
     // resolved wallets and never starts treasury sync, funding workers or listeners.
     let policy = config.discovery_relay.clone().filter(|p| {
-        p.warm
+        p.provider_metadata
             && p.has_method("GET")
             && !direct
             && (p.sources.is_empty() || selected.iter().any(|id| p.sources.contains(id)))

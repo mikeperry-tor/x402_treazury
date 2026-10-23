@@ -74,6 +74,15 @@ impl PaidClient {
         self.document_relay = relay;
         self
     }
+    pub(crate) fn with_relay_purpose(mut self, purpose: crate::discovery_relay::Purpose) -> Self {
+        self.relay_purpose = purpose;
+        self
+    }
+    pub(crate) fn request_relay(&self) -> Option<Arc<crate::discovery_relay::SearchRelay>> {
+        self.document_relay
+            .clone()
+            .filter(|relay| relay.enabled(self.relay_purpose))
+    }
     pub(crate) fn has_document_authority(&self) -> bool {
         !self.unsigned_only
             && self.unavailable.is_none()
