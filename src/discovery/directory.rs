@@ -54,7 +54,7 @@ pub fn search_schema() -> Value {
     }
     // Describe the choices once, without concatenating upstream implementation prose.
     let help = json!({
-        "q":"Capability keywords. Browse/local use substring matching; ranked search uses relevance. Omit to search without keywords.",
+        "q":"Capability keywords. Local search uses BM25 with literal matches first; x402 List browse uses substring matching. Omit to search without keywords.",
         "category":"x402 List only: service category; omit for all categories.",
         "status":"x402 List browse only: service status.",
         "verified":"x402 List browse only: filter for its paid-delivery verification badge. Distinct from payment_ready; no guarantee for a future call.",

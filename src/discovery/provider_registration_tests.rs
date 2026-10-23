@@ -20,7 +20,7 @@ async fn public_local_tools_dispatch_offline_with_complete_json() {
     let search = s
         .invoke(
             "x402_treazury_sources_search",
-            json!({"local_only":true,"q":"no-such-provider-capability"})
+            json!({"local_only":true,"q":"xqzunmatchedcapabilitysentinel"})
                 .as_object()
                 .unwrap(),
         )
@@ -36,6 +36,33 @@ async fn public_local_tools_dispatch_offline_with_complete_json() {
     let listed: Value = serde_json::from_str(&listed).unwrap();
     assert_eq!(listed["per_page"], 25);
     assert!(listed["items"].is_array());
+    let query = "retrieval contents";
+    let expected = crate::providers::browse(Some(query), 1, 25).unwrap();
+    let ranked = s
+        .invoke(
+            "x402_treazury_sources_search",
+            json!({"local_only":true,"q":query}).as_object().unwrap(),
+        )
+        .await
+        .unwrap();
+    let ranked: Value = serde_json::from_str(&ranked).unwrap();
+    let ids = |value: &Value| -> Vec<String> {
+        value["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["provider_id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert!(!expected["items"].as_array().unwrap().is_empty());
+    assert_eq!(ids(&ranked), ids(&expected));
+    assert_eq!(ranked["items"], expected["items"]);
+    assert_eq!(ranked["total"], expected["total"]);
+    assert!(
+        m.payers.is_empty(),
+        "public local search must not need a wallet or documentation identity"
+    );
+    assert!(m.fetches.lock().unwrap().is_empty());
     assert!(m.inner.lock().unwrap().state.records.is_empty());
 }
 

@@ -9,6 +9,7 @@ pub mod pricing;
 pub mod provider_status;
 pub mod providers;
 pub mod qualification;
+mod relevance;
 pub mod rotation;
 pub mod server;
 pub mod treasury;

@@ -20,7 +20,7 @@ pub fn search_branch() -> Value {
     let mut properties = pagination_properties();
     properties.insert("local_only".into(), json!({"const":true}));
     properties.insert("mode".into(), json!({"const":"browse"}));
-    properties.insert("q".into(), json!({"type":"string","description":"Optional case-insensitive substring across bundled provider IDs, names, capability descriptions and declared API bases. Omit or pass blank text to enumerate all bundled providers."}));
+    properties.insert("q".into(), json!({"type":"string","description":"BM25 keywords over bundled provider IDs, names, descriptions and API bases; literal substrings rank first. Omit or pass blank text to enumerate."}));
     json!({"properties":properties,"required":["local_only"],"additionalProperties":false})
 }
 

@@ -40,15 +40,19 @@ See [catalog selection](configuration.md) for composition and stale-advice behav
 
 ## Tool search matching and results
 
-`x402_treazury_tools_search.query` performs lexical BM25 keyword retrieval over
-visible tool names, descriptions and top-level input parameter names. For example,
+Both local search surfaces use the same lexical BM25 ranker: `tools_search.query`
+searches visible tool names, descriptions and top-level input parameter names;
+`sources_search(local_only=true).q` searches bundled provider IDs, display names,
+capability descriptions and declared API bases. For example,
 `yelp reviews` finds a description such as "List public reviews for a Yelp business"
 without requiring those words to be adjacent. Query terms have OR semantics:
-tools matching one term remain candidates, and BM25 ranks their relevance.
+candidates matching one term remain eligible, and BM25 ranks their relevance.
 
 Names and descriptions containing the complete trimmed query as a lowercase
 substring rank first, followed by BM25 score and then tool name for deterministic
-ties. Literal priority favors precise identifiers, identifier fragments and phrases;
+ties. Provider search applies the same literal priority to its space-joined metadata
+and breaks score ties by provider ID. Blank searches retain enumeration order.
+Literal priority favors precise identifiers, identifier fragments and phrases;
 it is a relevance rule, not a legacy query mode. Terms are lowercased Unicode
 alphanumeric runs; punctuation, underscores and hyphens separate terms, and repeated
 BM25 query terms count once. There is no stemming, stopword removal, camel-case splitting,
@@ -80,9 +84,11 @@ the endpoint as a whole. Neither case proves a configured provider has no APIs.
 No speculative near-miss list is produced: OR-term retrieval already returns tools
 matching some of the query, and enumeration is the explicit fallback.
 
-Ranking uses only the captured endpoint/source-filtered snapshot, so inaccessible
-or unrelated tools cannot influence relevance or counts. It builds no persistent
-index, cache or background job and makes no provider requests. BM25 uses `k1=1.2`,
+Tool ranking uses only the captured endpoint/source-filtered snapshot, so
+inaccessible or unrelated tools cannot influence relevance or counts. Provider
+ranking uses only the shipped metadata collection. The shared ranker builds no
+persistent index, cache or background job and makes no provider requests.
+BM25 uses `k1=1.2`,
 `b=0.75` and positive IDF `ln(1 + (N - df + 0.5)/(df + 0.5))`, as documented by
 [Lucene BM25Similarity](https://lucene.apache.org/core/9_12_3/core/org/apache/lucene/search/similarities/BM25Similarity.html).
 Ranking preserves complete descriptions, schemas and payment bindings.
@@ -90,9 +96,12 @@ Ranking preserves complete descriptions, schemas and payment bindings.
 ## External directory matching
 
 `x402_treazury_sources_search(local_only=true)` searches only bundled provider
-metadata: IDs, display names, capability descriptions and declared API bases use
-case-insensitive substring matching, ordered by stable provider ID. Omitted or
-blank `q` enumerates the bundle. `page` defaults to 1; `per_page` defaults to 25
+metadata using the same BM25 and literal-match priority as callable tool search.
+Multiword queries match any of their terms and rank by relevance across IDs,
+display names, capability descriptions and declared API bases. Omitted or blank
+`q` enumerates the bundle in stable provider-ID order. Nonblank results rank before
+pagination and use provider ID to break ties. `page` defaults to 1;
+`per_page` defaults to 25
 and accepts any positive integer. Only omitted or `browse` mode is allowed; directory filters,
 ranking arguments and `best` fail before I/O. `x402_treazury_providers_list` accepts
 only the same pagination fields and shares this projection with blank local search.

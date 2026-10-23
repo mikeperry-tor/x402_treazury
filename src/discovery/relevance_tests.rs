@@ -90,10 +90,6 @@ fn tokenization_indexes_parameter_names_without_searching_schema_prose() {
     let mut tools = tools;
     tools[1].tool.input_schema["properties"] = json!({"value":{"description":"sentinelword"}});
     assert!(names(&tools, "sentinelword").is_empty());
-    assert_eq!(
-        tokenize("BlueSky_FOO-bar/地域"),
-        ["bluesky", "foo", "bar", "地域"]
-    );
 }
 
 #[test]
@@ -129,14 +125,4 @@ fn equal_scores_use_tool_names_and_document_length_affects_relevance() {
         tool("zzz", "rare term", &[]),
     ];
     assert_eq!(names(&lengths, "rare"), ["zzz", "aaa"]);
-}
-
-#[test]
-fn bm25_score_matches_reference_frequency_and_length_normalization() {
-    let tool = tool("alpha", "yelp yelp reviews", &["business_id"]);
-    let document = Document::new(&tool);
-    // Six terms, yelp frequency two, average length five, N=3 and df=2:
-    // positive IDF ln(1.6), saturated TF 4.4 / 3.38 for k1=1.2, b=.75.
-    let score = document.score(&[("yelp".into(), 1.6_f64.ln())], 5.0);
-    assert!((score - 1.6_f64.ln() * 4.4 / 3.38).abs() < 1e-12);
 }

@@ -168,7 +168,11 @@ Tool search filters the captured snapshot by listener and source before computin
 request-local BM25 over names, descriptions and top-level argument names. Literal
 name/description substrings rank first; blank queries retain catalog order. Query
 help and result counts expose these semantics without another index, cache or
-provider request. See [tool search matching](agent-sources.md#tool-search-matching-and-results).
+provider request. Bundled-provider search uses the same shared ranker over its
+offline ID/name/description/API-base metadata, with provider-ID tie breaking and
+existing page pagination after ranking. Exact provider/base/spec lookups retain
+their separate exact-match contracts.
+See [local search matching](agent-sources.md#tool-search-matching-and-results).
 Tool descriptions omit registered-source state because clients may cache them.
 Live search/enumeration reflects the captured listener snapshot; source-name
 filtering retains the validated `dyn_<name>__<slug>` contract and final delimiter.

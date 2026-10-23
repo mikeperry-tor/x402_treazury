@@ -123,11 +123,11 @@ fn browse_providers(
 ) -> Result<Value> {
     ensure!(page >= 1, "page must be at least 1");
     ensure!(per_page >= 1, "per_page must be at least 1");
-    let query = q.unwrap_or_default().trim().to_lowercase();
-    let matched: Vec<_> = providers
-        .iter()
-        .filter(|provider| {
-            [
+    let matched = crate::relevance::rank(
+        providers.iter().collect::<Vec<_>>(),
+        q.unwrap_or_default(),
+        |provider| {
+            let literal = [
                 Some(provider.id),
                 provider.config.name.as_deref(),
                 provider.config.description.as_deref(),
@@ -135,9 +135,12 @@ fn browse_providers(
             ]
             .into_iter()
             .flatten()
-            .any(|field| field.to_lowercase().contains(&query))
-        })
-        .collect();
+            .collect::<Vec<_>>()
+            .join(" ");
+            (literal, String::new())
+        },
+        |provider| provider.id,
+    );
     let total = matched.len() as u64;
     let offset = (page - 1).saturating_mul(per_page);
     let items: Vec<_> = matched
@@ -270,11 +273,20 @@ mod tests {
             synthetic("alpha", "First", "Satellite maps", "https://a.invalid"),
             synthetic("beta", "Second", "Registry records", "https://b.invalid"),
         ];
-        for q in ["ALPHA", "first", " SATELLITE ", "a.invalid"] {
+        for q in ["ALPHA", "first", " SATELLITE "] {
             let result = browse_providers(&entries, Some(q), 1, 1).unwrap();
             assert_eq!(result["total"], 1);
             assert_eq!(result["items"][0]["provider_id"], "alpha");
         }
+        let address = browse_providers(&entries, Some("a.invalid"), 1, 1).unwrap();
+        assert_eq!(
+            address["total"], 2,
+            "OR token matching includes both .invalid hosts"
+        );
+        assert_eq!(
+            address["items"][0]["provider_id"], "alpha",
+            "the literal address match ranks first"
+        );
         assert_eq!(
             browse_providers(&entries, None, 1, 1).unwrap(),
             browse_providers(&entries, Some("  "), 1, 1).unwrap()
@@ -304,5 +316,112 @@ mod tests {
             );
         }
         assert!(browse_providers(&entries, None, 1, 0).is_err());
+    }
+
+    fn ids(result: &Value) -> Vec<&str> {
+        result["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["provider_id"].as_str().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn provider_keywords_use_or_matching_query_dedup_and_unicode_tokens() {
+        let entries = [
+            synthetic(
+                "alpha",
+                "First",
+                "Satellite detailed maps",
+                "https://a.invalid",
+            ),
+            synthetic(
+                "beta",
+                "Second",
+                "Satellite registry archive",
+                "https://b.invalid",
+            ),
+            synthetic("gamma", "Third", "Unrelated records", "https://c.invalid"),
+        ];
+        let ranked = browse_providers(&entries, Some("maps satellite"), 1, 10).unwrap();
+        assert_eq!(ids(&ranked), ["alpha", "beta"]);
+        assert_eq!(ranked["total"], 2);
+        assert_eq!(
+            browse_providers(&entries, Some("maps maps satellite"), 1, 10).unwrap(),
+            ranked,
+            "repeated query terms do not change BM25 weighting"
+        );
+        assert_eq!(
+            ids(&browse_providers(&entries, Some("maps absenttoken"), 1, 10).unwrap()),
+            ["alpha"],
+            "one matching term suffices"
+        );
+        let unicode = [
+            synthetic("alpha", "Météo", "Données locales", "https://a.invalid"),
+            synthetic("beta", "Second", "Météo rapports", "https://b.invalid"),
+        ];
+        let result = browse_providers(&unicode, Some("MÉTÉO—DONNÉES"), 1, 10).unwrap();
+        assert_eq!(ids(&result), ["alpha", "beta"]);
+        assert_eq!(
+            browse_providers(&unicode, Some("meteo"), 1, 10).unwrap()["total"],
+            0,
+            "token matching does not remove accents"
+        );
+    }
+
+    #[test]
+    fn provider_literal_cross_field_phrase_precedes_keyword_score_and_pagination() {
+        let entries = [
+            synthetic(
+                "beta",
+                "Forecast",
+                "Weather weather weather",
+                "https://b.invalid",
+            ),
+            synthetic("alpha", "Weather", "Forecast", "https://a.invalid"),
+            synthetic("gamma", "Third", "Unrelated records", "https://c.invalid"),
+        ];
+        let first = browse_providers(&entries, Some("weather forecast"), 1, 1).unwrap();
+        assert_eq!(
+            ids(&first),
+            ["alpha"],
+            "a phrase crossing name/description is a literal match"
+        );
+        assert_eq!(
+            first["items"][0],
+            entries[1].metadata(),
+            "ranked pages retain complete metadata"
+        );
+        assert_eq!(first["total"], 2);
+        assert_eq!(first["next_page"], 2);
+        let second = browse_providers(&entries, Some("weather forecast"), 2, 1).unwrap();
+        assert_eq!(ids(&second), ["beta"]);
+        assert_eq!(second["items"][0], entries[0].metadata());
+        assert!(second["next_page"].is_null());
+        let complete = browse_providers(&entries, Some("weather forecast"), 1, u64::MAX).unwrap();
+        assert_eq!(ids(&complete), ["alpha", "beta"]);
+        assert_eq!(
+            complete["items"],
+            json!([first["items"][0], second["items"][0]])
+        );
+    }
+
+    #[test]
+    fn provider_keyword_ties_use_ids_while_blank_enumeration_preserves_input_order() {
+        let entries = [
+            synthetic("zeta", "Weather", "Reports", "https://z.invalid"),
+            synthetic("alpha", "Weather", "Reports", "https://a.invalid"),
+        ];
+        assert_eq!(
+            ids(&browse_providers(&entries, Some("weather"), 1, 10).unwrap()),
+            ["alpha", "zeta"]
+        );
+        let blank = browse_providers(&entries, None, 1, 10).unwrap();
+        assert_eq!(ids(&blank), ["zeta", "alpha"]);
+        assert_eq!(
+            browse_providers(&entries, Some("  "), 1, 10).unwrap(),
+            blank
+        );
     }
 }

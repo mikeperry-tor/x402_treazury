@@ -736,8 +736,10 @@ repeat a busy or lost add with the same selector. Repeated provider IDs and gene
 specification URLs return the accepted registration on that endpoint. See the [agent source guide](agent-sources.md).
 
 `x402_treazury_providers_list` enumerates the embedded provider catalog offline;
-`sources_search` with `local_only=true` searches the same metadata by case-insensitive
-substring across ID, name, description and declared API base. Both support `page`
+`sources_search` with `local_only=true` searches the same metadata with the same
+BM25/literal-priority matching as `tools_search`, across ID, name, description and
+API base. Blank queries enumerate in provider-ID order; nonblank queries rank
+before pagination. Both support `page`
 (default 1) and `per_page` (default 25, any positive integer). Local search accepts only `q`,
 those pagination fields and omitted or `browse` mode; directory filters/ranking are
 rejected before I/O. These tools perform no wallet or network work and never fall
