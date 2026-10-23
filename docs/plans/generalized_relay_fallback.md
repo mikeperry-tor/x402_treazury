@@ -2,10 +2,11 @@
 
 ## Intent, baseline and scope
 
-Give supported public reads a consistent origin-retry/Curl-fallback path. Extend
+Give supported public reads a consistent origin-retry/relay-fallback path. Extend
 fallback to agent-added OpenAPI acquisition and refresh, provider help, explicit
 usage documents and discovery probes, and unsigned public API/directory GET/HEAD
-responses. Expose the Tor isolation retry count in `[network]`. Keep agent-facing
+responses, plus otherwise-authorized unsigned x402 POST requests that a configured
+relay can faithfully represent. Expose the Tor isolation retry count in `[network]`. Keep agent-facing
 help focused on capabilities and inputs, without relay, retry or payer machinery.
 
 Starting baseline: `a59770f107d8cb64f7df64b82d6554343b233ade` on
@@ -15,6 +16,12 @@ current Tor count is hardcoded to three total attempts in the common network
 factory. Static relay state includes caching/readiness/breaker responsibilities;
 Coinbase has a separate on-demand exchange. These are starting facts, not the
 proposed architecture.
+
+Provider additions in `962ffd50` subsequently supplied AGProxy and Horizon Pulse
+definitions and reviewed their public request/response contracts. They did not
+change the Curl-only runtime. The implementation baseline includes that commit;
+retain the original network/payment baseline above for accumulated comparisons.
+The method-list design below supersedes the earlier single-Curl assumption.
 
 This turn prepares the plan for user review only. No implementation commit starts
 before that review. Implementation uses offline/local fixtures and public unfunded
@@ -44,8 +51,10 @@ add a link only if an enduring contract gains a new owner.
   the value. Direct mode and explicit direct warming retain one origin attempt.
 - All participating Tor callers use this count: static catalogs/pricing, Coinbase,
   dynamic imports/refresh, help/documents/probes, unsigned API/directory calls and
-  Base read-only RPC recovery. Base retains its existing endpoint/method validation
-  and separate direct behavior; it does not acquire a Curl fallback.
+  Base read-only RPC recovery, and eligible unsigned requests to a relay service
+  itself. Disabling recursive fallback does not disable the relay leg's authorized
+  Tor origin retries. Base retains its existing endpoint/method validation
+  and separate direct behavior; it does not acquire a relay fallback.
 - Use one `[discovery_relay].on_demand` switch, default true when the relay is
   configured, for all supported runtime reads. Replace `search` with a compatible
   input alias rather than adding overlapping flags. Both spellings together are
@@ -58,19 +67,130 @@ add a link only if an enduring contract gains a new owner.
   administration continue to accept the common network file without gaining
   deployment relay support or loading unused relay providers.
 
+### Method-specific ordered relay lists
+
+Selection is operator configuration, not a vendor-name rule. Use an ordered list
+per original target method. The proposed Tor example places cheaper Curl before
+AGProxy for GET and uses AGProxy for POST/HEAD; Horizon Pulse can be appended or
+selected by the operator. Do not switch defaults in advance of D02 validation.
+
+```toml
+[discovery_relay]
+serve = true
+warm = true
+on_demand = true
+
+[discovery_relay.fallbacks]
+GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/agproxy.toml"]
+HEAD = ["../../providers/agproxy.toml"]
+```
+
+- Method keys are exactly `GET`, `HEAD` and `POST` in this scope. Reject unknown
+  keys before I/O. An absent or empty list means origin-only for that method;
+  there is no GET-to-HEAD/POST inheritance or implicit extra provider. Select using
+  the original unsigned target request, never the relay service's outer POST.
+- Each list contains provider TOML paths only. The provider definition declares
+  its optional `relay_format` once (`curl`, `agproxy` or `horizonpulse`), resolved
+  through normal provider configuration. No per-entry `adapter` field or repeated
+  protocol label. These formats differ; do not infer them from a host/name/OpenAPI
+  shape or autodetect an envelope after paying. Listed providers with missing or
+  unsupported formats fail bootstrap before I/O; ordinary providers need no field
+  unless used as relays. Keep format metadata out of agent tool descriptions and
+  input schemas.
+- Fallback paths resolve relative to their declaring deployment/network file;
+  a provider's schema/help paths resolve relative to its own TOML. Whole-section
+  override and offline inspection semantics remain unchanged. Config-only
+  inspection reports lists without loading relay catalogs or requiring missing
+  provider files to exist. Runtime local bootstrap validates selected formats,
+  operations and filters before requesting payment.
+- Legacy `[discovery_relay].provider` desugars to one Curl entry in the GET list,
+  preserving current behavior for old Curl definitions without `relay_format`.
+  Validate the existing Curl operation/filters and reject conflicting format
+  metadata; implicit Curl applies only to this legacy syntax. Reject combining
+  it with `fallbacks`, including an explicitly empty map. Canonical inspection exposes the resolved method lists.
+  Shared `serve`, `warm`, `on_demand`/legacy `search`, `wallet` and `sources` retain
+  their meanings; do not add a switch per provider/consumer. `wallet` and `sources`
+  remain static discovery overrides, not runtime cross-owner selectors.
+- Lists govern eligibility/order. Curl appears only in GET in the proposed
+  example; there is no hardcoded Curl-is-GET-only selection branch. Its documented
+  bodyless POST could be explicitly listed if faithfully representable. Every
+  adapter must still reject/skip unsupported request fields before paid dispatch:
+  configuration cannot make a missing header/body feature work. Do not silently
+  discard required fields. Changing a header/parameter does not authorize
+  forwarding target payment signatures or other credentials to a new party.
+- Keep adapter translation small: the shared sequence owns attempts and financial
+  lifecycle; an adapter encodes its actual request and decodes its envelope.
+  AGProxy supports GET/HEAD/POST and a string body; Horizon Pulse supports headers
+  and string/JSON bodies. Preserve exact target bytes/query/required headers.
+  Their filtered header contracts must be established for each required header;
+  lack of evidence must not be treated as support for payment/auth headers.
+- Bootstrap all configured adapters from local schemas without fetching another
+  remote schema/help/pricing document. D02 pins complete vendor OpenAPI documents
+  for AGProxy/Horizon Pulse as runtime assets, adds `relay_format` to the three
+  relay provider definitions, updates their TOMLs/manifest, and
+  retains existing filters/validation. This is an offline-bootstrap consumer, not
+  an inventory fixture. Record primary provenance/update instructions and verify
+  references cannot escape to the network. Their reusable catalogs become pinned
+  until deliberately updated; do not add duplicate miniature provider definitions.
+- Reuse the single configured origin attempt sequence, then walk the selected list
+  in authored order. Never restart origin retries between relay entries. Each
+  authored position has at most one logical acquisition per caller request, with
+  its authorized unsigned HTTP attempts inside the shared Tor count; no separate
+  health scheduler, cost scoring, vendor ranking, deduplication gate or new ledger.
+  An unrepresentable entry is skipped before I/O, not counted as a purchased call.
+  Actual request bytes may prove an external limit incompatible; a caller's larger
+  maximum accepted response size alone does not prove the actual response too large.
+- Advance only on a proven pre-payment provider failure, or a complete, attributable
+  target result for which the consumer matrix below still permits fallback. The
+  matrix applies throughout the list, including existing broader static remote
+  HTTP/parse fallback. Explicitly validated relay-declared delivery truncation
+  can advance when another provider may deliver complete content. A target's own
+  unsolicited 206/Content-Range or a complete-but-invalid document retains its
+  consumer's terminal validation rule. A normal terminal result does not
+  advance: in particular API/doc-probe 404/410, accepted empty results and target
+  402 remain terminal under their contracts. A local policy/authority/bounds failure
+  does not buy another entry. Distinguish a valid envelope's unusable target body
+  from malformed/unattributable relay JSON.
+- A list authorizes additional distinct paid acquisitions after definitive failed
+  delivery; it does not establish the preceding relay was uncharged. Delivered
+  blocking/error/truncated responses may already cost money. Preserve each actual
+  authorization and possible liability under the existing owner and ordinary
+  per-payment caps; do not introduce a local cumulative spending counter.
+  Any unresolved paid relay outcome, including an invalid/unattributable envelope
+  after possible payment, stops the sequence. A proven pre-payment provider failure
+  may advance; do not mistake ambiguous paid failure for this case. A refund
+  promise, timeout or vendor “not charged” prose is not proof granting another
+  payment. Never replay a signed target request.
+- Cache/provenance and existing static failure state include adapter/provider
+  identity and existing payer/source/request scope. One entry's cached result or
+  target failure must not masquerade as another entry's response or disable an
+  independent provider. Preserve alias coalescing and accepted-work ownership
+  across the complete list; on-demand calls gain no sticky cache or global breaker.
+- Remove the static relay's separate hardcoded pre-payment network attempt counter
+  and one-second retry backoff when replacing it with the common unsigned Tor
+  sequence: one unsigned attempt in direct mode, or one plus
+  `tor_isolation_retries` in Tor mode, using participating selection while retaining
+  signed-request no-replay. Do not multiply network retries in caller/state/adapter
+  layers. Existing
+  static payer-readiness waiting and successful result sharing remain ownership
+  responsibilities; readiness without I/O consumes no network attempt. Document
+  the resulting direct-mode behavior instead of silently retaining an extra loop.
+
 ### Shared request path and response contracts
 
-- One shared unsigned GET/HEAD acquisition path owns origin attempt ordering,
+- One shared unsigned acquisition path owns origin attempt ordering,
   transient-failure classification, complete-body transport failure handling,
-  `Retry-After` and at most one fallback handoff. Migrate the existing static and
+  `Retry-After` and one traversal of the method-specific fallback list. Migrate the existing static and
   Coinbase paths as well as new callers; do not leave vendor-specific retry loops
   or wrap an existing retry loop in another loop. Base and the existing x402 POST
   path share origin count/selection/retry-classification primitives without being
   forced into a GET response abstraction. Unsigned x402 POST and GET have the same
   origin retry eligibility; unifying API transport failure handling must apply to
-  both. Curl target-POST support remains excluded because its bundled interface
-  cannot carry the required request body/headers, not because POST needs an
-  additional idempotency or side-effect proof. No signed replay is authorized.
+  both. A configured POST entry may relay an otherwise-authorized unsigned x402
+  POST when it faithfully preserves its body/required headers. Unsupported Curl
+  payloads skip that entry before payment; they do not restrict POST retries or
+  the other adapters. No signed replay is authorized.
 - Retry existing eligible blocking statuses/transient transport failures on fresh
   owner-bound scopes, with unchanged certificate/hostname/public-destination checks.
   Honor valid server delays, including the terminal delay before relay handoff.
@@ -78,11 +198,11 @@ add a link only if an enduring contract gains a new owner.
   partial directory results. Do not retry merely because a search found nothing.
   Local destination/authority checks and download-limit failures never trigger a
   paid fallback. Generic API output/schema conversion failures are terminal, not
-  reasons to repeat an otherwise successful read through Curl.
+  reasons to repeat an otherwise successful read through another relay.
 - Caller validation remains responsible for accepted statuses, document parsing,
   cache/revalidation, output mapping and publication. Share transport mechanics;
   do not impose catalog JSON rules on text help, HEAD responses or generic APIs.
-  Separate Curl envelope validation from those caller contracts. Preserve existing
+  Separate adapter envelope validation from those caller contracts. Preserve existing
   static catalog/pricing fallback on remote HTTP/parse failures, with the explicit
   local-policy/download-limit exclusions above. Static catalog loading currently
   offers a continuation for broadly caught errors: classify those failures during
@@ -98,18 +218,22 @@ add a link only if an enduring contract gains a new owner.
   The shared primitive still supports ordinary API/raw HEAD with empty-body and
   header/status semantics. Do not introduce a new cross-call cache.
 - Enforce each caller's origin allowlist, public URL policy, transport permissions,
-  exact query encoding, body bounds and redirect policy on both paths. Curl follows
-  redirects remotely: reject disallowed reported redirect chains, preserve the
-  existing explicit trust in Curl, and do not claim local checks prevent its remote
-  fetch. Relay responses never promote an origin Tor scope or populate origin
+  exact query encoding, body bounds and redirect policy on both paths. All three
+  services follow redirects remotely. Curl reports a chain; reject disallowed
+  chains. AGProxy/Horizon Pulse report only a final URL: validate that destination
+  and explicitly document trust in their remote redirect/public-destination
+  enforcement, without claiming to establish intermediate hops. Their configured
+  use accepts this limited evidence; requests needing verified no-redirect or
+  every-hop evidence cannot use such an entry. Relay responses never promote an
+  origin Tor scope or populate origin
   validators/caches as if obtained directly.
-- Eligibility is limited by the bundled Curl request contract: a public target
-  GET/HEAD faithfully representable by URL and method, without a body or required
-  target headers. Do not silently discard headers or credentials to make a request
-  eligible. The envelope carries text, not arbitrary binary bytes; reject unusable
-  relayed binary/truncated content rather than return corrupted success. Preserve
-  legitimate generic API range semantics; complete-document readers reject
-  unsolicited 206/Content-Range responses on origin and relay paths.
+- Eligibility requires a public unsigned request faithfully representable by its
+  configured adapter. Curl's envelope carries text; AGProxy/Horizon Pulse have
+  binary/base64 representations. Decode only documented formats and validate
+  explicit truncation/encoding before success. Preserve legitimate generic API
+  range semantics; complete-document readers reject unsolicited 206/Content-Range
+  responses on origin and relay paths. Unsupported bytes/headers are never silently
+  rewritten to fit a cheaper entry.
 - The complete-document portion incorporates the focused
   [unfinished audit](deferred/document_response_completeness.md) for help/import,
   static catalogs and relay decoding. Preserve complete schemas/help and visible
@@ -118,7 +242,7 @@ add a link only if an enduring contract gains a new owner.
 ### Explicit origin retry conditions and current gaps
 
 An origin retry means another request to the original target on a fresh Tor
-isolation scope. It is distinct from the single paid Curl handoff, normal x402
+isolation scope. It is distinct from the ordered paid relay sequence, normal x402
 challenge/signing, and structured-insufficient-funds wallet traversal. A failure
 can qualify for one of these without qualifying for the others.
 
@@ -151,7 +275,7 @@ The proposed common origin retry requires all of the following:
 | Hyper parse/user/canceled errors rejected by the shared classifier | No | Examples: a malformed HTTP response rejected as a protocol parse error or an internally canceled request. Do not relabel a parser/caller error as network instability. |
 | Explicitly rejected SOCKS failures | No | Error-chain markers for failure to create the underlying proxy connection, proxy authentication/credentials rejection, or a listener that is not a SOCKS proxy. A fresh target circuit cannot repair this local setup. Preserve the actual classifier, not broad substring guesses elsewhere. |
 | Complete invalid JSON/schema/text, unsolicited partial document, or API mapping failure | No | A fully delivered malformed OpenAPI document, an HTML page instead of accepted usage text, or a valid HTTP 200 that cannot be mapped to tool output. Static catalog/coinbase parse fallback remains a separately specified exception, not an origin retry. |
-| Any generic failure after signing the target request | No | A timeout, TLS error, reset, 503 or unreadable body after signing may already have charged/executed. Neither fresh isolation nor Curl can be used to replay it. Preserve only the separately authorized structured-insufficient-funds traversal. |
+| Any generic failure after signing the target request | No | A timeout, TLS error, reset, 503 or unreadable body after signing may already have charged/executed. Neither fresh isolation nor another relay can be used to replay it. Preserve only the separately authorized structured-insufficient-funds traversal. |
 
 Baseline implementation differences must be visible in implementation review:
 
@@ -179,8 +303,9 @@ that accepted model, unsigned POST is retryable on the same otherwise-authorized
 basis as GET, without an extra provider idempotency proof or side-effect gate.
 This is not a claim that arbitrary non-x402 HTTP POSTs are side-effect-free, or
 that signed requests may be repeated. Keep this rule in the permanent guide and
-its affected tests; a GET/HEAD-only Curl request representation must not be used
-as a reason to restrict origin retries of unsigned x402 POSTs.
+its affected tests; Curl's inability to represent a particular body/header
+combination must not restrict origin retries of unsigned x402 POSTs or other
+configured adapters.
 
 ### Failure/response matrix
 
@@ -197,10 +322,10 @@ never earn fallback.
 | Consumer | Successful/terminal result | Other response treatment |
 | --- | --- | --- |
 | Static catalogs | Complete accepted JSON/304 revalidation | Preserve remote HTTP/parse fallback, including existing non-transient HTTP errors; no local-policy/bounds fallback. |
-| Static pricing | Usable 402 or 2xx (unknown price); required-argument skip remains terminal | Preserve existing unusable/missing pricing and remote-error fallback; a 2xx unknown price does not buy another probe. |
+| Static pricing | Usable origin 402 or 2xx (unknown price); required-argument skip remains terminal | Preserve fallback for unusable/missing **origin** pricing and remote errors. Any relayed 402 is terminal (usable estimate or unknown); a 2xx unknown price does not buy another probe. |
 | Coinbase search | Complete accepted 200, including empty/partial-result metadata | Preserve existing remote status/JSON-parse fallback; bounds/policy failures terminal. |
 | Dynamic OpenAPI, help, explicit docs and document probes | Complete accepted document; 401/404/410 and other non-blocking 4xx are terminal | Blocking statuses/transient failures above can fall back. Complete invalid JSON/schema/text, unsolicited partial documents and unsupported content are validation failures, not reasons to pay for another read. |
-| Ordinary API/directory/raw GET or HEAD | Any accepted complete 2xx, including empty and legitimate range responses | Blocking statuses/transient failures above can fall back. Other 4xx/redirects are terminal under existing response policy; valid 200 with invalid directory JSON or output conversion failure is terminal, without fallback. Origin 402 enters normal payment handling; relayed 402 is handled below. |
+| Ordinary API/directory/raw GET/HEAD and otherwise-authorized unsigned x402 POST | Any accepted complete 2xx, including empty and legitimate range responses | Blocking statuses/transient failures above can fall back. Other 4xx/redirects are terminal under existing response policy; valid 200 with invalid directory JSON or output conversion failure is terminal, without fallback. Origin 402 enters normal payment handling; relayed 402 is handled below. |
 
 The engine must distinguish transport/body-read failure from complete-but-invalid
 content and local limits with typed outcomes, rather than guessing from upstream
@@ -211,10 +336,15 @@ HTTP delivery. Test 404/410, 400/403/429/503, other 5xx, complete malformed 200,
 ### Payments, ownership and agent interface
 
 - Direct-origin 402 keeps normal challenge/sign/retry behavior. A relayed 402 does
-  not enter that signing path: Curl cannot forward the target payment headers.
+  not enter that signing path. The new adapters' generic header/body support does
+  not authorize forwarding a target signature or negotiating target payment through
+  the relay; header fidelity and financial ownership have not been established.
   Surface the unpaid target failure; do not sign it, try the blocked origin again,
   or claim the target API was paid. This limitation does not change static pricing
-  probes, which can read challenge metadata without signing it.
+  probes, which can read challenge metadata without signing it. A relayed pricing
+  402 is always terminal: record a usable estimate when available, otherwise unknown
+  pricing; do not advance to purchase another probe. An unusable origin pricing
+  402 retains its existing fallback eligibility.
 - Once any target request is signed, no generic status/TLS/body/output failure
   authorizes relay fallback or another paid target attempt. Preserve the existing
   structured-insufficient-funds traversal and original accepted request inputs.
@@ -236,7 +366,7 @@ HTTP delivery. Test 404/410, 400/403/429/503, other 5xx, complete malformed 200,
   replacing a request inside `OnceCell::get_or_try_init` alone is insufficient.
   Concurrent compatible help/import requests must not duplicate accepted paid I/O.
   Source removal/revision changes still fence publication. No replay on restart.
-- Share a stateless relay exchange/envelope decoder between on-demand and static
+- Share a stateless relay sequence with small adapter encoders/decoders between on-demand and static
   consumers. Keep static cache/readiness behavior with its existing owner; do not
   spread its run-wide breaker/attempt counters to ordinary calls. Explicitly disable
   fallback on the relay's own payment client to prevent recursive relay calls.
@@ -266,10 +396,11 @@ implementation approach. The user reviews this plan first. Reopen the affected
 contract/gate when implementation evidence requires a material change.
 
 Planning gate status: independent design and clarity reviews passed after resolving
-the failure/response matrix and GET/HEAD scope. The retry-condition and unsigned
-POST clarification also passed renewed independent review. User review remains
-pending; D01
-has not started. Material changes reopen the affected concerns.
+the failure/response matrix and GET/HEAD scope. Retry conditions/unsigned POST
+clarification also passed review. The method-specific ordered provider lists and
+provider-owned format metadata passed renewed independent design and clarity
+review. User review remains pending; D01 has not started. Material changes reopen
+the affected concerns.
 
 ## Ordered implementation commits
 
@@ -283,13 +414,25 @@ has not started. Material changes reopen the affected concerns.
    inventories and `examples/network/tor.toml` with the count semantics. No new
    total-work deadline, response timer, readiness gate or local cap.
 2. **D02 — Shared unsigned acquisition and relay exchange.** Establish one origin
-   retry/handoff path and a response envelope with separate caller validation;
+   retry/handoff path, method-specific ordered lists, and adapter envelopes with
+   separate caller validation;
    migrate static catalog/pricing and Coinbase without parallel old loops. Separate
    stateless exchange from static scheduling/cache ownership and prevent recursion.
+   Add adapter bootstrap assets/configuration, legacy-single-provider migration,
+   method-list inspection/declaration-relative paths, provider-owned format
+   metadata and the proposed example order. Keep format metadata out of agent help.
+   Replace static relay's extra pre-payment network counter/backoff with the common
+   retry policy in this same commit; preserve readiness/accepted-work ownership.
    Preserve current `search` configuration until D03 replaces it with its consumers.
    Cover complete progress versus stalls, retries/body failures/delays at counts
    0/1/default, valid empty results, cancellation, limits, trust/redirect handling,
    no relay scope promotion, cache/304 provenance, and static accepted-work drain.
+   Cover GET Curl-before-AG order, separate POST/HEAD lists, missing/empty lists,
+   unknown keys/missing format/conflicting legacy metadata, no implicit vendor
+   selection or repeated per-entry adapter fields, faithful body/header/byte encoding,
+   offline bootstrap, explicit truncation, definitive paid-error advancement and
+   ambiguous-payment stop. Test no repeated origin attempts or recursive fallback,
+   and no cross-adapter cache/failure pollution.
    Correct static complete-document acceptance coherently with this migration.
    Update network/configuration/architecture/resource guides and affected tests.
 3. **D03 — Generalize discovery and help reads.** Introduce `on_demand` with the
@@ -305,23 +448,25 @@ has not started. Material changes reopen the affected concerns.
    operator configuration/network/architecture guides and affected examples.
 4. **D04 — Ordinary unsigned API and directory reads.** Wire supported public GET
    and HEAD responses, including x402 List browse/best/details and raw GET/HEAD
-   calls, through the same fallback while preserving normal origin 402 signing
-   and existing unsigned POST authority. Apply the common unsigned transport retry classification to API GET
-   and POST together; the existing TLS-only transport handling is an explicit
+   calls and supported unsigned x402 POSTs, through the same method lists while
+   preserving normal origin 402 signing and existing unsigned POST authority.
+   Apply the common unsigned transport retry classification to API GET and POST
+   together; the existing TLS-only transport handling is an explicit
    baseline gap. Cover exact query/response/output mapping, supported text MIME/status,
-   unsupported body/headers/binary handling, relayed 402 without target signing,
+   per-adapter unsupported body/headers/binary handling, relayed 402 without target signing,
    eligible and rejected transport errors for unsigned GET/POST, nonretryable
    statuses such as 408/500/502/504 despite 5xx fallback eligibility, signed failures
    without fallback/replay, relay recursion exclusion, managed/static
    payer bindings, payment uncertainty and concurrent cancellation/drain. Verify
    preexisting typed insufficient-funds traversal and forbidden financial side
-   effects. Do not buy another relay call for the same accepted attempt. Update
+   effects. Do not duplicate a provider position's accepted call; additional
+   configured entries require the sequence's definitive-outcome authority. Update
    network/payment architecture and agent/operator guides without adding transport
    prose or new parameters to agent-facing help.
 5. **D05 — Final integration and documentation handoff.** Resolve accumulated
    findings with focused regressions; review complete caller/lifecycle chains and
    all earlier fixups. Verify README managed/Tor commands offline, defaults and
-   aliases in examples/inspection, concise agent-facing help and unchanged local
+   aliases and method-list ordering in examples/inspection, concise agent-facing help and unchanged local
    search/discovery fixes. Consolidate lasting rules in owning guides, confirm
    AGENTS.md links, retire the incorporated document-completeness deferred plan
    only when its acceptance is actually complete, and remove this completed plan
@@ -341,7 +486,8 @@ reviewers do not run competing builds or edit sources by default.
 - **G1, after D02 — Shared transport architecture.** Review D01–D02 and every fixup
   across configuration, HTTP selection, static downloads/pricing, Coinbase, Base,
   envelope validation, caches and paid ownership. Exit: exactly one origin attempt
-  sequence, configured count everywhere, no lost validation/promotion/authority,
+  sequence plus one ordered method-list traversal, configured count everywhere,
+  definitive-versus-uncertain fee handling, no lost validation/promotion/authority,
   no new unnecessary enforcement, and source-matched complexity evidence.
 - **G2, after D04 — Runtime and payment architecture.** Review every prior commit
   and fixup across source management, help caches, directory/raw/API request
