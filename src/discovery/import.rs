@@ -95,87 +95,45 @@ pub(super) fn read_timeout(
             provider.and_then(|p| p.settings.read_timeout_seconds.map(Duration::from_secs_f64))
         })
 }
+pub(super) fn options(
+    policy: &Policy,
+    url: &str,
+    provider: Option<&super::curated::AcceptedProvider>,
+) -> Result<crate::discovery_relay::document::Options> {
+    endpoint(policy, url)?;
+    let mut options = crate::discovery_relay::document::Options::new(
+        url,
+        IsolationId::discovery(url)?,
+        policy.max_spec_bytes,
+        "max_spec_bytes",
+    );
+    options.allowed_origins = policy.allowed_origins.clone();
+    options.transport = provider.map(|p| p.settings.transport()).unwrap_or_default();
+    options.timeout = read_timeout(policy, provider);
+    Ok(options)
+}
 pub(super) async fn fetch_with(
     policy: &Policy,
     url: &str,
     provider: Option<&super::curated::AcceptedProvider>,
-) -> Result<Vec<u8>> {
-    endpoint(policy, url)?;
-    let client = network::global().http_policy(
-        &IsolationId::discovery(url)?,
-        url,
-        read_timeout(policy, provider),
-        true,
-        provider.map(|p| p.settings.transport()).unwrap_or_default(),
-    )?;
-    fetch_response(policy, client.get(url)).await
-}
-async fn fetch_response(policy: &Policy, request: reqwest::RequestBuilder) -> Result<Vec<u8>> {
-    let mut response = request
-        .send()
-        .await
-        .map_err(|error| fetch_error(error, "source_fetch_failed"))?;
-    network::log_http(&response, "agent_import");
-    if !response.status().is_success() {
-        tracing::warn!(
-            status = response.status().as_u16(),
-            "source import HTTP response rejected"
-        );
-        anyhow::bail!("source_http_{}", response.status().as_u16());
-    }
-    if response
-        .content_length()
-        .is_some_and(|n| n > policy.max_spec_bytes as u64)
-    {
-        return Err(crate::limits::exceeded(
-            "imported spec",
-            "max_spec_bytes",
-            policy.max_spec_bytes,
-        )
-        .context("spec_too_large"));
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| fetch_error(error, "source_read_failed"))?
-    {
-        if chunk.len() > policy.max_spec_bytes.saturating_sub(bytes.len()) {
-            return Err(crate::limits::exceeded(
-                "imported spec",
-                "max_spec_bytes",
-                policy.max_spec_bytes,
-            )
-            .context("spec_too_large"));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(bytes)
-}
-
-fn fetch_error(error: reqwest::Error, stage: &'static str) -> anyhow::Error {
-    if error.is_timeout() {
-        tracing::warn!(
-            stage,
-            connection = error.is_connect(),
-            "source import transport timeout; operation rejected"
-        );
-    } else {
-        tracing::warn!(
-            stage,
-            "source import transport failed or destination rejected"
-        );
-    }
-    anyhow::anyhow!(stage)
+    client: &crate::payment::PaidClient,
+) -> Result<crate::discovery_relay::document::Document> {
+    crate::discovery_relay::document::read(client, &options(policy, url, provider)?).await
 }
 #[cfg(test)]
-pub async fn fixture_fetch(policy: &Policy, url: &str) -> Result<Vec<u8>> {
-    let client = network::provider_discovery(
+pub async fn fixture_fetch(
+    policy: &Policy,
+    url: &str,
+) -> Result<crate::discovery_relay::document::Document> {
+    let mut options = crate::discovery_relay::document::Options::new(
         url,
-        policy.read_timeout_seconds.map(Duration::from_secs),
-        Default::default(),
-    )?;
-    fetch_response(policy, client.get(url)).await
+        IsolationId::discovery("https://api.example.com")?,
+        policy.max_spec_bytes,
+        "max_spec_bytes",
+    );
+    options.public_only = false;
+    options.timeout = policy.read_timeout_seconds.map(Duration::from_secs);
+    crate::discovery_relay::document::read(&crate::payment::PaidClient::unsigned(), &options).await
 }
 
 fn check_complexity(depth: usize, nodes: usize, bytes: usize) -> Result<()> {

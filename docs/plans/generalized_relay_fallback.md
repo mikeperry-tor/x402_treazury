@@ -460,10 +460,20 @@ until the D04 integration, as specified above.
 The operator accepted the relay redirect/visibility limitation during implementation;
 renewed independent design review passed that explicit contract. It grants no target
 signing, credential forwarding or uncertain-payment replay authority. D02 implements shared acquisition, ordered adapters and static/Coinbase consumers.
-The affected library union passed 151 tests with one readiness-admission failure;
-the correction then passed all 45 relay tests, including that unchanged regression.
-Configuration/CLI validation, exact-SHA review and G1 remain pending. Method-list
-examples do not establish live qualification.
+Exact `6e072a09` and fixups `86538344`, `321384a2`, `4efcc962`, `34e8b767` and
+`66af4c69` passed independent review. G1 passed after its completeness/known-status
+concerns were reopened and resolved: 48 relay tests, CLI/configuration/assets/audit,
+Clippy, formatting and source-matched exact-baseline complexity evidence passed.
+The consumer decision table was simplified after reviewing both CogC and CycC.
+No live qualification is claimed.
+
+D03 implements the common complete-document reader, `on_demand`/legacy alias,
+pinned help/import authority, retained publication and lazy selected-authority CLI
+refresh. Focused tests passed (180 in the combined run, plus the corrected paid
+CLI fixture); configuration/server/Clippy and independent exact-SHA review remain
+in progress. Exact-baseline complexity is complete with source hashes verified.
+Early review findings about post-fetch fees, lazy preflight, cached observation
+failures and financial versus document authority were resolved with regressions.
 
 ## Ordered implementation commits
 

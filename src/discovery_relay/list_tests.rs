@@ -339,7 +339,7 @@ async fn unsolicited_catalog_not_modified_stays_terminal_despite_delivery_metada
             let failure = error.downcast_ref::<TargetFailure>().unwrap();
             assert_eq!(failure.reason, "unsolicited_not_modified");
             assert_eq!(failure.status, Some(304));
-            assert!(format!("{error:#}").contains("may still charge"));
+            assert!(error.is::<document::PossiblePayment>());
             harness.assert_order(&[(0, false), (0, true)]);
         }
     }
@@ -448,6 +448,71 @@ async fn attributable_curl_delivery_failures_advance_with_known_retry_after_pres
         assert!(response.payment_may_have_occurred);
         harness.assert_order(&[(0, false), (0, true), (1, false), (1, true)]);
     }
+}
+
+#[tokio::test]
+async fn runtime_documents_advance_no_http_delivery_failure_but_keep_known_404_terminal() {
+    for status in [0, 404] {
+        let mut first = curl(status, "{}");
+        first["error"] = json!("fixture delivery failure");
+        let harness = Harness::new(vec![
+            (Format::Curl, first),
+            (Format::Agproxy, agproxy(200, "{}", false)),
+        ])
+        .await;
+        let result = harness
+            .acquire(&target(Method::GET), Contract::Document, 4096, None)
+            .await;
+        if status == 0 {
+            let response = result.unwrap();
+            assert_eq!(response.via, "agproxy");
+            assert!(response.payment_may_have_occurred);
+            harness.assert_order(&[(0, false), (0, true), (1, false), (1, true)]);
+        } else {
+            let error = result.err().unwrap();
+            assert_eq!(
+                error.downcast_ref::<TargetFailure>().unwrap().status,
+                Some(404)
+            );
+            assert!(error.is::<document::PossiblePayment>());
+            harness.assert_order(&[(0, false), (0, true)]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn prepared_document_needs_origin_eligibility_and_existing_authority_before_io() {
+    let harness = Harness::new(vec![(Format::Curl, curl(200, "{}"))]).await;
+    let options = document::Options::new(
+        TARGET,
+        crate::network::IsolationId::discovery(TARGET).unwrap(),
+        4096,
+        "max_spec_bytes",
+    );
+    let client =
+        PaidClient::unsigned().with_document_relay(Some(Arc::new(harness.sequence.clone())));
+    let failure = crate::network::acquisition::Failure::status(
+        anyhow::anyhow!("fixture origin blocked"),
+        StatusCode::FORBIDDEN,
+        &HeaderMap::new(),
+        crate::network::acquisition::FallbackPolicy::BlockingFailures,
+    );
+    let error = document::fallback(&client, &options, failure)
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), "fixture origin blocked");
+    let prepared = document::prepare_fallback(&harness.sequence, &options)
+        .unwrap()
+        .unwrap();
+    let failure = crate::network::acquisition::Failure::validation(anyhow::anyhow!(
+        "fixture terminal origin"
+    ));
+    let error = prepared
+        .acquire(&harness.client, failure)
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), "fixture terminal origin");
+    harness.assert_order(&[]);
 }
 
 #[tokio::test]

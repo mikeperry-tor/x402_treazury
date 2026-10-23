@@ -45,17 +45,22 @@ async fn streamed_import_limits_partial_chunks_and_slow_download() {
             .await
             .expect("fixture completes");
         if mode == "exact" || mode == "slow" {
-            assert_eq!(result.unwrap(), b"abcdefgh");
+            assert_eq!(result.unwrap().body.as_slice(), b"abcdefgh");
         } else {
-            let error = format!("{:#}", result.unwrap_err());
-            assert!(
-                error.contains(match mode {
-                    "overflow" => "spec_too_large",
-                    "interrupted" => "source_read_failed",
-                    _ => unreachable!(),
-                }),
-                "{mode}: {error}"
-            );
+            let error = result.unwrap_err();
+            match mode {
+                "overflow" => {
+                    let limit = error
+                        .downcast_ref::<crate::limits::DownloadLimit>()
+                        .expect("typed download rejection");
+                    assert_eq!((limit.setting, limit.limit), ("max_spec_bytes", 8));
+                }
+                "interrupted" => assert!(
+                    error.downcast_ref::<reqwest::Error>().is_some(),
+                    "{error:#}"
+                ),
+                _ => unreachable!(),
+            }
         }
         server.abort();
     }
@@ -423,15 +428,21 @@ async fn import_redirect_and_read_timeout_warn_without_response_prose() {
         let mut p = policy(None);
         p.read_timeout_seconds = Some(1);
         let (result, logs) = capture_future_logs(import::fixture_fetch(&p, &url)).await;
-        let error = result.unwrap_err().to_string();
-        assert!(
-            error.contains(if stall {
-                "source_read_failed"
-            } else {
-                "source_http_302"
-            }),
-            "{error}"
-        );
+        let error = result.unwrap_err();
+        if stall {
+            assert!(
+                error
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_timeout),
+                "{error:#}"
+            );
+        } else {
+            assert_eq!(
+                crate::discovery_relay::document::SharedFailure::capture(&error, "fixture")
+                    .status(),
+                Some(302)
+            );
+        }
         assert!(logs.contains("WARN"), "{logs}");
         assert!(
             logs.contains(if stall {

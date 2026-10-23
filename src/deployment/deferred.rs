@@ -104,6 +104,7 @@ impl Runtime {
                         old.tool.name == tool.tool.name
                             && old.base == tool.base
                             && old.tool.help_url == tool.tool.help_url
+                            && old.help.compatible(&tool.help)
                     })
                 }) {
                     tool.help = previous.help.clone();

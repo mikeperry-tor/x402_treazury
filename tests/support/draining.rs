@@ -21,7 +21,9 @@ fn binding(h: &Harness, method: &str) -> BoundTool {
         client: h.client.clone(),
         base: h.base.clone(),
         source: Some(("retained-draining".into(), 1)),
-        help: Arc::new(tokio::sync::OnceCell::new()),
+        help: Arc::new(x402_treazury::catalog_state::HelpBinding::new(
+            h.client.clone(),
+        )),
     }
 }
 async fn publish(h: &Harness) {

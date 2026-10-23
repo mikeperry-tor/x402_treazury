@@ -1,5 +1,9 @@
 //! One immutable generation binds definitions, routes and payers for every listener.
-use crate::{catalog::ToolSpec, payment::PaidClient};
+use crate::discovery_relay::document::{self, SharedFailure};
+use crate::{
+    catalog::ToolSpec,
+    payment::{Authority, PaidClient},
+};
 use anyhow::{Context, Result};
 use std::{
     collections::BTreeMap,
@@ -12,7 +16,153 @@ pub struct BoundTool {
     pub client: PaidClient,
     pub base: String,
     pub source: Option<(String, u64)>,
-    pub help: Arc<OnceCell<String>>,
+    pub help: Arc<HelpBinding>,
+}
+/// Documentation pins its financial authority without freezing ordinary API calls.
+pub struct HelpBinding {
+    client: PaidClient,
+    authority: Authority,
+    allowed_origins: Vec<String>,
+    result: OnceCell<HelpResult>,
+}
+struct HelpResult {
+    result: Result<String, SharedFailure>,
+    possible: bool,
+}
+type HelpKey = (
+    Authority,
+    usize,
+    crate::network::HttpPolicy,
+    std::time::Duration,
+    (bool, Option<usize>),
+    Vec<String>,
+);
+impl HelpBinding {
+    pub fn new(client: PaidClient) -> Self {
+        Self::with_origins(client, Vec::new())
+    }
+    pub(crate) fn with_origins(client: PaidClient, mut allowed_origins: Vec<String>) -> Self {
+        let (client, authority) = client.pin_document_authority();
+        allowed_origins.sort();
+        allowed_origins.dedup();
+        Self {
+            client,
+            authority,
+            allowed_origins,
+            result: OnceCell::new(),
+        }
+    }
+    fn key(&self) -> HelpKey {
+        (
+            self.authority.clone(),
+            self.client.max_help_bytes(),
+            self.client.transport(),
+            crate::network::global().read_timeout(self.client.timeout()),
+            self.client.document_policy_key(),
+            self.allowed_origins.clone(),
+        )
+    }
+    pub(crate) fn compatible(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+    pub(crate) fn get(&self) -> Option<&Result<String, SharedFailure>> {
+        self.result.get().map(|help| &help.result)
+    }
+    #[cfg(test)]
+    pub(crate) fn set(&self, text: String) -> Result<(), String> {
+        self.result
+            .set(HelpResult {
+                result: Ok(text),
+                possible: false,
+            })
+            .map_err(|error| {
+                let value = match error {
+                    tokio::sync::SetError::AlreadyInitializedError(value)
+                    | tokio::sync::SetError::InitializingError(value) => value,
+                };
+                value.result.expect("set inserts successful fixture text")
+            })
+    }
+
+    async fn invoke(&self, client: &PaidClient, url: &str) -> Result<String> {
+        let already_cached = self.get().is_some();
+        let started = crate::qualification::record_help(true, None, None).await;
+        match (self.result.get(), started) {
+            (Some(help), Err(observation)) => {
+                if let Err(failure) = &help.result {
+                    return Err(failure.error());
+                }
+                return document::with_payment_context(help.possible, Err(observation));
+            }
+            (_, started) => started?,
+        }
+        let fetched = std::sync::atomic::AtomicBool::new(false);
+        let result = self
+            .result
+            .get_or_try_init(|| async {
+                fetched.store(true, std::sync::atomic::Ordering::Relaxed);
+                let result = self.fetch(client, url).await;
+                match result {
+                    Ok((text, possible)) => Ok(HelpResult {
+                        result: Ok(text),
+                        possible,
+                    }),
+                    Err(error) => {
+                        let failure = SharedFailure::capture(&error, "help document unavailable");
+                        if failure.possible_payment() {
+                            Ok(HelpResult {
+                                result: Err(failure),
+                                possible: true,
+                            })
+                        } else {
+                            Err(error)
+                        }
+                    }
+                }
+            })
+            .await;
+        let (result, possible) = match result {
+            Ok(help) => (
+                help.result.clone().map_err(|failure| failure.error()),
+                help.possible,
+            ),
+            Err(error) => (Err(error), false),
+        };
+        let cache = if fetched.load(std::sync::atomic::Ordering::Relaxed) {
+            crate::qualification::HelpCache::Fetch
+        } else if already_cached {
+            crate::qualification::HelpCache::Hit
+        } else {
+            crate::qualification::HelpCache::Shared
+        };
+        let completion = crate::qualification::record_help(false, Some(cache), Some(&result)).await;
+        // A secondary observation failure must not replace the original paid
+        // failure. Successful fetched/cached text retains its fee evidence too.
+        let text = result?;
+        document::with_payment_context(possible, completion.map(|()| text))
+    }
+    async fn fetch(&self, client: &PaidClient, url: &str) -> Result<(String, bool)> {
+        let mut options = document::Options::new(
+            url,
+            crate::network::IsolationId::discovery(url)?,
+            self.client.max_help_bytes(),
+            "max_help_bytes",
+        );
+        options.public_only = self.client.document_policy_key().0;
+        options.allowed_origins = self.allowed_origins.clone();
+        options.transport = self.client.transport();
+        options.timeout = self.client.timeout();
+        let document = document::read(client, &options).await?;
+        let text = document.validate(|status, _, bytes| {
+            anyhow::ensure!(
+                status.is_success(),
+                "help document HTTP status {}",
+                status.as_u16()
+            );
+            String::from_utf8(bytes.to_vec()).context("help document is not valid UTF-8 text")
+        })?;
+        Ok((text, document.payment_may_have_occurred))
+    }
 }
 impl BoundTool {
     pub async fn invoke(
@@ -27,48 +177,19 @@ impl BoundTool {
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> Result<crate::output::ToolOutput> {
         if let Some(url) = &self.tool.help_url {
-            let already_cached = self.help.get().is_some();
-            crate::qualification::record_help(true, None, None).await?;
-            let fetched = std::sync::atomic::AtomicBool::new(false);
-            let result = self
-                .help
-                .get_or_try_init(|| async {
-                    fetched.store(true, std::sync::atomic::Ordering::Relaxed);
-                    let response = crate::network::global()
-                        .http_policy(
-                            &crate::network::IsolationId::discovery(url)?,
-                            url,
-                            self.client.timeout(),
-                            self.source.is_some(),
-                            self.client.transport(),
-                        )?
-                        .get(url)
-                        .send()
-                        .await
-                        .map_err(reqwest::Error::without_url)?
-                        .error_for_status()
-                        .map_err(reqwest::Error::without_url)?;
-                    crate::network::log_http(&response, "help");
-                    let bytes = crate::limits::read(
-                        response,
-                        self.client.max_help_bytes(),
-                        "help document",
-                        "max_help_bytes",
-                    )
-                    .await?;
-                    Ok::<_, anyhow::Error>(String::from_utf8_lossy(&bytes).into_owned())
-                })
-                .await
-                .cloned();
-            let cache = if fetched.load(std::sync::atomic::Ordering::Relaxed) {
-                crate::qualification::HelpCache::Fetch
-            } else if already_cached {
-                crate::qualification::HelpCache::Hit
-            } else {
-                crate::qualification::HelpCache::Shared
+            let help = self.help.clone();
+            let url = url.clone();
+            let client = match &self.source {
+                Some((source, _)) => help.client.clone().with_source_identity(source),
+                None => help.client.clone(),
             };
-            crate::qualification::record_help(false, Some(cache), Some(&result)).await?;
-            Ok(crate::output::ToolOutput::text(result?))
+            let owner = client.clone();
+            owner
+                .run_owned(async move {
+                    let text = help.invoke(&client, &url).await?;
+                    Ok(crate::output::ToolOutput::text(text))
+                })
+                .await?
         } else {
             let client = match &self.source {
                 Some((source, _)) => self.client.clone().with_source_identity(source),
@@ -151,18 +272,16 @@ impl CatalogState {
     }
 }
 pub fn bind(tools: Vec<(ToolSpec, PaidClient, String)>) -> Vec<BoundTool> {
+    // Authority orders only its retained Arc identity, never mutable pool state.
+    #[allow(clippy::mutable_key_type)]
     let mut help = BTreeMap::new();
     tools
         .into_iter()
         .map(|(tool, client, base)| {
+            let binding = HelpBinding::new(client.clone());
             let cell = help
-                .entry((
-                    tool.help_url.clone().unwrap_or_default(),
-                    client.max_help_bytes(),
-                    client.transport(),
-                    crate::network::global().read_timeout(client.timeout()),
-                ))
-                .or_insert_with(|| Arc::new(OnceCell::new()))
+                .entry((tool.help_url.clone().unwrap_or_default(), binding.key()))
+                .or_insert_with(|| Arc::new(binding))
                 .clone();
             BoundTool {
                 tool,
@@ -299,3 +418,7 @@ mod tests {
         let _ = server.await;
     }
 }
+
+#[cfg(test)]
+#[path = "catalog_state/help_tests.rs"]
+mod help_tests;

@@ -309,14 +309,19 @@ fn netintel_document() -> Value {
 
 fn seed_netintel(m: &Manager) {
     let provider = AcceptedProvider::current("netintel").unwrap();
+    let (client, authority) = m.source_client("writer").unwrap().pin_document_authority();
     let cell = OnceCell::new();
     cell.set(Fetched {
         completed: Instant::now(),
-        result: Ok(Arc::new(netintel_document().to_string().into_bytes())),
+        result: Ok(Arc::new(Document::local(
+            netintel_document().to_string().into_bytes(),
+        ))),
     })
     .unwrap();
     m.fetches.lock().unwrap().insert(
         FetchKey {
+            authority,
+            policy: client.document_policy_key(),
             url: provider.settings.spec.clone(),
             transport: provider.settings.transport(),
             timeout: import::read_timeout(&m.policy, Some(&provider)),

@@ -16,7 +16,7 @@ pub struct Policy {
     pub wallet: Option<String>,
     pub serve: bool,
     pub warm: bool,
-    pub search: bool,
+    pub on_demand: bool,
     pub sources: Vec<String>,
 }
 
@@ -31,13 +31,13 @@ struct Input {
     serve: bool,
     #[serde(default)]
     warm: bool,
-    #[serde(default = "search_default")]
-    search: bool,
+    #[serde(default = "on_demand_default", alias = "search")]
+    on_demand: bool,
     #[serde(default)]
     sources: Vec<String>,
 }
 
-fn search_default() -> bool {
+fn on_demand_default() -> bool {
     true
 }
 
@@ -69,7 +69,7 @@ impl TryFrom<Input> for Policy {
             wallet: input.wallet,
             serve: input.serve,
             warm: input.warm,
-            search: input.search,
+            on_demand: input.on_demand,
             sources: input.sources,
         })
     }
@@ -140,7 +140,7 @@ impl Default for Policy {
             wallet: None,
             serve: false,
             warm: false,
-            search: true,
+            on_demand: true,
             sources: Vec::new(),
         }
     }

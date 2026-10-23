@@ -1,6 +1,6 @@
 # Deployment or standalone commands: --network-config examples/network/tor.toml
 # Replaces [network] and [discovery_relay]; alternatively embed both in --config.
-# Relay settings apply to deployment discovery; standalone/wallet commands use Tor only.
+# Relay settings apply to deployment reads; standalone/wallet commands use Tor only.
 # Tor Browser must already be running on the configured SOCKS port.
 [network]
 mode = "tor"
@@ -18,7 +18,7 @@ tor_isolation_retries = 2
 [discovery_relay]
 serve = true
 warm = true
-# search defaults to true for Coinbase curated search.
+on_demand = true # runtime document and Coinbase fallback; legacy search is an alias
 
 # Select by original target method; absent/empty lists mean origin-only.
 [discovery_relay.fallbacks]

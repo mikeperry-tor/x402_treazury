@@ -19,13 +19,17 @@ pub async fn record(
     let detail = match result {
         Some(Ok(text)) => json!({"status":"succeeded","bytes":text.len()}),
         Some(Err(error)) => {
-            let status = error.chain().find_map(|cause| {
-                cause
-                    .downcast_ref::<reqwest::Error>()
-                    .and_then(|e| e.status())
-                    .map(|s| s.as_u16())
-            });
-            json!({"status":"failed","failure_category":super::super::failure_category(error),"http_status":status})
+            let status = crate::discovery_relay::document::SharedFailure::capture(
+                error,
+                "help document unavailable",
+            )
+            .status();
+            let category = if status.is_some() {
+                crate::qualification::FailureCategory::HttpStatus
+            } else {
+                super::super::failure_category(error)
+            };
+            json!({"status":"failed","failure_category":category,"http_status":status})
         }
         None => json!({"status":"started"}),
     };
@@ -146,7 +150,7 @@ mod tests {
         let _ = server.await;
     }
     #[tokio::test]
-    async fn concurrent_help_observes_shared_initialization_and_cancellation_stays_incomplete() {
+    async fn concurrent_help_observes_shared_initialization_and_cancellation_retains_completion() {
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Notify::new());
         let (a, b) = (entered.clone(), release.clone());
@@ -195,7 +199,8 @@ mod tests {
         assert_eq!(events(&db2)[1]["cache"], "shared");
         let (_dir3, claim3, db3) = fixture().await;
         let mut fresh = tool;
-        fresh.help = Arc::new(tokio::sync::OnceCell::new());
+        fresh.help = Arc::new(crate::catalog_state::HelpBinding::new(fresh.client.clone()));
+        let retained_client = fresh.client.clone();
         let pending = tokio::spawn(async move {
             claim3
                 .invoke(fresh.invoke_output(&serde_json::Map::new()))
@@ -208,6 +213,13 @@ mod tests {
         let _ = pending.await;
         assert_eq!(events(&db3).len(), 1);
         assert_eq!(events(&db3)[0]["result"]["status"], "started");
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), retained_client.drain())
+            .await
+            .unwrap();
+        assert_eq!(events(&db3).len(), 2);
+        assert_eq!(events(&db3)[1]["result"]["status"], "succeeded");
+        assert_eq!(events(&db3)[1]["cache"], "fetch");
         server.abort();
         let _ = server.await;
     }

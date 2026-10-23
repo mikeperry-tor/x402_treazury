@@ -94,6 +94,7 @@ fn label(format: Format) -> &'static str {
 pub(crate) enum Contract {
     Catalog,
     Pricing,
+    Document,
     Search(fn(&[u8]) -> Result<()>),
 }
 impl Contract {
@@ -117,6 +118,14 @@ impl Contract {
         {
             return Decision::Terminal("partial_response");
         }
+        // Terminal runtime statuses remain terminal even when the relay also
+        // reports failed delivery. Such metadata grants no second paid read.
+        if matches!(self, Self::Document)
+            && !(200..300).contains(&status)
+            && !matches!(status, 400 | 403 | 408 | 429 | 500..=599)
+        {
+            return Decision::Terminal("http_status");
+        }
         if response.delivery_failed || response.truncated {
             return Decision::Next("incomplete_delivery");
         }
@@ -128,6 +137,8 @@ impl Contract {
                 Decision::Next("catalog_parse")
             }
             Self::Catalog => Decision::Accept,
+            Self::Document if (200..300).contains(&status) => Decision::Accept,
+            Self::Document => Decision::Next("http_status"),
             Self::Pricing => Decision::Next("http_status"),
             Self::Search(_) if status != 200 => Decision::Next("http_status"),
             Self::Search(validate) if validate(&response.body).is_err() => {
@@ -300,6 +311,9 @@ pub(super) struct Prepared {
     entries: Vec<(Entry, serde_json::Value)>,
 }
 impl Prepared {
+    pub(super) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
     pub(super) async fn cached(
         &self,
         state: Arc<tokio::sync::Mutex<State>>,

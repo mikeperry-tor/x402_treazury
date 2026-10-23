@@ -1,5 +1,6 @@
 //! Ordered paid read relays; static cache/readiness ownership stays with discovery.
 mod adapters;
+pub(crate) mod document;
 mod policy;
 mod sequence;
 use crate::{
@@ -190,7 +191,7 @@ impl TargetFailure {
             None => self.into(),
         };
         if possible || self.possible {
-            error.context("Relay response_rejected or delivery failed; a relay authorization may still charge; do not automatically repeat this logical call")
+            error.context(document::PossiblePayment)
         } else {
             error
         }

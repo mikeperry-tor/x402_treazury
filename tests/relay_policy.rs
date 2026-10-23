@@ -22,7 +22,7 @@ POST = ["missing/post.toml"]
 "#,
     );
     assert!(!parsed.is_legacy());
-    assert!(parsed.search && parsed.serve && parsed.warm);
+    assert!(parsed.on_demand && parsed.serve && parsed.warm);
     assert_eq!(
         parsed.fallbacks()["GET"],
         [
@@ -69,7 +69,7 @@ fn policy_from_json(value: Value) -> Policy {
 fn legacy_provider_is_one_get_entry_with_explicit_legacy_provenance() {
     let legacy = policy("provider='missing.toml'\nsearch=false");
     assert!(legacy.is_legacy());
-    assert!(!legacy.search);
+    assert!(!legacy.on_demand);
     assert!(!legacy.serve && !legacy.warm);
     assert_eq!(legacy.fallbacks()["GET"], [PathBuf::from("missing.toml")]);
     assert_eq!(legacy.fallbacks().len(), 1);
@@ -200,4 +200,22 @@ fn relay_bootstrap_assets_preserve_complete_primary_catalogs_and_internal_refs()
         horizon["paths"]["/api/screenshot"].is_object(),
         "retain non-relay catalog consumers"
     );
+}
+
+#[test]
+fn on_demand_alias_is_defaulted_canonical_and_rejects_duplicate_spellings() {
+    use x402_treazury::discovery_relay::Policy;
+    let default: Policy = toml::from_str("").unwrap();
+    assert!(default.on_demand);
+    for spelling in ["on_demand", "search"] {
+        for enabled in [true, false] {
+            let policy: Policy = toml::from_str(&format!("{spelling}={enabled}")).unwrap();
+            assert_eq!(policy.on_demand, enabled);
+            let shown = serde_json::to_value(policy).unwrap();
+            assert_eq!(shown["on_demand"], enabled);
+            assert!(shown.get("search").is_none());
+        }
+    }
+    assert!(toml::from_str::<Policy>("on_demand=true\nsearch=false").is_err());
+    assert!(toml::from_str::<Policy>("search=true\non_demand=true").is_err());
 }

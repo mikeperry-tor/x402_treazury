@@ -1166,7 +1166,7 @@ async fn network_override_replaces_relay_at_its_declaration_without_inspection_i
             "sources": [],
             "serve": false,
             "warm": false,
-            "search": true
+            "on_demand": true
         })
     );
     assert_eq!(shown["discovery_wallets"], json!({}));

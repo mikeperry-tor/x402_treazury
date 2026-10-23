@@ -107,10 +107,10 @@ renew another response's inactivity timer or signed authority.
 | --- | --- |
 | `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, participating discovery origin (configured Tor attempt count; promotes on valid JSON or 304) |
 | `pricing.rs` | Startup-only unsigned GET probe, participating discovery origin (configured Tor attempt count; promotes on usable 402 or 2xx); successes/failures remain cached |
-| `catalog_state.rs` | Lazy help fetch, help URL discovery origin; dynamic bindings retain public-destination policy |
+| `catalog_state.rs` | Shared complete-document help reader, help URL discovery origin; source-bound relay authority and retained cache publication |
 | `discovery/coinbase.rs` | On-demand unsigned resource search, existing endpoint wallet documentation identity, participating origin retries; optional ordered paid relay list via endpoint payer |
-| `discovery/import.rs` | Agent OpenAPI fetch, discovery origin, public-destination policy |
-| `discovery/source_details.rs` | Unsigned exact usage-document GET or fixed discovery probes, existing source-management documentation identity, public destinations and allowed origins |
+| `discovery/import.rs` | Shared complete-document OpenAPI reader, URL discovery origin, public destinations and source-bound relay authority |
+| `discovery/source_details.rs` | Complete usage-document GET or fixed GET probes, available endpoint documentation identity or URL discovery identity, public/allowed origins and optional on-demand relay |
 | `payment.rs` | Actual unsigned challenge and paid retry, selected EVM payer |
 | `rotation/base.rs` | Participating read-only RPC: address reads by EVM owner; chain/header reads by RPC discovery origin; validates method results before promotion |
 | `rotation/near.rs` | Metadata by origin; quote and status by immutable request recipient |
@@ -593,24 +593,37 @@ such rules globally on a user's machine as part of an application test.
 
 ## Agent-selected destinations
 
-`source_details(documentation_url=...)` makes exactly one unsigned GET using the
-existing source-management documentation identity and transport. It enforces public
-destinations, `allowed_origins`, help bytes and response-read inactivity; it never
-follows redirects, pays, uses Curl or traverses links. Accepted work survives caller
-cancellation. Separate documentation hosts require independent origin permission.
+Runtime OpenAPI imports/refresh, lazy help, explicit usage documents and URL
+probes use the common complete-document reader. Its unsigned origin sequence uses
+`network.tor_isolation_retries` and retained server delays; configured
+`discovery_relay.on_demand` permits the ordered GET relay list after blocking
+HTTP/transport failures. Legacy `search` is an input alias for the same switch.
+There is no HEAD-then-GET probe, target challenge signing or linked traversal.
+Terminal `401`/`404`/`410`, other non-blocking responses, complete invalid content,
+unsolicited `206`/`Content-Range`, local byte bounds and destination rejection never
+purchase another read. Only consumer-validated complete content promotes an origin
+transport. Relay content cannot promote it.
 
-`source_details` fetches at most one directory listing when given a slug, then
-makes unsigned HEAD requests and bounded GET validations for a
-fixed, deduplicated set of specification/directory/LLM-documentation candidates.
-At most 24 candidates and four concurrent requests limit speculative network traffic
-and simultaneous document buffers. It uses the source-management wallet's existing
-isolation identity, pinned for the batch, with public destination/origin checks.
-Managed identity selection is read-only; no funding or allocation occurs. A base-URL
-input skips the directory lookup. Only a
-slug's directory lookup uses ordinary payment handling. The listing remains in the
-response if optional URL discovery cannot proceed. Provider probes never sign,
-never follow redirects and use existing spec/help byte and response-inactivity limits.
+`source_details(documentation_url=...)` returns complete accepted usage text.
+Base/slug discovery validates one GET per fixed, deduplicated candidate, keeping
+four candidates in flight. It uses the available source-management documentation
+identity, pinned for a batch; absent identity leaves origin retrieval available
+under the URL's discovery identity. Imports and help use the URL discovery identity.
+Public destinations, `allowed_origins`, spec/help byte bounds and response-read
+inactivity apply. Missing payment authority disables paid fallback without
+blocking origin retrieval. No document read allocates wallets, starts funding or
+waits for funding. Configured relays may follow redirects remotely under the
+[relay trust boundary](#paid-discovery-relay); origin requests remain no-follow.
 
+Accepted help and source mutations retain fetching, validation and cache/registry
+publication after disconnect. Compatible cache aliases retain the exact payer and
+effective document policy. Possible charges survive later parsing, publication,
+qualification and cleanup errors. Proven unpaid help initialization failures can
+be retried explicitly; possible-paid failures are shared rather than re-purchased
+by joined initializers. Runtime relay traversal has no static provider breaker or
+new cache/readiness queue. Operator refresh prepares a representable relay request
+before opening only the saved owner's existing payer and closes that owner on all
+outcomes; it starts no SDK or funding scheduler.
 
 Dynamic imports, lazy help and paid API calls, including source-management
 `raw_call`, use the same factory with a `public_only` pool key. Dynamic help uses
@@ -711,7 +724,7 @@ financial or qualification authority.
 | --- | --- |
 | Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote directory browse retains upstream maximum 100. Follow continuations for complete inventories. |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
-| Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static/runtime relay-service unsigned stages and Base read-only RPC also participate). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
+| Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery, runtime imports/help/documents/probes, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static/runtime relay-service unsigned stages and Base read-only RPC also participate). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
 | HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP uses explicit source-management override, then accepted provider value, then network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
 | Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |

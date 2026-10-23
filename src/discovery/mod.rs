@@ -14,6 +14,7 @@ pub mod tools;
 use crate::{
     catalog_state::{BoundTool, CatalogSnapshot, CatalogState},
     deployment::ListenerConfig,
+    discovery_relay::document::{Document, SharedFailure},
     payment::PaidClient,
 };
 use anyhow::{Context, Result, ensure};
@@ -36,15 +37,8 @@ struct FetchKey {
     url: String,
     transport: crate::network::HttpPolicy,
     timeout: Option<Duration>,
-}
-impl From<&str> for FetchKey {
-    fn from(url: &str) -> Self {
-        Self {
-            url: url.into(),
-            transport: Default::default(),
-            timeout: None,
-        }
-    }
+    authority: crate::payment::Authority,
+    policy: (bool, Option<usize>),
 }
 fn hash(bytes: &[u8]) -> String {
     alloy_primitives::hex::encode(Sha256::digest(bytes))
@@ -92,7 +86,7 @@ struct Inner {
 #[derive(Debug)]
 struct Fetched {
     completed: Instant,
-    result: std::result::Result<Arc<Vec<u8>>, &'static str>,
+    result: std::result::Result<Arc<Document>, SharedFailure>,
 }
 type FetchCell = Arc<OnceCell<Fetched>>;
 pub struct Manager {
@@ -176,8 +170,19 @@ impl Manager {
             .get(wallet)
             .context("source management wallet unavailable")?
             .clone()
+            .with_document_relay(self.search_relay.clone())
             .with_timeout(self.policy.read_timeout_seconds.map(Duration::from_secs))
             .with_download_limits(self.policy.max_response_bytes, self.policy.max_help_bytes))
+    }
+
+    fn document_client(&self, owner: &str) -> Result<PaidClient> {
+        ensure!(self.enabled(owner), "source_management_disabled");
+        let wallet = policy::wallet(&self.policy, &self.listeners[owner]);
+        if self.payers.contains_key(wallet) {
+            self.source_client(owner)
+        } else {
+            Ok(PaidClient::unsigned().with_document_relay(self.search_relay.clone()))
+        }
     }
 
     pub fn directory(&self, owner: &str) -> Result<BoundTool> {
@@ -194,18 +199,18 @@ impl Manager {
             };
             return Ok(BoundTool {
                 tool: directory::tool("/services").clone(),
-                client,
+                client: client.clone(),
                 base,
                 source: None,
-                help: Arc::new(OnceCell::new()),
+                help: Arc::new(crate::catalog_state::HelpBinding::new(client.clone())),
             });
         }
         Ok(BoundTool {
             tool: directory::tool("/services").clone(),
-            client: client.public_destinations(),
+            client: client.clone().public_destinations(),
             base,
             source: None,
-            help: Arc::new(OnceCell::new()),
+            help: Arc::new(crate::catalog_state::HelpBinding::new(client.clone())),
         })
     }
     pub async fn invoke_directory(
@@ -353,8 +358,9 @@ impl Manager {
             let payer = self
                 .payers
                 .get(wallet)
-                .context("dynamic wallet unavailable")?
-                .clone()
+                .cloned()
+                .unwrap_or_else(PaidClient::unsigned)
+                .with_document_relay(self.search_relay.clone())
                 .with_transport(
                     record
                         .candidate
@@ -372,6 +378,10 @@ impl Manager {
             let view = result.views.get_mut(target).context("target_missing")?;
             let initial_count = view.len();
             for tool in &built.tools {
+                let help = Arc::new(crate::catalog_state::HelpBinding::with_origins(
+                    payer.clone().public_destinations(),
+                    self.policy.allowed_origins.clone(),
+                ));
                 ensure!(
                     !view.iter().any(|t| t.tool.name == tool.name),
                     "tool_name_collision"
@@ -387,12 +397,14 @@ impl Manager {
                         .and_then(|tools| {
                             tools.iter().find(|bound| {
                                 bound.tool.name == tool.name
+                                    && bound.tool.help_url == tool.help_url
+                                    && bound.help.compatible(&help)
                                     && bound.source.as_ref()
                                         == Some(&(record.id.clone(), record.revision))
                             })
                         })
                         .map(|bound| bound.help.clone())
-                        .unwrap_or_else(|| Arc::new(OnceCell::new())),
+                        .unwrap_or(help),
                 });
             }
             if view.len() > initial_count
@@ -425,7 +437,7 @@ impl Manager {
         } else if tool_count == 0 {
             "This registration has no visible tools on this MCP endpoint. Ask the operator to inspect source selections and listener tool filters. Use tools_search without source_name to look for other available endpoint tools; removing that search filter does not change operator filters."
         } else {
-            "Search tools with source_name=name on this same MCP endpoint, then invoke tool_id with arguments through x402_treazury_tool_call. Optional advertised provider help may explain prices and request contracts before a paid call. Unknown cost is not free; registration and help do not establish paid-delivery qualification."
+            "Search tools with source_name=name on this same MCP endpoint, then invoke tool_id with arguments through x402_treazury_tool_call. Optional provider help explains request contracts and advertised prices."
         };
         let mut result = json!({
             "name": r.candidate.name,
@@ -445,18 +457,18 @@ impl Manager {
     }
 
     #[cfg(test)]
-    async fn document(&self, owner: &str, url: &str) -> Result<Arc<Vec<u8>>> {
+    async fn document(&self, owner: &str, url: &str) -> Result<Arc<Document>> {
         self.document_with(owner, url, None).await
     }
-    async fn source_document(&self, owner: &str, candidate: &Candidate) -> Result<Arc<Vec<u8>>> {
+    async fn source_document(&self, owner: &str, candidate: &Candidate) -> Result<Arc<Document>> {
         match candidate.remote_spec() {
             Some(url) => {
                 self.document_with(owner, url, candidate.provider.as_ref())
                     .await
             }
-            None => Ok(Arc::new(curated::local_document(
+            None => Ok(Arc::new(Document::local(curated::local_document(
                 candidate.provider.as_ref().context("provider_required")?,
-            )?)),
+            )?))),
         }
     }
     async fn document_with(
@@ -464,11 +476,14 @@ impl Manager {
         owner: &str,
         url: &str,
         provider: Option<&curated::AcceptedProvider>,
-    ) -> Result<Arc<Vec<u8>>> {
+    ) -> Result<Arc<Document>> {
         let canonical = import::endpoint(&self.policy, url)?.to_string();
         let url = canonical.as_str();
+        let (client, authority) = self.document_client(owner)?.pin_document_authority();
         let key = FetchKey {
             url: canonical.clone(),
+            authority,
+            policy: client.document_policy_key(),
             transport: provider.map(|p| p.settings.transport()).unwrap_or_default(),
             timeout: import::read_timeout(&self.policy, provider),
         };
@@ -508,18 +523,22 @@ impl Manager {
                 // Only the initializer consumes import capacity; aliases merely
                 // waiting for its result cannot starve independent imports.
                 let result = async {
-                    let owner = self.owner_import.get(owner).ok_or("unknown_owner")?;
-                    let _owner = owner
-                        .try_acquire()
-                        .map_err(|_| crate::limits::busy("owner_import_busy", 1))?;
-                    let _global = self
-                        .global_import
-                        .try_acquire()
-                        .map_err(|_| crate::limits::busy("imports_busy", 4))?;
-                    self.fetch_document(url, provider)
+                    let owner = self
+                        .owner_import
+                        .get(owner)
+                        .ok_or_else(|| SharedFailure::local("unknown_owner"))?;
+                    let _owner = owner.try_acquire().map_err(|_| {
+                        SharedFailure::local(crate::limits::busy("owner_import_busy", 1))
+                    })?;
+                    let _global = self.global_import.try_acquire().map_err(|_| {
+                        SharedFailure::local(crate::limits::busy("imports_busy", 4))
+                    })?;
+                    self.fetch_document(url, provider, &client)
                         .await
                         .map(Arc::new)
-                        .map_err(|_| "source_fetch_failed_or_rejected")
+                        .map_err(|error| {
+                            SharedFailure::capture(&error, "source_fetch_failed_or_rejected")
+                        })
                 }
                 .await;
                 Fetched {
@@ -528,14 +547,15 @@ impl Manager {
                 }
             })
             .await;
-        done.result.clone().map_err(anyhow::Error::msg)
+        done.result.clone().map_err(|failure| failure.error())
     }
 
     async fn fetch_document(
         &self,
         url: &str,
         provider: Option<&curated::AcceptedProvider>,
-    ) -> Result<Vec<u8>> {
+        client: &PaidClient,
+    ) -> Result<Document> {
         #[cfg(test)]
         {
             let fixture = self.fixture_endpoint.lock().unwrap().clone();
@@ -543,7 +563,7 @@ impl Manager {
                 return import::fixture_fetch(&self.policy, &url).await;
             }
         }
-        import::fetch_with(&self.policy, url, provider).await
+        import::fetch_with(&self.policy, url, provider, client).await
     }
     pub async fn invoke(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
         crate::limits::check(
@@ -579,6 +599,14 @@ impl Manager {
     }
 
     async fn add_source(self: &Arc<Self>, owner: &str, args: Value) -> Result<Value> {
+        let client = self.document_client(owner)?;
+        let this = self.clone();
+        let owner = owner.to_owned();
+        client
+            .run_owned(async move { this.add_source_owned(&owner, args).await })
+            .await?
+    }
+    async fn add_source_owned(self: &Arc<Self>, owner: &str, args: Value) -> Result<Value> {
         ensure!(self.enabled(owner), "source_management_disabled");
         match (args.get("provider_id"), args.get("spec_url")) {
             (Some(Value::String(_)), None) | (None, Some(Value::String(_))) => {}
@@ -650,23 +678,27 @@ impl Manager {
             self.targets(owner, &candidate)?;
         }
         let document = self.source_document(owner, &candidate).await?;
-        let id = Uuid::new_v4().to_string();
-        import::build(&self.policy, &candidate, &document)?;
-        let record = Record {
-            id,
-            owner: owner.into(),
-            candidate,
-            targets: vec![],
-            revision: 1,
-            document: String::from_utf8((*document).clone())?,
-            hash: hash(&document),
-            format: FORMAT,
-            accepted_at: epoch(),
-            updated_at: epoch(),
-            removed: false,
-            disabled: None,
-        };
-        self.commit(owner.to_owned(), generated_name, record).await
+        let result = async {
+            let id = Uuid::new_v4().to_string();
+            document.validate(|_, _, bytes| import::build(&self.policy, &candidate, bytes))?;
+            let record = Record {
+                id,
+                owner: owner.into(),
+                candidate,
+                targets: vec![],
+                revision: 1,
+                document: String::from_utf8((*document.body).clone())?,
+                hash: hash(&document.body),
+                format: FORMAT,
+                accepted_at: epoch(),
+                updated_at: epoch(),
+                removed: false,
+                disabled: None,
+            };
+            self.commit(owner.to_owned(), generated_name, record).await
+        }
+        .await;
+        document.with_payment_context(result)
     }
 
     fn search_tools(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
@@ -923,6 +955,30 @@ pub async fn maintain_cli_with_network(
     refresh: bool,
     network_override: Option<&crate::network::NetworkConfig>,
 ) -> Result<()> {
+    let path = path.to_owned();
+    let owner = owner.to_owned();
+    let source_id = source_id.to_owned();
+    let network_override = network_override.cloned();
+    PaidClient::unsigned()
+        .run_owned(async move {
+            maintain_cli_owned(
+                &path,
+                &owner,
+                &source_id,
+                refresh,
+                network_override.as_ref(),
+            )
+            .await
+        })
+        .await?
+}
+async fn maintain_cli_owned(
+    path: &std::path::Path,
+    owner: &str,
+    source_id: &str,
+    refresh: bool,
+    network_override: Option<&crate::network::NetworkConfig>,
+) -> Result<()> {
     crate::deployment::Deployment::show_config_with_network(path, network_override).await?;
     let mut cfg = crate::deployment::MetaConfig::parse_with_network(
         &std::fs::read_to_string(path)?,
@@ -943,6 +999,9 @@ pub async fn maintain_cli_with_network(
     ensure!(file.is_file(), "source registry does not exist");
     let mut store = store::Store::open(file, &policy::protected_paths(&cfg, path))?;
     let mut state = store.load()?;
+    let mut authority = None;
+    let mut possible_payment = false;
+    let result: Result<Value> = async {
     let record = state
         .records
         .get_mut(source_id)
@@ -962,13 +1021,28 @@ pub async fn maintain_cli_with_network(
         if let Some(provider) = &candidate.provider {
             candidate.provider = Some(curated::AcceptedProvider::current(&provider.id)?);
         }
-        let bytes = match candidate.remote_spec() {
-            Some(url) => import::fetch_with(&policy, url, candidate.provider.as_ref()).await?,
-            None => {
-                curated::local_document(candidate.provider.as_ref().context("provider_required")?)?
+        let document = match candidate.remote_spec() {
+            Some(url) => {
+                let options = import::options(&policy, url, candidate.provider.as_ref())?;
+                match crate::discovery_relay::document::origin(&options).await {
+                    Ok(document) => document,
+                    Err(failure) if failure.fallback => {
+                        let relay_policy = cfg.discovery_relay.as_ref().filter(|relay| relay.on_demand && relay.has_method("GET"));
+                        let Some(relay_policy) = relay_policy else { return Err(failure.error); };
+                        let relay = Arc::new(crate::discovery_relay::SearchRelay::load(relay_policy, path).await?);
+                        let Some(prepared) = crate::discovery_relay::document::prepare_fallback(&relay, &options)? else { return Err(failure.error); };
+                        authority = Some(crate::deployment::existing_read::ExistingRead::load(&cfg, owner).await?);
+                        let client = authority.as_ref().unwrap().client().with_document_relay(Some(relay));
+                        prepared.acquire(&client, failure).await?
+                    }
+                    Err(failure) => return Err(failure.error),
+                }
             }
+            None => Document::local(curated::local_document(candidate.provider.as_ref().context("provider_required")?)?),
         };
-        import::build(&policy, &candidate, &bytes)?;
+        possible_payment = document.payment_may_have_occurred;
+        document.validate(|_, _, bytes| import::build(&policy, &candidate, bytes))?;
+        let bytes = (*document.body).clone();
         candidate.spec_url = candidate.remote_spec().unwrap_or_default().to_owned();
         record.candidate = candidate;
         record.hash = hash(&bytes);
@@ -1001,6 +1075,18 @@ pub async fn maintain_cli_with_network(
         .checked_add(1)
         .context("generation exhausted")?;
     store.save(&state)?;
+    Ok(result)
+    }.await;
+    let cleanup = match authority {
+        Some(authority) => authority.close().await,
+        None => Ok(()),
+    };
+    let result = match (result, cleanup) {
+        (Err(error), Err(_)) => Err(error.context("existing authority cleanup failed")),
+        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        (Ok(result), Ok(())) => Ok(result),
+    };
+    let result = crate::discovery_relay::document::with_payment_context(possible_payment, result)?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }

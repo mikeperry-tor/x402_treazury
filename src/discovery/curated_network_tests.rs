@@ -201,7 +201,10 @@ async fn fixture() {
     ] {
         let mut invalid = help.clone();
         invalid.tool.help_url = Some(private.into());
-        invalid.help = Arc::new(OnceCell::new());
+        invalid.help = Arc::new(crate::catalog_state::HelpBinding::with_origins(
+            invalid.client.clone(),
+            m.policy.allowed_origins.clone(),
+        ));
         assert!(
             invalid
                 .invoke_output(json!({}).as_object().unwrap())
@@ -238,11 +241,21 @@ async fn fixture() {
         assert_eq!(api.canonical, owner);
         let help_credentials = crate::network::global()
             .credentials(&IsolationId::discovery("https://spec.example.com/help").unwrap());
+        let help = seen
+            .iter()
+            .find(|record| {
+                record.origin == "https://spec.example.com" && record.canonical == help_credentials
+            })
+            .unwrap();
+        assert_ne!(
+            help.scope, help_credentials,
+            "participating documentation uses a fresh owner-bound scope"
+        );
         let socks = proxy.records.lock().unwrap();
         assert!(socks.iter().any(|record| record.host == "api.example.com"
             && (record.user.clone(), record.password.clone()) == api.scope));
         assert!(socks.iter().any(|record| record.host == "spec.example.com"
-            && (record.user.clone(), record.password.clone()) == help_credentials));
+            && (record.user.clone(), record.password.clone()) == help.scope));
         assert!(socks.iter().all(|record| record.address_type == 3));
     }
     // Identical URLs with different acquisition compatibility must not share a
@@ -264,7 +277,7 @@ async fn fixture() {
     assert!(strict.is_err());
     let bytes = curated.unwrap();
     assert_eq!(
-        serde_json::from_slice::<Value>(&bytes).unwrap()["openapi"],
+        serde_json::from_slice::<Value>(&bytes.body).unwrap()["openapi"],
         "3.0.3"
     );
     let before = requests.lock().unwrap().len();

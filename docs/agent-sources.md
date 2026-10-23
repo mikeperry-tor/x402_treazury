@@ -151,8 +151,7 @@ payment caps or evidence of useful delivery. Provider-specific filters and a
 non-curated mode are not exposed. The server supplies Base mainnet USDC/exact
 payment constraints; all returned offers remain intact.
 
-The response contains `directory="coinbase"`, `acquisition.via` (`origin` or
-`curl`), `response` (the complete upstream object) and guidance. It preserves
+The response contains `directory="coinbase"`, `acquisition.via` (`origin`, `curl`, `agproxy` or `horizonpulse`), `response` (the complete upstream object) and guidance. It preserves
 exact URLs, methods, Bazaar metadata, offers, skill links, unknown fields and
 missing contracts without normalizing resources into services. `partialResults`
 remains upstream metadata, with no invented totals or continuations. Empty or
@@ -171,14 +170,15 @@ identity fails that request. Under Tor they use one origin attempt plus
 policy, including the terminal delay before fallback. Direct mode uses one
 origin attempt. Only complete valid search JSON may promote an origin scope.
 
-With `[discovery_relay]` configured, paid Curl fallback after origin failure is
-enabled by default. Set `search=false` in that section to disable it. Each search fetches fresh results; it inherits no catalog URL cache,
+With `[discovery_relay]` configured, the ordered GET relay list is enabled by
+default for supported on-demand reads. Set `on_demand=false` to disable it; legacy
+`search=false` has the same expanded effect. Each search fetches fresh results; it inherits no catalog URL cache,
 sticky failure, readiness queue or shared breaker. The relay uses this listener's
 source-management payer, regardless of the static relay wallet override; ordinary
 payment admission, journaling and insufficient-funds traversal still apply.
 Each authorization may charge, and uncertain paid failure grants no automatic
-replay. The client connection to Curl retains its configured direct/Tor policy;
-Curl sees the query URL, reaches Coinbase from its own network and supplies target
+replay. The relay connection retains configured direct/Tor policy. The selected service
+sees the query URL, reaches Coinbase from its own network and supplies target
 content/status/headers. Origin failures and relay failures remain request-scoped.
 See [relay configuration](configuration.md#paid-discovery-relay) for settings,
 precedence and trust. Local input/origin/identity/download-limit failures
@@ -328,10 +328,13 @@ not a verified instruction source. The response labels provenance
 when available, and visible status. `ok` and `empty` include complete `text`;
 failures omit text and report safe reasons, HTTP status or the affected byte limit.
 
-The reader makes one unsigned GET, without HEAD, redirects, linked traversal,
-payment or Curl fallback. The listener's source-management documentation identity,
-transport, `allowed_origins`, `max_help_bytes` and response-read inactivity policy
-apply. A separate skill host must independently satisfy the origin policy.
+The reader uses the shared unsigned origin sequence and, when configured, the
+on-demand GET relay list. It performs no HEAD request or linked traversal. The
+listener's available documentation identity, transport, `allowed_origins`,
+`max_help_bytes` and response-read inactivity policy apply. Missing wallet identity
+leaves origin retrieval available under the URL's discovery identity. Origin HTTP
+remains no-follow; configured relays may follow redirects under the
+[documented trust boundary](configuration.md#paid-discovery-relay). A separate skill host must independently satisfy the origin policy.
 Accepted text is complete UTF-8 without NUL, with `text/plain`, `text/markdown`,
 `text/x-markdown` (parameters allowed), or no content type. HTML MIME and leading
 HTML/doctype markup are rejected, as are other MIME types and invalid UTF-8.
@@ -355,23 +358,25 @@ The response contains `listing` (the exact parsed directory response, or null fo
 base URL), `provider_matches` (empty when none) and `url_discovery`. Discovery includes an overall `status`, per-URL
 `results`, and available base/website metadata. A received directory response is
 preserved when discovery cannot proceed, including missing/rejected API bases or an
-unavailable documentation identity. Non-JSON directory output is preserved as text
+unavailable optional discovery work. Non-JSON directory output is preserved as text
 with `directory_response_not_json`; the tool does not automatically repeat a paid
 lookup. Directory request failures propagate through ordinary response handling.
 
-Provider probes use unsigned HEAD followed by bounded GET for successful or
-unsupported HEAD responses. They never pay a provider's 402 and never follow
-redirects. Candidate URLs are fixed and deduplicated, with four probes in flight.
-Existing spec/help byte and response-read-inactivity limits apply. Results include
-URL, candidate kind, HTTP statuses, content type and outcome; document contents stay
-server-side. `verified_openapi` means structural OpenAPI 3 JSON checks passed;
+Provider probes use one validated GET per fixed, deduplicated candidate, with four
+probes in flight. They share origin retries and configured on-demand relay fallback;
+blocked retrieval can charge, while terminal `401`/`404`/`410`, target `402`, complete
+invalid content and partial-document rejection do not buy another read. Results
+include URL, candidate kind, GET status, content type and outcome; no synthetic HEAD
+status is reported. Document contents stay server-side. Existing spec/help byte
+and response-read-inactivity limits apply. `verified_openapi` means structural OpenAPI 3 JSON checks passed;
 `source_add` still performs full import validation. `documentation_found` points to
 concise documentation; `directory_json_unverified` is only an unverified lead.
 Other statuses expose missing, redirected, blocked, invalid, oversized or unavailable
 candidates. Nothing found does not prove the API is unusable.
 
-Probes share a pinned existing source-management wallet isolation identity, including
-listener overrides and Tor remote DNS. Identity selection does not allocate, fund or
+Probes use a pinned available source-management wallet isolation identity, including
+listener overrides and Tor remote DNS. Without one, the URL's discovery identity
+keeps unsigned origin retrieval available. Identity selection does not allocate, fund or
 promote a wallet. Directory and probe work remain owned through caller cancellation.
 No new discovery cache or registration is created.
 
@@ -481,6 +486,23 @@ All listeners return at most 25 definitions per `tools/list` page. Follow `nextC
 schemas and accepted tool outputs are returned complete. The removed listener
 `max_response_chars` field and CLI flag reject visibly; byte acquisition and image
 bounds still reject oversized content explicitly.
+
+Help and imported specifications share the common complete-document acquisition
+path. Only validated complete content can promote an origin transport. Complete
+invalid schemas/text, unsolicited `206`/`Content-Range`, local bounds and destination
+rejections are terminal; blocking HTTP/transport failures can use configured
+on-demand fallback. A relayed target `402` is never signed. Relayed content retains
+requested/reported-destination checks and the configured relay trust boundary.
+
+Help caches and active import coalescing include retained payer authority and
+effective document policy. A static help binding pins the exact payer independently
+of later ordinary API payer replacement; managed bindings retain their existing
+pool authority. Accepted help/add/refresh work survives waiter cancellation through
+validation and cache/source publication. Shared failures preserve typed bounds and
+possible-charge facts. Possible-paid help failures remain cached so joined waiters
+cannot sequentially purchase the same failed initialization; proven unpaid help
+failures retain normal explicit retry behavior. These readers allocate no wallets,
+start no funding and create no new replay authority.
 
 ## Limits and network policy
 
@@ -606,7 +628,13 @@ x402_treazury sources remove --config FILE --server research --source-id SOURCE_
 ```
 
 Generic refresh fetches and validates new bytes through the configured network
-policy without wallet credentials or pricing probes. Curated refresh resolves the
+policy without pricing probes. Origin retrieval needs no wallet credentials. Only
+when an eligible relay acquisition is necessary does refresh load the saved owner's
+selected existing payer. Static mode reads only that profile's key; managed mode
+opens the authenticated existing store and named pool with Base transport, without
+SDK reconstruction, pool/wallet allocation or funding workers. Unrepresentable
+relay requests do not load a key or store. The owner remains alive through registry
+publication and closes on success or failure; errors retain possible charge facts. Curated refresh resolves the
 current bundled provider definition and acquires its remote or embedded schema,
 then atomically replaces settings, provenance and document together while retaining
 owner, name and source identity and advancing the revision. A missing provider or

@@ -78,15 +78,34 @@ fn registered_id(m: &Manager, response: &Value) -> String {
         .clone()
 }
 
+fn fetch_key(m: &Manager, url: &str) -> FetchKey {
+    fetch_key_for(m, "writer", url)
+}
+fn fetch_key_for(m: &Manager, owner: &str, url: &str) -> FetchKey {
+    let (client, authority) = m.document_client(owner).unwrap().pin_document_authority();
+    FetchKey {
+        url: url.into(),
+        transport: Default::default(),
+        timeout: import::read_timeout(&m.policy, None),
+        authority,
+        policy: client.document_policy_key(),
+    }
+}
+
 async fn seed(m: &Manager) {
+    seed_for(m, "writer").await;
+}
+async fn seed_for(m: &Manager, owner: &str) {
     let cell = OnceCell::new();
     cell.set(Fetched {
         completed: Instant::now(),
-        result: Ok(Arc::new(serde_json::to_vec(&spec()).unwrap())),
+        result: Ok(Arc::new(Document::local(
+            serde_json::to_vec(&spec()).unwrap(),
+        ))),
     })
     .unwrap();
     m.fetches.lock().unwrap().insert(
-        "https://api.example.com/openapi.json".into(),
+        fetch_key_for(m, owner, "https://api.example.com/openapi.json"),
         Arc::new(cell),
     );
 }
@@ -464,10 +483,18 @@ async fn public_transport_child() {
     .with_test_root(crate::test_tls::CA);
     crate::network::install_test_context(context);
     let p = policy(None);
-    let bytes = import::fetch_with(&p, "https://spec.example.com/openapi.json", None)
-        .await
-        .unwrap();
-    assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), spec());
+    let bytes = import::fetch_with(
+        &p,
+        "https://spec.example.com/openapi.json",
+        None,
+        &PaidClient::unsigned(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&bytes.body).unwrap(),
+        spec()
+    );
     let payer = payer().public_destinations();
     let request = crate::catalog::RoutedRequest {
         method: "GET".into(),
@@ -480,15 +507,25 @@ async fn public_transport_child() {
     assert_eq!(signed.load(Ordering::SeqCst), 1);
     for path in ["redirect", "downgrade"] {
         assert!(
-            import::fetch_with(&p, &format!("https://spec.example.com/{path}"), None)
-                .await
-                .is_err()
+            import::fetch_with(
+                &p,
+                &format!("https://spec.example.com/{path}"),
+                None,
+                &PaidClient::unsigned()
+            )
+            .await
+            .is_err()
         );
     }
     assert!(
-        import::fetch_with(&p, "https://127.0.0.1/openapi.json", None)
-            .await
-            .is_err()
+        import::fetch_with(
+            &p,
+            "https://127.0.0.1/openapi.json",
+            None,
+            &PaidClient::unsigned()
+        )
+        .await
+        .is_err()
     );
     let ctx = crate::network::global();
     let signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 1).parse().unwrap();
@@ -502,8 +539,27 @@ async fn public_transport_child() {
             Default::default(),
         )
         .unwrap();
+    let discovery_id = IsolationId::discovery("https://spec.example.com").unwrap();
+    let discovery_transport = ctx
+        .http_participating(
+            &discovery_id,
+            "https://spec.example.com/openapi.json",
+            import::read_timeout(&p, None),
+            true,
+            Default::default(),
+        )
+        .unwrap();
+    assert_eq!(discovery_transport.identity, discovery_id);
+    assert_eq!(
+        discovery_transport.selection(),
+        crate::network::SelectionPolicy::Participating
+    );
+    assert_ne!(
+        ctx.credentials(&discovery_transport.scope).1,
+        ctx.credentials(&discovery_id).1
+    );
     let ids = [
-        IsolationId::discovery("https://spec.example.com").unwrap(),
+        discovery_transport.scope.clone(),
         evm_transport.scope.clone(),
     ];
     {
@@ -882,6 +938,13 @@ async fn endpoint_wallet_override_and_filters_preserve_boundaries() {
     .await
     .unwrap();
     add(&m, "first", "", "").await;
+    // The reader has a distinct retained authority even though this fixture's
+    // two public deterministic keys have the same address. Seed its exact key.
+    seed_for(&m, "reader").await;
+    assert_ne!(
+        fetch_key_for(&m, "writer", "https://api.example.com/openapi.json"),
+        fetch_key_for(&m, "reader", "https://api.example.com/openapi.json")
+    );
     m.invoke(
         "reader",
         "x402_treazury_source_add",
@@ -1963,7 +2026,7 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
             .is_ok()
     );
     let original =
-        m.fetches.lock().unwrap()[&FetchKey::from("https://api.example.com/active")].clone();
+        m.fetches.lock().unwrap()[&fetch_key(&m, "https://api.example.com/active")].clone();
     // Churn completed retention beyond capacity; an active fetch is never evicted.
     for n in 0..12 {
         assert!(
@@ -1974,7 +2037,7 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
     }
     assert!(Arc::ptr_eq(
         &original,
-        &m.fetches.lock().unwrap()[&FetchKey::from("https://api.example.com/active")]
+        &m.fetches.lock().unwrap()[&fetch_key(&m, "https://api.example.com/active")]
     ));
     release.notify_one();
     while let Some(result) = aliases.join_next().await {
@@ -2320,8 +2383,11 @@ async fn static_publication_composes_with_dynamic_commits_and_fences_stale_prici
     priced.views.get_mut("writer").unwrap()[0].tool.description = "startup price".into();
     let second_url = "https://api.example.com/second.json";
     let cell =
-        m.fetches.lock().unwrap()[&FetchKey::from("https://api.example.com/openapi.json")].clone();
-    m.fetches.lock().unwrap().insert(second_url.into(), cell);
+        m.fetches.lock().unwrap()[&fetch_key(&m, "https://api.example.com/openapi.json")].clone();
+    m.fetches
+        .lock()
+        .unwrap()
+        .insert(fetch_key(&m, second_url), cell);
     let (registered, published) = tokio::join!(
         m.invoke(
             "writer",
@@ -2355,7 +2421,10 @@ async fn static_publication_composes_with_dynamic_commits_and_fences_stale_prici
         .find(|b| b.tool.name == dynamic.tool.name)
         .unwrap();
     assert!(Arc::ptr_eq(&unchanged.help, &dynamic.help));
-    assert_eq!(unchanged.help.get().unwrap(), "retained help");
+    assert_eq!(
+        unchanged.help.get().unwrap().as_ref().unwrap(),
+        "retained help"
+    );
     assert_eq!(
         captured.views["writer"]
             .iter()
@@ -2525,13 +2594,13 @@ async fn more_than_sixteen_sources_and_one_hundred_tools_are_accepted() {
         let cell = OnceCell::new();
         cell.set(Fetched {
             completed: Instant::now(),
-            result: Ok(Arc::new(serde_json::to_vec(&doc).unwrap())),
+            result: Ok(Arc::new(Document::local(serde_json::to_vec(&doc).unwrap()))),
         })
         .unwrap();
         m.fetches
             .lock()
             .unwrap()
-            .insert(url.as_str().into(), Arc::new(cell));
+            .insert(fetch_key(&m, url.as_str()), Arc::new(cell));
         m.invoke(
             "writer",
             "x402_treazury_source_add",
@@ -2594,13 +2663,13 @@ async fn register_spec(
     let cell = OnceCell::new();
     cell.set(Fetched {
         completed: Instant::now(),
-        result: Ok(Arc::new(serde_json::to_vec(&doc).unwrap())),
+        result: Ok(Arc::new(Document::local(serde_json::to_vec(&doc).unwrap()))),
     })
     .unwrap();
     m.fetches
         .lock()
         .unwrap()
-        .insert(url.as_str().into(), Arc::new(cell));
+        .insert(fetch_key_for(m, owner, url.as_str()), Arc::new(cell));
     m.invoke(
         owner,
         "x402_treazury_source_add",
@@ -3216,11 +3285,13 @@ async fn automatic_source_names_are_readable_collision_safe_and_duplicate_safe()
         let cell = OnceCell::new();
         cell.set(Fetched {
             completed: Instant::now(),
-            result: Ok(Arc::new(serde_json::to_vec(&spec()).unwrap())),
+            result: Ok(Arc::new(Document::local(
+                serde_json::to_vec(&spec()).unwrap(),
+            ))),
         })
         .unwrap();
         m.fetches.lock().unwrap().insert(
-            format!("https://api.example.com/{path}").as_str().into(),
+            fetch_key(&m, &format!("https://api.example.com/{path}")),
             Arc::new(cell),
         );
     }
@@ -3510,3 +3581,6 @@ async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
 
 #[path = "registration_guidance_tests.rs"]
 mod registration_guidance_tests;
+
+#[path = "import_read_tests.rs"]
+mod import_read_tests;

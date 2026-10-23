@@ -12,7 +12,9 @@ use tracing::Instrument;
 use x402_chain_eip155::{V2Eip155ExactClient, V2Eip155UptoClient};
 use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
+mod document_identity;
 mod v1;
+pub(crate) use document_identity::Authority;
 pub(crate) use v1::V1ExactClient;
 
 /// Typed HTTP status for callers that must discard untrusted response prose.
@@ -249,6 +251,7 @@ pub struct PaidClient {
     unsigned_only: bool,
     /// Relay exchanges use common unsigned transport recovery and never recurse.
     relay_call: bool,
+    document_relay: Option<Arc<crate::discovery_relay::SearchRelay>>,
     attempt_capacity: Vec<Arc<tokio::sync::Semaphore>>,
     unavailable: Option<crate::rotation::error::AdmissionError>,
     selection: crate::network::SelectionPolicy,
@@ -268,6 +271,7 @@ impl PaidClient {
             cover: None,
             unsigned_only: false,
             relay_call: false,
+            document_relay: None,
             attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
@@ -287,6 +291,7 @@ impl PaidClient {
             cover: None,
             unsigned_only: false,
             relay_call: false,
+            document_relay: None,
             attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
@@ -307,6 +312,7 @@ impl PaidClient {
             cover: None,
             unsigned_only: true,
             relay_call: false,
+            document_relay: None,
             attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
@@ -374,6 +380,7 @@ impl PaidClient {
     }
     pub(crate) fn for_relay(mut self) -> Self {
         self.relay_call = true;
+        self.document_relay = None;
         self.selection = crate::network::SelectionPolicy::Participating;
         self
     }
@@ -528,11 +535,11 @@ impl PaidClient {
     }
     /// Retain an encompassing payment workflow through its outcome publication.
     /// Nested payment execution reuses this owner and its foreground permit.
-    pub(crate) async fn run_owned<T: Send + 'static>(
+    pub(crate) fn run_owned<T: Send + 'static>(
         &self,
         work: impl std::future::Future<Output = T> + Send + 'static,
-    ) -> Result<T> {
-        ownership::run(&self.work, work).await
+    ) -> impl std::future::Future<Output = Result<T>> + Send + '_ {
+        ownership::run(&self.work, work)
     }
     pub(crate) async fn execute_rendered_scoped(
         &self,

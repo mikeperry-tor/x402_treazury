@@ -260,7 +260,24 @@ async fn scope_child() {
     );
     assert_eq!(requests.load(Ordering::SeqCst), before);
     let discovery_id = IsolationId::discovery("https://api.example.com").unwrap();
-    let legacy_discovery = crate::network::global().credentials(&discovery_id);
+    let canonical_discovery = crate::network::global().credentials(&discovery_id);
+    let public_transport = crate::network::global()
+        .http_participating(
+            &discovery_id,
+            "https://api.example.com",
+            import::read_timeout(&m.policy, None),
+            true,
+            Default::default(),
+        )
+        .unwrap();
+    assert_eq!(public_transport.identity, discovery_id);
+    assert_eq!(
+        public_transport.selection(),
+        crate::network::SelectionPolicy::Participating
+    );
+    let public_credentials = crate::network::global().credentials(&public_transport.scope);
+    assert_eq!(public_credentials.0, canonical_discovery.0);
+    assert_ne!(public_credentials.1, canonical_discovery.1);
     let pricing_transport = crate::network::global()
         .http_participating(
             &discovery_id,
@@ -271,12 +288,13 @@ async fn scope_child() {
         )
         .unwrap();
     let pricing_credentials = crate::network::global().credentials(&pricing_transport.scope);
-    assert_eq!(pricing_credentials.0, legacy_discovery.0);
-    assert_ne!(pricing_credentials.1, legacy_discovery.1);
+    assert_eq!(pricing_credentials.0, canonical_discovery.0);
+    assert_ne!(pricing_credentials.1, canonical_discovery.1);
+    assert_ne!(pricing_credentials.1, public_credentials.1);
     let mut expected = vec![
-        // Public-only imports and dynamic lazy help share the guarded legacy
-        // discovery pool; participating pricing uses a fresh-scope pool.
-        legacy_discovery,
+        // Public imports/help share their participating discovery transport;
+        // pricing has a distinct non-public-only transport key.
+        public_credentials,
         pricing_credentials,
     ];
     for key in [1, 2] {

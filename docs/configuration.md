@@ -770,15 +770,17 @@ probing specification/documentation URLs, from exactly one directory slug or HTT
 API base URL. Matches return IDs and schema provenance, skip speculative provider
 requests and make no live reachability/qualification claim. A slug causes one
 ordinary potentially paid directory lookup; a base URL skips it. Results retain the listing alongside URL-discovery status, even when a missing
-or rejected API base or unavailable identity prevents probing. Provider HEAD/GET
-probes stay unsigned and use the existing wallet identity and spec/help limits.
-No wallet is allocated or funded for probes.
+or rejected API base prevents probing. Each candidate gets one validated GET,
+with four candidates in flight and existing spec/help limits. Available wallet
+identity is pinned; without it the URL's discovery identity keeps origin retrieval
+available. No wallet is allocated or funded for probes. Configured on-demand
+fallback can charge for blocked document retrieval.
 
 Alternatively, `source_details(documentation_url=...)` reads one exact public HTTPS
 usage-document URL, allowing a query. This selector is exclusive with slug/base.
-It uses a single unsigned GET with source-management identity, transport,
-`allowed_origins`, help-byte and response-inactivity policy, without payment,
-redirects or Curl. Complete accepted UTF-8 text is returned with caller-supplied
+It uses the shared unsigned origin sequence with source-management identity,
+transport, `allowed_origins`, help bytes and response inactivity. Configured
+on-demand fallback can acquire the document through the GET relay list. Complete accepted UTF-8 text is returned with caller-supplied
 provenance; failures are visible without partial text. See the
 [document contract](agent-sources.md#listing-and-url-discovery) for accepted MIME
 types and HTML rejection. Reading help grants no execution or payment authority.
@@ -1288,7 +1290,7 @@ search-result metadata is terminal success.
 [discovery_relay]
 serve = true   # static serving startup; defaults false
 warm = true    # static catalog warm; defaults false
-search = true  # Coinbase fallback; defaults true
+on_demand = true # runtime document/Coinbase fallback; defaults true
 # wallet = "web" # optional static payer override
 # sources = ["social"] # optional static source selection; empty selects all
 
@@ -1301,7 +1303,8 @@ HEAD = ["../../providers/agproxy.toml"]
 Method keys are exactly `GET`, `HEAD` and `POST`, selected by the original target
 method. A missing or empty list means origin-only for that method; lists do not
 inherit from GET. These settings declare relay eligibility; they do not extend the
-supported consumers beyond static discovery and Coinbase searches. Ordering is
+supported consumers beyond static discovery, Coinbase searches, source imports,
+help, explicit usage documents and URL-discovery probes. Ordering is
 operator-authored, with no implicit vendor ranking or extra provider. Each listed
 provider declares `relay_format = "curl"`, `"agproxy"` or `"horizonpulse"` in its
 own TOML. Ordinary providers need no format field. Unsupported request bodies,
@@ -1322,15 +1325,31 @@ local schemas before payment. The bundled Curl schema, `agproxy-openapi.json` an
 no schema, help or pricing document and rejects nonlocal schema references.
 [Provider caveats](../providers/CAVEATS.md) own provenance and update instructions.
 
-`search` defaults true when this section exists and controls Coinbase fallback on
-source-management listeners. Without the section no paid relay is created.
-`serve`/`warm` retain static-acquisition meanings. `wallet` and `sources` apply only
-to static work; runtime search uses the authenticated endpoint's existing payer.
-Search neither prepares wallets nor starts funding and adds no sticky response
-cache, readiness queue or provider breaker. Repeated searches are fresh operations
-and may authorize new payments. Source-management `max_response_bytes` bounds its
-outer envelope and decoded target; inactivity precedence is source-management,
+`on_demand` defaults true when this section exists. It controls supported runtime
+document reads and Coinbase fallback. `search` remains an input alias; specifying
+both spellings is an error, and inspection emits only `on_demand`. Legacy
+`search=false` now also disables fallback for imports, help and documentation
+probes. Without the section no paid relay is created. `serve`/`warm` retain their
+static-acquisition meanings. `wallet` and `sources` apply only to static work;
+runtime reads retain the source or authenticated endpoint's existing payer.
+No runtime read allocates wallets, starts funding or waits for funding. For document reads, missing
+payment authority leaves unsigned origin retrieval available and relay fallback
+unavailable. Runtime relay exchange adds no sticky response cache, readiness queue
+or provider breaker; existing help/import coalescing remains with those owners.
+Repeated Coinbase searches are fresh operations and may authorize new payments.
+The caller's response bound covers the outer envelope; its spec/help/response
+bound applies to decoded content. Inactivity precedence is source management,
 relay provider, then network. Provider transport permissions govern the relay leg.
+
+Runtime document readers use the common unsigned origin sequence and ordered GET
+relay list after blocking transport failures or HTTP `400`, `403`, `408`, `429`
+or `5xx`. Complete invalid schemas/text, unsupported content, unsolicited `206`
+or `Content-Range`, local policy/byte bounds, redirects and other `4xx` are terminal.
+A relayed `402` never reaches target signing. Origin HTTP remains no-follow;
+configured relays can follow redirects under the trust boundary below. Accepted
+work retains fetching, validation and cache/source publication after disconnect.
+Shared cache identities retain the exact payer and effective document policy;
+possible charges survive parsing, publication and cleanup errors.
 
 After exhausted origin attempts, each authored position has at most one logical
 acquisition. Its unsigned relay-service requests use the same configured Tor

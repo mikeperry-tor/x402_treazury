@@ -13,6 +13,7 @@ pub use startup::StartupConfig;
 mod bootstrap;
 pub use bootstrap::{BootstrapSummary, bootstrap_wallets, bootstrap_wallets_with_network};
 mod cache_warm;
+pub(crate) mod existing_read;
 pub use cache_warm::{CacheWarmSummary, warm_cache, warm_cache_with_network};
 
 /// Full frozen catalogs may exceed ordinary tool-result/evidence limits. Includes
@@ -595,7 +596,7 @@ impl Deployment {
         let search_relay = match config.discovery_relay.as_ref() {
             Some(policy) => {
                 let relay = crate::discovery_relay::SearchRelay::load(policy, path).await?;
-                policy.search.then(|| std::sync::Arc::new(relay))
+                policy.on_demand.then(|| std::sync::Arc::new(relay))
             }
             None => None,
         };
@@ -1158,6 +1159,7 @@ impl Deployment {
                         wallets[&self.wallet_resolution.bindings[name][id].wallet]
                             .clone()
                             .with_source_identity(id)
+                            .with_document_relay(self.search_relay.clone())
                             .with_transport(source.config.transport())
                             .with_cover(
                                 source.config.cover_traffic.clone(),

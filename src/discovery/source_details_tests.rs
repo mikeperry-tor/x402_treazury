@@ -64,7 +64,6 @@ async fn directory_listing_survives_unavailable_url_discovery() {
                 match slug.as_str() {
                     "missing" => axum::Json(json!({"data":{"service":{"name":"Retained", "endpoints":[{"path":"/read"}]}},"meta":{"original":true}})).into_response(),
                     "rejected" => axum::Json(json!({"service":{"base_url":"https://127.0.0.1/private"},"original":true})).into_response(),
-                    "identity" => axum::Json(json!({"base_url":"https://api.example.com/v1","original":true})).into_response(),
                     "malformed" => "Original non-JSON directory response".into_response(),
                     _ => panic!("unexpected directory request"),
                 }
@@ -95,11 +94,6 @@ async fn directory_listing_survives_unavailable_url_discovery() {
             json!({"service":{"base_url":"https://127.0.0.1/private"},"original":true}),
         ),
         (
-            "identity",
-            "identity_unavailable",
-            json!({"base_url":"https://api.example.com/v1","original":true}),
-        ),
-        (
             "malformed",
             "directory_response_not_json",
             json!("Original non-JSON directory response"),
@@ -113,7 +107,7 @@ async fn directory_listing_survives_unavailable_url_discovery() {
         assert_eq!(result["url_discovery"]["status"], status);
         assert_eq!(result["url_discovery"]["results"], json!([]));
     }
-    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
     assert!(m.inner.lock().unwrap().state.records.is_empty());
     task.abort();
 }
@@ -163,14 +157,6 @@ async fn fixture() {
             }
             if path == "/llms-full.txt" || (method == Method::GET && path == "/v1/swagger.json") {
                 return (StatusCode::PAYMENT_REQUIRED, [("payment-required", "deliberately-not-a-payment-to-sign")]).into_response();
-            }
-            if method == Method::HEAD {
-                return match path {
-                    "/v1/openapi.json" => StatusCode::METHOD_NOT_ALLOWED,
-                    "/llms.txt" => StatusCode::NOT_IMPLEMENTED,
-                    "/openapi.json" | "/v1/llms-full.txt" | "/.well-known/x402" | "/v1/swagger.json" => StatusCode::OK,
-                    _ => StatusCode::NOT_FOUND,
-                }.into_response();
             }
             match path {
                 "/v1/openapi.json" => axum::Json(json!({"openapi":"3.1.0","info":{"title":"Fixture","version":"1"},"servers":[{"url":"https://api.example.com/v1"}],"paths":{"/read":{"get":{}}}})).into_response(),
@@ -257,10 +243,15 @@ async fn fixture() {
                 .unwrap()
         };
         assert_eq!(result("/v1/openapi.json")["status"], "verified_openapi");
-        assert_eq!(result("/v1/openapi.json")["head_status"], 405);
+        assert_eq!(result("/v1/openapi.json")["get_status"], 200);
         assert_eq!(result("/openapi.json")["status"], "invalid_document");
         assert_eq!(result("/llms.txt")["status"], "documentation_found");
-        assert_eq!(result("/llms.txt")["head_status"], 501);
+        assert_eq!(result("/llms.txt")["get_status"], 200);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.get("head_status").is_none())
+        );
         assert_eq!(result("/llms-full.txt")["status"], "payment_required");
         assert_eq!(result("/v1/swagger.json")["status"], "payment_required");
         assert_eq!(result("/v1/llms-full.txt")["status"], "too_large");
@@ -284,7 +275,15 @@ async fn fixture() {
             .count(),
         1
     );
-    assert!(!requests.iter().any(|(m,p)| m == "GET" && (p == "/llms-full.txt" || p == "/.well-known/openapi.json")));
+    assert_eq!(
+        requests
+            .iter()
+            .filter(
+                |(m, p)| m == "GET" && (p == "/llms-full.txt" || p == "/.well-known/openapi.json")
+            )
+            .count(),
+        4
+    );
     assert_eq!(
         requests
             .iter()
@@ -292,34 +291,30 @@ async fn fixture() {
             .count(),
         2
     );
-    assert_eq!(requests.iter().filter(|(m, _)| m == "HEAD").count(), 32);
+    assert_eq!(requests.iter().filter(|(m, _)| m == "HEAD").count(), 0);
+    assert_eq!(
+        requests.len(),
+        33,
+        "one GET per candidate plus the directory listing"
+    );
     let records = proxy.records.lock().unwrap();
-    let mut expected: Vec<_> = (1..=2)
+    let expected: Vec<_> = (1..=2)
         .map(|key| {
             let signer: alloy_signer_local::PrivateKeySigner =
                 format!("{key:064x}").parse().unwrap();
-            crate::network::global()
-                .credentials(&IsolationId::evm(&signer.address().to_string()).unwrap())
+            let identity = IsolationId::evm(&signer.address().to_string()).unwrap();
+            let selected = crate::network::global()
+                .http_participating(
+                    &identity,
+                    "https://api.example.com",
+                    Some(Duration::from_secs(60)),
+                    true,
+                    Default::default(),
+                )
+                .unwrap();
+            crate::network::global().credentials(&selected.scope)
         })
         .collect();
-    let reader_signer: alloy_signer_local::PrivateKeySigner =
-        format!("{:064x}", 2).parse().unwrap();
-    let reader_id = IsolationId::evm(&reader_signer.address().to_string()).unwrap();
-    let reader_dir_transport = crate::network::global()
-        .http_participating(
-            &reader_id,
-            "https://api.example.com",
-            Some(Duration::from_secs(60)),
-            true,
-            Default::default(),
-        )
-        .unwrap();
-    let reader_dir_creds = crate::network::global().credentials(&reader_dir_transport.scope);
-    assert_ne!(
-        reader_dir_creds.1,
-        crate::network::global().credentials(&reader_id).1
-    );
-    expected.push(reader_dir_creds);
     for record in records.iter() {
         assert_eq!(record.host, "api.example.com");
         assert_eq!(record.address_type, 3);

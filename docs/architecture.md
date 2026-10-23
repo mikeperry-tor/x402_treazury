@@ -96,7 +96,10 @@ bypasses qualification. See [discovery disk caching](configuration.md#automatic-
 `src/network/acquisition.rs` owns the single unsigned origin sequence, including
 fresh Tor scope selection, typed delivery failure and server delays. Static
 catalog/pricing and Coinbase consumers retain their own content acceptance,
-cache/revalidation and publication rules. `src/discovery_relay/` shares one ordered
+cache/revalidation and publication rules. Runtime imports, help and document probes
+use `discovery_relay/document.rs` for complete unsigned acquisition and typed
+failures. Consumer validation promotes only accepted origin content and preserves
+possible fees through cache/registry publication, qualification and cleanup. `src/discovery_relay/` shares one ordered
 method-specific relay traversal with small provider-owned encoders/decoders.
 Bootstrap uses complete pinned local schemas rather than another network fetch.
 It resolves one static wallet per source (or an explicit override); Coinbase uses
@@ -116,7 +119,7 @@ serialization without adding a resource cap. Cache/failure identity includes
 adapter/provider, authored position, payer and request scope. Readiness waits
 consume no network attempt. There is no separate static request counter/backoff.
 Definitive eligible provider/target outcomes may advance through the list once;
-possible paid failure or an unattributable envelope stops. Static uncertainty
+uncertain paid failure or an unattributable envelope stops. Static uncertainty
 disables that provider for the run without disabling independent providers.
 Delivered target errors/truncation may already be billed, and every authorization
 retains its liability. Relayed pricing `402` always terminates; no relayed challenge
@@ -129,6 +132,22 @@ unknown even with `allowed_origins`; missing evidence does not exclude an adapte
 The operator accepts the relay's remote redirect/public-destination enforcement
 and plaintext integrity. Relay TLS does not establish target TLS or content
 authenticity. Target credentials and payment signatures remain excluded.
+
+On-demand document relay calls retain the existing source-bound payer and owner;
+the shared `on_demand` switch accepts legacy `search` on input. Existing help/import
+coalescing includes pinned financial authority and effective document policy.
+Static help pins the actual payer Arc separately from ordinary API payer replacement;
+managed help retains its existing pool Arc across rotation. A possible-paid help
+initialization failure is shared with joined waiters, while a proven unpaid failure
+retains normal explicit retry behavior. Source-add ownership spans fetching through
+validated registry/catalog publication. Revision/removal fences still govern publication.
+
+CLI refresh tries the unsigned origin first. Only a representable eligible relay
+request loads the saved registration owner's selected static key or authenticated
+existing managed store/pool and Base transport. That narrow owner starts no SDK,
+wallet allocation or funding worker; it drains and closes after success or failure.
+Missing document payment authority leaves origin retrieval available. These paths
+create no target-signing or uncertain-outcome replay authority.
 
 Serving binds listeners before starting initial or
 replacement funding, including when a relay payer has no capacity. The dormant

@@ -297,7 +297,7 @@ async fn relay_method_lists_are_inspected_offline_and_every_provider_path_is_pro
         shown["discovery_relay"]["fallbacks"],
         json!({"GET":["missing-first.toml","missing-second.toml"],"HEAD":[],"POST":["missing-post.toml"]})
     );
-    assert_eq!(shown["discovery_relay"]["search"], true);
+    assert_eq!(shown["discovery_relay"]["on_demand"], true);
     assert!(shown["discovery_relay"].get("provider").is_none());
     for provider in [
         "missing-first.toml",
@@ -695,7 +695,7 @@ provider="missing-local-provider.toml"
 "#;
     std::fs::write(&path, text).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
-    assert_eq!(shown["discovery_relay"]["search"], true);
+    assert_eq!(shown["discovery_relay"]["on_demand"], true);
     assert_eq!(shown["discovery_relay"]["serve"], false);
     assert_eq!(shown["discovery_relay"]["warm"], false);
     assert_eq!(shown["discovery_wallets"], json!({}));
@@ -710,7 +710,10 @@ provider="missing-local-provider.toml"
     for setting in ["search=true", "search=false"] {
         std::fs::write(&path, format!("{text}{setting}\n")).unwrap();
         let shown = Deployment::show_config(&path).await.unwrap();
-        assert_eq!(shown["discovery_relay"]["search"], setting == "search=true");
+        assert_eq!(
+            shown["discovery_relay"]["on_demand"],
+            setting == "search=true"
+        );
         // Every configured adapter is validated locally, including when search
         // is disabled. Invalid bootstrap fails before secrets or network work.
         assert!(Deployment::load(&path).await.is_err());
