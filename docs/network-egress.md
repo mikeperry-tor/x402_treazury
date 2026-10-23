@@ -102,6 +102,7 @@ renew another response's inactivity timer or signed authority.
 | `catalog_state.rs` | Lazy help fetch, help URL discovery origin; dynamic bindings retain public-destination policy |
 | `discovery/coinbase.rs` | On-demand unsigned resource search, existing endpoint wallet documentation identity, participating origin retries; optional paid Curl via endpoint payer |
 | `discovery/import.rs` | Agent OpenAPI fetch, discovery origin, public-destination policy |
+| `discovery/source_details.rs` | Unsigned exact usage-document GET or fixed discovery probes, existing source-management documentation identity, public destinations and allowed origins |
 | `payment.rs` | Actual unsigned challenge and paid retry, selected EVM payer |
 | `rotation/base.rs` | Participating read-only RPC: address reads by EVM owner; chain/header reads by RPC discovery origin; validates method results before promotion |
 | `rotation/near.rs` | Metadata by origin; quote and status by immutable request recipient |
@@ -517,6 +518,12 @@ Rules must cover IPv4 and IPv6 and reject destination DNS/UDP egress. Do not ena
 such rules globally on a user's machine as part of an application test.
 
 ## Agent-selected destinations
+
+`source_details(documentation_url=...)` makes exactly one unsigned GET using the
+existing source-management documentation identity and transport. It enforces public
+destinations, `allowed_origins`, help bytes and response-read inactivity; it never
+follows redirects, pays, uses Curl or traverses links. Accepted work survives caller
+cancellation. Separate documentation hosts require independent origin permission.
 
 `source_details` fetches at most one directory listing when given a slug, then
 makes unsigned HEAD requests and bounded GET validations for a

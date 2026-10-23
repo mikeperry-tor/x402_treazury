@@ -631,7 +631,7 @@ Sources and reusable provider TOML files accept these positive byte limits:
 | Setting | Default | Applies to |
 | --- | --- | --- |
 | `max_response_bytes` | 16 MiB (16777216) | API response bodies, including payment challenges and errors |
-| `max_help_bytes` | 4 MiB (4194304) | Lazy help documents |
+| `max_help_bytes` | 4 MiB (4194304) | Lazy help documents and exact source-management usage-document reads |
 | `max_spec_bytes` | 32 MiB (33554432) | Static specs fetched from URLs; local operator-authored files are unaffected |
 
 Standalone CLI flags `--max-response-bytes`, `--max-help-bytes` and
@@ -767,6 +767,15 @@ ordinary potentially paid directory lookup; a base URL skips it. Results retain 
 or rejected API base or unavailable identity prevents probing. Provider HEAD/GET
 probes stay unsigned and use the existing wallet identity and spec/help limits.
 No wallet is allocated or funded for probes.
+
+Alternatively, `source_details(documentation_url=...)` reads one exact public HTTPS
+usage-document URL, allowing a query. This selector is exclusive with slug/base.
+It uses a single unsigned GET with source-management identity, transport,
+`allowed_origins`, help-byte and response-inactivity policy, without payment,
+redirects or Curl. Complete accepted UTF-8 text is returned with caller-supplied
+provenance; failures are visible without partial text. See the
+[document contract](agent-sources.md#listing-and-url-discovery) for accepted MIME
+types and HTML rejection. Reading help grants no execution or payment authority.
 
 `x402_treazury_raw_call` calls any documented public HTTPS x402 API URL without
 registering an OpenAPI catalog. It takes a required HTTP `method`, `url`, optional

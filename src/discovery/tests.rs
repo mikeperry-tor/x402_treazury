@@ -2291,6 +2291,8 @@ async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
     assert!(manager.catalog.read().views["writer"].is_empty());
 }
 
+#[path = "source_details_document_tests.rs"]
+mod source_details_document_tests;
 #[path = "source_details_tests.rs"]
 mod source_details_tests;
 

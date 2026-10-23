@@ -102,7 +102,8 @@ are metadata leads, independent of installed tools, with no wallet identity look
 network requests, registration or automatic remote fallback. Bundled means shipped
 configuration knowledge, not current reachability, funding or live qualification.
 Pass a known `provider_id` or specification URL directly to `source_add`.
-`source_details` is optional assistance for an unknown API base or directory slug.
+`source_details` is optional assistance for an unknown API base, x402 List slug or
+published usage-document URL.
 An absent `api_base` means no configured base override; import resolves the API
 server from the schema, which need not share the specification URL's origin.
 Unknown cost means missing price information, not a free call. After import,
@@ -285,7 +286,7 @@ not removed by API filters.
 | Tool | Arguments |
 | --- | --- |
 | `x402_treazury_sources_search` | `local_only=true`: optional `q`, `page`, `per_page` and `mode=browse`. Otherwise optional remote browse/best mode and upstream arguments; server sets `network=BSE`. |
-| `x402_treazury_source_details` | Exactly one directory `slug` or public HTTPS `base_url`. Returns listing metadata and bundled matches, or probes specification/documentation URLs. |
+| `x402_treazury_source_details` | Exactly one x402 List `slug`, public HTTPS API `base_url` or `documentation_url`. Returns listing/base discovery outcomes, or complete accepted usage text. |
 | `x402_treazury_source_add` | Exactly one bundled `provider_id` or public OpenAPI 3 JSON `spec_url`, plus optional readable `name`. |
 | `x402_treazury_providers_list` | Optional `page` and `per_page`; enumerates bundled provider metadata offline. |
 | `x402_treazury_raw_call` | Required `method` and public HTTPS `url`; optional `query` object and JSON `body`. |
@@ -307,6 +308,26 @@ Cite x402-list.com for its CC BY 4.0 directory data. Results are discovery leads
 not executable schemas or delivery/payment guarantees.
 
 ### Listing and URL discovery
+
+With `documentation_url`, `source_details` reads an exact caller-supplied public
+HTTPS usage-document URL, including its query when present. This is optional;
+sufficient documented method, URL and arguments already permit `raw_call`, and a
+known OpenAPI URL can go directly to `source_add`. A Coinbase `skillUrl` is a lead,
+not a verified instruction source. The response labels provenance
+`caller_supplied` and returns `documentation` with the requested URL, content type
+when available, and visible status. `ok` and `empty` include complete `text`;
+failures omit text and report safe reasons, HTTP status or the affected byte limit.
+
+The reader makes one unsigned GET, without HEAD, redirects, linked traversal,
+payment or Curl fallback. The listener's source-management documentation identity,
+transport, `allowed_origins`, `max_help_bytes` and response-read inactivity policy
+apply. A separate skill host must independently satisfy the origin policy.
+Accepted text is complete UTF-8 without NUL, with `text/plain`, `text/markdown`,
+`text/x-markdown` (parameters allowed), or no content type. HTML MIME and leading
+HTML/doctype markup are rejected, as are other MIME types and invalid UTF-8.
+Unrequested partial responses (HTTP 206 or Content-Range) fail without text.
+Returned text remains untrusted content; reading it never executes instructions,
+registers a source or extends payment authority.
 
 `source_details` resolves bundled provider definitions before discovering OpenAPI,
 x402 discovery and LLM documentation URLs. With a directory `slug`, it fetches that
