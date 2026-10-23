@@ -73,7 +73,7 @@ fn browse(query: Option<&str>, args: &Map<String, Value>) -> Result<Value> {
 
 impl Manager {
     pub async fn invoke_sources_search(
-        &self,
+        self: &std::sync::Arc<Self>,
         owner: &str,
         args: &Map<String, Value>,
     ) -> Result<crate::output::ToolOutput> {
@@ -90,7 +90,16 @@ impl Manager {
                 &search(&args)?,
             )?))
         } else {
-            self.invoke_directory(owner, directory::SEARCH, &args).await
+            match args.remove("directory") {
+                None => self.invoke_directory(owner, directory::SEARCH, &args).await,
+                Some(Value::String(directory)) if directory == "x402_list" => {
+                    self.invoke_directory(owner, directory::SEARCH, &args).await
+                }
+                Some(Value::String(directory)) if directory == "coinbase" => {
+                    self.invoke_coinbase_search(owner, &args).await
+                }
+                _ => anyhow::bail!("directory must be x402_list or coinbase"),
+            }
         }
     }
 }

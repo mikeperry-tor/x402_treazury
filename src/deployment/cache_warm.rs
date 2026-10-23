@@ -106,6 +106,7 @@ pub async fn warm_cache_with_network(
             funding.auto_fund = false;
         }
         let deployment = Deployment {
+            search_relay: None,
             prebound: BTreeMap::new(),
             pending_sources: BTreeMap::new(),
             defer_discovery: false,

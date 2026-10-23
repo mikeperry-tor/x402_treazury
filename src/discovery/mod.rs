@@ -1,4 +1,5 @@
 //! Operator-authorized source registration; all paid work stays in the common dispatcher.
+mod coinbase;
 mod curated;
 mod directory;
 mod import;
@@ -102,10 +103,13 @@ pub struct Manager {
     #[cfg(test)]
     fixture_directory: Mutex<Option<String>>,
     #[cfg(test)]
+    fixture_coinbase: Mutex<Option<String>>,
+    #[cfg(test)]
     fail_after_commit: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     crash_after_commit: std::sync::atomic::AtomicBool,
     pub policy: policy::Policy,
+    search_relay: Option<Arc<crate::discovery_relay::SearchRelay>>,
     listeners: BTreeMap<String, ListenerConfig>,
     payers: BTreeMap<String, PaidClient>,
     catalog: Arc<CatalogState>,
@@ -222,6 +226,16 @@ impl Manager {
         catalog: Arc<CatalogState>,
         protected: Vec<PathBuf>,
     ) -> Result<Arc<Self>> {
+        Self::new_with_search(policy, listeners, payers, catalog, protected, None).await
+    }
+    pub(crate) async fn new_with_search(
+        policy: policy::Policy,
+        listeners: BTreeMap<String, ListenerConfig>,
+        payers: BTreeMap<String, PaidClient>,
+        catalog: Arc<CatalogState>,
+        protected: Vec<PathBuf>,
+        search_relay: Option<Arc<crate::discovery_relay::SearchRelay>>,
+    ) -> Result<Arc<Self>> {
         let file = policy.registry_file.clone();
         let (store, state) = tokio::task::spawn_blocking(move || -> Result<_> {
             let store = file
@@ -245,12 +259,15 @@ impl Manager {
             #[cfg(test)]
             fixture_directory: Mutex::new(None),
             #[cfg(test)]
+            fixture_coinbase: Mutex::new(None),
+            #[cfg(test)]
             fail_after_commit: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             commit_barrier: Mutex::new(None),
             #[cfg(test)]
             crash_after_commit: std::sync::atomic::AtomicBool::new(false),
             policy,
+            search_relay,
             listeners,
             payers,
             inner: Mutex::new(Inner {

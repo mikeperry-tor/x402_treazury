@@ -22,6 +22,9 @@ pub struct Policy {
     pub serve: bool,
     #[serde(default)]
     pub warm: bool,
+    /// Allow uncached Coinbase search fallback with the authenticated endpoint payer.
+    #[serde(default)]
+    pub search: bool,
     /// Empty means all authored sources.
     #[serde(default)]
     pub sources: Vec<String>,
@@ -271,16 +274,19 @@ impl Response {
         self.delay.saturating_add(self.received.elapsed())
     }
 }
-impl Relay {
-    pub async fn new(policy: &Policy, path: &Path, client: PaidClient) -> Result<Arc<Self>> {
-        Self::new_scoped(policy, path, client, Arc::default()).await
+/// Immutable local relay bootstrap shared by static acquisition and live search.
+/// Search deliberately owns no URL cache, breaker, readiness queue or mutable state.
+#[derive(Clone)]
+pub(crate) struct SearchRelay {
+    endpoint: String,
+    cfg: Config,
+}
+impl SearchRelay {
+    #[cfg(test)]
+    pub(crate) fn fixture(endpoint: String, cfg: Config) -> Self {
+        Self { endpoint, cfg }
     }
-    async fn new_scoped(
-        policy: &Policy,
-        path: &Path,
-        client: PaidClient,
-        state: Arc<tokio::sync::Mutex<State>>,
-    ) -> Result<Arc<Self>> {
+    pub(crate) async fn load(policy: &Policy, path: &Path) -> Result<Self> {
         let provider = if policy.provider.is_absolute() {
             policy.provider.clone()
         } else {
@@ -308,11 +314,77 @@ impl Relay {
             .as_deref()
             .context("discovery relay requires base_url")?;
         let endpoint = format!("{}/curl", base.trim_end_matches('/'));
-        let url = reqwest::Url::parse(&endpoint)?;
-        ensure!(
-            url.scheme() == "https" && url.username().is_empty() && url.password().is_none(),
-            "discovery relay requires public HTTPS without credentials"
-        );
+        crate::network::public_url(&endpoint)?;
+        Ok(Self { endpoint, cfg })
+    }
+
+    pub(crate) async fn fetch(
+        &self,
+        client: PaidClient,
+        url: &str,
+        policy: &crate::discovery::policy::Policy,
+    ) -> Result<Vec<u8>> {
+        // The target has already passed the source-management origin policy.
+        crate::network::public_url(url)?;
+        let client = client
+            .with_source_identity("builtin:coinbase-search-relay")
+            .with_transport(self.cfg.transport())
+            .with_timeout(
+                policy
+                    .read_timeout_seconds
+                    .map(std::time::Duration::from_secs)
+                    .or_else(|| {
+                        self.cfg
+                            .read_timeout_seconds
+                            .map(std::time::Duration::from_secs_f64)
+                    }),
+            )
+            .with_download_limits(policy.max_response_bytes, policy.max_help_bytes)
+            .public_destinations();
+        let progress = crate::payment::SubmissionProgress::default();
+        let started = Instant::now();
+        let output = client.execute_response_scoped(
+            RoutedRequest {
+                method: "POST".into(), url: self.endpoint.clone(),
+                query: BTreeMap::new(),
+                body: Some(serde_json::json!({"url":url,"method":"GET"})),
+            },
+            &progress,
+            client.operation_key(None, "POST", "/curl", &self.endpoint),
+        ).await.map_err(|error| {
+            let reason = if let Some(limit) = error.downcast_ref::<crate::limits::DownloadLimit>() {
+                limit.to_string()
+            } else { RelayFailure::from_error(&error).to_string() };
+            anyhow::anyhow!("coinbase_search stage=relay relay=failed {reason}; payment_may_have_occurred={}; do not automatically repeat the search", progress.possible())
+        })?;
+        decode(&output.bytes, url, 200, policy.max_response_bytes,
+            "max_response_bytes", started.elapsed())
+            .and_then(|response| {
+                ensure!(
+                    !response.headers.contains_key(reqwest::header::CONTENT_RANGE),
+                    "coinbase_search relay partial_response"
+                );
+                Ok(response.body)
+            })
+            .map_err(|error| {
+                let reason = if let Some(limit) = error.downcast_ref::<crate::limits::DownloadLimit>() {
+                    limit.to_string()
+                } else { "response_rejected".into() };
+                anyhow::anyhow!("coinbase_search stage=relay category={reason} relay=failed; payment may have occurred; do not automatically repeat the search")
+            })
+    }
+}
+impl Relay {
+    pub async fn new(policy: &Policy, path: &Path, client: PaidClient) -> Result<Arc<Self>> {
+        Self::new_scoped(policy, path, client, Arc::default()).await
+    }
+    async fn new_scoped(
+        policy: &Policy,
+        path: &Path,
+        client: PaidClient,
+        state: Arc<tokio::sync::Mutex<State>>,
+    ) -> Result<Arc<Self>> {
+        let SearchRelay { endpoint, cfg } = SearchRelay::load(policy, path).await?;
         // Enablement and source selection gate access, but do not change the
         // representation: warming must remain reusable after changing those flags.
         let key = serde_json::to_string(&(

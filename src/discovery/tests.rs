@@ -1,4 +1,6 @@
 use super::*;
+#[path = "coinbase_network_tests.rs"]
+mod coinbase_network_tests;
 use crate::mcp_wire::McpResponse;
 use crate::{
     payment::{Payer, SpendPolicy},
@@ -1866,7 +1868,7 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
     for branch in schema["oneOf"].as_array().unwrap() {
         assert!(branch["properties"].get("network").is_none());
     }
-    assert_eq!(schema["properties"]["mode"]["default"], "browse");
+    assert!(schema["properties"]["mode"].get("default").is_none());
     assert_eq!(schema["oneOf"][0]["properties"]["mode"]["const"], "browse");
     assert!(schema["oneOf"][0]["properties"].get("limit").is_none());
     assert_eq!(schema["oneOf"][1]["required"], json!(["mode"]));
@@ -1900,7 +1902,13 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
                     .contains(original_description)
             );
             merged["description"] = field["description"].clone();
-            assert_eq!(merged, *field, "{path} {name}: schema constraint changed");
+            let mut expected = field.clone();
+            expected.as_object_mut().unwrap().remove("default");
+            if name == "max_price_usd" {
+                assert_eq!(merged["type"], json!(["number", "string"]));
+                merged["type"] = json!("number");
+            }
+            assert_eq!(merged, expected, "{path} {name}: schema constraint changed");
         }
     }
     task.abort();

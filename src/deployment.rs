@@ -127,6 +127,7 @@ pub struct InventoryTool {
 }
 pub struct Deployment {
     prebound: BTreeMap<String, TcpListener>,
+    search_relay: Option<std::sync::Arc<crate::discovery_relay::SearchRelay>>,
     unavailable_sources: BTreeMap<String, String>,
     pending_sources: BTreeMap<String, startup::PendingSource>,
     defer_discovery: bool,
@@ -402,6 +403,7 @@ impl Deployment {
         let discovery_wallets = config
             .discovery_relay
             .as_ref()
+            .filter(|policy| policy.serve || policy.warm)
             .map(|policy| {
                 crate::discovery_relay::resolve_wallets(
                     policy,
@@ -582,8 +584,15 @@ impl Deployment {
             t.resolve(path);
         }
         crate::discovery::policy::validate_registry_path(&config, path)?;
+        let search_relay = match config.discovery_relay.as_ref().filter(|p| p.search) {
+            Some(policy) => Some(std::sync::Arc::new(
+                crate::discovery_relay::SearchRelay::load(policy, path).await?,
+            )),
+            None => None,
+        };
         let mut deployment = Self {
             prebound: BTreeMap::new(),
+            search_relay,
             unavailable_sources: BTreeMap::new(),
             pending_sources: BTreeMap::new(),
             defer_discovery: relay_env.is_some()
@@ -1387,12 +1396,13 @@ impl Deployment {
         let protected = crate::discovery::policy::protected_paths(&self.config, &self.config_path);
         let manager = if let Some(policy) = self.config.source_management.clone() {
             Some(
-                crate::discovery::Manager::new(
+                crate::discovery::Manager::new_with_search(
                     policy,
                     self.config.servers.clone(),
                     wallets,
                     catalog.clone(),
                     protected,
+                    self.search_relay.clone(),
                 )
                 .await?,
             )

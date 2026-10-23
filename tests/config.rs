@@ -629,3 +629,61 @@ async fn provider_description_inherits_and_replaces_with_field_origins() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn search_relay_opt_in_is_separate_from_static_bindings_and_wallet_selection() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deployment.toml");
+    let text = r#"version=1
+[wallets.payer]
+mode="static"
+private_key_env="UNUSED_PUBLIC_TEST_KEY"
+[source_management]
+wallet="payer"
+[servers.tools]
+listen="127.0.0.1:0"
+bearer_token_env="UNUSED_TEST_TOKEN"
+source_management=true
+sources=[]
+[discovery_relay]
+provider="missing-local-provider.toml"
+search=true
+"#;
+    std::fs::write(&path, text).unwrap();
+    let shown = Deployment::show_config(&path).await.unwrap();
+    assert_eq!(shown["discovery_relay"]["search"], true);
+    assert_eq!(shown["discovery_relay"]["serve"], false);
+    assert_eq!(shown["discovery_relay"]["warm"], false);
+    assert_eq!(shown["discovery_wallets"], json!({}));
+    assert_eq!(
+        shown["source_management"]["wallet_bindings"]["tools"],
+        "payer"
+    );
+    // Config-only inspection never loads the relay catalog or wallet key; strict
+    // loading validates local bootstrap configuration before serving can use it.
+    assert!(Deployment::load(&path).await.is_err());
+    assert!(!dir.path().join("state").exists());
+    let provider = format!(
+        "spec={:?}\nbase_url='https://spec.example.com'\nprobe_pricing=false\n",
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/openapi.json")
+    );
+    std::fs::write(dir.path().join("relay.toml"), provider).unwrap();
+    std::fs::write(
+        &path,
+        text.replace("missing-local-provider.toml", "relay.toml"),
+    )
+    .unwrap();
+    let loaded = Deployment::load(&path).await.unwrap();
+    let bound = loaded
+        .bind(&std::collections::BTreeMap::from([
+            ("UNUSED_PUBLIC_TEST_KEY".into(), format!("{:064x}", 1)),
+            ("UNUSED_TEST_TOKEN".into(), "fixture-token".into()),
+        ]))
+        .await
+        .unwrap();
+    assert_eq!(bound.addresses().len(), 1);
+    drop(bound);
+    assert!(!dir.path().join("state").exists());
+    std::fs::write(&path, text.replace("search=true", "search=\"yes\"")).unwrap();
+    assert!(Deployment::show_config(&path).await.is_err());
+}

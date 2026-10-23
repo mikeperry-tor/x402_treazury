@@ -1258,8 +1258,35 @@ provider = "../../providers/curl/provider.toml" # relative to this deployment fi
 # wallet = "web" # optional override; otherwise choose from each source's bindings
 serve = true   # allow paid fallback during serving startup; defaults false
 warm = true    # allow paid fallback during catalog warm; defaults false
+search = false # opt in separately for live Coinbase resource search
 # sources = ["social"] # optional authored source IDs; omitted/empty selects all
 ```
+
+`search=true` independently enables runtime Coinbase search fallback for
+source-management listeners. It does not enable serve/warm, select static sources,
+prepare wallets or start funding. Search always uses the authenticated endpoint's
+source-management payer; `wallet` and `sources` here apply only to static
+catalog/pricing relay work. `config show` exposes the flag and the existing
+`source_management.wallet_bindings`; `discovery_wallets` covers enabled static
+serve/warm work. Config-only inspection does not load relay catalogs; strict
+loading validates the local search-relay bootstrap before it can be used.
+
+Runtime searches retain no catalog response cache, sticky target failure, global
+relay breaker or readiness queue. Public origin requests never wait for relay
+funding. Each fallback is an ordinary retained paid workflow, including authorized
+insufficient-funds wallet traversal; an ambiguous signed outcome cannot trigger
+another workflow. Repeated searches are fresh and can authorize new payments.
+Existing static catalog/pricing caching and failure behavior remain unchanged.
+
+For runtime search, source-management `max_response_bytes` governs both the paid
+outer envelope and decoded target. Its read-inactivity setting overrides the relay
+provider value, otherwise provider then network applies; the relay provider's
+transport compatibility settings apply to the Curl leg. Public Coinbase origin
+reads use source-management transport/inactivity policy. Coinbase targets must
+satisfy `allowed_origins`; Curl's separately configured public HTTPS endpoint does
+not extend that target allowlist or need its own entry there. Neither leg follows
+redirects as a successful result, and a local target-policy or body-bound rejection
+cannot authorize paid fallback. Search result provenance discloses Curl content.
 
 The relay provider must have a local bootstrap catalog exposing `POST /curl` and
 an HTTPS `base_url`. The bundled provider pins the vendor schema and advertises

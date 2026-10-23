@@ -109,7 +109,8 @@ Unknown cost means missing price information, not a free call. After import,
 optional advertised provider help may explain prices and request contracts before
 calling; neither registration nor help establishes paid-delivery qualification.
 
-With `local_only` false or omitted, `x402_treazury_sources_search` searches x402 List
+With `local_only` false or omitted and `directory` omitted or `x402_list`,
+`x402_treazury_sources_search` searches x402 List
 rather than the endpoint's loaded tools. The local selector is stripped before
 remote dispatch. Matching is performed upstream: `mode=browse` (default) uses
 case-insensitive
@@ -121,6 +122,59 @@ multiword query that works in `tools_search` may therefore need fewer keywords i
 directory browse mode. Each invocation dispatches one selected directory request;
 it does not crawl the directory or build a local index. Directory reads share an
 IP-level free quota and can require payment through normal payment admission.
+
+### Coinbase curated resource search
+
+Select `directory="coinbase"` for ranked resource search, optionally using `q`.
+Omitted mode or `mode="best"` selects this search; `browse`, page/per-page/cursor
+arguments and x402 List-only filters reject before I/O. Mode defaults are
+branch-specific: local and x402 List omission still means browse. There is no
+search federation or automatic directory fallback. `curated_only` defaults true;
+false includes non-curated matches. `limit` defaults to 20 and accepts 1–20, an
+upstream constraint rather than a local pagination limit.
+
+Coinbase accepts optional `tags` (up to five, case-sensitive OR), known
+`bundle_slugs` (up to five, OR), `extensions`, `pay_to` and `url_substring`.
+`q` accepts at most 400 Unicode characters. `max_price_usd` is a USD-price string
+such as `"0.05"` in this branch; x402 List best retains its nonnegative numeric
+price argument. Coinbase validates price-string syntax. The server supplies Base
+mainnet USDC/exact payment filters; callers cannot select networks/assets/schemes
+or a payer. All returned offers remain intact. Filters and prices are advisory,
+not evidence of spendability or useful delivery. A known bundle slug is only a
+search filter: bundle list/detail and authenticated CDP access are not exposed.
+
+The response contains `directory="coinbase"`, `acquisition.via` (`origin` or
+`curl`), `response` (the complete upstream object) and guidance. It preserves
+exact URLs, methods, Bazaar metadata, offers, skill links, unknown fields and
+missing contracts without normalizing resources into services. `partialResults`
+remains upstream metadata, with no invented totals or continuations. Empty or
+partial results do not prove absence and never trigger a paid fallback. HTTP
+responses marked with Content-Range fail the complete-response contract; a rejected
+origin response may use the explicitly enabled fallback, while a rejected relayed
+response fails without automatic paid replay. HTTP
+examples and a Bazaar envelope schema are not invented request argument schemas.
+Documented HTTP requests may go straight to `raw_call`; known OpenAPI URLs go to
+`source_add`. MCP/unknown protocols remain metadata only.
+
+Public Coinbase reads are unsigned, using an existing endpoint wallet's
+documentation identity without allocation, funding or observation. Missing
+identity fails that request. Under Tor they use one origin attempt plus up to two
+eligible fresh-isolation retries, with the shared eligibility and `Retry-After`
+policy, including the terminal delay before fallback. Direct mode uses one
+origin attempt. Only complete valid search JSON may promote an origin scope.
+
+`[discovery_relay].search=true` separately enables paid Curl fallback after origin
+failure. Each search fetches fresh results; it inherits no catalog URL cache,
+sticky failure, readiness queue or shared breaker. The relay uses this listener's
+source-management payer, regardless of the static relay wallet override; ordinary
+payment admission, journaling and insufficient-funds traversal still apply.
+Each authorization may charge, and uncertain paid failure grants no automatic
+replay. The client connection to Curl retains its configured direct/Tor policy;
+Curl sees the query URL, reaches Coinbase from its own network and supplies target
+content/status/headers. Origin failures and relay failures remain request-scoped.
+See [relay configuration](configuration.md#paid-discovery-relay) for opt-in,
+settings precedence and trust. Local input/origin/identity/download-limit failures
+never authorize relay spending. No Coinbase challenge is signed.
 
 ## Endpoint instruction placement
 

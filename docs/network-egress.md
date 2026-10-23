@@ -100,6 +100,7 @@ renew another response's inactivity timer or signed authority.
 | `main.rs`, `deployment.rs`, `catalog.rs` | Spec fetch, participating discovery origin (up to 3 Tor attempts; promotes on valid JSON or 304) |
 | `pricing.rs` | Startup-only unsigned GET probe, participating discovery origin (up to 3 Tor attempts; promotes on usable 402 or 2xx); successes/failures remain cached |
 | `catalog_state.rs` | Lazy help fetch, help URL discovery origin; dynamic bindings retain public-destination policy |
+| `discovery/coinbase.rs` | On-demand unsigned resource search, existing endpoint wallet documentation identity, participating origin retries; optional paid Curl via endpoint payer |
 | `discovery/import.rs` | Agent OpenAPI fetch, discovery origin, public-destination policy |
 | `payment.rs` | Actual unsigned challenge and paid retry, selected EVM payer |
 | `rotation/base.rs` | Participating read-only RPC: address reads by EVM owner; chain/header reads by RPC discovery origin; validates method results before promotion |
@@ -124,6 +125,25 @@ lookup; invalid completed facts can still retain exact local bytes. Do not guess
 identity from current pool roles.
 
 ## Paid discovery relay
+
+Coinbase runtime resource search uses an existing endpoint source-management
+wallet's documentation identity for unsigned origin reads. It shares participating
+HTTP attempt selection, eligibility, complete-body transport recovery,
+`Retry-After` and conditional validated promotion: initial plus at most two fresh
+Tor scopes, or one origin attempt in direct mode. Successful empty/partial
+results never fall back. Complete invalid JSON does not earn an isolation retry;
+local policy, identity and download-limit failures cannot trigger paid relay work.
+
+The independent `[discovery_relay].search` opt-in permits an uncached Curl workflow
+with the authenticated endpoint payer, using ordinary payment and cancellation
+ownership. It bypasses static relay wallet resolution, URL caches, readiness
+queues and shared stopped state. It adds no retry loop or automatic signed replay.
+The terminal origin `Retry-After` is honored before Curl. Relay content never
+promotes the Coinbase scope. Source-management response bounds govern outer and
+decoded bodies; inactivity precedence is source-management, relay provider, network
+for the Curl leg. All constructors remain in `src/network.rs`. Curl uses its own
+network for the target, and target content/status integrity is trusted to Curl.
+
 
 An optional deployment `[discovery_relay]` uses source-assigned wallets by default for
 Curl HTTP Request fallback; an explicit wallet can override this. Shared sources
@@ -610,7 +630,7 @@ financial or qualification authority.
 | --- | --- |
 | Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote directory browse retains upstream maximum 100. Follow continuations for complete inventories. |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
-| Participating Tor HTTP scope retries: up to 3 attempts total (`1` selected + `2` candidates); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery and `PaidClient` unsigned API/directory/raw stages (internal discovery relay calls remain `SelectionPolicy::Legacy`; Base read-only RPC also participates). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
+| Participating Tor HTTP scope retries: up to 3 attempts total (`1` selected + `2` candidates); `Retry-After` on `429`/`503` | Enrolled for static catalog/pricing discovery, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static catalog/pricing relay calls remain `SelectionPolicy::Legacy`; Base read-only RPC also participates). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
 | HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP uses explicit source-management override, then accepted provider value, then network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
 | Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |

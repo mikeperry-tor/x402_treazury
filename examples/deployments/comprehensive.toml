@@ -39,6 +39,8 @@ read_timeout_seconds = 60
 # Curl receives target URLs; connections retain wallet-bound Tor isolation.
 # A failure/cancellation disables further relay calls across all wallets this run.
 [discovery_relay]
+# Separate opt-in for runtime Coinbase search fallback; uses the listener payer.
+search = false
 provider = "../../providers/curl/provider.toml"
 serve = true
 warm = true
