@@ -115,7 +115,7 @@ async fn run() -> Result<()> {
         }) => {
             let policy = network_config
                 .as_deref()
-                .map(x402_treazury::network::NetworkPolicy::load)
+                .map(x402_treazury::network::NetworkConfig::load)
                 .transpose()?;
             return x402_treazury::discovery::maintain_cli_with_network(
                 &config,
@@ -137,7 +137,7 @@ async fn run() -> Result<()> {
             let policy = args
                 .network_config
                 .as_deref()
-                .map(x402_treazury::network::NetworkPolicy::load)
+                .map(x402_treazury::network::NetworkConfig::load)
                 .transpose()?;
             let summary = x402_treazury::deployment::warm_cache_with_network(
                 &args.config,
@@ -179,7 +179,7 @@ async fn run() -> Result<()> {
     let network_override = args
         .network_config
         .as_deref()
-        .map(x402_treazury::network::NetworkPolicy::load)
+        .map(x402_treazury::network::NetworkConfig::load)
         .transpose()?;
     if args.show_config {
         return show_config(&args, network_override.as_ref()).await;
@@ -187,7 +187,7 @@ async fn run() -> Result<()> {
     if args.meta_config.is_none()
         && let Some(policy) = &network_override
     {
-        x402_treazury::network::install(policy.clone())?;
+        x402_treazury::network::install(policy.network.clone())?;
     }
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     if let Some(path) = &args.env_file {
@@ -445,7 +445,7 @@ fn validate_meta_arguments(
 
 async fn show_config(
     args: &Args,
-    network_override: Option<&x402_treazury::network::NetworkPolicy>,
+    network_override: Option<&x402_treazury::network::NetworkConfig>,
 ) -> Result<()> {
     let mut value = if let Some(path) = &args.meta_config {
         x402_treazury::deployment::Deployment::show_config_with_network(path, network_override)
@@ -458,7 +458,11 @@ async fn show_config(
         serde_json::to_value(x402_treazury::config::load(std::path::Path::new(path)).await?)?
     };
     if args.meta_config.is_none() {
-        value["network"] = network_override.cloned().unwrap_or_default().inspection();
+        value["network"] = network_override
+            .map(|config| &config.network)
+            .cloned()
+            .unwrap_or_default()
+            .inspection();
     }
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
@@ -468,7 +472,7 @@ async fn run_deployment(
     args: &Args,
     env: &BTreeMap<String, String>,
     path: &std::path::Path,
-    network_override: Option<&x402_treazury::network::NetworkPolicy>,
+    network_override: Option<&x402_treazury::network::NetworkConfig>,
 ) -> Result<()> {
     let mut parent =
         x402_treazury::supervision::Parent::from_stdin(args.qualification_parent_stdin)?;
@@ -544,7 +548,7 @@ async fn load_deployment(
     args: &Args,
     env: &BTreeMap<String, String>,
     path: &std::path::Path,
-    network_override: Option<&x402_treazury::network::NetworkPolicy>,
+    network_override: Option<&x402_treazury::network::NetworkConfig>,
 ) -> Result<x402_treazury::deployment::Deployment> {
     if args.list_tags || args.list_tools || args.check || args.qualification_snapshot {
         x402_treazury::deployment::Deployment::load_for_inspection_with_network(

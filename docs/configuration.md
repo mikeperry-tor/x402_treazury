@@ -39,9 +39,13 @@ reads saved observations without network traffic. See the
 [CLI output and discovery scope](wallet-cli.md#one-configuration-for-wallet-commands).
 `--meta-config` remains a deployment alias. `--provider FILE` selects a reusable
 provider for standalone serving and catalog inspection. `--network-config FILE`
-selects a network-only file for either standalone or deployment commands. It
+selects a file containing `[network]` and optionally `[discovery_relay]`. It
 replaces the complete deployment `[network]` section for that invocation; omitted
-fields use network defaults rather than inheriting deployment values. Other
+fields use network defaults rather than inheriting deployment values. A supplied
+relay section replaces the complete deployment relay section; an omitted section
+preserves the deployment relay. Its `provider` path resolves relative to the file
+that declares it. Relay settings apply to deployment discovery; standalone provider
+and wallet commands accept the same file without loading relay providers. Other
 standalone provider options still cannot be combined with `--config`.
 
 Ordinary deployment examples live in `examples/deployments/`, reusable network policies in
@@ -930,7 +934,7 @@ only `read_timeout_seconds` in new configs. For old provider configs containing
 both timeout fields, `timeout` takes precedence. The bundled comprehensive example now
 uses 60 seconds; user-owned local configs retain their existing explicit values.
 
-For deployment, standalone or wallet commands, use the same table in a separate file:
+For deployment, standalone or wallet commands, use a separate network file:
 
 ```sh
 x402_treazury catalog tools --provider providers/socialfetch.toml \
@@ -941,9 +945,13 @@ x402_treazury wallet init --state-dir state/public-demo \
 
 Paths above assume the repository root as the current directory. Deployment commands,
 including wallet commands, use their embedded policy unless `--network-config` is
-provided. The external file replaces the entire policy before validation or client
-creation; it does not rewrite the deployment or change wallet identities. This also
-applies to `catalog warm` and `sources refresh`. `catalog warm --direct` retains its
+provided. The external file replaces the entire network policy and any supplied
+relay section before validation or client creation; it does not rewrite the
+deployment or change wallet identities. This also applies to `catalog warm` and
+`sources refresh`. `examples/network/tor.toml` enables paid Curl fallback for
+deployment catalog/pricing discovery and Coinbase search. Standalone provider and
+wallet commands use only the transport policy and never load the relay provider.
+`catalog warm --direct` retains its
 explicit direct-fetch behavior even when a network override is supplied.
 Qualification snapshots, bound/supervised serving and supervised wallet sync keep
 the policy in their pinned deployment and reject an external override; select the
@@ -1249,7 +1257,8 @@ or extend lifetimes. A failed multi-source warm can leave completed disposable e
 
 #### Paid discovery relay
 
-A deployment can opt into Curl HTTP Request as a fallback for catalog and pricing
+A deployment can opt into Curl HTTP Request, in its own configuration or through
+`--network-config`, as a fallback for catalog and pricing
 GETs that fail, including HTTP errors, timeouts, connection resets, body/parse errors,
 and missing or unusable pricing headers on a 402 response. Successful 2xx pricing
 responses leave the price unknown and do not trigger paid fallback: no payment

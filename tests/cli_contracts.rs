@@ -1128,6 +1128,152 @@ async fn deployment_network_override_replaces_policy_without_inspection_io() {
 }
 
 #[tokio::test]
+async fn network_override_replaces_relay_at_its_declaration_without_inspection_io() {
+    let dir = tempfile::tempdir().unwrap();
+    network_override_fixture(
+        dir.path(),
+        "[discovery_relay]\nprovider='embedded-missing.toml'\nwallet='shared'\nsources=['api']\nserve=true\nwarm=true\nsearch=false\n",
+    );
+    let external = dir.path().join("network");
+    std::fs::create_dir(&external).unwrap();
+    std::fs::write(
+        external.join("tor.toml"),
+        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n[discovery_relay]\nprovider='external-missing.toml'\n",
+    )
+    .unwrap();
+    let args = [
+        "config",
+        "show",
+        "--config",
+        "deployment.toml",
+        "--network-config",
+        "network/tor.toml",
+    ];
+    let shown = good(run(dir.path(), &args, &[]).await);
+    assert_eq!(shown["network"]["mode"], "tor");
+    assert_eq!(
+        shown["discovery_relay"],
+        json!({
+            "provider": external.canonicalize().unwrap().join("external-missing.toml"),
+            "wallet": null,
+            "sources": [],
+            "serve": false,
+            "warm": false,
+            "search": true
+        })
+    );
+    assert_eq!(shown["discovery_wallets"], json!({}));
+
+    // Both serving and warming validate the selected relay against the
+    // deployment before loading providers, keys or state. Ignoring the external
+    // section would instead use the valid embedded wallet binding.
+    std::fs::write(
+        external.join("tor.toml"),
+        "[network]\nmode='direct'\n[discovery_relay]\nprovider='external-missing.toml'\nwallet='undeclared-network-relay-wallet'\nserve=true\nwarm=true\n",
+    )
+    .unwrap();
+    for command in [vec!["serve"], vec!["catalog", "warm"]] {
+        let mut command = command;
+        command.extend([
+            "--config",
+            "deployment.toml",
+            "--network-config",
+            "network/tor.toml",
+        ]);
+        assert!(
+            bad(run(dir.path(), &command, &[]).await)
+                .contains("discovery_relay.wallet must name a declared wallet")
+        );
+    }
+
+    // A transport-only override preserves the entire deployment relay and its
+    // deployment-relative provider path rather than rebasing it to network/.
+    std::fs::write(external.join("tor.toml"), "[network]\nmode='direct'\n").unwrap();
+    let preserved = good(run(dir.path(), &args, &[]).await);
+    let embedded = good(
+        run(
+            dir.path(),
+            &["config", "show", "--config", "deployment.toml"],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(preserved["discovery_relay"], embedded["discovery_relay"]);
+    assert_eq!(
+        preserved["discovery_relay"]["provider"],
+        "embedded-missing.toml"
+    );
+    assert_eq!(preserved["discovery_wallets"], json!({"api":"shared"}));
+    assert!(!dir.path().join("embedded-missing.toml").exists());
+    assert!(!external.join("external-missing.toml").exists());
+    assert!(!dir.path().join("state").exists());
+}
+
+#[tokio::test]
+async fn network_override_relay_file_is_reusable_by_offline_standalone_and_wallet_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("network.toml"),
+        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n[discovery_relay]\nprovider='missing-relay.toml'\nwallet='deployment-only'\nsources=['deployment-only']\nserve=true\nwarm=true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='https://catalog.invalid/missing.json'\nbase_url='https://api.example.com'\n",
+    )
+    .unwrap();
+    let shown = good(
+        run(
+            dir.path(),
+            &[
+                "config",
+                "show",
+                "--provider",
+                "provider.toml",
+                "--network-config",
+                "network.toml",
+            ],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(shown["network"]["mode"], "tor");
+    assert!(shown.get("discovery_relay").is_none());
+    assert!(!dir.path().join("state").exists());
+
+    let store = Store::create(
+        &dir.path().join("wallet-state"),
+        &dir.path().join("wallet.key"),
+        1,
+        b"synthetic snapshot",
+    )
+    .unwrap();
+    let treasury_id = store.id().to_owned();
+    drop(store);
+    let status = good(
+        run(
+            dir.path(),
+            &[
+                "wallet",
+                "status",
+                "--json",
+                "--state-dir",
+                "wallet-state",
+                "--key-file",
+                "wallet.key",
+                "--network-config",
+                "network.toml",
+            ],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(status["treasury_id"], treasury_id);
+    assert!(!dir.path().join("missing-relay.toml").exists());
+    assert!(!dir.path().join("state").exists());
+}
+
+#[tokio::test]
 async fn network_override_routes_catalog_warming_and_serving_through_the_selected_proxy() {
     use std::{collections::BTreeMap, sync::atomic::Ordering};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1259,6 +1405,28 @@ async fn network_override_routes_catalog_warming_and_serving_through_the_selecte
 async fn invalid_network_overrides_and_unpinned_qualification_fail_before_side_effects() {
     let dir = tempfile::tempdir().unwrap();
     network_override_fixture(dir.path(), "");
+    for invalid in [
+        "[network]\nmode='direct'\n[unrelated]\nenabled=true\n",
+        "[network]\nmode='direct'\n[discovery_relay]\nprovider='missing.toml'\nserrve=true\n",
+    ] {
+        std::fs::write(dir.path().join("invalid.toml"), invalid).unwrap();
+        assert!(
+            bad(run(
+                dir.path(),
+                &[
+                    "config",
+                    "show",
+                    "--config",
+                    "deployment.toml",
+                    "--network-config",
+                    "invalid.toml",
+                ],
+                &[],
+            )
+            .await)
+            .contains("unknown field")
+        );
+    }
     std::fs::write(
         dir.path().join("invalid.toml"),
         "[network]\nmode='tor'\nsocks_endpoint='1.1.1.1:9150'\n",

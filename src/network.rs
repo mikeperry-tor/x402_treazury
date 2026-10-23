@@ -113,16 +113,30 @@ impl NetworkPolicy {
         serde_json::json!({"cover_traffic_enabled":self.cover_enabled(),"cover_limits":self.cover_limits,"mode":self.mode,"socks_endpoint":self.socks_endpoint,"isolation_namespace":self.namespace(),"socks_auth":self.socks_auth.as_ref().unwrap_or(&SocksAuth::TorExtended),"connect_timeout_seconds":self.connect_timeout().as_secs(),"read_timeout_seconds":self.read_timeout_seconds.unwrap_or(60),"identity_scopes":["evm_address","treasury_uuid","discovery_origin","bootstrap_invocation"]})
     }
     pub fn load(path: &Path) -> Result<Self> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct File {
-            network: NetworkPolicy,
-        }
-        let file: File =
+        Ok(NetworkConfig::load(path)?.network)
+    }
+}
+/// Invocation-local transport and optional deployment discovery-relay overrides.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkConfig {
+    pub network: NetworkPolicy,
+    pub discovery_relay: Option<crate::discovery_relay::Policy>,
+}
+impl NetworkConfig {
+    pub fn load(path: &Path) -> Result<Self> {
+        let mut file: Self =
             toml::from_str(&std::fs::read_to_string(path).context("reading network config")?)
                 .context("invalid network config")?;
         file.network.validate()?;
-        Ok(file.network)
+        if let Some(relay) = &mut file.discovery_relay {
+            relay.provider = std::path::absolute(
+                path.parent()
+                    .unwrap_or(Path::new("."))
+                    .join(&relay.provider),
+            )?;
+        }
+        Ok(file)
     }
 }
 /// Canonical, domain-separated identity. Never contains signing keys or API credentials.

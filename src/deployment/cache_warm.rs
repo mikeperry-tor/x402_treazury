@@ -30,7 +30,7 @@ pub async fn warm_cache_with_network(
     selected: &[String],
     direct: bool,
     discover_pricing: bool,
-    network_override: Option<&crate::network::NetworkPolicy>,
+    network_override: Option<&crate::network::NetworkConfig>,
 ) -> Result<CacheWarmSummary> {
     ensure!(
         !crate::qualification::active() && !catalog_evidence::collecting(),

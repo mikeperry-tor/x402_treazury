@@ -921,7 +921,7 @@ pub async fn maintain_cli_with_network(
     owner: &str,
     source_id: &str,
     refresh: bool,
-    network_override: Option<&crate::network::NetworkPolicy>,
+    network_override: Option<&crate::network::NetworkConfig>,
 ) -> Result<()> {
     crate::deployment::Deployment::show_config_with_network(path, network_override).await?;
     let mut cfg = crate::deployment::MetaConfig::parse_with_network(

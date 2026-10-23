@@ -72,7 +72,7 @@ pub async fn bootstrap_wallets(path: &Path) -> Result<BootstrapSummary> {
 }
 pub async fn bootstrap_wallets_with_network(
     path: &Path,
-    network_override: Option<&crate::network::NetworkPolicy>,
+    network_override: Option<&crate::network::NetworkConfig>,
 ) -> Result<BootstrapSummary> {
     ensure!(
         !crate::qualification::active() && !catalog_evidence::collecting(),

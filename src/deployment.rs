@@ -154,14 +154,17 @@ pub(crate) fn pattern(text: &str) -> Result<Regex> {
     Ok(Regex::new(&expression)?)
 }
 impl MetaConfig {
-    /// Replace the complete network policy before validating or using a deployment.
+    /// Apply invocation-local network and relay overrides before deployment validation.
     pub fn parse_with_network(
         text: &str,
-        network_override: Option<&crate::network::NetworkPolicy>,
+        network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<Self> {
         let mut config: Self = toml::from_str(text).context("invalid meta-config")?;
         if let Some(policy) = network_override {
-            config.network = policy.clone();
+            config.network = policy.network.clone();
+            if let Some(relay) = &policy.discovery_relay {
+                config.discovery_relay = Some(relay.clone());
+            }
         }
         Ok(config)
     }
@@ -386,7 +389,7 @@ impl Deployment {
     }
     pub async fn show_config_with_network(
         path: &Path,
-        network_override: Option<&crate::network::NetworkPolicy>,
+        network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<serde_json::Value> {
         let mut config = MetaConfig::parse_with_network(
             &tokio::fs::read_to_string(path).await?,
@@ -443,7 +446,7 @@ impl Deployment {
     pub async fn load_for_inspection_with_network(
         path: &Path,
         all_tools: bool,
-        network_override: Option<&crate::network::NetworkPolicy>,
+        network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<Self> {
         Self::load_with_warnings(path, false, None, all_tools, network_override).await
     }
@@ -467,7 +470,7 @@ impl Deployment {
         path: &Path,
         env: &BTreeMap<String, String>,
         restriction: crate::rotation::restriction::FundingRestriction,
-        network_override: Option<&crate::network::NetworkPolicy>,
+        network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<Self> {
         Self::load_with_warnings(
             path,
@@ -566,7 +569,7 @@ impl Deployment {
             crate::rotation::restriction::FundingRestriction,
         )>,
         all_tools: bool,
-        network_override: Option<&crate::network::NetworkPolicy>,
+        network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<Self> {
         let mut config = MetaConfig::parse_with_network(
             &tokio::fs::read_to_string(path).await?,

@@ -47,7 +47,7 @@ pub(super) async fn run(
     network: crate::rotation::store::TreasuryNetwork,
     supervised: bool,
     json: bool,
-    policy: Option<&crate::network::NetworkPolicy>,
+    policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<()> {
     let mut parent = crate::supervision::Parent::from_stdin(supervised)?;
     let config = MetaConfig::parse_with_network(&tokio::fs::read_to_string(&path).await?, policy)?;

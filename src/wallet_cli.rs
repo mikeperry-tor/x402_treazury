@@ -103,7 +103,7 @@ enum Action {
     },
 }
 
-fn network_override(args: &WalletArgs) -> Result<Option<crate::network::NetworkPolicy>> {
+fn network_override(args: &WalletArgs) -> Result<Option<crate::network::NetworkConfig>> {
     if matches!(args.command, Action::Pool { .. }) {
         anyhow::bail!(
             "wallet pool was removed; configure managed wallet reserves and explicit max_api_payment_usdc in the deployment, then use wallet bootstrap --config FILE"
@@ -123,7 +123,7 @@ fn network_override(args: &WalletArgs) -> Result<Option<crate::network::NetworkP
     );
     args.network_config
         .as_ref()
-        .map(|path| crate::network::NetworkPolicy::load(path))
+        .map(|path| crate::network::NetworkConfig::load(path))
         .transpose()
 }
 
@@ -135,7 +135,7 @@ fn resolve_args(args: WalletArgs) -> Result<Command> {
 
 fn resolve_args_with_network(
     args: WalletArgs,
-    policy: Option<&crate::network::NetworkPolicy>,
+    policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<Command> {
     use anyhow::Context;
     let settings = load_wallet_settings(
@@ -217,7 +217,7 @@ fn resolve_args_with_network(
 
 fn load_wallet_settings(
     config_path: Option<&PathBuf>,
-    policy: Option<&crate::network::NetworkPolicy>,
+    policy: Option<&crate::network::NetworkConfig>,
     sync_only: bool,
 ) -> Result<Option<crate::rotation::config::TreasuryConfig>> {
     use anyhow::{Context, ensure};
@@ -238,7 +238,7 @@ fn load_wallet_settings(
         Some(treasury)
     } else {
         if let Some(policy) = policy {
-            crate::network::install(policy.clone())?;
+            crate::network::install(policy.network.clone())?;
         }
         None
     };
@@ -573,7 +573,7 @@ async fn show_status(state_dir: PathBuf, key_file: PathBuf, json: bool) -> Resul
 async fn execute_wallet_command(
     command: Command,
     network: crate::rotation::store::TreasuryNetwork,
-    policy: Option<&crate::network::NetworkPolicy>,
+    policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<crate::treasury::Treasury> {
     use crate::treasury::Treasury;
     let treasury = match command {
@@ -627,7 +627,7 @@ async fn execute_wallet_command(
 async fn recover_funding(
     path: PathBuf,
     network: crate::rotation::store::TreasuryNetwork,
-    policy: Option<&crate::network::NetworkPolicy>,
+    policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<()> {
     let config = crate::deployment::MetaConfig::parse_with_network(
         &tokio::fs::read_to_string(&path).await?,
@@ -683,7 +683,7 @@ async fn recover_expired(
     meta_config: PathBuf,
     operation_id: String,
     network: crate::rotation::store::TreasuryNetwork,
-    policy: Option<&crate::network::NetworkPolicy>,
+    policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<crate::treasury::Treasury> {
     let (mut treasury, settings) = configured(&meta_config, network, policy).await?;
     let indexer = settings.indexer_endpoint(|name| std::env::var(name).ok())?;
@@ -713,7 +713,7 @@ async fn shield_refunds(
     meta_config: PathBuf,
     job_id: String,
     network: crate::rotation::store::TreasuryNetwork,
-    policy: Option<&crate::network::NetworkPolicy>,
+    policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<crate::treasury::Treasury> {
     let (mut treasury, settings) = configured(&meta_config, network, policy).await?;
     let stop = tokio_util::sync::CancellationToken::new();
@@ -744,7 +744,7 @@ async fn reconcile(
     operation_id: String,
     rebroadcast: bool,
     network: crate::rotation::store::TreasuryNetwork,
-    policy: Option<&crate::network::NetworkPolicy>,
+    policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<crate::treasury::Treasury> {
     let (mut treasury, settings) = configured(&meta_config, network, policy).await?;
     let indexer = settings.indexer_endpoint(|name| std::env::var(name).ok())?;
@@ -886,7 +886,7 @@ pub(crate) async fn shutdown_signal() -> std::io::Result<()> {
 async fn configured(
     path: &std::path::Path,
     network: crate::rotation::store::TreasuryNetwork,
-    policy: Option<&crate::network::NetworkPolicy>,
+    policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<(
     crate::treasury::Treasury,
     crate::rotation::config::TreasuryConfig,

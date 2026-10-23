@@ -12,8 +12,13 @@ suppressed. RPC providers still receive the wallet addresses being queried.
 
 Ordinary CLI commands select the deployment's `[network]` policy unless an explicit
 `--network-config FILE` replaces it. Replacement is whole-policy, before semantic
-validation or client creation; omitted fields use defaults. The same resolved policy
-flows through serving, catalog inspection/warming, source refresh and wallet
+validation or client creation; omitted fields use defaults. The external file can
+also contain `[discovery_relay]`, replacing that entire deployment section when
+present and preserving it when omitted. Its provider path resolves relative to the
+external file. Relay settings apply to deployment discovery; standalone provider,
+wallet and diagnostic commands accept the same file without loading relay providers.
+The Tor example enables paid relay fallback with existing deployment payers.
+The same resolved policy flows through serving, catalog inspection/warming, source refresh and wallet
 initialization/sync/bootstrap/recovery, including configuration reloads. `config show`
 reports it without installing a transport or contacting the network. Explicit
 `catalog warm --direct` still selects direct fetching for that dedicated process.

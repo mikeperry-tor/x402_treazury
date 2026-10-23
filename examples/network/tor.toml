@@ -1,5 +1,6 @@
 # Deployment or standalone commands: --network-config examples/network/tor.toml
-# Replaces the complete network policy; alternatively embed this table in --config.
+# Replaces [network] and [discovery_relay]; alternatively embed both in --config.
+# Relay settings apply to deployment discovery; standalone/wallet commands use Tor only.
 # Tor Browser must already be running on the configured SOCKS port.
 [network]
 mode = "tor"
@@ -10,3 +11,10 @@ isolation_namespace = "x402_treazury"
 socks_auth = "tor_extended"
 connect_timeout_seconds = 120
 read_timeout_seconds = 60
+
+# Paid Curl fallback after eligible origin attempts, using existing deployment payers.
+[discovery_relay]
+provider = "../../providers/curl/provider.toml"
+serve = true
+warm = true
+# search defaults to true for Coinbase curated search.

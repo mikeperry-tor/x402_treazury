@@ -75,21 +75,24 @@ target/release/x402_treazury serve --config examples/deployments/managed.local.t
 ```
 
 To serve over Tor instead, start Tor Browser with its SOCKS listener at
-`127.0.0.1:9150`. Pass [the separate network policy](examples/network/tor.toml):
+`127.0.0.1:9150`. Pass [the Tor and discovery-relay settings](examples/network/tor.toml):
 
 ```sh
 target/release/x402_treazury serve --config examples/deployments/managed.local.toml \
   --network-config examples/network/tor.toml
 ```
 
-Or embed that policy once in the fresh local deployment and use the basic command:
+Or embed those settings once in the fresh local deployment and use the basic command:
 
 ```sh
 cat examples/network/tor.toml >> examples/deployments/managed.local.toml
 target/release/x402_treazury serve --config examples/deployments/managed.local.toml
 ```
 
-`--network-config` replaces the complete `[network]` policy for that invocation.
+`--network-config` replaces the complete `[network]` policy and, when present,
+`[discovery_relay]` for that invocation. This Tor example enables paid Curl fallback
+for catalog/pricing discovery and curated Coinbase search using the deployment’s
+existing payers. Without the option, the managed starter uses its own settings.
 For treasury initialization over Tor, pass the same option to `wallet init`, or
 initialize using the deployment with the embedded policy.
 
