@@ -138,8 +138,16 @@ impl RuntimeHints {
             // Keep the newest receipts, including when old validation finishes
             // after eviction. No per-key tombstones or second retention bound.
             if receipt <= oldest {
+                tracing::warn!(
+                    limit_entries = CAPACITY,
+                    "Runtime price hint capacity reached; older incoming hint discarded"
+                );
                 return;
             }
+            tracing::warn!(
+                limit_entries = CAPACITY,
+                "Runtime price hint capacity reached; oldest receipt evicted"
+            );
             entries.by_receipt.remove(&(oldest, oldest_key));
             entries.by_key.remove(&oldest_key);
         }
@@ -221,6 +229,13 @@ mod tests {
     }
     #[test]
     fn bounded_storage_has_no_unbounded_keys_or_late_resurrection() {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
         let cache = RuntimeHints::default();
         let at = Instant::now();
         for sequence in 0..CAPACITY as u64 {
@@ -267,6 +282,15 @@ mod tests {
         let entries = cache.entries.lock().unwrap();
         assert_eq!(entries.by_key.len(), CAPACITY);
         assert_eq!(entries.by_receipt.len(), CAPACITY);
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        for message in ["older incoming hint discarded", "oldest receipt evicted"] {
+            assert!(
+                logs.lines()
+                    .any(|line| line.contains("WARN") && line.contains(message))
+            );
+        }
+        assert!(logs.contains("limit_entries=65535"));
+        assert!(!logs.contains("source"));
         for (key, entry) in &entries.by_key {
             assert!(entries.by_receipt.contains(&(entry.receipt, *key)));
         }

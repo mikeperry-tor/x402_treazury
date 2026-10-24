@@ -129,3 +129,102 @@ async fn deadline_cleanup_reports_actual_capability_without_warn_on_available_sh
         }
     }
 }
+
+#[tokio::test]
+async fn capacity_refusal_summaries_warn_without_reclassifying_normal_completion() {
+    let engine = Engine::new(Limits::default());
+    let identity = IsolationId::treasury("cover-diagnostic-fixture");
+    let transport = crate::network::global()
+        .http_transport(
+            &identity,
+            "https://api.example.com",
+            None,
+            false,
+            HttpPolicy::default(),
+            crate::network::SelectionPolicy::Legacy,
+        )
+        .unwrap();
+    let mut config = crate::cover::tests::example_config();
+    config.ranges_enabled = false;
+    let call = engine
+        .begin(
+            Owner::from_transport(&transport),
+            Arc::new(config),
+            Scope {
+                listener: "fixture".into(),
+                source: "source".into(),
+            },
+            transport.client.clone(),
+        )
+        .unwrap();
+    for cached in [false, true] {
+        let capability = if cached {
+            Capability::Unavailable("cover_forbidden")
+        } else {
+            Capability::Available {
+                length: 4096,
+                validator: None,
+            }
+        };
+        for code in [
+            "cover_stream_limit",
+            "cover_request_limit",
+            "cover_body_limit",
+            "cover_padding_limit",
+            "cover_history_limit",
+            "cover_episode_limit",
+            "cover_budget_completed",
+            "cover_budget_unspent",
+            "cover_episode_deadline",
+            "cover_episode_request_limit",
+        ] {
+            let logs = Capture::default();
+            let sink = logs.clone();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(tracing::Level::DEBUG)
+                .with_writer(move || sink.clone())
+                .finish();
+            tracing::subscriber::with_default(subscriber, || {
+                diagnostics::episode(
+                    &call.session,
+                    &engine.limits,
+                    code,
+                    &capability,
+                    "primary",
+                    false,
+                );
+            });
+            let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+            let refusal = matches!(
+                code,
+                "cover_stream_limit"
+                    | "cover_request_limit"
+                    | "cover_body_limit"
+                    | "cover_padding_limit"
+                    | "cover_history_limit"
+                    | "cover_episode_limit"
+            );
+            let expected_level = if refusal {
+                "WARN"
+            } else if cached {
+                "DEBUG"
+            } else {
+                "INFO"
+            };
+            assert!(logs.contains(expected_level), "{code}: {logs}");
+            assert!(logs.contains(code));
+            for field in [
+                "process_stream_limit=6",
+                "process_history_limit=128",
+                "process_request_limit=64",
+            ] {
+                assert!(logs.contains(field), "{logs}");
+            }
+            assert!(!logs.contains("https://api.example.com"));
+            assert!(!logs.contains("cover-diagnostic-fixture"));
+        }
+    }
+    assert_eq!(engine.metrics().range_requests, 0);
+}

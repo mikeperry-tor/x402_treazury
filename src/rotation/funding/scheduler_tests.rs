@@ -177,6 +177,13 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
 
 #[test]
 fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
     let job = FundingJob {
         id: "job".into(),
         pool_id: "pool".into(),
@@ -266,6 +273,151 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
             "replacement cannot reset old backoff"
         );
     }
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(
+        logs.lines()
+            .any(|line| line.contains("WARN") && line.contains("due inactive record evicted"))
+    );
+    assert!(logs.contains("limit_records=256"));
+    assert!(!logs.contains("next-operation"));
+}
+
+#[tokio::test]
+async fn occupied_observation_lanes_warn_once_per_pass_and_preserve_pending_work() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "pool",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let job = raw.funding_jobs().unwrap().remove(0);
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (statuses, _status_events) = mpsc::unbounded_channel();
+    let (started, _source_events) = mpsc::unbounded_channel();
+    let reads = Reads {
+        credits: Arc::new(Semaphore::new(0)),
+        credit_calls: Arc::new(AtomicUsize::new(0)),
+        statuses,
+        status_gates: Default::default(),
+        failed_job: Default::default(),
+        processing: false,
+        quotes: None,
+    };
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            reads: reads.clone(),
+            gate: Arc::new(Semaphore::new(0)),
+            started,
+        },
+        60,
+    );
+    let lease = Arc::new(store.funding_owner().lock_owned().await);
+    let clock = TickClock {
+        epoch: 1000,
+        started: tokio::time::Instant::now(),
+    };
+    let mut flight = InFlight::new();
+    // Joining an existing quote is normal coalescing, even though the same
+    // prerequisite remains pending until that observation finishes.
+    let quote_key = Key {
+        operation: job.operation_id.clone(),
+        kind: Kind::Quote,
+    };
+    flight.active.insert(quote_key.clone());
+    let mut duplicate = VecDeque::from([Pending {
+        job: job.clone(),
+        lane: Kind::Quote,
+    }]);
+    worker.dispatch_pending(&mut duplicate, &mut flight, &reads, &lease, &clock);
+    assert_eq!(duplicate.len(), 1);
+    assert!(std::fs::read_to_string(log.path()).unwrap().is_empty());
+    flight.active.remove(&quote_key);
+    flight.credit_active = CREDIT_READS;
+    flight.status_active = STATUS_READS;
+    flight.quote_active = QUOTE_READS;
+    flight.source_active = true;
+    let mut pending: VecDeque<_> = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
+        .into_iter()
+        .map(|lane| Pending {
+            job: job.clone(),
+            lane,
+        })
+        .collect();
+    worker.dispatch_pending(&mut pending, &mut flight, &reads, &lease, &clock);
+    assert_eq!(pending.len(), 4);
+    assert!(flight.reads.is_empty());
+    assert_eq!(reads.credit_calls.load(Ordering::SeqCst), 0);
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    let warnings: Vec<_> = logs
+        .lines()
+        .filter(|line| line.contains("Funding observation capacity reached"))
+        .collect();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("WARN"));
+    for field in [
+        "credit_deferred=true",
+        "status_deferred=true",
+        "source_deferred=true",
+        "quote_deferred=true",
+    ] {
+        assert!(warnings[0].contains(field));
+    }
+    assert!(!logs.contains(&job.operation_id));
+    flight.credit_active = 0;
+    pending.clear();
+    for index in 0..RECORDS {
+        let mut existing = job.clone();
+        existing.operation_id = format!("retained-{index}");
+        let key = Key {
+            operation: existing.operation_id.clone(),
+            kind: Kind::Credit,
+        };
+        assert_eq!(
+            lease
+                .state
+                .lock()
+                .unwrap()
+                .admit(&key, &existing, clock.now(), &flight.active),
+            Some(true)
+        );
+        flight.active.insert(key);
+    }
+    pending.push_back(Pending {
+        job: job.clone(),
+        lane: Kind::Credit,
+    });
+    worker.dispatch_pending(&mut pending, &mut flight, &reads, &lease, &clock);
+    assert_eq!(pending.len(), 1);
+    assert!(flight.reads.is_empty());
+    assert_eq!(reads.credit_calls.load(Ordering::SeqCst), 0);
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(logs.lines().any(|line| line.contains("WARN")
+        && line.contains("metadata_deferred=true")
+        && line.contains("metadata_capacity_per_kind=256")));
+    assert!(!logs.contains(&job.operation_id));
+    drop(lease);
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
 }
 
 #[tokio::test]

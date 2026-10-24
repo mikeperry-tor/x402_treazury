@@ -16,6 +16,7 @@ struct InventoryRpc {
     first_address: String,
     healthy_address: String,
     hold_first: bool,
+    hold_all: Arc<AtomicBool>,
     fail: bool,
     events: tokio::sync::mpsc::UnboundedSender<String>,
     release: Arc<tokio::sync::Semaphore>,
@@ -35,7 +36,9 @@ async fn balance(State(rpc): State<InventoryRpc>, Json(v): Json<Value>) -> Json<
         *count
     };
     rpc.events.send(address.clone()).unwrap();
-    if rpc.hold_first && address == rpc.first_address && count == 1 {
+    if rpc.hold_all.load(Ordering::SeqCst)
+        || (rpc.hold_first && address == rpc.first_address && count == 1)
+    {
         rpc.release.acquire().await.unwrap().forget();
     }
     *rpc.reads.lock().unwrap().active.get_mut(&address).unwrap() -= 1;
@@ -83,6 +86,7 @@ impl Inventory {
             first_address: fixture.rpc.address.to_lowercase(),
             healthy_address: addresses.last().unwrap().clone(),
             hold_first,
+            hold_all: Arc::new(AtomicBool::new(false)),
             fail,
             events: events_tx,
             release: Arc::new(tokio::sync::Semaphore::new(0)),
@@ -261,5 +265,101 @@ async fn held_pending_read_allows_full_live_inventory_and_retains_a_new_failure(
     assert_eq!(observed, ("17".into(), false, false, None));
     drop(db);
     f.assert_no_financial_side_effects();
+    f.fixture.close().await;
+}
+
+#[tokio::test]
+async fn advisory_capacity_warns_while_complete_inventory_still_drains() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let f = Inventory::new(true, true, false).await;
+    f.fixture
+        .pool
+        .maintenance(CancellationToken::new(), true)
+        .await
+        .unwrap_err();
+    assert_eq!(f.rpc.reads.lock().unwrap().calls.len(), WALLETS);
+    f.assert_no_financial_side_effects();
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(logs.lines().any(|line| line.contains("WARN")
+        && line.contains("Advisory balance observation capacity reached")));
+    assert!(logs.contains("limit_reads=4"));
+    assert!(!logs.contains(&f.rpc.first_address));
+    f.fixture.close().await;
+}
+
+#[tokio::test]
+async fn advisory_capacity_looks_past_coalesced_rows_and_keeps_coalescing_silent() {
+    use tracing::instrument::WithSubscriber;
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let mut f = Inventory::new(true, false, false).await;
+    let db = rusqlite::Connection::open(f.fixture.dir.path().join("state/state.sqlite")).unwrap();
+    db.execute("DELETE FROM wallets WHERE sequence >= 4", [])
+        .unwrap();
+    f.rpc.hold_all.store(true, Ordering::SeqCst);
+    let pool = f.fixture.pool.clone();
+    let stop = CancellationToken::new();
+    let stopped = stop.clone();
+    let running = tokio::spawn(
+        async move { pool.maintenance(stopped, false).await }.with_subscriber(subscriber),
+    );
+    tokio::time::timeout(Duration::from_secs(15), async {
+        for _ in 0..BALANCE_READS {
+            f.events.recv().await.unwrap();
+        }
+        // A Store round trip gives the pending inventory pass a chance to finish
+        // after all four reads have been accepted and retained.
+        f.fixture.store.call(|_| Ok(())).await.unwrap();
+        tokio::task::yield_now().await;
+    })
+    .await
+    .unwrap();
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(!logs.contains("Advisory balance observation capacity reached"));
+    db.execute("INSERT INTO wallets(id,pool_id,sequence,address,key,target,role,balance,low_balance,refresh_pending) SELECT 'later-pending',pool_id,4,'0x000000000000000000000000000000000000ffff',key,target,'RETAINED','5000000',0,0 FROM wallets WHERE id=?1", [&f.fixture.wallet]).unwrap();
+    f.fixture
+        .pool
+        .note_insufficient("later-pending".into())
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            if logs.lines().any(|line| {
+                line.contains("WARN")
+                    && line.contains("Advisory balance observation capacity reached")
+            }) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(f.rpc.reads.lock().unwrap().calls.len(), BALANCE_READS);
+    let pending: bool = db
+        .query_row(
+            "SELECT refresh_pending FROM wallets WHERE id='later-pending'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(pending);
+    f.assert_no_financial_side_effects();
+    stop.cancel();
+    running.await.unwrap().unwrap();
+    f.rpc.hold_all.store(false, Ordering::SeqCst);
+    f.rpc.release.add_permits(BALANCE_READS);
+    drop(db);
     f.fixture.close().await;
 }

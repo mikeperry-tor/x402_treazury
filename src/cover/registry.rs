@@ -187,6 +187,10 @@ impl Registry {
         let e = Arc::new(Mutex::new(Episode::new(&config, now, rng)?));
         if let Some(oldest) = eviction {
             self.owners.remove(&oldest);
+            tracing::warn!(
+                limit_owners = self.limits.max_owners,
+                "Cover owner cache capacity reached; least recently used inactive owner evicted"
+            );
         }
         let state = self.owners.entry(owner).or_insert_with(|| OwnerState {
             config,

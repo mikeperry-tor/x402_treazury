@@ -22,6 +22,8 @@ pub(super) fn status(session: &Session, limits: &Limits, code: &'static str, lev
                     episode_request_limit = session.config.max_requests_per_episode,
                     episode_body_byte_limit = session.config.max_cover_body_bytes_per_episode,
                     process_request_limit = limits.max_requests_per_window,
+                    process_stream_limit = limits.max_active_streams,
+                    process_history_limit = limits.max_requests_per_window.saturating_mul(2),
                     process_body_byte_limit = limits.max_cover_body_bytes_per_window,
                     process_padding_byte_limit = limits.max_padding_value_bytes_per_window,
                     episode_padding_byte_limit = session.config.padding.as_ref().map(|p| p.max_value_bytes_per_episode),
@@ -123,6 +125,8 @@ pub(super) fn episode(
                     episode_request_limit = session.config.max_requests_per_episode,
                     episode_body_byte_limit = session.config.max_cover_body_bytes_per_episode,
                     process_request_limit = limits.max_requests_per_window,
+                    process_stream_limit = limits.max_active_streams,
+                    process_history_limit = limits.max_requests_per_window.saturating_mul(2),
                     process_body_byte_limit = limits.max_cover_body_bytes_per_window,
                     process_padding_byte_limit = limits.max_padding_value_bytes_per_window,
                     episode_padding_byte_limit = session.config.padding.as_ref().map(|p| p.max_value_bytes_per_episode),
@@ -137,7 +141,17 @@ pub(super) fn episode(
                 "HTTP/2 range cover qualification did not finish for provider [{}]; further range attempts disabled for this identity/origin until restart or cache eviction",
                 scope.source
             );
-        } else if matches!(code, "cover_task_failed" | "cover_sampling_exhausted") {
+        } else if matches!(
+            code,
+            "cover_task_failed"
+                | "cover_sampling_exhausted"
+                | "cover_stream_limit"
+                | "cover_request_limit"
+                | "cover_body_limit"
+                | "cover_padding_limit"
+                | "cover_history_limit"
+                | "cover_episode_limit"
+        ) {
             event!(
                 Level::WARN,
                 "HTTP/2 cover traffic failed for provider [{}]; see diagnostic fields",

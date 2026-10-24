@@ -416,7 +416,10 @@ async fn cache_bounds_evict_and_report_without_losing_complete_catalog() {
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(logs.contains("entry exceeds resource limit"));
     assert!(logs.contains("limit_bytes=1024"));
-    assert!(logs.contains("oldest disposable entry evicted"));
+    assert!(
+        logs.lines()
+            .any(|line| line.contains("WARN") && line.contains("oldest disposable entry evicted"))
+    );
     assert!(logs.contains("limit_entries=4096"));
     assert!(!logs.contains(&url));
     task.abort();

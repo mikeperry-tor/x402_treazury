@@ -29,6 +29,13 @@ fn scope() -> Scope {
 
 #[tokio::test]
 async fn cleanup_ownership_outlives_zero_counters_and_prevents_replacement() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
     let engine = Engine::new(Limits {
         max_owners: 1,
         ..Default::default()
@@ -89,6 +96,14 @@ async fn cleanup_ownership_outlives_zero_counters_and_prevents_replacement() {
     let call = engine.begin(next.clone(), config, scope(), http).unwrap();
     assert!(!engine.registry.lock().unwrap().owners.contains_key(&first));
     assert!(engine.registry.lock().unwrap().owners.contains_key(&next));
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    let eviction = logs
+        .lines()
+        .find(|line| line.contains("Cover owner cache capacity reached"))
+        .unwrap();
+    assert!(eviction.contains("WARN") && eviction.contains("limit_owners=1"));
+    assert!(!eviction.contains("first") && !eviction.contains("next"));
+    assert!(!eviction.contains("api.example.com"));
     drop(call);
 }
 

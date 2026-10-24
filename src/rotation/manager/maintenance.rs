@@ -97,6 +97,7 @@ impl ManagedPool {
             tokio::pin!(changed);
             changed.as_mut().enable();
             let mut wake = Instant::now() + CADENCE;
+            let mut capacity_deferred = false;
             // The finite pass is independent of recurring requested work. Its
             // failed reads report failure; only explicit requests retain retries.
             while startup_ready && !startup_complete && active.len() < BALANCE_READS {
@@ -118,6 +119,11 @@ impl ManagedPool {
                     _ => startup_complete = true,
                 }
             }
+            capacity_deferred |= startup_ready
+                && active.len() == BALANCE_READS
+                && page
+                    .iter()
+                    .any(|(_, id)| id.as_ref().is_none_or(|wallet| !active.contains(wallet)));
             if !one_pass {
                 let pool = self.pool.clone();
                 let pending = read_result(
@@ -131,8 +137,12 @@ impl ManagedPool {
                 if pending.is_empty() {
                     pending_cursor = -1;
                 }
-                for (sequence, id) in pending {
+                let mut pending = pending.into_iter();
+                while let Some((sequence, id)) = pending.next() {
                     if active.len() == BALANCE_READS {
+                        capacity_deferred |= std::iter::once(&id)
+                            .chain(pending.as_slice().iter().map(|(_, id)| id))
+                            .any(|id| id.as_ref().is_none_or(|wallet| !active.contains(wallet)));
                         break;
                     }
                     pending_cursor = sequence;
@@ -165,6 +175,12 @@ impl ManagedPool {
                         .boxed(),
                     );
                 }
+            }
+            if capacity_deferred {
+                tracing::warn!(
+                    limit_reads = BALANCE_READS,
+                    "Advisory balance observation capacity reached; remaining inventory retained for a later pass"
+                );
             }
             if one_pass && startup_complete && reads.is_empty() {
                 return first_error.map_or(Ok(()), Err);

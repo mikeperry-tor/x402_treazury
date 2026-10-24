@@ -483,6 +483,8 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         lease: &Lease,
         clock: &TickClock,
     ) {
+        let mut capacity_deferred = [false; 4];
+        let mut metadata_deferred = false;
         for _ in 0..pending.len() {
             let item = pending.pop_front().unwrap();
             let kind = match item.lane {
@@ -497,6 +499,8 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         kind: Kind::Quote,
                     }))
             {
+                capacity_deferred[Kind::Quote as usize] |=
+                    flight.quote_active == QUOTE_READS || flight.quote_pending.is_some();
                 // The prerequisite lane keeps its own bounded page;
                 // occupied quote HTTP slots cannot hold the source
                 // reconciliation cursor behind unrelated allocations.
@@ -513,6 +517,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             // Source is one rolling serialized lane. It never parks
             // a page of status/credit behind an occupied treasury.
             if kind == Kind::Source && flight.source_active {
+                capacity_deferred[Kind::Source as usize] = true;
                 // Retain only this source lane's bounded page. Other
                 // lane cursors continue independently while owned work drains.
                 pending.push_back(item);
@@ -521,6 +526,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             if (kind == Kind::Credit && flight.credit_active == CREDIT_READS)
                 || (kind == Kind::Status && flight.status_active == STATUS_READS)
             {
+                capacity_deferred[kind as usize] = true;
                 pending.push_back(item);
                 continue;
             }
@@ -531,6 +537,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             match ready {
                 Some(false) => continue,
                 None => {
+                    metadata_deferred = true;
                     pending.push_back(item);
                     continue;
                 }
@@ -598,6 +605,22 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 }
             }
         }
+        if capacity_deferred.into_iter().any(|deferred| deferred) || metadata_deferred {
+            tracing::warn!(
+                credit_capacity = CREDIT_READS,
+                status_capacity = STATUS_READS,
+                quote_capacity = QUOTE_READS,
+                source_capacity = 1,
+                quote_prerequisite_capacity = 1,
+                metadata_capacity_per_kind = RECORDS,
+                credit_deferred = capacity_deferred[Kind::Credit as usize],
+                status_deferred = capacity_deferred[Kind::Status as usize],
+                source_deferred = capacity_deferred[Kind::Source as usize],
+                quote_deferred = capacity_deferred[Kind::Quote as usize],
+                metadata_deferred,
+                "Funding observation capacity reached; pending work retained for a later pass"
+            );
+        }
     }
 
     fn dispatch_quote(
@@ -607,6 +630,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         lease: &Lease,
         clock: &TickClock,
     ) {
+        if flight.quote_active == QUOTE_READS && flight.quote_pending.is_some() {
+            tracing::warn!(
+                limit = QUOTE_READS,
+                "Funding quote capacity reached; pending prerequisite retained"
+            );
+        }
         if flight.quote_active < QUOTE_READS
             && let Some((job, request)) = flight.quote_pending.take()
         {
@@ -636,6 +665,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     .boxed(),
                 );
             } else {
+                if admitted.is_none() {
+                    tracing::warn!(
+                        limit_records = RECORDS,
+                        "Funding scheduling metadata capacity reached; pending quote retained"
+                    );
+                }
                 flight.quote_pending = Some((job, request));
             }
         }
@@ -891,6 +926,8 @@ impl State {
                 .min_by_key(|(_, record)| record.due)
                 .map(|(key, _)| key.clone())?;
             self.records.remove(&old);
+            tracing::warn!(limit_records = RECORDS, observation = ?key.kind,
+                "Funding scheduling metadata capacity reached; due inactive record evicted");
         }
         // Persisted next_poll is aggregate reporting from older coordinators;
         // it cannot assign one kind's outage to another kind after reopen.

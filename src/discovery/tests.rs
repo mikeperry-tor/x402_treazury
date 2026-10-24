@@ -1984,6 +1984,13 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
 
 #[tokio::test]
 async fn import_aliases_share_active_fetches_and_failed_fetches_recover() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
     use std::sync::atomic::{AtomicUsize, Ordering};
     let m = manager(None).await;
     let calls = Arc::new(AtomicUsize::new(0));
@@ -2039,6 +2046,13 @@ async fn import_aliases_share_active_fetches_and_failed_fetches_recover() {
         &original,
         &m.fetches.lock().unwrap()[&fetch_key(&m, "https://api.example.com/active")]
     ));
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(
+        logs.lines().any(|line| line.contains("WARN")
+            && line.contains("Completed import cache capacity reached"))
+    );
+    assert!(logs.contains("limit_entries=4"));
+    assert!(!logs.contains("https://api.example.com"));
     release.notify_one();
     while let Some(result) = aliases.join_next().await {
         assert!(result.unwrap().is_err());
