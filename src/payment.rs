@@ -401,10 +401,14 @@ impl PaidClient {
         let mut permits = Vec::new();
         for gate in &self.attempt_capacity {
             permits.push(
-                gate.clone()
-                    .acquire_owned()
-                    .await
-                    .context("relay acquisition capacity closed")?,
+                crate::limits::acquire_owned_capacity(
+                    gate.clone(),
+                    "catalog_relay_attempts_busy",
+                    None,
+                    "startup.catalog_concurrency",
+                )
+                .await
+                .context("relay acquisition capacity closed")?,
             );
         }
         Ok(permits)

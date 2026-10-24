@@ -701,7 +701,16 @@ async fn fetch_catalog_origin(
         cfg.http_cache_direct_warm_target.is_some(),
         |current, _, _| async move {
             let _permit = match gate {
-                Some(gate) => Some(gate.acquire().await.expect("owned catalog gate")),
+                Some(gate) => Some(
+                    crate::limits::acquire_capacity(
+                        gate,
+                        "catalog_downloads_busy",
+                        None,
+                        "startup.catalog_concurrency",
+                    )
+                    .await
+                    .expect("owned catalog gate"),
+                ),
                 None => None,
             };
             let started = std::time::Instant::now();

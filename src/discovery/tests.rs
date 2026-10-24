@@ -2513,6 +2513,34 @@ async fn rejected_static_publications_preserve_revision_and_catalog() {
 }
 
 #[tokio::test]
+async fn saturated_static_publication_warns_and_waits_without_rejecting() {
+    let (_, logs) = crate::limits::tests::capture(async {
+        let m = manager(None).await;
+        let base = m.static_snapshot().await.unwrap();
+        let held = m.mutations.clone().acquire_many_owned(16).await.unwrap();
+        let publication = m.replace_static(0, base);
+        tokio::pin!(publication);
+        let polled = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(std::future::Future::poll(publication.as_mut(), cx))
+        })
+        .await;
+        assert!(polled.is_pending());
+        assert_eq!(m.catalog.read().generation, 0);
+        drop(held);
+        assert_eq!(publication.await.unwrap(), 1);
+        assert_eq!(m.catalog.read().generation, 1);
+    })
+    .await;
+    assert_eq!(logs.matches("WARN").count(), 1, "{logs}");
+    assert!(
+        logs.contains("mutation_queue_full") && logs.contains("limit=16"),
+        "{logs}"
+    );
+    assert!(logs.contains("action=\"waiting\""), "{logs}");
+    assert!(!logs.contains("operation rejected"), "{logs}");
+}
+
+#[tokio::test]
 async fn accepted_static_publication_outlives_cancelled_waiter() {
     let m = manager(None).await;
     add(&m, "first", "", "").await;

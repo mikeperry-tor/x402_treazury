@@ -53,8 +53,7 @@ impl TreasuryHandle {
 
     async fn call<T>(&self, make: impl FnOnce(oneshot::Sender<Result<T>>) -> Command) -> Result<T> {
         let (send, recv) = oneshot::channel();
-        self.sender
-            .send(make(send))
+        crate::limits::send_capacity(&self.sender, make(send), "treasury_queue_full", 8)
             .await
             .map_err(|_| anyhow::anyhow!("treasury owner stopped"))?;
         recv.await

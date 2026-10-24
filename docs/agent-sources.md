@@ -553,9 +553,10 @@ Completed fetches retain successes for 300 seconds and failures for one second;
 optional completed retention is trimmed on lookup and completion to the smaller of
 eight entries or `128 MiB / max_spec_bytes`. This is a cache-retention allowance,
 not a total bound on documents retained by active callers.
-At most 16 mutation jobs can be outstanding; saturation returns an explicit busy
-error. Publication and collision checks are serialized, so concurrent additions
-cannot publish partial sources.
+At most 16 mutation jobs can be outstanding. Dynamic registration saturation
+emits WARN and returns an explicit busy error; static catalog publication emits
+WARN with limit 16 and waits for the same shared gate. Publication and collision
+checks are serialized, so concurrent additions cannot publish partial sources.
 
 JSON/reference traversal remains bounded to depth 64, 500,000 expanded nodes and
 64 MiB of expanded string/key content. Import rejects over 10,000 operations,

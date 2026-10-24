@@ -1209,12 +1209,32 @@ impl StoreHandle {
         f: impl FnOnce(&mut Store) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (send, recv) = tokio::sync::oneshot::channel();
-        self.sender
-            .send(Box::new(move |store| {
-                let _ = send.send(f(store));
-            }))
-            .await
-            .map_err(|_| anyhow::anyhow!("store worker stopped"))?;
+        crate::limits::send_capacity(
+            &self.sender,
+            Box::new(move |store: &mut Store| {
+                let result = f(store).inspect_err(|error| {
+                    // Report contention even if the accepted command's reply
+                    // waiter disappeared; this never authorizes mutation retry.
+                    if matches!(error.downcast_ref::<rusqlite::Error>(),
+                        Some(rusqlite::Error::SqliteFailure(failure, _))
+                        if matches!(failure.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+                    {
+                        tracing::warn!(
+                            reason = "store_database_busy",
+                            limit_ms = 5000,
+                            setting = "hardcoded_store_busy_timeout",
+                            action = "operation_failed",
+                            "Store database contention prevented an operation"
+                        );
+                    }
+                });
+                let _ = send.send(result);
+            }) as Work,
+            "store_queue_full",
+            32,
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("store worker stopped"))?;
         recv.await.context("store worker stopped")?
     }
 }

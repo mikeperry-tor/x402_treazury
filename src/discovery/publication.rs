@@ -17,12 +17,14 @@ impl Manager {
         expected_revision: u64,
         mut base: CatalogSnapshot,
     ) -> Result<u64> {
-        let permit = self
-            .mutations
-            .clone()
-            .acquire_owned()
-            .await
-            .context("mutation_queue_closed")?;
+        let permit = crate::limits::acquire_owned_capacity(
+            self.mutations.clone(),
+            "mutation_queue_full",
+            Some(16),
+            "hardcoded",
+        )
+        .await
+        .context("mutation_queue_closed")?;
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;

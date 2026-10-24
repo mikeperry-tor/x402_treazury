@@ -198,7 +198,14 @@ async fn saturation_child() {
         client.drain().await;
     }
     let permits: Vec<_> = (0..128).map(|_| ownership::foreground().unwrap()).collect();
-    assert!(ownership::foreground().is_err());
+    let (result, logs) = crate::limits::tests::capture(async { ownership::foreground() }).await;
+    assert!(result.is_err());
+    assert!(
+        logs.contains("WARN")
+            && logs.contains("foreground_work_busy")
+            && logs.contains("limit=128"),
+        "{logs}"
+    );
     drop(permits);
     // Both groups can accept another call after retained foreground work drains.
     for pool in &pools {

@@ -13,8 +13,7 @@ pub(crate) fn foreground() -> Result<Option<SemaphorePermit<'static>>> {
         return Ok(None);
     }
     Ok(Some(
-        FOREGROUND
-            .try_acquire()
+        crate::limits::try_capacity(&FOREGROUND, "foreground_work_busy", 128)
             .context("managed payment queue capacity unavailable")?,
     ))
 }
