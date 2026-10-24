@@ -92,6 +92,79 @@ async fn source_inspection_lists_saved_tools_without_tokens_catalog_fetches_or_r
 }
 
 #[tokio::test]
+async fn source_removal_selects_saved_names_and_empty_bulk_removal_preserves_registry() {
+    use sha2::{Digest, Sha256};
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    std::fs::write(dir.join("registry.toml"), "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.toolbox]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='payer'\nsource_management=true\nsource_registry_file='registry.sqlite'\n").unwrap();
+    let document = json!({"openapi":"3.0.3","servers":[{"url":"https://offline.invalid"}],"paths":{"/read":{"get":{}}}}).to_string();
+    let selected_id = "00000000-0000-0000-0000-000000000001";
+    let remaining_id = "00000000-0000-0000-0000-000000000002";
+    let record = |id: &str, name: &str, disabled: Value| json!({"id":id,"owner":"toolbox","candidate":{"name":name,"spec_url":"https://offline.invalid/openapi.json","lifetime":"persistent"},"targets":["toolbox"],"revision":1,"document":document,"hash":format!("{:x}",Sha256::digest(document.as_bytes())),"format":1,"accepted_at":1,"updated_at":1,"removed":false,"disabled":disabled});
+    drop(
+        tempfile::NamedTempFile::new_in(dir)
+            .unwrap()
+            .persist(dir.join("registry.sqlite"))
+            .unwrap(),
+    );
+    let db = rusqlite::Connection::open(dir.join("registry.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE snapshot(id INTEGER PRIMARY KEY,json TEXT NOT NULL); PRAGMA user_version=1;",
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO snapshot VALUES(1,?1)",
+        [json!({"generation":2,"records":{
+            selected_id:record(selected_id,"savedname",Value::Null),
+            remaining_id:record(remaining_id,"disabledname",json!("saved_catalog_invalid"))
+        },"receipts":{}})
+        .to_string()],
+    )
+    .unwrap();
+    drop(db);
+    let base = [
+        "sources",
+        "remove",
+        "--config",
+        "registry.toml",
+        "--server",
+        "toolbox",
+    ];
+    let mut selected = base.to_vec();
+    selected.extend(["--source", "savedname"]);
+    let removed = good(run(dir, &selected, &[]).await);
+    assert_eq!(removed["source_id"], selected_id);
+    assert_eq!(removed["name"], "savedname");
+    assert_eq!(removed["removed"], true);
+
+    let mut all = base.to_vec();
+    all.push("--all");
+    let removed = good(run(dir, &all, &[]).await);
+    assert_eq!(removed["server"], "toolbox");
+    assert_eq!(removed["removed_count"], 1);
+    assert_eq!(removed["sources"][0]["source_id"], remaining_id);
+    assert_eq!(removed["sources"][0]["removed"], true);
+    let inspect = ["sources", "inspect", "--config", "registry.toml"];
+    let tombstones = good(run(dir, &inspect, &[]).await);
+    assert_eq!(tombstones["toolbox"]["generation"], 4);
+    let sources = tombstones["toolbox"]["sources"].as_array().unwrap();
+    assert_eq!(sources.len(), 2);
+    for source in sources {
+        assert_eq!(source["removed"], true);
+        assert_eq!(source["tools"], json!([]));
+        assert_eq!(source["revision"], 2);
+    }
+    let before = std::fs::read(dir.join("registry.sqlite")).unwrap();
+    assert_eq!(
+        good(run(dir, &all, &[]).await),
+        json!({"server":"toolbox","removed_count":0,"sources":[]})
+    );
+    assert_eq!(std::fs::read(dir.join("registry.sqlite")).unwrap(), before);
+    assert_eq!(good(run(dir, &inspect, &[]).await), tombstones);
+    assert!(!dir.join("state").exists());
+}
+
+#[tokio::test]
 async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();
@@ -675,28 +748,47 @@ async fn payment_and_wallet_funding_help_use_explicit_usdc_names() {
 #[tokio::test]
 async fn source_maintenance_has_explicit_operator_commands() {
     let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("maintenance.toml"), "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.research]\nlisten='127.0.0.1:0'\nauth=false\nwallet='payer'\nsource_management=true\n").unwrap();
     for command in ["refresh", "remove"] {
         let output = run(dir.path(), &["sources", command, "--help"], &[]).await;
         assert!(output.status.success());
         let help = String::from_utf8(output.stdout).unwrap();
-        for option in ["--config", "--server", "--source-id"] {
+        for option in ["--config", "--server", "--source"] {
             assert!(help.contains(option), "{help}");
         }
-        bad(run(
-            dir.path(),
-            &[
-                "sources",
-                command,
-                "--config",
-                "missing.toml",
-                "--server",
-                "research",
-                "--source-id",
-                "missing",
-            ],
-            &[],
-        )
-        .await);
+        assert!(!help.contains("--source-id"), "{help}");
+        assert_eq!(help.contains("--all"), command == "remove", "{help}");
+        let base = [
+            "sources",
+            command,
+            "--config",
+            "maintenance.toml",
+            "--server",
+            "research",
+        ];
+        let missing = bad(run(dir.path(), &base, &[]).await);
+        assert!(missing.contains("required"), "{missing}");
+        assert!(missing.contains("--source"), "{missing}");
+        let mut selected = base.to_vec();
+        selected.extend(["--source", "saved-name"]);
+        // Valid selectors reach registry configuration without loading credentials.
+        let selected_error = bad(run(dir.path(), &selected, &[]).await);
+        assert!(
+            selected_error.contains("persistent registry not configured"),
+            "{selected_error}"
+        );
+        if command == "remove" {
+            let mut all = base.to_vec();
+            all.push("--all");
+            let all_error = bad(run(dir.path(), &all, &[]).await);
+            assert!(
+                all_error.contains("persistent registry not configured"),
+                "{all_error}"
+            );
+            selected.push("--all");
+            let conflict = bad(run(dir.path(), &selected, &[]).await);
+            assert!(conflict.contains("cannot be used with"), "{conflict}");
+        }
     }
 }
 
@@ -1471,12 +1563,7 @@ async fn invalid_network_overrides_and_unpinned_qualification_fail_before_side_e
         vec!["catalog", "tools"],
         vec!["catalog", "warm"],
         vec![
-            "sources",
-            "refresh",
-            "--server",
-            "research",
-            "--source-id",
-            "missing",
+            "sources", "refresh", "--server", "research", "--source", "missing",
         ],
     ] {
         let mut args = command;

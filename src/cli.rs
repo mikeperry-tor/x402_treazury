@@ -27,7 +27,7 @@ pub enum Command {
     Config(Configuration),
     /// Initialize, inspect, back up and manage the Zcash treasury.
     Wallet(x402_treazury::wallet_cli::WalletArgs),
-    /// Inspect persisted agent-added source records.
+    /// Inspect, refresh or remove persisted agent-added sources.
     #[command(subcommand)]
     Sources(Sources),
     /// Print build identity and provenance as JSON.
@@ -62,8 +62,12 @@ pub enum Sources {
         config: PathBuf,
         #[arg(long)]
         server: String,
+        /// Saved source ID or exact name.
+        #[arg(long, required_unless_present = "all", conflicts_with = "all")]
+        source: Option<String>,
+        /// Remove all saved sources on this server.
         #[arg(long)]
-        source_id: String,
+        all: bool,
     },
     /// Fetch and validate a saved source's current specification while serving is stopped.
     Refresh {
@@ -74,8 +78,9 @@ pub enum Sources {
         network_config: Option<PathBuf>,
         #[arg(long)]
         server: String,
+        /// Saved source ID or exact name.
         #[arg(long)]
-        source_id: String,
+        source: String,
     },
     /// List persisted agent-added sources and saved tools without fetching or modifying them.
     Inspect {

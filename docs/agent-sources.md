@@ -642,9 +642,19 @@ schemas and callable tool IDs.
 Stop serving before operator maintenance; exclusive registry ownership is enforced:
 
 ```sh
-x402_treazury sources refresh --config FILE --server research --source-id SOURCE_ID
-x402_treazury sources remove --config FILE --server research --source-id SOURCE_ID
+x402_treazury sources refresh --config FILE --server research --source SOURCE_ID_OR_NAME
+x402_treazury sources remove --config FILE --server research --source SOURCE_ID_OR_NAME
+x402_treazury sources remove --config FILE --server research --all
 ```
+
+`--source` selects an exact saved ID first, then an exact name among sources that
+have not been removed. A removed ID fails rather than selecting another source by
+name. An ambiguous name fails without changing the registry;
+use its ID instead. Disabled sources can also be removed. `remove` requires exactly
+one of `--source` or `--all`; `refresh` requires `--source`. Both commands require
+`--server` and operate only on that endpoint's registry. `remove --all` atomically
+records tombstones for all remaining sources on the endpoint. An empty selection
+succeeds without saving the registry. Removal performs no network or wallet work.
 
 Generic refresh fetches and validates new bytes through the configured network
 policy without pricing probes. Origin retrieval needs no wallet credentials. Only

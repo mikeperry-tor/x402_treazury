@@ -517,18 +517,20 @@ not automatically follow vendor updates; they must be updated manually.
 First, stop the server, then:
 
 ```sh
-target/release/x402_treazury sources refresh --server research --source-id SOURCE_ID \
+target/release/x402_treazury sources refresh --server research --source SOURCE_ID_OR_NAME \
   --config path/to/deployment_config.toml
 ```
 
 To remove a source:
 
 ```sh
-target/release/x402_treazury sources remove --server research --source-id SOURCE_ID \
+target/release/x402_treazury sources remove --server research --source SOURCE_ID_OR_NAME \
   --config path/to/deployment_config.toml
 ```
 
-Removal revokes API access without deleting wallet balances or financial journals.
+Use an exact saved ID or name with `--source`. To remove every saved source on
+that endpoint, use `sources remove --server research --all --config FILE`.
+Removal revokes API access without network or wallet work and preserves financial journals.
 
 See the [configuration and authority reference](docs/agent-sources.md#configuration-and-authority)
 for import restrictions, limits and endpoint permissions.

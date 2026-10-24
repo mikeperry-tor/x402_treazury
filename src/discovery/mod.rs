@@ -968,44 +968,110 @@ pub async fn inspect_cli(meta_config: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+enum Maintenance {
+    Refresh(String),
+    Remove(String),
+    RemoveAll,
+}
+
+fn resolve_source(state: &State, source: &str) -> Result<String> {
+    if let Some(record) = state.records.get(source) {
+        ensure!(!record.removed, "source_not_manageable");
+        return Ok(source.to_owned());
+    }
+    let mut matches = state
+        .records
+        .iter()
+        .filter(|(_, record)| !record.removed && record.candidate.name == source);
+    let (id, _) = matches.next().context("source_not_manageable")?;
+    ensure!(
+        matches.next().is_none(),
+        "source name is ambiguous; use its ID"
+    );
+    Ok(id.clone())
+}
+
+fn advance_record(record: &mut Record) -> Result<Value> {
+    record.revision = record
+        .revision
+        .checked_add(1)
+        .context("revision exhausted")?;
+    record.updated_at = epoch();
+    Ok(
+        json!({"source_id":record.id,"name":record.candidate.name,"server":record.owner,"revision":record.revision,"removed":record.removed}),
+    )
+}
+
+fn remove_sources(state: &mut State, source: Option<&str>) -> Result<Vec<Value>> {
+    let selected = match source {
+        Some(source) => vec![resolve_source(state, source)?],
+        None => state
+            .records
+            .iter()
+            .filter(|(_, record)| !record.removed)
+            .map(|(id, _)| id.clone())
+            .collect(),
+    };
+    selected
+        .into_iter()
+        .map(|id| {
+            let record = state.records.get_mut(&id).unwrap();
+            record.removed = true;
+            record.document.clear();
+            record.candidate.provider = None;
+            advance_record(record)
+        })
+        .collect()
+}
+
 /// Operator-only registry maintenance. Exclusive ownership requires serving to be stopped.
 pub async fn maintain_cli(
     path: &std::path::Path,
     owner: &str,
-    source_id: &str,
+    source: &str,
     refresh: bool,
 ) -> Result<()> {
-    maintain_cli_with_network(path, owner, source_id, refresh, None).await
+    maintain_cli_with_network(path, owner, source, refresh, None).await
 }
 pub async fn maintain_cli_with_network(
     path: &std::path::Path,
     owner: &str,
-    source_id: &str,
+    source: &str,
     refresh: bool,
+    network_override: Option<&crate::network::NetworkConfig>,
+) -> Result<()> {
+    let operation = if refresh {
+        Maintenance::Refresh(source.to_owned())
+    } else {
+        Maintenance::Remove(source.to_owned())
+    };
+    maintain_cli_action(path, owner, operation, network_override).await
+}
+
+/// Tombstone every unremoved registration on the selected endpoint atomically.
+pub async fn remove_all_cli(path: &std::path::Path, owner: &str) -> Result<()> {
+    maintain_cli_action(path, owner, Maintenance::RemoveAll, None).await
+}
+
+async fn maintain_cli_action(
+    path: &std::path::Path,
+    owner: &str,
+    operation: Maintenance,
     network_override: Option<&crate::network::NetworkConfig>,
 ) -> Result<()> {
     let path = path.to_owned();
     let owner = owner.to_owned();
-    let source_id = source_id.to_owned();
     let network_override = network_override.cloned();
     PaidClient::unsigned()
         .run_owned(async move {
-            maintain_cli_owned(
-                &path,
-                &owner,
-                &source_id,
-                refresh,
-                network_override.as_ref(),
-            )
-            .await
+            maintain_cli_owned(&path, &owner, operation, network_override.as_ref()).await
         })
         .await?
 }
 async fn maintain_cli_owned(
     path: &std::path::Path,
     owner: &str,
-    source_id: &str,
-    refresh: bool,
+    operation: Maintenance,
     network_override: Option<&crate::network::NetworkConfig>,
 ) -> Result<()> {
     crate::deployment::Deployment::show_config_with_network(path, network_override).await?;
@@ -1034,81 +1100,106 @@ async fn maintain_cli_owned(
     let mut authority = None;
     let mut possible_payment = false;
     let result: Result<Value> = async {
-    let record = state
-        .records
-        .get_mut(source_id)
-        .filter(|r| !r.removed && r.owner == owner)
-        .context("source_not_manageable")?;
-    if refresh {
-        ensure!(
-            cfg.servers.get(owner).is_some_and(|s| s.source_management),
-            "source_management_disabled"
-        );
-        ensure!(
-            record.targets == [owner] && record.candidate.visibility == Visibility::Server,
-            "source_scope_must_be_endpoint_local"
-        );
-        crate::network::install(cfg.network.clone())?;
-        let mut candidate = record.candidate.clone();
-        if let Some(provider) = &candidate.provider {
-            candidate.provider = Some(curated::AcceptedProvider::current(&provider.id)?);
-        }
-        let document = match candidate.remote_spec() {
-            Some(url) => {
-                let options = import::options(url, candidate.provider.as_ref())?;
-                match crate::discovery_relay::document::origin(&options).await {
-                    Ok(document) => document,
-                    Err(failure) if failure.fallback => {
-                        let relay_policy = cfg.relay_fallback.as_ref().filter(|relay| relay.provider_metadata && relay.has_method("GET"));
-                        let Some(relay_policy) = relay_policy else { return Err(failure.error); };
-                        let relay = Arc::new(crate::discovery_relay::SearchRelay::load(relay_policy, path).await?);
-                        let Some(prepared) = crate::discovery_relay::document::prepare_fallback(&relay, &options)? else { return Err(failure.error); };
-                        authority = Some(crate::deployment::existing_read::ExistingRead::load(&cfg, owner).await?);
-                        let client = authority.as_ref().unwrap().client().with_document_relay(Some(relay));
-                        prepared.acquire(&client, failure).await?
-                    }
-                    Err(failure) => return Err(failure.error),
+        let all = matches!(&operation, Maintenance::RemoveAll);
+        let mut results = match operation {
+            Maintenance::Remove(source) => remove_sources(&mut state, Some(&source))?,
+            Maintenance::RemoveAll => remove_sources(&mut state, None)?,
+            Maintenance::Refresh(source) => {
+                let source_id = resolve_source(&state, &source)?;
+                let record = state.records.get_mut(&source_id).unwrap();
+                ensure!(
+                    cfg.servers.get(owner).is_some_and(|s| s.source_management),
+                    "source_management_disabled"
+                );
+                ensure!(
+                    record.targets == [owner] && record.candidate.visibility == Visibility::Server,
+                    "source_scope_must_be_endpoint_local"
+                );
+                crate::network::install(cfg.network.clone())?;
+                let mut candidate = record.candidate.clone();
+                if let Some(provider) = &candidate.provider {
+                    candidate.provider = Some(curated::AcceptedProvider::current(&provider.id)?);
                 }
+                let document = match candidate.remote_spec() {
+                    Some(url) => {
+                        let options = import::options(url, candidate.provider.as_ref())?;
+                        match crate::discovery_relay::document::origin(&options).await {
+                            Ok(document) => document,
+                            Err(failure) if failure.fallback => {
+                                let relay_policy = cfg.relay_fallback.as_ref().filter(|relay| {
+                                    relay.provider_metadata && relay.has_method("GET")
+                                });
+                                let Some(relay_policy) = relay_policy else {
+                                    return Err(failure.error);
+                                };
+                                let relay = Arc::new(
+                                    crate::discovery_relay::SearchRelay::load(relay_policy, path)
+                                        .await?,
+                                );
+                                let Some(prepared) =
+                                    crate::discovery_relay::document::prepare_fallback(
+                                        &relay, &options,
+                                    )?
+                                else {
+                                    return Err(failure.error);
+                                };
+                                authority = Some(
+                                    crate::deployment::existing_read::ExistingRead::load(
+                                        &cfg, owner,
+                                    )
+                                    .await?,
+                                );
+                                let client = authority
+                                    .as_ref()
+                                    .unwrap()
+                                    .client()
+                                    .with_document_relay(Some(relay));
+                                prepared.acquire(&client, failure).await?
+                            }
+                            Err(failure) => return Err(failure.error),
+                        }
+                    }
+                    None => Document::local(curated::local_document(
+                        candidate.provider.as_ref().context("provider_required")?,
+                    )?),
+                };
+                possible_payment = document.payment_may_have_occurred;
+                document.validate(|_, _, bytes| import::build(&candidate, bytes))?;
+                let bytes = (*document.body).clone();
+                candidate.spec_url = candidate.remote_spec().unwrap_or_default().to_owned();
+                record.candidate = candidate;
+                record.hash = hash(&bytes);
+                record.document = String::from_utf8(bytes)?;
+                record.format = FORMAT;
+                record.disabled = None;
+                vec![advance_record(record)?]
             }
-            None => Document::local(curated::local_document(candidate.provider.as_ref().context("provider_required")?)?),
         };
-        possible_payment = document.payment_may_have_occurred;
-        document.validate(|_, _, bytes| import::build(&candidate, bytes))?;
-        let bytes = (*document.body).clone();
-        candidate.spec_url = candidate.remote_spec().unwrap_or_default().to_owned();
-        record.candidate = candidate;
-        record.hash = hash(&bytes);
-        record.document = String::from_utf8(bytes)?;
-        record.format = FORMAT;
-        record.disabled = None;
-    } else {
-        record.removed = true;
-        record.document.clear();
-        record.candidate.provider = None;
+        if results.is_empty() {
+            return Ok(json!({"server":owner,"removed_count":0,"sources":[]}));
+        }
+        crate::limits::check(
+            state
+                .records
+                .values()
+                .map(|r| r.document.len())
+                .sum::<usize>(),
+            128 * 1024 * 1024,
+            "registry_document_limit",
+            "hardcoded_registry_document_bytes",
+        )?;
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .context("generation exhausted")?;
+        store.save(&state)?;
+        if all {
+            Ok(json!({"server":owner,"removed_count":results.len(),"sources":results}))
+        } else {
+            Ok(results.pop().unwrap())
+        }
     }
-    record.revision = record
-        .revision
-        .checked_add(1)
-        .context("revision exhausted")?;
-    record.updated_at = epoch();
-    let result = json!({"source_id":record.id,"server":owner,"revision":record.revision,"removed":record.removed});
-    crate::limits::check(
-        state
-            .records
-            .values()
-            .map(|r| r.document.len())
-            .sum::<usize>(),
-        128 * 1024 * 1024,
-        "registry_document_limit",
-        "hardcoded_registry_document_bytes",
-    )?;
-    state.generation = state
-        .generation
-        .checked_add(1)
-        .context("generation exhausted")?;
-    store.save(&state)?;
-    Ok(result)
-    }.await;
+    .await;
     let cleanup = match authority {
         Some(authority) => authority.close().await,
         None => Ok(()),

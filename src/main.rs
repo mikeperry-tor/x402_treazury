@@ -101,16 +101,25 @@ async fn run() -> Result<()> {
         cli::Command::Sources(cli::Sources::Remove {
             config,
             server,
-            source_id,
+            source,
+            all,
         }) => {
-            return x402_treazury::discovery::maintain_cli(&config, &server, &source_id, false)
-                .await;
+            if all {
+                return x402_treazury::discovery::remove_all_cli(&config, &server).await;
+            }
+            return x402_treazury::discovery::maintain_cli(
+                &config,
+                &server,
+                &source.context("source selection is required")?,
+                false,
+            )
+            .await;
         }
         cli::Command::Sources(cli::Sources::Refresh {
             config,
             network_config,
             server,
-            source_id,
+            source,
         }) => {
             let policy = network_config
                 .as_deref()
@@ -119,7 +128,7 @@ async fn run() -> Result<()> {
             return x402_treazury::discovery::maintain_cli_with_network(
                 &config,
                 &server,
-                &source_id,
+                &source,
                 true,
                 policy.as_ref(),
             )
