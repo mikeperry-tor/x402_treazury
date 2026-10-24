@@ -768,9 +768,14 @@ arrays join with commas, and flat objects become `key,value` pairs or `key=value
 pairs with `explode = true`. Unsupported styles, content-based header parameters,
 nested values and invalid HTTP names/values fail explicitly. Values are never
 included in validation error messages. As required by OpenAPI, header parameters
-named Accept, Content-Type and Authorization are ignored. Cookies, x402 payment
-headers and HTTP framing/connection/proxy headers remain runtime-owned and are
-rejected. Explicit custom API-key headers are ordinary declared arguments; existing
+named Accept, Content-Type and Authorization are ignored. Declarations of x402
+protocol headers (`PAYMENT-SIGNATURE`, `X-PAYMENT`, `PAYMENT-REQUIRED`,
+`PAYMENT-RESPONSE`, `X-PAYMENT-RESPONSE`) are also ignored, case-insensitively,
+even when marked required: they describe the payment protocol, which Treazury
+handles automatically. They never become tool arguments or business headers.
+Direct or persisted routing metadata cannot supply these runtime-owned headers.
+Cookies and HTTP framing/connection/proxy header declarations are rejected.
+Explicit custom API-key headers are ordinary declared arguments; existing
 relay policy still forbids credential forwarding and skips adapters unable to
 preserve all business headers.
 

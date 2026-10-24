@@ -289,16 +289,25 @@ impl Runtime {
                 }
                 Event::Catalog(id, result) => {
                     self.deployment.pending_sources.remove(&id);
-                    let result = result.and_then(|source| self.accept_source(&id, *source));
+                    let result = result.and_then(|source| {
+                        self.accept_source(&id, *source)
+                            .context(crate::catalog::LoadStage::Selection)
+                    });
                     match result {
                         Ok(()) => {
                             tracing::info!(source = id, "Deferred catalog ready");
                         }
-                        Err(_) => tracing::warn!(
-                            source = id,
-                            category = "catalog_unavailable",
-                            "Deferred catalog failed; source remains unavailable"
-                        ),
+                        Err(error) => {
+                            let failure = startup::catalog_failure(&error, "fetch_parse");
+                            tracing::warn!(
+                                source = id,
+                                category = "catalog_unavailable",
+                                failure_stage = failure.stage,
+                                reason = failure.reason,
+                                http_status = failure.http_status,
+                                "Catalog could not be made available; this source's tools are unavailable; correct the cause and restart to retry"
+                            );
+                        }
                     }
                 }
             }
@@ -306,10 +315,13 @@ impl Runtime {
             if stop.is_cancelled() {
                 break;
             }
-            if self.publish().await.is_err() {
+            if let Err(error) = self.publish().await {
+                let failure = startup::catalog_failure(&error, "publication");
                 tracing::warn!(
                     category = "catalog_publication_failed",
-                    "Deferred publication stopped; existing snapshot retained"
+                    failure_stage = failure.stage,
+                    reason = failure.reason,
+                    "Catalog publication stopped; existing tool inventory retained; endpoints still waiting for catalogs cannot start"
                 );
                 self.catalog.mark_publication_failed();
                 break;

@@ -194,6 +194,20 @@ identify failures, degraded operation or actionable configuration problems.
 Normal capacity waits, retained observation deferrals and disposable cache eviction
 belong at DEBUG, even when they delay work or discard advisory cached data.
 
+Catalog cache-hit messages confirm a readable JSON document; tool generation and
+listener validation must still finish before a source is ready. Catalog failures
+report the authored source ID, `failure_stage`, a fixed plain-language `reason`,
+and numeric `http_status` when available. Shared download failures retain the same
+typed cause and diagnostics. Stages distinguish configuration, acquisition,
+JSON parsing, tool generation, listener selection and publication. Reasons can
+identify unsupported header contracts or invalid provider tool filters without
+printing header names from the document, schemas, URLs, upstream prose or raw
+error chains. A failed source stays unavailable; a required source failure emits
+ERROR for each dependent waiting endpoint, identifying the source and directing
+the operator to its catalog warning. Publication failures retain the existing
+inventory for ready endpoints and fail endpoints still waiting for catalogs.
+Correct the reported cause and restart serving to retry a failed startup catalog.
+
 Unsigned document acquisitions carry an ephemeral `document_id` and trusted
 `request_kind`, shared by origin and paid relay spans. Origin failures report safe
 HTTP status, a plain-language reason, direct/Tor route, typed failure/transport

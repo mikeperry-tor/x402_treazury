@@ -1847,7 +1847,7 @@ impl RunningDeployment {
                         // Only fixed diagnostics and authored identities cross this
                         // boundary; upstream errors/content must never be included.
                         tracing::error!(server = name, reason = %error,
-                            "MCP endpoint unavailable; catalog startup failed; restart required");
+                            "MCP endpoint unavailable; catalog startup failed; see the catalog failure warning for the cause; correct it and restart");
                         drop(listener);
                         drop(app);
                         stopped.cancelled().await;

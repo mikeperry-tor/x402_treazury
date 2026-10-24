@@ -1,4 +1,5 @@
 mod credit_pricing;
+pub(crate) mod diagnostics;
 pub use credit_pricing::CreditPricing;
 
 use anyhow::{Context, Result, bail, ensure};
@@ -17,6 +18,10 @@ pub enum LoadStage {
     Body,
     LocalRead,
     Parse,
+    Configuration,
+    Generation,
+    Selection,
+    Publication,
 }
 impl LoadStage {
     pub fn label(self) -> &'static str {
@@ -25,6 +30,10 @@ impl LoadStage {
             Self::Body => "body",
             Self::LocalRead => "local_read",
             Self::Parse => "parse",
+            Self::Configuration => "configuration",
+            Self::Generation => "generation",
+            Self::Selection => "selection",
+            Self::Publication => "publication",
         }
     }
 }
@@ -39,15 +48,18 @@ impl std::error::Error for LoadStage {}
 /// remote outage. Keep the detailed cause for the operator without classifying
 /// failures by their human-readable text.
 #[derive(Debug)]
-pub(crate) struct ToolConfigurationError(anyhow::Error);
+pub(crate) struct ToolConfigurationError {
+    error: anyhow::Error,
+    reason: &'static str,
+}
 impl std::fmt::Display for ToolConfigurationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "invalid provider tool configuration: {}", self.0)
+        write!(f, "invalid provider tool configuration: {}", self.error)
     }
 }
 impl std::error::Error for ToolConfigurationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.0.as_ref())
+        Some(self.error.as_ref())
     }
 }
 
@@ -599,7 +611,7 @@ pub(crate) async fn prepare_json_discovery_bounded(
         if let Ok(document) = parse_document(&entry.data) {
             tracing::warn!(
                 cache = "relay_disk_hit",
-                "Catalog loaded from fresh relay cache; content supplied by configured relay"
+                "Catalog JSON read from fresh relay cache; content supplied by configured relay; tool generation and validation still required"
             );
             return Ok(CatalogLoad::Ready(document));
         }
@@ -657,7 +669,7 @@ async fn load_json_discovery_origin(
     {
         tracing::info!(
             cache = "disk_hit",
-            "Catalog loaded from fresh HTTP disk cache"
+            "Catalog JSON read from fresh HTTP disk cache; tool generation and validation still required"
         );
         return Ok(cached.expect("fresh cached document").1);
     }
@@ -857,11 +869,18 @@ async fn revalidate_cached_catalog(
     slot: Option<&crate::http_cache::Slot>,
 ) -> Result<()> {
     let Some(entry) = conditional else {
-        return Err(anyhow::anyhow!("unsolicited catalog HTTP 304")).context(LoadStage::Headers);
+        return Err(anyhow::anyhow!("unsolicited catalog HTTP 304"))
+            .context(diagnostics::Problem(
+                "The catalog server returned HTTP 304 but there is no cached document to validate",
+            ))
+            .context(LoadStage::Headers);
     };
     if !entry.metadata.matches_validation(headers) {
         return Err(anyhow::anyhow!(
             "catalog HTTP 304 did not validate cached representation"
+        ))
+        .context(diagnostics::Problem(
+            "The catalog server's HTTP 304 response does not match the cached document",
         ))
         .context(LoadStage::Headers);
     }
@@ -1266,7 +1285,10 @@ fn price(op: &Value) -> String {
 
 pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolSpec>> {
     if let Some(credits) = &cfg.credit_pricing {
-        credits.validate().map_err(ToolConfigurationError)?;
+        credits.validate().map_err(|error| ToolConfigurationError {
+            error,
+            reason: "Provider credit-pricing settings are invalid",
+        })?;
     }
     let selected = selected_operations(cfg, root, prefix)?;
     let mut credit_diagnostics = credit_pricing::Diagnostics::default();
@@ -1288,7 +1310,10 @@ pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolS
     if names.len() != tools.len() {
         bail!("duplicate generated tool names");
     }
-    filter_tool_names(cfg, &mut tools).map_err(ToolConfigurationError)?;
+    filter_tool_names(cfg, &mut tools).map_err(|error| ToolConfigurationError {
+        error,
+        reason: "Provider tool-name filters are invalid or match no tools; check include_tools, exclude_tools and recommendation settings",
+    })?;
     if let Some(credits) = &cfg.credit_pricing {
         credit_diagnostics.report(prefix, credits, &tools);
     }
@@ -1364,7 +1389,11 @@ fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(
     if selected.is_empty() {
         let error = anyhow::anyhow!("no operations matched");
         return Err(if had_operations {
-            ToolConfigurationError(error).into()
+            ToolConfigurationError {
+                error,
+                reason: "Provider path, method or tag filters select no API operations",
+            }
+            .into()
         } else {
             error
         });

@@ -14,6 +14,10 @@ struct Fixture {
 }
 impl Fixture {
     async fn new(listeners: &str, remote: bool) -> Self {
+        Self::with_failure_document(listeners, remote, None).await
+    }
+
+    async fn with_failure_document(listeners: &str, remote: bool, document: Option<Value>) -> Self {
         let slow = Arc::new(Semaphore::new(0));
         let failure = Arc::new(Semaphore::new(0));
         let arrived = Arc::new(Semaphore::new(0));
@@ -30,6 +34,7 @@ impl Fixture {
                     failure.clone()
                 };
                 let arrived = arrived.clone();
+                let document = document.clone();
                 async move {
                     assert!(!headers.contains_key("payment-signature"));
                     assert!(!headers.contains_key("x-payment"));
@@ -38,6 +43,8 @@ impl Fixture {
                     if uri.path() == "/slow" {
                         Json(json!({"operations":[{"method":"GET","path":"/read"}]}))
                             .into_response()
+                    } else if let Some(document) = document {
+                        Json(document).into_response()
                     } else {
                         (StatusCode::BAD_GATEWAY, "private upstream credential text")
                             .into_response()
@@ -242,12 +249,78 @@ async fn required_failure_logs_error_and_closes_only_dependent_endpoint() {
     finish(stop, serving).await;
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(!logs.contains("private upstream credential text"));
+    assert!(logs.contains("failure_stage=\"headers\""));
+    assert!(logs.contains("http_status=502"));
+    assert!(logs.contains("The catalog server returned an unsuccessful HTTP status"));
     assert!(
         !logs
             .lines()
             .any(|line| line.contains("MCP listening") && line.contains("server=\"broken\""))
     );
     fixtures.origin.abort();
+}
+
+#[tokio::test]
+async fn generation_and_listener_failures_explain_why_a_readable_catalog_is_unavailable() {
+    for (document, settings, stage, reason) in [
+        (
+            json!({"paths":{"/read":{"get":{
+                "description":"private upstream credential text",
+                "parameters":[{"name":"Cookie","in":"header"}]
+            }}}}),
+            "",
+            "generation",
+            "API header is reserved",
+        ),
+        (
+            json!({"operations":[{"path":"/read","method":"GET"}]}),
+            "include_tools=['failure_missing']",
+            "selection",
+            "configured listeners",
+        ),
+    ] {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+        let fixtures = Fixture::with_failure_document(
+            &(listener("broken", "['failure']", settings) + &listener("healthy", "['local']", "")),
+            true,
+            Some(document),
+        )
+        .await;
+        let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+        let stop = CancellationToken::new();
+        let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+        fixtures.failure.add_permits(1);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let logs = std::fs::read_to_string(log.path()).unwrap();
+                if logs
+                    .lines()
+                    .any(|line| line.contains("ERROR") && line.contains("server=\"broken\""))
+                {
+                    assert!(
+                        logs.contains(&format!("failure_stage=\"{stage}\"")),
+                        "{logs}"
+                    );
+                    assert!(logs.contains(reason), "{logs}");
+                    assert!(!logs.contains("private upstream credential text"));
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        drop(TcpListener::bind(addresses["broken"]).await.unwrap());
+        let listed = rpc(addresses["healthy"], "tools/list").await;
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 1);
+        finish(stop, serving).await;
+        fixtures.origin.abort();
+    }
 }
 
 #[tokio::test]
@@ -379,6 +452,11 @@ async fn worker_or_publication_failure_closes_waiters_and_keeps_ready_peers() {
             .unwrap()
             .unwrap();
         assert_eq!(result.is_err(), panic);
+        if !panic {
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            assert!(logs.contains("failure_stage=\"publication\""), "{logs}");
+            assert!(logs.contains("previous tool inventory"), "{logs}");
+        }
         fixtures.origin.abort();
     }
 }

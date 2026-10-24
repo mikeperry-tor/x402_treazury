@@ -56,8 +56,11 @@ boundaries; OpenAPI boolean exclusive bounds normalize to numeric bounds.
 Declared business header parameters retain their original names and simple-style
 serialization in serializable tool routing metadata. Collisions with flattened
 query/body arguments use a `_header` argument suffix. OpenAPI's ignored Accept,
-Content-Type and Authorization parameters remain ignored; payment signatures,
-cookies and HTTP transport/framing headers cannot be supplied as API arguments.
+Content-Type and Authorization parameters remain ignored. x402 protocol header
+declarations also stay out of tool inputs, including required declarations;
+the payment runtime owns those headers. Cookies and HTTP transport/framing
+declarations are rejected. Runtime-owned headers cannot be supplied as business
+headers through persisted or directly constructed routing metadata.
 A declared Idempotency-Key is generated once per routed invocation and retained
 in the request cloned by existing unsigned and signed attempts. It is not a caller
 argument and grants no retry authority. See [header contracts](configuration.md#openapi-header-parameters-and-idempotency).

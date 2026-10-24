@@ -215,7 +215,7 @@ fn automatic_key_constraints_survive_schema_and_parameter_references() {
 }
 
 #[test]
-fn openapi_ignored_headers_stay_ignored_and_runtime_owned_headers_are_rejected() {
+fn openapi_ignored_headers_stay_ignored_and_transport_headers_are_rejected() {
     let ignored = tool(json!([
         {"name":"aCcEpT","in":"header","required":true},
         {"name":"Content-Type","in":"header","required":true},
@@ -230,8 +230,6 @@ fn openapi_ignored_headers_stay_ignored_and_runtime_owned_headers_are_rejected()
         "Connection",
         "Proxy-Authorization",
         "Cookie",
-        "Payment-Signature",
-        "x-PaYmEnT",
     ] {
         let error = build_tools(
             &Config::default(),
@@ -240,5 +238,53 @@ fn openapi_ignored_headers_stay_ignored_and_runtime_owned_headers_are_rejected()
         )
         .unwrap_err();
         assert!(error.to_string().contains("reserved"));
+    }
+}
+
+#[test]
+fn documented_payment_headers_are_ignored_but_cannot_be_injected_into_routes() {
+    for name in [
+        "PAYMENT-SIGNATURE",
+        "x-PaYmEnT",
+        "Payment-Required",
+        "PAYMENT-RESPONSE",
+        "X-Payment-Response",
+    ] {
+        for required in [false, true] {
+            let document = json!({"components":{"parameters":{"Payment":{
+                "name":name,"in":"header","required":required,"schema":{"type":"string"}
+            }}},"paths":{"/purchase":{
+                "parameters":[{"$ref":"#/components/parameters/Payment"}],
+                "post":{"parameters":[{"name":"X-Quote-Id","in":"header","schema":{"type":"string"}}]}
+            }}});
+            let generated = build_tools(&Config::default(), &document, "fixture")
+                .unwrap()
+                .remove(0);
+            assert_eq!(generated.header_params.len(), 1);
+            assert!(generated.input_schema["properties"].get(name).is_none());
+            assert!(generated.input_schema["required"].is_null());
+            let args = json!({(name):"caller-forged-payment", "X-Quote-Id":"quote"});
+            let route = generated
+                .route("https://example.com", args.as_object().unwrap())
+                .unwrap();
+            assert_eq!(route.headers.len(), 1);
+            assert_eq!(route.headers["x-quote-id"], "quote");
+
+            // Persisted or Rust-constructed routing metadata must not bypass runtime ownership.
+            let mut forged = generated;
+            forged.header_params.insert(
+                name.into(),
+                x402_treazury::catalog::HeaderParameter {
+                    name: name.into(),
+                    required,
+                    explode: false,
+                },
+            );
+            assert!(
+                forged
+                    .route("https://example.com", args.as_object().unwrap())
+                    .is_err()
+            );
+        }
     }
 }

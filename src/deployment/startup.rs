@@ -114,6 +114,17 @@ impl std::error::Error for SharedFailure {
         Some(self.0.as_ref().as_ref())
     }
 }
+
+// Shared downloads preserve the typed cause behind Arc; never display its prose.
+pub(super) fn catalog_failure(
+    mut error: &anyhow::Error,
+    stage: &'static str,
+) -> catalog::diagnostics::Failure {
+    while let Some(shared) = error.downcast_ref::<SharedFailure>() {
+        error = shared.0.as_ref();
+    }
+    catalog::diagnostics::Failure::from_error(error, stage)
+}
 #[derive(Clone, Debug)]
 enum Download {
     Ready(Document),
@@ -362,26 +373,11 @@ async fn load_one(
     let result = Source::load(id, source, path, warn, &mut progress, downloads).await;
     progress.finished = true;
     if let Err(error) = &result {
-        let error = error
-            .downcast_ref::<SharedFailure>()
-            .map(|shared| shared.0.as_ref())
-            .unwrap_or(error);
-        let phase = error
-            .downcast_ref::<catalog::LoadStage>()
-            .map(|stage| stage.label())
-            .unwrap_or(progress.phase);
-        catalog_evidence::record(
-            id,
-            State::Failed,
-            phase,
-            error
-                .downcast_ref::<reqwest::Error>()
-                .and_then(|e| e.status())
-                .map(|s| s.as_u16()),
-        );
+        let failure = catalog_failure(error, progress.phase);
+        catalog_evidence::record(id, State::Failed, failure.stage, failure.http_status);
         tracing::warn!(target: "x402_treazury::startup", source = id, phase = progress.phase,
-            failure_stage = phase,
-            http_status = error.downcast_ref::<reqwest::Error>().and_then(|e| e.status()).map(|s| s.as_u16()),
+            failure_stage = failure.stage, reason = failure.reason,
+            http_status = failure.http_status,
             elapsed_ms = progress.started.elapsed().as_millis() as u64,
             collecting_independent_results = catalog_evidence::collecting(),
             "Catalog load failed; complete inventory unavailable");
@@ -483,18 +479,21 @@ impl Source {
             );
             Ok(base_url)
         })();
-        let base_url = base_url.map_err(|error| {
-            if cfg.base_url.is_none()
-                && (cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://"))
-            {
-                error.context(RemoteCatalogUnavailable {
-                    prefix: cfg.prefix.clone().expect("resolved prefix"),
-                })
-            } else {
-                error
-            }
-        })?;
-        cfg.resolve_cover(&base_url, crate::network::global().policy.cover_enabled())?;
+        let base_url = base_url
+            .map_err(|error| {
+                if cfg.base_url.is_none()
+                    && (cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://"))
+                {
+                    error.context(RemoteCatalogUnavailable {
+                        prefix: cfg.prefix.clone().expect("resolved prefix"),
+                    })
+                } else {
+                    error
+                }
+            })
+            .context(catalog::LoadStage::Configuration)?;
+        cfg.resolve_cover(&base_url, crate::network::global().policy.cover_enabled())
+            .context(catalog::LoadStage::Configuration)?;
         let tools = catalog::build_tools(&cfg, &document, cfg.prefix.as_deref().unwrap())
             .map_err(|e| {
                 if (cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://"))
@@ -507,6 +506,7 @@ impl Source {
                     e
                 }
             })
+            .context(catalog::LoadStage::Generation)
             .with_context(|| format!("source {id}: catalog generation"))?;
         tracing::debug!(target: "x402_treazury::startup", source = id, tools = tools.len(),
             elapsed_ms = generation_started.elapsed().as_millis() as u64, "Catalog generation finished");
@@ -596,6 +596,106 @@ mod warm_tests;
 mod deferred_tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn cached_json_can_fail_generation_with_a_safe_specific_reason() {
+        use crate::http_cache::{Entry, Metadata, Slot};
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = catalog::Config {
+            spec: "https://example.com/private-catalog?token=secret".into(),
+            base_url: Some("https://example.com".into()),
+            prefix: Some("fixture".into()),
+            http_cache_directory: Some(dir.path().join("cache")),
+            ..Default::default()
+        };
+        let headers = reqwest::header::HeaderMap::from_iter([(
+            reqwest::header::CACHE_CONTROL,
+            "max-age=600".parse().unwrap(),
+        )]);
+        let metadata = Metadata::from_headers(&headers, Duration::ZERO, None).unwrap();
+        let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
+        slot.write(Some(Entry {
+            metadata,
+            data: serde_json::json!({"paths":{"/read":{"get":{
+                "description":"private upstream prose",
+                "parameters":[{"in":"header","name":"Idempotency-Key","schema":{"type":"integer"}}]
+            }}}})
+            .to_string()
+            .into_bytes(),
+        }))
+        .await;
+        assert!(
+            slot.read()
+                .await
+                .expect("cached fixture must be stored")
+                .metadata
+                .fresh()
+        );
+        let downloads = Downloads {
+            defer: true,
+            ..Default::default()
+        };
+        let Download::Deferred(document) = downloads.load("fixture", &cfg).await.unwrap() else {
+            panic!("expected deferred document");
+        };
+        let pending = PendingSource {
+            config: cfg,
+            operator_required: false,
+            document,
+        };
+        let (error, logs) = crate::limits::tests::capture(async {
+            let (status, _) = tokio::sync::watch::channel(false);
+            pending
+                .resume(
+                    "fixture",
+                    Arc::new(tokio::sync::Semaphore::new(1)),
+                    false,
+                    status,
+                )
+                .await
+                .err()
+                .expect("invalid key schema must reject generation")
+        })
+        .await;
+        assert!(
+            logs.contains("fresh HTTP disk cache; tool generation and validation still required")
+        );
+        assert!(!logs.contains("private upstream prose") && !logs.contains("token=secret"));
+        let failure = catalog_failure(&error, "fetch_parse");
+        assert_eq!(failure.stage, "generation");
+        assert!(failure.reason.contains("Idempotency-Key schema"));
+        assert!(error.is::<RemoteCatalogUnavailable>());
+    }
+
+    #[test]
+    fn shared_failures_retain_safe_stage_and_http_status() {
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(503)
+                .body("private upstream prose")
+                .unwrap(),
+        );
+        let error = response.error_for_status().unwrap_err();
+        let shared = SharedFailure(Arc::new(
+            anyhow::Error::new(error).context(catalog::LoadStage::Headers),
+        ));
+        let error = anyhow::Error::new(shared).context("private source context");
+        let failure = catalog_failure(&error, "fetch_parse");
+        assert_eq!(failure.stage, "headers");
+        assert_eq!(failure.http_status, Some(503));
+        assert_eq!(
+            failure.reason,
+            "The catalog server returned an unsuccessful HTTP status"
+        );
+
+        let error = anyhow::Error::new(SharedFailure(Arc::new(
+            anyhow::anyhow!("private malformed body").context(catalog::LoadStage::Parse),
+        )));
+        assert_eq!(
+            catalog_failure(&error, "fetch_parse").reason,
+            "The catalog document is not valid JSON"
+        );
+    }
 
     #[tokio::test]
     async fn remote_aliases_defer_io_and_share_one_origin_request() {

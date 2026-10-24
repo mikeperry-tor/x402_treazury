@@ -29,7 +29,11 @@ rejects it. `deployment::deferred::readiness_tests` uses real MCP HTTP requests 
 verify default waiting per endpoint, publication before initialize/tools/list,
 independent local/immediate peers, optional failure, ERROR plus socket closure for
 required failure, local-only/management-only endpoints, cancellation while waiting, and
-worker/publication failures. Existing accepted-relay-payment cancellation and
+worker/publication failures. Failure logs distinguish HTTP status, tool-generation
+and listener-selection failures without upstream prose; publication failures explain
+the retained inventory. Startup unit tests cover a fresh cached JSON document
+whose unsupported header schema prevents generation, and shared failures preserving
+safe acquisition stages and status. Existing accepted-relay-payment cancellation and
 panic fixtures also run with default waiting and verify drain/Store ownership.
 Publication preserves authored prices, tool order and existing callable snapshots. Deferred collision
 regressions cover opposite completion orders, three owners, exact selectors,
