@@ -9,11 +9,19 @@ recommended_tools = ["netintel_dns_lookup", "netintel_whois_rdap_lookup", "netin
 pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 help_url = "https://netintel.dev/llms.txt"
-instructions_text = "NetIntel network, domain, IP, email, crypto, web and model tools via x402 USDC on Base. Default POST preference collapses equivalent same-path twins before naming, avoiding URL secrets and query-array serialization. Compatible /api/v1 gateway aliases remain available under their full names; /v1/embeddings and /embeddings stay distinct. netintel_ai_image_generate extracts its PNG data URI as an MCP image. Recommendations offer a small research view without restricting the default inventory. Published prices are estimates; live challenges and the configured cap govern payment. Do not automatically replay uncertain signed requests."
+instructions_text = "Network and infrastructure intelligence. Preserve section availability, source timestamps and partial results. Unavailable signals are not clean results."
 
 [overrides.netintel_help]
-description = "Read NetIntel's endpoint index and usage guide, fetched on demand and cached for this process. Its header summary ($0.005–$0.100 and legacy X-PAYMENT wording) lags the full catalog ($0.001–$0.65 over x402 v2); Treazury handles Base USDC payment automatically."
+description = "Read NetIntel’s endpoint index and usage guide. Its summary price range and legacy payment-header wording lag the current catalog."
 
 [response_mappings."POST /ai-image/generate"]
 images = [{ pointer = "/image_url", encoding = "data_uri" }]
 
+[overrides.netintel_phone_intel_analyze]
+description = "Validate and normalize phone to E.164, international and national formats. Supply country_hint when no dial code is present. Line-type classification covers NANP and UK; other countries return unknown. This is not subscriber identity, scam history or proof of reachability. Cost: ~$0.05/call [spec]."
+
+[overrides.netintel_ip_report_full]
+description = "Retrieve geolocation, ASN, DNSBL status, threat reputation and aggregate risk for ip. Preserve per-section availability and timestamps; partial failures are not clean results. IPv6 skips IPv4-only blacklist checks. Cost: ~$0.20/call [spec]."
+
+[overrides.netintel_ip_reputation_analyze]
+description = "Screen ip against AbuseIPDB and AlienVault OTX, returning threat categories, source data and risk_score (higher means more danger). Preserve unavailable signals and timestamps. Cost: ~$0.05/call [spec]."

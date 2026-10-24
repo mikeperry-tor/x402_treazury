@@ -621,8 +621,9 @@ agents to interpret actual HTTP response bodies and not assume another `.data`
 layer (individual upstream bodies may legitimately contain a `data` field).
 Help is fetched only on call and cached for the process lifetime, with configured
 size limits reported explicitly. It includes workflows outside the selected catalog;
-the instructions/help description name these exclusions rather than modifying or
-silently cutting down the vendor document.
+the help description identifies unsupported workflows rather than modifying or
+silently cutting down the vendor document. Maps text-search pagination repeats
+the original body, including `textQuery`, alongside its `pageToken`.
 
 Excluded operations:
 

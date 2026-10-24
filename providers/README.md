@@ -175,7 +175,14 @@ retry authority; see the [unsigned request contract](../docs/architecture.md#uns
 
 Attach `help_url` when a useful guide covers the toolset; help is fetched on demand
 and cached for the process lifetime. Preserve complete request schemas and usage
-guidance. Provider-specific tests and fixtures need a concrete quirk, historical
+guidance. Keep `instructions_text` brief and limited to cross-tool workflows or
+shared interpretation rules. Put operation requirements, sparse-schema arguments,
+pagination quirks and coverage limitations in the affected tool descriptions or
+parameter notes. Avoid capability inventories already present in tool metadata,
+manual payment/sign/retry steps, client setup, marketing and maintainer provenance
+in agent guidance; keep provenance and compatibility rationale in this guide and
+the provider caveats. Preserve operation prices and billing distinctions rather
+than repeating the server's general pricing caveat. Provider-specific tests and fixtures need a concrete quirk, historical
 failure or authored transformation. Prefer small faithful inputs and assertions
 for that responsibility, with synthetic shared tests for generic behavior. A new
 provider requires neither a complete golden/settings snapshot nor paid

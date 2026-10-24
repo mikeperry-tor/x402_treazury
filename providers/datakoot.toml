@@ -9,10 +9,10 @@ pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 # x402.datakoot.com/llms.txt returns 404; the vendor guide is hosted on the apex domain.
 help_url = "https://datakoot.com/llms.txt"
-instructions_text = "Datakoot public-data intelligence (security CVEs/KEV/EPSS, OSS packages, SEC EDGAR filings, World Bank/FRED macro, FX, US weather/geocoding/elevation, global USGS earthquakes, DNS/domain/email intel, Federal Register, Base on-chain reads) and Koot multi-source briefings via x402 USDC on Base. Select subsets with exact vendor tags (Security Intel, Package Intel, Filings Intel, Economy Intel, Market Intel, Weather & Geo, Domain Intel, Regulatory Intel, Base Intel, Koot). For datakoot_epss_score pass cve_id or cve_ids; for datakoot_audit_dependencies pass manifest or dependencies; for datakoot_brief_stack pass packages or manifest. Geocode, weather, elevation and brief_place cover US locations only (US Census / NWS / USGS). Per-operation x-payment-info prices ($0.01 for Security Intel, Package Intel and Koot tools; $0.002 for the rest) differ from the spec's top-level summary; the live 402 challenge is authoritative."
+instructions_text = "Geocode, weather, elevation and brief_place cover US locations only. Per-operation price metadata differs from the guide summary; displayed prices remain estimates."
 
 [overrides.datakoot_help]
-description = "Read Datakoot's catalog and usage guide from datakoot.com/llms.txt, fetched on demand and cached for this process. The guide also describes hosted MCP endpoints and free rate-limited subdomains; Treazury calls the x402 REST endpoints directly and handles Base USDC payment automatically."
+description = "Read Datakoot's catalog and usage guide. Hosted MCP and free subdomain setup does not apply here."
 
 [overrides.datakoot_epss_score.params]
 cve_id = "A single CVE ID (e.g. CVE-2024-3094). Pass either cve_id or cve_ids (at least one is required)."

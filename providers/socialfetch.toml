@@ -13,12 +13,12 @@ pricing_key = "x-socialfetch-credits-pricing"
 # API-origin catalog/help ignored byte ranges in the 2026-10-16 probe; HTTP/2
 # cover requires 206 responses. Canonical docs use a different origin.
 cover_traffic_enabled = false
-instructions_text = "SocialFetch social and web data via x402 USDC on Base. Select platforms using OpenAPI tags (for example Twitter, YouTube, LinkedIn). Prices are quoted in credits, approximately $0.014 USDC per credit; follow each tool description for base costs and usage-dependent surcharges. The payment challenge is authoritative. LinkedIn includes both API versions: tools with socialfetch_linkedin_ use v1, and socialfetch_v2_linkedin_ use v2. Parameter names and HTTP paths preserve their original casing. Slow transcript/search requests may need a 90-second timeout."
+instructions_text = "Prices use credits at approximately $0.014 USDC per credit; tool descriptions include base costs and usage surcharges. socialfetch_linkedin_* uses v1; socialfetch_v2_linkedin_* uses v2. Preserve lookupStatus, partial results and provenance."
 
 help_url = "https://www.socialfetch.dev/llms.txt"
 
 [overrides.socialfetch_help]
-description = "Read Social Fetch's API usage guide, fetched on demand and cached for this process. The guide describes its API-key product and broader monitor/webhook workflows; this integration uses the x402 host and selected tools with Treazury-managed payment, without a vendor API key. Preserve lookupStatus, partial-result and provenance fields."
+description = "Read Social Fetch's API guide. API-key setup and monitor/webhook workflows describe another product; use exposed tools. Fetched on demand and cached for this process."
 
 # Convert structured credit costs into USDC estimates in each tool description.
 [credit_pricing]

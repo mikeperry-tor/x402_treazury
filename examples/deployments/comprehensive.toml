@@ -100,8 +100,8 @@ registry_file = "../../state/privacy-sources.sqlite"
 # combines instructions from sources with selected tools into the MCP server's
 # instructions for the agent, labeled with [source_id], and appends a
 # pricing caveat. An endpoint instructions_text replaces this composed guidance.
-# Social keeps its capability list only in discovery search help below, with a
-# short initialization message for clients that forward server instructions.
+# Endpoints below use brief initialization guidance; keep operation requirements
+# in provider tool descriptions and social capability keywords in search help.
 # Source-local instructions_text replaces inherited provider guidance; tool
 # descriptions are configured separately through source overrides.
 
@@ -125,7 +125,6 @@ exclude_tools = ["telesint_help"]
 
 [sources.webinfo]
 extends = "../../providers/socialfetch.toml"
-instructions_text = "Additional web access tools are available under socialfetch_web_*."
 tags = ["Web", "Reddit"]
 exclude_tools = ["socialfetch_help"]
 
@@ -133,7 +132,6 @@ exclude_tools = ["socialfetch_help"]
 # subset providers below omit broad vendor guides.
 [sources.exa]
 extends = "../../providers/exa.toml"
-instructions_text = "Use exa_search for web discovery and exa_contents for known URLs or document IDs. Prefer small result/page counts and highlights. For contents supply exactly one of urls or ids. Omit stream or set false: tools return completed responses. exa_help covers these selected endpoints; generic API-key and SDK setup is unnecessary."
 
 # Person lookups stay in the social context. Vendor-listed matches cost $0.28,
 # within the shared $0.50 cap for one matched result; use small batches.
@@ -146,7 +144,6 @@ include_tools = ["pdl_person_*"]
 # the shared $0.50 per-payment cap.
 [sources.pdl_company]
 extends = "../../providers/pdl.toml"
-instructions_text = "Discover companies using People Data Labs structured company search. Prefer size=1 and paginate with scroll_token when needed. Use Deepline for company enrichment rather than searching again for details. Verify company identity before combining results across providers."
 include_tools = ["pdl_company_search"]
 
 # StableEnrich purpose selections narrow the supported catalog and omit broad
@@ -181,7 +178,6 @@ include_tools = [
   "stableenrich_serper_news",
   "stableenrich_firecrawl_scrape",
 ]
-instructions_text = "Company research through StableEnrich: enrich organizations by domain or name/social URL, discover local businesses with Google Maps, retrieve place details, search company news and scrape company pages with Firecrawl. Verify returned domains and company identity before combining results; CompanyEnrich employees/revenue are ranges and funding totals may lag individual rounds. Prefer partial Maps results when sufficient. For Maps text-search pagination repeat the original search body with its pageToken. Check news dates and source provenance. Interpret actual HTTP bodies without assuming an AgentCash success/data wrapper."
 
 # Tool-name allowlists keep the company toolset small as upstream catalogs grow.
 # Broad vendor help tools are omitted to avoid suggesting unselected operations.
@@ -189,7 +185,6 @@ instructions_text = "Company research through StableEnrich: enrich organizations
 [sources.company_otto]
 extends = "../../providers/otto.toml"
 include_tools = ["otto_financial_statements", "otto_equity_news"]
-instructions_text = "Company research: SEC financial statements and company-specific equity news. Use source dates and filing provenance when comparing results."
 
 # Startup/crypto/investor research: RootData profiles crypto projects and venture
 # organizations, including teams, backers and funding rounds. Search resolves IDs
@@ -203,14 +198,12 @@ include_tools = [
   "claw402_crypto_rootdata_org",
   "claw402_crypto_rootdata_funding",
 ]
-instructions_text = "Crypto-company research through RootData: search projects and investors, inspect project/organization profiles, and list funding rounds. Resolve IDs with search before requesting profiles. Only these four operations are exposed."
 
 # Business profiles and competitor advertising; no personal contact harvesting.
 [sources.company_deepline]
 extends = "../../providers/deepline.toml"
 tags = ["Company", "Ads"]
 include_tools = ["deepline_company_enrich", "deepline_ads_search"]
-instructions_text = "Company research: company enrichment and advertising intelligence. Personal contact, email and phone lookup tools are excluded."
 
 # Public-company discovery, overview, SEC disclosures and filing summaries.
 # Retain inherited exclusions; omit trading signals, expensive research memos
@@ -223,7 +216,6 @@ include_tools = [
   "x402stock_dossier_ticker",
   "x402stock_filing_summary_ticker",
 ]
-instructions_text = "US public-company research: resolve symbols with tickers, then request overview, SEC disclosure dossier or filing summary. Pass ticker symbols in the tool's ticker argument. Check timestamps and unavailable sections; quotes may be delayed, and filing summaries are synthesized."
 
 # Multi-board job search (LinkedIn, Indeed, Glassdoor, Google Jobs, ZipRecruiter,
 # Bayt, BDJobs, Naukri). Base price is $0.05 + $0.002 * len(sites) * maxResults,
@@ -233,7 +225,6 @@ instructions_text = "US public-company research: resolve symbols with tickers, t
 [sources.company_hirescrape]
 extends = "../../providers/hirescrape.toml"
 include_tools = ["hirescrape_jobs"]
-instructions_text = "Company hiring and job-opening research through HireScrape (hirescrape_jobs). Prefer 1-2 target job boards in sites (e.g. ['linkedin'] or ['linkedin', 'indeed']) and small maxResults."
 
 # European and global business registries, German Handelsregister, one-call due
 # diligence ($0.10), EU VIES VAT validation, sanctions screening and domain intel.
@@ -247,7 +238,6 @@ include_tools = [
   "agosint_sanctions",
   "agosint_domain",
 ]
-instructions_text = "Company registry and compliance research through AgOSINT: look up legal entities across Czechia, Norway, UK, France, Finland, US SEC and GLEIF LEI (agosint_company), German Handelsregister records and officers (agosint_company_de, prefer limit <= 4 for small result batches), combined one-call due diligence (agosint_due_diligence), EU VIES VAT validation (agosint_vat), sanctions screening (agosint_sanctions) and domain intelligence (agosint_domain). For agosint_company and agosint_due_diligence pass exactly one of id, name, lei, vat, or domain (with country required for id or name); for agosint_sanctions pass name or wallet."
 
 # Company security research: eleven explicitly selected main-catalog tools plus
 # the local phone companion. Both inherit the existing company wallet; no new pool.
@@ -266,12 +256,10 @@ include_tools = [
   "relayshield_tech_stack_cve",
   "relayshield_wallet_risk",
 ]
-instructions_text = "Company security and vendor due diligence through RelayShield (relayshield_*): email breach/infostealer exposure and identity pivots, vendor supply-chain risk, domain identity/ransomware risk, public credential exposure, IP intelligence, declared-stack vulnerabilities and counterparty wallet screening. Supply email for breach, infostealer and identity_graph; phone in E.164 format for sim_swap; vendor_domains or vendor_emails for supply_chain; domain or ip for ip_intel; domain for identity_risk_score and ransomware_risk; domain and/or vendor_domains for secret_scan; tech_stack directly for tech_stack_cve (domain references an unavailable account profile); and address for wallet_risk. The vendor documents SIM-swap carrier availability as degraded/unavailable; a failed lookup supplies no verdict. Phone reputation is available through the companion source. Preserve timestamps, coverage, null and degraded markers; missing findings are not proof of safety."
 
 [sources.company_relayshield_phone]
 extends = "../../providers/relayshield/phone-reputation.toml"
 include_tools = ["relayshield_phone_reputation"]
-instructions_text = "Use relayshield_phone_reputation for a company's known contact phone, supplied as phone in E.164 format. It returns phone reputation, attack-graph pivots and carrier line-type signals, with SIM-swap data cached for 24 hours rather than a fresh carrier check. Preserve checked/unknown markers and evidence timestamps; an absence of flags is not proof of safety. This locally authored companion covers a route omitted from the vendor OpenAPI catalog."
 
 # Focused NetIntel phone, IP and company-infrastructure intelligence.
 # Inherit the company wallet and its $0.50 per-payment cap.
@@ -286,14 +274,12 @@ include_tools = [
   "netintel_cloud_fingerprint_analyze",
   "netintel_tech_fingerprint_analyze",
 ]
-instructions_text = "NetIntel phone, IP and company-infrastructure intelligence (netintel_*). Use phone_intel_analyze with phone in any format and optional country_hint when no country dial code is present; it validates and normalizes the number, with line-type classification limited to NANP and UK numbers, not scam history, subscriber identity or proof of reachability. Use ip for ip_reputation_analyze, ip_report_full and ip_geo_locate; domain for cloud_fingerprint_analyze; and url for tech_fingerprint_analyze. Choose individual IP checks for focused information or ip_report_full for a combined profile. The ip_reputation_analyze risk_score rises with danger. Preserve section availability, partial results, unknown fields and source timestamps; unavailable signals are not clean results. IPv6 inputs skip IPv4-only blacklist checks."
 
 # IP enrichment and satellite observations for company infrastructure/site research.
 # Inherit the existing company wallet and its $0.50 per-payment cap.
 [sources.company_ipintel]
 extends = "../../providers/ipintel.toml"
 include_tools = ["ipintel_ip_lookup", "ipintel_satellite"]
-instructions_text = "Company infrastructure and physical-site research through IPIntel.ai. Use ipintel_ip_lookup with an IPv4 or IPv6 ip for geolocation, ASN, ISP, organization, reverse DNS and proxy/mobile/hosting indicators; these are vendor signals, not proof of company ownership or location. Use ipintel_satellite with known lat and lon and optional radius_m, mode and date. Null date selects the latest suitable scene; fallback defaults to true and may select a nearby date. Preserve selected-scene timestamps, fulfillment status, warnings and Copernicus attribution. Satellite image links remain JSON metadata and are not automatically fetched."
 
 # Company profiles, public records, market signals and specialist research through Vaaya.
 # Inherit the existing company wallet and its $0.50 per-payment cap.
@@ -327,22 +313,20 @@ include_tools = [
   "vaaya_recallradar_search",
   "vaaya_recallradar_get",
 ]
-instructions_text = "Company profiles, funding, workforce/product signals, US litigation, filings, patents, historical sites, numerical evidence and recalls through Vaaya. For Fundable company_search supply one of name/domain/linkedin/crunchbase; use the returned id with company, or call company directly with one of id/domain/linkedin/crunchbase. Verify legal entity/domain and source articles: the vendor documents identity mismatches and funding totals that may lag the latest round. CourtListener cases/dockets require q with optional party_name/court/date filters; cases searches opinions, dockets searches RECAP federal dockets. Akta headcount_trends/product_reviews take company as domain or Akta uuid. TheirStack technographics takes a company identifier, preferably company_domain; resolve technology slugs with tech_catalog before filtering, and preserve confidence and first/last dates because job mentions do not prove current deployment. Signalbase funding/acquisitions support company_domain/company_name and date filters; preserve event/source dates. EDGAR entities resolves q to CIK; filings takes cik, fulltext takes q with optional forms/date filters, document takes cik/accession/filename, concept takes cik/concept for public-company XBRL financials, and index takes date. Private Form D/C filings may be available, but missing results prove neither nonregistration nor absent financing. USPTO assignees takes organization; patents takes q. Wayback snapshots/available take url and date selectors; fetch takes url/timestamp from a snapshot. Tako search/answer take query with optional source_indexes; contents takes a result url for its backing CSV/page text. RecallRadar search takes q (product/brand) in the JSON body; get takes an id from search. Preserve source links, dates, jurisdiction, coverage, partial results and recall record identifiers; no hits do not prove no litigation or safety notices. Hosted assets remain links."
 
 [sources.googletrends]
 extends = "../../providers/google-trends.toml"
-instructions_text = "Use Google Trends for aggregate keyword interest over time, by region, and related queries/topics in the web research context. Supply keyword and an ISO country code as required by the tools. This is aggregate trend data, not web search or evidence about a specific person's behavior. google_trends_help describes this complete selected toolset."
 
 # GenuineGood is a grant discovery service. Keep its selected search and detail
 # tools for focused company grant research.
 [sources.genuinegood]
 extends = "../../providers/genuinegood.toml"
 include_tools = ["genuinegood_search", "genuinegood_detail"]
-instructions_text = "US federal grant research: search Grants.gov opportunities, then request detail by opportunityId. Verify eligibility, deadlines and awards against the linked official notice. Only search and detail are exposed."
 
 # MCP endpoints expose separate toolsets; social, company and toolbox share payment identity.
 # Sources inherit each listener wallet unless a source explicitly overrides it.
 [servers.web]
+instructions_text = "Web research and aggregate keyword trends. Preserve source links, dates and coverage; trends do not describe an individual’s behavior."
 # discover_on_demand = true # advertise search/call wrappers; fetch schemas as needed
 listen = "127.0.0.1:6337"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
@@ -352,18 +336,15 @@ sources = ["exa", "webinfo", "googletrends"]
 [servers.social]
 # Keep platform coverage in search help, including for clients that omit server instructions.
 discover_on_demand = true
-instructions_text = "Social research endpoint. Discover an operation and inspect its schema before calling it."
+instructions_text = "Social and people research."
 discovery_search_tool_instructions_text = """
 Social tool keywords to search for:
 - SocialFetch: `Bluesky`, `Facebook`, `GitHub`, `Hacker News`, `Instagram`,
   `LinkedIn`, `Reddit`, `Rumble`, `Snapchat`, `Telegram`,
   `Threads`, `TikTok`, `truthsocial` (Truth Social), `Twitter` (X), `Twitch`,
   `Yelp`, `YouTube`.
-- TeleSINT (Telegram OSINT): `telesint`, `telesint_search`, `telesint_ioc`, `telesint_c2`,
-  `telesint_actor`, `telesint_breach`, `telesint_vulnerability`, `telesint_darkweb`,
-  `telesint_ransomware`, `telesint_intent`, `telesint_malware`, `telesint_feed`,
-  `telesint_artifact`, `telesint_asn`, `telesint_source`, `telesint_preparation`,
-  `telesint_velocity`, `telesint_target_mentions`, `telesint_claim_check`.
+- TeleSINT (Telegram OSINT): `telesint`, actors, indicators, breaches, malware,
+  vulnerabilities, ransomware, dark web, sources and claim checks.
 - People Data Labs: `pdl_person` (person enrichment and search).
 - StableEnrich: `stableenrich_reddit` (Reddit searches and comments),
   `stableenrich_minerva` (person resolution, enrichment, and email checks),
@@ -375,6 +356,7 @@ wallet = "company"
 sources = ["social", "telesint", "pdl_people", "social_stableenrich"]
 
 [servers.company]
+instructions_text = "Company and public-record research. Verify entity identity; preserve source links, dates and partial results. Missing findings do not prove absence."
 listen = "127.0.0.1:6339"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
@@ -382,6 +364,7 @@ sources = ["genuinegood", "pdl_company", "company_otto", "company_claw402", "com
 
 # Start with discovery tools; agent-added APIs are persisted in the registry above.
 [servers.toolbox]
+instructions_text = "" # Discovery wrappers carry the source-management workflow.
 listen = "127.0.0.1:6340"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"

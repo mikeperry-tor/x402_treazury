@@ -9,4 +9,34 @@ exclude = ["/api/run/agentfax/send", "/api/run/agentmail", "/api/run/mailbox/sen
 include = ["/api/run/vaaya", "/api/run", ""]
 pricing_key = "x-payment-info"
 help_url = "https://vaaya.ai/llms.txt"
-instructions_text = "Vaaya synchronous research: cited OneSearch, web search/scrape, public filings/courts/patents, company/funding intelligence, reviews, sourced numerical research and product recalls. Treazury handles x402 USDC on Base without a Vaaya account or API key; MPP-only, async jobs, uploads, outreach, account state and payment forwarding are outside this selected toolset. Help describes a much broader account service. Firecrawl crawl/extract return service-specific data in the ordinary ok/data/charged_cents JSON envelope; result completeness is not qualified. No follow-up polling, asset retrieval or automatic replay is added. Send arguments as JSON body fields and preserve ok/data/charged_cents, partial results, source URLs and timestamps. Resolve legal entities/CIKs before combining EDGAR results; no autocomplete match does not prove an entity never registered. CourtListener RECAP coverage is incomplete; no hits are not proof of no litigation. Fundable company requires one of id/domain/linkedin/crunchbase; company-search requires one of name/domain/linkedin/crunchbase. Verify returned company identity: the vendor documents sampled entity mismatches and stale aggregate funding totals. TheirStack jobs requires a date or company condition, and technographics requires a company identifier even though schema required lists omit them; follow tool descriptions. TheirStack companies is advertised at $0.60, above the example company listener's $0.50 cap. Tako search/answer take query, contents takes a result url. RecallRadar search takes q (product/brand) as a JSON body field despite its sparse schema and query-parameter prose; pass a returned id to get. Tako and RecallRadar description prices differ from structured estimates: use $0.03/$0.03/$0.05 for Tako search/answer/contents and $0.12/$0.03 for RecallRadar search/get. All listed prices are estimates; live challenges and the configured payment cap govern signing. Treazury does not automatically download hosted assets or replay uncertain paid submissions."
+instructions_text = "Research uses ok/data/charged_cents; preserve source dates and partial results. Verify company identity and funding against source articles. TheirStack jobs needs a date or company condition. Resolve EDGAR CIKs; missing matches do not prove nonregistration. Firecrawl crawl/extract completeness is unqualified: no follow-up polling or paid replay. Hosted assets remain links."
+
+[overrides.vaaya_fundable_company]
+description = "Retrieve a company and its latest funding round, investors and source articles. Supply one of id, domain, linkedin or crunchbase. Vendor sampling mismatched 1 of 10 entities; total_raised can lag the attached round. Verify identity and prefer dated deal evidence. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_fundable_company_search]
+description = "Resolve a company to its Fundable id. Supply one of name, domain, linkedin or crunchbase; use the returned id with company. Verify returned identity and relevance. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_courtlistener_cases]
+description = "Search US court opinions. q is required even with party_name; optional court, judge, filed_after/filed_before, order_by and cursor. Preserve court, dates, citations and source links. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_courtlistener_dockets]
+description = "Search federal dockets in CourtListener RECAP. q is required even with party_name. Coverage is incomplete and state coverage varies; no hits do not prove no litigation. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_theirstack_technographics]
+description = "List technologies associated with a company, with confidence, job-mention counts and first/last dates. Supply one of company_domain (preferred), company_name or company_linkedin_url. Resolve case-sensitive technology slugs with tech_catalog. Mentions do not prove current deployment. Cost: ~$0.25/call [spec]."
+
+[overrides.vaaya_tako_search]
+description = "Search licensed numerical data and return sourced knowledge cards. JSON body: query, optional source_indexes. Cost: ~$0.03/call [spec]."
+
+[overrides.vaaya_tako_answer]
+description = "Return a cited answer and backing data cards. JSON body: query, optional source_indexes. Cost: ~$0.03/call [spec]."
+
+[overrides.vaaya_tako_contents]
+description = "Retrieve a result url from Tako search/answer: cards return backing CSV; other URLs return extracted page text. Pass url in the JSON body. Cost: ~$0.05/call [spec]."
+
+[overrides.vaaya_recallradar_search]
+description = "Search consumer-product safety notices from six public authorities. Pass q (product/brand) in the POST JSON body despite the sparse schema and vendor query-parameter prose. Preserve notice dates, jurisdiction and record IDs; no hits do not prove safety. Cost: ~$0.12/call [spec]."
+
+[overrides.vaaya_recallradar_get]
+description = "Retrieve a safety notice by id from a prior search. Preserve the record’s sources, dates and jurisdiction. Cost: ~$0.03/call [spec]."

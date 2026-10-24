@@ -11,10 +11,10 @@ include = ["/api", "/v1", ""]
 pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 help_url = "https://agent402.tools/llms.txt"
-instructions_text = "Agent402 supported tools use x402 USDC on Base. Recommendations offer a compact web-research view only when explicitly selected; exact lowercase vendor tags can narrow sources. Preserve partial/truncated and per-step failure markers. Omit stream or set false. PNG/JPEG/WebP binary output becomes MCP images; choose png or jpeg for resize, convert and thumbnail, never bmp. JSON containing base64 PDF/audio/video/image data remains JSON text unless an existing explicit image mapping applies; no automatic asset fetching or decoding is added. Raw speech and multipart transcription upload routes, wallet-owned memory/history/attestation/feedback, actual funding and delegated execution remain excluded. onramp_link only returns a human checkout link and quote and does not fund a wallet. Some gateways/reports take time or exceed ordinary payment caps; published estimates and model token hints never override the live challenge or configured authority. Do not set Prefer: respond-async or promise job polling. MPP, card, credits, PoW and hosted-MCP setup are other clients, not extra Treazury capabilities. Missing receipts do not prove no charge; never automatically replay uncertain signed payments."
+instructions_text = "Preserve partial/truncated and per-step failure markers. Binary PNG/JPEG/WebP becomes MCP images; other encoded media and hosted links remain JSON unless explicitly mapped. onramp_link returns a human checkout link and quote, not wallet funding. Do not request async responses or assume job polling."
 
 [overrides.agent402_help]
-description = "Read Agent402's unified catalog and usage guide, fetched on demand and cached for this process. The document is large and covers more tools and payment methods than this selected catalog. Treazury handles x402 payments; vendor PoW/MPP/card setup and retry claims are not additional capabilities or payment guarantees here. Any configured document limit is reported explicitly."
+description = "Read Agent402's catalog and usage guide. It also covers unsupported tools, payment methods and retry claims; use exposed tool schemas."
 
 [overrides.agent402_auto_messages.params]
 stream = "Omit or set false. Treazury returns completed tool responses and does not relay incremental server-sent events."

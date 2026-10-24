@@ -10,10 +10,10 @@ pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 # Use SKILL.md (advertised via x-skill-url in openapi.json) because /llms.txt is truncated mid-line at line 25.
 help_url = "https://telesint-api.onrender.com/SKILL.md"
-instructions_text = "TeleSINT cyber threat intelligence and conflict/geopolitical OSINT via x402 USDC on Base. Wallet-bound watchlist routes (/watch/*) are excluded because they tie watchlist ownership to the paying wallet address, which changes across managed wallet rotation. Always supply required scope parameters on telesint_preparation and telesint_velocity (at least one of organization, sector, country, actor, or vendor) and on telesint_claim_check (id or text): the upstream server returns HTTP 200 with a guidance/error JSON body when scope parameters are omitted, which would still consume a paid call. Use the parameter names and enum values declared in each tool's input schema rather than undocumented query fields in the vendor guide."
+instructions_text = "Follow exposed input schemas rather than legacy parameter names in the guide. Supply scope on preparation/velocity and id or text on claim_check: omitted scope can return a paid HTTP 200 guidance error."
 
 [overrides.telesint_help]
-description = "Read TeleSINT's full Telegram CTI and OSINT SKILL.md reference guide (used instead of /llms.txt, which is truncated mid-line), fetched on demand and cached for this process. The guide also describes excluded wallet-bound /watch/* routes, free /status, and some query parameter names or enum spellings that differ from the OpenAPI schema; follow the exposed tools' input schemas."
+description = "Read TeleSINT's full CTI/OSINT guide. It also covers unsupported watchlists and legacy query names/enums; follow exposed schemas."
 
 [overrides.telesint_search]
 description = "Cross-Category CTI Search — Pivot across all TeleSint Telegram CTI categories with a single query. Accepts keyword search plus filters: category, severity, sector, country, actor name, TTP, tag, confidence. Returns unified items[] across any category. Cost: ~$0.04/call [spec]."

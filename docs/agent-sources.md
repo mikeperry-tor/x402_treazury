@@ -222,6 +222,12 @@ source-search field for guidance about finding new APIs locally or in the extern
 source guidance, override initialization with concise endpoint instructions.
 Keep essential operation requirements in the relevant tool descriptions or include
 them in the endpoint search guidance when suppressing inherited instructions.
+Prefer brief endpoint guidance even when clients forward server instructions:
+some clients repeat initialization guidance alongside each tool. The server sends
+`initialize.result.instructions` separately from `tools/list` descriptions. Keep
+request quirks and result-coverage limitations with their affected tools so endpoint
+overrides do not hide them; keep provider inventories and maintainer rationale out
+of initialization text.
 
 ```toml
 [servers.research]

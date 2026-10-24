@@ -10,10 +10,10 @@ exclude = ["/mpp"]
 pricing_key = "x-payment-info"
 read_timeout_seconds = 120
 help_url = "https://agosint.shveik.dev/llms.txt"
-instructions_text = "AgOSINT corporate, registry, network, domain, VAT and sanctions intelligence via x402 USDC on Base. Supply valid mutually exclusive lookup keys before calling: an invalid body still receives an unpaid 402 quote (with X-Agdata-Invalid-Request: 1) before failing with 400 after payment signing. For agosint_company and agosint_due_diligence pass exactly one of id, name, lei, vat, or domain (country is required with id or name, and not used with lei, vat, or domain). For agosint_network pass exactly one of ip or asn. For agosint_sanctions pass exactly one of name or wallet (birth_date, country, kind, and threshold apply only to name). Live multi-registry fan-out (especially agosint_company_de) can take up to 90–120 seconds. Treazury handles x402 payment automatically and never replays signed payment headers on HTTP 202 or timeouts; missing receipts do not prove nothing was charged."
+instructions_text = "Registry and sanctions research. Validate lookup keys before calling: invalid bodies can receive a quote and fail validation after payment."
 
 [overrides.agosint_help]
-description = "Read AgOSINT's agent guide, fetched on demand and cached for this process. It also covers duplicate /mpp/* paths, Solana/MPP payment options, Idempotency-Key headers, and manual payment-retry advice that do not apply to Treazury."
+description = "Read AgOSINT’s registry and request guide. Its manual payment/retry and MPP setup instructions do not apply to these tools."
 
 [overrides.agosint_company.params]
 id = "National company number. Mutually exclusive with name, lei, vat, and domain; requires country."
@@ -31,3 +31,20 @@ ip = "IPv4 or IPv6 address. Pass exactly one of ip or asn, never both."
 name = "Person, company, vessel, or aircraft name. Pass exactly one of name or wallet."
 wallet = "Crypto address (BTC, ETH, TRON, USDT, etc.). Pass exactly one of wallet or name; birth_date, country, kind, and threshold are not used with wallet."
 
+[overrides.agosint_company]
+description = "Look up a legal entity in Czechia, Norway, UK, France, Finland, US SEC or GLEIF. Pass exactly one of id, name, lei, vat or domain; country is required with id/name and unused with other keys. Cost: ~$0.02/call [spec]."
+
+[overrides.agosint_company_de]
+description = "Retrieve German Handelsregister records, officers and history. Prefer small limit batches; registry fan-out can take 90–120 seconds. Cost: ~$0.056–$0.152/call [spec]."
+
+[overrides.agosint_due_diligence]
+description = "Combine official registry identity, LEI/parents, VAT validation, company/officer sanctions and domain checks with sources. Pass exactly one of id, name, lei, vat or domain; country is required with id/name and unused with other keys. Cost: ~$0.10/call [spec]."
+
+[overrides.agosint_domain]
+description = "Retrieve domain registration, DNS/mail security, TLS, hosting and identifiable company information. These are phishing-risk signals, not a legitimacy guarantee. Cost: ~$0.015/call [spec]."
+
+[overrides.agosint_vat]
+description = "Validate EU VAT through VIES or Norwegian VAT through the national register. Returns registered name/address and, when caller VAT is supplied, a VIES consultation number. Cost: ~$0.015/call [spec]."
+
+[overrides.agosint_sanctions]
+description = "Screen official OFAC, EU and UK lists with match scores and publication dates. Pass exactly one of name or wallet; birth_date, country, kind and threshold apply only to name. A screening aid, not a compliance determination. Cost: ~$0.015/call [spec]."

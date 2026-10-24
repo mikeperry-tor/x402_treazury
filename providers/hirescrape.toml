@@ -9,10 +9,10 @@ include = ["/api/tools", ""]
 pricing_key = "x-payment-info"
 read_timeout_seconds = 120
 help_url = "https://hirescrape.com/llms.txt"
-instructions_text = "HireScrape job-board and social-media scrapers paid via x402 USDC on Base. Keep requested record counts small (well below 200 total records, and within the configured payment cap): requests exceeding ~200 records or using async discovery modes switch to asynchronous snapshots whose GET /api/snapshots/{id} polling requires same-wallet SIWX authentication and session cookies not supported by Treazury. Follow each tool's input schema mode enum and limit/maxResults fields rather than divergent mode or num_of_posts names in vendor guidance. Published dynamic price ranges are estimates; the live 402 challenge and configured spend cap are authoritative. Missing receipts after a timeout do not prove nothing was charged; do not automatically replay a signed payment."
+instructions_text = "Keep total requested records well below 200 and avoid async discovery modes: snapshots require unsupported same-wallet SIWX authentication and cookies. Follow tool schemas for mode and limit/maxResults rather than legacy names in vendor guides."
 
 [overrides.hirescrape_help]
-description = "Read HireScrape's vendor guide, fetched on demand and cached for this process. The guide includes excluded SIWX-authenticated snapshot polling, empty skills-marketplace routes, MPP/API-key flows, and legacy mode/parameter names (such as person, profile_discover, or num_of_posts on Instagram/LinkedIn/TikTok) that differ from the live OpenAPI schema. Always use the selected tools' input schema enums and keep total requested records below 200 so calls remain synchronous."
+description = "Read HireScrape's guide. Legacy modes and parameter names may differ from exposed schemas. Snapshot polling requires unsupported SIWX authentication; keep requests synchronous."
 
 [overrides.hirescrape_jobs.params]
 maxResults = "Max results per site (1-100, default 20). Total records across all selected boards is len(sites) * maxResults; keep that product below 200 (and small enough for the payment cap) so the call stays synchronous instead of returning an unpollable SIWX snapshot."

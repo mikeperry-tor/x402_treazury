@@ -7,5 +7,5 @@ prefix = "x402stock"
 recommended_tools = ["x402stock_tickers", "x402stock_overview_ticker", "x402stock_dossier_ticker", "x402stock_filing_summary_ticker", "x402stock_calendar_fomc", "x402stock_help"]
 include = ["/api/v1", ""]
 pricing_key = "x-payment-info"
-instructions_text = "Pay-per-call market and economic data: US stocks/ETFs/options, forex, crypto and on-chain perps, energy commodities, macro (Fed, CPI, jobs, GDP, Treasury), SEC filings, congressional trades, and sentiment. Endpoints live under /api/v1 and return {ticker, data, source, as_of}. Path placeholders like {ticker} go in the URL path (uppercase symbols), never as query parameters; resolve unknown symbols first via /api/v1/tickers?search=. Unpaid requests to paid endpoints answer HTTP 402 with the quote in response headers; pay the quoted USDC amount and retry the same request."
+instructions_text = "Use uppercase ticker symbols; resolve unknown symbols with the tickers search tool. Responses include source and as_of metadata."
 help_url = "https://x402stock.xyz/llms.txt"

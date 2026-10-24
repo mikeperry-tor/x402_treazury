@@ -9,14 +9,14 @@ base_url = "https://concordancehq.duckdns.org"
 prefix = "concordance"
 include = ["/tools", ""]
 additional_properties = false
-instructions_text = "Concordance aggregates 18 refreshed-on-schedule data sources (SEC EDGAR, FRED, World Bank, UN Comtrade, GDELT news, CourtListener, govinfo, arXiv/CORE, Hacker News, Stack Exchange, Wikipedia, weather, DefiLlama, finnhub/twelvedata/polygon quotes) into six paid tools, $0.01-$0.05 per call in USDC (Base or Solana). The paid research tools take flat JSON bodies; responses cite real sources, never black-box summaries. concordance_search: one-query full-text search with optional source/category/since filters. concordance_digest: one call groups a topic across every category with counts (not an LLM summary). concordance_timeline: coverage ordered oldest-first for tracking a story. concordance_corroboration: counts DISTINCT sources backing a claim - the trust signal. concordance_company_brief: quotes from 3 market providers + SEC filings + mentions for one ticker or company name; partial sections are normal. concordance_series: tabular series by source + series_id (fred GDP/CPIAUCSL/UNRATE/FEDFUNDS/DGS10; world_bank US-<indicator>). Use concordance_catalog for current source/series discovery, concordance_healthz for diagnostics and concordance_root for the public homepage. concordance_help faithfully fetches the vendor's /llms.txt document."
+instructions_text = "Use concordance_catalog to discover current sources and series IDs. Company briefs may contain partial sections; corroboration counts distinct sources, not independently verified truth."
 help_url = "https://concordancehq.duckdns.org/llms.txt"
 pricing_key = "x-payment-info"
 
 [overrides]
 
 [overrides.concordance_search]
-description = "Full-text search across every aggregated data source in one call: news, SEC filings, court opinions, academic papers, government records, and developer discussions. One query surfaces everything concordant across independently-sourced, citable results (source, category, title, content, url, published_at) -- not a single-source wrapper. Optional source/category/since filters; limit 1-100 (default 20). $0.01 per call."
+description = "Search aggregated news, filings, court opinions, papers, government records and developer discussions. Results include source, category, title, content, URL and publication time. Optional source/category/since filters; limit 1–100 (default 20). $0.01/call."
 
 [overrides.concordance_series]
 description = "Tabular time-series lookup by source + series_id: economic indicators (FRED, World Bank, UN Comtrade), crypto TVL (DefiLlama), weather (open_meteo), and stock quotes (finnhub/twelvedata/polygon). Optional start/end date range; returns [{observed_at, value}] points. $0.01 per call. Source slugs and series ids are listed in the param notes; the vendor's free /catalog endpoint has the live list."

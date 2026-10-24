@@ -23,13 +23,13 @@ description = "People Data Labs company enrichment. $0.10 per match, free on no 
 min_likelihood = "Minimum confidence score 1-10 (default 2). Higher = fewer, better matches."
 
 [overrides.pdl_person_search]
-description = "Search 3B+ People Data Labs person records via Elasticsearch DSL or SQL. $0.28 x size (max $28); free when the result set is empty. Recommended size 1-5. Paginate with the returned scroll_token. dataset picks record sources (resume, email, phone, mobile_phone, street_address, consumer_social, developer, all)."
+description = "Search People Data Labs person records via Elasticsearch DSL or SQL. $0.28 x size (max $28); free when the result set is empty. Recommended size 1-5. Paginate with the returned scroll_token. dataset picks record sources (resume, email, phone, mobile_phone, street_address, consumer_social, developer, all)."
 
 [overrides.pdl_person_search.params]
 size = "Batch size 1-100 (default 1). Price scales with size."
 
 [overrides.pdl_company_search]
-description = "Search 30M+ People Data Labs company records via Elasticsearch DSL or SQL. $0.10 x size (max $10); free when the result set is empty. Paginate with the returned scroll_token."
+description = "Search People Data Labs company records via Elasticsearch DSL or SQL. $0.10 x size (max $10); free when the result set is empty. Paginate with the returned scroll_token."
 
 [overrides.pdl_company_search.params]
 size = "Batch size 1-100 (default 1). Price scales with size."

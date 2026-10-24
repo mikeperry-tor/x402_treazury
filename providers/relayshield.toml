@@ -18,16 +18,10 @@ read_timeout_seconds = 90
 
 help_url = "https://api.relayshield.net/llms.txt"
 
-instructions_text = """
-RelayShield x402 threat, breach, and identity intelligence ($0.05-$5.50 USDC per call on Base):
-- The stateless `/v1/payg/*` x402 endpoints and three public keyless checks are exposed here (`relayshield_*`). `POST /v1/payg/phone-reputation` ($0.05/call; omitted from the vendor's `openapi.json`) is available via the companion `providers/relayshield/phone-reputation.toml` (`relayshield_phone_reputation`). API-key `/v1/metered/*` routes, account/SIEM/webhook admin routes, `POST /v1/payg/scan-file` (async VirusTotal file job whose `GET /v1/payg/result/{analysis_id}` polling endpoint is absent from `openapi.json`) are excluded.
-- Several `/v1/payg/*` schemas omit `required` in `openapi.json` because they accept alternative inputs: supply `domain` or `ip` on `relayshield_ip_intel`; `vendor_domains` or `vendor_emails` on `relayshield_supply_chain`; `content` or `diff` on `relayshield_secret_scan_text`; `tech_stack` on `relayshield_tech_stack_cve` (`domain` references a stored account profile unavailable on stateless calls); `domain` (and/or `vendor_domains`) on `relayshield_secret_scan`, `relayshield_llm_credential_exposure`, and `relayshield_nhi_exposure`; `url` or `html` for kit fingerprinting, or `kind="malware"` with `signals` on `relayshield_scamkit_fingerprint`; and at least one indicator array on `relayshield_campaign_scan`.
-- `relayshield_bulk_identity_risk` ($2.00) and `relayshield_campaign_scan` ($5.50) exceed the default $1.00 per-call payment cap and require a higher `--max-payment` setting.
-- Call `relayshield_help` for the vendor's `llms.txt` reference (note that `llms.txt` lists `/v1/metered/*` paths and includes metered-only endpoints not present under `/v1/payg/*`).
-"""
+instructions_text = "Threat and exposure signals. Preserve timestamps, coverage and degraded/unknown markers; missing findings do not prove safety."
 
 [overrides.relayshield_help]
-description = "Return RelayShield's llms.txt reference (endpoint summaries, request body examples, and pricing). Free, no upstream call once cached. Note: llms.txt writes paths under /v1/metered/* and lists some metered-only routes; only the exposed relayshield_* tools are callable here."
+description = "Read RelayShield’s request examples and pricing. The guide uses metered paths and includes unavailable account routes; use the exposed tools."
 
 [overrides.relayshield_ip_intel.params]
 domain = "Domain to look up for reputation and passive DNS resolution history (provide `domain` or `ip`)."
@@ -59,10 +53,49 @@ description = "Scan a URL (`http://` or `https://`) for phishing or malware usin
 
 
 [overrides.relayshield_v1_email_check]
-description = "Keyless and free. The same scoring model as checkemail@relayshield.net, for a caller that has already parsed a message -- an agent reading a mailbox through the Gmail or Graph API -- rather than a raw RFC822 blob. Scores SPF/DKIM/DMARC, brand impersonation in the display name, ask-plus-pressure phrasing, links to public file-hosting services, and attachment names by extension. Links are checked through the same keyless path as `/v1/link-check`, never `/v1/scan-url`, so this endpoint has no per-call vendor cost.\n\nThis does not parse raw email. Extract from_address, from_name, subject, body_text, links and attachment_names yourself before calling.\n\n**Billing.** Free. This endpoint is not metered.\n\n**Note.** No API key required. checkemail@relayshield.net runs the same model over raw forwarded mail; this is a second door for a caller that has already parsed one. Free — no payment required (vendor contract)."
+description = "Screen a parsed email’s authentication, sender/name, phrasing, links and attachment names. Extract from_address, from_name, subject, body_text, links and attachment_names first; raw RFC822 is not parsed. Vendor contract: free; no payment required."
 
 [overrides.relayshield_v1_link_check]
-description = "Keyless and free. Returns the three signals that are immediate and carry no vendor cost: RelayShield's criminal IOC corpus, Google Safe Browsing, and domain registration age. Send `url` for one link, or `urls` for up to 25 at once -- the batch form deduplicates by domain and resolves the whole set in a single Safe Browsing request, so screening a mailbox costs one call rather than one per link.\n\nIt never answers `safe`. The best available verdict is `unknown`, meaning nothing is known against the domain, because an absence of evidence is not evidence of absence. Unauthenticated callers share a per-IP daily allowance and a batch counts once per URL; send an API key to lift it.\n\n**Billing.** Free. This endpoint is not metered.\n\n**Note.** No API key required. A key is still accepted and removes the per-IP daily allowance, which is what an integration serving many users should send. Free — no payment required (vendor contract)."
+description = "Check criminal IOC, Google Safe Browsing and domain-age signals. Supply url or urls (up to 25). The best verdict is unknown, never safe. Public callers share a per-IP daily allowance; a batch counts once per URL. Vendor contract: free; no payment required."
 
 [overrides.relayshield_v1_wallet_risk]
-description = "Keyless and free. Detects the chain from the address and screens it against sanctions and abuse sources. Answers the question a person actually has before paying an address they were given, rather than after.\n\n**Billing.** Free. This endpoint is not metered.\n\n**Note.** No API key required, on the same terms as /v1/link-check. Free — no payment required (vendor contract)."
+description = "Detect the chain from address and screen sanctions and abuse sources. Public callers share the link-check per-IP allowance. Vendor contract: free; no payment required."
+
+[overrides.relayshield_breach]
+description = "Check whether an email address appears in known data breaches. Returns breach count, source names, dates, and exposed data types (passwords, emails, etc). Call before trusting a new user identity or granting elevated access. Cost: ~$0.10/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_identity_graph]
+description = "Correlate an email address against the criminal breach/stealer corpus to surface linked phone numbers, secondary domains, and other identifiers tied to the same compromised identity. Call to map the blast radius of a known compromise across an organization. Cost: ~$0.35/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_identity_risk_score]
+description = "Return a domain security score (0–100), grade and factors across breach, infostealer, ransomware, session, CVE and threat-actor exposure. Cost: ~$0.35/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_infostealer]
+description = "Check whether an email address's credentials were harvested by infostealer malware and appear in a criminal stealer-log marketplace. Call to catch device-level compromise before stolen session cookies or saved passwords are used for account takeover. Cost: ~$0.15/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_ip_intel]
+description = "Look up passive DNS resolution history and reputation for a domain or IP address. For a domain: which IPs it has resolved to over time. For an IP: which hostnames have resolved to it, plus malicious/suspicious vendor detection counts. Call to pivot from an indicator to its infrastructure history during an investigation. Cost: ~$0.10/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_ransomware_risk]
+description = "Check whether a domain appears on a known ransomware group's victim/leak-site list, and whether pre-ransomware credential harvesting was detected beforehand. Call to assess active ransomware exposure for a domain, not just historical breach history. Cost: ~$0.40/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_secret_scan]
+description = "Scan public GitHub, npm, PyPI, Docker Hub, Hugging Face and Postman artifacts for exposed credential patterns associated with domain and/or vendor_domains. Cost: ~$0.35/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_sim_swap]
+description = "Check recent SIM-swap or carrier-port signals for phone (E.164). Vendor carrier availability is degraded/unavailable; a failed lookup supplies no verdict. Cost: ~$0.25/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_supply_chain]
+description = "Check up to 10 vendor domains for combined breach, infostealer, and dark-web risk exposure in one call. Returns a composite risk score per vendor. Call to assess third-party API/vendor risk before an agent integrates with or continues calling an external service. Cost: ~$0.10/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_tech_stack_cve]
+description = "Check tech_stack product names against CISA KEV and high-EPSS CVEs. Supply the declared stack directly; domain requires an unavailable stored account profile. Cost: ~$0.20/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_wallet_risk]
+description = "Screen address for scam, exploit, drainer and sanctions associations. Preserve observed_at, valid_for_seconds, expires_at and degraded. Vendor freshness: flagged 24h, clean 1h, degraded 5m; missing signals do not prove safety. Cost: ~$0.05/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_scamkit_fingerprint]
+description = "Fingerprint a phishing kit using url or html, or supply kind=\"malware\" with signals. URL fetching uses static HTML without JavaScript; supply rendered html for JS-heavy pages. observed_telemetry is caller-supplied; JA3/JA4 is not computed. Supplied html has no URL malware attribution. Preserve family_status (approved/suggested), confidence and evidence. Cost: ~$0.50/call [spec]. Vendor bills successful calls."
+
+[overrides.relayshield_campaign_scan]
+description = "Scan up to 25 campaign indicators; supply at least one indicator array. Returns correlated findings, per-indicator results, citations and per-endpoint errors. Preserve degraded=true and truncated_subcalls when upstream results are incomplete. Cost: ~$5.50/call [spec]. Vendor bills successful calls."

@@ -10,7 +10,7 @@ include = ["/api", ""]
 pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 help_url = "https://stableenrich.dev/llms.txt"
-instructions_text = "StableEnrich provides search, scraping, maps and enrichment via x402 USDC on Base. The full supported catalog remains available; recommendations and vendor tags select smaller research views only on request. stableenrich_help contains full API guidance and examples, fetched only when called. Its AgentCash tool names and success/data wrapper describe another client: use these Treazury tools and interpret their actual HTTP response bodies; do not assume an extra AgentCash data envelope. Help also describes excluded Hunter/Cloudflare async jobs, aerial rendering/polling; those workflows are not enabled. Solar rgb-image may return JSON asset metadata or PNG/JPEG image attachments. Asset URLs are not automatically downloaded; inline images have explicit size limits. Do not repeat a paid submission to retrieve a pending result. Embedded prices are vendor estimates; the live challenge and payment cap are authoritative. Use small batches. For FullEnrich supply actual filters and paginate with search_after rather than page/offset alone; verify returned company identity before further enrichment. Omit Exa stream or set false."
+instructions_text = "Interpret actual HTTP bodies without assuming AgentCash’s success/data wrapper. Hosted assets remain links. Use small batches; do not repeat a paid submission to retrieve a pending result. FullEnrich requires filters and search_after pagination; verify company identity."
 
 [overrides.stableenrich_exa_search.params]
 stream = "Omit or set false. Treazury returns completed tool responses, not incremental server-sent events."
@@ -19,4 +19,13 @@ stream = "Omit or set false. Treazury returns completed tool responses, not incr
 stream = "Omit or set false. Treazury returns completed tool responses, not incremental server-sent events."
 
 [overrides.stableenrich_help]
-description = "Read StableEnrich's unified API reference, examples, pricing and research guidance. Fetched on demand and cached for this process. AgentCash-specific tools/wrappers are not Treazury requirements. The guide also covers async/SIWX endpoints excluded from this catalog. Any configured document limit is reported explicitly."
+description = "Read StableEnrich’s API reference and pricing. AgentCash tool names/wrappers and async/SIWX workflows in the guide do not apply to these tools."
+
+[overrides.stableenrich_google_maps_text_search_partial]
+description = "Search Google Maps places (partial). For pagination, repeat the full original body including textQuery with its pageToken; the token belongs to that search. Cost: ~$0.02/call [spec]."
+
+[overrides.stableenrich_google_maps_text_search_full]
+description = "Search Google Maps places (full). For pagination, repeat the full original body including textQuery with its pageToken; the token belongs to that search. Cost: ~$0.08/call [spec]."
+
+[overrides.stableenrich_companyenrich_org_enrich]
+description = "Enrich a company by domain. Verify identity: openai.com has resolved to the wrong entity; x.com returns 404, so use twitter.com. Employees/revenue are ranges; total_funding can lag funding rounds and excludes M&A. Cost: ~$0.06/call [spec]."

@@ -9,7 +9,7 @@ include = ["/api/v1", ""]
 pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 help_url = "https://claw402.ai/llms.txt"
-instructions_text = "Claw402 market, crypto-company and model research via x402 USDC on Base. Recommendations are a market overview, not a compatibility allowlist. Use exact vendor tags for purpose subsets. RootData schemas are intentionally sparse open objects: search takes query and optional precise_x_search; project takes project_id or contract_address and optional include_team/include_investors; org takes org_id and optional include_team/include_investments; funding accepts start_time/end_time Unix seconds, min_amount/max_amount USD, project_id, page and page_size. Resolve profile IDs with search. Send these fields in the JSON body; do not invent different required keys. Omit stream or set false on model gateways. JSON/hosted asset results remain metadata unless an explicit mapping applies; image result completeness is unqualified. Vendor prices are estimates, the live challenge and configured cap govern payment, and no signed failure authorizes automatic re-signing or replay."
+instructions_text = "Market, company and model research. Omit stream or set false on model gateways. Hosted assets remain links; image-result completeness is unqualified. Do not automatically re-sign or replay uncertain paid calls."
 
 [overrides.claw402_help]
-description = "Read Claw402's unified API guide, including market parameters and per-call prices. Cached after successful retrieval. The guide covers more operations than this curated toolset. Treazury handles payment and does not follow the guide's advice to automatically re-sign failed requests."
+description = "Read Claw402’s API parameters and pricing. Ignore the guide’s advice to automatically re-sign failed payments."

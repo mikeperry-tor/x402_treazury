@@ -32,3 +32,5 @@ cover_traffic_enabled = false
 
 read_timeout_seconds = 90
 
+[overrides.relayshield_phone_reputation]
+description = "Screen phone (E.164) for threat-corpus reputation, attack-graph pivots and carrier line type. SIM/eSIM swap signals are cached 24h, not a fresh carrier check. Preserve checked/unknown markers, reason timestamps and coverage. Cost: ~$0.05/call [spec]."

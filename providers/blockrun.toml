@@ -10,35 +10,35 @@ include = ["/api/v1", ""]
 pricing_key = "x-payment-info"
 read_timeout_seconds = 120
 help_url = "https://blockrun.ai/llms.txt"
-instructions_text = "BlockRun synchronous model/search gateways, stateless phone intelligence and market/chain data through x402 on Base. Treazury handles payment; no API key or SDK setup is needed. Omit stream or set false and use a small output-token request. Recommendations do not restrict the supported default. Paths retain /api/v1 even when the guide shows /v1 aliases. Tools whose names include BTC-USD, XAU-USD, EUR-USD or BTCUSDT call that fixed literal target; they do not accept an invented symbol/path parameter. Zero-placeholder paths, hybrid inline-or-async music/image jobs and async video, owned phone/sandbox lifecycle, outbound voice calls and trade submission remain excluded. Speech and sound-effects return JSON with hosted audio URLs; these links are not automatically fetched. Published prices are estimates; the live challenge and configured cap govern payment. Never automatically replay an uncertain paid call."
+instructions_text = "Omit stream or set false on model gateways. Paths retain /api/v1 even when the guide uses /v1 aliases. Speech and sound effects return JSON with hosted audio links; links are not automatically fetched."
 
 [overrides.blockrun_chat_completions.params]
 stream = "Omit or set false. Treazury returns completed tool responses, not a streamed chat session."
 max_tokens = "Set an explicit small output-token limit to bound the provider's pre-call quote and response size."
 
 [overrides.blockrun_help]
-description = "Read BlockRun's unified API guide, model/pricing guidance and usage examples. Cached after successful retrieval. The guide includes unsupported jobs and lifecycle APIs that are not in this default toolset; Treazury handles x402 signing and never automatically replays failed paid requests."
+description = "Read BlockRun's API guide, models, pricing and examples. It also covers unsupported job and lifecycle APIs; use exposed schemas."
 
 [overrides.blockrun_commodity_history_xau_usd]
-description = "Historical OHLC bars for one Commodity symbol. Symbol format: Commodity ticker `BASE-QUOTE` (e.g. XAU-USD for gold, WTI-USD for oil). Example: `XAU-USD`. Substitute the path tail with any valid symbol from /list. This tool calls the fixed literal target shown in its name/path. It does not substitute a different symbol; do not invent a symbol argument."
+description = "Historical OHLC bars for fixed XAU-USD. No symbol/path substitution."
 
 [overrides.blockrun_commodity_price_xau_usd]
-description = "Current spot price for one Commodity symbol from Pyth Network. Symbol format: Commodity ticker `BASE-QUOTE` (e.g. XAU-USD for gold, WTI-USD for oil). Example: `XAU-USD`. Substitute the path tail with any valid symbol from /list. This tool calls the fixed literal target shown in its name/path. It does not substitute a different symbol; do not invent a symbol argument."
+description = "Current Pyth spot price for fixed XAU-USD. No symbol/path substitution."
 
 [overrides.blockrun_crypto_history_btc_usd]
-description = "Historical OHLC bars for one Crypto symbol. Symbol format: Crypto pair `BASE-QUOTE` (e.g. BTC-USD, ETH-USD, SOL-USD). Example: `BTC-USD`. Substitute the path tail with any valid symbol from /list. This tool calls the fixed literal target shown in its name/path. It does not substitute a different symbol; do not invent a symbol argument."
+description = "Historical OHLC bars for fixed BTC-USD. No symbol/path substitution."
 
 [overrides.blockrun_crypto_price_btc_usd]
-description = "Current spot price for one Crypto symbol from Pyth Network. Symbol format: Crypto pair `BASE-QUOTE` (e.g. BTC-USD, ETH-USD, SOL-USD). Example: `BTC-USD`. Substitute the path tail with any valid symbol from /list. This tool calls the fixed literal target shown in its name/path. It does not substitute a different symbol; do not invent a symbol argument."
+description = "Current Pyth spot price for fixed BTC-USD. No symbol/path substitution."
 
 [overrides.blockrun_fx_history_eur_usd]
-description = "Historical OHLC bars for one FX symbol. Symbol format: Currency pair `BASE-QUOTE` (e.g. EUR-USD, GBP-USD, JPY-USD). Example: `EUR-USD`. Substitute the path tail with any valid symbol from /list. This tool calls the fixed literal target shown in its name/path. It does not substitute a different symbol; do not invent a symbol argument."
+description = "Historical OHLC bars for fixed EUR-USD. No symbol/path substitution."
 
 [overrides.blockrun_fx_price_eur_usd]
-description = "Current spot price for one FX symbol from Pyth Network. Symbol format: Currency pair `BASE-QUOTE` (e.g. EUR-USD, GBP-USD, JPY-USD). Example: `EUR-USD`. Substitute the path tail with any valid symbol from /list. This tool calls the fixed literal target shown in its name/path. It does not substitute a different symbol; do not invent a symbol argument."
+description = "Current Pyth spot price for fixed EUR-USD. No symbol/path substitution."
 
 [overrides.blockrun_pm_binance_candles_btcusdt]
-description = "Get OHLCV candlestick data for a Binance trading pair Provider: Predexon (binance). Tier 2 pricing — payment goes directly to the Predexon recipient wallet. The path segment shown is a placeholder — substitute a real id from the matching list endpoint (e.g. /api/v1/pm/polymarket/markets). This tool calls the fixed literal target shown in its name/path. It does not substitute a different symbol; do not invent a symbol argument."
+description = "Historical OHLCV candlesticks for fixed BTCUSDT. No symbol/path substitution."
 
 [overrides.blockrun_pm_binance_ticks_btcusdt]
-description = "Get raw book ticker data at microsecond granularity Provider: Predexon (binance). Tier 2 pricing — payment goes directly to the Predexon recipient wallet. The path segment shown is a placeholder — substitute a real id from the matching list endpoint (e.g. /api/v1/pm/polymarket/markets). This tool calls the fixed literal target shown in its name/path. It does not substitute a different symbol; do not invent a symbol argument."
+description = "Raw book ticker data at microsecond granularity for fixed BTCUSDT. No symbol/path substitution."
