@@ -1301,6 +1301,29 @@ origin allowlist. Header support still requires faithful representation; payment
 signatures and other target credentials gain no forwarding authority. Ordered
 lists never permit another paid attempt after an ambiguous signed relay outcome.
 
+## voipstore.toml — VoIPStore
+
+The primary [OpenAPI schema](https://api.voipstore.xyz/openapi.json) omits
+`servers`, so the provider supplies the API base advertised by the
+[guide](https://api.voipstore.xyz/llms.txt). Catalog, quote, health and existing-order
+status reads remain available. The `/agent/v1` naming anchor has a root fallback
+so new compatible routes remain visible.
+
+`POST /agent/v1/orders` requires `X-Quote-Id` and `Idempotency-Key` headers;
+`POST /agent/v1/topup` requires `Idempotency-Key`. The generic catalog router
+skips header parameters and cannot preserve these purchase/replay contracts.
+Exact operation exclusions retain the supported order-status GET and future
+compatible child routes. This provider cannot buy numbers or credit prepaid
+balances. Status accepts an existing externally created `order_id`; the schema
+documents no additional ownership credential for that GET.
+
+The guide advertises five-minute quotes, catalog reads at $0.002 and each status
+poll at $0.001. Status progresses to `received` or `expired`, with `sms_code` and
+`sms_text` on receipt. `x-payment-info` supplies price hints; the guide advertises
+x402 exact USDC on Base. Help includes unsupported writes, called out in its
+tool description. Public schema/guide inspection and offline routing tests do
+not qualify funded delivery or current payment compatibility.
+
 ## Pinned relay contracts
 
 `agproxy-openapi.json` and `horizonpulse-openapi.json` are complete, unmodified

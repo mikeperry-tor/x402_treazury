@@ -73,6 +73,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | StableEnrich | `stableenrich.toml` | Synchronous JSON/image catalog; specific lifecycle paths excluded |
 | Straits | `straits/provider.toml` | Authored free/premium JSON, CSV, RSS and HTML contracts |
 | Vaaya | `vaaya.toml` | Supported x402 JSON/image catalog; specific MPP/lifecycle boundaries |
+| VoIPStore | `voipstore.toml` | Virtual-number catalog, quotes and existing-order SMS status; required-header writes excluded |
 | x402-list | `x402-list.toml` | Public directory reads, assessments and suggestions |
 | x402stock | `x402stock.toml` | Full supported market/economic catalog; compact research recommendations |
 

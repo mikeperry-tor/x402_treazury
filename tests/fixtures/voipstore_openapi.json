@@ -1,0 +1,408 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "VoipStore Agent API",
+    "version": "1.0.0",
+    "description": "Agent-facing API of VoipStore: virtual numbers and SMS verification, paid per call in USDC over x402.",
+    "contact": {
+      "email": "info@voipstore.xyz"
+    },
+    "x-guidance": "Buy virtual numbers and read the SMS codes they receive. Flow: GET /agent/v1/catalog for service_id/country_id, GET /agent/v1/quote to lock the price, POST /agent/v1/orders with X-Quote-Id and Idempotency-Key, then poll GET /agent/v1/orders/{order_id} until the SMS arrives. POST /agent/v1/topup credits a prepaid balance first. Every paid call answers 402 with the runtime payment terms in the PAYMENT-REQUIRED header (x402, USDC on Base), which is the authoritative source. Terms: https://voipstore.xyz/terms/agents"
+  },
+  "paths": {
+    "/agent/v1/quote": {
+      "get": {
+        "tags": [
+          "agent-payments"
+        ],
+        "summary": "Agent Quote",
+        "operationId": "agent_quote_agent_v1_quote_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Agent Quote Agent V1 Quote Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Service Id",
+              "description": "Service id from /agent/v1/catalog",
+              "example": 1012
+            },
+            "description": "Service id from /agent/v1/catalog"
+          },
+          {
+            "name": "country_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Country Id",
+              "description": "Country id from /agent/v1/catalog",
+              "example": 1
+            },
+            "description": "Country id from /agent/v1/catalog"
+          },
+          {
+            "name": "operator",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Operator",
+              "description": "Optional operator preference",
+              "example": "any"
+            },
+            "description": "Optional operator preference"
+          }
+        ]
+      }
+    },
+    "/agent/v1/catalog": {
+      "get": {
+        "tags": [
+          "agent-payments"
+        ],
+        "summary": "Agent Catalog",
+        "operationId": "agent_catalog_agent_v1_catalog_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Agent Catalog Agent V1 Catalog Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.002"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "parameters": [
+          {
+            "name": "service",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Service",
+              "description": "Optional service-name filter",
+              "example": "whatsapp"
+            },
+            "description": "Optional service-name filter"
+          },
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Country",
+              "description": "Optional ISO-3166 alpha-2 country code",
+              "example": "IT"
+            },
+            "description": "Optional ISO-3166 alpha-2 country code"
+          }
+        ]
+      }
+    },
+    "/agent/v1/orders": {
+      "post": {
+        "tags": [
+          "agent-payments"
+        ],
+        "summary": "Agent Create Order",
+        "operationId": "agent_create_order_agent_v1_orders_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Agent Create Order Agent V1 Orders Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-payment-info": {
+          "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": "0.01"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "parameters": [
+          {
+            "name": "service_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Service Id",
+              "description": "Service id from /agent/v1/catalog",
+              "example": 1012
+            },
+            "description": "Service id from /agent/v1/catalog"
+          },
+          {
+            "name": "country_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Country Id",
+              "description": "Country id from /agent/v1/catalog",
+              "example": 1
+            },
+            "description": "Country id from /agent/v1/catalog"
+          },
+          {
+            "name": "operator",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "Operator",
+              "description": "Optional operator preference",
+              "example": "any"
+            },
+            "description": "Optional operator preference"
+          },
+          {
+            "name": "X-Quote-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Quote-Id",
+              "description": "Quote id from GET /agent/v1/quote; locks the price",
+              "example": "q_ab12cd34"
+            },
+            "description": "Quote id from GET /agent/v1/quote; locks the price"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key",
+              "description": "Unique key for this purchase: a replay returns the stored response instead of charging again",
+              "example": "order-0001"
+            },
+            "description": "Unique key for this purchase: a replay returns the stored response instead of charging again"
+          }
+        ]
+      }
+    },
+    "/agent/v1/orders/{order_id}": {
+      "get": {
+        "tags": [
+          "agent-payments"
+        ],
+        "summary": "Agent Order Status",
+        "operationId": "agent_order_status_agent_v1_orders__order_id__get",
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Agent Order Status Agent V1 Orders  Order Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.001"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        }
+      }
+    },
+    "/agent/v1/topup": {
+      "post": {
+        "tags": [
+          "agent-payments"
+        ],
+        "summary": "Agent Topup",
+        "operationId": "agent_topup_agent_v1_topup_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Agent Topup Agent V1 Topup Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-payment-info": {
+          "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": "5",
+            "max": "100"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "parameters": [
+          {
+            "name": "amount_usd",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Amount Usd",
+              "description": "USDC amount to top up",
+              "minimum": 5.0,
+              "maximum": 100.0,
+              "example": 5.0
+            },
+            "description": "USDC amount to top up"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key",
+              "description": "Unique key for this top-up: a replay returns the stored response instead of charging again",
+              "example": "topup-0001"
+            },
+            "description": "Unique key for this top-up: a replay returns the stored response instead of charging again"
+          }
+        ]
+      }
+    }
+  },
+  "x-agentcash-guidance": {
+    "llmsTxtUrl": "https://api.voipstore.xyz/llms.txt"
+  },
+  "x-agentcash-provenance": {
+    "ownershipProofs": [
+      "dns-txt:_x402.api.voipstore.xyz",
+      "https://voipstore.xyz/terms/agents"
+    ]
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  },
+  "x-treazury-fixture-scope": "VoIPStore required-header purchase/topup exclusions and catalog, quote, existing-order status routing witnesses; health omitted."
+}

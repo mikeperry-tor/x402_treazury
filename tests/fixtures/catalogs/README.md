@@ -83,6 +83,7 @@ not the current vendor's whole inventory:
 | IPIntel — `https://tools.ipintel.ai/openapi.json` | DNS enum arrays, nullable satellite dates, arbitrary validator JSON, HTTP method enum and unverified JWT interpretation. |
 | RelayShield — `https://api.relayshield.net/openapi.json` | Three original keyless checks, scan immediate-result versus missing poll contract, account/metered auth negatives and the privacy view's exact selected security requests. |
 | Vaaya — `https://vaaya.ai/openapi.json` | Real mixed CRW extraction/result, MPP/upload/owned/project/message/forwarding negatives; Firecrawl JSON wrappers, hosted chart/image positives, open bodies, date/enum constraints and complete Tako/RecallRadar research chains with conflicting price prose. |
+| VoIPStore — `https://api.voipstore.xyz/openapi.json` | Required quote/idempotency-header write exclusions, catalog/quote query routing and existing-order status path routing; health omitted. |
 
 Refresh from the original vendor document and select complete path objects and
 reference closure. Keep required fields, descriptions and original operation

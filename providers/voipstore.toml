@@ -1,0 +1,21 @@
+description = "Virtual-number service and country discovery, price quotes and SMS status for existing orders."
+spec = "https://api.voipstore.xyz/openapi.json"
+name = "VoIPStore"
+base_url = "https://api.voipstore.xyz"
+prefix = "voipstore"
+include = ["/agent/v1", ""]
+# Purchases require X-Quote-Id and Idempotency-Key; top-ups require Idempotency-Key.
+# The catalog router cannot supply these required vendor headers.
+exclude_operations = ["POST /agent/v1/orders", "POST /agent/v1/topup"]
+pricing_key = "x-payment-info"
+help_url = "https://api.voipstore.xyz/llms.txt"
+instructions_text = "Use service_id and country_id from the catalog when requesting a quote."
+
+[overrides.voipstore_quote]
+description = "Get a price quote for service_id and country_id from the catalog, with an optional operator preference. The guide says quotes lock the price for five minutes. Number purchases are unavailable through this provider."
+
+[overrides.voipstore_orders_order_id]
+description = "Read SMS status for an existing order created outside this provider. Poll until status is received or expired; received SMS includes sms_code and sms_text. Each status call is advertised at $0.001. Number purchases and prepaid top-ups are unavailable through this provider."
+
+[overrides.voipstore_help]
+description = "Read VoIPStore's virtual-number and SMS API guide. It also describes purchases and prepaid top-ups, which are unavailable through this provider."

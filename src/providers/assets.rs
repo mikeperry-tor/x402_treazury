@@ -39,6 +39,7 @@ macro_rules! provider_manifest {
             ("straits", "providers/straits/provider.toml", Some("providers/straits/openapi.json")),
             ("telesint", "providers/telesint.toml", None),
             ("vaaya", "providers/vaaya.toml", None),
+            ("voipstore", "providers/voipstore.toml", None),
             ("x402-list", "providers/x402-list.toml", None),
             ("x402stock", "providers/x402stock.toml", None),
         }

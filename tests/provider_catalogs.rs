@@ -1,6 +1,95 @@
 //! Focused captured provider regressions; no live vendor access.
 use serde_json::Value;
 use std::path::Path;
+
+#[tokio::test]
+async fn voipstore_excludes_required_header_writes_and_preserves_read_routing() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/voipstore.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let mut doc: Value =
+        serde_json::from_str(include_str!("fixtures/voipstore_openapi.json")).unwrap();
+    for path in ["/agent/v1/orders", "/agent/v1/topup"] {
+        assert!(
+            doc["paths"][path]["post"]["parameters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["in"] == "header" && p["required"] == true)
+        );
+    }
+    // Exact write exclusions must preserve compatible children and routes outside
+    // the naming anchor; these are synthetic future-route witnesses.
+    for path in ["/agent/v1/orders/history", "/public/status"] {
+        doc["paths"][path] = json!({"get":{"summary":"Public read"}});
+    }
+    let tools = catalog::build_tools(&cfg, &doc, "voipstore").unwrap();
+    for path in ["/agent/v1/orders", "/agent/v1/topup"] {
+        assert!(!tools.iter().any(|t| t.path == path && t.method == "POST"));
+    }
+    for path in ["/agent/v1/orders/history", "/public/status"] {
+        assert!(tools.iter().any(|t| t.path == path && t.method == "GET"));
+    }
+    let catalog = tools
+        .iter()
+        .find(|t| t.name == "voipstore_catalog")
+        .unwrap();
+    let route = catalog
+        .route(
+            cfg.base_url.as_ref().unwrap(),
+            json!({"service":"whatsapp","country":"IT"})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(route.url, "https://api.voipstore.xyz/agent/v1/catalog");
+    assert_eq!(route.query["country"], "IT");
+    assert!(catalog.description.contains("$0.002"));
+    let quote = tools.iter().find(|t| t.name == "voipstore_quote").unwrap();
+    let route = quote
+        .route(
+            cfg.base_url.as_ref().unwrap(),
+            json!({"service_id":1012,"country_id":1,"operator":"any"})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(route.url, "https://api.voipstore.xyz/agent/v1/quote");
+    assert_eq!(route.query["service_id"], 1012);
+    assert_eq!(route.query["country_id"], 1);
+    assert_eq!(route.query["operator"], "any");
+    let status = tools
+        .iter()
+        .find(|t| t.name == "voipstore_orders_order_id")
+        .unwrap();
+    let route = status
+        .route(
+            cfg.base_url.as_ref().unwrap(),
+            json!({"order_id":"external/order"}).as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        route.url,
+        "https://api.voipstore.xyz/agent/v1/orders/external%2Forder"
+    );
+    assert!(route.query.is_empty());
+    assert!(route.body.is_none());
+    assert!(status.description.contains("created outside this provider"));
+    assert!(status.description.contains("$0.001"));
+    assert!(
+        tools
+            .iter()
+            .find(|t| t.name == "voipstore_help")
+            .unwrap()
+            .description
+            .contains("unavailable through this provider")
+    );
+}
+
 #[test]
 fn reviewed_provider_scope_matches_explicit_paid_preset() {
     use std::collections::BTreeSet;
