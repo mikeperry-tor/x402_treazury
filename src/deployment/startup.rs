@@ -352,7 +352,12 @@ pub(super) async fn load(
             completed = sources.len(), "Catalog inspection finished with failures; no partial inventory published");
         return Err(error.context(format!("catalog inspection failed for {failures} of {total} sources; independent catalog results retained")));
     }
-    tracing::info!(target: "x402_treazury::startup", total, ready = sources.len(), unavailable = unavailable.len() - deferred.len(), pending = deferred.len(), elapsed_ms = started.elapsed().as_millis() as u64, "Initial catalog loading finished");
+    tracing::info!(target: "x402_treazury::startup", total, ready = sources.len(), unavailable = unavailable.len() - deferred.len(), pending = deferred.len(), elapsed_ms = started.elapsed().as_millis() as u64,
+    "{}", if deferred.is_empty() {
+        "Initial catalog loading finished"
+    } else {
+        "Catalogs are still loading; each waiting MCP endpoint will start when its required catalogs are ready"
+    });
     Ok((sources, unavailable, deferred))
 }
 

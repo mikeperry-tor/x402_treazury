@@ -1093,7 +1093,7 @@ impl Deployment {
                         source,
                     } = *treasury;
                     tracing::info!(target: "x402_treazury::startup", auto_fund = f.auto_fund,
-                        "{}", if f.auto_fund { "automatic managed funding enabled: bootstrap and replacements are subject to actual spendable treasury funds, ZEC/fee safeguards and any qualification restrictions" } else { "automatic managed funding disabled: new bootstrap and replacement transfers are paused" });
+                        "{}", if f.auto_fund { "Automatic wallet funding enabled; new transfers use spendable treasury funds" } else { "Automatic wallet funding disabled; new funding transfers are paused" });
                     let (handle, commands) = crate::treasury::actor::channel();
                     let backend = crate::rotation::funding::Backend {
                         treasury: handle,

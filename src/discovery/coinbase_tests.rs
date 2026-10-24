@@ -162,9 +162,17 @@ fn malformed_top_level_is_failure_without_invented_empty_results() {
         json!({"resources":[null],"partialResults":false}),
         json!({"resources":{},"partialResults":false}),
     ] {
-        assert!(parse_response(&serde_json::to_vec(&invalid).unwrap()).is_err());
+        let error = parse_response(&serde_json::to_vec(&invalid).unwrap()).unwrap_err();
+        assert_eq!(
+            crate::discovery_relay::RelayFailure::from_error(&error).explanation(),
+            "The returned content did not meet the required response contract"
+        );
     }
-    assert!(parse_response(b"{incomplete").is_err());
+    let error = parse_response(b"{incomplete").unwrap_err();
+    assert_eq!(
+        crate::discovery_relay::RelayFailure::from_error(&error).explanation(),
+        "The returned content did not meet the required response contract"
+    );
 }
 
 #[test]

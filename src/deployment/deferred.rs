@@ -295,7 +295,7 @@ impl Runtime {
                     });
                     match result {
                         Ok(()) => {
-                            tracing::info!(source = id, "Deferred catalog ready");
+                            tracing::info!(source = id, "Catalog ready");
                         }
                         Err(error) => {
                             let failure = startup::catalog_failure(&error, "fetch_parse");

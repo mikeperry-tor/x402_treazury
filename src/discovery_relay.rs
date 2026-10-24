@@ -82,13 +82,42 @@ pub(crate) async fn build(
 }
 
 /// Deliberately has no source: upstream errors can contain credentials or prose.
-#[derive(Debug)]
-struct RelayFailure {
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RelayFailure {
     reason: &'static str,
     status: Option<u16>,
 }
 impl RelayFailure {
-    fn from_error(error: &anyhow::Error) -> Self {
+    pub(crate) fn http_status(status: u16) -> Self {
+        Self {
+            reason: "http_status",
+            status: Some(status),
+        }
+    }
+
+    pub(crate) fn rejected_response() -> Self {
+        Self {
+            reason: "response_rejected",
+            status: None,
+        }
+    }
+
+    pub(crate) fn from_error(error: &anyhow::Error) -> Self {
+        if let Some(partial) = error.downcast_ref::<document::IncompleteDocument>() {
+            return Self {
+                reason: "partial_response",
+                status: Some(partial.status),
+            };
+        }
+        if let Some(failure) = error.downcast_ref::<TargetFailure>() {
+            return Self {
+                reason: failure.reason,
+                status: failure.status,
+            };
+        }
+        if let Some(failure) = error.downcast_ref::<Self>() {
+            return *failure;
+        }
         if error.is::<crate::qualification::RetryAuthorityDenied>() {
             return Self {
                 reason: "qualification_authority",
@@ -102,14 +131,10 @@ impl RelayFailure {
             };
         }
         if let Some(http) = error.downcast_ref::<reqwest::Error>() {
-            let reason = if http.is_timeout() && http.is_connect() {
-                "connection_timeout"
-            } else if http.is_timeout() {
-                "read_inactivity"
-            } else if http.is_connect() {
-                "connection"
+            let reason = if http.is_status() {
+                "http_status"
             } else {
-                "transport"
+                crate::payment::diagnostics::transport_reason(http)
             };
             return Self {
                 reason,
@@ -154,6 +179,66 @@ impl RelayFailure {
         Self {
             reason: "payment_or_response",
             status: None,
+        }
+    }
+    pub(crate) fn kind(&self) -> &'static str {
+        self.reason
+    }
+    pub(crate) fn status(&self) -> Option<u16> {
+        self.status
+    }
+    pub(crate) fn explanation(&self) -> &'static str {
+        match self.reason {
+            "http_status" => "The server returned an unsuccessful HTTP status",
+            "tls_failure" => "The secure connection failed TLS validation or negotiation",
+            "connection_timeout" => "The connection to the server or proxy timed out",
+            "read_inactivity" => "The server stopped sending data before the response was complete",
+            "connection" => "Could not connect to the server or configured proxy",
+            "body" => "The response body could not be read completely",
+            "decode" => "The server response could not be decoded",
+            "request_construction" => "The HTTP request could not be constructed",
+            "transport" => "The HTTP request or response failed during transport",
+            "download_limit" => "The response exceeded the configured download limit",
+            "partial_response" | "incomplete_delivery" => {
+                "The server did not deliver a complete response"
+            }
+            "response_rejected" => {
+                "The returned content did not meet the required response contract"
+            }
+            "invalid_relay_envelope" => "The response did not match the configured relay format",
+            "catalog_parse" => "The relay returned content that is not valid catalog JSON",
+            "origin_request" => {
+                "The relay could not retrieve the requested content from its source"
+            }
+            "target_payment_required" => {
+                "The target service requires a payment that this relay cannot perform"
+            }
+            "unsolicited_not_modified" => {
+                "The server returned HTTP 304 when a complete response was required"
+            }
+            "unsupported_response" => "The relay cannot preserve the required response format",
+            "no_representable_relay" => "No configured relay can represent this request",
+            "provider_unavailable" => "A configured relay is unavailable",
+            "qualification_authority" | "funding_denied" => {
+                "This operation does not have authority to continue"
+            }
+            "payer_changed" => "The wallet assigned to the payment changed",
+            "unsupported_payment" => {
+                "The server requested an unsupported payment format or requirement"
+            }
+            "price_limit" => "The requested payment exceeds the authorized amount",
+            "payment_pending" => "A payment is still pending",
+            "wallet_not_ready" => "No eligible wallet is ready for this payment",
+            "funding_unavailable" => "Wallet funding is unavailable",
+            "payment_outcome_unknown" => {
+                "The payment outcome is unknown; reconciliation is required"
+            }
+            "chain_recovery_required" => {
+                "Blockchain reconciliation is required before this wallet can continue"
+            }
+            _ => {
+                "The requested content could not be retrieved or processed; no further cause information is available"
+            }
         }
     }
 }
@@ -557,12 +642,16 @@ pub(crate) fn log_fallback(cfg: &Config, stage: &str, reason: &str, http_status:
                     .map(std::time::Duration::from_secs_f64)
             )
             .as_secs_f64(),
-        "Discovery fetch unavailable; configured paid relay fallback selected; payer readiness is checked before any paid request"
+        "Catalog could not be loaded from its source; configured paid relay selected as fallback"
     );
 }
 pub(crate) fn log_failure(cfg: &Config, stage: &str, error: &anyhow::Error) {
-    let failure = error.downcast_ref::<TargetFailure>();
-    let request = error.downcast_ref::<RelayFailure>();
+    let failure = RelayFailure::from_error(error);
+    let limit = error.downcast_ref::<crate::limits::DownloadLimit>();
+    let possible_submission = error.is::<document::PossiblePayment>()
+        || error
+            .downcast_ref::<TargetFailure>()
+            .is_some_and(|failure| failure.possible);
     tracing::warn!(
         source = cfg
             .discovery_source
@@ -570,17 +659,22 @@ pub(crate) fn log_failure(cfg: &Config, stage: &str, error: &anyhow::Error) {
             .or(cfg.prefix.as_deref())
             .unwrap_or("standalone"),
         stage,
-        reason = failure
-            .map(|f| f.reason)
-            .or_else(|| request.map(|f| f.reason))
-            .unwrap_or("relay_unavailable"),
-        http_status = failure
-            .and_then(|f| f.status)
-            .or_else(|| request.and_then(|f| f.status)),
-        possible_submission = failure.is_some_and(|f| f.possible),
-        "Configured relay fallback failed or unavailable; discovery fetch failed, no retry"
+        reason = failure.kind(),
+        cause = failure.explanation(),
+        http_status = failure.status(),
+        possible_submission,
+        resource = limit.map(|limit| limit.kind),
+        setting = limit.map(|limit| limit.setting),
+        limit_bytes = limit.map(|limit| limit.limit),
+        "{}",
+        if possible_submission {
+            "Configured paid relay fallback failed; the catalog is unavailable; a payment authorization may still charge; do not automatically repeat"
+        } else {
+            "Configured paid relay fallback failed; the catalog is unavailable; correct the cause and restart to retry"
+        }
     );
 }
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -940,6 +1034,40 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn terminal_relay_warning_retains_target_cause_and_prior_payment_uncertainty() {
+        for prior_payment in [false, true] {
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            let mut failure = TargetFailure::new("http_status", Some(503), false);
+            failure.possible = !prior_payment;
+            let error = if prior_payment {
+                failure.error(true)
+            } else {
+                anyhow::Error::new(failure)
+            };
+            tracing::subscriber::with_default(subscriber, || {
+                log_failure(&Config::default(), "catalog", &error);
+            });
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            for expected in [
+                "WARN",
+                "unsuccessful HTTP status",
+                "http_status=503",
+                "possible_submission=true",
+                "catalog is unavailable",
+                "payment authorization may still charge; do not automatically repeat",
+            ] {
+                assert!(logs.contains(expected), "missing {expected}: {logs}");
+            }
+            assert!(!logs.contains("restart to retry"), "{logs}");
+        }
+    }
+
+    #[test]
     fn fallback_selection_is_info_and_does_not_claim_a_paid_request_started() {
         let log = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
@@ -961,8 +1089,8 @@ pub(crate) mod tests {
             "fixture",
             "catalog",
             "read_inactivity",
-            "configured paid relay fallback selected",
-            "payer readiness is checked before any paid request",
+            "Catalog could not be loaded from its source",
+            "configured paid relay selected as fallback",
         ] {
             assert!(logs.contains(expected), "missing {expected}: {logs}");
         }

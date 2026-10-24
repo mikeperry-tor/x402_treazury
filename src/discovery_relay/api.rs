@@ -42,6 +42,7 @@ pub(crate) fn fallback<'a>(
         if prepared.is_empty() {
             return Err(failure.error);
         }
+        tracing::info!("Configured paid relay selected as fallback for this API request");
         let result = prepared
             .acquire(
                 client.clone(),

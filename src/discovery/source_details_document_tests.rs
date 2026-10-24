@@ -680,7 +680,7 @@ async fn paid_document_fixture() {
         && line.contains("request_kind=Document")
         && line.contains("http_status=404")
         && line.contains("document does not exist at this location")
-        && line.contains("relay_fallback_eligible=false")));
+        && line.contains("paid fallback unavailable or failed")));
     let before = paid_calls.lock().unwrap().len();
     let discovered = manager
         .invoke_source_details(
@@ -718,6 +718,7 @@ async fn paid_document_fixture() {
     let all_logs = std::fs::read_to_string(logs.path()).unwrap();
     let probe_logs = &all_logs[explicit_logs.len()..];
     assert!(!probe_logs.contains("WARN"), "{probe_logs}");
+    assert!(!probe_logs.contains("INFO"), "{probe_logs}");
     for status in [401, 403, 404, 410] {
         assert!(
             probe_logs.lines().any(|line| line.contains("DEBUG")
@@ -753,9 +754,9 @@ async fn paid_document_fixture() {
         .next()
         .unwrap();
     assert!(
-        probe_logs
-            .lines()
-            .any(|line| line.contains(document_id) && line.contains("Using configured paid relay")),
+        probe_logs.lines().any(|line| line.contains(document_id)
+            && line.contains("DEBUG")
+            && line.contains("Requesting the target response from a configured paid relay")),
         "{probe_logs}"
     );
     for private in [
@@ -800,15 +801,22 @@ async fn paid_document_fixture() {
     let all_logs = std::fs::read_to_string(logs.path()).unwrap();
     let oversized_logs = &all_logs[explicit_logs.len()..];
     assert!(!oversized_logs.contains("WARN"), "{oversized_logs}");
-    assert_eq!(
-        oversized_logs.matches("limit_bytes=7").count(),
-        2,
-        "{oversized_logs}"
-    );
-    assert!(
-        oversized_logs.contains("setting=\"max_help_bytes\""),
-        "{oversized_logs}"
-    );
+    for message in [
+        "Optional discovery probe did not retrieve a document",
+        "Optional discovery probe exhausted document retrieval",
+    ] {
+        assert_eq!(
+            oversized_logs
+                .lines()
+                .filter(|line| line.contains(message)
+                    && line.contains("DEBUG")
+                    && line.contains("limit_bytes=7")
+                    && line.contains("setting=\"max_help_bytes\""))
+                .count(),
+            2,
+            "{oversized_logs}"
+        );
+    }
     let owner = manager.clone();
     let waiter = tokio::spawn(async move {
         owner

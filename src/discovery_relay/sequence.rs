@@ -558,9 +558,9 @@ impl Entry {
         let scoped = self.client(client, outer_limit, help_limit, timeout);
         let progress = crate::payment::SubmissionProgress::default();
         let started = Instant::now();
-        tracing::info!(
+        tracing::debug!(
             relay_format = label(self.format),
-            "Using configured paid relay; target response is supplied by relay"
+            "Requesting the target response from a configured paid relay"
         );
         let result = scoped
             .execute_response_scoped(
@@ -588,7 +588,7 @@ impl Entry {
                     outer_limit.unwrap_or(self.cfg.max_response_bytes),
                 ));
             }
-            tracing::info!(
+            tracing::debug!(
                 reason = safe.reason,
                 http_status = safe.status,
                 possible_submission = possible,

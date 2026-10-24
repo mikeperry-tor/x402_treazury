@@ -99,15 +99,17 @@ fn validate(name: &str, value: &Value, field: &Value) -> Result<()> {
 }
 
 pub(super) fn parse_response(bytes: &[u8]) -> Result<Value> {
-    let value: Value = serde_json::from_slice(bytes)
-        .map_err(|_| anyhow::anyhow!("coinbase_search response invalid_json"))?;
+    let value: Value = serde_json::from_slice(bytes).map_err(|_| {
+        anyhow::Error::new(crate::discovery_relay::RelayFailure::rejected_response())
+            .context("coinbase_search response invalid_json")
+    })?;
     ensure!(
         value.is_object()
             && value["resources"]
                 .as_array()
                 .is_some_and(|items| items.iter().all(Value::is_object))
             && value["partialResults"].is_boolean(),
-        "coinbase_search response invalid_contract"
+        crate::discovery_relay::RelayFailure::rejected_response()
     );
     Ok(value)
 }
@@ -142,7 +144,9 @@ impl Manager {
         let client = self.source_client(owner)?;
         let manager = self.clone();
         let owned_client = client.clone();
+        let listener = owner.to_owned();
         client.run_owned(async move {
+            let result = async {
             let identity = owned_client.documentation_identity().await.map_err(|_| anyhow::anyhow!("coinbase_search identity unavailable"))?;
             let factory = network::global();
             let selected = factory.http_participating(&identity, url.as_str(), import::read_timeout(None), true, owned_client.transport())
@@ -152,9 +156,9 @@ impl Manager {
                 Err(failure) if !failure.fallback => Err(failure.error.context("coinbase_search origin response rejected")),
                 Err(failure) => {
                     let Some(relay) = manager.search_relay.as_ref().filter(|relay| relay.enabled(crate::discovery_relay::Purpose::SourceDiscovery)) else {
-                        tracing::warn!(stage = "coinbase_search", "Coinbase search failed; origin acquisition exhausted and fallback unavailable");
                         return Err(failure.error.context("coinbase_search origin failed; fallback unavailable"));
                     };
+                    tracing::info!("Configured paid relay selected as fallback for the Coinbase directory search");
                     let response = relay.fetch(owned_client, url.as_str(), validate_response, failure.retry_after).await
                         .context("coinbase_search fallback failed; do not automatically repeat: payment or side effects may have occurred")?;
                     let value = parse_response(&response.body)
@@ -162,6 +166,28 @@ impl Manager {
                     output(value, &response.via)
                 }
             }
+            }.await;
+            result.inspect_err(|error| {
+                let failure = crate::discovery_relay::RelayFailure::from_error(error);
+                let limit = error.downcast_ref::<crate::limits::DownloadLimit>();
+                let authorization_may_charge = error.is::<crate::payment::PossiblePayment>();
+                tracing::warn!(
+                    listener,
+                    stage = "coinbase_search",
+                    failure_kind = failure.kind(),
+                    reason = failure.explanation(),
+                    http_status = failure.status(),
+                    authorization_may_charge,
+                    resource = limit.map(|limit| limit.kind),
+                    setting = limit.map(|limit| limit.setting),
+                    limit_bytes = limit.map(|limit| limit.limit),
+                    "{}", if authorization_may_charge {
+                        "Coinbase directory search failed; a payment authorization may still charge; do not automatically repeat the search"
+                    } else {
+                        "Coinbase directory search failed; no valid result was obtained"
+                    }
+                );
+            })
         }).await?
     }
 }
@@ -198,13 +224,16 @@ async fn origin(
                     .headers()
                     .contains_key(reqwest::header::CONTENT_RANGE)
             {
-                return Err(Failure::validation(anyhow::anyhow!(
-                    "coinbase_search origin partial_response"
-                )));
+                return Err(Failure::validation(
+                    crate::discovery_relay::document::IncompleteDocument {
+                        status: status.as_u16(),
+                    }
+                    .into(),
+                ));
             }
             if status != reqwest::StatusCode::OK {
                 let error =
-                    anyhow::anyhow!("coinbase_search origin http_status {}", status.as_u16());
+                    crate::discovery_relay::RelayFailure::http_status(status.as_u16()).into();
                 // An unpaid target challenge is terminal; a relay must not turn it
                 // into another purchase or acquire target signing authority.
                 if status == reqwest::StatusCode::PAYMENT_REQUIRED {

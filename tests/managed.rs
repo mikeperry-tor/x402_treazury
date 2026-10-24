@@ -748,13 +748,18 @@ async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization(
         .collect();
     assert!(!omissions.is_empty(), "{logs}");
     assert!(
-        omissions.iter().all(|line| line.contains("INFO")
+        omissions.iter().all(|line| line.contains("DEBUG")
             && line.contains("call_id=")
             && line.contains("source=\"standalone\"")
             && line.contains("method=\"GET\"")),
         "{logs}"
     );
-    assert!(logs.contains("Payment call completed"), "{logs}");
+    assert!(
+        logs.lines()
+            .any(|line| line.contains("DEBUG") && line.contains("Payment call completed")),
+        "{logs}"
+    );
+    assert!(!logs.contains("INFO"), "{logs}");
     assert!(!logs.contains("WARN"), "{logs}");
     assert!(!logs.contains("private-extension-value"));
 }
@@ -841,6 +846,7 @@ async fn managed_failure_diagnostics_survive_cancellation_and_hide_upstream_pros
             "stage=\"response_body\"",
             "authorization_may_charge=true",
             "failure_kind=\"http_status\"",
+            "The server returned an unsuccessful HTTP status",
         ] {
             assert!(warning.contains(expected), "{logs}");
         }
@@ -929,6 +935,14 @@ async fn direct_managed_failure_diagnostics_distinguish_refusal_and_rejection() 
     );
     assert!(
         warnings[0].contains("authorization_may_charge=false"),
+        "{logs}"
+    );
+    assert!(
+        warnings[0].contains("The server requested an unsupported payment format or requirement"),
+        "{logs}"
+    );
+    assert!(
+        warnings[1].contains("The server returned an unsuccessful HTTP status"),
         "{logs}"
     );
     assert!(warnings[1].contains("last_http_status=402"), "{logs}");

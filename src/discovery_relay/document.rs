@@ -405,6 +405,9 @@ impl PreparedDocument {
             return Err(failure.error);
         }
         let options = self.options;
+        if options.kind == RequestKind::Document {
+            tracing::info!("Configured paid relay selected as fallback to retrieve this document");
+        }
         let response = self
             .prepared
             .acquire(

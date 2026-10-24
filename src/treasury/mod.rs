@@ -480,7 +480,7 @@ impl Treasury {
             });
         observation.phase = SyncPhase::Syncing;
         observation.confirmations = settings.confirmations.get();
-        tracing::info!("treasury sync: synchronizing wallet with indexer");
+        tracing::info!("Synchronizing Zcash treasury wallet");
         self.checkpoint(observation.clone()).await?;
         let session = SyncSession {
             identity: crate::network::IsolationId::treasury(
@@ -527,7 +527,7 @@ impl Treasury {
                 height,
                 observed_tip_height,
                 scanned_blocks,
-                "treasury sync: synchronization completed; wallet checkpoint saved"
+                "Zcash treasury wallet synchronized; progress saved"
             );
         } else {
             tracing::debug!("treasury sync: wallet checkpoint saved after interruption or failure");
@@ -680,7 +680,7 @@ impl SyncSession {
                         target_height,
                         scanned_blocks = observation.scanned_blocks,
                         elapsed_seconds = started.elapsed().as_secs(),
-                        "treasury sync: scan in progress; wallet checkpoint saved"
+                        "Zcash treasury wallet synchronization in progress; progress saved"
                     );
                 }
             }

@@ -157,12 +157,25 @@ async fn fallback_diagnostics_fixture() {
         .unwrap()
         .with_test_root(crate::test_tls::CA),
     );
-    for scenario in ["success", "exhausted", "absent", "disabled", "no_authority"] {
+    for (scenario, kind, debug) in [
+        ("success", RequestKind::Document, false),
+        ("success", RequestKind::Document, true),
+        ("success", RequestKind::OpenApiProbe, false),
+        ("success", RequestKind::OpenApiProbe, true),
+        ("exhausted", RequestKind::Document, false),
+        ("absent", RequestKind::Document, false),
+        ("disabled", RequestKind::Document, false),
+        ("no_authority", RequestKind::Document, false),
+    ] {
         let logs = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_ansi(false)
-            .with_max_level(tracing::Level::INFO)
+            .with_env_filter(if debug {
+                "warn,x402_treazury=debug"
+            } else {
+                "warn,x402_treazury=info"
+            })
             .with_writer(logs.reopen().unwrap())
             .finish();
         let mut entries = vec![(
@@ -195,23 +208,41 @@ async fn fallback_diagnostics_fixture() {
             )
         }
         .with_document_relay((scenario != "absent").then(|| Arc::new(relay)));
-        let options = Options::new(
+        let mut options = Options::new(
             "https://api.example.com/read",
             IsolationId::bootstrap(),
             4096,
             "max_help_bytes",
         );
+        options.kind = kind;
         let result = read(&client, &options).with_subscriber(subscriber).await;
         let logs = std::fs::read_to_string(logs.path()).unwrap();
-        assert!(
-            logs.contains("INFO") && logs.contains("http_status=403"),
-            "{scenario}: {logs}"
-        );
+        if kind == RequestKind::Document {
+            assert!(
+                logs.contains("INFO") && logs.contains("http_status=403"),
+                "{scenario}: {logs}"
+            );
+        } else {
+            assert!(!logs.contains("INFO"), "{logs}");
+        }
         if scenario == "success" {
             assert_eq!(&*result.unwrap().body, b"complete");
             assert!(!logs.contains("WARN"), "{logs}");
-            assert!(logs.contains("Relay payment attempt failed"), "{logs}");
-            assert!(logs.contains("Configured relay request failed"), "{logs}");
+            for detail in [
+                "Relay payment attempt failed",
+                "Configured relay request failed",
+                "Payment call completed",
+                "Requesting the target response from a configured paid relay",
+            ] {
+                assert_eq!(logs.contains(detail), debug, "{logs}");
+            }
+            assert_eq!(
+                logs.contains(
+                    "Configured paid relay selected as fallback to retrieve this document"
+                ),
+                kind == RequestKind::Document,
+                "{logs}"
+            );
         } else {
             assert!(result.is_err(), "{scenario}");
             let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();

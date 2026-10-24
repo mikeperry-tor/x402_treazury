@@ -124,6 +124,15 @@ async fn relay(
     let target = body["url"].as_str().unwrap();
     assert!(target.starts_with(ORIGIN));
     let q = query(target);
+    if q == "unsigned-relay-failure" {
+        assert!(!headers.contains_key("payment-signature"));
+        f.calls.lock().unwrap().push(("unsigned_failure".into(), q));
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            "PRIVATE_UNSIGNED_RELAY_FAILURE",
+        )
+            .into_response();
+    }
     if q == "retry-after" {
         assert!(
             f.terminal_retry.lock().unwrap().unwrap().elapsed() >= Duration::from_secs(1),
@@ -205,6 +214,19 @@ fn coinbase_search_retries_fresh_scopes_and_retains_endpoint_paid_work() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+async fn capture_warnings<T>(work: impl std::future::Future<Output = T>) -> (T, String) {
+    use tracing::instrument::WithSubscriber;
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::WARN)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let result = work.with_subscriber(subscriber).await;
+    (result, std::fs::read_to_string(log.path()).unwrap())
 }
 
 async fn invoke(m: &Arc<Manager>, owner: &str, q: &str) -> anyhow::Result<Value> {
@@ -404,9 +426,9 @@ async fn fixture() {
     assert!(result.is_err());
     assert!(
         logs.lines().any(|line| line.contains("WARN")
-            && line.contains(
-                "Coinbase search failed; origin acquisition exhausted and fallback unavailable"
-            )),
+            && line.contains("Coinbase directory search failed; no valid result was obtained")
+            && line.contains("http_status=403")
+            && line.contains("unsuccessful HTTP status")),
         "{logs}"
     );
     assert_eq!(
@@ -414,6 +436,32 @@ async fn fixture() {
         ["origin", "origin", "origin"],
         "ordinary deployments have no implied paid fallback authority"
     );
+    let (result, logs) = capture_warnings(invoke(&m, "writer", "unsigned-relay-failure")).await;
+    assert!(result.is_err());
+    let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
+    assert_eq!(warnings.len(), 1, "{logs}");
+    for fact in [
+        "Coinbase directory search failed",
+        "http_status=501",
+        "The server returned an unsuccessful HTTP status",
+        "authorization_may_charge=false",
+        "listener=\"writer\"",
+    ] {
+        assert!(warnings[0].contains(fact), "{logs}");
+    }
+    for private in [
+        "PRIVATE_UNSIGNED_RELAY_FAILURE",
+        "api.example.com",
+        "spec.example.com",
+        "unsigned-relay-failure",
+    ] {
+        assert!(!logs.contains(private), "{logs}");
+    }
+    assert_eq!(
+        sequence(&f, "unsigned-relay-failure"),
+        ["origin", "origin", "origin", "unsigned_failure"]
+    );
+
     // Explicit discovery permission is independent of both sibling preferences.
     for (enabled, api_requests, provider_metadata, q) in [
         (false, true, true, "discovery-disabled"),
@@ -599,7 +647,26 @@ async fn fixture() {
     }
     for status in [206, 402] {
         let q = format!("status-{status}");
-        assert!(invoke(&m, "writer", &q).await.is_err());
+        let (result, logs) = capture_warnings(invoke(&m, "writer", &q)).await;
+        assert!(result.is_err());
+        if status == 402 {
+            assert!(
+                logs.lines()
+                    .any(|line| line.contains("Coinbase directory search failed")
+                        && line.contains("http_status=402")
+                        && line.contains("unsuccessful HTTP status")
+                        && line.contains("authorization_may_charge=false")),
+                "{logs}"
+            );
+        } else {
+            assert!(
+                logs.lines()
+                    .any(|line| line.contains("Coinbase directory search failed")
+                        && line.contains("http_status=206")
+                        && line.contains("server did not deliver a complete response")),
+                "{logs}"
+            );
+        }
         assert_eq!(
             sequence(&f, &q),
             ["origin"],
@@ -632,10 +699,17 @@ async fn fixture() {
         "a signed oversized outer response must fail visibly without another authorization"
     );
 
-    let error = invoke(&m, "reader", "uncertain")
-        .await
-        .unwrap_err()
-        .to_string();
+    let (result, logs) = capture_warnings(invoke(&m, "reader", "uncertain")).await;
+    let error = result.unwrap_err().to_string();
+    assert!(
+        logs.lines()
+            .any(|line| line.contains("Coinbase directory search failed")
+                && line.contains("authorization_may_charge=true")
+                && line.contains("http_status=502")
+                && line.contains("do not automatically repeat")),
+        "{logs}"
+    );
+    assert!(!logs.contains("PRIVATE_RELAY_FAILURE"), "{logs}");
     assert!(!error.contains("PRIVATE_RELAY_FAILURE"));
     assert!(error.contains("do not automatically repeat"));
     assert_eq!(

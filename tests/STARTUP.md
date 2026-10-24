@@ -37,6 +37,8 @@ the retained inventory. Startup unit tests cover a fresh cached JSON document
 whose unsupported header schema prevents generation, and shared failures preserving
 safe acquisition stages and status. Existing accepted-relay-payment cancellation and
 panic fixtures also run with default waiting and verify drain/Store ownership.
+The waiting-endpoint regression also checks that the INFO startup summary
+identifies catalogs still loading instead of announcing discovery completion.
 Publication preserves authored prices, tool order and existing callable snapshots. Deferred collision
 regressions cover opposite completion orders, three owners, exact selectors,
 unique tools, listener isolation and captured bindings; strict loading still rejects

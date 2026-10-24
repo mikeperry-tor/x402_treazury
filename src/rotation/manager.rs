@@ -499,7 +499,7 @@ fn strip_extensions(challenge: &mut Value) -> Result<bool> {
         if name == "bazaar" {
             tracing::debug!(extension = ?name, "managed payment omitting Bazaar discovery metadata before signing");
         } else {
-            tracing::info!(extension = ?name, stage = "challenge_preparation", reason = "unsupported_extension", "managed payment omitting advertised x402 extension before offer validation and signing; provider may require it");
+            tracing::debug!(extension = ?name, stage = "challenge_preparation", reason = "unsupported_extension", "managed payment omitting advertised x402 extension before offer validation and signing; provider may require it");
         }
     }
     challenge

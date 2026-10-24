@@ -97,7 +97,19 @@ pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress, relay
         .as_ref()
         .err()
         .and_then(|error| error.downcast_ref::<reqwest::Error>());
-    emit(result.is_ok(), kind, transport, progress, relay_call);
+    let reason = result
+        .as_ref()
+        .err()
+        .and_then(|error| error.downcast_ref::<crate::rotation::error::AdmissionError>())
+        .map(admission_reason);
+    emit(
+        result.is_ok(),
+        kind,
+        transport,
+        progress,
+        relay_call,
+        reason,
+    );
 }
 
 /// Direct callers own body consumption; observe only the returned headers here.
@@ -109,7 +121,53 @@ pub(crate) fn finish_response(response: &reqwest::Response, progress: &Submissio
         None,
         progress,
         false,
+        None,
     );
+}
+
+/// Only the typed category is safe here; even static error detail can contain
+/// provider-authored or credential-bearing text.
+fn admission_reason(error: &crate::rotation::error::AdmissionError) -> &'static str {
+    use crate::rotation::error::AdmissionError;
+    match error {
+        AdmissionError::PayerChanged => {
+            "The wallet assigned to this payment changed before authorization"
+        }
+        AdmissionError::UnsupportedPayment(_) => {
+            "The server requested an unsupported payment format or requirement"
+        }
+        AdmissionError::PriceLimit(_) => "The requested payment exceeds the authorized amount",
+        AdmissionError::PaymentPending(_) => "A payment is still pending",
+        AdmissionError::WalletNotReady(_) => "No eligible wallet is ready for this payment",
+        AdmissionError::FundingUnavailable(_) => "Wallet funding is unavailable",
+        AdmissionError::FundingRestricted | AdmissionError::FundingPermitDenied => {
+            "This operation does not have authority to start new wallet funding"
+        }
+        AdmissionError::OutcomeUnknown(_) => {
+            "The payment outcome is unknown; reconciliation is required"
+        }
+        AdmissionError::ChainRecoveryRequired(_) => {
+            "Blockchain reconciliation is required before this wallet can continue"
+        }
+    }
+}
+
+/// Human explanations complement stable diagnostic codes without exposing errors.
+fn failure_reason(kind: &str, transport: Option<&str>) -> &'static str {
+    match (kind, transport) {
+        (_, Some("tls_failure")) => "The secure connection failed TLS validation or negotiation",
+        (_, Some("connection_timeout")) => "The connection to the server or proxy timed out",
+        (_, Some("read_inactivity")) => {
+            "The server stopped sending data before the response was complete"
+        }
+        (_, Some("connection")) => "Could not connect to the server or configured proxy",
+        (_, Some("body")) => "The response body could not be read completely",
+        (_, Some("decode")) => "The server response could not be decoded",
+        (_, Some("request_construction")) => "The HTTP request could not be constructed",
+        (_, Some(_)) => "The HTTP request or response failed during transport",
+        ("http_status", None) => "The server returned an unsuccessful HTTP status",
+        _ => "The operation failed; no further cause information is available",
+    }
 }
 
 fn emit(
@@ -118,6 +176,7 @@ fn emit(
     transport: Option<&reqwest::Error>,
     progress: &SubmissionProgress,
     relay_call: bool,
+    reason: Option<&'static str>,
 ) {
     let observation = OBSERVATION.with(Cell::get);
     let stage = observation.stage;
@@ -125,6 +184,7 @@ fn emit(
     let unsigned_attempt = observation.unsigned_attempt;
     let max_unsigned_attempts = observation.max_unsigned_attempts;
     let transport_reason = transport.map(transport_reason);
+    let reason = reason.unwrap_or_else(|| failure_reason(failure_kind, transport_reason));
     let io = transport.and_then(|error| {
         let mut cause = std::error::Error::source(error);
         while let Some(error) = cause {
@@ -139,17 +199,18 @@ fn emit(
     let os_error = io.and_then(std::io::Error::raw_os_error);
     let authorization_may_charge = progress.possible();
     if success {
-        tracing::info!(
+        tracing::debug!(
             stage,
             last_http_status,
             authorization_may_charge,
             "Payment call completed; completion does not establish settlement"
         );
     } else if relay_call && !authorization_may_charge {
-        tracing::info!(
+        tracing::debug!(
             stage,
             last_http_status,
             failure_kind,
+            reason,
             transport_reason,
             io_kind = ?io_kind,
             os_error,
@@ -163,6 +224,7 @@ fn emit(
             stage,
             last_http_status,
             failure_kind,
+            reason,
             transport_reason,
             io_kind = ?io_kind,
             os_error,
@@ -203,6 +265,7 @@ mod tests {
         let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
             .with_writer(log.reopen().unwrap())
             .finish();
         scope(async {
@@ -224,6 +287,7 @@ mod tests {
         for expected in [
             "http_transport_or_body",
             "transport_reason=\"connection\"",
+            "Could not connect to the server or configured proxy",
             "ConnectionRefused",
             "unsigned_attempt=1",
             "max_unsigned_attempts=3",
@@ -243,12 +307,13 @@ mod tests {
             warnings[1].contains("do not automatically repeat"),
             "{logs}"
         );
-        let relay_info = logs
+        let relay_detail = logs
             .lines()
             .find(|line| line.contains("Relay payment attempt failed"))
             .unwrap();
         assert!(
-            relay_info.contains("INFO") && relay_info.contains("authorization_may_charge=false"),
+            relay_detail.contains("DEBUG")
+                && relay_detail.contains("authorization_may_charge=false"),
             "{logs}"
         );
         assert!(
@@ -257,6 +322,74 @@ mod tests {
         );
         for private in ["private-path", "private-token", &address.to_string()] {
             assert!(!logs.contains(private), "{logs}");
+        }
+    }
+
+    #[tokio::test]
+    async fn routine_results_are_debug_and_terminal_uncertainty_is_explained_at_warn() {
+        for debug in [false, true] {
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(if debug {
+                    tracing::Level::DEBUG
+                } else {
+                    tracing::Level::INFO
+                })
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            scope(async {
+                // A later output/preparation failure must not blame an earlier 402.
+                OBSERVATION.with(|cell| {
+                    cell.set(Observation {
+                        last_http_status: Some(402),
+                        ..cell.get()
+                    })
+                });
+                let progress = SubmissionProgress::default();
+                let success: Result<()> = Ok(());
+                finish(&success, &progress, false);
+                let failure: Result<()> = Err(anyhow::anyhow!("PRIVATE_UPSTREAM_PROSE"));
+                finish(&failure, &progress, true);
+                progress.mark_possible();
+                finish(&failure, &progress, true);
+                let admission: Result<()> =
+                    Err(crate::rotation::error::AdmissionError::OutcomeUnknown(
+                        "PRIVATE_ADMISSION_DETAIL",
+                    )
+                    .into());
+                finish(&admission, &progress, false);
+            })
+            .with_subscriber(subscriber)
+            .await;
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            assert_eq!(logs.contains("Payment call completed"), debug, "{logs}");
+            assert_eq!(
+                logs.contains("Relay payment attempt failed"),
+                debug,
+                "{logs}"
+            );
+            assert!(!logs.contains("INFO"), "{logs}");
+            let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
+            assert_eq!(warnings.len(), 2, "{logs}");
+            assert!(
+                warnings[0].contains("no further cause information is available"),
+                "{logs}"
+            );
+            assert!(!warnings[0].contains("unsuccessful HTTP status"), "{logs}");
+            assert!(
+                warnings[1].contains("The payment outcome is unknown; reconciliation is required"),
+                "{logs}"
+            );
+            for warning in warnings {
+                assert!(
+                    warning.contains("authorization_may_charge=true")
+                        && warning.contains("do not automatically repeat"),
+                    "{logs}"
+                );
+            }
+            assert!(!logs.contains("PRIVATE_"), "{logs}");
         }
     }
 }

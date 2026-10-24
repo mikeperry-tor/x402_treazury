@@ -129,6 +129,14 @@ async fn finish(stop: CancellationToken, serving: tokio::task::JoinHandle<Result
 
 #[tokio::test]
 async fn default_waits_for_own_catalog_publication_while_peers_serve() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _logging = tracing::subscriber::set_default(subscriber);
     let fixtures = Fixture::new(
         &(listener("wait", "['local','slow']", "")
             + &listener("eager", "['local','slow']", "wait_for_catalogs=false")
@@ -136,6 +144,12 @@ async fn default_waits_for_own_catalog_publication_while_peers_serve() {
         true,
     )
     .await;
+    let initial_logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(initial_logs.contains("Catalogs are still loading; each waiting MCP endpoint will start when its required catalogs are ready"), "{initial_logs}");
+    assert!(
+        !initial_logs.contains("Initial catalog loading finished"),
+        "{initial_logs}"
+    );
     let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
     assert_eq!(fixtures.running.catalog_readiness.len(), 2);
     let stop = CancellationToken::new();

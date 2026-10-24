@@ -266,6 +266,9 @@ Catalog file reads, origin fetches, cache configuration/policy, cache hits and
 writes, shared downloads and retained catalog-load handoffs are DEBUG. These
 implementation details do not announce readiness. Per-source catalog readiness,
 initial loading summaries and endpoint waiting/ready transitions remain INFO.
+When remote loads remain pending, the initial summary says catalogs are still
+loading and waiting endpoints will start when their required catalogs are ready;
+it does not announce that startup discovery has finished.
 Catalog cache-hit messages confirm a readable JSON document; tool generation and
 listener validation must still finish before a source is ready. Catalog failures
 report the authored source ID, `failure_stage`, a fixed plain-language `reason`,
@@ -278,7 +281,9 @@ error chains. A failed source stays unavailable; a required source failure emits
 ERROR for each dependent waiting endpoint, identifying the source and directing
 the operator to its catalog warning. Publication failures retain the existing
 inventory for ready endpoints and fail endpoints still waiting for catalogs.
-Correct the reported cause and restart serving to retry a failed startup catalog.
+For failures without potentially chargeable work, correct the reported cause and
+restart serving to retry a failed startup catalog. A possibly charged acquisition
+instead retains explicit payment uncertainty and the prohibition on automatic replay.
 
 Unsigned document acquisitions carry an ephemeral `document_id` and trusted
 `request_kind`, shared by origin and paid relay spans. Origin failures report safe
@@ -286,9 +291,13 @@ HTTP status, a plain-language reason, direct/Tor route, typed failure/transport
 categories and final attempt/maximum counts. `relay_fallback_eligible` describes
 the origin failure, not configured relay availability, payment authority or
 successful recovery.
-Explicit document origin failures that lead to fallback are INFO. Individual relay
-request failures use INFO when they explain recovery or delay; repetitive attempt
-details belong at DEBUG.
+Explicit document origin failures and selection of their configured paid fallback
+are INFO. Catalog, API and directory-search fallback owners also report selection
+at INFO. Selection does not promise a new request, payment or successful retrieval:
+preparation, existing authority, readiness and possible cached work still apply.
+Individual relay exchanges, unsigned relay failures and routine payment completion
+are DEBUG. Optional discovery probes keep their acquisition and fallback detail
+at DEBUG, including successful paid relay calls.
 The complete document acquisition emits WARN only when no usable paid fallback is
 available or retrieval ends in failure after fallback. This includes lazy source
 refresh preparation and authority loading failures. Speculative OpenAPI, directory
@@ -297,10 +306,12 @@ blocked responses. Enable `RUST_LOG=warn,x402_treazury=debug` for these probe
 diagnostics; oversized origin candidates also use DEBUG with resource, setting
 and byte limit, while terminal explicit document rejection retains WARN. The tool
 response retains per-URL outcomes. No URLs, hosts, arguments or upstream error
-prose are logged. Unsigned relay payment attempt failures follow the intermediate
-failure rule above; terminal ordinary payment failures and terminal potentially
-chargeable relay failures retain WARN
-and possible-charge facts. These levels do not grant retry or payment authority.
+prose are logged. Terminal ordinary payment failures and terminal potentially
+chargeable relay failures retain WARN and possible-charge facts, including when
+an optional probe's payment fails. These levels do not grant retry or payment authority.
+The Coinbase directory search owner reports a terminal WARN after origin and
+fallback recovery ends, including safe cause/status and possible-charge facts;
+individual unsigned relay failures remain DEBUG.
 A successful relay HTTP call does not establish usable target documentation or
 settlement; consumers still validate the document.
 
@@ -329,8 +340,13 @@ challenge, extension values, signed bytes or upstream error prose is logged.
 
 Accepted payment work logs its terminal result inside its retained owner, even
 after caller cancellation. Routine completion belongs at DEBUG; terminal failure
-is WARN. Diagnostics retain a fixed failure kind, execution stage, unsigned
-attempt number/maximum when available, and `authorization_may_charge`. Counts describe dispatches in the latest payer's
+is WARN. Warnings include a fixed plain-language reason derived from the typed
+transport or payment category, with explicit uncertainty when no more specific
+cause is available. Provider error detail is never formatted, even when stored in
+a static string. An earlier unsigned HTTP status cannot explain a later signing
+or output failure by itself. Diagnostics retain a fixed failure kind, execution
+stage, unsigned attempt number/maximum when available, and
+`authorization_may_charge`. Counts describe dispatches in the latest payer's
 unsigned sequence and reset when managed wallet traversal changes payer; they are
 not a cumulative call limit. Transport failures include a fixed `transport_reason`
 (TLS, connection timeout, read inactivity, connection, body, decode, request
@@ -369,8 +385,9 @@ emit raw returned errors; the sanitized application diagnostic owns failure
 reporting. Base RPC attempts and successful provider failover are DEBUG events
 with provider ordinals; an exhausted complete verification remains WARN.
 Configured discovery relay selection and meaningful paid-recovery transitions
-use INFO. Unsigned API, catalog/pricing Tor retries and unsigned relay payment
-failures use INFO when they explain recovery or user-visible delay, with attempt
+use INFO at the owning operation. Individual relay exchanges, unsigned relay
+failures and payment completion use DEBUG. Other unsigned API and catalog/pricing
+Tor recovery messages use INFO when they explain user-visible delay, with attempt
 and maximum counts where available; repetitive attempt details belong at DEBUG.
 The complete acquisition owns terminal failure warnings.
 
