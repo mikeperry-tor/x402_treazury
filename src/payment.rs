@@ -593,7 +593,7 @@ impl PaidClient {
                         }
                         Ok(output)
                     });
-                diagnostics::finish(&result, &progress);
+                diagnostics::finish(&result, &progress, client.relay_call);
                 with_payment_context(progress.possible(), result)
             })
             .instrument(span),

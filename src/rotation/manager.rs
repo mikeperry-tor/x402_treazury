@@ -274,7 +274,7 @@ impl ManagedPool {
                 .await;
                 match &result {
                     Ok(owned) => diagnostics::finish_response(&owned.response, &progress),
-                    Err(_) => diagnostics::finish(&result, &progress),
+                    Err(_) => diagnostics::finish(&result, &progress, false),
                 }
                 result
             }),

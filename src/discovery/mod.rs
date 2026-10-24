@@ -1130,41 +1130,51 @@ async fn maintain_cli_owned(
                 let document = match candidate.remote_spec() {
                     Some(url) => {
                         let options = import::options(url, candidate.provider.as_ref())?;
-                        match crate::discovery_relay::document::origin(&options).await {
-                            Ok(document) => document,
-                            Err(failure) if failure.fallback => {
-                                let relay_policy = cfg.relay_fallback.as_ref().filter(|relay| {
-                                    relay.provider_metadata && relay.has_method("GET")
-                                });
-                                let Some(relay_policy) = relay_policy else {
-                                    return Err(failure.error);
-                                };
-                                let relay = Arc::new(
-                                    crate::discovery_relay::SearchRelay::load(relay_policy, path)
+                        async {
+                            match crate::discovery_relay::document::origin(&options).await {
+                                Ok(document) => Ok(document),
+                                Err(failure) if failure.fallback => {
+                                    let relay_policy =
+                                        cfg.relay_fallback.as_ref().filter(|relay| {
+                                            relay.provider_metadata && relay.has_method("GET")
+                                        });
+                                    let Some(relay_policy) = relay_policy else {
+                                        return Err(failure.error);
+                                    };
+                                    let relay = Arc::new(
+                                        crate::discovery_relay::SearchRelay::load(
+                                            relay_policy,
+                                            path,
+                                        )
                                         .await?,
-                                );
-                                let Some(prepared) =
-                                    crate::discovery_relay::document::prepare_fallback(
-                                        &relay, &options,
-                                    )?
-                                else {
-                                    return Err(failure.error);
-                                };
-                                authority = Some(
-                                    crate::deployment::existing_read::ExistingRead::load(
-                                        &cfg, owner,
-                                    )
-                                    .await?,
-                                );
-                                let client = authority
-                                    .as_ref()
-                                    .unwrap()
-                                    .client()
-                                    .with_document_relay(Some(relay));
-                                prepared.acquire(&client, failure).await?
+                                    );
+                                    let Some(prepared) =
+                                        crate::discovery_relay::document::prepare_fallback(
+                                            &relay, &options,
+                                        )?
+                                    else {
+                                        return Err(failure.error);
+                                    };
+                                    authority = Some(
+                                        crate::deployment::existing_read::ExistingRead::load(
+                                            &cfg, owner,
+                                        )
+                                        .await?,
+                                    );
+                                    let client = authority
+                                        .as_ref()
+                                        .unwrap()
+                                        .client()
+                                        .with_document_relay(Some(relay));
+                                    prepared.acquire(&client, failure).await
+                                }
+                                Err(failure) => Err(failure.error),
                             }
-                            Err(failure) => return Err(failure.error),
                         }
+                        .await
+                        .inspect_err(|error| {
+                            crate::discovery_relay::document::log_failure(&options, error);
+                        })?
                     }
                     None => Document::local(curated::local_document(
                         candidate.provider.as_ref().context("provider_required")?,

@@ -547,6 +547,21 @@ async fn paid_import_fixture() {
     server.abort();
 }
 
+async fn refresh_with_logs(config: &std::path::Path, id: &str) -> (Result<()>, String) {
+    use tracing::instrument::WithSubscriber;
+    let logs = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(logs.reopen().unwrap())
+        .finish();
+    let result = maintain_cli(config, "writer", id, true)
+        .with_subscriber(subscriber)
+        .await;
+    (result, std::fs::read_to_string(logs.path()).unwrap())
+}
+
 async fn all_unsupported_refresh_avoids_authority() {
     let dir = tempfile::tempdir().unwrap();
     let registry = dir.path().join("registry.sqlite");
@@ -586,9 +601,13 @@ async fn all_unsupported_refresh_avoids_authority() {
         "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true,"wallet":"shared","source_registry_file":registry}}
     });
     std::fs::write(&config, toml::to_string(&value).unwrap()).unwrap();
-    let error = maintain_cli(&config, "writer", &id, true)
-        .await
-        .unwrap_err();
+    let (result, logs) = refresh_with_logs(&config, &id).await;
+    let error = result.unwrap_err();
+    assert!(
+        logs.contains("WARN") && logs.contains("paid fallback unavailable or failed"),
+        "{logs}"
+    );
+    assert!(!logs.contains("api.example.com"), "{logs}");
     let facts = SharedFailure::capture(&error, "refresh failed");
     assert_eq!(
         facts.status(),
@@ -675,7 +694,28 @@ async fn supported_paid_cli_refresh(state: &PaidImport) {
         "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true,"wallet":"selected","source_registry_file":registry}}
     });
     std::fs::write(&config, toml::to_string(&value).unwrap()).unwrap();
-    maintain_cli(&config, "writer", &id, true).await.unwrap();
+    // An unavailable selected key is terminal before any relay HTTP or mutation.
+    let mut missing_key = value.clone();
+    missing_key["wallets"]["selected"]["private_key_env"] = json!("TREAZURY_IMPORT_CLI_UNUSED_KEY");
+    std::fs::write(&config, toml::to_string(&missing_key).unwrap()).unwrap();
+    let (result, logs) = refresh_with_logs(&config, &id).await;
+    assert!(result.is_err());
+    assert!(
+        logs.contains("WARN") && logs.contains("paid fallback unavailable or failed"),
+        "{logs}"
+    );
+    assert_eq!(state.calls.lock().unwrap()["cli-paid"], ["origin"]);
+    let saved = store::Store::open(&registry, &[]).unwrap();
+    assert_eq!(saved.load().unwrap().records[&id].revision, 1);
+    drop(saved);
+    std::fs::write(&config, toml::to_string(&value).unwrap()).unwrap();
+    let (result, logs) = refresh_with_logs(&config, &id).await;
+    result.unwrap();
+    assert!(
+        logs.contains("INFO") && logs.contains("http_status=403"),
+        "{logs}"
+    );
+    assert!(!logs.contains("WARN"), "{logs}");
     let saved = store::Store::open(&registry, &[]).unwrap();
     let state_after = saved.load().unwrap();
     let refreshed = &state_after.records[&id];
@@ -689,7 +729,7 @@ async fn supported_paid_cli_refresh(state: &PaidImport) {
     drop(saved);
     assert_eq!(
         state.calls.lock().unwrap()["cli-paid"],
-        ["origin", "challenge", "signed"]
+        ["origin", "origin", "challenge", "signed"]
     );
     let signer: alloy_signer_local::PrivateKeySigner = format!("{:064x}", 19).parse().unwrap();
     assert_eq!(

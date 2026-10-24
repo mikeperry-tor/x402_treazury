@@ -84,7 +84,7 @@ pub(crate) fn response(response: &reqwest::Response) {
     });
 }
 
-pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress) {
+pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress, relay_call: bool) {
     let kind = match result {
         Err(error) if error.is::<super::HttpFailure>() => "http_status",
         Err(error) if error.is::<crate::rotation::error::AdmissionError>() => {
@@ -97,7 +97,7 @@ pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress) {
         .as_ref()
         .err()
         .and_then(|error| error.downcast_ref::<reqwest::Error>());
-    emit(result.is_ok(), kind, transport, progress);
+    emit(result.is_ok(), kind, transport, progress, relay_call);
 }
 
 /// Direct callers own body consumption; observe only the returned headers here.
@@ -108,6 +108,7 @@ pub(crate) fn finish_response(response: &reqwest::Response, progress: &Submissio
         "http_status",
         None,
         progress,
+        false,
     );
 }
 
@@ -116,6 +117,7 @@ fn emit(
     failure_kind: &'static str,
     transport: Option<&reqwest::Error>,
     progress: &SubmissionProgress,
+    relay_call: bool,
 ) {
     let observation = OBSERVATION.with(Cell::get);
     let stage = observation.stage;
@@ -142,6 +144,19 @@ fn emit(
             last_http_status,
             authorization_may_charge,
             "Payment call completed; completion does not establish settlement"
+        );
+    } else if relay_call && !authorization_may_charge {
+        tracing::info!(
+            stage,
+            last_http_status,
+            failure_kind,
+            transport_reason,
+            io_kind = ?io_kind,
+            os_error,
+            unsigned_attempt,
+            max_unsigned_attempts,
+            authorization_may_charge,
+            "Relay payment attempt failed before any potentially chargeable authorization"
         );
     } else {
         tracing::warn!(
@@ -194,16 +209,18 @@ mod tests {
             stage("unsigned_request");
             unsigned_attempt(1, 3);
             let result: Result<()> = Err(error.into());
-            finish(&result, &SubmissionProgress::default());
+            finish(&result, &SubmissionProgress::default(), false);
             let progress = SubmissionProgress::default();
             progress.mark_possible();
-            finish(&result, &progress);
+            finish(&result, &progress, false);
+            finish(&result, &SubmissionProgress::default(), true);
+            finish(&result, &progress, true);
         })
         .with_subscriber(subscriber)
         .await;
         let logs = std::fs::read_to_string(log.path()).unwrap();
         let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
-        assert_eq!(warnings.len(), 2, "{logs}");
+        assert_eq!(warnings.len(), 3, "{logs}");
         for expected in [
             "http_transport_or_body",
             "transport_reason=\"connection\"",
@@ -224,6 +241,18 @@ mod tests {
         );
         assert!(
             warnings[1].contains("do not automatically repeat"),
+            "{logs}"
+        );
+        let relay_info = logs
+            .lines()
+            .find(|line| line.contains("Relay payment attempt failed"))
+            .unwrap();
+        assert!(
+            relay_info.contains("INFO") && relay_info.contains("authorization_may_charge=false"),
+            "{logs}"
+        );
+        assert!(
+            warnings[2].contains("authorization_may_charge=true"),
             "{logs}"
         );
         for private in ["private-path", "private-token", &address.to_string()] {

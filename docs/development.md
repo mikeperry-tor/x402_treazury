@@ -214,15 +214,20 @@ HTTP status, a plain-language reason, direct/Tor route, typed failure/transport
 categories and final attempt/maximum counts. `relay_fallback_eligible` describes
 the origin failure, not configured relay availability, payment authority or
 successful recovery.
-Explicit document origin failures are WARN; speculative OpenAPI, directory and
-documentation URL probe failures are DEBUG, including missing paths and blocked
-responses. Enable `RUST_LOG=warn,x402_treazury=debug` for these probe diagnostics;
-oversized origin candidates also use DEBUG with resource, setting and byte limit,
-while explicit document rejection retains WARN. The tool response retains per-URL
-outcomes. No URLs, hosts, arguments or upstream
-error prose are logged. Paid relay failures retain ordinary payment WARN diagnostics
-and possible-charge facts. A successful relay HTTP call does not establish usable
-target documentation or settlement; consumers still validate the document.
+Explicit document origin failures and individual relay request failures are INFO.
+The complete document acquisition emits WARN only when no usable paid fallback is
+available or retrieval ends in failure after fallback. This includes lazy source
+refresh preparation and authority loading failures. Speculative OpenAPI, directory
+and documentation URL probe failures remain DEBUG, including missing paths and
+blocked responses. Enable `RUST_LOG=warn,x402_treazury=debug` for these probe
+diagnostics; oversized origin candidates also use DEBUG with resource, setting
+and byte limit, while terminal explicit document rejection retains WARN. The tool
+response retains per-URL outcomes. No URLs, hosts, arguments or upstream error
+prose are logged. Unsigned relay payment attempt failures are INFO; ordinary
+payment failures and terminal potentially chargeable relay failures retain WARN
+and possible-charge facts. These levels do not grant retry or payment authority.
+A successful relay HTTP call does not establish usable target documentation or
+settlement; consumers still validate the document.
 
 A valid first-page `tools/list` with more than 250 advertised definitions emits
 an advisory WARN with listener ID, count and `discover_on_demand = true` suggestion,
@@ -284,9 +289,9 @@ provider failover are debug events with provider ordinals; an exhausted complete
 verification remains a warning. Selecting a configured discovery relay fallback
 and actual paid relay attempts are info. Unsigned API and catalog/pricing Tor
 retry events are info, with attempt and maximum counts; terminal payment failures
-remain warnings. Relay pre-submission retry availability is info, but each failed
-relay payment call still warns before the separate discovery workflow considers
-another attempt.
+remain warnings. Relay pre-submission retry availability and failed unsigned
+relay payment attempts are info; the complete acquisition owns terminal failure
+warnings.
 
 Sanitize Zingolib errors before logging or persistence. Retain fixed categories
 and typed reasons, numeric gRPC codes and fixed status names when available, never

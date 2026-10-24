@@ -302,15 +302,10 @@ pub(crate) async fn origin(options: &Options) -> Result<Document, Failure> {
     })
 }
 
-fn log_origin_failure(options: &Options, failure: &Failure, attempts: (usize, usize)) {
-    let http_status = match failure.kind {
-        acquisition::FailureKind::HttpStatus(status) => Some(status.as_u16()),
-        _ => SharedFailure::capture(&failure.error, "document request failed").status(),
-    };
-    let limit = failure.error.downcast_ref::<crate::limits::DownloadLimit>();
-    let reason = if limit.is_some() {
+fn failure_reason(error: &anyhow::Error, http_status: Option<u16>) -> &'static str {
+    if error.is::<crate::limits::DownloadLimit>() {
         "document exceeds the download limit; content rejected without partial output"
-    } else if failure.error.is::<IncompleteDocument>() {
+    } else if error.is::<IncompleteDocument>() {
         "partial response rejected; a complete document is required"
     } else {
         match http_status {
@@ -323,7 +318,16 @@ fn log_origin_failure(options: &Options, failure: &Failure, attempts: (usize, us
             Some(_) => "service returned an unsuccessful HTTP status",
             None => "document request or response failed validation or transport",
         }
+    }
+}
+
+fn log_origin_failure(options: &Options, failure: &Failure, attempts: (usize, usize)) {
+    let http_status = match failure.kind {
+        acquisition::FailureKind::HttpStatus(status) => Some(status.as_u16()),
+        _ => SharedFailure::capture(&failure.error, "document request failed").status(),
     };
+    let limit = failure.error.downcast_ref::<crate::limits::DownloadLimit>();
+    let reason = failure_reason(&failure.error, http_status);
     let transport_reason = failure
         .error
         .downcast_ref::<reqwest::Error>()
@@ -336,7 +340,7 @@ fn log_origin_failure(options: &Options, failure: &Failure, attempts: (usize, us
     let setting = limit.map(|limit| limit.setting);
     let limit_bytes = limit.map(|limit| limit.limit);
     if options.kind == RequestKind::Document {
-        tracing::warn!(
+        tracing::info!(
             http_status,
             reason,
             transport_reason,
@@ -456,9 +460,64 @@ pub(crate) async fn fallback(
 }
 
 pub(crate) async fn read(client: &PaidClient, options: &Options) -> Result<Document> {
-    match origin(options).await {
+    let result = match origin(options).await {
         Ok(document) => Ok(document),
         Err(failure) => fallback(client, options, failure).await,
+    };
+    result.inspect_err(|error| log_failure(options, error))
+}
+
+/// Only the complete acquisition owner knows whether fallback was unavailable
+/// or exhausted. Origin and individual relay attempts are intermediate events.
+pub(crate) fn log_failure(options: &Options, error: &anyhow::Error) {
+    let failure = SharedFailure::capture(error, "document acquisition failed");
+    let http_status = failure.status();
+    let authorization_may_charge = failure.possible_payment();
+    let reason = error
+        .downcast_ref::<TargetFailure>()
+        .map(|f| f.reason)
+        .or_else(|| {
+            error
+                .downcast_ref::<super::RelayFailure>()
+                .map(|f| f.reason)
+        })
+        .unwrap_or_else(|| failure_reason(error, http_status));
+    let transport_reason = error
+        .downcast_ref::<reqwest::Error>()
+        .map(crate::payment::diagnostics::transport_reason);
+    let route = &network::global().policy.mode;
+    let limit = error.downcast_ref::<crate::limits::DownloadLimit>();
+    let resource = limit.map(|limit| limit.kind);
+    let setting = limit.map(|limit| limit.setting);
+    let limit_bytes = limit.map(|limit| limit.limit);
+    if options.kind == RequestKind::Document {
+        tracing::warn!(
+            document_id = %options.id,
+            request_kind = ?options.kind,
+            http_status,
+            reason,
+            transport_reason,
+            ?route,
+            resource,
+            setting,
+            limit_bytes,
+            authorization_may_charge,
+            "Could not retrieve document; paid fallback unavailable or failed"
+        );
+    } else {
+        tracing::debug!(
+            document_id = %options.id,
+            request_kind = ?options.kind,
+            http_status,
+            reason,
+            transport_reason,
+            ?route,
+            resource,
+            setting,
+            limit_bytes,
+            authorization_may_charge,
+            "Optional discovery probe exhausted document retrieval"
+        );
     }
 }
 

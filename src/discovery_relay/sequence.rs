@@ -588,7 +588,7 @@ impl Entry {
                     outer_limit.unwrap_or(self.cfg.max_response_bytes),
                 ));
             }
-            tracing::warn!(
+            tracing::info!(
                 reason = safe.reason,
                 http_status = safe.status,
                 possible_submission = possible,
