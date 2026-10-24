@@ -281,8 +281,7 @@ async fn shutdown_while_waiting_releases_sockets_without_readiness_errors() {
 async fn local_only_and_management_only_endpoints_start_without_pending_catalogs() {
     let fixtures = Fixture::new(
         &(listener("local", "['local']", "")
-            + &listener("management", "[]", "source_management=true")
-            + "[source_management]\nwallet='w'\n"),
+            + &listener("management", "[]", "source_management=true")),
         false,
     )
     .await;

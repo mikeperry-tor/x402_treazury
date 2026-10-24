@@ -269,26 +269,24 @@ The [managed starter](../examples/deployments/managed.toml) already enables sour
 management using its research pool. Its settings are:
 
 ```toml
-[source_management]
-wallet = "research" # Existing [wallets.research]; no new pool required.
-# registry_file = "../../state/managed-sources.sqlite" # Optional persistence.
-
 [servers.research]
+wallet = "research" # Existing [wallets.research]; no new pool required.
 source_management = true
-# Retain its existing listen, bearer_token_env, wallet and sources settings.
+# source_registry_file = "../../state/managed-sources.sqlite" # Optional persistence.
+# Retain its existing listen, bearer_token_env and sources settings.
 ```
 
-Omit `registry_file` for registrations that last only until exit. Static sources
+Omit `source_registry_file` for registrations that last only until exit. Static sources
 are optional: set `sources = []` for a discovery-only listener. A second listener
 can enable source management with the same shared wallet and its own authenticated
 identity; registrations remain separate even when both listeners use one pool.
 Static profiles also work here when the operator defines the referenced wallet
 with `mode = "static"` and `private_key_env`.
 
-The shared block names an existing wallet and optionally a separate registry file.
-A server's existing `wallet` setting overrides the shared dynamic wallet. No automatic
-wallet allocation occurs per source. Managed wallet initialization and funding follow
-the normal operator-authorized startup policy. Registration never funds wallets or
+Each enabled endpoint must name an existing wallet with `wallet` and may set its
+own `source_registry_file`. No automatic wallet allocation occurs per source.
+Managed wallet initialization and funding follow the normal operator-authorized
+startup policy. Registration never funds wallets or
 probes endpoint prices; paid invocation checks readiness and ordinary payment limits.
 
 A listener's authenticated endpoint ID is the principal. All agents using its bearer
@@ -298,7 +296,7 @@ receiver roles or process-wide grants. Two endpoints adding the same specificati
 get independent registrations, even if they share a payment wallet. Static TOML
 sources cannot be modified by agent tools.
 
-Persistence belongs to the operator. With `registry_file`, all additions are saved;
+Persistence belongs to the operator. With `source_registry_file`, all additions are saved;
 without it, additions disappear on exit. Agents cannot select lifetime, wallet,
 timeouts, payment limits or visibility. Existing endpoint tag/tool filters still
 constrain imported API tools. Include `dyn_*` when an endpoint has an explicit
@@ -350,7 +348,7 @@ failures omit text and report safe reasons, HTTP status or the affected byte lim
 
 The reader uses the shared unsigned origin sequence and, when configured, the
 on-demand GET relay list. It performs no HEAD request or linked traversal. The
-listener's available documentation identity, transport, `allowed_origins`,
+listener's available documentation identity, transport, public-destination policy,
 `max_help_bytes` and response-read inactivity policy apply. Missing wallet identity
 leaves origin retrieval available under the URL's discovery identity. Origin HTTP
 remains no-follow; configured relays may follow redirects under the
@@ -535,29 +533,23 @@ warn; a fresh first-page request may warn again. This observes advertised invent
 not client/model context, and never rejects registration or changes access/mode.
 The operator must explicitly opt in to on-demand discovery.
 
-Removed `max_tools_per_server`, `max_sources` and `max_tools_per_source` settings
-are rejected as unknown fields; remove them from existing configuration.
+Generic imports use the shared specification default of 32 MiB, response default
+of 16 MiB and help default of 4 MiB. Raw calls and exact usage-document reads use
+the same response and help defaults. Bundled imports preserve the provider's
+configured byte limits and read-inactivity timeout; an omitted provider timeout
+inherits the network default (60 seconds in either transport). Generic imports,
+raw calls and exact usage-document reads inherit the network timeout. There are no
+source-management overrides. Spec, help and API responses have no total HTTP
+download deadline.
 
-Specifications default to 32 MiB. Other advanced overrides in
-`[source_management]` are `max_spec_bytes`, `max_response_bytes`, `max_help_bytes`,
-`read_timeout_seconds`, and `allowed_origins`. The optional read-inactivity
-override takes precedence over an accepted bundled provider value, which otherwise
-inherits the network default (60 seconds in either transport). Generic imports and
-raw calls inherit the network default when the source-management value is omitted.
-Source-management response, help and specification byte limits govern dynamic
-operations rather than the provider's static byte settings. Spec, help and API
-responses have no total HTTP download deadline. `fetch_timeout_seconds` is a
-legacy alias.
-
-The specification byte override accepts up to 64 MiB.
 Management requests have a 64 KiB limit; forwarded API calls retain normal API behavior.
 Remote imports have no separate per-listener, global-import or active-cache admission
 quota; they retain the existing foreground work ownership. Equivalent aliases share
 an active fetch keyed by payer authority, document policy and transport settings.
 Active fetches cannot be evicted by retention age or completed-cache churn.
 Completed fetches retain successes for 300 seconds and failures for one second;
-optional completed retention is trimmed on lookup and completion to the smaller of
-eight entries or `128 MiB / max_spec_bytes`. This is a cache-retention allowance,
+optional completed retention is trimmed on lookup and completion to four entries.
+This is a cache-retention allowance,
 not a total bound on documents retained by active callers.
 At most 16 mutation jobs can be outstanding. Dynamic registration saturation
 emits WARN and returns an explicit busy error; static catalog publication emits
@@ -580,10 +572,8 @@ submitted names, URLs, schemas or upstream prose.
 
 Agent destinations require public HTTPS without userinfo or fragments. Local/special
 addresses, private names, redirects and local files are rejected. Direct connections
-validate DNS answers at dial time. Optional `allowed_origins` narrows specification
-and API destinations to exact canonical HTTPS origins. Undeclared cross-origin API
-routes and help URLs are rejected; a cross-origin help URL requires its origin in
-`allowed_origins`. All production traffic uses the network factory. Dynamic API
+validate DNS answers at dial time. Undeclared cross-origin API routes and generic cross-origin help URLs are rejected.
+Bundled providers retain their reviewed, authored help origin. All production traffic uses the network factory. Dynamic API
 clients and lazy help retain public-destination restrictions at execution, including
 after binding, while help uses its own discovery-origin isolation identity. Accepted
 bundled protocol compatibility applies to schema acquisition, refresh, API and help
@@ -603,8 +593,8 @@ arguments, query values and request bodies cannot choose that scope, payer, rese
 claim or funding authority. Removing or refreshing a source cannot rebind an
 already captured call; removal does not erase its financial obligations.
 
-Dynamic sources share `source_management.wallet` unless an explicit listener wallet
-override splits that group. Registration never creates per-source funding groups.
+Dynamic sources use the endpoint's `wallet`. Endpoints referencing the same named
+wallet share its payment identity. Registration never creates per-source funding groups.
 Hints contain amounts, not reusable payment challenges or signatures. Every call
 uses a fresh request/challenge and current payment admission. See the
 [selection and isolation decision](architecture.md#wallet-selection-and-network-isolation)
@@ -625,11 +615,15 @@ authority. Legacy generic records retain their existing settings and identity.
 
 The registry contains no wallet keys, but URLs and documents can reveal operator interests. Back it up while
 serving is stopped. Never delete or replace its ownership sidecar while serving.
-Registry files and sidecars cannot alias configuration or treasury paths.
+Registry files and sidecars cannot alias configuration or treasury paths. Each
+endpoint uses its own registry file; exclusive ownership prevents two endpoints
+from opening the same file. Saved records owned by another endpoint fail restoration
+without altering the registry.
 
 `config show` inspects configuration without opening registry state or secrets.
-`sources inspect --config FILE` reads saved registrations and never creates a missing
-registry. It does not require listener tokens, wallet keys or catalog requests.
+`sources inspect --config FILE` returns an object keyed by endpoint ID, with each
+persistent endpoint's saved generation and source inventory. It never creates a
+missing registry. It does not require listener tokens, wallet keys or catalog requests.
 Each source includes `tools`, an array of generated `name`, HTTP `method` and
 `path` entries rebuilt from its accepted specification and saved catalog settings
 or legacy generic selection. Inspection does not resolve the current bundle.

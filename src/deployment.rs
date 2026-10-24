@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::SocketAddr,
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 use tokio::{net::TcpListener, task::JoinSet};
@@ -41,7 +41,6 @@ pub struct MetaConfig {
     pub network: crate::network::NetworkPolicy,
     pub treasury: Option<TreasuryConfig>,
     pub funding: Option<FundingConfig>,
-    pub source_management: Option<crate::discovery::policy::Policy>,
     pub relay_fallback: Option<crate::discovery_relay::Policy>,
     #[serde(default)]
     pub sources: BTreeMap<String, SourceConfig>,
@@ -87,6 +86,7 @@ pub struct ListenerConfig {
     pub wallet: Option<String>,
     #[serde(default)]
     pub source_management: bool,
+    pub source_registry_file: Option<PathBuf>,
     /// Advertise discovery wrappers instead of every API schema.
     #[serde(default)]
     pub discover_on_demand: bool,
@@ -402,9 +402,7 @@ impl Deployment {
             &tokio::fs::read_to_string(path).await?,
             network_override,
         )?;
-        if let Some(p) = &mut config.source_management {
-            p.resolve(path);
-        }
+        crate::discovery::policy::resolve(&mut config, path);
         let wallet_resolution = config.validate()?;
         if let Some(t) = &mut config.treasury {
             t.resolve(path);
@@ -440,7 +438,7 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"discovery_wallets":discovery_wallets,"relay_fallback":config.relay_fallback,"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"discovery_wallets":discovery_wallets,"relay_fallback":config.relay_fallback,"startup":config.startup,"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
@@ -586,9 +584,7 @@ impl Deployment {
             &tokio::fs::read_to_string(path).await?,
             network_override,
         )?;
-        if let Some(p) = &mut config.source_management {
-            p.resolve(path);
-        }
+        crate::discovery::policy::resolve(&mut config, path);
         let scoped_funding = relay_env.is_some()
             && !crate::qualification::active()
             && !catalog_evidence::collecting();
@@ -1263,8 +1259,7 @@ impl Deployment {
 
     fn unsigned_wallets(&self) -> Result<InitializedWallets> {
         ensure!(
-            self.config.source_management.is_none()
-                && self.config.servers.values().all(|s| !s.source_management),
+            !crate::discovery::policy::enabled(&self.config),
             "unsigned qualification forbids agent source management"
         );
         ensure!(
@@ -1355,7 +1350,7 @@ impl Deployment {
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         for (name, server) in &servers {
             let tools = server.catalog.read().views["default"].clone();
-            if self.config.source_management.is_some()
+            if crate::discovery::policy::enabled(&self.config)
                 || self.config.servers[name].discover_on_demand
             {
                 ensure!(
@@ -1373,10 +1368,9 @@ impl Deployment {
         }
         let catalog = std::sync::Arc::new(crate::catalog_state::CatalogState::new(snapshot));
         let protected = crate::discovery::policy::protected_paths(&self.config, &self.config_path);
-        let manager = if let Some(policy) = self.config.source_management.clone() {
+        let manager = if crate::discovery::policy::enabled(&self.config) {
             Some(
                 crate::discovery::Manager::new_with_search(
-                    policy,
                     self.config.servers.clone(),
                     wallets,
                     catalog.clone(),
@@ -2221,10 +2215,9 @@ base_url = "https://example.com"
 [wallets.shared]
 mode = "static"
 private_key_env = "KEY"
-[source_management]
-wallet = "shared"
-registry_file = "registry.sqlite"
 [servers.one]
+source_management = true
+source_registry_file = "registry.sqlite"
 listen = "127.0.0.1:0"
 sources = ["test"]
 wallet = "shared"

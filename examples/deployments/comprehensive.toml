@@ -90,12 +90,6 @@ max_conversion_overhead_percent = 5
 funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
 
-# Toolbox agents can discover APIs and save added tools across restarts.
-# The registry is separate from the encrypted treasury; additions stay toolbox-local.
-[source_management]
-wallet = "company"
-registry_file = "../../state/privacy-sources.sqlite"
-
 # Source instructions_text is agent-facing guidance. Each MCP server listener
 # combines instructions from sources with selected tools into the MCP server's
 # instructions for the agent, labeled with [source_id], and appends a
@@ -362,11 +356,12 @@ bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
 sources = ["genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel", "company_ipintel", "company_vaaya"]
 
-# Start with discovery tools; agent-added APIs are persisted in the registry above.
+# Start with discovery tools; persist agent-added APIs separately from the treasury.
 [servers.toolbox]
 instructions_text = "" # Discovery wrappers carry the source-management workflow.
 listen = "127.0.0.1:6340"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "company"
 source_management = true
+source_registry_file = "../../state/privacy-sources.sqlite" # Toolbox-local registrations.
 sources = []

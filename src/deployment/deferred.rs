@@ -133,7 +133,7 @@ impl Runtime {
                     tool.help = previous.help.clone();
                 }
             }
-            if self.deployment.config.source_management.is_some()
+            if crate::discovery::policy::enabled(&self.deployment.config)
                 || self.deployment.config.servers[&name].discover_on_demand
             {
                 ensure!(
@@ -188,7 +188,7 @@ impl Runtime {
                 })
                 .unzip();
             for (name, tools) in &selected {
-                if self.deployment.config.source_management.is_some()
+                if crate::discovery::policy::enabled(&self.deployment.config)
                     || self.deployment.config.servers[name].discover_on_demand
                 {
                     ensure!(

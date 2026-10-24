@@ -264,7 +264,11 @@ async fn discovery_relay_policy_is_offline_explicit_and_validates_bindings() {
         json!({"GET":["missing-local-provider.toml"]})
     );
     assert!(shown["relay_fallback"].get("provider").is_none());
-    std::fs::write(&path,format!("{text}{relay}\n[source_management]\nwallet='default'\nregistry_file='missing-local-provider.toml'\n")).unwrap();
+    let text_with_registry = text.replace(
+        "[servers.a]",
+        "[servers.a]\nsource_management=true\nsource_registry_file='missing-local-provider.toml'",
+    );
+    std::fs::write(&path, format!("{text_with_registry}{relay}")).unwrap();
     let error = x402_treazury::deployment::Deployment::show_config(&path)
         .await
         .err()
@@ -307,7 +311,13 @@ async fn relay_method_lists_are_inspected_offline_and_every_provider_path_is_pro
         std::fs::write(
             &path,
             format!(
-                "{text}{relay}\n[source_management]\nwallet='default'\nregistry_file='{provider}'\n"
+                "{}{relay}",
+                text.replace(
+                    "[servers.a]",
+                    &format!(
+                        "[servers.a]\nsource_management=true\nsource_registry_file='{provider}'"
+                    )
+                )
             ),
         )
         .unwrap();
@@ -677,9 +687,8 @@ async fn search_relay_defaults_on_without_static_bindings_and_can_be_disabled() 
 [wallets.payer]
 mode="static"
 private_key_env="UNUSED_PUBLIC_TEST_KEY"
-[source_management]
-wallet="payer"
 [servers.tools]
+wallet="payer"
 listen="127.0.0.1:0"
 bearer_token_env="UNUSED_TEST_TOKEN"
 source_management=true
@@ -693,10 +702,7 @@ relays.GET=["missing-local-provider.toml"]
     assert_eq!(shown["relay_fallback"]["provider_metadata"], true);
     assert_eq!(shown["relay_fallback"]["api_requests"], false);
     assert_eq!(shown["discovery_wallets"], json!({}));
-    assert_eq!(
-        shown["source_management"]["wallet_bindings"]["tools"],
-        "payer"
-    );
+    assert_eq!(shown["servers"]["tools"]["wallet"], "payer");
     // Config-only inspection never loads the relay catalog or wallet key; strict
     // loading validates local bootstrap configuration before serving can use it.
     assert!(Deployment::load(&path).await.is_err());

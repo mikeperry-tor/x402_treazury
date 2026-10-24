@@ -138,7 +138,7 @@ async fn selected_static_initialization_intersects_effective_dynamic_and_relay_w
     let dir = tempfile::tempdir().unwrap();
     write_spec(dir.path());
     let path = dir.path().join("deployment.toml");
-    let mut config = String::from("version=1\n[source_management]\nwallet='dynamic'\n");
+    let mut config = String::from("version=1\n");
     for name in ["overridden", "effective", "dynamic", "relay", "unused"] {
         config.push_str(&format!(
             "[wallets.{name}]\nmode='static'\nprivate_key_env='{name}'\n"
@@ -159,6 +159,7 @@ sources=['api']
 listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
 source_management=true
+wallet='dynamic'
 sources=[]
 "#,
     );

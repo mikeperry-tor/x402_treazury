@@ -130,8 +130,8 @@ retains its liability. No relayed challenge reaches target signing. Relay conten
 
 Configured relays may follow redirects remotely while origin HTTP remains
 no-follow. Requested/reported final destinations and every Curl-reported hop pass
-applicable public/allowed-origin checks. AGProxy/Horizon intermediate hops remain
-unknown even with `allowed_origins`; missing evidence does not exclude an adapter.
+applicable public-destination checks. AGProxy/Horizon intermediate hops remain
+unknown; missing evidence does not exclude an adapter.
 The operator accepts the relay's remote redirect/public-destination enforcement
 and plaintext integrity. Relay TLS does not establish target TLS or content
 authenticity. Target credentials and payment signatures remain excluded.

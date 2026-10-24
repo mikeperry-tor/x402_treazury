@@ -38,7 +38,7 @@ fn curated_candidate(name: &str) -> Candidate {
 pub(super) async fn commit_curated(m: &Arc<Manager>, name: &str) -> String {
     let document = document().to_string();
     let mut candidate = curated_candidate(name);
-    if m.policy.registry_file.is_none() {
+    if m.listeners["writer"].source_registry_file.is_none() {
         candidate.lifetime = Lifetime::Process;
     }
     let id = Uuid::new_v4().to_string();
@@ -68,8 +68,7 @@ pub(super) async fn commit_curated(m: &Arc<Manager>, name: &str) -> String {
 #[test]
 fn canonical_curated_configuration_applies_before_dynamic_renaming() {
     let candidate = curated_candidate("custom");
-    let built =
-        import::build(&policy(None), &candidate, document().to_string().as_bytes()).unwrap();
+    let built = import::build(&candidate, document().to_string().as_bytes()).unwrap();
     assert_eq!(built.base, "https://api.example.com");
     assert_eq!(
         built
@@ -130,7 +129,6 @@ fn listener_projection_preserves_selection_and_validates_hidden_operations() {
     document["paths"]["/v1/other"] = json!({"get":{"tags":["read"]}});
     document["paths"]["/v1/blocked"] = json!({"get":{"tags":["read","blocked"]}});
     let bytes = serde_json::to_vec(&document).unwrap();
-    let p = policy(None);
     for (filters, expected) in [
         (json!({}), vec!["blocked", "other", "read", "help"]),
         (json!({"tags":["write"]}), vec![]),
@@ -159,7 +157,7 @@ fn listener_projection_preserves_selection_and_validates_hidden_operations() {
             .unwrap()
             .extend(filters.as_object().unwrap().clone());
         listener = serde_json::from_value(value).unwrap();
-        let built = import::build_visible(&p, &candidate, &bytes, &listener).unwrap();
+        let built = import::build_visible(&candidate, &bytes, &listener).unwrap();
         assert_eq!(
             built
                 .tools
@@ -188,13 +186,8 @@ fn listener_projection_preserves_selection_and_validates_hidden_operations() {
     hidden.exclude_tools = vec!["*".into()];
     document["paths"]["/v1/read"]["post"]["servers"] = json!([{"url":"https://other.example.com"}]);
     assert!(
-        import::build_visible(
-            &p,
-            &candidate,
-            &serde_json::to_vec(&document).unwrap(),
-            &hidden
-        )
-        .is_err()
+        import::build_visible(&candidate, &serde_json::to_vec(&document).unwrap(), &hidden)
+            .is_err()
     );
     assert_eq!(
         import::saved_tools(&candidate, &bytes).unwrap().len(),
@@ -204,23 +197,53 @@ fn listener_projection_preserves_selection_and_validates_hidden_operations() {
 }
 
 #[test]
-fn source_management_timeout_wins_then_provider_then_network_inherits() {
-    let provider = authored();
-    let mut p = policy(None);
+fn provider_acquisition_settings_apply_and_generic_imports_use_shared_defaults() {
+    let mut provider = authored();
+    provider.settings.max_spec_bytes = 8192;
     assert_eq!(
-        import::read_timeout(&p, Some(&provider)),
+        import::read_timeout(Some(&provider)),
         Some(Duration::from_secs(93))
     );
-    p.read_timeout_seconds = Some(12);
-    assert_eq!(
-        import::read_timeout(&p, Some(&provider)),
-        Some(Duration::from_secs(12))
+    assert_eq!(import::max_spec_bytes(Some(&provider)), 8192);
+    let options = import::options("https://api.example.com/spec", Some(&provider)).unwrap();
+    assert_eq!(options.limit, 8192);
+    provider.settings.read_timeout_seconds = None;
+    assert_eq!(import::read_timeout(Some(&provider)), None);
+    assert_eq!(import::read_timeout(None), None);
+    assert_eq!(import::max_spec_bytes(None), crate::limits::SPEC_BYTES);
+
+    let mut candidate = curated_candidate("bounds");
+    let bytes = document().to_string().into_bytes();
+    candidate.provider.as_mut().unwrap().settings.max_spec_bytes = bytes.len();
+    import::build(&candidate, &bytes).unwrap();
+    candidate.provider.as_mut().unwrap().settings.max_spec_bytes = bytes.len() - 1;
+    assert!(
+        import::build(&candidate, &bytes)
+            .unwrap_err()
+            .to_string()
+            .contains("spec_too_large")
     );
-    p.read_timeout_seconds = None;
-    let mut inherited = provider;
-    inherited.settings.read_timeout_seconds = None;
-    assert_eq!(import::read_timeout(&p, Some(&inherited)), None);
-    assert_eq!(import::read_timeout(&p, None), None);
+}
+
+#[test]
+fn authored_cross_origin_help_uses_its_declared_documentation_origin() {
+    let mut candidate = curated_candidate("origins");
+    let provider = candidate.provider.as_mut().unwrap();
+    provider.settings.help_url = Some("https://docs.example.com/help".into());
+    let bytes = document().to_string().into_bytes();
+    let built = import::build(&candidate, &bytes).unwrap();
+    assert!(
+        built
+            .tools
+            .iter()
+            .any(|tool| tool.help_url.as_deref() == Some("https://docs.example.com/help"))
+    );
+    assert_eq!(
+        import::help_origins(candidate.provider.as_ref()).unwrap(),
+        vec!["https://docs.example.com"]
+    );
+    candidate.provider.as_mut().unwrap().settings.help_url = Some("https://127.0.0.1/help".into());
+    assert!(import::build(&candidate, &bytes).is_err());
 }
 
 #[test]
@@ -234,23 +257,7 @@ fn every_local_bundled_schema_passes_dynamic_destination_and_import_validation()
             serde_json::from_value(json!({"name":"local","provider":accepted})).unwrap();
         let bytes = crate::discovery::curated::local_document(candidate.provider.as_ref().unwrap())
             .unwrap();
-        let mut policy = policy(None);
-        for url in [
-            provider.config.base_url.as_deref(),
-            provider.config.help_url.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let origin = reqwest::Url::parse(url)
-                .unwrap()
-                .origin()
-                .ascii_serialization();
-            if !policy.allowed_origins.contains(&origin) {
-                policy.allowed_origins.push(origin);
-            }
-        }
-        import::build(&policy, &candidate, &bytes)
+        import::build(&candidate, &bytes)
             .unwrap_or_else(|error| panic!("{}: {error:#}", provider.id));
     }
 }
@@ -327,7 +334,7 @@ async fn dynamic_guidance_recomposes_from_static_base_without_duplicates() {
 async fn explicit_listener_instruction_suppression_omits_provider_guidance() {
     let mut config = listeners(false);
     config.get_mut("writer").unwrap().instructions_text = Some(String::new());
-    let m = manager_with(policy(None), config).await;
+    let m = manager_with(config).await;
     commit_curated(&m, "custom").await;
     assert!(
         m.catalog

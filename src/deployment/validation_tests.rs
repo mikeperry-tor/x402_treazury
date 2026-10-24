@@ -33,7 +33,6 @@ fn preliminary_stages_precede_structural_validation() {
     let mut v = fixture();
     v["startup"] = json!({"catalog_concurrency":0});
     v["network"] = json!({"connect_timeout_seconds":0});
-    v["source_management"] = json!({"wallet":"missing"});
     v["relay_fallback"] = json!({"relays":{"GET":["never-read.toml"]},"wallet":"missing"});
     v["version"] = json!(2);
     v["servers"] = json!({});
@@ -41,8 +40,6 @@ fn preliminary_stages_precede_structural_validation() {
     v.as_object_mut().unwrap().remove("startup");
     error(&v, "network connect timeout must be 1..300 seconds");
     v.as_object_mut().unwrap().remove("network");
-    error(&v, "unknown source_management wallet");
-    v.as_object_mut().unwrap().remove("source_management");
     error(&v, "relay_fallback.wallet must name a declared wallet");
     v.as_object_mut().unwrap().remove("relay_fallback");
     error(&v, "unsupported meta-config version 2");
@@ -200,13 +197,15 @@ fn dynamic_only_listener_is_valid_but_does_not_bypass_policy() {
     let mut v = fixture();
     v["servers"]["one"]["sources"] = json!([]);
     v["servers"]["one"]["source_management"] = json!(true);
+    v["servers"]["one"]
+        .as_object_mut()
+        .unwrap()
+        .remove("wallet");
+    error(&v, "server one: source_management requires wallet");
+    v["servers"]["one"]["wallet"] = json!("payer");
     v["version"] = json!(2);
-    error(
-        &v,
-        "source_management=true requires deployment source_management settings",
-    );
+    error(&v, "unsupported meta-config version 2");
     v["version"] = json!(1);
-    v["source_management"] = json!({"wallet":"payer"});
     assert_eq!(resolved(&v)["bindings"], json!({"one":{}}));
 }
 

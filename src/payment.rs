@@ -245,7 +245,6 @@ pub struct PaidClient {
     relay_call: bool,
     document_relay: Option<Arc<crate::discovery_relay::SearchRelay>>,
     relay_purpose: crate::discovery_relay::Purpose,
-    relay_origins: Arc<Vec<String>>,
     attempt_capacity: Vec<Arc<tokio::sync::Semaphore>>,
     unavailable: Option<crate::rotation::error::AdmissionError>,
     selection: crate::network::SelectionPolicy,
@@ -267,7 +266,6 @@ impl PaidClient {
             relay_call: false,
             document_relay: None,
             relay_purpose: Default::default(),
-            relay_origins: Arc::new(Vec::new()),
             attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
@@ -289,7 +287,6 @@ impl PaidClient {
             relay_call: false,
             document_relay: None,
             relay_purpose: Default::default(),
-            relay_origins: Arc::new(Vec::new()),
             attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
@@ -312,7 +309,6 @@ impl PaidClient {
             relay_call: false,
             document_relay: None,
             relay_purpose: Default::default(),
-            relay_origins: Arc::new(Vec::new()),
             attempt_capacity: Vec::new(),
             unavailable: None,
             selection: crate::network::SelectionPolicy::Participating,
@@ -381,12 +377,7 @@ impl PaidClient {
     pub(crate) fn for_relay(mut self) -> Self {
         self.relay_call = true;
         self.document_relay = None;
-        self.relay_origins = Arc::new(Vec::new());
         self.selection = crate::network::SelectionPolicy::Participating;
-        self
-    }
-    pub(crate) fn with_relay_origins(mut self, origins: Vec<String>) -> Self {
-        self.relay_origins = Arc::new(origins);
         self
     }
     /// Existing acquisition gates apply to active attempts, never retry delays.
@@ -863,7 +854,6 @@ impl PaidClient {
         crate::discovery_relay::api::fallback(
             &relay_client,
             request,
-            &self.relay_origins,
             failure,
             progress,
             &self.attempt_capacity,

@@ -388,7 +388,7 @@ To avoid repeating managed wallet definitions, define one template and an
 automatic assignment policy. To adapt the managed starter, replace its
 `[wallets.research]` definition and reserve with this template/policy and remove
 `wallet = "research"` from the listener. For this variant, also remove the
-`[source_management]` block and the listener's `source_management = true`: dynamic
+listener's `source_management = true` and any `source_registry_file`: dynamic
 sources require an explicitly named wallet. Keep its treasury, funding, source and
 other listener settings. This substitutes automatic pools for the explicit pool:
 
@@ -669,9 +669,9 @@ Sources and reusable provider TOML files accept these positive byte limits:
 
 Standalone CLI flags `--max-response-bytes`, `--max-help-bytes` and
 `--max-spec-bytes` override provider settings. Meta-config sets them per source;
-`config show` reports resolved values and origins. For agent-added sources,
-`[source_management]` sets the response/help caps and its existing spec import cap.
-Agents cannot raise these operator-controlled limits.
+`config show` reports resolved values and origins. Generic agent-added sources, raw calls and exact usage-document reads use the
+shared defaults. Bundled imports preserve the provider's configured limits.
+Agents cannot change these limits.
 
 A declared Content-Length over the cap is rejected immediately. Streaming reads
 also enforce the cap when Content-Length is absent. An oversized document
@@ -740,15 +740,14 @@ pages and does not reject or trim the full inventory.
 ## Optional agent API discovery
 
 Authorize agents to register public OpenAPI sources in a running multi-server
-HTTP deployment with `[source_management]` and `source_management = true` on each
+HTTP deployment with `source_management = true` and an explicit `wallet` on each
 participating endpoint. The [comprehensive example](../examples/deployments/comprehensive.toml)
 uses its existing company pool on the toolbox listener; the managed starter uses
 its research pool. The [agent source guide](agent-sources.md#configuration-and-authority)
 explains persistence and wallet sharing. Registered APIs share their pool's
 existing reserve claims regardless of registration count.
 Registration does not create wallet pools or trigger funding.
-`source_management.max_tools_per_server` has been removed; strict parsing rejects
-it by name. Remove it from existing configuration. Tool counts do not gate
+Tool counts do not gate
 registration, restoration, publication or refresh. On a valid first `tools/list`
 page, more than 250 advertised definitions produce an advisory WARN suggesting
 explicit `discover_on_demand = true`. Continuations and invalid cursors do not warn;
@@ -757,13 +756,16 @@ definitions plus wrappers (only wrappers in on-demand mode) and never changes ac
 
 | Arrangement | Configuration | Payment identity sharing |
 | --- | --- | --- |
-| All agent-added APIs share one wallet (recommended) | Global `source_management.wallet = "agent_shared"` | Across APIs and participating listeners |
-| Listener-specific wallets | Listener `wallet` overrides | Across added APIs on that listener |
-| Operator-selected listener groups | Several listener overrides reference the same named profile | Within the configured group |
+| All agent-added APIs share one wallet | Each listener sets `wallet = "agent_shared"` | Across APIs and participating listeners |
+| Listener-specific wallets | Each listener names its own `wallet` profile | Across added APIs on that listener |
+| Operator-selected listener groups | Several listeners reference the same named `wallet` profile | Within the configured group |
 
 A listener's bearer token defines its authority. Registrations remain local to that
 endpoint; they cannot be published to another endpoint. The operator selects persistence
-by configuring `source_management.registry_file`; agents cannot choose scope or lifetime.
+with each endpoint's `source_registry_file`; agents cannot choose scope or lifetime.
+Omit it for registrations that last until exit. Persistent endpoints need distinct
+registry files: exclusive ownership prevents sharing one file, and saved records
+owned by another endpoint fail restoration without modifying the registry.
 Existing listener filters still constrain imported API tools. Parallel callers on the
 same endpoint share one import slot. Concurrent additions publish complete snapshots;
 repeat a busy or lost add with the same selector. Repeated provider IDs and generic
@@ -809,7 +811,7 @@ fallback can charge for blocked document retrieval.
 Alternatively, `source_details(documentation_url=...)` reads one exact public HTTPS
 usage-document URL, allowing a query. This selector is exclusive with slug/base.
 It uses the shared unsigned origin sequence with source-management identity,
-transport, `allowed_origins`, help bytes and response inactivity. Configured
+transport, public-destination policy, shared help-byte default and network response inactivity. Configured
 on-demand fallback can acquire the document through the GET relay list. Complete accepted UTF-8 text is returned with caller-supplied
 provenance; failures are visible without partial text. See the
 [document contract](agent-sources.md#listing-and-url-discovery) for accepted MIME
@@ -818,8 +820,8 @@ types and HTML rejection. Reading help grants no execution or payment authority.
 `x402_treazury_raw_call` calls any documented public HTTPS x402 API URL without
 registering an OpenAPI catalog. It takes a required HTTP `method`, `url`, optional
 `query` and optional JSON `body`; omitted body and explicit JSON null are distinct.
-It uses the same resolved wallet, ordinary payment admission, allowed origins,
-response limits and network factory as imported APIs. It is independent of API
+It uses the endpoint's wallet, ordinary payment admission, public-destination
+policy, shared response-byte default, network timeout and network factory. It is independent of API
 tool-name filters and accepts no agent headers, wallet or payment settings.
 
 Registration returns a readable name, prefix, visible tool count, status and next step.
@@ -951,12 +953,13 @@ for participating callers and transient versus local setup failures.
 `read_timeout_seconds` defaults to 60 seconds in **both direct and Tor modes**.
 It limits inactivity while waiting for headers or reading the body. Every
 successful read renews the budget; catalogs and API responses have no total HTTP
-download deadline. The same setting on a provider/source or `source_management`
-overrides the network default for that scope, including catalogs and help.
+download deadline. The same setting on a provider/source
+overrides the network default for that scope, including catalogs and help. Bundled
+dynamic sources preserve that setting; generic imports and raw calls use the network default.
 
 `connect_timeout_seconds` is separate, defaulting to 15 seconds direct and 120
 seconds Tor. Both settings work in either mode; there is no Tor read-timeout floor.
-Read timeout accepts 1..86400 seconds at network/source-management level and
+Read timeout accepts 1..86400 seconds at network level and
 positive fractional seconds at provider level. Connection timeout accepts 1..300.
 Base RPCs, chain views and receipt verification have no separate total deadline;
 they use these connection and read-inactivity limits. Tor Base reads exhaust the
@@ -1375,13 +1378,13 @@ Every relay connection uses the configured network factory and existing payer.
 Tor never falls back to direct egress. The relay sees target URLs and reaches them
 from its own network. Origin HTTP remains no-follow; configured relays may follow
 redirects remotely. Requested and reported final destinations must satisfy the
-caller's public/allowed-origin policy, and every Curl-reported hop is checked.
+caller's public-destination policy, and every Curl-reported hop is checked.
 AGProxy/Horizon Pulse expose only a final URL: intermediate destinations remain
-unknown, including when `allowed_origins` is nonempty. Missing chain evidence does
+unknown. Missing chain evidence does
 not exclude an adapter. This explicitly trusts remote redirect/public-destination
 policy and the relay's plaintext content, headers and status; our TLS verifies
 the relay, without establishing target TLS or content authenticity. A relay service
-endpoint does not need an entry in the target's allowlist. Never use this path for
+endpoint is separate from the requested target. Never use this path for
 authenticated target requests. Adding a relay does not expose it as an MCP tool.
 
 Ordinary managed serving binds listeners before funding. Static fallback waits

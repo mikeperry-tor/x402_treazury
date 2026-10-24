@@ -56,6 +56,8 @@ async fn fixture() {
                     assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!({"prompt":"a map"}));
                     axum::Json(json!({"image_url":format!("data:image/png;base64,{PNG}"),"note":"Fixture attribution"})).into_response()
                 },
+                "/large" => "x".repeat(513).into_response(),
+                "/large-help" => "x".repeat(129).into_response(),
                 "/help" => {
                     assert_eq!(method, Method::GET);
                     assert!(body.is_empty());
@@ -95,18 +97,15 @@ async fn fixture() {
     })
     .unwrap();
 
-    let mut p = policy(None);
-    p.allowed_origins = vec![
-        "https://api.example.com".into(),
-        "https://spec.example.com".into(),
-    ];
-    let m = manager_with(p, listeners(false)).await;
+    let m = manager_with(listeners(false)).await;
     let provider = AcceptedProvider::new("authored", Config {
         spec: "accepted-schema.json".into(),
         prefix: Some("original".into()),
         base_url: Some("https://api.example.com".into()),
         include: vec!["/v1".into()],
         help_url: Some("https://spec.example.com/help".into()),
+        max_response_bytes: 512,
+        max_help_bytes: 128,
         allow_http1: true,
         allow_tls12: true,
         response_mappings: serde_json::from_value(json!({"POST /v1/image":{"images":[{"pointer":"/image_url","encoding":"data_uri"}]}})).unwrap(),
@@ -203,7 +202,7 @@ async fn fixture() {
         invalid.tool.help_url = Some(private.into());
         invalid.help = Arc::new(crate::catalog_state::HelpBinding::with_origins(
             invalid.client.clone(),
-            m.policy.allowed_origins.clone(),
+            vec![],
         ));
         assert!(
             invalid
@@ -258,6 +257,37 @@ async fn fixture() {
             && (record.user.clone(), record.password.clone()) == help.scope));
         assert!(socks.iter().all(|record| record.address_type == 3));
     }
+    // Authored byte settings must reach API and help consumers after publication.
+    let mut oversized_api = image.clone();
+    oversized_api.tool.path = "/large".into();
+    let error = oversized_api
+        .invoke_output(
+            json!({"prompt":"a map","format":"png"})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap_err();
+    let limit = error
+        .downcast_ref::<crate::limits::DownloadLimit>()
+        .unwrap();
+    assert_eq!((limit.setting, limit.limit), ("max_response_bytes", 512));
+    let mut oversized_help = help.clone();
+    oversized_help.tool.path = "https://spec.example.com/large-help".into();
+    oversized_help.tool.help_url = Some("https://spec.example.com/large-help".into());
+    oversized_help.help = Arc::new(crate::catalog_state::HelpBinding::with_origins(
+        oversized_help.client.clone(),
+        vec!["https://spec.example.com".into()],
+    ));
+    let error = oversized_help
+        .invoke_output(json!({}).as_object().unwrap())
+        .await
+        .unwrap_err();
+    let limit = error
+        .downcast_ref::<crate::limits::DownloadLimit>()
+        .unwrap();
+    assert_eq!((limit.setting, limit.limit), ("max_help_bytes", 128));
+
     // Identical URLs with different acquisition compatibility must not share a
     // cached error or in-flight fetch. The fixture requires TLS 1.2 and HTTP/1.
     let schema_url = "https://spec.example.com/openapi.json";

@@ -105,7 +105,7 @@ renew another response's inactivity timer or signed authority.
 | `catalog_state.rs` | Shared complete-document help reader, help URL discovery origin; source-bound relay authority and retained cache publication |
 | `discovery/coinbase.rs` | On-demand unsigned resource search, existing endpoint wallet documentation identity, participating origin retries; optional ordered paid relay list via endpoint payer |
 | `discovery/import.rs` | Shared complete-document OpenAPI reader, URL discovery origin, public destinations and source-bound relay authority |
-| `discovery/source_details.rs` | Complete usage-document GET or fixed GET probes, available endpoint documentation identity or URL discovery identity, public/allowed origins and optional on-demand relay |
+| `discovery/source_details.rs` | Complete usage-document GET or fixed GET probes, available endpoint documentation identity or URL discovery identity, public destinations and optional on-demand relay |
 | `payment.rs` | Actual unsigned challenge and paid retry, selected EVM payer |
 | `rotation/base.rs` | Participating read-only RPC: address reads by EVM owner; chain/header reads by RPC discovery origin; validates method results before promotion |
 | `rotation/near.rs` | Metadata by origin; quote and status by immutable request recipient |
@@ -212,18 +212,18 @@ Static process outcomes share the first acquisition for the same wallet,
 catalog contract, authored provider position and target URL, including a
 terminal decoded-bound failure despite a later larger allowance. Successful cached
 responses still check the requesting bound; disk slots remain bound-specific. See
-[cache semantics](configuration.md#relay-fallback). Runtime source-management
-bounds cover both outer and decoded responses;
-provider transport permissions apply to the relay leg, with inactivity precedence
-source-management, provider, then network.
+[cache semantics](configuration.md#relay-fallback). Dynamic document bounds cover both outer and decoded responses; bundled sources
+preserve provider byte limits, while generic imports and usage-document reads use
+shared defaults. Provider transport permissions apply to the relay leg, with
+provider inactivity settings taking precedence over the network default.
 
 Every relay connection uses the factory, deployment network and bound payer;
 Tor has no direct fallback. The relay sees target URLs and supplies target status,
 headers and plaintext from its own network. Origin HTTP does not follow redirects,
 but configured relays may do so remotely. Requested/reported final URLs and all
-Curl-reported hops pass the caller's public/allowed-origin checks. AGProxy/Horizon
+Curl-reported hops pass the caller's public-destination checks. AGProxy/Horizon
 Pulse do not expose intermediate hops: their configured use accepts that limited
-visibility even with `allowed_origins`. Missing chain evidence does not exclude
+visibility. Missing chain evidence does not exclude
 them. Remote redirect/public-destination policy and content integrity remain
 trusted to the relay; TLS to the relay cannot establish target TLS or plaintext
 authenticity. Unsupported required headers/body bytes skip an entry before
@@ -259,12 +259,10 @@ binary bodies. Waiting for response headers is also subject to this budget.
 Byte limits remain enforced, and partial documents are never published.
 
 A provider/source `read_timeout_seconds` explicitly overrides the network default.
-For accepted curated dynamic sources, source-management `read_timeout_seconds`
-wins over the saved provider value, then the network default. That ordering applies
-to schema acquisition/refresh, API responses and lazy help. Generic imports and raw
-calls inherit the network default when source-management omits the override.
-Source-management specification, response and help byte limits remain decisive
-for dynamic operations. HTTP pools key on the effective idle
+Accepted curated dynamic sources preserve the saved provider value, falling back
+to the network default. That ordering applies to schema acquisition/refresh, API
+responses and lazy help. Generic imports and raw calls inherit the network default
+and use the shared specification, response and help byte limits. HTTP pools key on the effective idle
 budget alongside identity, transport and public-destination policy, preserving
 the exact configured duration, including fractional milliseconds. Cover owners
 use the same exact duration to keep distinct transport policies separate.
@@ -632,7 +630,7 @@ Base/slug discovery validates one GET per fixed, deduplicated candidate, keeping
 four candidates in flight. It uses the available source-management documentation
 identity, pinned for a batch; absent identity leaves origin retrieval available
 under the URL's discovery identity. Imports and help use the URL discovery identity.
-Public destinations, `allowed_origins`, spec/help byte bounds and response-read
+Public destinations, spec/help byte bounds and response-read
 inactivity apply. Missing payment authority disables paid fallback without
 blocking origin retrieval. No document read allocates wallets, starts funding or
 waits for funding. Configured relays may follow redirects remotely under the
@@ -651,8 +649,8 @@ outcomes; it starts no SDK or funding scheduler.
 Dynamic imports, lazy help and paid API calls, including source-management
 `raw_call`, use the same factory with a `public_only` pool key. Dynamic help uses
 the help URL's discovery-origin identity and validates public destinations at
-execution, as well as during catalog validation. A help origin different from
-the API base must be explicitly present in `allowed_origins`. HTTPS, no
+execution, as well as during catalog validation. Generic help origins must match
+the API base; bundled providers retain their reviewed, authored help origin. HTTPS, no
 credentials/fragments, public literal addresses and public hostnames
 are required. In direct mode, a custom resolver rejects the entire result if any
 answer is non-public, and returns only that validated set to the connector. Cached
@@ -662,8 +660,7 @@ Trusted TOML sources retain their existing local-fixture/private-provider behavi
 Tor uses authenticated `socks5h` with the same discovery/payer identities and never
 resolves the destination locally. Hostname answers hidden behind Tor rely on Tor's
 `ClientRejectInternalAddresses` protection. Keep it enabled; a generic SOCKS server
-may not provide it. Optional dynamic `allowed_origins` narrows public HTTPS access,
-including direct raw calls. Raw calls use the resolved source-management payer and
+may not provide it. Raw calls use the endpoint's wallet and
 existing response/read limits; redirects are not followed.
 Tests exercise the production resolver wrapper with injected DNS answers, including
 mixed/rebound rejection, plus actual direct-client rejection before connecting to
@@ -748,7 +745,7 @@ financial or qualification authority.
 | Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote directory browse retains upstream maximum 100. Follow continuations for complete inventories. |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. gRPC factory failure WARNs immediately; HTTP terminal timeout WARNs at the retained application workflow; exhausted Base endpoints and Coinbase origins remain DEBUG while fallback is possible. |
 | Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog discovery, runtime imports/help/documents/probes, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static/runtime relay-service unsigned stages and Base read-only RPC also participate). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
-| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP uses explicit source-management override, then accepted provider value, then network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. Guard expiry emits WARN with a fixed dispatch/header/body stage; owning HTTP workflows likewise WARN on terminal timeouts. |
+| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP preserves the accepted provider value, then inherits the network default; generic imports and raw calls use the network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. Guard expiry emits WARN with a fixed dispatch/header/body stage; owning HTTP workflows likewise WARN on terminal timeouts. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. Expiry emits WARN `grpc_dispatch_inactivity`. |
 | Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
 | Pepper drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. One independently polled engine task preserves progress during checkpoint lock waits; runtime teardown owns cancellation and worker joins. Scan retirement drains without a cutoff. |
@@ -771,7 +768,7 @@ financial or qualification authority.
 | Explicit wallet bootstrap observation | One-second captured-claim polling and 60-second progress reporting; no total-work deadline. Ordinary serving has no bootstrap readiness poll or funded-payer startup gate. |
 | Funding polling/backoff and swap delay threshold | One-second wake cadence and independent per-kind backoff up to 300 seconds. Recurring Base initial-credit reads begin only after durable source acceptance, with the first read when the recipient is due and a 60-second floor from the previous acquisition completion to the next read start. Preparation, startup, requested refresh and credit checks share the Store/wallet acquisition and its authoritative due time; credit scheduling adds no second backoff or jitter. Cached reuse neither republishes the scalar estimate nor counts a cached failure as a new recurring observation. Actual preparation requests one exact-destination discovery read after the SDK supplies a valid spendable proposal. SDK capital shortages or invalid proposals issue no destination read. Fresh allocations and unsigned quotes do not create Base polling. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). Recurring source and provider-status observations also have a 60-second floor after completion, preserving independent error backoff and jitter. Configured polling controls local inventory/owner wakeups, not permission for faster network observations; the health threshold reports delay without changing financial authority. Successful local quote→preparation→submission handoffs do not acquire a minute delay or clear earlier observation failures. These govern scheduling only; no whole-job timeout or replacement-send authority. A success in one observation kind cannot reset another kind's failure backoff or shorten the credit interval. A joined failed scheduler retries through its existing Store lease on the configured polling cadence; accepted source work retains that lease until it drains. Typed busy/locked inventory reads defer only their lane under the existing poll cadence, retaining its cursor and all active work; mutation/publication failures are not replayed by the inventory-read retry mechanism. Completed SDK results instead retain their existing owner, which retries identical local publication without recalculating or submitting. |
 | Import success retention 300 seconds / failure backoff one second | Applies after completion only; active coalesced fetches cannot age out. |
-| Dynamic import ownership and catalog bounds | No separate per-listener, global-import or active-cache admission quota; existing foreground ownership remains. Active aliases coalesce without eviction. Completed retention alone is trimmed to `min(128 MiB / max_spec_bytes, 8)` entries on lookup/completion; completed-entry pressure eviction logs DEBUG without rejecting active work. Sixteen mutation jobs; dynamic registration saturation WARNs and rejects, while static publication logs DEBUG with limit 16 and retains the same wait. No tool-count admission quota. Valid first-page tool lists above 250 advertised definitions emit one advisory WARN suggesting explicit `discover_on_demand = true`; continuations and invalid cursors do not warn, fresh first pages may repeat. On-demand counts only wrappers. [Agent sources](agent-sources.md#limits-and-network-policy) lists remaining document/registry bounds and WARN diagnostics. |
+| Dynamic import ownership and catalog bounds | No separate per-listener, global-import or active-cache admission quota; existing foreground ownership remains. Active aliases coalesce without eviction. Completed retention alone is trimmed to four entries on lookup/completion; completed-entry pressure eviction logs DEBUG without rejecting active work. Sixteen mutation jobs; dynamic registration saturation WARNs and rejects, while static publication logs DEBUG with limit 16 and retains the same wait. No tool-count admission quota. Valid first-page tool lists above 250 advertised definitions emit one advisory WARN suggesting explicit `discover_on_demand = true`; continuations and invalid cursors do not warn, fresh first pages may repeat. On-demand counts only wrappers. [Agent sources](agent-sources.md#limits-and-network-policy) lists remaining document/registry bounds and WARN diagnostics. |
 | Relay-service unsigned acquisition | One direct attempt, or `1 + network.tor_isolation_retries` Tor attempts per authored provider position. No separate relay attempt counter/backoff. Readiness without I/O consumes no attempt. Definitive provider/target failure can advance once through the configured list; uncertain paid outcomes stop without signed replay. |
 | Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Normal expiry is ordinary freshness policy. HTTP disk cache limits are 128 MiB / 4,096 entries / 16 KiB metadata / 144 MiB database; pressure eviction logs DEBUG, while persistence/read failures WARN. Store Busy/Locked failures WARN before command reply; this grants no mutation retry. Cache persistence failure does not invalidate a complete response. |
 | Optional cover episode bounds | Bound optional unsigned work; cannot cut off the real paid call. Actual process-budget refusals WARN; owner-cache pressure eviction logs DEBUG; ordinary completed episode budgets/deadlines retain INFO and cached refusals DEBUG. The three-second cleanup wait in `wait_experiment_idle` is a test-only fixture bound; production cleanup has no such cutoff. |

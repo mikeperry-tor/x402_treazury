@@ -97,7 +97,11 @@ async fn origin(
         }
         "malformed" => (StatusCode::OK, "not search JSON").into_response(),
         "nonretry" => StatusCode::NOT_FOUND.into_response(),
-        "large" => (StatusCode::OK, "x".repeat(32768)).into_response(),
+        "large" => (
+            StatusCode::OK,
+            "x".repeat(crate::limits::RESPONSE_BYTES + 1),
+        )
+            .into_response(),
         _ => (
             StatusCode::FORBIDDEN,
             [("cf-mitigated", "challenge")],
@@ -161,7 +165,11 @@ async fn relay(
         return (StatusCode::BAD_GATEWAY, "PRIVATE_RELAY_FAILURE").into_response();
     }
     if q == "outer_large" {
-        return (StatusCode::OK, "PRIVATE_OUTER_RELAY_BODY".repeat(2048)).into_response();
+        return (
+            StatusCode::OK,
+            "PRIVATE_OUTER_RELAY_BODY".repeat(crate::limits::RESPONSE_BYTES / 22 + 1),
+        )
+            .into_response();
     }
     let headers = if q == "relay-range" {
         json!({"content-type":"application/json", "Content-Range":"bytes 0-100/999"})
@@ -256,9 +264,6 @@ async fn fixture() {
         Ok(())
     })
     .unwrap();
-    let mut p = policy(None);
-    p.allowed_origins = vec!["https://api.example.com".into()];
-    p.max_response_bytes = 16384;
     let mut ls = listeners(false);
     ls.get_mut("reader").unwrap().wallet = Some("split".into());
     let payers = [(1, "shared"), (2, "split")]
@@ -277,7 +282,6 @@ async fn fixture() {
         })
         .collect();
     let m = Manager::new_with_search(
-        p,
         ls,
         payers,
         Arc::new(CatalogState::default()),
@@ -318,7 +322,7 @@ async fn fixture() {
         );
     }
     assert!(invoke(&m, "hidden", "retry").await.is_err());
-    *m.fixture_coinbase.lock().unwrap() = Some("https://other.example.com/search".into());
+    *m.fixture_coinbase.lock().unwrap() = Some("https://other.internal/search".into());
     assert!(invoke(&m, "writer", "retry").await.is_err());
     *m.fixture_coinbase.lock().unwrap() = Some(ORIGIN.into());
     assert_eq!(proxy.accepted.load(Ordering::SeqCst), before);
@@ -337,7 +341,6 @@ async fn fixture() {
     );
 
     let unsigned = Manager::new(
-        m.policy.clone(),
         listeners(false),
         BTreeMap::from([("shared".into(), PaidClient::unsigned())]),
         Arc::new(CatalogState::default()),
@@ -388,7 +391,6 @@ async fn fixture() {
         );
     }
     let disabled = Manager::new(
-        m.policy.clone(),
         m.listeners.clone(),
         m.payers.clone(),
         Arc::new(CatalogState::default()),
@@ -418,7 +420,6 @@ async fn fixture() {
         (true, false, false, "metadata-disabled"),
     ] {
         let configured = Manager::new_with_search(
-            m.policy.clone(),
             m.listeners.clone(),
             m.payers.clone(),
             Arc::new(CatalogState::default()),
@@ -498,7 +499,7 @@ async fn fixture() {
             .http_participating(
                 &identity,
                 ORIGIN,
-                import::read_timeout(&m.policy, None),
+                import::read_timeout(None),
                 true,
                 client.transport(),
             )
@@ -616,7 +617,10 @@ async fn fixture() {
         invoke(&m, "writer", "outer_large").await.unwrap_err()
     );
     assert!(outer_error.contains("max_response_bytes"), "{outer_error}");
-    assert!(outer_error.contains("16384"), "{outer_error}");
+    assert!(
+        outer_error.contains(&crate::limits::RESPONSE_BYTES.to_string()),
+        "{outer_error}"
+    );
     assert!(
         outer_error.contains("do not automatically repeat"),
         "{outer_error}"

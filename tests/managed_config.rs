@@ -586,11 +586,9 @@ async fn managed_starter_exposes_exa_and_source_management_without_financial_sta
         "https://api.exa.ai/openapi.json"
     );
     assert_eq!(shown["servers"]["research"]["source_management"], true);
-    assert_eq!(
-        shown["source_management"]["wallet_bindings"]["research"],
-        "research"
-    );
-    assert_eq!(shown["source_management"]["persistent"], false);
+    assert_eq!(shown["servers"]["research"]["wallet"], "research");
+    assert!(shown["servers"]["research"]["source_registry_file"].is_null());
+    assert!(shown.get("source_management").is_none());
     assert!(!dir.path().join("state").exists());
 
     // Exercise deployment composition offline; provider-specific schema contracts

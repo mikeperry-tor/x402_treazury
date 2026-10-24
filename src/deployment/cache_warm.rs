@@ -34,9 +34,7 @@ pub async fn warm_cache_with_network(
     );
     let mut config =
         MetaConfig::parse_with_network(&tokio::fs::read_to_string(path).await?, network_override)?;
-    if let Some(policy) = &mut config.source_management {
-        policy.resolve(path);
-    }
+    crate::discovery::policy::resolve(&mut config, path);
     config.validate()?;
     if let Some(treasury) = &mut config.treasury {
         treasury.resolve(path);

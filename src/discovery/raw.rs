@@ -29,11 +29,11 @@ pub fn schema() -> Value {
     },"required":["method","url"],"additionalProperties":false})
 }
 
-fn request(manager: &Manager, args: &Map<String, Value>) -> Result<RoutedRequest> {
+fn request(args: &Map<String, Value>) -> Result<RoutedRequest> {
     let input: Arguments = serde_json::from_value(Value::Object(args.clone()))?;
     let method =
         reqwest::Method::from_bytes(input.method.as_bytes()).context("invalid HTTP method")?;
-    let url = import::endpoint(&manager.policy, &input.url)?;
+    let url = import::endpoint(&input.url)?;
     let scalar = |v: &Value| v.is_string() || v.is_number() || v.is_boolean();
     for value in input.query.values() {
         ensure!(
@@ -52,10 +52,9 @@ fn request(manager: &Manager, args: &Map<String, Value>) -> Result<RoutedRequest
 impl Manager {
     pub async fn invoke_raw(&self, owner: &str, args: &Map<String, Value>) -> Result<ToolOutput> {
         ensure!(self.enabled(owner), "source_management_disabled");
-        let route = request(self, args)?;
+        let route = request(args)?;
         self.source_client(owner)?
             .with_source_identity("builtin:raw")
-            .with_relay_origins(self.policy.allowed_origins.clone())
             .public_destinations()
             .execute_rendered_scoped(route, None, None, &Default::default())
             .await

@@ -4,7 +4,7 @@ use super::*;
 async fn registration_guidance_tracks_visible_tools_without_changing_registration() {
     let mut configured = listeners(false);
     configured.get_mut("writer").unwrap().exclude_tools = vec!["dyn_hidden__*".into()];
-    let m = manager_with(policy(None), configured).await;
+    let m = manager_with(configured).await;
     let visible = register_spec(&m, "writer", "visible", "visible.json", spec())
         .await
         .unwrap();
@@ -68,7 +68,12 @@ async fn disabled_registration_guidance_requires_operator_repair() {
             .unwrap()
             .targets
             .push("removed_endpoint".into());
-        inner.store.as_mut().unwrap().save(&state).unwrap();
+        inner
+            .stores
+            .get_mut("writer")
+            .unwrap()
+            .save(&state)
+            .unwrap();
     }
     drop(m);
     let m = manager(Some(registry)).await;

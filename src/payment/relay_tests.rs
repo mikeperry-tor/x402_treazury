@@ -310,9 +310,7 @@ fn payer(key: u64) -> Payer {
     .unwrap()
 }
 fn attached(relay: Arc<SearchRelay>) -> PaidClient {
-    PaidClient::new(payer(181))
-        .with_document_relay(Some(relay))
-        .with_relay_origins(vec!["https://api.example.com".into()])
+    PaidClient::new(payer(181)).with_document_relay(Some(relay))
 }
 fn relay_fixture() -> Arc<SearchRelay> {
     let entry = |format: &str, provider| {
@@ -595,7 +593,6 @@ async fn fixture(mode: &str) {
             "uncertain",
             "malformed-envelope",
             "private-final",
-            "other-origin",
         ] {
             let progress = SubmissionProgress::default();
             let error = client
@@ -622,6 +619,26 @@ async fn fixture(mode: &str) {
                 "relayed target 402 cannot sign/retry the target"
             );
         }
+    }
+
+    for method in ["GET", "POST"] {
+        let progress = SubmissionProgress::default();
+        let output = client
+            .execute_response_observed(route(method, "other-origin"), &progress)
+            .await
+            .unwrap();
+        assert!(!output.paid_submission && output.relay_payment_may_have_occurred);
+        assert!(progress.possible() && !output.advisories.is_empty());
+        assert_eq!(output.bytes, b"relay result");
+        let events = fixture.events(&format!("{method}-other-origin"));
+        assert_eq!(events.len(), attempts + 2);
+        assert!(
+            events[..attempts]
+                .iter()
+                .all(|event| event.provider.is_none() && event.signer.is_none())
+        );
+        assert!(events[attempts].provider.is_some() && events[attempts].signer.is_none());
+        assert!(events[attempts + 1].provider.is_some() && events[attempts + 1].signer.is_some());
     }
 
     for method in ["GET", "POST"] {
@@ -886,29 +903,6 @@ async fn fixture(mode: &str) {
         "an empty HEAD result remains empty text even when target MIME is binary"
     );
 
-    let denied = client
-        .clone()
-        .with_relay_origins(vec!["https://other.example.com".into()]);
-    let progress = SubmissionProgress::default();
-    let before = fixture.events("GET-status403").len();
-    assert!(
-        denied
-            .execute_response_observed(route("GET", "status403"), &progress)
-            .await
-            .is_err()
-    );
-    assert!(!progress.possible());
-    let events = fixture.events("GET-status403");
-    assert_eq!(
-        events.len() - before,
-        attempts,
-        "requested destination rejection never purchases a provider"
-    );
-    assert!(
-        events[before..]
-            .iter()
-            .all(|event| event.provider.is_none())
-    );
     let origin_only = attached(Arc::new(
         SearchRelay::fixture_methods(BTreeMap::new())
             .unwrap()

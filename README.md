@@ -410,10 +410,9 @@ directly; discovery and usage-help inspection are optional.
 
 The feature is disabled by default.
 
-Configure it in two places: the deployment-wide `[source_management]` section
-sets the default wallet and optional persistence file; `source_management = true`
-inside a `[servers.NAME]` section enables it for that MCP server endpoint. The wallet name
-must reference an existing `[wallets.NAME]` profile.
+Set `source_management = true` inside a `[servers.NAME]` section and name its
+existing `[wallets.NAME]` profile with `wallet`. Optional `source_registry_file`
+on that endpoint enables persistence.
 
 The [comprehensive deployment](examples/deployments/comprehensive.toml) enables
 this on its toolbox listener using the existing company pool. The
@@ -425,19 +424,17 @@ and wallet sharing.
 Here is an example excerpt:
 
 ```toml
-[source_management]
-wallet = "agent_shared" # defined elsewhere as [wallets.agent_shared]
-registry_file = "../../state/agent-sources.sqlite" # optional; path relative to this file
-
 [servers.research]
 listen = "127.0.0.1:8000"
 bearer_token_env = "RESEARCH_MCP_TOKEN"
+wallet = "agent_shared" # defined elsewhere as [wallets.agent_shared]
 source_management = true
+source_registry_file = "../../state/agent-sources.sqlite" # optional; relative to this file
 # discover_on_demand = true # keep API definitions out of the advertised tool list
 ```
 
-Directory requests and added APIs use the shared wallet unless the `[source_management]` stanza has
-an explicit `wallet` override. Existing payment caps and endpoint tool filters apply.
+Directory requests and added APIs use the endpoint's wallet. Existing payment
+caps and endpoint tool filters apply.
 
 Registrations are
 shared by agents using the same MCP server endpoint, but are not visible on other MCP server endpoints.
@@ -498,7 +495,7 @@ let clients retrieve API schemas as needed, rather than fill the tool list
 with all added APIs. Tool arguments and the API discovery
 workflow are documented in [agent source management](docs/agent-sources.md#agent-tools).
 
-With `registry_file` set, accepted specifications are saved and restored on restart;
+With `source_registry_file` set, accepted specifications are saved and restored on restart;
 without it, additions last only until the process exits.
 
 To view saved API sources and each source's tool names, HTTP methods and paths:

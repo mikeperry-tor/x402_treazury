@@ -119,7 +119,6 @@ async fn scope_child() {
         .unwrap()
         .with_test_root(crate::test_tls::CA),
     );
-    let p = policy(None);
     let mut ls = listeners(false);
     ls.insert("sibling".into(), ls["reader"].clone());
     ls.get_mut("reader").unwrap().wallet = Some("reader_wallet".into());
@@ -137,7 +136,6 @@ async fn scope_child() {
         views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
     }));
     let m = Manager::new(
-        p,
         ls,
         BTreeMap::from([("shared".into(), shared), ("reader_wallet".into(), other)]),
         catalog,
@@ -272,7 +270,7 @@ async fn scope_child() {
         .http_participating(
             &discovery_id,
             "https://api.example.com",
-            import::read_timeout(&m.policy, None),
+            import::read_timeout(None),
             true,
             Default::default(),
         )

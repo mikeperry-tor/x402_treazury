@@ -139,10 +139,7 @@ async fn directory_relay_fixture() {
         "https://spec.example.com/curl".into(),
         Default::default(),
     ));
-    let mut p = policy(None);
-    p.allowed_origins = vec!["https://api.example.com".into()];
     let manager = Manager::new_with_search(
-        p,
         listeners(false),
         BTreeMap::from([("shared".into(), payer())]),
         Arc::new(CatalogState::default()),
@@ -261,8 +258,6 @@ async fn directory_relay_fixture() {
 
     for discovery in [false, true] {
         for metadata in [false, true] {
-            let mut p = policy(None);
-            p.allowed_origins = vec!["https://api.example.com".into()];
             let configured = Arc::new((*relay).clone().with_policy(
                 crate::discovery_relay::Policy {
                     source_discovery: discovery,
@@ -280,7 +275,6 @@ async fn directory_relay_fixture() {
                 ..Default::default()
             };
             let m = Manager::new_with_search(
-                p,
                 listeners,
                 BTreeMap::from([("shared".into(), payer())]),
                 Arc::new(CatalogState::new(snapshot)),

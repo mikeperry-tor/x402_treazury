@@ -80,9 +80,7 @@ pub async fn bootstrap_wallets_with_network(
     );
     let mut config =
         MetaConfig::parse_with_network(&tokio::fs::read_to_string(path).await?, network_override)?;
-    if let Some(policy) = &mut config.source_management {
-        policy.resolve(path);
-    }
+    crate::discovery::policy::resolve(&mut config, path);
     let wallet_resolution = config.validate()?;
     crate::network::install(config.network.clone())?;
     if let Some(treasury) = &mut config.treasury {

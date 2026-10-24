@@ -3,7 +3,6 @@ use super::*;
 
 async fn without_wallets() -> Arc<Manager> {
     Manager::new(
-        policy(None),
         listeners(false),
         BTreeMap::new(),
         Arc::new(CatalogState::default()),
@@ -215,7 +214,6 @@ async fn local_arguments_and_authority_reject_before_wallet_lookup() {
 #[tokio::test]
 async fn curated_details_match_without_documentation_identity_or_probes() {
     let m = Manager::new(
-        policy(None),
         listeners(false),
         BTreeMap::from([("shared".into(), PaidClient::unsigned())]),
         Arc::new(CatalogState::default()),
@@ -324,7 +322,8 @@ fn seed_netintel(m: &Manager) {
             policy: client.document_policy_key(),
             url: provider.settings.spec.clone(),
             transport: provider.settings.transport(),
-            timeout: import::read_timeout(&m.policy, Some(&provider)),
+            timeout: import::read_timeout(Some(&provider)),
+            max_spec_bytes: import::max_spec_bytes(Some(&provider)),
         },
         Arc::new(cell),
     );

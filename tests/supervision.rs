@@ -425,12 +425,11 @@ async fn unsigned_mode_rejects_managed_funding_and_source_management_configs() {
                 );
             }
             _ => {
-                document.as_table_mut().unwrap().insert(
-                    "source_management".into(),
-                    toml::from_str::<toml::Value>(
-                        "wallet='test'\nregistry_file='must-not-be-created.sqlite'",
-                    )
-                    .unwrap(),
+                let endpoint = document["servers"]["one"].as_table_mut().unwrap();
+                endpoint.insert("source_management".into(), toml::Value::Boolean(true));
+                endpoint.insert(
+                    "source_registry_file".into(),
+                    toml::Value::String("must-not-be-created.sqlite".into()),
                 );
             }
         }

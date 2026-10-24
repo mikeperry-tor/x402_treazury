@@ -3,9 +3,7 @@ use super::*;
 
 #[tokio::test]
 async fn documentation_selectors_and_policy_reject_before_io() {
-    let mut p = policy(None);
-    p.allowed_origins = vec!["https://api.example.com".into()];
-    let m = manager_with(p, listeners(false)).await;
+    let m = manager_with(listeners(false)).await;
     for invalid in [
         json!({"documentation_url":null}),
         json!({"documentation_url":3}),
@@ -16,7 +14,6 @@ async fn documentation_selectors_and_policy_reject_before_io() {
         json!({"documentation_url":"https://127.0.0.1/help"}),
         json!({"documentation_url":"https://user:secret@api.example.com/help"}),
         json!({"documentation_url":"https://api.example.com/help#fragment"}),
-        json!({"documentation_url":"https://skill.example.com/help"}),
     ] {
         assert!(
             m.invoke_source_details("writer", invalid.as_object().unwrap())
@@ -166,9 +163,11 @@ async fn document_fixture() {
                     "/invalid-utf8" => {
                         ([("content-type", "text/plain")], vec![0xff]).into_response()
                     }
-                    "/oversized" => {
-                        ([("content-type", "text/plain")], "x".repeat(129)).into_response()
-                    }
+                    "/oversized" => (
+                        [("content-type", "text/plain")],
+                        "x".repeat(crate::limits::HELP_BYTES + 1),
+                    )
+                        .into_response(),
                     "/redirect" => (
                         StatusCode::FOUND,
                         [("location", "https://spec.example.com/never-follow")],
@@ -229,15 +228,12 @@ async fn document_fixture() {
             mode: Mode::Tor,
             socks_endpoint: Some(proxy.address),
             cover_traffic_enabled: Some(false),
+            read_timeout_seconds: Some(1),
             ..Default::default()
         })
         .unwrap()
         .with_test_root(crate::test_tls::CA),
     );
-    let mut p = policy(None);
-    p.allowed_origins = vec!["https://api.example.com".into()];
-    p.max_help_bytes = 128;
-    p.read_timeout_seconds = Some(1);
     let mut ls = listeners(false);
     ls.get_mut("reader").unwrap().wallet = Some("split".into());
     let payers = [(1, "shared"), (2, "split")]
@@ -255,7 +251,7 @@ async fn document_fixture() {
             )
         })
         .collect();
-    let m = Manager::new(p, ls, payers, Arc::new(CatalogState::default()), vec![])
+    let m = Manager::new(ls, payers, Arc::new(CatalogState::default()), vec![])
         .await
         .unwrap();
     for (path, status, text) in [
@@ -326,7 +322,7 @@ async fn document_fixture() {
         }
         if path == "/oversized" {
             assert_eq!(doc["limit_setting"], "max_help_bytes");
-            assert_eq!(doc["limit_bytes"], 128);
+            assert_eq!(doc["limit_bytes"], crate::limits::HELP_BYTES);
         }
     }
     let result = m
@@ -412,7 +408,6 @@ async fn document_fixture() {
     );
     assert!(m.inner.lock().unwrap().state.records.is_empty());
     let unsigned = Manager::new(
-        policy(None),
         listeners(false),
         BTreeMap::from([("shared".into(), PaidClient::unsigned())]),
         Arc::new(CatalogState::default()),
@@ -596,9 +591,6 @@ async fn paid_document_fixture() {
         format!("http://{relay_address}/curl"),
         Default::default(),
     ));
-    let mut p = policy(None);
-    p.allowed_origins = vec!["https://api.example.com".into()];
-    p.read_timeout_seconds = Some(2);
     let payer = PaidClient::new(
         Payer::new(
             &format!("{:064x}", 47),
@@ -607,7 +599,6 @@ async fn paid_document_fixture() {
         .unwrap(),
     );
     let manager = Manager::new_with_search(
-        p,
         listeners(false),
         BTreeMap::from([("shared".into(), payer)]),
         Arc::new(CatalogState::default()),

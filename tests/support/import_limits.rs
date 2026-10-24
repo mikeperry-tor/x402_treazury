@@ -38,12 +38,12 @@ async fn streamed_import_limits_partial_chunks_and_slow_download() {
                 }
             }
         });
-        let mut p = policy(None);
-        p.max_spec_bytes = 8;
-        p.read_timeout_seconds = Some(1);
-        let result = tokio::time::timeout(Duration::from_secs(5), import::fixture_fetch(&p, &url))
-            .await
-            .expect("fixture completes");
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            import::fixture_fetch(&url, 8, Some(Duration::from_secs(1))),
+        )
+        .await
+        .expect("fixture completes");
         if mode == "exact" || mode == "slow" {
             assert_eq!(result.unwrap().body.as_slice(), b"abcdefgh");
         } else {
@@ -67,39 +67,19 @@ async fn streamed_import_limits_partial_chunks_and_slow_download() {
 }
 
 #[test]
-fn allowed_origins_apply_to_spec_base_and_explicit_override() {
-    let mut p = policy(None);
-    p.allowed_origins = vec![
-        "https://api.example.com".into(),
-        "https://spec.example.com:8443".into(),
-    ];
-    for allowed in [
-        "https://api.example.com:443/spec",
-        "https://spec.example.com:8443/spec",
-    ] {
-        assert!(import::endpoint(&p, allowed).is_ok());
-    }
-    for denied in [
-        "https://api.example.com:8443/spec",
-        "https://spec.example.com/spec",
-        "https://api.example.com.attacker.com/spec",
-        "https://other.example.com/spec",
-    ] {
-        assert!(import::endpoint(&p, denied).is_err());
-    }
+fn public_spec_and_base_origins_are_independent() {
     let mut c: Candidate =
         serde_json::from_value(candidate("origins", "process", "server")).unwrap();
     c.spec_url = "https://spec.example.com:8443/spec".into();
     let mut doc = spec();
-    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_ok());
+    assert!(import::build(&c, &serde_json::to_vec(&doc).unwrap()).is_ok());
     c.base_url = Some("https://other.example.com".into());
-    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
+    assert!(import::build(&c, &serde_json::to_vec(&doc).unwrap()).is_ok());
     c.base_url = None;
     doc["servers"] = json!([{"url":"https://other.example.com"}]);
-    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
-    c.spec_url = "https://other.example.com/spec".into();
-    doc = spec();
-    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
+    assert!(import::build(&c, &serde_json::to_vec(&doc).unwrap()).is_ok());
+    c.base_url = Some("https://127.0.0.1".into());
+    assert!(import::build(&c, &serde_json::to_vec(&doc).unwrap()).is_err());
 }
 
 #[derive(Clone, Default)]
@@ -146,7 +126,6 @@ fn resource_limit_warns_only_when_exceeded() {
 
 #[test]
 fn generated_tool_names_accept_512_bytes_and_warn_above_boundary() {
-    let p = policy(None);
     let c: Candidate = serde_json::from_value(candidate("name", "process", "server")).unwrap();
     // The source name is separated from the operation by two underscores.
     let prefix_len = "dyn_name__".len();
@@ -155,7 +134,7 @@ fn generated_tool_names_accept_512_bytes_and_warn_above_boundary() {
         let mut doc = spec();
         doc["paths"] = json!({(path):{"get":{}}});
         let logs = capture_limit_logs(|| {
-            let result = import::build(&p, &c, &serde_json::to_vec(&doc).unwrap());
+            let result = import::build(&c, &serde_json::to_vec(&doc).unwrap());
             if length == 512 {
                 assert_eq!(result.unwrap().tools[0].name.len(), 512);
             } else {
@@ -188,13 +167,12 @@ fn generated_tool_names_accept_512_bytes_and_warn_above_boundary() {
 
 #[test]
 fn generated_schema_limit_warns_without_logging_document_content() {
-    let p = policy(None);
     let c: Candidate = serde_json::from_value(candidate("schema", "process", "server")).unwrap();
     let mut doc = spec();
     doc["paths"]["/read"]["get"]["parameters"][0]["schema"]["description"] =
         json!("PRIVATE_DOCUMENT_CONTENT".repeat(12_000));
     let logs = capture_limit_logs(|| {
-        let result = import::build(&p, &c, &serde_json::to_vec(&doc).unwrap());
+        let result = import::build(&c, &serde_json::to_vec(&doc).unwrap());
         assert!(
             result
                 .err()
@@ -211,7 +189,6 @@ fn generated_schema_limit_warns_without_logging_document_content() {
 
 #[test]
 fn operation_count_limit_warns_even_when_selection_excludes_operations() {
-    let p = policy(None);
     let mut c: Candidate =
         serde_json::from_value(candidate("operations", "process", "server")).unwrap();
     c.selection.include = vec!["/read".into()];
@@ -220,7 +197,7 @@ fn operation_count_limit_warns_even_when_selection_excludes_operations() {
         doc["paths"][format!("/excluded-{index}")] = json!({"get":{}});
     }
     let logs = capture_limit_logs(|| {
-        let result = import::build(&p, &c, &serde_json::to_vec(&doc).unwrap());
+        let result = import::build(&c, &serde_json::to_vec(&doc).unwrap());
         assert!(
             result
                 .err()
@@ -273,7 +250,6 @@ async fn oversized_management_request_warns_without_logging_arguments() {
 
 #[test]
 fn import_policy_rejections_warn_without_private_content() {
-    let p = policy(None);
     let c: Candidate = serde_json::from_value(candidate("policy", "process", "server")).unwrap();
     let mut cases = vec![(b"PRIVATE_INVALID_JSON".to_vec(), "invalid OpenAPI JSON")];
     for (target, field, value, reason) in [
@@ -318,7 +294,7 @@ fn import_policy_rejections_warn_without_private_content() {
     }
     for (bytes, reason) in cases {
         let logs = capture_limit_logs(|| {
-            let error = import::build(&p, &c, &bytes).unwrap_err();
+            let error = import::build(&c, &bytes).unwrap_err();
             assert!(error.to_string().contains(reason), "{error}");
         });
         assert!(logs.contains("WARN") && logs.contains(reason), "{logs}");
@@ -328,7 +304,7 @@ fn import_policy_rejections_warn_without_private_content() {
         );
     }
     let logs = capture_limit_logs(|| {
-        assert!(import::endpoint(&p, "https://127.0.0.1/PRIVATE_DESTINATION").is_err());
+        assert!(import::endpoint("https://127.0.0.1/PRIVATE_DESTINATION").is_err());
     });
     assert!(
         logs.contains("WARN") && logs.contains("public_destination_rejected"),
@@ -400,9 +376,12 @@ async fn import_redirect_and_read_timeout_warn_without_response_prose() {
                 socket.write_all(b"HTTP/1.1 302 Found\r\nLocation: https://private.example/PRIVATE_REDIRECT\r\nContent-Length: 0\r\n\r\n").await.unwrap();
             }
         });
-        let mut p = policy(None);
-        p.read_timeout_seconds = Some(1);
-        let (result, logs) = capture_future_logs(import::fixture_fetch(&p, &url)).await;
+        let (result, logs) = capture_future_logs(import::fixture_fetch(
+            &url,
+            crate::limits::SPEC_BYTES,
+            Some(Duration::from_secs(1)),
+        ))
+        .await;
         let error = result.unwrap_err();
         if stall {
             assert!(

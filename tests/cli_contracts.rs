@@ -51,8 +51,8 @@ async fn source_inspection_lists_saved_tools_without_tokens_catalog_fetches_or_r
     use sha2::{Digest, Sha256};
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();
-    // Inspection must not apply current admission policy or connect to this URL.
-    std::fs::write(dir.join("registry.toml"), "version=1\nservers={}\n[source_management]\nwallet='missing'\nregistry_file='registry.sqlite'\nallowed_origins=['https://different.example.com']\n").unwrap();
+    // Inspection must not load wallet credentials or connect to saved URLs.
+    std::fs::write(dir.join("registry.toml"), "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.toolbox]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='payer'\nsource_management=true\nsource_registry_file='registry.sqlite'\n").unwrap();
     let id = "00000000-0000-0000-0000-000000000001";
     let document = json!({"openapi":"3.0.3","servers":[{"url":"https://offline.invalid"}],"paths":{"/read":{"get":{"description":"PRIVATE_SCHEMA_SENTINEL"}},"/write":{"post":{}}}}).to_string();
     let record = json!({"id":id,"owner":"toolbox","candidate":{"name":"demo","spec_url":"https://offline.invalid/openapi.json","lifetime":"persistent"},"targets":["toolbox"],"revision":2,"document":document,"hash":format!("{:x}",Sha256::digest(document.as_bytes())),"format":1,"accepted_at":1,"updated_at":2,"removed":false,"disabled":null});
@@ -75,6 +75,7 @@ async fn source_inspection_lists_saved_tools_without_tokens_catalog_fetches_or_r
     .await;
     assert!(!String::from_utf8_lossy(&output.stdout).contains("PRIVATE_SCHEMA_SENTINEL"));
     let shown = good(output);
+    let shown = &shown["toolbox"];
     assert_eq!(shown["generation"], 2);
     assert_eq!(shown["sources"].as_array().unwrap().len(), 1);
     assert_eq!(shown["sources"][0]["id"], id);
@@ -211,7 +212,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     assert!(!dir.join("missing").exists());
     std::fs::write(
         dir.join("registry.toml"),
-        "version = 1\nservers = {}\n[source_management]\nwallet = 'unused'\nregistry_file = 'registry.sqlite'\n",
+        "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.toolbox]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='payer'\nsource_management=true\nsource_registry_file='registry.sqlite'\n",
     )
     .unwrap();
     let inspect = ["sources", "inspect", "--config", "registry.toml"];
@@ -231,7 +232,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     let before = std::fs::read(dir.join("registry.sqlite")).unwrap();
     assert_eq!(
         good(run(dir, &inspect, &[]).await),
-        json!({"generation":7,"sources":[]})
+        json!({"toolbox":{"generation":7,"sources":[]}})
     );
     assert_eq!(std::fs::read(dir.join("registry.sqlite")).unwrap(), before);
     assert!(!dir.join("registry.sqlite.owner.lock").exists());

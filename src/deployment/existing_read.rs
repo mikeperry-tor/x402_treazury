@@ -17,16 +17,15 @@ impl ExistingRead {
         listener: &str,
         env: impl Fn(&str) -> Option<String>,
     ) -> Result<Self> {
-        let policy = config
-            .source_management
-            .as_ref()
-            .context("source management not configured")?;
         let listener = config
             .servers
             .get(listener)
             .filter(|server| server.source_management)
             .context("source_management_disabled")?;
-        let name = crate::discovery::policy::wallet(policy, listener);
+        let name = listener
+            .wallet
+            .as_deref()
+            .context("source management wallet unavailable")?;
         let wallet = config
             .wallets
             .get(name)
@@ -124,7 +123,6 @@ mod tests {
                 "shared":{"mode":"static","private_key_env":"MISSING_SHARED"},
                 "selected":{"mode":"static","private_key_env":"SELECTED_KEY"},
                 "unused":{"mode":"static","private_key_env":"MISSING_UNUSED"}},
-            "source_management":{"wallet":"shared"},
             "servers":{"owner":{"listen":"127.0.0.1:0","source_management":true,"wallet":"selected"},
                 "disabled":{"listen":"127.0.0.1:0","source_management":false,"wallet":"unused"}}
         })).unwrap()

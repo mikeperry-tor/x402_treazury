@@ -23,13 +23,11 @@ max_funding_amount_usdc = "3.00" # Explicit headroom for bridge minimums.
 [sources.exa]
 extends = "../../providers/exa.toml" # Web search, page contents and on-demand help.
 
-[source_management]
-wallet = "research" # Agent-added APIs share the existing pool.
-# Registrations last until exit; add registry_file for persistence.
-
 [servers.research]
 listen = "127.0.0.1:8000"
 bearer_token_env = "TREAZURY_MCP_TOKEN"
 wallet = "research"
 sources = ["exa"]
 source_management = true
+# Registrations last until exit; optionally persist them:
+# source_registry_file = "../../state/managed-sources.sqlite"

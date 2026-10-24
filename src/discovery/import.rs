@@ -1,4 +1,3 @@
-use super::policy::Policy;
 use crate::{
     catalog::{self, Config, ToolSpec},
     network::{self, IsolationId},
@@ -68,71 +67,67 @@ fn require(condition: bool, reason: &'static str) -> Result<()> {
     Ok(())
 }
 
-pub fn endpoint(policy: &Policy, url: &str) -> Result<reqwest::Url> {
-    let u = network::public_url(url).inspect_err(|_| {
+pub fn endpoint(url: &str) -> Result<reqwest::Url> {
+    network::public_url(url).inspect_err(|_| {
         tracing::warn!(
             reason = "public_destination_rejected",
             "source import destination rejected"
         );
-    })?;
-    require(
-        policy.allowed_origins.is_empty()
-            || policy
-                .allowed_origins
-                .contains(&u.origin().ascii_serialization()),
-        "destination origin not authorized",
-    )?;
-    Ok(u)
+    })
 }
 pub(super) fn read_timeout(
-    policy: &Policy,
     provider: Option<&super::curated::AcceptedProvider>,
 ) -> Option<Duration> {
-    policy
-        .read_timeout_seconds
-        .map(Duration::from_secs)
-        .or_else(|| {
-            provider.and_then(|p| p.settings.read_timeout_seconds.map(Duration::from_secs_f64))
-        })
+    provider.and_then(|p| p.settings.read_timeout_seconds.map(Duration::from_secs_f64))
+}
+pub(super) fn max_spec_bytes(provider: Option<&super::curated::AcceptedProvider>) -> usize {
+    provider.map_or(crate::limits::SPEC_BYTES, |p| p.settings.max_spec_bytes)
+}
+/// An authored help URL grants its own documentation destination, not API routes.
+pub(super) fn help_origins(
+    provider: Option<&super::curated::AcceptedProvider>,
+) -> Result<Vec<String>> {
+    provider
+        .and_then(|p| p.settings.help_url.as_deref())
+        .map(|url| endpoint(url).map(|url| vec![url.origin().ascii_serialization()]))
+        .unwrap_or_else(|| Ok(Vec::new()))
 }
 pub(super) fn options(
-    policy: &Policy,
     url: &str,
     provider: Option<&super::curated::AcceptedProvider>,
 ) -> Result<crate::discovery_relay::document::Options> {
-    endpoint(policy, url)?;
+    endpoint(url)?;
     let mut options = crate::discovery_relay::document::Options::new(
         url,
         IsolationId::discovery(url)?,
-        policy.max_spec_bytes,
+        max_spec_bytes(provider),
         "max_spec_bytes",
     );
-    options.allowed_origins = policy.allowed_origins.clone();
     options.transport = provider.map(|p| p.settings.transport()).unwrap_or_default();
-    options.timeout = read_timeout(policy, provider);
+    options.timeout = read_timeout(provider);
     Ok(options)
 }
 pub(super) async fn fetch_with(
-    policy: &Policy,
     url: &str,
     provider: Option<&super::curated::AcceptedProvider>,
     client: &crate::payment::PaidClient,
 ) -> Result<crate::discovery_relay::document::Document> {
-    crate::discovery_relay::document::read(client, &options(policy, url, provider)?).await
+    crate::discovery_relay::document::read(client, &options(url, provider)?).await
 }
 #[cfg(test)]
 pub async fn fixture_fetch(
-    policy: &Policy,
     url: &str,
+    max_spec_bytes: usize,
+    timeout: Option<Duration>,
 ) -> Result<crate::discovery_relay::document::Document> {
     let mut options = crate::discovery_relay::document::Options::new(
         url,
         IsolationId::discovery("https://api.example.com")?,
-        policy.max_spec_bytes,
+        max_spec_bytes,
         "max_spec_bytes",
     );
     options.public_only = false;
-    options.timeout = policy.read_timeout_seconds.map(Duration::from_secs);
+    options.timeout = timeout;
     crate::discovery_relay::document::read(&crate::payment::PaidClient::unsigned(), &options).await
 }
 
@@ -245,20 +240,16 @@ pub(super) fn tool_prefix(name: &str) -> Result<String> {
     Ok(format!("dyn_{name}__"))
 }
 
-pub fn build(policy: &Policy, c: &Candidate, bytes: &[u8]) -> Result<Built> {
-    if bytes.len() > policy.max_spec_bytes {
-        return Err(crate::limits::exceeded(
-            "imported spec",
-            "max_spec_bytes",
-            policy.max_spec_bytes,
-        )
-        .context("spec_too_large"));
+pub fn build(c: &Candidate, bytes: &[u8]) -> Result<Built> {
+    let spec_limit = max_spec_bytes(c.provider.as_ref());
+    if bytes.len() > spec_limit {
+        return Err(
+            crate::limits::exceeded("imported spec", "max_spec_bytes", spec_limit)
+                .context("spec_too_large"),
+        );
     }
     validate_source_name(&c.name)?;
-    let spec = c
-        .remote_spec()
-        .map(|url| endpoint(policy, url))
-        .transpose()?;
+    let spec = c.remote_spec().map(endpoint).transpose()?;
     let root = parse_document(bytes)?;
     let paths = root["paths"]
         .as_object()
@@ -269,10 +260,15 @@ pub fn build(policy: &Policy, c: &Candidate, bytes: &[u8]) -> Result<Built> {
         "operation_count_limit",
         "hardcoded_path_count",
     )?;
-    let (base, base_url) = resolve_base(policy, c, spec.as_ref(), &root)?;
+    let (base, base_url) = resolve_base(c, spec.as_ref(), &root)?;
     validate_paths(paths)?;
     let (tools, instructions) = selected_tools(c, &root)?;
-    validate_tools(policy, &tools, &base, &base_url)?;
+    validate_tools(
+        &tools,
+        &base,
+        &base_url,
+        &help_origins(c.provider.as_ref())?,
+    )?;
     Ok(Built {
         tools,
         base,
@@ -283,12 +279,11 @@ pub fn build(policy: &Policy, c: &Candidate, bytes: &[u8]) -> Result<Built> {
 /// Project a fully validated catalog into a listener's visible tool inventory.
 /// Snapshot publication applies this projection after full import validation.
 pub(super) fn build_visible(
-    policy: &Policy,
     candidate: &Candidate,
     bytes: &[u8],
     listener: &crate::deployment::ListenerConfig,
 ) -> Result<Built> {
-    let mut built = build(policy, candidate, bytes)?;
+    let mut built = build(candidate, bytes)?;
     let document: Value = serde_json::from_slice(bytes)?;
     let operations = catalog::operations(&document, None)?;
     let mut visible = Vec::new();
@@ -329,7 +324,6 @@ fn parse_document(bytes: &[u8]) -> Result<Value> {
 }
 
 fn resolve_base(
-    policy: &Policy,
     c: &Candidate,
     spec: Option<&reqwest::Url>,
     root: &Value,
@@ -350,7 +344,7 @@ fn resolve_base(
             .context("invalid OpenAPI server URL")?
             .to_string()
     };
-    let base_url = endpoint(policy, &base)?;
+    let base_url = endpoint(&base)?;
     require(
         base_url.query().is_none(),
         "base_url must not contain query parameters",
@@ -458,10 +452,10 @@ fn selected_tools(c: &Candidate, root: &Value) -> Result<(Vec<ToolSpec>, Option<
 }
 
 fn validate_tools(
-    policy: &Policy,
     tools: &[ToolSpec],
     base: &str,
     base_url: &reqwest::Url,
+    help_origins: &[String],
 ) -> Result<()> {
     require(!tools.is_empty(), "no tools selected")?;
     for tool in tools {
@@ -486,12 +480,11 @@ fn validate_tools(
                 tool.path.trim_start_matches('/')
             )
         };
-        let url = endpoint(policy, &url)?;
+        let url = endpoint(&url)?;
         require(
             url.origin() == base_url.origin()
-                || policy
-                    .allowed_origins
-                    .contains(&url.origin().ascii_serialization()),
+                || (tool.help_url.is_some()
+                    && help_origins.contains(&url.origin().ascii_serialization())),
             "cross_origin_operation_rejected",
         )?;
     }

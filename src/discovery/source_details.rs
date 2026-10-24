@@ -1,5 +1,5 @@
 //! Complete usage text and fixed document-location probes under the listener owner.
-use super::{Manager, directory, import, policy::Policy};
+use super::{Manager, directory, import};
 use crate::{
     discovery_relay::document::{self, Options, SharedFailure},
     payment::PaidClient,
@@ -32,7 +32,7 @@ struct Input {
     documentation_url: Option<String>,
 }
 impl Input {
-    fn parse(args: &Map<String, Value>, policy: &Policy) -> Result<Self> {
+    fn parse(args: &Map<String, Value>) -> Result<Self> {
         ensure!(
             args.len() == 1,
             "provide exactly one of slug, base_url or documentation_url"
@@ -46,10 +46,10 @@ impl Input {
                 )?;
             }
             (None, Some(base), None) => {
-                base_url(policy, base)?;
+                base_url(base)?;
             }
             (None, None, Some(url)) => {
-                import::endpoint(policy, url)?;
+                import::endpoint(url)?;
             }
             _ => anyhow::bail!("provide exactly one of slug, base_url or documentation_url"),
         }
@@ -61,27 +61,23 @@ pub fn schema() -> Value {
     json!({"type":"object","properties":{
         "slug":{"type":"string","minLength":1,"pattern":"\\S","not":{"enum":[".",".."]},"description":"x402 List service slug, not a resource URL. Use base_url instead when the exact API base is known."},
         "base_url":{"type":"string","format":"uri","description":"Exact public HTTPS API base, optionally with a path such as /v1. No query, fragment or credentials; do not infer it from a resource URL."},
-        "documentation_url":{"type":"string","format":"uri","description":"Optional public HTTPS usage-document URL. Returns complete UTF-8 plain/Markdown text; rejects HTML/non-text. Query parameters allowed, credentials/fragments forbidden. Its host must be allowed. No linked reading."}
+        "documentation_url":{"type":"string","format":"uri","description":"Optional public HTTPS usage-document URL. Returns complete UTF-8 plain/Markdown text; rejects HTML/non-text. Query parameters allowed, credentials/fragments forbidden. No linked reading."}
     },"oneOf":[{"required":["slug"]},{"required":["base_url"]},{"required":["documentation_url"]}],"additionalProperties":false})
 }
 
-fn base_url(policy: &Policy, raw: &str) -> Result<Url> {
-    let url = import::endpoint(policy, raw)?;
+fn base_url(raw: &str) -> Result<Url> {
+    let url = import::endpoint(raw)?;
     ensure!(url.query().is_none(), "base_url must not contain a query");
     Ok(url)
 }
 
-fn candidates(
-    policy: &Policy,
-    base: &str,
-    website: Option<&str>,
-) -> Result<Vec<(Url, &'static str)>> {
-    let mut api = base_url(policy, base)?;
+fn candidates(base: &str, website: Option<&str>) -> Result<Vec<(Url, &'static str)>> {
+    let mut api = base_url(base)?;
     api.set_path(&format!("{}/", api.path().trim_end_matches('/')));
     let root = api.join("/")?;
     let mut bases = vec![api, root];
     if let Some(website) = website
-        && let Ok(url) = base_url(policy, website)
+        && let Ok(url) = base_url(website)
     {
         bases.push(url.join("/")?);
     }
@@ -90,7 +86,7 @@ fn candidates(
     for base in bases {
         for &(path, kind) in PATHS {
             let url = base.join(path)?;
-            import::endpoint(policy, url.as_str())?;
+            import::endpoint(url.as_str())?;
             if seen.insert(url.to_string()) {
                 result.push((url, kind));
             }
@@ -106,12 +102,12 @@ impl Manager {
         args: &Map<String, Value>,
     ) -> Result<Value> {
         ensure!(self.enabled(owner), "source_management_disabled");
-        let input = Input::parse(args, &self.policy)?;
+        let input = Input::parse(args)?;
         let client = self.document_client(owner)?;
         let (manager, owner, owned_client) = (self.clone(), owner.to_owned(), client.clone());
         client.run_owned(async move {
             if let Some(url) = input.documentation_url {
-                return read_document(&manager.policy, &owned_client, &url).await;
+                return read_document(&owned_client, &url).await;
             }
             let mut possible_payment = false;
             let result = async {
@@ -143,14 +139,14 @@ impl Manager {
             } else {
                 (input.base_url.unwrap(), None)
             };
-            if base_url(&manager.policy, &base).is_err() {
+            if base_url(&base).is_err() {
                 output["url_discovery"]["status"] = json!("api_base_url_rejected");
                 return Ok(output);
             }
             output["url_discovery"]["base_url"] = json!(base);
             let website_status = match website.as_deref() {
                 None => "not_provided",
-                Some(url) if base_url(&manager.policy, url).is_ok() => "included",
+                Some(url) if base_url(url).is_ok() => "included",
                 Some(_) => "rejected_by_url_or_origin_policy",
             };
             output["url_discovery"]["website_status"] = json!(website_status);
@@ -161,7 +157,7 @@ impl Manager {
                 output["url_discovery"]["note"] = json!("Exact bundled provider definitions were found; speculative documentation probes were skipped. These are offline configuration matches, not current reachability or live qualification evidence. Select one provider_id for source_add; companion matches are not combined automatically.");
                 return Ok(output);
             }
-            let candidates = match candidates(&manager.policy, &base, website.as_deref()) {
+            let candidates = match candidates(&base, website.as_deref()) {
                 Ok(candidates) => candidates,
                 Err(_) => {
                     output["url_discovery"]["status"] = json!("candidate_discovery_failed");
@@ -171,10 +167,9 @@ impl Manager {
             let identity = owned_client.documentation_identity().await.ok();
             // Four in-flight requests bound sockets and document buffers per lookup.
             let probes: Vec<_> = candidates.into_iter().enumerate().map(|(index, (url, kind))| {
-                let policy = &manager.policy;
                 let identity = identity.as_ref();
                 let client = &owned_client;
-                async move { (index, probe(policy, client, identity, url, kind).await) }
+                async move { (index, probe(client, identity, url, kind).await) }
             }).collect();
             let mut results: Vec<_> = stream::iter(probes).buffer_unordered(4).collect().await;
             results.sort_by_key(|(index, _)| *index);
@@ -187,7 +182,6 @@ impl Manager {
 }
 
 fn options(
-    policy: &Policy,
     client: &PaidClient,
     identity: Option<&crate::network::IsolationId>,
     url: &str,
@@ -200,8 +194,6 @@ fn options(
     };
     let mut options = Options::new(url, identity, limit, setting);
     options.transport = client.transport();
-    options.timeout = import::read_timeout(policy, None);
-    options.allowed_origins = policy.allowed_origins.clone();
     Ok(options)
 }
 
@@ -214,14 +206,13 @@ impl std::fmt::Display for RejectedDocument {
 }
 impl std::error::Error for RejectedDocument {}
 
-async fn read_document(policy: &Policy, client: &PaidClient, url: &str) -> Result<Value> {
+async fn read_document(client: &PaidClient, url: &str) -> Result<Value> {
     let identity = client.documentation_identity().await.ok();
     let options = options(
-        policy,
         client,
         identity.as_ref(),
         url,
-        policy.max_help_bytes,
+        client.max_help_bytes(),
         "max_help_bytes",
     )?;
     let mut documentation = json!({"url":url,"provenance":"caller_supplied","content_type":null});
@@ -377,14 +368,13 @@ fn failure(error: &anyhow::Error) -> Value {
 }
 
 async fn probe(
-    policy: &Policy,
     client: &PaidClient,
     identity: Option<&crate::network::IsolationId>,
     url: Url,
     kind: &str,
 ) -> Value {
     let mut result = json!({"url":url.as_str(),"kind":kind});
-    let outcome = inspect(policy, client, identity, &url, kind, &mut result).await;
+    let outcome = inspect(client, identity, &url, kind, &mut result).await;
     if let Err(error) = outcome {
         result
             .as_object_mut()
@@ -395,7 +385,6 @@ async fn probe(
 }
 
 async fn inspect(
-    policy: &Policy,
     client: &PaidClient,
     identity: Option<&crate::network::IsolationId>,
     url: &Url,
@@ -403,11 +392,11 @@ async fn inspect(
     result: &mut Value,
 ) -> Result<()> {
     let (limit, setting) = if kind == "documentation" {
-        (policy.max_help_bytes, "max_help_bytes")
+        (client.max_help_bytes(), "max_help_bytes")
     } else {
-        (policy.max_spec_bytes, "max_spec_bytes")
+        (crate::limits::SPEC_BYTES, "max_spec_bytes")
     };
-    let options = options(policy, client, identity, url.as_str(), limit, setting)?;
+    let options = options(client, identity, url.as_str(), limit, setting)?;
     let document = document::read(client, &options).await?;
     result["get_status"] = json!(document.status.as_u16());
     result["content_type"] = json!(content_type(&document.headers));

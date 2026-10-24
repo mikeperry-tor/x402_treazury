@@ -117,7 +117,11 @@ fn execution_contract(m: &Manifest, config: &Value, confined: bool) -> Result<()
         "unsigned preparation refuses payments/automatic funding"
     );
     ensure!(
-        config["source_management"].is_null(),
+        config["servers"]
+            .as_object()
+            .context("missing servers")?
+            .values()
+            .all(|server| server["source_management"] != true),
         "qualification refuses source management"
     );
     if managed {
@@ -317,7 +321,7 @@ pub async fn collect_catalogs_confined(
     validate_cases(m, &snapshot)?;
     let mut config: MetaConfig = serde_json::from_value(snapshot["deployment"].clone())?;
     ensure!(
-        config.source_management.is_none() && config.servers.values().all(|s| !s.source_management),
+        config.servers.values().all(|s| !s.source_management),
         "qualification refuses source management"
     );
     for listener in config.servers.values() {

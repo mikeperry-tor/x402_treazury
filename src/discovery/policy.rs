@@ -1,77 +1,34 @@
 use crate::deployment::MetaConfig;
 use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
 };
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Policy {
-    pub wallet: String,
-    pub registry_file: Option<PathBuf>,
-    #[serde(default = "bytes")]
-    pub max_spec_bytes: usize,
-    #[serde(default = "crate::limits::response_default")]
-    pub max_response_bytes: usize,
-    #[serde(default = "crate::limits::help_default")]
-    pub max_help_bytes: usize,
-    #[serde(
-        default,
-        alias = "fetch_timeout_seconds",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub read_timeout_seconds: Option<u64>,
-    #[serde(default)]
-    pub allowed_origins: Vec<String>,
-}
-fn bytes() -> usize {
-    33554432
-}
-impl Policy {
-    pub fn resolve(&mut self, path: &Path) {
-        if let Some(file) = &mut self.registry_file
+
+pub fn resolve(config: &mut MetaConfig, path: &Path) {
+    for listener in config.servers.values_mut() {
+        if let Some(file) = &mut listener.source_registry_file
             && file.is_relative()
         {
             *file = path.parent().unwrap_or(Path::new(".")).join(&*file);
         }
     }
 }
-pub fn wallet<'a>(policy: &'a Policy, listener: &'a crate::deployment::ListenerConfig) -> &'a str {
-    listener.wallet.as_deref().unwrap_or(&policy.wallet)
+pub fn enabled(config: &MetaConfig) -> bool {
+    config
+        .servers
+        .values()
+        .any(|listener| listener.source_management)
 }
 pub fn validate(config: &MetaConfig) -> Result<()> {
-    if let Some(p) = &config.source_management {
-        ensure!(
-            config.wallets.contains_key(&p.wallet),
-            "unknown source_management wallet"
-        );
-        ensure!(
-            (1024..=67108864).contains(&p.max_spec_bytes)
-                && p.read_timeout_seconds
-                    .is_none_or(|v| (1..=86400).contains(&v)),
-            "invalid import limits"
-        );
-        ensure!(
-            p.max_response_bytes > 0 && p.max_help_bytes > 0,
-            "dynamic download limits must be positive"
-        );
-        for origin in &p.allowed_origins {
-            let u = crate::network::public_url(origin)?;
-            ensure!(
-                u.origin().ascii_serialization() == *origin,
-                "allowed_origins must be exact canonical HTTPS origins"
-            );
-        }
-    }
     for (id, listener) in &config.servers {
         if listener.source_management {
-            let p = config
-                .source_management
+            let wallet = listener
+                .wallet
                 .as_ref()
-                .context("source_management=true requires deployment source_management settings")?;
+                .with_context(|| format!("server {id}: source_management requires wallet"))?;
             ensure!(
-                config.wallets.contains_key(wallet(p, listener)),
+                config.wallets.contains_key(wallet),
                 "server {id}: unknown dynamic wallet"
             );
         }
@@ -79,28 +36,12 @@ pub fn validate(config: &MetaConfig) -> Result<()> {
     Ok(())
 }
 pub fn wallets(config: &MetaConfig) -> BTreeSet<String> {
-    let Some(p) = &config.source_management else {
-        return BTreeSet::new();
-    };
     config
         .servers
         .values()
-        .filter(|l| l.source_management)
-        .map(|l| wallet(p, l).to_owned())
+        .filter(|listener| listener.source_management)
+        .filter_map(|listener| listener.wallet.clone())
         .collect()
-}
-/// Configuration-only inspection; never opens registry, credentials or treasury state.
-pub fn inspection(config: &MetaConfig) -> serde_json::Value {
-    let Some(p) = &config.source_management else {
-        return serde_json::Value::Null;
-    };
-    let bindings: std::collections::BTreeMap<_, _> = config
-        .servers
-        .iter()
-        .filter(|(_, l)| l.source_management)
-        .map(|(id, l)| (id.clone(), wallet(p, l).to_owned()))
-        .collect();
-    serde_json::json!({"policy":p,"wallet_bindings":bindings,"persistent":p.registry_file.is_some(),"scope":"endpoint_local"})
 }
 pub fn protected_paths(config: &MetaConfig, path: &Path) -> Vec<PathBuf> {
     let mut paths = vec![path.to_owned()];
@@ -123,12 +64,19 @@ pub fn protected_paths(config: &MetaConfig, path: &Path) -> Vec<PathBuf> {
     paths
 }
 pub fn validate_registry_path(config: &MetaConfig, path: &Path) -> Result<()> {
-    if let Some(file) = config
-        .source_management
-        .as_ref()
-        .and_then(|p| p.registry_file.as_ref())
-    {
-        super::store::protect(file, &protected_paths(config, path))?;
+    let protected = protected_paths(config, path);
+    for listener in config.servers.values() {
+        if let Some(file) = &listener.source_registry_file {
+            super::store::protect(file, &protected)?;
+            for other in config
+                .servers
+                .values()
+                .filter_map(|listener| listener.source_registry_file.as_ref())
+                .filter(|other| *other != file)
+            {
+                super::store::protect(file, std::slice::from_ref(other))?;
+            }
+        }
     }
     Ok(())
 }

@@ -37,6 +37,7 @@ struct FetchKey {
     url: String,
     transport: crate::network::HttpPolicy,
     timeout: Option<Duration>,
+    max_spec_bytes: usize,
     authority: crate::payment::Authority,
     policy: (bool, Option<usize>),
 }
@@ -81,7 +82,7 @@ fn ignore_registration_receipts<'de, D: serde::Deserializer<'de>>(
 struct Inner {
     base: CatalogSnapshot,
     state: State,
-    store: Option<store::Store>,
+    stores: BTreeMap<String, store::Store>,
 }
 #[derive(Debug)]
 struct Fetched {
@@ -103,7 +104,6 @@ pub struct Manager {
     fail_after_commit: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     crash_after_commit: std::sync::atomic::AtomicBool,
-    pub policy: policy::Policy,
     search_relay: Option<Arc<crate::discovery_relay::SearchRelay>>,
     listeners: BTreeMap<String, ListenerConfig>,
     payers: BTreeMap<String, PaidClient>,
@@ -147,7 +147,8 @@ impl Manager {
             "source_scope_must_be_endpoint_local"
         );
         ensure!(
-            c.lifetime != Lifetime::Persistent || self.policy.registry_file.is_some(),
+            c.lifetime != Lifetime::Persistent
+                || self.listeners[owner].source_registry_file.is_some(),
             "persistent_registry_missing"
         );
         ensure!(
@@ -163,20 +164,24 @@ impl Manager {
 
     fn source_client(&self, owner: &str) -> Result<PaidClient> {
         ensure!(self.enabled(owner), "source_management_disabled");
-        let wallet = policy::wallet(&self.policy, &self.listeners[owner]);
+        let wallet = self.listeners[owner]
+            .wallet
+            .as_deref()
+            .context("source management wallet unavailable")?;
         Ok(self
             .payers
             .get(wallet)
             .context("source management wallet unavailable")?
             .clone()
-            .with_document_relay(self.search_relay.clone())
-            .with_timeout(self.policy.read_timeout_seconds.map(Duration::from_secs))
-            .with_download_limits(self.policy.max_response_bytes, self.policy.max_help_bytes))
+            .with_document_relay(self.search_relay.clone()))
     }
 
     fn document_client(&self, owner: &str) -> Result<PaidClient> {
         ensure!(self.enabled(owner), "source_management_disabled");
-        let wallet = policy::wallet(&self.policy, &self.listeners[owner]);
+        let wallet = self.listeners[owner]
+            .wallet
+            .as_deref()
+            .context("source management wallet unavailable")?;
         if self.payers.contains_key(wallet) {
             self.source_client(owner)
         } else {
@@ -225,33 +230,49 @@ impl Manager {
         bound.invoke_output(&args).await
     }
     pub async fn new(
-        policy: policy::Policy,
         listeners: BTreeMap<String, ListenerConfig>,
         payers: BTreeMap<String, PaidClient>,
         catalog: Arc<CatalogState>,
         protected: Vec<PathBuf>,
     ) -> Result<Arc<Self>> {
-        Self::new_with_search(policy, listeners, payers, catalog, protected, None).await
+        Self::new_with_search(listeners, payers, catalog, protected, None).await
     }
     pub(crate) async fn new_with_search(
-        policy: policy::Policy,
         listeners: BTreeMap<String, ListenerConfig>,
         payers: BTreeMap<String, PaidClient>,
         catalog: Arc<CatalogState>,
         protected: Vec<PathBuf>,
         search_relay: Option<Arc<crate::discovery_relay::SearchRelay>>,
     ) -> Result<Arc<Self>> {
-        let file = policy.registry_file.clone();
-        let (store, state) = tokio::task::spawn_blocking(move || -> Result<_> {
-            let store = file
-                .map(|p| store::Store::open(&p, &protected))
-                .transpose()?;
-            let state = store
-                .as_ref()
-                .map(store::Store::load)
-                .transpose()?
-                .unwrap_or_default();
-            Ok((store, state))
+        let registries: Vec<_> = listeners
+            .iter()
+            .filter_map(|(owner, listener)| {
+                listener
+                    .source_registry_file
+                    .as_ref()
+                    .map(|file| (owner.clone(), file.clone()))
+            })
+            .collect();
+        let (stores, state) = tokio::task::spawn_blocking(move || -> Result<_> {
+            let mut stores = BTreeMap::new();
+            let mut state = State::default();
+            for (owner, file) in registries {
+                let store = store::Store::open(&file, &protected)?;
+                let saved = store.load()?;
+                ensure!(
+                    saved.records.values().all(|record| record.owner == owner),
+                    "source registry belongs to another endpoint"
+                );
+                state.generation = state.generation.max(saved.generation);
+                for (id, record) in saved.records {
+                    ensure!(
+                        state.records.insert(id, record).is_none(),
+                        "duplicate source registry identity"
+                    );
+                }
+                stores.insert(owner, store);
+            }
+            Ok((stores, state))
         })
         .await??;
         let manager = Arc::new(Self {
@@ -267,14 +288,13 @@ impl Manager {
             commit_barrier: Mutex::new(None),
             #[cfg(test)]
             crash_after_commit: std::sync::atomic::AtomicBool::new(false),
-            policy,
             search_relay,
             listeners,
             payers,
             inner: Mutex::new(Inner {
                 base: (*catalog.read()).clone(),
                 state,
-                store,
+                stores,
             }),
             catalog,
             fetches: Mutex::new(BTreeMap::new()),
@@ -302,8 +322,7 @@ impl Manager {
                             targets == record.targets,
                             "saved source scope is not endpoint-local"
                         );
-                        import::build(&self.policy, &record.candidate, record.document.as_bytes())
-                            .map(|_| ())
+                        import::build(&record.candidate, record.document.as_bytes()).map(|_| ())
                     })
                     .err()
                     .map(|_| "policy_or_catalog_invalid".into())
@@ -342,20 +361,17 @@ impl Manager {
         for record in live.into_iter().filter(|r| r.disabled.is_none()) {
             let target = &record.owner;
             let cfg = self.listeners.get(target).context("target_missing")?;
-            let built = import::build_visible(
-                &self.policy,
-                &record.candidate,
-                record.document.as_bytes(),
-                cfg,
-            )?;
-            let wallet = policy::wallet(&self.policy, cfg);
+            let built = import::build_visible(&record.candidate, record.document.as_bytes(), cfg)?;
+            let wallet = cfg
+                .wallet
+                .as_deref()
+                .context("source management wallet unavailable")?;
             let payer = self
                 .payers
                 .get(wallet)
                 .cloned()
                 .unwrap_or_else(PaidClient::unsigned)
                 .with_document_relay(self.search_relay.clone())
-                .with_relay_origins(self.policy.allowed_origins.clone())
                 .with_transport(
                     record
                         .candidate
@@ -364,18 +380,28 @@ impl Manager {
                         .map(|p| p.settings.transport())
                         .unwrap_or_default(),
                 )
-                .with_timeout(import::read_timeout(
-                    &self.policy,
-                    record.candidate.provider.as_ref(),
-                ))
-                .with_download_limits(self.policy.max_response_bytes, self.policy.max_help_bytes)
+                .with_timeout(import::read_timeout(record.candidate.provider.as_ref()))
+                .with_download_limits(
+                    record
+                        .candidate
+                        .provider
+                        .as_ref()
+                        .map(|p| p.settings.max_response_bytes)
+                        .unwrap_or_else(crate::limits::response_default),
+                    record
+                        .candidate
+                        .provider
+                        .as_ref()
+                        .map(|p| p.settings.max_help_bytes)
+                        .unwrap_or_else(crate::limits::help_default),
+                )
                 .public_destinations();
             let view = result.views.get_mut(target).context("target_missing")?;
             let initial_count = view.len();
             for tool in &built.tools {
                 let help = Arc::new(crate::catalog_state::HelpBinding::with_origins(
                     payer.clone().public_destinations(),
-                    self.policy.allowed_origins.clone(),
+                    import::help_origins(record.candidate.provider.as_ref())?,
                 ));
                 ensure!(
                     !view.iter().any(|t| t.tool.name == tool.name),
@@ -477,7 +503,7 @@ impl Manager {
         });
         // Active acquisitions have owners and cannot be evicted or reject new work.
         // Only optional completed retention uses the existing byte/count allowance.
-        let max = (128 * 1024 * 1024 / self.policy.max_spec_bytes).min(8);
+        let max = (128 * 1024 * 1024 / crate::limits::SPEC_BYTES).min(8);
         let mut completed: Vec<_> = cache
             .iter()
             .filter_map(|(key, cell)| cell.get().map(|done| (key.clone(), done.completed)))
@@ -502,7 +528,7 @@ impl Manager {
         url: &str,
         provider: Option<&curated::AcceptedProvider>,
     ) -> Result<Arc<Document>> {
-        let canonical = import::endpoint(&self.policy, url)?.to_string();
+        let canonical = import::endpoint(url)?.to_string();
         let url = canonical.as_str();
         let (client, authority) = self.document_client(owner)?.pin_document_authority();
         let key = FetchKey {
@@ -510,7 +536,8 @@ impl Manager {
             authority,
             policy: client.document_policy_key(),
             transport: provider.map(|p| p.settings.transport()).unwrap_or_default(),
-            timeout: import::read_timeout(&self.policy, provider),
+            timeout: import::read_timeout(provider),
+            max_spec_bytes: import::max_spec_bytes(provider),
         };
         self.prune_fetches();
         let cell = {
@@ -551,10 +578,15 @@ impl Manager {
         {
             let fixture = self.fixture_endpoint.lock().unwrap().clone();
             if let Some(url) = fixture {
-                return import::fixture_fetch(&self.policy, &url).await;
+                return import::fixture_fetch(
+                    &url,
+                    import::max_spec_bytes(provider),
+                    import::read_timeout(provider),
+                )
+                .await;
             }
         }
-        import::fetch_with(&self.policy, url, provider, client).await
+        import::fetch_with(url, provider, client).await
     }
     pub async fn invoke(self: &Arc<Self>, owner: &str, name: &str, args: Value) -> Result<Value> {
         crate::limits::check(
@@ -607,7 +639,7 @@ impl Manager {
         let spec_url = a
             .spec_url
             .as_deref()
-            .map(|url| import::endpoint(&self.policy, url).map(|url| url.to_string()))
+            .map(|url| import::endpoint(url).map(|url| url.to_string()))
             .transpose()?;
         let key = match a.provider_id.as_deref() {
             Some(id) => import::RegistrationKey::Provider(id),
@@ -656,7 +688,7 @@ impl Manager {
             selection: Selection::default(),
             visibility: Visibility::Server,
             targets: vec![],
-            lifetime: if self.policy.registry_file.is_some() {
+            lifetime: if self.listeners[owner].source_registry_file.is_some() {
                 Lifetime::Persistent
             } else {
                 Lifetime::Process
@@ -671,7 +703,7 @@ impl Manager {
         let document = self.source_document(owner, &candidate).await?;
         let result = async {
             let id = Uuid::new_v4().to_string();
-            document.validate(|_, _, bytes| import::build(&self.policy, &candidate, bytes))?;
+            document.validate(|_, _, bytes| import::build(&candidate, bytes))?;
             let record = Record {
                 id,
                 owner: owner.into(),
@@ -775,11 +807,11 @@ impl Manager {
                 .context("generation exhausted")?;
             let snapshot = this.snapshot(&state, &inner.base, state.generation)?;
             let result = this.result(&state.records[&id], &owner, &snapshot);
-            if let Some(store) = &mut inner.store {
+            if let Some(store) = inner.stores.get_mut(&owner) {
                 let mut saved = state.clone();
-                saved
-                    .records
-                    .retain(|_, r| r.candidate.lifetime == Lifetime::Persistent);
+                saved.records.retain(|_, record| {
+                    record.owner == owner && record.candidate.lifetime == Lifetime::Persistent
+                });
                 store.save(&saved)?;
             }
             #[cfg(test)]
@@ -916,16 +948,22 @@ fn page(
     Ok(result)
 }
 pub async fn inspect_cli(meta_config: &std::path::Path) -> Result<()> {
-    let cfg: crate::deployment::MetaConfig =
+    let mut cfg: crate::deployment::MetaConfig =
         toml::from_str(&std::fs::read_to_string(meta_config)?)?;
-    let mut policy = cfg
-        .source_management
-        .context("source management not configured")?;
-    policy.resolve(meta_config);
-    let path = policy
-        .registry_file
-        .context("persistent registry not configured")?;
-    let value = tokio::task::spawn_blocking(move || store::inspect(&path)).await??;
+    policy::resolve(&mut cfg, meta_config);
+    let registries: Vec<_> = cfg
+        .servers
+        .into_iter()
+        .filter_map(|(owner, listener)| listener.source_registry_file.map(|file| (owner, file)))
+        .collect();
+    ensure!(!registries.is_empty(), "persistent registry not configured");
+    let value = tokio::task::spawn_blocking(move || -> Result<_> {
+        registries
+            .into_iter()
+            .map(|(owner, file)| Ok((owner, store::inspect(&file)?)))
+            .collect::<Result<BTreeMap<_, _>>>()
+    })
+    .await??;
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }
@@ -978,18 +1016,21 @@ async fn maintain_cli_owned(
     if let Some(t) = &mut cfg.treasury {
         t.resolve(path);
     }
-    let mut policy = cfg
-        .source_management
-        .clone()
-        .context("source management not configured")?;
-    policy.resolve(path);
-    let file = policy
-        .registry_file
+    policy::resolve(&mut cfg, path);
+    let file = cfg
+        .servers
+        .get(owner)
+        .context("unknown source endpoint")?
+        .source_registry_file
         .as_ref()
         .context("persistent registry not configured")?;
     ensure!(file.is_file(), "source registry does not exist");
     let mut store = store::Store::open(file, &policy::protected_paths(&cfg, path))?;
     let mut state = store.load()?;
+    ensure!(
+        state.records.values().all(|record| record.owner == owner),
+        "source registry belongs to another endpoint"
+    );
     let mut authority = None;
     let mut possible_payment = false;
     let result: Result<Value> = async {
@@ -1014,7 +1055,7 @@ async fn maintain_cli_owned(
         }
         let document = match candidate.remote_spec() {
             Some(url) => {
-                let options = import::options(&policy, url, candidate.provider.as_ref())?;
+                let options = import::options(url, candidate.provider.as_ref())?;
                 match crate::discovery_relay::document::origin(&options).await {
                     Ok(document) => document,
                     Err(failure) if failure.fallback => {
@@ -1032,7 +1073,7 @@ async fn maintain_cli_owned(
             None => Document::local(curated::local_document(candidate.provider.as_ref().context("provider_required")?)?),
         };
         possible_payment = document.payment_may_have_occurred;
-        document.validate(|_, _, bytes| import::build(&policy, &candidate, bytes))?;
+        document.validate(|_, _, bytes| import::build(&candidate, bytes))?;
         let bytes = (*document.body).clone();
         candidate.spec_url = candidate.remote_spec().unwrap_or_default().to_owned();
         record.candidate = candidate;

@@ -138,16 +138,16 @@ impl Manager {
                 url
             }
         };
-        import::endpoint(&self.policy, url.as_str()).context("coinbase_search policy rejected")?;
+        import::endpoint(url.as_str()).context("coinbase_search policy rejected")?;
         let client = self.source_client(owner)?;
         let manager = self.clone();
         let owned_client = client.clone();
         client.run_owned(async move {
             let identity = owned_client.documentation_identity().await.map_err(|_| anyhow::anyhow!("coinbase_search identity unavailable"))?;
             let factory = network::global();
-            let selected = factory.http_participating(&identity, url.as_str(), import::read_timeout(&manager.policy, None), true, owned_client.transport())
+            let selected = factory.http_participating(&identity, url.as_str(), import::read_timeout(None), true, owned_client.transport())
                 .map_err(|_| anyhow::anyhow!("coinbase_search transport selection failed"))?;
-            match origin(&url, &selected, manager.policy.max_response_bytes).await {
+            match origin(&url, &selected, crate::limits::RESPONSE_BYTES).await {
                 Ok(value) => output(value, "origin"),
                 Err(failure) if !failure.fallback => Err(failure.error.context("coinbase_search origin response rejected")),
                 Err(failure) => {
@@ -155,7 +155,7 @@ impl Manager {
                         tracing::warn!(stage = "coinbase_search", "Coinbase search failed; origin acquisition exhausted and fallback unavailable");
                         return Err(failure.error.context("coinbase_search origin failed; fallback unavailable"));
                     };
-                    let response = relay.fetch(owned_client, url.as_str(), &manager.policy, validate_response, failure.retry_after).await
+                    let response = relay.fetch(owned_client, url.as_str(), validate_response, failure.retry_after).await
                         .context("coinbase_search fallback failed; do not automatically repeat: payment or side effects may have occurred")?;
                     let value = parse_response(&response.body)
                         .context("coinbase_search target response invalid; do not automatically repeat: payment may have occurred")?;

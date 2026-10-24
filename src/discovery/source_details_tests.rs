@@ -4,9 +4,7 @@ use rmcp::ServerHandler;
 
 #[tokio::test]
 async fn input_and_listener_authority_precede_io() {
-    let mut policy = policy(None);
-    policy.allowed_origins = vec!["https://api.example.com".into()];
-    let m = manager_with(policy, listeners(false)).await;
+    let m = manager_with(listeners(false)).await;
     for demand in [false, true] {
         let mut s = server(&m, "hidden");
         s.discover_on_demand = demand;
@@ -38,7 +36,6 @@ async fn input_and_listener_authority_precede_io() {
         json!({"base_url":"http://api.example.com"}),
         json!({"base_url":"https://127.0.0.1"}),
         json!({"base_url":"https://user:secret@api.example.com"}),
-        json!({"base_url":"https://other.example.com"}),
     ] {
         assert!(
             m.invoke_source_details("writer", args.as_object().unwrap())
@@ -73,7 +70,6 @@ async fn directory_listing_survives_unavailable_url_discovery() {
     // A free directory response can be received without a documentation wallet.
     // The optional probe identity must not hide the already received listing.
     let m = Manager::new(
-        policy(None),
         listeners(false),
         BTreeMap::from([("shared".into(), PaidClient::unsigned())]),
         Arc::new(CatalogState::default()),
@@ -162,7 +158,7 @@ async fn fixture() {
                 "/v1/openapi.json" => axum::Json(json!({"openapi":"3.1.0","info":{"title":"Fixture","version":"1"},"servers":[{"url":"https://api.example.com/v1"}],"paths":{"/read":{"get":{}}}})).into_response(),
                 "/openapi.json" => ([("content-type", "text/html")], "<!doctype html><html>fallback</html>").into_response(),
                 "/llms.txt" => ([("content-type", "text/plain")], "# Fixture API\nSee the provider docs.").into_response(),
-                "/v1/llms-full.txt" => ([("content-type", "text/plain")], "x".repeat(1024)).into_response(),
+                "/v1/llms-full.txt" => ([("content-type", "text/plain")], "x".repeat(crate::limits::HELP_BYTES + 1)).into_response(),
                 "/.well-known/x402" => axum::Json(json!({"resources":[]})).into_response(),
                 _ => StatusCode::NOT_FOUND.into_response(),
             }
@@ -201,10 +197,7 @@ async fn fixture() {
             )
         })
         .collect();
-    let mut p = policy(None);
-    p.allowed_origins = vec!["https://api.example.com".into()];
-    p.max_help_bytes = 64;
-    let m = Manager::new(p, ls, payers, Arc::new(CatalogState::default()), vec![])
+    let m = Manager::new(ls, payers, Arc::new(CatalogState::default()), vec![])
         .await
         .unwrap();
     *m.fixture_directory.lock().unwrap() = Some("https://api.example.com/directory".into());
@@ -259,7 +252,7 @@ async fn fixture() {
             result("/v1/llms-full.txt")["reason"]
                 .as_str()
                 .unwrap()
-                .contains("max_help_bytes=64")
+                .contains(&format!("max_help_bytes={}", crate::limits::HELP_BYTES))
         );
         assert_eq!(
             result("/.well-known/x402")["status"],

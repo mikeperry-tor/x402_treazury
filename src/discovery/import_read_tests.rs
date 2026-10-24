@@ -105,7 +105,7 @@ async fn concurrent_imports_outlive_waiters_and_completed_cache_churn() {
     assert_eq!(m.catalog.read().views["writer"].len(), 2 * (IMPORTS + 12));
     let cache = m.fetches.lock().unwrap();
     assert!(cache.values().all(|cell| cell.get().is_some()));
-    assert_eq!(cache.len(), 128 * 1024 * 1024 / m.policy.max_spec_bytes);
+    assert_eq!(cache.len(), 128 * 1024 * 1024 / crate::limits::SPEC_BYTES);
     server.abort();
 }
 
@@ -433,7 +433,6 @@ async fn paid_import_fixture() {
         crate::catalog::Config::default(),
     ));
     let m = Manager::new_with_search(
-        policy(None),
         configured,
         BTreeMap::from([("shared".into(), payer())]),
         Arc::new(CatalogState::new(snapshot)),
@@ -582,10 +581,9 @@ async fn all_unsupported_refresh_avoids_authority() {
     let value = json!({"version":1,
         "network": fixture_network(),
         "wallets":{"shared":{"mode":"static","private_key_env":"IMPORT_UNSUPPORTED_MISSING_KEY"}},
-        "source_management":{"wallet":"shared","registry_file":registry},
         "relay_fallback":{"relays":{"GET":[provider]},"provider_metadata":true},
         "treasury":{"state_dir":dir.path().join("untouched-state"),"key_file":dir.path().join("untouched-key")},
-        "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true}}
+        "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true,"wallet":"shared","source_registry_file":registry}}
     });
     std::fs::write(&config, toml::to_string(&value).unwrap()).unwrap();
     let error = maintain_cli(&config, "writer", &id, true)
@@ -601,10 +599,7 @@ async fn all_unsupported_refresh_avoids_authority() {
     assert!(!format!("{error:#}").contains("selected signing key unavailable"));
     assert!(!dir.path().join("untouched-state").exists());
     assert!(!dir.path().join("untouched-key").exists());
-    let mut policy = policy(Some(registry));
-    policy.resolve(&config);
-    let options =
-        import::options(&policy, "https://api.example.com/imports/supported", None).unwrap();
+    let options = import::options("https://api.example.com/imports/supported", None).unwrap();
     let relay_policy: crate::discovery_relay::Policy =
         serde_json::from_value(value["relay_fallback"].clone()).unwrap();
     let relay = crate::discovery_relay::SearchRelay::load(&relay_policy, &config)
@@ -675,10 +670,9 @@ async fn supported_paid_cli_refresh(state: &PaidImport) {
             "shared":{"mode":"static","private_key_env":"TREAZURY_IMPORT_CLI_UNUSED_KEY"},
             "selected":{"mode":"static","private_key_env":"TREAZURY_IMPORT_CLI_SELECTED_KEY"},
             "unrelated":{"mode":"static","private_key_env":"TREAZURY_IMPORT_CLI_UNUSED_KEY"}},
-        "source_management":{"wallet":"shared","registry_file":registry},
         "relay_fallback":{"relays":{"GET":[provider]},"provider_metadata":true},
         "treasury":{"state_dir":dir.path().join("untouched-state"),"key_file":dir.path().join("untouched-key")},
-        "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true,"wallet":"selected"}}
+        "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true,"wallet":"selected","source_registry_file":registry}}
     });
     std::fs::write(&config, toml::to_string(&value).unwrap()).unwrap();
     maintain_cli(&config, "writer", &id, true).await.unwrap();

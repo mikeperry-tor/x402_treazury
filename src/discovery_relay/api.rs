@@ -13,7 +13,6 @@ use std::sync::Arc;
 pub(crate) fn fallback<'a>(
     client: &'a PaidClient,
     request: &'a reqwest::Request,
-    origins: &'a [String],
     failure: Failure,
     progress: &'a SubmissionProgress,
     capacity: &'a [Arc<tokio::sync::Semaphore>],
@@ -37,7 +36,7 @@ pub(crate) fn fallback<'a>(
             url: request.url().clone(),
             headers: request.headers().clone(),
             body,
-            allowed_origins: origins.to_vec(),
+            allowed_origins: Vec::new(),
         };
         let prepared = relay.prepare(&target, client.response_limit())?;
         if prepared.is_empty() {

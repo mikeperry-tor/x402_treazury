@@ -1299,9 +1299,6 @@ async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() 
                     &format!("[servers.research]\ninstructions_text='{authored}'"),
                 );
             }
-            if management {
-                text.push_str("\n[source_management]\nwallet='shared'\n");
-            }
             let path = write_config(dir.path(), &text);
             let deployment = Deployment::load(&path).await.unwrap();
             let inventory = deployment.inventory();

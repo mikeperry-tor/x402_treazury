@@ -1,3 +1,5 @@
+#[path = "registry_tests.rs"]
+mod registry_tests;
 use super::*;
 #[path = "coinbase_network_tests.rs"]
 mod coinbase_network_tests;
@@ -12,10 +14,18 @@ mod curated_network_tests;
 #[path = "curated_tests.rs"]
 mod curated_tests;
 fn listeners(_persistent: bool) -> BTreeMap<String, ListenerConfig> {
-    ["writer", "reader", "hidden"].into_iter().map(|id| (id.into(), serde_json::from_value(json!({"listen":"127.0.0.1:0","bearer_token_env":"TEST_TOKEN","sources":[],"source_management":id != "hidden"})).unwrap())).collect()
+    ["writer", "reader", "hidden"].into_iter().map(|id| (id.into(), serde_json::from_value(json!({"listen":"127.0.0.1:0","bearer_token_env":"TEST_TOKEN","sources":[],"wallet":"shared","source_management":id != "hidden"})).unwrap())).collect()
 }
-fn policy(file: Option<PathBuf>) -> policy::Policy {
-    serde_json::from_value(json!({"wallet":"shared","registry_file":file})).unwrap()
+fn with_registry(
+    mut listeners: BTreeMap<String, ListenerConfig>,
+    file: Option<PathBuf>,
+) -> BTreeMap<String, ListenerConfig> {
+    if let Some(file) = &file {
+        listeners.get_mut("reader").unwrap().source_registry_file =
+            Some(file.with_file_name("reader-registry.sqlite"));
+    }
+    listeners.get_mut("writer").unwrap().source_registry_file = file;
+    listeners
 }
 
 fn payer() -> PaidClient {
@@ -28,17 +38,13 @@ fn payer() -> PaidClient {
     )
 }
 
-async fn manager_with(
-    policy: policy::Policy,
-    listeners: BTreeMap<String, ListenerConfig>,
-) -> Arc<Manager> {
+async fn manager_with(listeners: BTreeMap<String, ListenerConfig>) -> Arc<Manager> {
     let snapshot = CatalogSnapshot {
         instructions: Default::default(),
         generation: 0,
         views: listeners.keys().map(|k| (k.clone(), vec![])).collect(),
     };
     Manager::new(
-        policy,
         listeners,
         BTreeMap::from([("shared".into(), payer())]),
         Arc::new(CatalogState::new(snapshot)),
@@ -50,7 +56,7 @@ async fn manager_with(
 
 async fn manager(file: Option<PathBuf>) -> Arc<Manager> {
     let persist = file.is_some();
-    manager_with(policy(file), listeners(persist)).await
+    manager_with(with_registry(listeners(persist), file)).await
 }
 
 fn spec() -> Value {
@@ -86,7 +92,8 @@ fn fetch_key_for(m: &Manager, owner: &str, url: &str) -> FetchKey {
     FetchKey {
         url: url.into(),
         transport: Default::default(),
-        timeout: import::read_timeout(&m.policy, None),
+        timeout: import::read_timeout(None),
+        max_spec_bytes: crate::limits::SPEC_BYTES,
         authority,
         policy: client.document_policy_key(),
     }
@@ -169,7 +176,7 @@ fn imported_and_saved_catalogs_share_post_preference_and_body_routing() {
     let mut doc = spec();
     doc["paths"]["/read"]["post"] = json!({"requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"q":{"type":"string"}}}}}}});
     let bytes = serde_json::to_vec(&doc).unwrap();
-    let built = import::build(&policy(None), &c, &bytes).unwrap();
+    let built = import::build(&c, &bytes).unwrap();
     let saved = import::saved_tools(&c, &bytes).unwrap();
     assert_eq!(
         serde_json::to_value(&built.tools).unwrap(),
@@ -187,9 +194,8 @@ fn imported_and_saved_catalogs_share_post_preference_and_body_routing() {
 
 #[test]
 fn importer_rejects_unsafe_and_expanding_documents() {
-    let p = policy(None);
     let c: Candidate = serde_json::from_value(candidate("demo", "process", "server")).unwrap();
-    assert!(import::build(&p, &c, &serde_json::to_vec(&spec()).unwrap()).is_ok());
+    assert!(import::build(&c, &serde_json::to_vec(&spec()).unwrap()).is_ok());
     for url in [
         "file:///etc/passwd",
         "http://api.example.com",
@@ -201,7 +207,7 @@ fn importer_rejects_unsafe_and_expanding_documents() {
         "https://metadata.internal",
         "https://0177.0.0.1",
     ] {
-        assert!(import::endpoint(&p, url).is_err(), "{url}");
+        assert!(import::endpoint(url).is_err(), "{url}");
     }
     for replacement in [
         json!({"$ref":"https://evil.example.com/schema"}),
@@ -210,18 +216,18 @@ fn importer_rejects_unsafe_and_expanding_documents() {
     ] {
         let mut doc = spec();
         doc["components"] = replacement;
-        assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
+        assert!(import::build(&c, &serde_json::to_vec(&doc).unwrap()).is_err());
     }
     let mut doc = spec();
     doc["paths"]["/read"]["get"]["servers"] = json!([{"url":"https://evil.example.com"}]);
-    assert!(import::build(&p, &c, &serde_json::to_vec(&doc).unwrap()).is_err());
+    assert!(import::build(&c, &serde_json::to_vec(&doc).unwrap()).is_err());
     let mut doc = spec();
     doc["components"] = json!({"x0":{"type":"string"}});
     for n in 1..25 {
         doc["components"][format!("x{n}")] = json!({"allOf":[{"$ref":format!("#/components/x{}",n-1)},{"$ref":format!("#/components/x{}",n-1)}]});
     }
     assert!(
-        import::build(&p, &c, &serde_json::to_vec(&doc).unwrap())
+        import::build(&c, &serde_json::to_vec(&doc).unwrap())
             .unwrap_err()
             .to_string()
             .contains("complexity")
@@ -230,26 +236,20 @@ fn importer_rejects_unsafe_and_expanding_documents() {
 
 #[test]
 fn import_pipeline_preserves_origin_checks_and_validation_before_selection() {
-    let mut p = policy(None);
     let mut c: Candidate = serde_json::from_value(candidate("demo", "process", "server")).unwrap();
-    let build = |p: &policy::Policy, c: &Candidate, doc: &Value| {
-        import::build(p, c, &serde_json::to_vec(doc).unwrap())
-    };
+    let build = |c: &Candidate, doc: &Value| import::build(c, &serde_json::to_vec(doc).unwrap());
     let mut doc = spec();
     doc["servers"][0]["url"] = json!("/v1");
-    assert_eq!(
-        build(&p, &c, &doc).unwrap().base,
-        "https://api.example.com/v1"
-    );
+    assert_eq!(build(&c, &doc).unwrap().base, "https://api.example.com/v1");
     c.base_url = Some("https://api.example.com/override".into());
     doc.as_object_mut().unwrap().remove("servers");
     assert_eq!(
-        build(&p, &c, &doc).unwrap().base,
+        build(&c, &doc).unwrap().base,
         c.base_url.as_ref().unwrap().as_str()
     );
     c.base_url = Some("https://api.example.com/v1?secret=value".into());
     assert!(
-        build(&p, &c, &doc)
+        build(&c, &doc)
             .unwrap_err()
             .to_string()
             .contains("base_url must not contain query")
@@ -287,34 +287,22 @@ fn import_pipeline_preserves_origin_checks_and_validation_before_selection() {
         };
         target[field] = value;
         assert!(
-            build(&p, &c, &bad).unwrap_err().to_string().contains(error),
+            build(&c, &bad).unwrap_err().to_string().contains(error),
             "{error}"
         );
     }
     // Selection still restricts the inventory without a per-source quota.
-    assert_eq!(build(&p, &c, &spec()).unwrap().tools.len(), 1);
+    assert_eq!(build(&c, &spec()).unwrap().tools.len(), 1);
     c.selection.include.clear();
-    assert_eq!(build(&p, &c, &spec()).unwrap().tools.len(), 2);
+    assert_eq!(build(&c, &spec()).unwrap().tools.len(), 2);
 
     let cross_origin = json!({"openapi":"3.0.3", "servers":[{"url":"https://api.example.com"}],
         "paths":{"https://other.example.com/read":{"get":{}}}});
     assert!(
-        build(&p, &c, &cross_origin)
+        build(&c, &cross_origin)
             .unwrap_err()
             .to_string()
             .contains("cross_origin_operation_rejected")
-    );
-    p.allowed_origins = vec![
-        "https://api.example.com".into(),
-        "https://other.example.com".into(),
-    ];
-    assert_eq!(build(&p, &c, &cross_origin).unwrap().tools.len(), 1);
-    p.allowed_origins = vec!["https://api.example.com".into()];
-    assert!(
-        build(&p, &c, &cross_origin)
-            .unwrap_err()
-            .to_string()
-            .contains("destination origin not authorized")
     );
 }
 
@@ -482,9 +470,7 @@ async fn public_transport_child() {
     .unwrap()
     .with_test_root(crate::test_tls::CA);
     crate::network::install_test_context(context);
-    let p = policy(None);
     let bytes = import::fetch_with(
-        &p,
         "https://spec.example.com/openapi.json",
         None,
         &PaidClient::unsigned(),
@@ -508,7 +494,6 @@ async fn public_transport_child() {
     for path in ["redirect", "downgrade"] {
         assert!(
             import::fetch_with(
-                &p,
                 &format!("https://spec.example.com/{path}"),
                 None,
                 &PaidClient::unsigned()
@@ -519,7 +504,6 @@ async fn public_transport_child() {
     }
     assert!(
         import::fetch_with(
-            &p,
             "https://127.0.0.1/openapi.json",
             None,
             &PaidClient::unsigned()
@@ -544,7 +528,7 @@ async fn public_transport_child() {
         .http_participating(
             &discovery_id,
             "https://spec.example.com/openapi.json",
-            import::read_timeout(&p, None),
+            import::read_timeout(None),
             true,
             Default::default(),
         )
@@ -611,10 +595,9 @@ async fn public_transport_child() {
         .insert("tags".into(), toml::Value::try_from(vec!["read"]).unwrap());
     std::fs::write(&config, toml::to_string(&config_value).unwrap()).unwrap();
     maintain_cli(&config, "writer", &id, true).await.unwrap();
-    let filtered_policy = policy(Some(file.clone()));
     let mut filtered_listeners = listeners(true);
     filtered_listeners.get_mut("writer").unwrap().tags = vec!["read".into()];
-    let restored = manager_with(filtered_policy, filtered_listeners).await;
+    let restored = manager_with(with_registry(filtered_listeners, Some(file.clone()))).await;
     assert_eq!(restored.catalog.read().views["writer"].len(), 1);
     assert_eq!(
         restored.catalog.read().views["writer"][0].tool.name,
@@ -845,7 +828,7 @@ async fn registry_persistence_is_operator_controlled_and_revocation_is_local() {
     drop(m);
     let mut ls = listeners(true);
     ls.get_mut("writer").unwrap().source_management = false;
-    let m = manager_with(policy(Some(file)), ls).await;
+    let m = manager_with(with_registry(ls, Some(file))).await;
     assert!(m.catalog.read().views.values().all(Vec::is_empty));
     assert!(
         m.inner
@@ -893,11 +876,18 @@ async fn failed_persistence_never_publishes_and_committed_add_recovers() {
     m.inner
         .lock()
         .unwrap()
-        .store
-        .as_ref()
+        .stores
+        .get("writer")
         .unwrap()
         .reject_writes();
-    seed(&m).await;
+    m.inner
+        .lock()
+        .unwrap()
+        .stores
+        .get("reader")
+        .unwrap()
+        .reject_writes();
+    seed_for(&m, "reader").await;
     assert!(
         m.invoke(
             "reader",
@@ -926,7 +916,6 @@ async fn endpoint_wallet_override_and_filters_preserve_boundaries() {
         views: ls.keys().map(|id| (id.clone(), vec![])).collect(),
     };
     let m = Manager::new(
-        policy(None),
         ls,
         BTreeMap::from([
             ("shared".into(), shared.clone()),
@@ -1055,8 +1044,8 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
         )
         .unwrap(),
     ));
-    let ls = listeners(true);
     let registry = tmp.path().join("registry.sqlite");
+    let ls = with_registry(listeners(true), Some(registry.clone()));
     let (url, task) = listen(
         axum::Router::new().route("/spec", axum::routing::get(|| async { axum::Json(spec()) })),
     )
@@ -1067,7 +1056,6 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
         views: ls.keys().map(|k| (k.clone(), vec![])).collect(),
     };
     let m = Manager::new(
-        policy(Some(registry.clone())),
         ls.clone(),
         BTreeMap::from([("shared".into(), managed.clone())]),
         Arc::new(CatalogState::new(snapshot)),
@@ -1100,7 +1088,6 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
     assert_eq!(before, after);
     drop(m);
     let reopened = Manager::new(
-        policy(Some(registry)),
         ls.clone(),
         BTreeMap::from([("shared".into(), managed)]),
         Arc::new(CatalogState::new(CatalogSnapshot {
@@ -1140,7 +1127,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
 fn operator_config(dir: &std::path::Path, file: &std::path::Path) -> PathBuf {
     let path = dir.join("deployment.toml");
     let config = json!({"version":1,"wallets":{"shared":{"mode":"static","private_key_env":"UNUSED_KEY"}},
-        "source_management":{"wallet":"shared","registry_file":file},"servers":{"writer":{"listen":"127.0.0.1:8000","bearer_token_env":"UNUSED_TOKEN","source_management":true}}});
+        "servers":{"writer":{"listen":"127.0.0.1:8000","bearer_token_env":"UNUSED_TOKEN","source_management":true,"wallet":"shared","source_registry_file":file}}});
     std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     path
 }
@@ -1215,17 +1202,18 @@ state_dir='state'
 confidentiality='public'
 [wallets.agent_shared]
 {wallet}
-[source_management]
-wallet='agent_shared'
-registry_file='registry.sqlite'
 [servers.research]
 listen='127.0.0.1:0'
 bearer_token_env='UNSET_RESEARCH_TOKEN'
 source_management=true
+wallet="agent_shared"
+source_registry_file="registry.sqlite"
 [servers.analysis]
 listen='127.0.0.1:0'
 bearer_token_env='UNSET_ANALYSIS_TOKEN'
 source_management=true
+wallet="agent_shared"
+source_registry_file="registry.sqlite"
 "#
             ),
         )
@@ -1233,13 +1221,9 @@ source_management=true
         let shown = crate::deployment::Deployment::show_config(&path)
             .await
             .unwrap();
-        assert_eq!(shown["source_management"]["scope"], "endpoint_local");
         for endpoint in ["research", "analysis"] {
             assert_eq!(shown["servers"][endpoint]["source_management"], true);
-            assert_eq!(
-                shown["source_management"]["wallet_bindings"][endpoint],
-                "agent_shared"
-            );
+            assert_eq!(shown["servers"][endpoint]["wallet"], "agent_shared");
         }
         assert!(!dir.path().join("registry.sqlite").exists());
         assert!(!dir.path().join("state").exists());
@@ -1283,7 +1267,12 @@ async fn saved_nonlocal_bindings_stay_disabled_and_duplicate_add_is_readable() {
             .unwrap()
             .targets
             .push("removed_endpoint".into());
-        inner.store.as_mut().unwrap().save(&state).unwrap();
+        inner
+            .stores
+            .get_mut("writer")
+            .unwrap()
+            .save(&state)
+            .unwrap();
     }
     drop(m);
     let m = manager(Some(file)).await;
@@ -1316,12 +1305,6 @@ fn embedded_directory_matches_reviewed_search_contract() {
             serde_json::to_value(expected).unwrap()
         );
     }
-    assert!(
-        serde_json::from_value::<policy::Policy>(
-            json!({"wallet":"shared","directory_tool":"custom"})
-        )
-        .is_err()
-    );
 }
 
 #[tokio::test]
@@ -1335,12 +1318,11 @@ version = 1
 [wallets.shared]
 mode = "static"
 private_key_env = "TEST_KEY"
-[source_management]
-wallet = "shared"
 [servers.research]
 listen = "127.0.0.1:0"
 bearer_token_env = "TEST_TOKEN"
 source_management = true
+wallet = "shared"
 # API filters must not hide management tools.
 exclude_tools = ["*"]
 "#,
@@ -1464,7 +1446,10 @@ async fn directory_payment_fixture() {
                         return ([("content-type", "image/png")], "invalid image").into_response();
                     }
                     "/raw/large" => {
-                        return ([("content-type", "text/plain")], "x".repeat(1024))
+                        return (
+                            [("content-type", "text/plain")],
+                            "x".repeat(crate::limits::RESPONSE_BYTES + 1),
+                        )
                             .into_response();
                     }
                     _ => {}
@@ -1528,17 +1513,9 @@ async fn directory_payment_fixture() {
         views: ls.keys().map(|name| (name.clone(), vec![])).collect(),
         ..Default::default()
     };
-    let mut policy = policy(None);
-    policy.max_response_bytes = 512;
-    let manager = Manager::new(
-        policy,
-        ls,
-        clients,
-        Arc::new(CatalogState::new(snapshot)),
-        vec![],
-    )
-    .await
-    .unwrap();
+    let manager = Manager::new(ls, clients, Arc::new(CatalogState::new(snapshot)), vec![])
+        .await
+        .unwrap();
     assert_eq!(manager.directory("writer").unwrap().base, directory::BASE);
     // Use the public hostname on the fixture certificate; retain public-destination checks.
     *manager.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
@@ -2258,9 +2235,7 @@ async fn on_demand_management_keeps_seven_wrappers_and_scoped_dynamic_search() {
 #[tokio::test]
 async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
     use rmcp::ServerHandler;
-    let mut policy = policy(None);
-    policy.allowed_origins = vec!["https://api.example.com".into()];
-    let manager = manager_with(policy, listeners(false)).await;
+    let manager = manager_with(listeners(false)).await;
     for on_demand in [false, true] {
         let mut disabled = server(&manager, "hidden");
         disabled.discover_on_demand = on_demand;
@@ -2314,7 +2289,7 @@ async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
         ),
         (
             raw::NAME,
-            json!({"method":"GET","url":"https://other.example.com/read"}),
+            json!({"method":"GET","url":"https://other.internal/read"}),
         ),
         (
             raw::NAME,
@@ -2604,25 +2579,6 @@ async fn accepted_static_publication_outlives_cancelled_waiter() {
     );
 }
 
-#[test]
-fn source_policy_removes_registration_and_source_tool_quotas() {
-    for removed in [
-        "max_sources",
-        "max_tools_per_source",
-        "max_tools_per_server",
-    ] {
-        let mut value = json!({"wallet":"shared"});
-        value[removed] = json!(1);
-        let error = serde_json::from_value::<policy::Policy>(value)
-            .err()
-            .unwrap();
-        assert!(error.to_string().contains(removed), "{error}");
-    }
-    let serialized = serde_json::to_value(policy(None)).unwrap();
-    assert!(serialized.get("max_sources").is_none());
-    assert!(serialized.get("max_tools_per_source").is_none());
-}
-
 #[tokio::test]
 async fn more_than_sixteen_sources_and_one_hundred_tools_are_accepted() {
     let m = manager(None).await;
@@ -2662,10 +2618,11 @@ async fn large_sources_survive_add_restart_and_static_publication_in_both_modes(
     for on_demand in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("registry.sqlite");
-        let p = policy(Some(file));
+        let configured_file = Some(file);
         let mut configured = listeners(true);
         configured.get_mut("writer").unwrap().discover_on_demand = on_demand;
-        let m = manager_with(p.clone(), configured.clone()).await;
+        let configured = with_registry(configured, configured_file);
+        let m = manager_with(configured.clone()).await;
         let mut doc = spec();
         doc["paths"] = (0..513).map(|i| (format!("/tool-{i}"), json!({"get":{"parameters":[{"name":"nested","in":"query","schema":{"type":"object","properties":{"value":{"type":"string"}}}}]}}))).collect::<serde_json::Map<_,_>>().into();
         register_spec(&m, "writer", "large", "large.json", doc)
@@ -2676,7 +2633,7 @@ async fn large_sources_survive_add_restart_and_static_publication_in_both_modes(
         m.replace_static(base.generation, base).await.unwrap();
         assert_eq!(m.catalog.read().views["writer"].len(), 513);
         drop(m);
-        let restored = manager_with(p, configured).await;
+        let restored = manager_with(configured).await;
         assert_eq!(restored.catalog.read().views["writer"].len(), 513);
         let found = restored
             .invoke(
@@ -2803,7 +2760,7 @@ async fn source_filters_use_readable_names_and_exclude_unmatched_tools() {
     ls.get_mut("writer").unwrap().include_tools = vec!["dyn_demo__read".into()];
     ls.get_mut("reader").unwrap().include_tools =
         vec!["dyn_00000000000000000000000000000001_*".into()];
-    let m = manager_with(policy(None), ls).await;
+    let m = manager_with(ls).await;
     register_spec(&m, "writer", "demo", "demo.json", spec())
         .await
         .unwrap();
@@ -2893,7 +2850,13 @@ async fn restore_unsupported_names_disables_only_the_affected_source() {
             .unwrap()
             .candidate
             .name = "old__name".into();
-        inner.store.as_mut().unwrap().save(&state).unwrap();
+        state.records.retain(|_, record| record.owner == "writer");
+        inner
+            .stores
+            .get_mut("writer")
+            .unwrap()
+            .save(&state)
+            .unwrap();
     }
     drop(m);
     let m = manager(Some(file)).await;
@@ -2968,11 +2931,12 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("registry.sqlite");
         let config = operator_config(dir.path(), &file);
-        let p = policy(Some(file));
+        let configured_file = Some(file);
         let mut configured = listeners(true);
         configured.get_mut("writer").unwrap().discover_on_demand = on_demand;
         configured.get_mut("writer").unwrap().exclude_tools = vec!["dyn_Filtered__*".into()];
-        let m = manager_with(p.clone(), configured.clone()).await;
+        let configured = with_registry(configured, configured_file);
+        let m = manager_with(configured.clone()).await;
         let mut base = m.static_snapshot().await.unwrap();
         let static_tools = crate::catalog::build_tools(
             &crate::catalog::Config {
@@ -3111,7 +3075,7 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
         let _ = http_task.await;
         drop(endpoint);
         drop(m);
-        let restored = manager_with(p.clone(), configured.clone()).await;
+        let restored = manager_with(configured.clone()).await;
         let result = restored
             .search_tools(
                 "writer",
@@ -3132,7 +3096,7 @@ async fn discovery_help_omits_cached_source_state_across_publication_and_restart
         maintain_cli(&config, "writer", &first_id, false)
             .await
             .unwrap();
-        let removed = manager_with(p, configured).await;
+        let removed = manager_with(configured).await;
         let description = server(&removed, "writer")
             .get_tool("x402_treazury_tools_search")
             .unwrap()
@@ -3324,7 +3288,7 @@ async fn automatic_source_names_are_readable_collision_safe_and_duplicate_safe()
         .unwrap()
         .sources
         .push("api-example-com".into());
-    let m = manager_with(policy(None), configured).await;
+    let m = manager_with(configured).await;
     for path in ["first.json", "second.json"] {
         let cell = OnceCell::new();
         cell.set(Fetched {
@@ -3468,7 +3432,7 @@ async fn legacy_registry_bookkeeping_does_not_block_restore_or_registration() {
 async fn simplified_tool_wrappers_reject_old_fields_and_filtered_names() {
     let mut configured = listeners(false);
     configured.get_mut("writer").unwrap().include_tools = vec!["dyn_demo__read".into()];
-    let m = manager_with(policy(None), configured).await;
+    let m = manager_with(configured).await;
     add(&m, "demo", "", "").await;
     let found = m
         .invoke("writer", "x402_treazury_tools_search", json!({}))
