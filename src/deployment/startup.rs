@@ -171,7 +171,7 @@ impl Downloads {
         let cell = {
             let mut entries = self.entries.lock().expect("catalog download map poisoned");
             if entries.contains_key(&key) {
-                tracing::info!(target: "x402_treazury::startup", source = id, cache = "shared_load",
+                tracing::debug!(target: "x402_treazury::startup", source = id, cache = "shared_load",
                     "Sharing compatible catalog download or parsed document");
             }
             entries.entry(key).or_default().clone()
@@ -318,7 +318,7 @@ pub(super) async fn load(
                         Ok(SourceLoad::Pending(source)) => {
                             unavailable.insert(source_id.clone(), source.config.prefix.clone().expect("resolved prefix"));
                             deferred.insert(source_id.clone(), source);
-                            tracing::info!(source=source_id, state="pending", "Catalog relay continuation retained for serving");
+                            tracing::debug!(source=source_id, state="pending", "Catalog load retained for serving");
                             continue;
                         }
                         Err(error) if warn && !crate::qualification::active() && !catalog_evidence::collecting()

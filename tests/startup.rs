@@ -359,13 +359,17 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
             fixture.release(id);
         }
         let dir = tempfile::tempdir().unwrap();
-        let path = config(
-            dir.path(),
-            &format!("http://{}", fixture.address),
-            2,
-            None,
-            "",
-        );
+        let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 3, 2);
+        let local = dir.path().join("local.json");
+        std::fs::write(
+            &local,
+            r#"{"servers":[{"url":"https://api.example"}],"paths":{"/local":{"get":{}}}}"#,
+        )
+        .unwrap();
+        let mut deployment: toml::Value = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        deployment["sources"]["s02"]["spec"] =
+            toml::Value::String(local.to_string_lossy().into_owned());
+        std::fs::write(&path, toml::to_string(&deployment).unwrap()).unwrap();
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
         command.env_remove("RUST_LOG");
         if debug {
@@ -382,7 +386,7 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
             String::from_utf8_lossy(&output.stderr)
         );
         let inventory: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(inventory[0]["tools"].as_array().unwrap().len(), 4);
+        assert_eq!(inventory[0]["tools"].as_array().unwrap().len(), 5);
         let log = String::from_utf8(output.stderr).unwrap();
         for message in [
             "HTTP response protocol",
@@ -392,6 +396,11 @@ async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
             "Catalog JSON parse complete",
             "Catalog fetch/parse finished",
             "Catalog generation finished",
+            "Catalog disk cache configuration",
+            "Catalog loading local file",
+            "Catalog fetching origin",
+            "Catalog origin response cache policy",
+            "Sharing compatible catalog download or parsed document",
         ] {
             assert_eq!(
                 log.contains(message),

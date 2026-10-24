@@ -237,6 +237,10 @@ not establish exceptions; unrelated work does not require a broad logging audit.
 
 ### Diagnostic context
 
+Catalog file reads, origin fetches, cache configuration/policy, cache hits and
+writes, shared downloads and retained catalog-load handoffs are DEBUG. These
+implementation details do not announce readiness. Per-source catalog readiness,
+initial loading summaries and endpoint waiting/ready transitions remain INFO.
 Catalog cache-hit messages confirm a readable JSON document; tool generation and
 listener validation must still finish before a source is ready. Catalog failures
 report the authored source ID, `failure_stage`, a fixed plain-language `reason`,

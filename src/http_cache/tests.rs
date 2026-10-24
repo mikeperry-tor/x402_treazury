@@ -498,51 +498,63 @@ async fn explicit_direct_entries_have_separate_provenance_and_require_freshness(
 #[tokio::test]
 async fn catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_urls() {
     use tracing::instrument::WithSubscriber;
-    let dir = tempfile::tempdir().unwrap();
-    let (url, origin, task) = fixture().await;
-    let mut cfg = config(dir.path());
-    cfg.spec = format!("{url}?token=private-token");
-    cfg.discovery_source = Some("fixture_source".into());
-    let log = tempfile::NamedTempFile::new().unwrap();
-    let subscriber = tracing_subscriber::fmt()
-        .without_time()
-        .with_ansi(false)
-        .with_writer(log.reopen().unwrap())
-        .finish();
-    async {
-        catalog::load_json_discovery(&cfg).await.unwrap();
-        catalog::load_json_discovery(&cfg).await.unwrap();
-        let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
-        let mut entry = slot.read().await.unwrap();
-        entry.metadata.expires = 0;
-        slot.write(Some(entry)).await;
-        origin.lock().unwrap().mode = 1;
-        catalog::load_json_discovery(&cfg).await.unwrap();
-        let mut entry = slot.read().await.unwrap();
-        entry.metadata.expires = 0;
-        slot.write(Some(entry)).await;
-        origin.lock().unwrap().mode = 2;
-        catalog::load_json_discovery(&cfg).await.unwrap();
-        assert!(slot.read().await.unwrap().metadata.fresh());
+    for debug in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let (url, origin, task) = fixture().await;
+        let mut cfg = config(dir.path());
+        cfg.spec = format!("{url}?token=private-token");
+        cfg.discovery_source = Some("fixture_source".into());
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(if debug {
+                tracing::Level::DEBUG
+            } else {
+                tracing::Level::INFO
+            })
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        async {
+            catalog::load_json_discovery(&cfg).await.unwrap();
+            catalog::load_json_discovery(&cfg).await.unwrap();
+            let slot = Slot::new(&cfg, &cfg.spec, "catalog", cfg.max_spec_bytes).unwrap();
+            let mut entry = slot.read().await.unwrap();
+            entry.metadata.expires = 0;
+            slot.write(Some(entry)).await;
+            origin.lock().unwrap().mode = 1;
+            catalog::load_json_discovery(&cfg).await.unwrap();
+            let mut entry = slot.read().await.unwrap();
+            entry.metadata.expires = 0;
+            slot.write(Some(entry)).await;
+            origin.lock().unwrap().mode = 2;
+            catalog::load_json_discovery(&cfg).await.unwrap();
+            assert!(slot.read().await.unwrap().metadata.fresh());
+        }
+        .with_subscriber(subscriber)
+        .await;
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        for field in [
+            "fixture_source",
+            "cache=\"miss\"",
+            "cache=\"stored\"",
+            "cache=\"disk_hit\"",
+            "cache=\"revalidate\"",
+            "cache=\"revalidated\"",
+            "origin_policy=\"no_store\"",
+        ] {
+            assert_eq!(
+                logs.contains(field),
+                debug,
+                "unexpected visibility for {field}: {logs}"
+            );
+        }
+        assert!(!logs.contains("INFO") && !logs.contains("WARN"), "{logs}");
+        assert!(!logs.contains(&url));
+        assert!(!logs.contains("private-token"));
+        assert_eq!(origin.lock().unwrap().calls.len(), 3);
+        task.abort();
     }
-    .with_subscriber(subscriber)
-    .await;
-    let logs = std::fs::read_to_string(log.path()).unwrap();
-    for field in [
-        "fixture_source",
-        "cache=\"miss\"",
-        "cache=\"stored\"",
-        "cache=\"disk_hit\"",
-        "cache=\"revalidate\"",
-        "cache=\"revalidated\"",
-        "origin_policy=\"no_store\"",
-    ] {
-        assert!(logs.contains(field), "missing {field}: {logs}");
-    }
-    assert!(!logs.contains(&url));
-    assert!(!logs.contains("private-token"));
-    assert_eq!(origin.lock().unwrap().calls.len(), 3);
-    task.abort();
 }
 
 #[test]
@@ -578,6 +590,7 @@ fn catalog_local_ttl_overrides_origin_freshness_and_logs_policy() {
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(log.reopen().unwrap())
         .finish();
     tracing::subscriber::with_default(subscriber, || {
@@ -602,7 +615,7 @@ fn catalog_local_ttl_overrides_origin_freshness_and_logs_policy() {
     });
     let logs = std::fs::read_to_string(log.path()).unwrap();
     for expected in [
-        "INFO",
+        "DEBUG",
         "ttl_seconds=86400",
         "ttl_seconds=120",
         "origin_policy=\"no_store\"",
@@ -610,6 +623,7 @@ fn catalog_local_ttl_overrides_origin_freshness_and_logs_policy() {
     ] {
         assert!(logs.contains(expected), "missing {expected}: {logs}");
     }
+    assert!(!logs.contains("INFO"), "{logs}");
     assert!(Metadata::from_headers(&HeaderMap::new(), Duration::ZERO, None).is_none());
     let delayed =
         Metadata::from_relay_headers(&HeaderMap::new(), Duration::from_secs(121), Some(120))

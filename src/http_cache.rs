@@ -189,7 +189,7 @@ impl Metadata {
         metadata.expires = metadata
             .stored
             .saturating_add(ttl_seconds.saturating_sub(delay.as_secs()));
-        tracing::info!(
+        tracing::debug!(
             cache_policy = "local_override",
             ttl_seconds,
             origin_policy =
@@ -596,21 +596,12 @@ impl Slot {
             Ok(stored)
         }).await;
         if matches!(result, Ok(Ok(true))) {
-            if self.resource == "catalog" {
-                tracing::info!(
-                    source = self.source,
-                    resource = self.resource,
-                    cache = "stored",
-                    "HTTP disk cache entry stored"
-                );
-            } else {
-                tracing::debug!(
-                    source = self.source,
-                    resource = self.resource,
-                    cache = "stored",
-                    "HTTP disk cache entry stored"
-                );
-            }
+            tracing::debug!(
+                source = self.source,
+                resource = self.resource,
+                cache = "stored",
+                "HTTP disk cache entry stored"
+            );
         }
         if !matches!(result, Ok(Ok(_))) {
             tracing::warn!(

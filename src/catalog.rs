@@ -418,7 +418,7 @@ pub async fn load_json_with_limit(
     limit: usize,
 ) -> Result<Value> {
     if !source.starts_with("https://") && !source.starts_with("http://") {
-        tracing::info!(cache = "local_file", "Catalog loading local file");
+        tracing::debug!(cache = "local_file", "Catalog loading local file");
         let bytes = tokio::fs::read(source)
             .await
             .context(LoadStage::LocalRead)?;
@@ -540,7 +540,7 @@ impl RelayContinuation {
                 response.catalog_cache_age(),
                 Some(cfg.catalog_cache_ttl_seconds),
             );
-            tracing::info!(
+            tracing::debug!(
                 cache = "relay_response",
                 cache_policy =
                     crate::http_cache::Metadata::policy_label(&response.headers, metadata.as_ref()),
@@ -600,7 +600,7 @@ pub(crate) async fn prepare_json_discovery_bounded(
     network: &crate::network::NetworkContext,
     gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
 ) -> Result<CatalogLoad> {
-    tracing::info!(
+    tracing::debug!(
         cache = crate::http_cache::Slot::availability(cfg, "catalog"),
         "Catalog disk cache configuration"
     );
@@ -609,7 +609,7 @@ pub(crate) async fn prepare_json_discovery_bounded(
             continue;
         };
         if let Ok(document) = parse_document(&entry.data) {
-            tracing::warn!(
+            tracing::debug!(
                 cache = "relay_disk_hit",
                 "Catalog JSON read from fresh relay cache; content supplied by configured relay; tool generation and validation still required"
             );
@@ -654,7 +654,7 @@ async fn load_json_discovery_origin(
 ) -> std::result::Result<Value, crate::network::acquisition::Failure> {
     let source = &cfg.spec;
     if !source.starts_with("https://") && !source.starts_with("http://") {
-        tracing::info!(cache = "local_file", "Catalog loading local file");
+        tracing::debug!(cache = "local_file", "Catalog loading local file");
         let bytes = tokio::fs::read(source)
             .await
             .context(LoadStage::LocalRead)
@@ -667,7 +667,7 @@ async fn load_json_discovery_origin(
         .as_ref()
         .is_some_and(|(entry, _)| entry.metadata.fresh())
     {
-        tracing::info!(
+        tracing::debug!(
             cache = "disk_hit",
             "Catalog JSON read from fresh HTTP disk cache; tool generation and validation still required"
         );
@@ -690,7 +690,7 @@ async fn load_json_discovery_origin(
     } else {
         "miss"
     };
-    tracing::info!(
+    tracing::debug!(
         cache,
         conditional = conditional.is_some(),
         "Catalog fetching origin"
@@ -856,7 +856,7 @@ async fn read_cached_catalog(
     match serde_json::from_slice::<Value>(&entry.data) {
         Ok(document) => Some((entry, document)),
         Err(_) => {
-            tracing::warn!("Invalid HTTP cached catalog; fetching origin");
+            tracing::debug!("Invalid HTTP cached catalog; fetching origin");
             slot.write(None).await;
             None
         }
@@ -890,7 +890,7 @@ async fn revalidate_cached_catalog(
         Some(&entry.metadata),
         slot.map_or(0, |s| s.catalog_ttl),
     );
-    tracing::info!(
+    tracing::debug!(
         cache_policy = crate::http_cache::Metadata::policy_label(headers, metadata.as_ref()),
         "Catalog revalidation response cache policy"
     );
@@ -901,7 +901,7 @@ async fn revalidate_cached_catalog(
         }))
         .await;
     }
-    tracing::info!(
+    tracing::debug!(
         cache = "revalidated",
         http_status = 304,
         "Catalog HTTP disk cache revalidated by origin"
@@ -925,7 +925,7 @@ async fn persist_catalog_response(
     } else {
         None
     };
-    tracing::info!(
+    tracing::debug!(
         cache = if slot.is_some() {
             "enabled"
         } else {

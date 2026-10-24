@@ -1214,7 +1214,7 @@ override does not change that process-wide hint lifetime; see
 
 A deployment source can override its provider's value. Any positive integer sets
 local retention regardless of upstream `Cache-Control` or `Expires`, including
-`no-store`, `no-cache` and `max-age=0`. INFO logs record
+`no-store`, `no-cache` and `max-age=0`. DEBUG logs record
 `cache_policy="local_override"`, `ttl_seconds`, and a fixed `origin_policy` label.
 `http_cache_enabled=false` disables disk caching. Changing the catalog TTL separates disk entries and shared startup loads.
 
@@ -1249,7 +1249,7 @@ clear it, stop the application and remove only `http-cache/`.
 
 Live qualification and captured qualification catalog loads bypass disk caching,
 so a historical cache hit cannot qualify a fresh network observation. Ordinary
-loads report source-specific cache decisions on stderr at info level: catalog
+loads report source-specific cache decisions on stderr at DEBUG: catalog
 `miss`, `disk_hit`, `revalidate`, `revalidated`, `shared_load`, and successful
 `stored` events. Configuration logs distinguish disabled caching from a missing
 cache directory. Response policy labels explain `local_override`,
