@@ -34,20 +34,17 @@ read_timeout_seconds = 60
 # Paid fallback for blocked catalog GETs, using each source's assigned
 # wallet. Shared sources choose one assigned profile deterministically; config
 # show reports discovery_wallets. Paid API calls retain their listener bindings.
-# Listeners bind before funding; relay-dependent catalogs appear as payers become usable.
-# Explicit paid warming requires an eligible payer; wallet bootstrap can prepare reserves.
-# Curl receives target URLs; connections retain wallet-bound Tor isolation.
-# Static relay outcomes are scoped to each configured provider and payer.
 [relay_fallback]
-# Discovery and provider metadata fallback default on; actual API data stays origin-only.
-source_discovery = true
-api_requests = false
-provider_metadata = true
+source_discovery = true # directory search and service metadata
+api_requests = false # opt in to disclose actual API requests
+provider_metadata = true # schemas/help, startup and explicit non-direct warming
 # wallet = "web" # optional override: share this wallet for all discovery
-# sources = ["social"] # omit to allow all authored sources
 
+# Select by original target method; absent/empty lists mean origin-only.
 [relay_fallback.relays]
-GET = ["../../providers/curl/provider.toml"]
+GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/agproxy.toml"]
+HEAD = ["../../providers/agproxy.toml"]
 
 # Treasury commands use this same state directory and its default wallet.key.
 [treasury]
