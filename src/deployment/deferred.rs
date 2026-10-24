@@ -1,5 +1,7 @@
 //! One serving-owned publisher; accepted relay work drains before financial owners.
 #[cfg(test)]
+mod readiness_tests;
+#[cfg(test)]
 mod startup_socks_tests;
 #[cfg(test)]
 mod tor_catalog_capacity_tests;
@@ -16,6 +18,7 @@ pub(super) struct Runtime {
     manager: Option<Arc<crate::discovery::Manager>>,
     relays: Vec<Arc<crate::discovery_relay::Relay>>,
     can_allocate: bool,
+    readiness: BTreeMap<String, tokio::sync::oneshot::Sender<Result<()>>>,
 }
 enum Event {
     OperatorStatus(String, Option<bool>, tokio::sync::watch::Receiver<bool>),
@@ -56,6 +59,7 @@ impl Runtime {
             .collect();
         Self {
             can_allocate,
+            readiness: BTreeMap::new(),
             #[cfg(test)]
             failure: None,
             deployment,
@@ -67,6 +71,46 @@ impl Runtime {
     }
     pub fn relays(&self) -> Vec<Arc<crate::discovery_relay::Relay>> {
         self.relays.clone()
+    }
+    pub fn catalog_readiness(
+        &mut self,
+    ) -> BTreeMap<String, tokio::sync::oneshot::Receiver<Result<()>>> {
+        self.deployment
+            .config
+            .servers
+            .iter()
+            .filter(|(_, config)| config.wait_for_catalogs)
+            .map(|(name, _)| {
+                let (sender, receiver) = tokio::sync::oneshot::channel();
+                self.readiness.insert(name.clone(), sender);
+                (name.clone(), receiver)
+            })
+            .collect()
+    }
+    // Derive completion from the catalog owner rather than tracking a second
+    // source ledger. Call only after the corresponding snapshot is published.
+    fn signal_readiness(&mut self) {
+        for name in self.readiness.keys().cloned().collect::<Vec<_>>() {
+            let sources = &self.deployment.config.servers[&name].sources;
+            let failed = sources.iter().find(|id| {
+                !self.deployment.pending_sources.contains_key(*id)
+                    && !self.deployment.sources.contains_key(*id)
+                    && !self.deployment.config.sources[*id].optional_startup
+            });
+            let result = if let Some(id) = failed {
+                Some(Err(anyhow::anyhow!("required catalog unavailable: {id}")))
+            } else if sources
+                .iter()
+                .all(|id| !self.deployment.pending_sources.contains_key(id))
+            {
+                Some(Ok(()))
+            } else {
+                None
+            };
+            if let Some(result) = result {
+                let _ = self.readiness.remove(&name).unwrap().send(result);
+            }
+        }
     }
     async fn publish(&self) -> Result<()> {
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
@@ -186,6 +230,7 @@ impl Runtime {
             }
         }
         let mut failure_guard = FailureGuard(self.catalog.clone(), true);
+        self.signal_readiness();
         #[cfg(test)]
         let failure_receiver = self.failure.take();
         #[cfg(test)]
@@ -269,8 +314,14 @@ impl Runtime {
                 self.catalog.mark_publication_failed();
                 break;
             }
+            self.signal_readiness();
         }
         drop(work);
+        for (_, sender) in std::mem::take(&mut self.readiness) {
+            let _ = sender.send(Err(anyhow::anyhow!(
+                "catalog publication stopped before endpoint readiness"
+            )));
+        }
         failure_guard.1 = false;
         self
     }
@@ -691,6 +742,7 @@ listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
 wallet='selected'
 sources=['healthy','late']
+wait_for_catalogs=false
 discover_on_demand=true
 instructions_text=''
 discovery_search_tool_instructions_text='Pending platform guidance'
@@ -886,6 +938,7 @@ listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
 wallet='selected'
 sources=['healthy','priced','failed']
+wait_for_catalogs=false
 "#
             ),
         )

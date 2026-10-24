@@ -493,9 +493,6 @@ async fn run_deployment(
         result = binding => result?,
         closed = parent.closed() => { closed?; anyhow::bail!("qualification supervisor closed during binding; startup cancelled"); }
     };
-    for (server, address) in running.addresses() {
-        tracing::info!(server, %address, "MCP listening at /mcp");
-    }
     serve_deployment(running, &mut parent).await
 }
 

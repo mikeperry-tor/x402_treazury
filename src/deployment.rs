@@ -67,10 +67,16 @@ use crate::rotation::config::{FundingConfig, TreasuryConfig};
 fn auth_enabled() -> bool {
     true
 }
+fn wait_for_catalogs_default() -> bool {
+    true
+}
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListenerConfig {
     pub listen: SocketAddr,
+    /// Wait for this listener's configured catalogs before accepting MCP requests.
+    #[serde(default = "wait_for_catalogs_default")]
+    pub wait_for_catalogs: bool,
     #[serde(default = "auth_enabled")]
     pub auth: bool,
     pub allowed_hosts: Option<Vec<String>>,
@@ -1472,11 +1478,16 @@ impl Deployment {
         let can_allocate = runtime.funding_available()
             && self.config.funding.as_ref().is_some_and(|f| f.auto_fund)
             && restriction == crate::rotation::restriction::FundingRestriction::Ordinary;
-        let deferred = self.defer_discovery.then(|| {
+        let mut deferred = self.defer_discovery.then(|| {
             deferred::Runtime::new(self, deferred_wallets, catalog, manager, can_allocate)
         });
+        let catalog_readiness = deferred
+            .as_mut()
+            .map(deferred::Runtime::catalog_readiness)
+            .unwrap_or_default();
         Ok(RunningDeployment {
             deferred,
+            catalog_readiness,
             listeners,
             accepted_work,
             #[cfg(test)]
@@ -1738,6 +1749,7 @@ type FundingRuntime = (
 );
 pub struct RunningDeployment {
     deferred: Option<deferred::Runtime>,
+    catalog_readiness: BTreeMap<String, tokio::sync::oneshot::Receiver<Result<()>>>,
     accepted_work: Vec<crate::server::work::Work>,
     #[cfg(test)]
     listener_failure: Option<(String, tokio::sync::oneshot::Receiver<()>)>,
@@ -1808,8 +1820,10 @@ impl RunningDeployment {
         let mut tasks = JoinSet::new();
         #[cfg(test)]
         let mut listener_failure = self.listener_failure;
+        let mut catalog_readiness = self.catalog_readiness;
         for (name, listener, app) in self.listeners {
             let stopped = listener_stop.clone();
+            let readiness = catalog_readiness.remove(&name);
             #[cfg(test)]
             let failure = if listener_failure.as_ref().is_some_and(|(id, _)| id == &name) {
                 listener_failure.take().map(|(_, signal)| signal)
@@ -1817,6 +1831,31 @@ impl RunningDeployment {
                 None
             };
             tasks.spawn(async move {
+                if let Some(readiness) = readiness {
+                    tracing::info!(server = name, "MCP endpoint waiting for catalogs");
+                    let ready = tokio::select! {
+                        biased;
+                        _ = stopped.cancelled() => return Ok(()),
+                        ready = readiness => ready
+                            .context("catalog discovery worker stopped before endpoint readiness")
+                            .and_then(|result| result),
+                    };
+                    if let Err(error) = ready {
+                        // Only fixed diagnostics and authored identities cross this
+                        // boundary; upstream errors/content must never be included.
+                        tracing::error!(server = name, reason = %error,
+                            "MCP endpoint unavailable; catalog startup failed; restart required");
+                        drop(listener);
+                        drop(app);
+                        stopped.cancelled().await;
+                        return Ok(());
+                    }
+                }
+                if stopped.is_cancelled() {
+                    return Ok(());
+                }
+                let address = listener.local_addr()?;
+                tracing::info!(server = name, %address, "MCP listening at /mcp");
                 let serving =
                     axum::serve(listener, app).with_graceful_shutdown(stopped.cancelled_owned());
                 #[cfg(test)]

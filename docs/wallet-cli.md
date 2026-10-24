@@ -146,9 +146,11 @@ minute. The first positive USDC observation satisfies the captured destination
 claim even when retained timeout diagnostics remain; exact pending source work
 stays owned and continues reconciling during serving.
 
-Ordinary managed `serve` binds listeners and exposes available tools before starting
-initial or replacement funding. Remote catalog discovery and pending paid
-relay discovery continue during serving under the retained owner; relay discovery
+Ordinary managed `serve` binds listener sockets before starting initial or replacement
+funding. MCP HTTP availability follows each endpoint's `wait_for_catalogs` setting
+(default true); see [catalog startup](configuration.md#multiple-mcp-ports-from-one-configuration).
+Remote catalog discovery and pending paid
+relay discovery continue under the retained owner; relay discovery
 waits for its assigned payer without allocating wallets itself. Serving does not
 wait for bootstrap completeness. `auto_fund=false` pauses new funding and makes
 explicit bootstrap fail, while accepted operations remain observed; qualification

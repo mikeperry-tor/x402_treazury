@@ -82,12 +82,38 @@ inspection and warming still require their complete selected results. Relay work
 reserves capacity for each HTTP attempt/body after serialization/cache/readiness
 checks and releases it before retry delays. Accepted ownership retains publication. Synchronous relay fallback traverses its configured list once;
 only deferred serving waits for discovery readiness. Ordinary deployment serving loads
-local catalogs, binds listeners and exposes available tools while remote catalog discovery
-runs in the background. Stderr and MCP instructions identify
-pending or unavailable sources; a failed remote source's tools are omitted as a
-complete unit, including when `optional_startup` is false (the default). Local
-configuration errors remain fatal. Errors discovered when a remote catalog arrives,
-including parsing, tool generation or filter selection, leave that source unavailable.
+local catalogs and binds every listener socket before funding and background remote
+catalog discovery start. Each endpoint defaults to `wait_for_catalogs = true`:
+it accepts MCP HTTP requests only after its configured `sources` have loaded and
+their tools have been published. Unrelated sources and other endpoints do not
+gate it. Set the endpoint's setting to `false` to serve available tools immediately
+and publish remote tools as they arrive:
+
+```toml
+[servers.research]
+listen = "127.0.0.1:8000"
+sources = ["company_stableenrich"]
+wallet = "research"
+bearer_token_env = "TREAZURY_MCP_TOKEN"
+wait_for_catalogs = true # Default; false enables incremental availability.
+```
+
+Sockets are reserved early, so TCP connections can queue while MCP HTTP service
+waits. `MCP listening at /mcp` is logged only when that endpoint starts serving.
+There is no overall catalog-startup deadline: progress, server-directed retry
+waits, Tor availability or relay payer readiness can keep a dependent endpoint
+waiting. Funding and discovery workers run during this wait under their existing
+authority. Shutdown still cancels unsigned discovery and drains accepted paid work.
+
+A required remote catalog failure leaves its waiting endpoints unavailable,
+closes their sockets and emits an ERROR identifying each failed endpoint and the
+source. Other endpoints keep running, even if every waiting endpoint fails.
+Restart to retry. `sources.NAME.optional_startup = true` lets waiting endpoints
+start after that source's failure, with its tools omitted as a complete unit.
+This includes failures discovered during remote parsing, tool generation or filter
+selection. For `wait_for_catalogs = false`, any failed remote source is omitted,
+regardless of `optional_startup`. Stderr and MCP instructions identify pending or
+unavailable sources. Local configuration errors remain fatal.
 An unresolved exact listener selector is deferred only if its name falls
 exclusively under pending or unavailable sources' resolved prefixes (including inherited
 prefixes). Unknown namespaces and names also attributable to a ready source
@@ -107,7 +133,8 @@ reveals its ambiguity; calls that already captured a binding finish with that
 original provider and wallet. Exact selectors still recognize ambiguous names.
 Strict inspection rejects duplicate names. `config check`, `catalog tools` and
 `catalog tags` use strict loading;
-`config show` remains offline and reports the effective limit. Progress, source
+`config show` remains offline and reports the effective limit and each endpoint's
+`wait_for_catalogs` setting. Progress, source
 fetch/parse and generation timings go to stderr; a ten-second
 waiting message identifies remaining work. No response content or source URL is
 included in these progress messages. Remote spec aliases share a download and parsed document within one deployment
@@ -537,8 +564,10 @@ payment authorizations can cause earlier reserve consumption.
 
 ### Startup readiness and configuration changes
 
-Ordinary enabled serving binds available tools before starting funding;
-small and large reserve funding may finish in either order. An empty managed pool
+Ordinary enabled serving binds listener sockets before starting funding;
+MCP availability follows each endpoint's `wait_for_catalogs` setting independently
+of wallet funding readiness.
+Small and large reserve funding may finish in either order. An empty managed pool
 returns typed unavailability until an eligible funded payer exists. No ACTIVE wallet is
 required: a funded READY reserve can serve immediately. Unsigned requests do not
 promote wallets or create replacement vacancies. `wallet bootstrap` instead
@@ -623,7 +652,9 @@ SIGINT/SIGTERM forces exit with an unknown-outcome warning; it never releases
 reservations or replays signed work. MCP client disconnect and stdio EOF stop
 response delivery without abandoning application-owned calls. Funding and
 reconciliation remain available until accepted deployment calls finish. A listener failure also stops its
-siblings. Managed profiles retain durable payment uncertainty through shutdown;
+siblings. Catalog startup failure instead disables only dependent waiting endpoints
+and emits ERROR; their peers and financial owners keep running. Managed profiles
+retain durable payment uncertainty through shutdown;
 automatic NEAR funding is controlled by `funding.auto_fund`.
 
 ## Download and display limits
@@ -975,7 +1006,7 @@ If that port is unreachable during ordinary serving startup, an ERROR names the
 configured SOCKS endpoint, with a reminder on the next failed probe after each
 minute while startup discovery is waiting. Finite startup discovery retries the local
 TCP connection every five seconds, then resumes automatically without a restart.
-Listeners, fresh cached catalogs and independent financial work remain
+Ready listeners, fresh cached catalogs and independent financial work remain
 available. This checks TCP reachability only, not Tor bootstrap or destination
 connectivity, and stops after the first successful connection. Explicit sync,
 inspection and qualification retain their normal failure behavior.
@@ -1355,7 +1386,8 @@ authenticated target requests. Adding a relay does not expose it as an MCP tool.
 
 Ordinary managed serving binds listeners before funding. Static fallback waits
 on existing eligible-payer notifications without allocating funds or consuming
-network attempts. Available tools remain callable. Paid warming opens only its
+network attempts. Endpoints with `wait_for_catalogs = false` keep available tools
+callable during discovery. Paid warming opens only its
 resolved wallets, denies new funding and starts no workers; bootstrap/fund them
 first. `--direct` warming stays unsigned and bypasses the relay. Ordinary
 `config check` and catalog inspection never

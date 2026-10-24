@@ -22,9 +22,16 @@ The application includes Zcash. The ignored SOCKS child is exercised by its pare
 Relay ownership fixtures cover capacity retained after waiter cancellation and
 queued serialized fetches leaving unrelated request capacity available.
 The deployment suite verifies concurrent source discovery and complete, ordered inventories through synchronous loading. The `deployment::deferred::tests`
-unit tests cover ordinary deployment serving: listeners bind before slow remote
-catalogs finish, available tools remain callable, and a required remote
-failure becomes unavailable while strict inspection still rejects it. Publication preserves authored prices, tool order and existing callable snapshots. Deferred collision
+unit tests cover incremental deployment serving (`wait_for_catalogs = false`):
+listeners bind before slow remote catalogs finish, available tools remain callable,
+and a required remote failure becomes unavailable while strict inspection still
+rejects it. `deployment::deferred::readiness_tests` uses real MCP HTTP requests to
+verify default waiting per endpoint, publication before initialize/tools/list,
+independent local/immediate peers, optional failure, ERROR plus socket closure for
+required failure, local-only/management-only endpoints, cancellation while waiting, and
+worker/publication failures. Existing accepted-relay-payment cancellation and
+panic fixtures also run with default waiting and verify drain/Store ownership.
+Publication preserves authored prices, tool order and existing callable snapshots. Deferred collision
 regressions cover opposite completion orders, three owners, exact selectors,
 unique tools, listener isolation and captured bindings; strict loading still rejects
 duplicate names.
@@ -38,7 +45,8 @@ Wallet discovery uses the [wallet observation policy](../docs/wallet-rotation.md
 cancelled waiters (including initializer handoff to an existing waiter), sanitized ERROR/recovery INFO, minute ERROR reminders during
 a continuing outage, completed observation without a
 permanent monitor, and fresh catalog cache hits while the proxy is absent.
-`deployment::deferred::startup_socks_tests` verifies that a bound authenticated MCP
+`deployment::deferred::startup_socks_tests` opts into incremental availability and
+verifies that a bound authenticated MCP
 listener and local tools remain available, then remote catalogs and captured Base
 balance discovery and an idle treasury's initial scan resume in the same process
 when a fake SOCKS endpoint appears after a confirmed startup connectivity ERROR,

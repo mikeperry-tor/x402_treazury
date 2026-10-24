@@ -62,8 +62,17 @@ source overrides, listener defaults and optional automatic assignment. Local
 catalogs load before ordinary deployment serving. Remote catalogs share capacity
 for 2 active downloads by default (`startup.catalog_concurrency`, 1..64), after
 listeners bind. Server-directed retry waits release download capacity while their
-logical loads remain pending. Available tools remain callable while remote catalogs are pending; failed remote sources remain unavailable with status in MCP
-instructions. Strict inspection/qualification wait for complete catalogs. The
+logical loads remain pending. Each listener defaults to `wait_for_catalogs = true`:
+after socket binding, funding/reconciliation and deferred discovery run while HTTP
+serving waits for that listener's configured sources. The catalog owner signals
+readiness only after publication; no duplicate source-outcome ledger or overall
+startup deadline is needed. A required failure logs ERROR and closes only the
+dependent waiting endpoints; their tasks await shutdown without stopping peers or
+financial owners. Optional remote failures permit startup with unavailable status.
+Worker/publication failure fails unresolved readiness signals. Listeners with
+`wait_for_catalogs = false` serve available tools while remote catalogs are pending
+and omit failed sources regardless of optional status. Strict inspection/qualification
+wait for complete catalogs. The
 synchronous unsigned-serving loader cancels unfinished loads on required failure
 and can omit an explicitly `optional_startup` remote failure. Source
 completion order cannot change the final sorted inventory for valid configurations.
@@ -196,8 +205,9 @@ the network factory. Generic imports and raw calls remain strict. Accepted catal
 settings do not activate static caches, warming, relays, cover configuration
 or recommendation selection. Agent-added sources use the same execution path; see
 [agent source management](agent-sources.md) for endpoint-local registration, persistence and refresh.
-Ordinary serving publishes available local tools before running remote catalog
-discovery and retained relay continuations. Late sources publish complete listener
+Ordinary serving builds the local snapshot before running remote catalog
+discovery and retained relay continuations; each endpoint's `wait_for_catalogs`
+setting controls when HTTP service exposes it. Late sources publish complete listener
 views through the same mutation boundary as dynamic registrations. Instructions
 report pending or unavailable sources. Each `tools/list` response also exposes
 listener-specific current instructions, catalog generation and publication-stop

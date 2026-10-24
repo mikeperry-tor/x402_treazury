@@ -114,7 +114,7 @@ async fn late_socks_child() {
     )
     .unwrap();
     let path = dir.path().join("deployment.toml");
-    std::fs::write(&path, format!("version=1\n[network]\nmode='tor'\nsocks_endpoint='{proxy_address}'\ncover_traffic_enabled=false\n[wallets.w]\nmode='static'\nprivate_key_env='KEY'\n[sources.local]\nspec='local.json'\nbase_url='http://catalog.example.com'\n[sources.remote]\nspec='http://catalog.example.com/spec'\nbase_url='http://catalog.example.com'\n[servers.one]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='w'\nsources=['local','remote']\n")).unwrap();
+    std::fs::write(&path, format!("version=1\n[network]\nmode='tor'\nsocks_endpoint='{proxy_address}'\ncover_traffic_enabled=false\n[wallets.w]\nmode='static'\nprivate_key_env='KEY'\n[sources.local]\nspec='local.json'\nbase_url='http://catalog.example.com'\n[sources.remote]\nspec='http://catalog.example.com/spec'\nbase_url='http://catalog.example.com'\n[servers.one]\nwait_for_catalogs=false\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='w'\nsources=['local','remote']\n")).unwrap();
     let deployment = Deployment::load_for_serving_with_relay(&path, &env, Default::default())
         .await
         .unwrap();

@@ -61,7 +61,7 @@ fn config(mode: &str, socks: std::net::SocketAddr) -> String {
             "[sources.{id}]\nspec='http://catalog.example.com/{mode}/{id}'\nbase_url='http://catalog.example.com'\n"
         ));
     }
-    config.push_str("[servers.one]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='w'\nsources=['a','b','z']\n");
+    config.push_str("[servers.one]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='w'\nsources=['a','b','z']\nwait_for_catalogs=false\n");
     config
 }
 

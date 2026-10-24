@@ -78,8 +78,12 @@ quirks, workarounds, and compatibility exemptions are documented in
   DNS/no-direct-fallback policy. Do not introduce a vendor-specific bypass.
 - Listener identity is the authenticated source-management principal; agent/session
   fields cannot select owners. Registration never allocates or funds a wallet.
-- Ordinary serving binds listeners before funding and exposes usable tools while
-  managed funding/discovery is pending or degraded. Strict inspection and separately
+- Ordinary serving binds listener sockets before funding. MCP availability follows
+  each endpoint's `wait_for_catalogs` setting (default true); see
+  [catalog startup](docs/configuration.md#multiple-mcp-ports-from-one-configuration).
+  Ready endpoints remain usable while managed funding is pending or degraded;
+  catalog failures disable only dependent waiting endpoints and emit ERROR.
+  Strict inspection and separately
   authorized qualification retain their completeness and authority requirements.
 
 Read the
