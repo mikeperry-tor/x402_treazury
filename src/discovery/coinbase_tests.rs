@@ -240,3 +240,44 @@ fn flat_schema_keeps_shared_types_and_coinbase_only_query_bound() {
         );
     }
 }
+
+#[tokio::test]
+async fn terminal_origin_transport_failure_warns_without_private_url() {
+    use tracing::instrument::WithSubscriber;
+    let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = socket.local_addr().unwrap();
+    drop(socket);
+    let url =
+        reqwest::Url::parse(&format!("http://{address}/PRIVATE_PATH?key=PRIVATE_KEY")).unwrap();
+    let selected = network::global()
+        .http_participating(
+            &network::IsolationId::bootstrap(),
+            url.as_str(),
+            None,
+            false,
+            network::HttpPolicy::default(),
+        )
+        .unwrap();
+    let logs = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(logs.reopen().unwrap())
+        .finish();
+    let result = origin(&url, &selected, 1024)
+        .with_subscriber(subscriber)
+        .await;
+    assert!(matches!(
+        result.unwrap_err().kind,
+        network::acquisition::FailureKind::Transport
+    ));
+    let text = std::fs::read_to_string(logs.path()).unwrap();
+    assert!(
+        text.contains("WARN") && text.contains("coinbase_search_origin"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("PRIVATE_") && !text.contains(&address.to_string()),
+        "{text}"
+    );
+}

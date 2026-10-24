@@ -305,7 +305,10 @@ impl<T> CachedClient<T> {
         &self.client
     }
 }
-fn evict_oldest<K: Clone + Eq + std::hash::Hash, T>(cache: &mut HashMap<K, CachedClient<T>>) {
+fn evict_oldest<K: Clone + Eq + std::hash::Hash, T>(
+    cache: &mut HashMap<K, CachedClient<T>>,
+    resource: &'static str,
+) {
     if cache.len() >= 256
         && let Some(key) = cache
             .iter()
@@ -313,6 +316,12 @@ fn evict_oldest<K: Clone + Eq + std::hash::Hash, T>(cache: &mut HashMap<K, Cache
             .map(|(key, _)| key.clone())
     {
         cache.remove(&key);
+        tracing::warn!(
+            resource,
+            limit_entries = 256,
+            action = "evicted",
+            "Transport cache capacity reached; oldest cache ownership evicted; active handles remain usable"
+        );
     }
 }
 pub struct NetworkContext {
@@ -478,7 +487,7 @@ impl NetworkContext {
         }
         let record = self.build_http_transport(key.clone())?;
         // Eviction drops only cache ownership. Existing requests keep their connections.
-        evict_oldest(&mut clients);
+        evict_oldest(&mut clients, "http_transport");
         clients.insert(key, CachedClient::new(record.clone()));
         Ok(record)
     }
@@ -866,7 +875,7 @@ impl NetworkContext {
         if let Some(existing) = cache.get_mut(&key) {
             return Ok(existing.touch().clone());
         }
-        evict_oldest(&mut cache);
+        evict_oldest(&mut cache, "grpc_transport");
         cache.insert(key, CachedClient::new(client.clone()));
         Ok(client)
     }
@@ -1040,7 +1049,14 @@ pub async fn local_control(
     Ok(
         tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address))
             .await
-            .context("local control connection deadline exceeded")??,
+            .map_err(|error| {
+                tracing::warn!(
+                    stage = "local_control_connection",
+                    limit_ms = timeout.as_millis(),
+                    "Local control connection deadline exceeded"
+                );
+                anyhow::Error::new(error).context("local control connection deadline exceeded")
+            })??,
     )
 }
 
@@ -1079,7 +1095,14 @@ pub async fn qualification_probe(
             Ok(Err(error)) => {
                 serde_json::json!({"reached":false,"denied":matches!(error.raw_os_error(),Some(libc::EPERM|libc::EACCES)),"error_kind":format!("{:?}",error.kind())})
             }
-            Err(_) => serde_json::json!({"reached":false,"denied":false,"error_kind":"timeout"}),
+            Err(_) => {
+                tracing::warn!(
+                    stage = "qualification_probe",
+                    limit_seconds = 2,
+                    "Explicit qualification connectivity probe timed out"
+                );
+                serde_json::json!({"reached":false,"denied":false,"error_kind":"timeout"})
+            }
         },
     )
 }
@@ -1193,11 +1216,77 @@ mod retention_tests {
         }
     }
 
+    #[test]
+    fn transport_cache_eviction_warns_for_both_resources_without_keys() {
+        let logs = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(logs.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            for resource in ["http_transport", "grpc_transport"] {
+                let mut cache = HashMap::new();
+                for n in 0..256 {
+                    cache.insert(format!("PRIVATE_KEY_{n}"), CachedClient::new(Arc::new(n)));
+                }
+                let old = cache.get_mut("PRIVATE_KEY_0").unwrap();
+                old.last_used -= Duration::from_secs(1);
+                let retained = old.client.clone();
+                evict_oldest(&mut cache, resource);
+                assert_eq!(cache.len(), 255);
+                assert!(!cache.contains_key("PRIVATE_KEY_0"));
+                assert_eq!(*retained, 0);
+                assert_eq!(Arc::strong_count(&retained), 1);
+            }
+        });
+        let text = std::fs::read_to_string(logs.path()).unwrap();
+        assert_eq!(
+            text.lines().filter(|line| line.contains("WARN")).count(),
+            2,
+            "{text}"
+        );
+        for expected in [
+            "http_transport",
+            "grpc_transport",
+            "limit_entries=256",
+            "action=\"evicted\"",
+        ] {
+            assert!(text.contains(expected), "{text}");
+        }
+        assert!(!text.contains("PRIVATE_"), "{text}");
+    }
+
     #[tokio::test]
     async fn interleaved_wallet_clients_preserve_frequent_provider_entry() {
         let context = NetworkContext::new(NetworkPolicy::default()).unwrap();
         let origin = "https://provider.example";
         let provider = IsolationId::discovery(origin).unwrap();
+        let wallet = IsolationId::treasury("wallet-0");
+        context
+            .http(
+                &wallet,
+                "https://base.example/PRIVATE_PATH?key=PRIVATE_TOKEN",
+                None,
+            )
+            .unwrap();
+        let retained = context
+            .http
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(key, _)| key.identity == wallet)
+            .unwrap()
+            .1
+            .client
+            .clone();
+        let logs = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(logs.reopen().unwrap())
+            .finish();
+        let _subscriber = tracing::subscriber::set_default(subscriber);
         for n in 0..768 {
             context.http(&provider, origin, None).unwrap();
             context
@@ -1216,6 +1305,26 @@ mod retention_tests {
             !cache
                 .keys()
                 .any(|key| key.identity == IsolationId::treasury("wallet-0"))
+        );
+        assert_eq!(
+            Arc::strong_count(&retained),
+            1,
+            "eviction drops cache ownership only"
+        );
+        assert_eq!(retained.read_timeout(), Duration::from_secs(60));
+        let text = std::fs::read_to_string(logs.path()).unwrap();
+        assert!(
+            text.contains("WARN")
+                && text.contains("http_transport")
+                && text.contains("limit_entries=256")
+                && text.contains("action=\"evicted\""),
+            "{text}"
+        );
+        assert!(
+            !text.contains("PRIVATE_")
+                && !text.contains("wallet-0")
+                && !text.contains("base.example"),
+            "{text}"
         );
         assert!(
             cache

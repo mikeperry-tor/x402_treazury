@@ -436,3 +436,47 @@ async fn grpc_eviction_release_and_runtime_recreation_keep_live_channels_usable(
     }
     server.abort();
 }
+
+#[tokio::test]
+async fn oversized_protobuf_unary_warns_with_safe_status_code() {
+    use tracing::instrument::WithSubscriber;
+    use zingo_netutils::Indexer;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!(
+        "http://{}/PRIVATE_PATH?key=PRIVATE_KEY",
+        listener.local_addr().unwrap()
+    );
+    let app = axum::Router::new().fallback(|| async {
+        // The gRPC frame declares one byte beyond Tonic's inherited 4 MiB
+        // receive bound. Rejection needs no oversized allocation or body.
+        (
+            [("content-type", "application/grpc")],
+            vec![0u8, 0, 64, 0, 1],
+        )
+    });
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let context = NetworkContext::new(NetworkPolicy::default()).unwrap();
+    let mut client = context.grpc(&IsolationId::bootstrap(), &url).await.unwrap();
+    let logs = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(logs.reopen().unwrap())
+        .finish();
+    let error = client
+        .get_latest_block(Duration::from_secs(2))
+        .with_subscriber(subscriber)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::OutOfRange);
+    let text = std::fs::read_to_string(logs.path()).unwrap();
+    assert!(
+        text.contains("WARN") && text.contains("grpc_code=11"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("PRIVATE_") && !text.contains("decoded message length"),
+        "{text}"
+    );
+    server.abort();
+}

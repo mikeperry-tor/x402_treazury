@@ -307,6 +307,17 @@ pub(super) async fn rpc<T>(
             elapsed_ms = started.elapsed().as_millis() as u64,
             "Read-only Base RPC request failed");
         if !retry {
+            if failure.public.category == "timeout" {
+                tracing::warn!(
+                    stage = "base_rpc",
+                    method,
+                    phase = failure.public.phase,
+                    reason = "timeout",
+                    attempt = number,
+                    max_attempts,
+                    "Base RPC timeout; endpoint attempts exhausted"
+                );
+            }
             return Err(failure.public.into());
         }
         if isolated {

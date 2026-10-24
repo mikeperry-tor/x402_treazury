@@ -37,10 +37,28 @@ const MAX_RETRIES: u8 = 3;
 
 async fn next_stream_item<T>(
     stream: &mut tonic::Streaming<T>,
-    _what: &'static str,
+    what: &'static str,
 ) -> Result<Option<T>, tonic::Status> {
     // Injected transport bounds inactivity below protobuf message assembly.
-    stream.message().await
+    stream
+        .message()
+        .await
+        .inspect_err(|status| warn_resource_status(status, what))
+}
+
+/// Preserve the original status while reporting possible local or peer limits.
+/// Status messages and metadata may contain private upstream content.
+pub(crate) fn warn_resource_status(status: &tonic::Status, stage: &'static str) {
+    if matches!(
+        status.code(),
+        tonic::Code::OutOfRange | tonic::Code::ResourceExhausted
+    ) {
+        tracing::warn!(
+            stage,
+            grpc_code = status.code() as i32,
+            "gRPC stream rejected with a resource-related status"
+        );
+    }
 }
 
 /// Fetch requests are created and sent to the [`crate::client::fetch::fetch`] task when a connection to the server is required.
@@ -509,6 +527,67 @@ mod tests {
     use zingo_netutils::lightwallet_protocol::TreeState;
 
     use super::*;
+
+    #[test]
+    fn stream_resource_warning_excludes_private_status_and_metadata() {
+        #[derive(Clone, Default)]
+        struct Events(std::sync::Arc<std::sync::Mutex<String>>);
+        impl tracing::Subscriber for Events {
+            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+                true
+            }
+            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+                tracing::span::Id::from_u64(1)
+            }
+            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+            fn enter(&self, _: &tracing::span::Id) {}
+            fn exit(&self, _: &tracing::span::Id) {}
+            fn event(&self, event: &tracing::Event<'_>) {
+                struct Fields<'a>(&'a mut String);
+                impl tracing::field::Visit for Fields<'_> {
+                    fn record_debug(
+                        &mut self,
+                        field: &tracing::field::Field,
+                        value: &dyn std::fmt::Debug,
+                    ) {
+                        use std::fmt::Write;
+                        write!(self.0, " {}={value:?}", field.name()).unwrap();
+                    }
+                }
+                let mut text = self.0.lock().unwrap();
+                text.push_str(event.metadata().level().as_str());
+                event.record(&mut Fields(&mut text));
+                text.push('\n');
+            }
+        }
+        let events = Events::default();
+        tracing::subscriber::with_default(events.clone(), || {
+            for code in [
+                tonic::Code::OutOfRange,
+                tonic::Code::ResourceExhausted,
+                tonic::Code::Unavailable,
+            ] {
+                let mut status = tonic::Status::new(code, "PRIVATE_UPSTREAM_PROSE");
+                status
+                    .metadata_mut()
+                    .insert("authorization", "PRIVATE_TOKEN".parse().unwrap());
+                warn_resource_status(&status, "compact_block_stream");
+                assert_eq!(status.message(), "PRIVATE_UPSTREAM_PROSE");
+                assert_eq!(status.code(), code);
+            }
+        });
+        let text = events.0.lock().unwrap();
+        assert_eq!(text.lines().count(), 2, "{text}");
+        assert!(
+            text.contains("WARN") && text.contains("grpc_code=11") && text.contains("grpc_code=8"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("PRIVATE_") && !text.contains("grpc_code=14"),
+            "{text}"
+        );
+    }
 
     const SAPLING_ACTIVATION: u32 = 100;
     const ORCHARD_ACTIVATION: u32 = 200;

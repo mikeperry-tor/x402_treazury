@@ -269,17 +269,35 @@ async fn stalled_body_inactivity_reports_body_not_headers() {
         std::future::pending::<()>().await;
         drop(held);
     });
+    use tracing::instrument::WithSubscriber;
+    let logs = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(logs.reopen().unwrap())
+        .finish();
     let error = rpc(
         &timed_client(Duration::from_millis(100)),
         &url,
         "eth_chainId",
         json!([]),
     )
+    .with_subscriber(subscriber)
     .await
     .unwrap_err();
     assert!(error.to_string().contains("timeout"));
     assert!(error.to_string().contains("phase body"));
     assert!(!error.to_string().contains("http://"));
+    let text = std::fs::read_to_string(logs.path()).unwrap();
+    assert!(
+        text.contains("WARN")
+            && text.contains("base_rpc")
+            && text.contains("phase=\"body\"")
+            && text.contains("reason=\"timeout\"")
+            && text.contains("Base RPC timeout; endpoint attempts exhausted"),
+        "{text}"
+    );
+    assert!(!text.contains("http://"), "{text}");
     task.abort();
 }
 

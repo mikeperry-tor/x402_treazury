@@ -24,6 +24,21 @@ pub struct GrpcIndexer {
     pub(super) clear_net_client: CompactTxStreamerClient<IndexerTransport>,
 }
 
+/// Codes can originate locally or at the peer; never infer a local byte count
+/// or retain the status message when reporting a possible resource rejection.
+fn warn_resource_status(status: &tonic::Status) {
+    if matches!(
+        status.code(),
+        tonic::Code::OutOfRange | tonic::Code::ResourceExhausted
+    ) {
+        tracing::warn!(
+            stage = "grpc_response_decode_or_status",
+            grpc_code = status.code() as i32,
+            "gRPC response rejected with a resource-related status"
+        );
+    }
+}
+
 // Preserve the existing gRPC submission contract: error codes become Unknown
 // with the bare server message; a successful message is the optionally quoted
 // transaction ID. Submission validates that ID against the durable transaction.
@@ -46,7 +61,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_lightd_info(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -55,7 +71,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_latest_block(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -68,7 +85,8 @@ impl Indexer for GrpcIndexer {
         let sendresponse = self
             .clear_net_client
             .send_transaction(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner();
         parse_send_response(sendresponse.error_code, sendresponse.error_message)
     }
@@ -82,7 +100,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_tree_state(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -92,7 +111,12 @@ impl Indexer for GrpcIndexer {
         _timeout: Duration,
     ) -> Result<CompactBlock, tonic::Status> {
         let request = Request::new(block_id);
-        Ok(self.clear_net_client.get_block(request).await?.into_inner())
+        Ok(self
+            .clear_net_client
+            .get_block(request)
+            .await
+            .inspect_err(warn_resource_status)?
+            .into_inner())
     }
 
     #[allow(deprecated)]
@@ -105,7 +129,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_block_nullifiers(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -118,7 +143,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_block_range(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -132,7 +158,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_block_range_nullifiers(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -145,7 +172,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_transaction(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -158,7 +186,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_mempool_tx(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -170,7 +199,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_mempool_stream(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -182,7 +212,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_latest_tree_state(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -195,7 +226,8 @@ impl Indexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_subtree_roots(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 }
@@ -211,7 +243,8 @@ impl TransparentIndexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_taddress_txids(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -224,7 +257,8 @@ impl TransparentIndexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_taddress_transactions(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -237,7 +271,8 @@ impl TransparentIndexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_taddress_balance(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -249,7 +284,8 @@ impl TransparentIndexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_taddress_balance_stream(stream)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -262,7 +298,8 @@ impl TransparentIndexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_address_utxos(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 
@@ -275,7 +312,8 @@ impl TransparentIndexer for GrpcIndexer {
         Ok(self
             .clear_net_client
             .get_address_utxos_stream(request)
-            .await?
+            .await
+            .inspect_err(warn_resource_status)?
             .into_inner())
     }
 }
@@ -283,6 +321,42 @@ impl TransparentIndexer for GrpcIndexer {
 #[cfg(test)]
 mod tests {
     use super::parse_send_response;
+
+    #[test]
+    fn resource_status_warning_preserves_codes_without_upstream_prose() {
+        let logs = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(logs.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            for code in [
+                tonic::Code::OutOfRange,
+                tonic::Code::ResourceExhausted,
+                tonic::Code::Unavailable,
+            ] {
+                let status = tonic::Status::new(code, "PRIVATE_UPSTREAM_PROSE");
+                super::warn_resource_status(&status);
+                assert_eq!(status.code(), code);
+                assert_eq!(status.message(), "PRIVATE_UPSTREAM_PROSE");
+            }
+        });
+        let text = std::fs::read_to_string(logs.path()).unwrap();
+        assert_eq!(
+            text.lines().filter(|line| line.contains("WARN")).count(),
+            2,
+            "{text}"
+        );
+        assert!(
+            text.contains("grpc_code=11") && text.contains("grpc_code=8"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("PRIVATE_") && !text.contains("grpc_code=14"),
+            "{text}"
+        );
+    }
 
     #[test]
     fn successful_submission_preserves_bare_and_safely_unquotes_paired_txids() {

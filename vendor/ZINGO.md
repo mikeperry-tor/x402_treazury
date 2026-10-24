@@ -69,8 +69,13 @@ remain in [wallet ownership](../docs/wallet-rotation.md) and
 The progress patch removes complete-message timers on sync streams and retains
 loader/worker ownership while draining, with periodic stage diagnostics instead
 of forced timeout success. Header/body inactivity remains in the application
-transport. Read retries, protobuf size bounds and mempool drain contracts remain
-unchanged. Remove these hunks only with equivalent progressing/stalled response,
+transport. Resource-related gRPC codes (`OutOfRange` and `ResourceExhausted`)
+emit safe WARNs at the existing stream-consumption points before recovery can
+replace the original status. The application adapter reports the same codes for
+unary and stream-opening failures; mempool consumption retains its existing safe
+status warning. These statuses may originate at the peer or the local decoder:
+logs contain fixed stages and numeric codes, never upstream prose or metadata.
+Read retries, protobuf size bounds and mempool drain contracts remain unchanged. Remove these hunks only with equivalent progressing/stalled response,
 cancellation/restart and worker-drain evidence through the full sync chain.
 
 The diagnostic patch retains typed shielded-pool and operation context for actual

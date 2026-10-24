@@ -224,7 +224,31 @@ async fn origin(
                 .map_err(|error| Failure::remote_content(error, FallbackPolicy::RemoteFailures))
         },
     )
-    .await?;
+    .await
+    .inspect_err(|failure| {
+        // Byte limits already warn at collection; report terminal transport and
+        // exhausted origin attempts without retaining upstream error prose.
+        if matches!(
+            failure.kind,
+            acquisition::FailureKind::Transport | acquisition::FailureKind::HttpStatus(_)
+        ) {
+            let error = failure.error.downcast_ref::<reqwest::Error>();
+            let reason = if error.is_some_and(|error| error.is_timeout() && error.is_connect()) {
+                "connection_timeout"
+            } else if error.is_some_and(reqwest::Error::is_timeout) {
+                "read_inactivity"
+            } else if error.is_some() {
+                "transport"
+            } else {
+                "http_status"
+            };
+            tracing::warn!(
+                stage = "coinbase_search_origin",
+                reason,
+                "Unsigned Coinbase origin acquisition failed"
+            );
+        }
+    })?;
     factory.promote_http(selected, &acquired.current);
     Ok(acquired.value)
 }

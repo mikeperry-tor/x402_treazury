@@ -741,6 +741,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn protobuf_resource_statuses_remain_safe_through_sync_consumers() {
+        for code in [tonic::Code::OutOfRange, tonic::Code::ResourceExhausted] {
+            let mut status =
+                tonic::Status::new(code, "https://user:private@example.invalid/authorization");
+            status
+                .metadata_mut()
+                .insert("authorization", "private-token".parse().unwrap());
+            assert_private_sdk_failure(
+                LightClientError::SyncError(SyncError::ServerError(ServerError::RequestFailed(
+                    status,
+                ))),
+                "indexer_request_failed",
+                Some(code),
+            );
+        }
+    }
+
     fn assert_private_sdk_failure(
         error: LightClientError,
         reason: &str,

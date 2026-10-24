@@ -744,10 +744,10 @@ financial or qualification authority.
 | Timer or bound | Purpose and behavior |
 | --- | --- |
 | Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote directory browse retains upstream maximum 100. Follow continuations for complete inventories. |
-| Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. |
+| Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. gRPC factory failure WARNs immediately; HTTP terminal timeout WARNs at the retained application workflow. |
 | Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog discovery, runtime imports/help/documents/probes, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static/runtime relay-service unsigned stages and Base read-only RPC also participate). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
-| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP uses explicit source-management override, then accepted provider value, then network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. |
-| gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. |
+| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP uses explicit source-management override, then accepted provider value, then network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. Guard expiry emits WARN with a fixed dispatch/header/body stage; owning HTTP workflows likewise WARN on terminal timeouts. |
+| gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. Expiry emits WARN `grpc_dispatch_inactivity`. |
 | Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
 | Pepper drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. One independently polled engine task preserves progress during checkpoint lock waits; runtime teardown owns cancellation and worker joins. Scan retirement drains without a cutoff. |
 | MCP SSE keepalive cadence: two seconds | Sends connection-liveness comments while awaiting the result; never renews remote-read inactivity, financial authority, or client whole-tool deadlines. |
@@ -772,7 +772,7 @@ financial or qualification authority.
 | Relay-service unsigned acquisition | One direct attempt, or `1 + network.tor_isolation_retries` Tor attempts per authored provider position. No separate relay attempt counter/backoff. Readiness without I/O consumes no attempt. Definitive provider/target failure can advance once through the configured list; uncertain paid outcomes stop without signed replay. |
 | Cache TTLs, warning suppression and database busy waits (2–5 seconds) | Storage/resource/diagnostic contention policy; cache persistence failure does not invalidate a complete response. |
 | Optional cover episode bounds | Bound optional unsigned work; cannot cut off the real paid call. The three-second cleanup wait in `wait_experiment_idle` is a test-only fixture bound; production cleanup has no such cutoff. |
-| Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. |
+| Local Tor control connection/probe limits (up to ten/two seconds) | Explicit diagnostic/qualification probes, not provider traffic. Actual deadline expiry WARNs with a safe stage and numeric allowance. |
 | Serving startup SOCKS prerequisite | Five-second retry cadence after a failed local TCP connection, using `connect_timeout_seconds` per attempt; stops after first reachability or owner cancellation. ERROR reminders on failed probes at least 60 seconds apart. No whole-work deadline or change to financial observation backoff. |
 | Qualification deadlines, reservations and test-harness timeouts | Operator authority and bounded tests; normal network progress cannot extend them. |
 | Sync mempool drain window | Returns control while scan workers remain, not a whole-sync deadline. |
@@ -781,7 +781,12 @@ Completed tool output has no character slicing; removed `max_response_chars`
 settings reject visibly. Provider `max_description_chars` remains a separate
 description control. Buffered response limits remain: default API 16 MiB, help 4 MiB and catalog 32 MiB,
 plus explicit MCP, NEAR JSON, protobuf, image and cache limits. They bound memory
-or stored data, not download duration. TLS/HTTP compatibility, authentication,
+or stored data, not download duration. Rejections emit WARN at the owning application
+boundary: MCP 413, image/description bounds, API/document/Base/NEAR readers, and
+protobuf unary or production stream consumers before status remapping. Protobuf
+resource codes may also be peer-reported, so logs do not infer a local size violation
+from arbitrary status prose. The [local inventory](local-resource-limits.md) lists
+these byte/image values and their diagnostics. TLS/HTTP compatibility, authentication,
 canonical proofs, amount caps and signed-work no-replay rules remain enforced.
 
 ### Source contract and upload limits

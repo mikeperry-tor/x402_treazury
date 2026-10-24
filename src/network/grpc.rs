@@ -157,12 +157,12 @@ impl Service<http::Request<Body>> for ProgressChannel {
                     if result.is_ok() {
                         tokio::time::timeout(inactivity, &mut response)
                             .await
-                            .map_err(|_| tonic::Status::deadline_exceeded("grpc_headers_inactivity"))?
+                            .map_err(|_| inactivity_failure("grpc_headers_inactivity", inactivity))?
                     } else {
                         response.await
                     }
                 },
-                _ = readiness.stalled(inactivity) => return Err(tonic::Status::deadline_exceeded("grpc_dispatch_inactivity")),
+                _ = readiness.stalled(inactivity) => return Err(inactivity_failure("grpc_dispatch_inactivity", inactivity)),
             }.map_err(|e| tonic::Status::from_error(Box::new(e)))?;
             cancel_on_drop.disarm();
             Ok(response.map(|inner| {
@@ -175,6 +175,16 @@ impl Service<http::Request<Body>> for ProgressChannel {
             }))
         })
     }
+}
+
+fn inactivity_failure(stage: &'static str, inactivity: Duration) -> tonic::Status {
+    tracing::warn!(
+        stage,
+        limit_ms = inactivity.as_millis(),
+        setting = "network.read_timeout_seconds",
+        "gRPC inactivity limit exceeded; affected RPC failed"
+    );
+    tonic::Status::deadline_exceeded(stage)
 }
 
 struct DispatchBody {
@@ -245,8 +255,9 @@ impl HttpBody for ProgressBody {
                     self.timer.as_mut().reset(deadline);
                 } else if frame.is_data() && self.timer.as_mut().poll(cx).is_ready() {
                     self.finished = true;
-                    return Poll::Ready(Some(Err(tonic::Status::deadline_exceeded(
+                    return Poll::Ready(Some(Err(inactivity_failure(
                         "grpc_body_inactivity",
+                        self.inactivity,
                     ))));
                 }
                 return Poll::Ready(Some(Ok(frame)));
@@ -259,8 +270,9 @@ impl HttpBody for ProgressBody {
         }
         if self.timer.as_mut().poll(cx).is_ready() {
             self.finished = true;
-            return Poll::Ready(Some(Err(tonic::Status::deadline_exceeded(
+            return Poll::Ready(Some(Err(inactivity_failure(
                 "grpc_body_inactivity",
+                self.inactivity,
             ))));
         }
         Poll::Pending
@@ -320,6 +332,7 @@ pub(super) fn connection_failure(
         }
         current = error.source();
     }
+    tracing::warn!(category, reason, "gRPC connection failed");
     ConnectionDiagnostic { category, reason }.into()
 }
 
@@ -349,4 +362,81 @@ fn connection_diagnostic_omits_upstream_secrets() {
         connection_failure(&tls, "grpc_connection_failed").to_string(),
         "grpc_connection_failed: reason=tls_error"
     );
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn stalled_response_body_warns_once_without_private_content() {
+    use tracing::instrument::WithSubscriber;
+    let logs = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(logs.reopen().unwrap())
+        .finish();
+    let inactivity = Duration::from_millis(10);
+    let inner = axum::body::Body::from_stream(futures_util::stream::pending::<
+        Result<Bytes, std::convert::Infallible>,
+    >());
+    let mut body = ProgressBody {
+        inner: Body::new(inner),
+        inactivity,
+        timer: Box::pin(tokio::time::sleep(inactivity)),
+        finished: false,
+    };
+    async {
+        let error = std::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx))
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::DeadlineExceeded);
+        assert_eq!(error.message(), "grpc_body_inactivity");
+        assert!(
+            std::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx))
+                .await
+                .is_none()
+        );
+    }
+    .with_subscriber(subscriber)
+    .await;
+    let text = std::fs::read_to_string(logs.path()).unwrap();
+    assert_eq!(
+        text.lines().filter(|line| line.contains("WARN")).count(),
+        1,
+        "{text}"
+    );
+    for expected in [
+        "grpc_body_inactivity",
+        "limit_ms=10",
+        "network.read_timeout_seconds",
+    ] {
+        assert!(text.contains(expected), "{text}");
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn connection_failure_warning_does_not_log_transport_prose() {
+    let logs = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_writer(logs.reopen().unwrap())
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        let error = std::io::Error::new(std::io::ErrorKind::TimedOut, "PRIVATE_URL_TOKEN");
+        let result = connection_failure(&error, "tor_grpc_connection_failed");
+        assert_eq!(
+            result
+                .downcast_ref::<ConnectionDiagnostic>()
+                .unwrap()
+                .reason,
+            "connection_timeout"
+        );
+    });
+    let text = std::fs::read_to_string(logs.path()).unwrap();
+    for expected in ["WARN", "tor_grpc_connection_failed", "connection_timeout"] {
+        assert!(text.contains(expected), "{text}");
+    }
+    assert!(!text.contains("PRIVATE_"), "{text}");
 }

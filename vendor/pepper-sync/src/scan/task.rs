@@ -440,7 +440,9 @@ where
 
                 loop {
                     let msg_res: Result<Option<CompactBlock>, tonic::Status> =
-                        block_stream.message().await;
+                        block_stream.message().await.inspect_err(|status| {
+                            client::warn_resource_status(status, "compact_block_stream")
+                        });
 
                     let maybe_block = match msg_res {
                         Ok(b) => b,
@@ -470,7 +472,9 @@ where
                             };
 
                             let first_msg_res: Result<Option<CompactBlock>, tonic::Status> =
-                                block_stream.message().await;
+                                block_stream.message().await.inspect_err(|status| {
+                                    client::warn_resource_status(status, "compact_block_stream")
+                                });
 
                             match first_msg_res {
                                 Ok(b) => b,

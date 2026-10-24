@@ -13,7 +13,7 @@
     "pepper-sync/diagrams/scan_worker.mmd": "80e1f8a18655ea4efdbf1439ce9bdae7669ec939624ff50e47569730fde5421a",
     "pepper-sync/diagrams/sync.mmd": "93d3a52048b1d467178b39385aef2e7c4d09747386ab86d47b189732a2724834",
     "pepper-sync/diagrams/verification.mmd": "5739d03395621497f8cdb9595eda2e600314012e3fd9a40fa442c178d3947f05",
-    "pepper-sync/src/client.rs": "466d1b1e692b5664ec792cb98244a13c1a1360d982d21cdd492ca9e930f76d6e",
+    "pepper-sync/src/client.rs": "f4df28e1d7253ba729190e96a01adae23869fd51634f7e239e6be3fa74998d18",
     "pepper-sync/src/client/fetch.rs": "4fcc00f0beb92e56ccfe201da2b18846b9da592fb5057939c05f4a71c2c714e1",
     "pepper-sync/src/config.rs": "6fbd2c35791ae409403ebbcd698d8926e8c48fe37b7831db62c1ef7e0948edfa",
     "pepper-sync/src/error.rs": "a0feb411ea48fdff65fe0d65dadf1a982adbaf745240f7facb6072b912259e7a",
@@ -24,7 +24,7 @@
     "pepper-sync/src/scan.rs": "c0076b4b54c84eee7a304885f864bdc087b08708aa269a22c3b2a45fbae6f858",
     "pepper-sync/src/scan/compact_blocks.rs": "0524ede00da463d5eba887b2ebfa64caa96b0ea34288fc83d605c2246273e2da",
     "pepper-sync/src/scan/compact_blocks/runners.rs": "69aecdf74b0895fbdbbfe07f7d5da8fcba20f5722787474c9d181ceb8f03c1c4",
-    "pepper-sync/src/scan/task.rs": "fca282557ba7756ee653f517a7694c4053928dada3e47493f9a64d9275809b82",
+    "pepper-sync/src/scan/task.rs": "0969cbad453585c6d6823b51f49ff5d71070eb03de1bddb01421a49858f9e21e",
     "pepper-sync/src/scan/transactions.rs": "6e1ca821df7ed4718ebf986d597b09a76a753ffe16fd9d34543fb1691b0e6ec4",
     "pepper-sync/src/shardtree_ext.rs": "d73b1dc74bd7019d9bc5b5ff59c5556882ea68ee75dfcebbcf45bbbeba1abf93",
     "pepper-sync/src/sync.rs": "7bfb4a1f20f4c1525fcde9a5ff2f663385dc47061c6f2c6cbe6021b846fd8a66",
@@ -39,6 +39,6 @@
     "pepper-sync/src/wallet/serialization.rs": "e78533d592478ee3be98bd0da37ccc8b7bccc39a7768ed6d371cc363e2c722dc",
     "pepper-sync/src/wallet/traits.rs": "faae09d2cce9414f3fe0c05cde1c99aa63cca88614133e82606b424fe9461062",
     "pepper-sync/src/witness.rs": "21dcba95e70cdf12f98f3482a253cf00f21135abc81dd0519c1417616983d4f7",
-    "zingo-progress.patch": "0984573a412ae792f1ff7d6c929c2c080e5e286b6a1e16de36313a8fd054788b"
+    "zingo-progress.patch": "f408bcd21630ffea07b4a4e29939101574fc59d4ed200caeeadde2ab45946b59"
   }
 }
