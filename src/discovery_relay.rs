@@ -51,7 +51,7 @@ pub(crate) fn resolve_wallets(
             candidates.into_iter().max_by_key(|wallet| {
                 // Length-delimited JSON prevents ambiguous source/profile concatenation.
                 (Sha256::digest(serde_json::to_vec(&("discovery-wallet-v1", &source, wallet)).expect("serializable identifiers")).to_vec(), wallet.clone())
-            }).with_context(|| format!("source {source}: discovery relay needs an assigned wallet; set sources.{source}.wallet or discovery_relay.wallet"))?
+            }).with_context(|| format!("source {source}: discovery relay needs an assigned wallet; set sources.{source}.wallet or relay_fallback.wallet"))?
         };
         result.insert(source, wallet);
     }
@@ -475,7 +475,7 @@ pub(crate) fn slots(
     kind: &str,
     limit: usize,
 ) -> Vec<crate::http_cache::Slot> {
-    let Some(relay) = &cfg.discovery_relay else {
+    let Some(relay) = &cfg.relay_fallback else {
         return Vec::new();
     };
     relay
@@ -765,7 +765,7 @@ pub(crate) mod tests {
     async fn built_relays_share_wallet_clients_and_one_global_breaker() {
         let config: crate::deployment::MetaConfig =
             toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
-        let policy = config.discovery_relay.as_ref().unwrap();
+        let policy = config.relay_fallback.as_ref().unwrap();
         let bindings = resolve_wallets(
             policy,
             &config,
@@ -794,11 +794,10 @@ pub(crate) mod tests {
     fn absent_get_list_does_not_select_static_discovery_wallets() {
         let config: crate::deployment::MetaConfig =
             toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
-        let mut policy = config.discovery_relay.clone().unwrap();
-        policy.fallbacks.remove("GET");
-        policy.provider = None;
+        let mut policy = config.relay_fallback.clone().unwrap();
+        policy.relays.remove("GET");
         policy
-            .fallbacks
+            .relays
             .insert("POST".into(), vec!["unused.toml".into()]);
         assert!(
             resolve_wallets(
@@ -815,7 +814,7 @@ pub(crate) mod tests {
     fn default_wallet_selection_is_stable_scoped_and_honors_overrides() {
         let mut config: crate::deployment::MetaConfig =
             toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
-        let policy = config.discovery_relay.clone().unwrap();
+        let policy = config.relay_fallback.clone().unwrap();
         assert!(
             policy.wallet.is_none()
                 && policy.provider_metadata
@@ -1277,7 +1276,7 @@ pub(crate) mod tests {
             let mut cfg = Config {
                 spec: url.clone(),
                 discovery_source: Some("test_provider".into()),
-                discovery_relay: Some(relay),
+                relay_fallback: Some(relay),
                 http_cache_directory: Some(dir.path().join("http-cache")),
                 ..Default::default()
             };
@@ -1321,7 +1320,7 @@ pub(crate) mod tests {
             // caller changes its configuration. Concurrent aliases share paid work.
             let original = cfg.clone();
             cfg.spec = "https://other.example.com/spec".into();
-            cfg.discovery_relay = None;
+            cfg.relay_fallback = None;
             let (a, b) = tokio::join!(pending.resume(), pending.resume());
             assert_eq!(a.unwrap(), b.unwrap());
             cfg = original;
@@ -1350,7 +1349,7 @@ pub(crate) mod tests {
                     .is_none()
             );
             let without = Config {
-                discovery_relay: None,
+                relay_fallback: None,
                 ..cfg
             };
             assert!(

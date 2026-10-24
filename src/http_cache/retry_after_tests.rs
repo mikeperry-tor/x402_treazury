@@ -113,7 +113,7 @@ async fn unrepresentable_retry_after_blocks_origin_and_relay_without_blocking_ot
         let expected = if path.ends_with("final") { 3 } else { 1 };
         let cfg = catalog::Config {
             spec: format!("{base}{path}"),
-            discovery_relay: Some(relay.clone()),
+            relay_fallback: Some(relay.clone()),
             ..Default::default()
         };
         let owned_context = context.clone();

@@ -252,18 +252,18 @@ async fn discovery_relay_policy_is_offline_explicit_and_validates_bindings() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("deployment.toml");
     let text = deployment_text();
-    let relay = "\n[discovery_relay]\nprovider='missing-local-provider.toml'\nwallet='default'\nsources=['shared']\n";
+    let relay = "\n[relay_fallback]\nrelays.GET=['missing-local-provider.toml']\nwallet='default'\nsources=['shared']\n";
     std::fs::write(&path, format!("{text}{relay}")).unwrap();
     let shown = x402_treazury::deployment::Deployment::show_config(&path)
         .await
         .unwrap();
-    assert_eq!(shown["discovery_relay"]["wallet"], "default");
-    assert_eq!(shown["discovery_relay"]["provider_metadata"], true);
+    assert_eq!(shown["relay_fallback"]["wallet"], "default");
+    assert_eq!(shown["relay_fallback"]["provider_metadata"], true);
     assert_eq!(
-        shown["discovery_relay"]["fallbacks"],
+        shown["relay_fallback"]["relays"],
         json!({"GET":["missing-local-provider.toml"]})
     );
-    assert!(shown["discovery_relay"].get("provider").is_none());
+    assert!(shown["relay_fallback"].get("provider").is_none());
     std::fs::write(&path,format!("{text}{relay}\n[source_management]\nwallet='default'\nregistry_file='missing-local-provider.toml'\n")).unwrap();
     let error = x402_treazury::deployment::Deployment::show_config(&path)
         .await
@@ -289,15 +289,15 @@ async fn relay_method_lists_are_inspected_offline_and_every_provider_path_is_pro
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("deployment.toml");
     let text = deployment_text();
-    let relay = "\n[discovery_relay]\nwallet='default'\n[discovery_relay.fallbacks]\nGET=['missing-first.toml','missing-second.toml']\nHEAD=[]\nPOST=['missing-post.toml']\n";
+    let relay = "\n[relay_fallback]\nwallet='default'\n[relay_fallback.relays]\nGET=['missing-first.toml','missing-second.toml']\nHEAD=[]\nPOST=['missing-post.toml']\n";
     std::fs::write(&path, format!("{text}{relay}")).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
     assert_eq!(
-        shown["discovery_relay"]["fallbacks"],
+        shown["relay_fallback"]["relays"],
         json!({"GET":["missing-first.toml","missing-second.toml"],"HEAD":[],"POST":["missing-post.toml"]})
     );
-    assert_eq!(shown["discovery_relay"]["source_discovery"], true);
-    assert!(shown["discovery_relay"].get("provider").is_none());
+    assert_eq!(shown["relay_fallback"]["source_discovery"], true);
+    assert!(shown["relay_fallback"].get("provider").is_none());
     for provider in [
         "missing-first.toml",
         "missing-second.toml",
@@ -315,8 +315,8 @@ async fn relay_method_lists_are_inspected_offline_and_every_provider_path_is_pro
         assert!(format!("{error:#}").contains("aliases a protected"));
     }
     for invalid in [
-        "\n[discovery_relay.fallbacks]\nPUT=['missing.toml']\n",
-        "\n[discovery_relay]\nprovider='old.toml'\nfallbacks={}\n",
+        "\n[relay_fallback.relays]\nPUT=['missing.toml']\n",
+        "\n[relay_fallback]\nrelays.GET=['old.toml']\nfallbacks={}\n",
     ] {
         std::fs::write(&path, format!("{text}{invalid}")).unwrap();
         assert!(Deployment::show_config(&path).await.is_err());
@@ -341,8 +341,8 @@ async fn relay_serving_loads_only_its_static_key_before_catalog_selection() {
         format!(
             r#"
 version=1
-[discovery_relay]
-provider='{}'
+[relay_fallback]
+relays.GET=['{}']
 wallet='relay'
 [wallets.relay]
 mode='static'
@@ -412,9 +412,9 @@ async fn comprehensive_example_enables_source_wallet_discovery_offline() {
     )
     .await
     .unwrap();
-    assert_eq!(shown["discovery_relay"]["provider_metadata"], true);
-    assert_eq!(shown["discovery_relay"]["source_discovery"], true);
-    assert!(shown["discovery_relay"]["wallet"].is_null());
+    assert_eq!(shown["relay_fallback"]["provider_metadata"], true);
+    assert_eq!(shown["relay_fallback"]["source_discovery"], true);
+    assert!(shown["relay_fallback"]["wallet"].is_null());
     assert_eq!(shown["discovery_wallets"]["exa"], "web");
     assert_eq!(shown["discovery_wallets"]["social"], "company");
     assert_eq!(
@@ -684,14 +684,14 @@ listen="127.0.0.1:0"
 bearer_token_env="UNUSED_TEST_TOKEN"
 source_management=true
 sources=[]
-[discovery_relay]
-provider="missing-local-provider.toml"
+[relay_fallback]
+relays.GET=["missing-local-provider.toml"]
 "#;
     std::fs::write(&path, text).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
-    assert_eq!(shown["discovery_relay"]["source_discovery"], true);
-    assert_eq!(shown["discovery_relay"]["provider_metadata"], true);
-    assert_eq!(shown["discovery_relay"]["api_requests"], false);
+    assert_eq!(shown["relay_fallback"]["source_discovery"], true);
+    assert_eq!(shown["relay_fallback"]["provider_metadata"], true);
+    assert_eq!(shown["relay_fallback"]["api_requests"], false);
     assert_eq!(shown["discovery_wallets"], json!({}));
     assert_eq!(
         shown["source_management"]["wallet_bindings"]["tools"],
@@ -705,24 +705,24 @@ provider="missing-local-provider.toml"
         std::fs::write(&path, format!("{text}{setting}\n")).unwrap();
         let shown = Deployment::show_config(&path).await.unwrap();
         assert_eq!(
-            shown["discovery_relay"]["source_discovery"],
+            shown["relay_fallback"]["source_discovery"],
             setting == "source_discovery=true"
         );
         // Every configured adapter is validated locally, including when search
         // is disabled. Invalid bootstrap fails before secrets or network work.
         assert!(Deployment::load(&path).await.is_err());
     }
-    let no_relay = text.split("[discovery_relay]").next().unwrap();
+    let no_relay = text.split("[relay_fallback]").next().unwrap();
     std::fs::write(&path, no_relay).unwrap();
     let shown = Deployment::show_config(&path).await.unwrap();
     assert!(
         shown
-            .get("discovery_relay")
+            .get("relay_fallback")
             .is_none_or(serde_json::Value::is_null)
     );
     assert!(Deployment::load(&path).await.is_ok());
     let provider = format!(
-        "spec={:?}\nbase_url='https://spec.example.com'\n",
+        "spec={:?}\nbase_url='https://spec.example.com'\nrelay_format='curl'\n",
         Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/openapi.json")
     );
     std::fs::write(dir.path().join("relay.toml"), provider).unwrap();

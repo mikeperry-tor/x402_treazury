@@ -46,8 +46,8 @@ socks_endpoint='{socks}'
 isolation_namespace='direct-warm-fixture'
 # Explicit direct warming bypasses relay bootstrap and payment:
 # its provider is deliberately missing and its wallet key is unavailable.
-[discovery_relay]
-provider='missing-bootstrap.toml'
+[relay_fallback]
+relays.GET=['missing-bootstrap.toml']
 wallet='w'
 [treasury]
 state_dir='state'

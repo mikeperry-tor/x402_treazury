@@ -80,7 +80,7 @@ Curl, AGProxy and Horizon Pulse pin complete vendor OpenAPI documents as runtime
 assets. This lets relay bootstrap validate operations locally without buying or
 fetching another catalog. Their reusable catalogs remain pinned until a deliberate
 update; see [capture provenance and update instructions](CAVEATS.md#pinned-relay-contracts)
-and [relay configuration](../docs/configuration.md#paid-discovery-relay).
+and [relay configuration](../docs/configuration.md#relay-fallback).
 
 Authored local catalogs are explicitly labeled rather than presented as vendor
 OpenAPI documents. Preserve complete documented request contracts, source
@@ -121,8 +121,7 @@ Providers selected in a relay method list declare `relay_format = "curl"`,
 request/response envelope; provider names, hosts and schema shapes do not infer it.
 The field is optional for ordinary API providers. Listed providers require a
 supported format and compatible operation/filter selection before paid dispatch.
-Legacy `[discovery_relay].provider` syntax grants implicit Curl format only to
-that entry and rejects conflicting metadata. Operator-authored GET, HEAD and POST
+Operator-authored `[relay_fallback.relays]` GET, HEAD and POST
 lists determine selection and order; an adapter still checks whether it can
 preserve the actual request. This metadata does not enter agent tool descriptions
 or input schemas.

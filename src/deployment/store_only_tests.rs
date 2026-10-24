@@ -160,7 +160,7 @@ async fn base_service(fault: &str, relay_enabled: bool) {
     if relay_enabled {
         let provider = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
         config.push_str(&format!(
-            "\n[discovery_relay]\nprovider='{}'\nwallet='selected'\n",
+            "\n[relay_fallback]\nrelays.GET=['{}']\nwallet='selected'\n",
             provider.display()
         ));
     }
@@ -304,7 +304,7 @@ async fn serving_sdk_fallback_does_not_mask_shared_faults_or_allow_strict_bootst
             let provider =
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
             config.push_str(&format!(
-                "\n[discovery_relay]\nprovider='{}'\nwallet='selected'\n",
+                "\n[relay_fallback]\nrelays.GET=['{}']\nwallet='selected'\n",
                 provider.display()
             ));
         }
@@ -511,7 +511,7 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
             let provider =
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
             config.push_str(&format!(
-                "\n[discovery_relay]\nprovider='{}'\nwallet='selected'\n",
+                "\n[relay_fallback]\nrelays.GET=['{}']\nwallet='selected'\n",
                 provider.display()
             ));
         }

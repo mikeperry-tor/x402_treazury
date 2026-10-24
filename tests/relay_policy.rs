@@ -13,16 +13,15 @@ fn method_lists_preserve_authored_order_without_inheritance_or_provider_io() {
         r#"
 wallet = "research"
 sources = ["docs"]
-[fallbacks]
+[relays]
 GET = ["missing/curl.toml", "missing/agproxy.toml", "missing/curl.toml"]
 HEAD = []
 POST = ["missing/post.toml"]
 "#,
     );
-    assert!(!parsed.is_legacy());
     assert!(parsed.source_discovery && parsed.provider_metadata && !parsed.api_requests);
     assert_eq!(
-        parsed.fallbacks()["GET"],
+        parsed.relays()["GET"],
         [
             "missing/curl.toml",
             "missing/agproxy.toml",
@@ -30,16 +29,16 @@ POST = ["missing/post.toml"]
         ]
         .map(PathBuf::from)
     );
-    assert!(parsed.fallbacks()["HEAD"].is_empty());
+    assert!(parsed.relays()["HEAD"].is_empty());
     assert_eq!(
-        parsed.fallbacks()["POST"],
+        parsed.relays()["POST"],
         [PathBuf::from("missing/post.toml")]
     );
     assert_eq!(parsed.provider_paths().count(), 4);
     let inspection = serde_json::to_value(&parsed).unwrap();
     assert!(inspection.get("provider").is_none());
     assert_eq!(
-        inspection["fallbacks"]["GET"],
+        inspection["relays"]["GET"],
         json!([
             "missing/curl.toml",
             "missing/agproxy.toml",
@@ -49,14 +48,14 @@ POST = ["missing/post.toml"]
     assert_eq!(inspection["wallet"], "research");
     assert_eq!(inspection["sources"], json!(["docs"]));
     let get_only = policy_from_json(inspection);
-    assert_eq!(get_only.fallbacks(), parsed.fallbacks());
+    assert_eq!(get_only.relays(), parsed.relays());
     assert!(
-        !policy("[fallbacks]\nGET=['missing.toml']")
-            .fallbacks()
+        !policy("[relays]\nGET=['missing.toml']")
+            .relays()
             .contains_key("HEAD")
     );
-    assert!(policy("").fallbacks().is_empty());
-    assert!(policy("[fallbacks]").fallbacks().is_empty());
+    assert!(policy("").relays().is_empty());
+    assert!(policy("[relays]").relays().is_empty());
 }
 
 fn policy_from_json(value: Value) -> Policy {
@@ -64,26 +63,72 @@ fn policy_from_json(value: Value) -> Policy {
 }
 
 #[test]
-fn legacy_provider_is_one_get_entry_with_explicit_legacy_provenance() {
-    let legacy = policy("provider='missing.toml'");
-    assert!(legacy.is_legacy());
-    assert!(legacy.source_discovery && legacy.provider_metadata && !legacy.api_requests);
-    assert_eq!(legacy.fallbacks()["GET"], [PathBuf::from("missing.toml")]);
-    assert_eq!(legacy.fallbacks().len(), 1);
-    let canonical = serde_json::to_value(&legacy).unwrap();
-    assert!(canonical.get("provider").is_none());
-    assert_eq!(canonical["fallbacks"], json!({"GET":["missing.toml"]}));
-    assert!(
-        !policy_from_json(canonical).is_legacy(),
-        "canonical lists do not implicitly grant Curl compatibility"
+fn section_names_are_strict_in_deployments_and_network_overrides() {
+    use x402_treazury::{deployment::MetaConfig, network::NetworkConfig};
+
+    let current = "[relay_fallback.relays]\nGET=['missing.toml']\n";
+    let config: MetaConfig = toml::from_str(&format!("version=1\n[servers]\n{current}")).unwrap();
+    let shown = serde_json::to_value(config).unwrap();
+    assert_eq!(
+        shown["relay_fallback"]["relays"]["GET"],
+        json!(["missing.toml"])
     );
+    assert!(shown.get("discovery_relay").is_none());
+    let override_file: NetworkConfig =
+        toml::from_str(&format!("[network]\nmode='direct'\n{current}")).unwrap();
+    assert!(override_file.relay_fallback.unwrap().has_method("GET"));
+
+    for retired in [
+        "[discovery_relay]\n",
+        "[relay_fallback.fallbacks]\nGET=['missing.toml']\n",
+        "[relay_fallback]\nprovider='missing.toml'\n",
+    ] {
+        let deployment = format!("version=1\n[servers]\n{retired}");
+        assert!(
+            toml::from_str::<MetaConfig>(&deployment).is_err(),
+            "{retired}"
+        );
+        let network = format!("[network]\nmode='direct'\n{retired}");
+        assert!(
+            toml::from_str::<NetworkConfig>(&network).is_err(),
+            "{retired}"
+        );
+    }
+}
+
+#[test]
+fn shipped_examples_use_explicit_relay_lists() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tor = x402_treazury::network::NetworkConfig::load(&root.join("examples/network/tor.toml"))
+        .unwrap();
+    let relay = tor.relay_fallback.unwrap();
+    assert_eq!(relay.relays()["GET"].len(), 2);
+    assert_eq!(relay.relays()["POST"].len(), 1);
+    assert_eq!(relay.relays()["HEAD"].len(), 1);
+    assert!(
+        relay
+            .provider_paths()
+            .all(|path| path.is_absolute() && path.is_file())
+    );
+    let comprehensive: x402_treazury::deployment::MetaConfig =
+        toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
+    assert_eq!(
+        comprehensive.relay_fallback.unwrap().relays()["GET"],
+        [PathBuf::from("../../providers/curl/provider.toml")]
+    );
+}
+
+#[test]
+fn retired_keys_and_invalid_method_lists_are_rejected() {
     for input in [
-        "provider='old.toml'\nfallbacks={}",
-        "provider='old.toml'\n[fallbacks]\nGET=['new.toml']",
-        "[fallbacks]\nget=['missing.toml']",
-        "[fallbacks]\nPUT=[]",
-        "[fallbacks]\nDELETE=['missing.toml']",
-        "[fallbacks]\nGET=[{provider='missing.toml',adapter='curl'}]",
+        "provider='old.toml'",
+        "fallbacks={}",
+        "[fallbacks]\nGET=['old.toml']",
+        "provider='old.toml'\n[relays]\nGET=['new.toml']",
+        "[relays]\nget=['missing.toml']",
+        "[relays]\nPUT=[]",
+        "[relays]\nDELETE=['missing.toml']",
+        "[relays]\nGET=[{provider='missing.toml',adapter='curl'}]",
         "unknown=true",
     ] {
         assert!(toml::from_str::<Policy>(input).is_err(), "{input}");
@@ -96,29 +141,22 @@ fn method_paths_resolve_at_declaration_without_reading_missing_providers() {
     let declaring = directory.path().join("network/tor.toml");
     let absolute = directory.path().join("absolute.toml");
     let mut listed = policy(&format!(
-        "[fallbacks]\nGET=['../curl.toml','{}']\nPOST=['post.toml']",
+        "[relays]\nGET=['../curl.toml','{}']\nPOST=['post.toml']",
         absolute.display()
     ));
     listed.resolve_paths(&declaring).unwrap();
     assert_eq!(
-        listed.fallbacks()["GET"],
+        listed.relays()["GET"],
         [
             std::path::absolute(directory.path().join("network/../curl.toml")).unwrap(),
             absolute
         ]
     );
     assert_eq!(
-        listed.fallbacks()["POST"],
+        listed.relays()["POST"],
         [directory.path().join("network/post.toml")]
     );
     assert!(listed.provider_paths().all(|path| !path.exists()));
-    let mut legacy = policy("provider='../old.toml'");
-    legacy.resolve_paths(&declaring).unwrap();
-    assert!(legacy.is_legacy());
-    assert_eq!(
-        legacy.provider.as_ref().unwrap(),
-        &legacy.fallbacks()["GET"][0]
-    );
     let config: x402_treazury::deployment::MetaConfig =
         toml::from_str("version=1\n[servers]").unwrap();
     listed.validate(&config).unwrap();

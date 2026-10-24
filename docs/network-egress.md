@@ -13,7 +13,7 @@ suppressed. RPC providers still receive the wallet addresses being queried.
 Ordinary CLI commands select the deployment's `[network]` policy unless an explicit
 `--network-config FILE` replaces it. Replacement is whole-policy, before semantic
 validation or client creation; omitted fields use defaults. The external file can
-also contain `[discovery_relay]`, replacing that entire deployment section when
+also contain `[relay_fallback]`, replacing that entire deployment section when
 present and preserving it when omitted. Its provider-list paths resolve relative to the
 external file. Relay settings apply to deployment reads; standalone provider,
 wallet and diagnostic commands accept the same file without loading relay providers.
@@ -145,7 +145,7 @@ relay-service unsigned requests, Base, and unsigned API GET/HEAD and x402 POST.
 Other API methods retain their existing TLS-only transport recovery. Startup's local SOCKS
 reachability prerequisite remains separate from per-operation attempts.
 
-## Paid discovery relay
+## Relay fallback
 
 Static catalog acquisition and Coinbase resource search share
 `network::acquisition`: one configured origin sequence, with complete-body
@@ -159,13 +159,12 @@ catalogs reject unsolicited `206`/`Content-Range`, and local policy, authority,
 proxy setup and byte-limit failures cannot purchase another response. Accepted
 empty/partial search-result metadata finishes without fallback.
 
-`[discovery_relay.fallbacks]` declares independent ordered `GET`, `HEAD` and `POST`
+`[relay_fallback.relays]` declares independent ordered `GET`, `HEAD` and `POST`
 provider-path lists; a missing/empty list is origin-only. Selection uses the original
 target method. Provider-owned `relay_format` identifies Curl, AGProxy or Horizon
 Pulse translation, with no host/name inference. Bootstrap validates local pinned
 schemas, operations and filters without remote schema/help acquisition.
-Legacy `provider` becomes one GET Curl entry and cannot coexist with `fallbacks`.
-See [configuration](configuration.md#paid-discovery-relay) for paths and inspection.
+See [configuration](configuration.md#relay-fallback) for paths and inspection.
 
 Runtime fallback uses the authenticated endpoint's existing payer and retained
 call owner. It adds no cache, readiness queue or provider breaker. Static metadata fallback uses deterministic
@@ -188,7 +187,7 @@ configured relay section. Mixed workflows classify each acquisition separately;
 method, hostname and agent arguments do not select a category. A disabled category
 cannot dispatch or sign a relay request. All categories share one immutable adapter
 context and existing payer/owner machinery; relay-service calls never recurse.
-See [configuration](configuration.md#paid-discovery-relay) for membership and static
+See [configuration](configuration.md#relay-fallback) for membership and static
 startup/warming authority.
 
 Each authored position permits at most one logical acquisition. Relay-service
@@ -213,7 +212,7 @@ Static process outcomes share the first acquisition for the same wallet,
 catalog contract, authored provider position and target URL, including a
 terminal decoded-bound failure despite a later larger allowance. Successful cached
 responses still check the requesting bound; disk slots remain bound-specific. See
-[cache semantics](configuration.md#paid-discovery-relay). Runtime source-management
+[cache semantics](configuration.md#relay-fallback). Runtime source-management
 bounds cover both outer and decoded responses;
 provider transport permissions apply to the relay leg, with inactivity precedence
 source-management, provider, then network.
@@ -618,7 +617,7 @@ such rules globally on a user's machine as part of an application test.
 Runtime OpenAPI imports/refresh, lazy help, explicit usage documents and URL
 probes use the common complete-document reader. Its unsigned origin sequence uses
 `network.tor_isolation_retries` and retained server delays; configured
-`discovery_relay.provider_metadata` permits the ordered GET relay list after blocking
+`relay_fallback.provider_metadata` permits the ordered GET relay list after blocking
 HTTP/transport failures.
 There is no HEAD-then-GET probe, target challenge signing or linked traversal.
 Terminal `401`/`404`/`410`, other non-blocking responses, complete invalid content,
@@ -635,7 +634,7 @@ Public destinations, `allowed_origins`, spec/help byte bounds and response-read
 inactivity apply. Missing payment authority disables paid fallback without
 blocking origin retrieval. No document read allocates wallets, starts funding or
 waits for funding. Configured relays may follow redirects remotely under the
-[relay trust boundary](#paid-discovery-relay); origin requests remain no-follow.
+[relay trust boundary](#relay-fallback); origin requests remain no-follow.
 
 Accepted help and source mutations retain fetching, validation and cache/registry
 publication after disconnect. Compatible cache aliases retain the exact payer and

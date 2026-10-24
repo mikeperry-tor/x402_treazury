@@ -80,16 +80,14 @@ pub fn audit_run(state: &Path, run: &str, output: &Path) -> Result<u8> {
         .as_ref()
         .context("run has no frozen catalog evidence")?;
     let mut snapshot = catalogs.verify_archive(&manifest)?;
-    // The archive bytes were verified above. Retired routing preferences do not
-    // affect wallet/transport identity derivation; ignore them only in this
+    // The archive bytes were verified above. The retired relay section does not
+    // affect wallet/transport identity derivation; ignore it only in this
     // offline observation, never in live preparation or current session policy.
-    if let Some(relay) = snapshot
-        .pointer_mut("/deployment/discovery_relay")
+    if let Some(deployment) = snapshot
+        .get_mut("deployment")
         .and_then(Value::as_object_mut)
     {
-        for key in ["serve", "warm", "on_demand", "search"] {
-            relay.remove(key);
-        }
+        deployment.remove("discovery_relay");
     }
     ensure!(
         manifest.network.tor_mode == crate::manifest::TorMode::Owned,

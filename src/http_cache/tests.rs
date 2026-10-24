@@ -1510,7 +1510,7 @@ async fn static_catalog_partial_documents_and_bounds_never_schedule_paid_fallbac
     let cfg = Config {
         spec: url.clone(),
         max_spec_bytes: 1024,
-        discovery_relay: Some(relay),
+        relay_fallback: Some(relay),
         ..Default::default()
     };
     for mode in [16, 17, 8, 20] {
@@ -1578,7 +1578,7 @@ async fn static_catalog_proven_local_proxy_refusal_never_schedules_paid_fallback
         crate::discovery_relay::tests::fixture(serde_json::json!({}), false, false).await;
     let cfg = Config {
         spec: "https://refusal.example.com/openapi.json".into(),
-        discovery_relay: Some(relay),
+        relay_fallback: Some(relay),
         ..Default::default()
     };
     let result = catalog::prepare_json_discovery_with(&cfg, &network).await;

@@ -39,7 +39,7 @@ reads saved observations without network traffic. See the
 [CLI output and discovery scope](wallet-cli.md#one-configuration-for-wallet-commands).
 `--meta-config` remains a deployment alias. `--provider FILE` selects a reusable
 provider for standalone serving and catalog inspection. `--network-config FILE`
-selects a file containing `[network]` and optionally `[discovery_relay]`. It
+selects a file containing `[network]` and optionally `[relay_fallback]`. It
 replaces the complete deployment `[network]` section for that invocation; omitted
 fields use network defaults rather than inheriting deployment values. A supplied
 relay section replaces the complete deployment relay section; an omitted section
@@ -1205,10 +1205,11 @@ including when upstream requests no storage or immediate revalidation. Variant,
 size and provenance restrictions still apply; `--direct` does not override them
 or extend lifetimes. A failed multi-source warm can leave completed disposable entries.
 
-## Paid discovery relay
+## Relay fallback
 
-A deployment can configure ordered paid fallback for static catalog GETs
-and Coinbase resource searches, in its own configuration or through
+A deployment can configure ordered paid relay fallback for catalogs, document
+reads, built-in directory searches and explicitly enabled API requests, in its
+own configuration or through
 `--network-config`. Origin acquisition has one attempt in direct mode, or the
 initial attempt plus `network.tor_isolation_retries` fresh owner-bound Tor scopes.
 Eligible origin statuses are `400`, `403`, `408`, `429`, `500`, `502`, `503` and
@@ -1222,14 +1223,14 @@ Coinbase also preserves remote-status/JSON fallback. Successful empty or partial
 search-result metadata is terminal success.
 
 ```toml
-[discovery_relay]
+[relay_fallback]
 source_discovery = true # directory/resource searches; default true
 api_requests = false # actual API data; default false
 provider_metadata = true # catalogs/help/imports/probes; default true
 # wallet = "web" # optional static payer override
 # sources = ["social"] # optional static source selection; empty selects all
 
-[discovery_relay.fallbacks]
+[relay_fallback.relays]
 GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
 POST = ["../../providers/agproxy.toml"]
 HEAD = ["../../providers/agproxy.toml"]
@@ -1247,10 +1248,10 @@ bytes or required headers skip the entry before paid I/O; headers and bodies are
 never silently discarded to fit another adapter. Target payment signatures and
 other credentials are not forwarded.
 
-Legacy `provider = "../../providers/curl/provider.toml"` remains accepted as one
-GET Curl entry, including old Curl definitions without `relay_format`. Conflicting
-format metadata is rejected. `provider` cannot appear with `fallbacks`, even an
-explicitly empty map. Inspection emits canonical method lists without reading
+The section is named `relay_fallback`, with provider lists under `relays`.
+The old `discovery_relay` section, `fallbacks` lists and single `provider` shorthand
+are rejected. Every listed provider requires explicit `relay_format` metadata.
+Inspection emits canonical method lists without reading
 provider files. Paths in lists resolve relative to the declaring deployment/network
 file; schemas/help paths inside providers resolve relative to their TOML.
 

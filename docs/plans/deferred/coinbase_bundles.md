@@ -29,5 +29,5 @@ Before proposing bundle tools:
 
 This deferred work authorizes no credential acquisition, live paid calls or wallet
 access. The maintained [agent source guide](../../agent-sources.md) and
-[relay configuration](../../configuration.md#paid-discovery-relay) own implemented
+[relay configuration](../../configuration.md#relay-fallback) own implemented
 resource search and its current boundaries.

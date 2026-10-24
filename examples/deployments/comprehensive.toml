@@ -38,14 +38,16 @@ read_timeout_seconds = 60
 # Explicit paid warming requires an eligible payer; wallet bootstrap can prepare reserves.
 # Curl receives target URLs; connections retain wallet-bound Tor isolation.
 # Static relay outcomes are scoped to each configured provider and payer.
-[discovery_relay]
+[relay_fallback]
 # Discovery and provider metadata fallback default on; actual API data stays origin-only.
 source_discovery = true
 api_requests = false
 provider_metadata = true
-provider = "../../providers/curl/provider.toml"
 # wallet = "web" # optional override: share this wallet for all discovery
 # sources = ["social"] # omit to allow all authored sources
+
+[relay_fallback.relays]
+GET = ["../../providers/curl/provider.toml"]
 
 # Treasury commands use this same state directory and its default wallet.key.
 [treasury]

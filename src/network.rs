@@ -130,12 +130,12 @@ impl NetworkPolicy {
         Ok(NetworkConfig::load(path)?.network)
     }
 }
-/// Invocation-local transport and optional deployment discovery-relay overrides.
+/// Invocation-local transport and optional deployment relay-fallback overrides.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkConfig {
     pub network: NetworkPolicy,
-    pub discovery_relay: Option<crate::discovery_relay::Policy>,
+    pub relay_fallback: Option<crate::discovery_relay::Policy>,
 }
 impl NetworkConfig {
     pub fn load(path: &Path) -> Result<Self> {
@@ -143,7 +143,7 @@ impl NetworkConfig {
             toml::from_str(&std::fs::read_to_string(path).context("reading network config")?)
                 .context("invalid network config")?;
         file.network.validate()?;
-        if let Some(relay) = &mut file.discovery_relay {
+        if let Some(relay) = &mut file.relay_fallback {
             relay.resolve_paths(path)?;
         }
         Ok(file)

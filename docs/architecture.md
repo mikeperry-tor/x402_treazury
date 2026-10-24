@@ -152,7 +152,7 @@ owners start in the serving lifecycle. `deployment/bootstrap.rs` remains the
 catalog-free explicit `wallet bootstrap` path with captured-claim completeness.
 Reserve vacancies follow their exact current claims; there is no separate initial allocation. Warming starts no funding workers. Origin freshness and relay provenance
 remain distinct from ordinary HTTP cache entries. See
-[paid discovery relay](configuration.md#paid-discovery-relay).
+[paid discovery relay](configuration.md#relay-fallback).
 
 Deployment initialization checks managed connection settings before opening the
 treasury and installs qualification, funding-denial and pause restrictions before

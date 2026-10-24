@@ -90,7 +90,7 @@ target/release/x402_treazury serve --config examples/deployments/managed.local.t
 ```
 
 `--network-config` replaces the complete `[network]` policy and, when present,
-`[discovery_relay]` for that invocation. This Tor example enables configured paid relay fallback for catalog,
+`[relay_fallback]` for that invocation. This Tor example enables configured paid relay fallback for catalog,
 document reads and built-in directory/Coinbase searches using the deployment’s
 existing payers. Actual API fallback requires explicit `api_requests = true`. Without the option, the managed starter uses its own settings.
 For treasury initialization over Tor, pass the same option to `wallet init`, or
@@ -263,7 +263,7 @@ startup, explicit `wallet sync` with serving stopped, or another relevant trigge
 See the [wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy)
 for the discovery scopes and unavailable-treasury exception.
 
-The comprehensive example uses a [paid discovery relay](docs/configuration.md#paid-discovery-relay)
+The comprehensive example uses a [paid discovery relay](docs/configuration.md#relay-fallback)
 over Tor when catalog requests are blocked, rate limited or time out.
 Relay fees depend on the configured provider and request; relay-dependent catalogs
 appear when their payer wallet becomes usable.
@@ -471,12 +471,12 @@ can charge for that read. Missing contracts remain missing: do not guess paid ar
 
 Coinbase origin search needs no API key. Tor uses one origin attempt plus
 `network.tor_isolation_retries` fresh attempts (default two). Configured
-`[discovery_relay]` method lists enable runtime fallback using the endpoint’s
+`[relay_fallback.relays]` method lists enable runtime fallback using the endpoint’s
 source-management payer. `source_discovery` defaults true for built-in directories,
 `provider_metadata` defaults true for schemas/help, and `api_requests` defaults false
 for actual API data. Set the applicable preference false to disable its fallback.
 With no relay section, requests use only the origin.
-See the [relay bootstrap settings](docs/configuration.md#paid-discovery-relay).
+See the [relay bootstrap settings](docs/configuration.md#relay-fallback).
 Connections to relays retain the configured Tor/direct policy. Relays fetch from
 their own networks; their redirect policy, unreported hops and plaintext content
 remain trusted. Requested and reported destinations are checked against the

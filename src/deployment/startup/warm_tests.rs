@@ -35,7 +35,7 @@ sources=['api']
         .unwrap()
         .settings;
     cfg.discovery_source = Some("api".into());
-    cfg.discovery_relay = Some(relay.clone());
+    cfg.relay_fallback = Some(relay.clone());
     cfg.http_cache_directory = Some(dir.path().join("http-cache"));
     let headers = reqwest::header::HeaderMap::from_iter([(
         reqwest::header::CACHE_CONTROL,
@@ -260,8 +260,8 @@ mode='tor'
 socks_endpoint='{}'
 tor_isolation_retries=0
 cover_traffic_enabled=false
-[discovery_relay]
-provider='relay.toml'
+[relay_fallback]
+relays.GET=['relay.toml']
 [treasury]
 state_dir='{}'
 [wallets.w]
@@ -292,8 +292,8 @@ sources=['api']
         std::fs::write(
             &path,
             config.replace(
-                "provider='relay.toml'",
-                "provider='relay.toml'\nprovider_metadata=false",
+                "relays.GET=['relay.toml']",
+                "relays.GET=['relay.toml']\nprovider_metadata=false",
             ),
         )
         .unwrap();

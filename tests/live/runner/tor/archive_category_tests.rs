@@ -1,4 +1,4 @@
-//! Retired relay preferences remain readable only through the offline archive.
+//! Retired relay configuration remains readable only through the offline archive.
 use super::*;
 use crate::{
     planner,
@@ -13,14 +13,14 @@ use x402_treazury::{
 };
 
 #[test]
-fn old_relay_flags_preserve_offline_managed_identity_audit_without_live_authority() {
+fn old_relay_config_preserves_offline_managed_identity_audit_without_live_authority() {
     const CHILD: &str = "TREAZURY_ARCHIVE_CATEGORY_CHILD";
     if std::env::var_os(CHILD).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .env_clear()
             .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .env(CHILD, "1")
-            .args(["--exact", "tor::archive::category_tests::old_relay_flags_preserve_offline_managed_identity_audit_without_live_authority", "--nocapture"])
+            .args(["--exact", "tor::archive::category_tests::old_relay_config_preserves_offline_managed_identity_audit_without_live_authority", "--nocapture"])
             .output().unwrap();
         assert!(
             output.status.success(),
@@ -185,19 +185,25 @@ fn old_relay_flags_preserve_offline_managed_identity_audit_without_live_authorit
     );
     let baseline: Value = serde_json::from_slice(&std::fs::read(baseline_output).unwrap()).unwrap();
 
-    for (ordinal, old_key) in ["serve", "warm", "on_demand", "search"]
-        .into_iter()
-        .enumerate()
-    {
-        snapshot["deployment"]["discovery_relay"] = json!({"fallbacks":{}});
-        snapshot["deployment"]["discovery_relay"][old_key] = json!(true);
+    let mut retired = vec![
+        json!({"provider":"missing-legacy-provider.toml"}),
+        json!({"fallbacks":{"GET":["missing-provider.toml"],"POST":[]}}),
+        json!({"fallbacks":{},"source_discovery":false,"api_requests":true,"provider_metadata":false}),
+    ];
+    for old_key in ["serve", "warm", "on_demand", "search"] {
+        let mut relay = json!({"fallbacks":{}});
+        relay[old_key] = json!(true);
+        retired.push(relay);
+    }
+    for (ordinal, relay) in retired.into_iter().enumerate() {
+        snapshot["deployment"]["discovery_relay"] = relay;
         assert!(
             serde_json::from_value::<MetaConfig>(snapshot["deployment"].clone()).is_err(),
-            "{old_key}"
+            "retired relay configuration {ordinal}"
         );
         assert!(
             identities::for_interval(&manifest, &snapshot, &state, |_| None, &[], false).is_err(),
-            "live identity path must stay strict for {old_key}"
+            "live identity path must stay strict for retired relay configuration {ordinal}"
         );
         let bytes = serde_json::to_vec(&snapshot).unwrap();
         std::fs::write(artifact_directory.join("snapshot.json"), &bytes).unwrap();

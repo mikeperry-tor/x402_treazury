@@ -981,7 +981,7 @@ configured method lists. Enabling the provider as an MCP source also exposes the
 vendor's target-method choices. Reported URLs cannot prove hidden intermediate
 destinations or target TLS/plaintext integrity: configured relay use trusts the
 service for those properties. See
-[relay configuration](../docs/configuration.md#paid-discovery-relay).
+[relay configuration](../docs/configuration.md#relay-fallback).
 
 ## relayshield.toml — RelayShield
 

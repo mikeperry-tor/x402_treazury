@@ -15,12 +15,12 @@ async fn relay_startup_errors_finish_shutdown() {
         std::fs::write(dir.path().join("spec.json"), r#"{"openapi":"3.0.0","info":{"title":"fixture","version":"1"},"paths":{"/curl":{"post":{"operationId":"curl","responses":{"200":{"description":"ok"}}}}}}"#).unwrap();
         std::fs::write(
             dir.path().join("relay.toml"),
-            "spec=\"spec.json\"\nbase_url=\"https://relay.example.com\"\n",
+            "relay_format=\"curl\"\nspec=\"spec.json\"\nbase_url=\"https://relay.example.com\"\n",
         )
         .unwrap();
         let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let policy = if relay {
-            "[discovery_relay]\nprovider=\"relay.toml\"\nwallet=\"research\"\n"
+            "[relay_fallback]\nrelays.GET=[\"relay.toml\"]\nwallet=\"research\"\n"
         } else {
             ""
         };

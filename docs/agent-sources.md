@@ -178,7 +178,7 @@ terminal HTTP statuses do not buy another read. API ranges remain legitimate;
 raw HEAD succeeds with empty text. Typed possible-charge facts survive directory
 processing and output conversion, separately from relay advisories and JSON text.
 
-With `[discovery_relay]` configured, `source_discovery=true` enables built-in
+With `[relay_fallback]` configured, `source_discovery=true` enables built-in
 Coinbase and x402 List fallback by default. `provider_metadata=true` independently
 enables schemas, imports/refresh, help, explicit usage documents and URL/spec probes.
 Actual API and raw calls require explicit `api_requests=true`; an ordinary call to
@@ -194,7 +194,7 @@ Each authorization may charge, and uncertain paid failure grants no automatic
 replay. The relay connection retains configured direct/Tor policy. The selected service
 sees the query URL, reaches Coinbase from its own network and supplies target
 content/status/headers. Origin failures and relay failures remain request-scoped.
-See [relay configuration](configuration.md#paid-discovery-relay) for settings,
+See [relay configuration](configuration.md#relay-fallback) for settings,
 precedence and trust. Local input/origin/identity/download-limit failures
 never authorize relay spending. No Coinbase challenge is signed.
 
@@ -348,7 +348,7 @@ listener's available documentation identity, transport, `allowed_origins`,
 `max_help_bytes` and response-read inactivity policy apply. Missing wallet identity
 leaves origin retrieval available under the URL's discovery identity. Origin HTTP
 remains no-follow; configured relays may follow redirects under the
-[documented trust boundary](configuration.md#paid-discovery-relay). A separate skill host must independently satisfy the origin policy.
+[documented trust boundary](configuration.md#relay-fallback). A separate skill host must independently satisfy the origin policy.
 Accepted text is complete UTF-8 without NUL, with `text/plain`, `text/markdown`,
 `text/x-markdown` (parameters allowed), or no content type. HTML MIME and leading
 HTML/doctype markup are rejected, as are other MIME types and invalid UTF-8.

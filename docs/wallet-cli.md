@@ -106,7 +106,7 @@ location overrides with `--config`: the deployment owns its paths. You may combi
 `--config` and `--network-config FILE` to replace the complete network policy for
 that invocation, including initialization, synchronization, bootstrap and recovery.
 Omitted network fields use defaults; they do not inherit values from the deployment.
-The file may also contain deployment `[discovery_relay]` settings; wallet commands
+The file may also contain deployment `[relay_fallback]` settings; wallet commands
 accept them without loading relay providers or performing paid discovery.
 Saved transaction bytes, wallet identities and recovery authority are unchanged.
 Supervised qualification sync retains its pinned deployment policy and rejects

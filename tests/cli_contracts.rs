@@ -1127,13 +1127,13 @@ async fn network_override_replaces_relay_at_its_declaration_without_inspection_i
     let dir = tempfile::tempdir().unwrap();
     network_override_fixture(
         dir.path(),
-        "[discovery_relay]\nwallet='shared'\nsources=['api']\nsource_discovery=false\n[discovery_relay.fallbacks]\nGET=['embedded-missing.toml','embedded-second.toml']\nHEAD=['embedded-head.toml']\n",
+        "[relay_fallback]\nwallet='shared'\nsources=['api']\nsource_discovery=false\n[relay_fallback.relays]\nGET=['embedded-missing.toml','embedded-second.toml']\nHEAD=['embedded-head.toml']\n",
     );
     let external = dir.path().join("network");
     std::fs::create_dir(&external).unwrap();
     std::fs::write(
         external.join("tor.toml"),
-        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n[discovery_relay]\n[discovery_relay.fallbacks]\nGET=['external-missing.toml','external-second.toml']\nPOST=['external-post.toml']\nHEAD=[]\n",
+        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n[relay_fallback]\n[relay_fallback.relays]\nGET=['external-missing.toml','external-second.toml']\nPOST=['external-post.toml']\nHEAD=[]\n",
     )
     .unwrap();
     let args = [
@@ -1147,9 +1147,9 @@ async fn network_override_replaces_relay_at_its_declaration_without_inspection_i
     let shown = good(run(dir.path(), &args, &[]).await);
     assert_eq!(shown["network"]["mode"], "tor");
     assert_eq!(
-        shown["discovery_relay"],
+        shown["relay_fallback"],
         json!({
-            "fallbacks": {
+            "relays": {
                 "GET": [external.canonicalize().unwrap().join("external-missing.toml"), external.canonicalize().unwrap().join("external-second.toml")],
                 "POST": [external.canonicalize().unwrap().join("external-post.toml")],
                 "HEAD": []
@@ -1168,7 +1168,7 @@ async fn network_override_replaces_relay_at_its_declaration_without_inspection_i
     // section would instead use the valid embedded wallet binding.
     std::fs::write(
         external.join("tor.toml"),
-        "[network]\nmode='direct'\n[discovery_relay]\nprovider='external-missing.toml'\nwallet='undeclared-network-relay-wallet'\n",
+        "[network]\nmode='direct'\n[relay_fallback]\nrelays.GET=['external-missing.toml']\nwallet='undeclared-network-relay-wallet'\n",
     )
     .unwrap();
     for command in [vec!["serve"], vec!["catalog", "warm"]] {
@@ -1181,7 +1181,7 @@ async fn network_override_replaces_relay_at_its_declaration_without_inspection_i
         ]);
         assert!(
             bad(run(dir.path(), &command, &[]).await)
-                .contains("discovery_relay.wallet must name a declared wallet")
+                .contains("relay_fallback.wallet must name a declared wallet")
         );
     }
 
@@ -1197,9 +1197,9 @@ async fn network_override_replaces_relay_at_its_declaration_without_inspection_i
         )
         .await,
     );
-    assert_eq!(preserved["discovery_relay"], embedded["discovery_relay"]);
+    assert_eq!(preserved["relay_fallback"], embedded["relay_fallback"]);
     assert_eq!(
-        preserved["discovery_relay"]["fallbacks"],
+        preserved["relay_fallback"]["relays"],
         json!({"GET":["embedded-missing.toml", "embedded-second.toml"], "HEAD":["embedded-head.toml"]})
     );
     assert_eq!(preserved["discovery_wallets"], json!({"api":"shared"}));
@@ -1213,7 +1213,7 @@ async fn network_override_relay_file_is_reusable_by_offline_standalone_and_walle
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("network.toml"),
-        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n[discovery_relay]\nwallet='deployment-only'\nsources=['deployment-only']\n[discovery_relay.fallbacks]\nGET=['missing-relay.toml','missing-second.toml']\nPOST=['missing-post.toml']\n",
+        "[network]\nmode='tor'\nsocks_endpoint='127.0.0.1:1'\n[relay_fallback]\nwallet='deployment-only'\nsources=['deployment-only']\n[relay_fallback.relays]\nGET=['missing-relay.toml','missing-second.toml']\nPOST=['missing-post.toml']\n",
     )
     .unwrap();
     std::fs::write(
@@ -1237,7 +1237,7 @@ async fn network_override_relay_file_is_reusable_by_offline_standalone_and_walle
         .await,
     );
     assert_eq!(shown["network"]["mode"], "tor");
-    assert!(shown.get("discovery_relay").is_none());
+    assert!(shown.get("relay_fallback").is_none());
     assert!(!dir.path().join("state").exists());
 
     // Catalog execution uses its own local schema, even though the common
@@ -1438,7 +1438,7 @@ async fn invalid_network_overrides_and_unpinned_qualification_fail_before_side_e
     network_override_fixture(dir.path(), "");
     for invalid in [
         "[network]\nmode='direct'\n[unrelated]\nenabled=true\n",
-        "[network]\nmode='direct'\n[discovery_relay]\nprovider='missing.toml'\nserrve=true\n",
+        "[network]\nmode='direct'\n[relay_fallback]\nrelays.GET=['missing.toml']\nserrve=true\n",
     ] {
         std::fs::write(dir.path().join("invalid.toml"), invalid).unwrap();
         assert!(

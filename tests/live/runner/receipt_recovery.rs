@@ -10,11 +10,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, path::Path, time::Duration};
 use x402_treazury::{
-    deployment::MetaConfig,
     network::{self, IsolationId, NetworkContext, NetworkPolicy},
     qualification::receipt_expectation,
-    rotation::{base::BaseRpc, store},
+    rotation::{base::BaseRpc, config::FundingConfig, store},
 };
+
+/// Only verified archive fields needed for read-only chain observation. Retired
+/// catalog/relay settings neither select RPC destinations nor grant authority.
+#[derive(Deserialize)]
+struct ObservationConfig {
+    network: NetworkPolicy,
+    funding: FundingConfig,
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -241,8 +248,8 @@ pub async fn reconcile(state: &Path, run: &str, evidence: &Path) -> Result<u8> {
         snapshot["treasury_status"]["treasury_id"] == manifest.treasury_id,
         "receipt recovery treasury mismatch"
     );
-    let config: MetaConfig = serde_json::from_value(archive["deployment"].clone())?;
-    let funding = config.funding.context("funding config missing")?;
+    let config: ObservationConfig = serde_json::from_value(archive["deployment"].clone())?;
+    let funding = config.funding;
     let candidates = select(&registry.report(Some(run), now()?)?, &snapshot)?;
     if candidates.is_empty() {
         println!("No unverified successful seller receipts to observe; no requests sent");
@@ -388,6 +395,48 @@ fn now() -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn archived_observation_reads_only_network_and_funding_without_live_config_aliases() {
+        let network: NetworkPolicy = serde_json::from_value(json!({
+            "mode":"tor", "socks_endpoint":"127.0.0.1:19050"
+        }))
+        .unwrap();
+        let funding: FundingConfig = serde_json::from_value(json!({
+            "base_rpc_url_env":"RECOVERY_RPC", "base_rpc_fallback_url_envs":[],
+            "base_confirmations":19
+        }))
+        .unwrap();
+        let mut deployment = json!({"version":1,"servers":{},
+            "network":network,"funding":funding});
+        assert!(
+            serde_json::from_value::<x402_treazury::deployment::MetaConfig>(deployment.clone())
+                .is_ok()
+        );
+        for retired in [
+            json!({"provider":"missing-provider.toml","serve":true}),
+            json!({"fallbacks":{"GET":["missing-provider.toml"]},"api_requests":true}),
+        ] {
+            deployment["discovery_relay"] = retired;
+            let original = deployment.clone();
+            assert!(
+                serde_json::from_value::<x402_treazury::deployment::MetaConfig>(deployment.clone())
+                    .is_err()
+            );
+            let observed: ObservationConfig = serde_json::from_value(deployment.clone()).unwrap();
+            assert_eq!(serde_json::to_value(observed.network).unwrap(), deployment["network"]);
+            assert_eq!(serde_json::to_value(observed.funding).unwrap(), deployment["funding"]);
+            assert_eq!(deployment, original);
+        }
+        for field in ["network", "funding"] {
+            let mut invalid = deployment.clone();
+            invalid[field] = json!({"unknown_observation_policy":true});
+            assert!(serde_json::from_value::<ObservationConfig>(invalid).is_err());
+            let mut missing = deployment.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<ObservationConfig>(missing).is_err());
+        }
+    }
+
     fn fixture() -> (Value, Value) {
         let payment = json!({"case":"case","session":"session","attempt_id":"attempt","pool":"pool","wallet":"wallet","generation":0,"amount":"7","requirements_hash":"hash","address":format!("0x{:040x}",1)});
         let receipt = json!({"case":"case","session":"session","attempt_id":"attempt","receipt":{"classification":"seller_success","network":"eip155:8453","transaction":format!("0x{:064x}",2)}});

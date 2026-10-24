@@ -46,12 +46,12 @@ impl Runtime {
         let relays: Vec<_> = deployment
             .sources
             .values()
-            .filter_map(|s| s.config.discovery_relay.clone())
+            .filter_map(|s| s.config.relay_fallback.clone())
             .chain(
                 deployment
                     .pending_sources
                     .values()
-                    .filter_map(|s| s.config.discovery_relay.clone()),
+                    .filter_map(|s| s.config.relay_fallback.clone()),
             )
             .collect();
         Self {

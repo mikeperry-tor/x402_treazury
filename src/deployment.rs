@@ -42,7 +42,7 @@ pub struct MetaConfig {
     pub treasury: Option<TreasuryConfig>,
     pub funding: Option<FundingConfig>,
     pub source_management: Option<crate::discovery::policy::Policy>,
-    pub discovery_relay: Option<crate::discovery_relay::Policy>,
+    pub relay_fallback: Option<crate::discovery_relay::Policy>,
     #[serde(default)]
     pub sources: BTreeMap<String, SourceConfig>,
     #[serde(default)]
@@ -163,8 +163,8 @@ impl MetaConfig {
         let mut config: Self = toml::from_str(text).context("invalid meta-config")?;
         if let Some(policy) = network_override {
             config.network = policy.network.clone();
-            if let Some(relay) = &policy.discovery_relay {
-                config.discovery_relay = Some(relay.clone());
+            if let Some(relay) = &policy.relay_fallback {
+                config.relay_fallback = Some(relay.clone());
             }
         }
         Ok(config)
@@ -176,7 +176,7 @@ impl MetaConfig {
         self.startup.validate()?;
         self.network.validate()?;
         crate::discovery::policy::validate(self)?;
-        if let Some(relay) = &self.discovery_relay {
+        if let Some(relay) = &self.relay_fallback {
             relay.validate(self)?;
         }
         ensure!(
@@ -405,7 +405,7 @@ impl Deployment {
         }
         crate::discovery::policy::validate_registry_path(&config, path)?;
         let discovery_wallets = config
-            .discovery_relay
+            .relay_fallback
             .as_ref()
             .filter(|policy| policy.provider_metadata && policy.has_method("GET"))
             .map(|policy| {
@@ -434,7 +434,7 @@ impl Deployment {
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"discovery_wallets":discovery_wallets,"discovery_relay":config.discovery_relay,"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"discovery_wallets":discovery_wallets,"relay_fallback":config.relay_fallback,"startup":config.startup,"source_management":crate::discovery::policy::inspection(&config),"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
@@ -525,7 +525,7 @@ impl Deployment {
         Ok(
             if let Some(policy) = self
                 .config
-                .discovery_relay
+                .relay_fallback
                 .clone()
                 .filter(|p| p.provider_metadata && p.has_method("GET"))
                 && let Some((env, restriction)) = relay_env
@@ -593,7 +593,7 @@ impl Deployment {
         }
         crate::discovery::policy::validate_registry_path(&config, path)?;
         // Validate every configured method/format locally before wallet state or I/O.
-        let search_relay = match config.discovery_relay.as_ref() {
+        let search_relay = match config.relay_fallback.as_ref() {
             Some(policy) => {
                 let relay = crate::discovery_relay::SearchRelay::load(policy, path).await?;
                 Some(std::sync::Arc::new(relay))
@@ -619,7 +619,7 @@ impl Deployment {
         if let Some((env, _)) = relay_env
             && deployment
                 .config
-                .discovery_relay
+                .relay_fallback
                 .as_ref()
                 .is_some_and(|p| p.provider_metadata && p.has_method("GET"))
         {

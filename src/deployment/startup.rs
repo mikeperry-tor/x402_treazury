@@ -155,7 +155,7 @@ impl Downloads {
             cfg.http_cache_directory.clone(),
             cfg.http_cache_enabled,
             cfg.catalog_cache_ttl_seconds,
-            cfg.discovery_relay.as_ref().map(|r| r.key.clone()),
+            cfg.relay_fallback.as_ref().map(|r| r.key.clone()),
         );
         let cell = {
             let mut entries = self.entries.lock().expect("catalog download map poisoned");
@@ -408,7 +408,7 @@ impl Source {
             cfg.use_recommended_tools = false;
         }
         cfg.discovery_source = Some(id.to_owned());
-        cfg.discovery_relay = downloads.relay.get(id).cloned();
+        cfg.relay_fallback = downloads.relay.get(id).cloned();
         cfg.http_cache_directory = downloads.cache_directory.clone();
         cfg.http_cache_direct_warm_target = downloads.direct_warm_target.clone();
         if warn {

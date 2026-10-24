@@ -813,11 +813,13 @@ Unknown, conflicting or missing mappings fail qualification. Re-audit compares
 archived mappings with the registered interval, and never infers missing owner
 metadata from observed streams. These records grant no financial/replay authority.
 Offline Tor re-audit verifies the original pinned archive bytes before interpreting
-its deployment. Only that observation discards retired relay enable keys from an
+its deployment. Only that observation discards the retired `discovery_relay` section from an
 in-memory copy; wallet bindings, transport identities, stored artifacts and pins
-remain unchanged. Current preparation, execution, identity export and receipt
-recovery retain strict configuration parsing. This compatibility grants no relay
-permission, payment authority or replay.
+remain unchanged. Read-only receipt recovery likewise verifies the original archive,
+then decodes only its typed network and funding policy; unrelated retired metadata
+does not prevent observing recorded receipts. Current preparation, execution and
+identity export retain strict configuration parsing. These observations grant no
+relay permission, payment authority or replay.
 Local migration tests do not requalify the changed recovery paths on real Tor.
 
 Unsigned execution proves discovery identity behavior only. Managed execution

@@ -783,7 +783,7 @@ async fn authored_head_list_uses_horizon_without_get_or_outer_post_inheritance()
 async fn bundled_method_lists_bootstrap_all_actual_formats_from_local_assets() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let policy = Policy {
-        fallbacks: BTreeMap::from([
+        relays: BTreeMap::from([
             (
                 "GET".into(),
                 vec![

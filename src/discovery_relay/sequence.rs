@@ -166,7 +166,7 @@ impl SearchRelay {
     pub(crate) async fn load(policy: &Policy, path: &Path) -> Result<Self> {
         let mut entries = BTreeMap::new();
         // Every configured position is validated locally before any request or key load.
-        for (method, providers) in policy.fallbacks() {
+        for (method, providers) in policy.relays() {
             let mut configured = Vec::new();
             for (position, provider) in providers.iter().enumerate() {
                 let provider = if provider.is_absolute() {
@@ -175,15 +175,11 @@ impl SearchRelay {
                     path.parent().unwrap_or(Path::new(".")).join(provider)
                 };
                 let cfg = crate::config::load(&provider).await?.settings;
-                let format = match cfg.relay_format.as_deref() {
-                    Some(value) => value.parse::<Format>()?,
-                    None if policy.is_legacy() => Format::Curl,
-                    None => anyhow::bail!("discovery relay provider requires relay_format"),
-                };
-                ensure!(
-                    !policy.is_legacy() || format == Format::Curl,
-                    "legacy discovery relay provider requires Curl relay_format"
-                );
+                let format = cfg
+                    .relay_format
+                    .as_deref()
+                    .context("relay fallback provider requires relay_format")?
+                    .parse::<Format>()?;
                 ensure!(
                     !cfg.spec.starts_with("https://") && !cfg.spec.starts_with("http://"),
                     "discovery relay requires a local bootstrap catalog"

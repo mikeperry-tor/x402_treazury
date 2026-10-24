@@ -34,7 +34,7 @@ fn preliminary_stages_precede_structural_validation() {
     v["startup"] = json!({"catalog_concurrency":0});
     v["network"] = json!({"connect_timeout_seconds":0});
     v["source_management"] = json!({"wallet":"missing"});
-    v["discovery_relay"] = json!({"provider":"never-read.toml","wallet":"missing"});
+    v["relay_fallback"] = json!({"relays":{"GET":["never-read.toml"]},"wallet":"missing"});
     v["version"] = json!(2);
     v["servers"] = json!({});
     error(&v, "startup.catalog_concurrency must be in 1..64");
@@ -43,8 +43,8 @@ fn preliminary_stages_precede_structural_validation() {
     v.as_object_mut().unwrap().remove("network");
     error(&v, "unknown source_management wallet");
     v.as_object_mut().unwrap().remove("source_management");
-    error(&v, "discovery_relay.wallet must name a declared wallet");
-    v.as_object_mut().unwrap().remove("discovery_relay");
+    error(&v, "relay_fallback.wallet must name a declared wallet");
+    v.as_object_mut().unwrap().remove("relay_fallback");
     error(&v, "unsupported meta-config version 2");
     v["version"] = json!(1);
     error(&v, "at least one server is required");

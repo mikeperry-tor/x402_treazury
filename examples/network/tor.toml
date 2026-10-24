@@ -1,5 +1,5 @@
 # Deployment or standalone commands: --network-config examples/network/tor.toml
-# Replaces [network] and [discovery_relay]; alternatively embed both in --config.
+# Replaces [network] and [relay_fallback]; alternatively embed both in --config.
 # Relay settings apply to deployment reads; standalone/wallet commands use Tor only.
 # Tor Browser must already be running on the configured SOCKS port.
 [network]
@@ -15,13 +15,13 @@ read_timeout_seconds = 60
 tor_isolation_retries = 2
 
 # Ordered paid fallback after eligible origin attempts, using existing deployment payers.
-[discovery_relay]
+[relay_fallback]
 source_discovery = true # directory search and service metadata
 api_requests = false # opt in to disclose actual API requests
 provider_metadata = true # schemas/help, startup and explicit non-direct warming
 
 # Select by original target method; absent/empty lists mean origin-only.
-[discovery_relay.fallbacks]
+[relay_fallback.relays]
 GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
 POST = ["../../providers/agproxy.toml"]
 HEAD = ["../../providers/agproxy.toml"]

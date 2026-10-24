@@ -14,7 +14,7 @@ fn fixture(dir: &Path, managed: bool) -> PathBuf {
     std::fs::write(
         &path,
         format!(
-            "{config}\n[discovery_relay]\nprovider='{}'\nwallet='selected'\n",
+            "{config}\n[relay_fallback]\nrelays.GET=['{}']\nwallet='selected'\n",
             provider.display()
         ),
     )

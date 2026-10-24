@@ -90,7 +90,7 @@ pub struct Config {
     #[serde(skip)]
     pub discovery_source: Option<String>,
     #[serde(skip)]
-    pub discovery_relay: Option<std::sync::Arc<crate::discovery_relay::Relay>>,
+    pub relay_fallback: Option<std::sync::Arc<crate::discovery_relay::Relay>>,
     /// Only deferred serving discovery waits for its local SOCKS prerequisite.
     #[serde(skip)]
     #[doc(hidden)]
@@ -184,7 +184,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             discovery_source: None,
-            discovery_relay: None,
+            relay_fallback: None,
             wait_for_startup_socks: false,
             http_cache_enabled: true,
             catalog_cache_ttl_seconds: crate::limits::API_CACHE_TTL_SECONDS,
@@ -470,7 +470,7 @@ impl RelayContinuation {
                 .and_then(reqwest::Error::status)
                 .map(|s| s.as_u16()),
         );
-        let relay = cfg.discovery_relay.as_ref().expect("captured relay");
+        let relay = cfg.relay_fallback.as_ref().expect("captured relay");
         let response = if wait_for_ready {
             relay
                 .fetch_when_ready_bounded(
@@ -603,7 +603,7 @@ pub(crate) async fn prepare_json_discovery_bounded(
     }
     let error = failure.error;
     let retry_after = failure.retry_after;
-    let Some(_) = &cfg.discovery_relay else {
+    let Some(_) = &cfg.relay_fallback else {
         return Err(error);
     };
     if !(cfg.spec.starts_with("https://") || cfg.spec.starts_with("http://")) {

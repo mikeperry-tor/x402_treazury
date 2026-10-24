@@ -280,7 +280,7 @@ async fn relay_method_bootstrap_validates_all_local_entries_before_network_or_wa
     )
     .unwrap();
     let valid: crate::discovery_relay::Policy =
-        toml::from_str("[fallbacks]\nGET=['valid.toml']").unwrap();
+        toml::from_str("[relays]\nGET=['valid.toml']").unwrap();
     crate::discovery_relay::SearchRelay::load(&valid, &declaring)
         .await
         .unwrap();
@@ -302,7 +302,7 @@ async fn relay_method_bootstrap_validates_all_local_entries_before_network_or_wa
         .unwrap();
         // A valid GET entry must not hide an invalid entry authored for another method.
         let policy: crate::discovery_relay::Policy =
-            toml::from_str("[fallbacks]\nGET=['valid.toml']\nHEAD=['bad.toml']").unwrap();
+            toml::from_str("[relays]\nGET=['valid.toml']\nHEAD=['bad.toml']").unwrap();
         assert!(
             crate::discovery_relay::SearchRelay::load(&policy, &declaring)
                 .await
@@ -310,25 +310,6 @@ async fn relay_method_bootstrap_validates_all_local_entries_before_network_or_wa
             "{metadata} {spec} {filters}"
         );
     }
-    std::fs::write(
-        dir.path().join("legacy.toml"),
-        provider("", "local.json", ""),
-    )
-    .unwrap();
-    let legacy = crate::discovery_relay::Policy::legacy("legacy.toml".into());
-    crate::discovery_relay::SearchRelay::load(&legacy, &declaring)
-        .await
-        .unwrap();
-    std::fs::write(
-        dir.path().join("legacy.toml"),
-        provider("relay_format='agproxy'", "local.json", ""),
-    )
-    .unwrap();
-    assert!(
-        crate::discovery_relay::SearchRelay::load(&legacy, &declaring)
-            .await
-            .is_err()
-    );
     assert!(
         tokio::time::timeout(Duration::from_millis(20), network.accept())
             .await
@@ -358,7 +339,7 @@ async fn relay_setup_preflight_failure_leaves_treasury_unmodified_without_alloca
     std::fs::write(
         &path,
         format!(
-            "{}\n[discovery_relay]\nprovider='missing-relay.toml'\nwallet='selected'\nsource_discovery=false\n",
+            "{}\n[relay_fallback]\nrelays.GET=['missing-relay.toml']\nwallet='selected'\nsource_discovery=false\n",
             managed_config()
         ),
     )
@@ -691,7 +672,7 @@ async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_prov
     let provider_url = format!("http://{}", provider.local_addr().unwrap());
     let relay_provider = Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/curl/provider.toml");
     let config = format!(
-        "{}\n[discovery_relay]\nprovider='{}'\nwallet='selected'\n",
+        "{}\n[relay_fallback]\nrelays.GET=['{}']\nwallet='selected'\n",
         managed_config()
             .replace("auto_fund=false", "auto_fund=true")
             .replace("http://127.0.0.1:1", &provider_url),
