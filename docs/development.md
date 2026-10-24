@@ -188,11 +188,54 @@ compiler's supported branch instrumentation, not every possible logical path.
 
 All application logs go to stderr; stdout carries the MCP wire or requested CLI
 JSON. Process `RUST_LOG` overrides the default `warn,x402_treazury=info` filter for
-every command. Info reports catalog completion, listener startup and
-funding progress. Download, parse and protocol details belong at debug; warnings
-identify failures, degraded operation or actionable configuration problems.
-Normal capacity waits, retained observation deferrals and disposable cache eviction
-belong at DEBUG, even when they delay work or discard advisory cached data.
+every command.
+
+### Log severity
+
+Choose the level from the outcome and scope of the owning capability or logical
+operation, after its applicable retry and fallback paths:
+
+| Level | Use for | Examples |
+| --- | --- | --- |
+| ERROR | Required service or endpoint functionality is unavailable and has no recovery remaining in the current lifecycle. | Program failure; an MCP endpoint cannot bind or cannot publish its required catalogs. Other endpoints may remain healthy. |
+| WARN | A requested agent operation or explicit CLI operation cannot complete successfully under its existing recovery and authority. | Document retrieval fails with no usable fallback; a payment ends with an unresolved potentially chargeable authorization; one-pass wallet sync fails. |
+| INFO | Meaningful user-visible lifecycle, progress, delay or recovery changes. | Program startup; catalog ready; MCP endpoint ready; funding progress; entering fallback or waiting for a retrying dependency; recovery of that dependency. |
+| DEBUG | Routine outcomes, expected negative results, individual attempts and troubleshooting details. | Ordinary successful calls; optional probes finding no document; no search matches; routine input/authentication rejection; background polling; cache activity. |
+| TRACE | Fine-grained execution or protocol detail needed for deeper diagnosis. | Internal transitions and detailed transport sequencing, subject to the same sanitization rules. |
+
+“Unrecoverable” is scoped to the current service lifecycle or logical operation,
+not to whether an operator could fix configuration and restart, or a later request
+could succeed. An exhausted operation can WARN while its endpoint remains usable;
+a terminal endpoint failure can ERROR while other endpoints remain usable. An
+operation that cannot safely proceed without new authority or reconciliation has
+no automatic recovery merely because another provider exists.
+
+Intermediate failures with an allowed retry or fallback remaining must not emit
+WARN/ERROR. Use INFO when they explain a meaningful delay, fallback or degradation;
+keep repetitive attempt details at DEBUG/TRACE. Mere elapsed time or repetition
+does not promote a recoverable condition. The owner that knows the final outcome
+emits the terminal diagnostic; lower layers retain the safe facts needed to
+explain it without announcing each failed attempt as an operation failure.
+
+Expected negative results, routine caller rejections and normal cancellation are
+not automatically operational failures. Cancellation does not end accepted
+financial work or erase its eventual terminal diagnostic. Recommendations and
+recoverable degradation use INFO only when useful to the user, otherwise DEBUG;
+they do not justify WARN by themselves. Routine successes and per-request
+completion messages normally belong at DEBUG/TRACE. Normal capacity waits,
+retained observation deferrals and disposable cache eviction belong at DEBUG,
+even when they delay work or discard advisory cached data.
+
+Financial uncertainty must remain explicit in terminal diagnostics. A level or a
+successful HTTP response never establishes settlement, grants replay authority or
+changes recovery policy. All levels obey the same privacy and sanitization rules.
+
+Apply this policy to new diagnostics and correct violations encountered in the
+affected development work, including excessive INFO. Update owning documentation
+and affected diagnostic tests with the correction. Existing levels and tests do
+not establish exceptions; unrelated work does not require a broad logging audit.
+
+### Diagnostic context
 
 Catalog cache-hit messages confirm a readable JSON document; tool generation and
 listener validation must still finish before a source is ready. Catalog failures
@@ -214,7 +257,9 @@ HTTP status, a plain-language reason, direct/Tor route, typed failure/transport
 categories and final attempt/maximum counts. `relay_fallback_eligible` describes
 the origin failure, not configured relay availability, payment authority or
 successful recovery.
-Explicit document origin failures and individual relay request failures are INFO.
+Explicit document origin failures that lead to fallback are INFO. Individual relay
+request failures use INFO when they explain recovery or delay; repetitive attempt
+details belong at DEBUG.
 The complete document acquisition emits WARN only when no usable paid fallback is
 available or retrieval ends in failure after fallback. This includes lazy source
 refresh preparation and authority loading failures. Speculative OpenAPI, directory
@@ -223,37 +268,40 @@ blocked responses. Enable `RUST_LOG=warn,x402_treazury=debug` for these probe
 diagnostics; oversized origin candidates also use DEBUG with resource, setting
 and byte limit, while terminal explicit document rejection retains WARN. The tool
 response retains per-URL outcomes. No URLs, hosts, arguments or upstream error
-prose are logged. Unsigned relay payment attempt failures are INFO; ordinary
-payment failures and terminal potentially chargeable relay failures retain WARN
+prose are logged. Unsigned relay payment attempt failures follow the intermediate
+failure rule above; terminal ordinary payment failures and terminal potentially
+chargeable relay failures retain WARN
 and possible-charge facts. These levels do not grant retry or payment authority.
 A successful relay HTTP call does not establish usable target documentation or
 settlement; consumers still validate the document.
 
 A valid first-page `tools/list` with more than 250 advertised definitions emits
-an advisory WARN with listener ID, count and `discover_on_demand = true` suggestion,
-without URLs, descriptions or credentials. It observes inventory, not model context;
-continuations and invalid cursors do not warn, and fresh first pages may repeat it.
+an advisory diagnostic with listener ID, count and `discover_on_demand = true`
+suggestion, without URLs, descriptions or credentials. It observes inventory,
+not model context; continuations and invalid cursors do not emit it, and fresh
+first pages may repeat it.
 It does not reject work, change mode or perform network/wallet work.
 
 An unreachable configured local Tor SOCKS endpoint during serving startup emits
-an immediate shared ERROR with the local address, safe I/O kind, retry cadence and
-reminder interval. Failed probes repeat the ERROR after at least 60 seconds while
-the shared startup wait remains pending. Recovery
+a shared startup-wait diagnostic with the local address, safe I/O kind, retry
+cadence and reminder interval. While startup recovery remains pending, the
+condition is INFO; repetitive probe details belong at DEBUG. The existing probe
+schedule and reminder interval do not grant terminal failure severity. Recovery
 emits INFO describing TCP reachability, without asserting Tor bootstrap or remote
 service health. No upstream prose, credentials or destination URLs are included.
 
-Managed extension omission is INFO (`bazaar` discovery metadata remains DEBUG).
-It reports challenge preparation before offer validation or signing, not a failed
-payment. Payment-call spans carry an ephemeral `call_id`, configured source and
+Managed extension omission is diagnostic detail (`bazaar` discovery metadata also
+remains DEBUG). It reports challenge preparation before offer validation or
+signing, not a failed payment. Payment-call spans carry an ephemeral `call_id`, configured source and
 HTTP method; catalog calls also carry tool identity. Dynamic catalog calls use
 their registered source identity. Direct managed-library calls have their own
 call ID without claiming a configured source. No request URL, arguments, raw
 challenge, extension values, signed bytes or upstream error prose is logged.
 
 Accepted payment work logs its terminal result inside its retained owner, even
-after caller cancellation: completion is INFO, failure is WARN with a fixed
-failure kind, execution stage, unsigned attempt number/maximum when available,
-and `authorization_may_charge`. Counts describe dispatches in the latest payer's
+after caller cancellation. Routine completion belongs at DEBUG; terminal failure
+is WARN. Diagnostics retain a fixed failure kind, execution stage, unsigned
+attempt number/maximum when available, and `authorization_may_charge`. Counts describe dispatches in the latest payer's
 unsigned sequence and reset when managed wallet traversal changes payer; they are
 not a cumulative call limit. Transport failures include a fixed `transport_reason`
 (TLS, connection timeout, read inactivity, connection, body, decode, request
@@ -264,34 +312,38 @@ possible financial liability, not confirmed settlement. `last_http_status`, when
 present, is the most recently observed response status; a later signing or
 transport failure can follow an unsigned 402. Recoverable payer handoffs and
 insufficient-funds traversal do not emit terminal failures. Direct managed-library
-calls warn on unsuccessful returned HTTP status; their completion covers response
-headers, while body consumption remains the caller's responsibility. Diagnostics
+diagnostics cover returned response headers, while body consumption remains the
+caller's responsibility; expected negative statuses follow the severity policy
+above. Diagnostics
 never authorize replay or change payment execution.
 
 Optional cover diagnostics distinguish fresh range failures from cached refusal
-and episode shortfalls. Retained range-capability loss is WARN; fallback selection
-and ordinary shortfalls are INFO; cached refusals and individual attempt facts are
-DEBUG. See [cover diagnostics](cover-traffic.md#cover-diagnostics) for fields,
-deadline cleanup and safe resource labels.
+and episode shortfalls. Capability loss or fallback that explains meaningful
+user-visible degradation belongs at INFO; ordinary shortfalls, cached refusals and
+individual attempt facts belong at DEBUG. Optional cover degradation alone does
+not establish failure of an agent operation. See
+[cover diagnostics](cover-traffic.md#cover-diagnostics) for fields, deadline
+cleanup and safe resource labels.
 
 Waiting for confirmed spendable ZEC and funding deferred by a reported treasury
-sync failure are info events; their retry backoff and stored failure conditions
-remain intact. Treasury sync failures stay warnings with safe connection reasons
-and direct/Tor route details when available. Background warnings report
+sync failure use INFO for meaningful state changes; repetitive observations belong
+at DEBUG. Their retry backoff and stored failure conditions remain intact.
+Treasury sync diagnostics retain safe connection reasons and direct/Tor route
+details when available. Recoverable background failures use INFO for the affected
+recovery state and DEBUG for individual attempts. Background diagnostics report
 `automatic_retry=true` and `retry_after_seconds` from the existing observation
 schedule (60, 120, 240, then 300 seconds after consecutive scan failures). Retry
 continues while serving and sync is needed; SDK reconstruction can delay it.
 One-pass `wallet sync` warnings report `automatic_retry=false` and instruct the
 operator to rerun the command. Pepper Sync fetch spans are debug-only and do not
-emit raw returned errors; the sanitized application warning owns failure reporting.
-Base RPC attempts and successful
-provider failover are debug events with provider ordinals; an exhausted complete
-verification remains a warning. Selecting a configured discovery relay fallback
-and actual paid relay attempts are info. Unsigned API and catalog/pricing Tor
-retry events are info, with attempt and maximum counts; terminal payment failures
-remain warnings. Relay pre-submission retry availability and failed unsigned
-relay payment attempts are info; the complete acquisition owns terminal failure
-warnings.
+emit raw returned errors; the sanitized application diagnostic owns failure
+reporting. Base RPC attempts and successful provider failover are DEBUG events
+with provider ordinals; an exhausted complete verification remains WARN.
+Configured discovery relay selection and meaningful paid-recovery transitions
+use INFO. Unsigned API, catalog/pricing Tor retries and unsigned relay payment
+failures use INFO when they explain recovery or user-visible delay, with attempt
+and maximum counts where available; repetitive attempt details belong at DEBUG.
+The complete acquisition owns terminal failure warnings.
 
 Sanitize Zingolib errors before logging or persistence. Retain fixed categories
 and typed reasons, numeric gRPC codes and fixed status names when available, never

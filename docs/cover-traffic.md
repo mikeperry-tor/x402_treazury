@@ -286,32 +286,36 @@ padding contents, payment identities or upstream prose. A 200 response is
 `cover_range_ignored`; its full body is not downloaded. A longer resource alone
 does not establish range support.
 
-WARN reports a fresh failure applied as retained unavailability. Fallback
-selection is INFO, retaining the primary failure in the preceding range outcome
-with the same episode ID. Cached refusal is DEBUG with `fresh_attempt=false`;
-repeated calls do not imply repeated HTTP probes. Completed attempt facts are
-also DEBUG before the scheduler consumes their result, so an episode-deadline
-race cannot erase an observed timeout. Local cancellation reports its own DEBUG
-event and observed byte count without claiming an HTTP response was received.
+Choose severity using the [logging policy](development.md#log-severity).
+Optional cover degradation alone does not fail an agent operation. A fresh
+failure applied as retained unavailability, or fallback selection, uses INFO
+when it explains meaningful user-visible degradation; otherwise it is DEBUG.
+The primary failure remains in the preceding range outcome with the same episode
+ID. Cached refusal is DEBUG with `fresh_attempt=false`; repeated calls do not
+imply repeated HTTP probes. Completed attempt facts are also DEBUG before the
+scheduler consumes their result, so an episode-deadline race cannot erase an
+observed timeout. Local cancellation reports its own DEBUG event and observed
+byte count without claiming an HTTP response was received.
 
 Episode summaries include sampled versus received bytes, request count, elapsed
 time, effective deadline kind (tail or episode), whether it expired, any explicit
 stop reason and the actual final capability/retained failure. An ordinary
-`cover_budget_unspent` shortfall is INFO; it is neither a wallet-funding failure
+`cover_budget_unspent` shortfall is DEBUG; it is neither a wallet-funding failure
 nor proof that the resource is unusable. If cleanup cancels unfinished
-qualification, the summary is WARN and records retained
-`cover_qualification_cancelled`, even when the episode reason is
-`cover_budget_unspent`. Previously available capability may remain available at
-the same deadline. Summaries for already cached unavailability are DEBUG.
-Unexpected task or sampling failures and actual process-budget refusals remain
-WARN even when capability has not changed. The aggregate `cover_episode_limit`
-reservation result can represent ordinary target, deadline or scheduling completion
-and uses the INFO/DEBUG lifecycle level unless qualification becomes unavailable. Normal
-budget completion, an authorized episode request-count completion, and an available
-resource's deadline shortfall remain INFO. Capacity-driven owner eviction logs DEBUG with the owner limit, without logging owner identities. Summaries retain the
-configured episode/process limit fields alongside actual usage, including stream
-and accounting-history bounds. These observations do not change retry, cache lifetime, fallback or
-budget policy.
+qualification, the summary records retained `cover_qualification_cancelled`, even
+when the episode reason is `cover_budget_unspent`. Previously available
+capability may remain available at the same deadline. Summaries for already
+cached unavailability are DEBUG. Unexpected task or sampling failures and actual
+process-budget refusals retain explicit reasons and applicable limits; their
+severity follows the affected operation's outcome, rather than automatically
+warning for optional work. The aggregate `cover_episode_limit` reservation result
+can represent ordinary target, deadline or scheduling completion. Normal budget
+completion, an authorized episode request-count completion, and an available
+resource's deadline shortfall belong at DEBUG. Capacity-driven owner eviction
+logs DEBUG with the owner limit, without logging owner identities. Summaries
+retain the configured episode/process limit fields alongside actual usage,
+including stream and accounting-history bounds. These observations do not change
+retry, cache lifetime, fallback or budget policy.
 
 Header values use random visible ASCII, protected-name/collision checks and a
 separate conservative header-list budget. Sensitive/never-indexed HPACK fields

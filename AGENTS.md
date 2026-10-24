@@ -244,6 +244,19 @@ make fmt-check
 - All logs go to stderr; stdout is the MCP wire or requested CLI JSON. Never persist
   or log credential-bearing upstream prose. Follow the [logging contract](docs/development.md#logging-and-diagnostics)
   when changing diagnostics.
+- Choose log severity by the owning capability or operation after applicable
+  recovery: ERROR for required service/endpoint functionality unavailable with no
+  recovery remaining in the current lifecycle; WARN for terminal agent-operation
+  failures; INFO for meaningful user-visible lifecycle, progress, delay or recovery
+  changes; DEBUG/TRACE for routine outcomes, individual attempts and diagnostic
+  detail. Intermediate failures with retry or fallback remaining must not emit
+  WARN/ERROR. Expected negative results and routine successes normally belong at
+  DEBUG/TRACE. Follow the [severity policy](docs/development.md#log-severity)
+  for scope and examples.
+- Correct log-level violations encountered during development, including excess
+  INFO, and update their owning documentation and affected diagnostic tests.
+  Existing call sites are not precedent; a repository-wide logging cleanup is not
+  required for unrelated work.
 - Limits that reject or truncate content must be visible to the affected consumer;
   never present a partial document as complete. Visibility requirements do not
   justify adding a limit; see [resource-limit behavior](docs/local-resource-limits.md#rejection-and-truncation).
