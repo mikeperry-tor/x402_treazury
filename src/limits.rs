@@ -136,22 +136,44 @@ impl std::fmt::Display for DownloadLimit {
 }
 impl std::error::Error for DownloadLimit {}
 
+impl DownloadLimit {
+    fn warn(&self) {
+        // Never include destinations, headers, excerpts or credentials.
+        tracing::warn!(
+            resource = self.kind,
+            setting = self.setting,
+            limit_bytes = self.limit,
+            "download limit exceeded; content rejected, no partial content returned"
+        );
+    }
+}
+
 pub fn exceeded(kind: &'static str, setting: &'static str, limit: usize) -> anyhow::Error {
-    // Do not include URLs, headers, document excerpts or credentials in logs.
-    tracing::warn!(
-        resource = kind,
-        setting,
-        limit_bytes = limit,
-        "download limit exceeded; content rejected, no partial content returned"
-    );
-    DownloadLimit {
+    let error = DownloadLimit {
         kind,
         setting,
         limit,
-    }
-    .into()
+    };
+    error.warn();
+    error.into()
 }
 pub async fn read(
+    response: reqwest::Response,
+    limit: usize,
+    kind: &'static str,
+    setting: &'static str,
+) -> Result<Vec<u8>> {
+    read_unlogged(response, limit, kind, setting)
+        .await
+        .inspect_err(|error| {
+            if let Some(limit) = error.downcast_ref::<DownloadLimit>() {
+                limit.warn();
+            }
+        })
+}
+
+/// The caller owns rejection diagnostics; bounds and typed errors are identical.
+pub(crate) async fn read_unlogged(
     mut response: reqwest::Response,
     limit: usize,
     kind: &'static str,
@@ -161,7 +183,12 @@ pub async fn read(
         bail!("{setting} must be positive");
     }
     if response.content_length().is_some_and(|n| n > limit as u64) {
-        return Err(exceeded(kind, setting, limit));
+        return Err(DownloadLimit {
+            kind,
+            setting,
+            limit,
+        }
+        .into());
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response
@@ -170,7 +197,12 @@ pub async fn read(
         .map_err(reqwest::Error::without_url)?
     {
         if chunk.len() > limit.saturating_sub(bytes.len()) {
-            return Err(exceeded(kind, setting, limit));
+            return Err(DownloadLimit {
+                kind,
+                setting,
+                limit,
+            }
+            .into());
         }
         bytes.extend_from_slice(&chunk);
     }

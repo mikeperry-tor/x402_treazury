@@ -396,7 +396,12 @@ async fn inspect(
     } else {
         (crate::limits::SPEC_BYTES, "max_spec_bytes")
     };
-    let options = options(client, identity, url.as_str(), limit, setting)?;
+    let mut options = options(client, identity, url.as_str(), limit, setting)?;
+    options.kind = match kind {
+        "openapi" => document::RequestKind::OpenApiProbe,
+        "x402_directory" => document::RequestKind::DirectoryProbe,
+        _ => document::RequestKind::DocumentationProbe,
+    };
     let document = document::read(client, &options).await?;
     result["get_status"] = json!(document.status.as_u16());
     result["content_type"] = json!(content_type(&document.headers));

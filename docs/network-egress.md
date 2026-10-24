@@ -256,7 +256,10 @@ direct and Tor mode. Each successful response read renews the inactivity budget;
 there is no total HTTP response deadline. This covers catalogs, lazy help,
 imports, ordinary paid API responses and relay envelopes, including large
 binary bodies. Waiting for response headers is also subject to this budget.
-Byte limits remain enforced, and partial documents are never published.
+Byte limits remain enforced, and partial documents are never published. Optional
+speculative document origin probes report byte rejection at DEBUG with the resource,
+setting and limit; explicit requests retain WARN and all rejections stay visible
+to the consumer. See [rejection diagnostics](local-resource-limits.md#rejection-and-truncation).
 
 A provider/source `read_timeout_seconds` explicitly overrides the network default.
 Accepted curated dynamic sources preserve the saved provider value, falling back

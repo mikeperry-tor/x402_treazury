@@ -497,6 +497,17 @@ async fn paid_document_fixture() {
     };
     use base64::{Engine, engine::general_purpose::STANDARD};
     use tokio_util::sync::CancellationToken;
+    // Runs in its own process. Include retained work and relay tasks in capture.
+    let logs = tempfile::NamedTempFile::new().unwrap();
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_env_filter("warn,x402_treazury=debug")
+            .with_writer(logs.reopen().unwrap())
+            .finish(),
+    )
+    .unwrap();
     let origin_calls = Arc::new(Mutex::new(Vec::new()));
     let captured = origin_calls.clone();
     let origin =
@@ -515,6 +526,14 @@ async fn paid_document_fixture() {
                     "/.well-known/x402" => StatusCode::UNAUTHORIZED.into_response(),
                     "/swagger.json" => {
                         ([("content-type", "application/json")], "not JSON").into_response()
+                    }
+                    "/probe-large-length" => "12345678".into_response(),
+                    "/probe-large-stream" => {
+                        let chunks = futures_util::stream::iter([
+                            Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"1234")),
+                            Ok(axum::body::Bytes::from_static(b"5678")),
+                        ]);
+                        axum::response::Response::new(axum::body::Body::from_stream(chunks))
                     }
                     "/partial" | "/discovery/resources" => {
                         (StatusCode::PARTIAL_CONTENT, "fragment").into_response()
@@ -656,6 +675,12 @@ async fn paid_document_fixture() {
             if paid { 3 } else { 1 }
         );
     }
+    let explicit_logs = std::fs::read_to_string(logs.path()).unwrap();
+    assert!(explicit_logs.lines().any(|line| line.contains("WARN")
+        && line.contains("request_kind=Document")
+        && line.contains("http_status=404")
+        && line.contains("document does not exist at this location")
+        && line.contains("relay_fallback_eligible=false")));
     let before = paid_calls.lock().unwrap().len();
     let discovered = manager
         .invoke_source_details(
@@ -689,6 +714,100 @@ async fn paid_document_fixture() {
         paid_calls.lock().unwrap().len() - before,
         4,
         "only the two blocked candidates purchase a document"
+    );
+    let all_logs = std::fs::read_to_string(logs.path()).unwrap();
+    let probe_logs = &all_logs[explicit_logs.len()..];
+    assert!(!probe_logs.contains("WARN"), "{probe_logs}");
+    for status in [401, 403, 404, 410] {
+        assert!(
+            probe_logs.lines().any(|line| line.contains("DEBUG")
+                && line.contains(&format!("http_status={status}"))
+                && line.contains("Optional discovery probe")),
+            "{probe_logs}"
+        );
+    }
+    for kind in ["OpenApiProbe", "DirectoryProbe", "DocumentationProbe"] {
+        assert!(
+            probe_logs.contains(&format!("request_kind={kind}")),
+            "{probe_logs}"
+        );
+    }
+    let blocked = probe_logs
+        .lines()
+        .find(|line| line.contains("http_status=403") && line.contains("request_kind=OpenApiProbe"))
+        .unwrap();
+    for expected in [
+        "service denied access",
+        "route=Tor",
+        "attempt=3",
+        "max_attempts=3",
+        "relay_fallback_eligible=true",
+    ] {
+        assert!(blocked.contains(expected), "{blocked}");
+    }
+    let document_id = blocked
+        .split("document_id=")
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap();
+    assert!(
+        probe_logs
+            .lines()
+            .any(|line| line.contains(document_id) && line.contains("Using configured paid relay")),
+        "{probe_logs}"
+    );
+    for private in [
+        "api.example.com",
+        "/openapi.json",
+        "/paid-help",
+        "must-not-sign-target",
+        "Complete relayed help",
+    ] {
+        assert!(!all_logs.contains(private), "leaked {private}");
+    }
+    // Both declared-length and streamed overflow use the same bounds, without
+    // WARN noise or purchasing a relay response for a local size rejection.
+    let before = paid_calls.lock().unwrap().len();
+    let client = manager.document_client("writer").unwrap();
+    for path in ["/probe-large-length", "/probe-large-stream"] {
+        let url = format!("https://api.example.com{path}");
+        let mut options = crate::discovery_relay::document::Options::new(
+            &url,
+            crate::network::IsolationId::discovery(&url).unwrap(),
+            7,
+            "max_help_bytes",
+        );
+        options.kind = crate::discovery_relay::document::RequestKind::DocumentationProbe;
+        let error = crate::discovery_relay::document::read(&client, &options)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<crate::limits::DownloadLimit>()
+                .unwrap()
+                .limit,
+            7
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("content rejected, no partial content returned")
+        );
+    }
+    assert_eq!(paid_calls.lock().unwrap().len(), before);
+    let all_logs = std::fs::read_to_string(logs.path()).unwrap();
+    let oversized_logs = &all_logs[explicit_logs.len()..];
+    assert!(!oversized_logs.contains("WARN"), "{oversized_logs}");
+    assert_eq!(
+        oversized_logs.matches("limit_bytes=7").count(),
+        2,
+        "{oversized_logs}"
+    );
+    assert!(
+        oversized_logs.contains("setting=\"max_help_bytes\""),
+        "{oversized_logs}"
     );
     let owner = manager.clone();
     let waiter = tokio::spawn(async move {

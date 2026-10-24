@@ -400,12 +400,25 @@ async fn import_redirect_and_read_timeout_warn_without_response_prose() {
         assert!(logs.contains("WARN"), "{logs}");
         assert!(
             logs.contains(if stall {
-                "transport timeout"
+                "transport_reason=\"read_inactivity\""
             } else {
-                "HTTP response rejected"
+                "redirect received; origin requests do not follow redirects"
             }),
             "{logs}"
         );
+        for expected in [
+            "document_id=",
+            "request_kind=Document",
+            "route=Direct",
+            "attempt=1",
+            "max_attempts=1",
+            "relay_fallback_eligible=",
+        ] {
+            assert!(logs.contains(expected), "missing {expected}: {logs}");
+        }
+        if !stall {
+            assert!(logs.contains("http_status=302"), "{logs}");
+        }
         assert!(
             !logs.contains("PRIVATE_") && !logs.contains("private.example"),
             "{logs}"

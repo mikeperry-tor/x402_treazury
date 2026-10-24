@@ -69,7 +69,11 @@ grants automatic replay authority.
 ## Rejection and truncation
 
 A runtime limit that rejects or truncates an operation must emit WARN or ERROR
-with safe resource and threshold/setting fields. Normal capacity waits, retained
+with safe resource and threshold/setting fields. Optional speculative document
+origin probes report oversized candidates at DEBUG with the same safe fields and
+visible `too_large` outcome; explicit document requests retain WARN. This is a
+diagnostic distinction, with identical byte bounds and no partial success.
+Normal capacity waits, retained
 observation deferrals and disposable cache eviction belong at DEBUG; they do not
 establish failure or permission to retry. Rejections must also provide explicit evidence for the affected consumer: a tool error or truncation
 marker, HTTP error or CLI error. Identify the resource, limit and adjustment

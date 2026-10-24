@@ -11,8 +11,20 @@ use anyhow::{Result, ensure};
 use reqwest::{StatusCode, header::HeaderMap};
 use std::{sync::Arc, time::Duration};
 
+/// Trusted caller context, never derived from a destination or upstream content.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum RequestKind {
+    #[default]
+    Document,
+    OpenApiProbe,
+    DirectoryProbe,
+    DocumentationProbe,
+}
+
 #[derive(Clone)]
 pub(crate) struct Options {
+    id: uuid::Uuid,
+    pub kind: RequestKind,
     pub url: String,
     pub identity: IsolationId,
     pub public_only: bool,
@@ -25,6 +37,8 @@ pub(crate) struct Options {
 impl Options {
     pub fn new(url: &str, identity: IsolationId, limit: usize, setting: &'static str) -> Self {
         Self {
+            id: uuid::Uuid::new_v4(),
+            kind: RequestKind::Document,
             url: url.into(),
             identity,
             public_only: true,
@@ -211,6 +225,8 @@ impl SharedFailure {
     }
 }
 
+#[tracing::instrument(name = "document_request", level = "warn", skip_all,
+    fields(document_id = %options.id, request_kind = ?options.kind))]
 pub(crate) async fn origin(options: &Options) -> Result<Document, Failure> {
     options.validate_destination().map_err(Failure::local)?;
     let factory = network::global();
@@ -223,65 +239,59 @@ pub(crate) async fn origin(options: &Options) -> Result<Document, Failure> {
             options.transport,
         )
         .map_err(Failure::local)?;
+    let mut attempts = (0, 0);
     let result = acquisition::run(
         factory,
         selected.clone(),
         false,
-        |current, _, _| async move {
-            let policy = FallbackPolicy::BlockingFailures;
-            crate::qualification::check_retry_authority()
-                .await
-                .map_err(Failure::local)?;
-            let response = current
-                .client
-                .get(&options.url)
-                .send()
-                .await
-                .map_err(|error| Failure::transport(error.without_url()))?;
-            network::log_http(&response, "document");
-            let status = response.status();
-            let headers = response.headers().clone();
-            if status == StatusCode::PARTIAL_CONTENT
-                || headers.contains_key(reqwest::header::CONTENT_RANGE)
-            {
-                return Err(Failure::validation(
-                    IncompleteDocument {
-                        status: status.as_u16(),
-                    }
-                    .into(),
-                ));
-            }
-            if !status.is_success() {
-                return Err(Failure::status(
-                    DocumentStatus(status.as_u16()).into(),
-                    status,
-                    &headers,
-                    policy,
-                ));
-            }
-            let body = crate::limits::read(response, options.limit, "document", options.setting)
+        |current, number, maximum| {
+            attempts = (number, maximum);
+            async move {
+                let policy = FallbackPolicy::BlockingFailures;
+                crate::qualification::check_retry_authority()
+                    .await
+                    .map_err(Failure::local)?;
+                let response = current
+                    .client
+                    .get(&options.url)
+                    .send()
+                    .await
+                    .map_err(|error| Failure::transport(error.without_url()))?;
+                network::log_http(&response, "document");
+                let status = response.status();
+                let headers = response.headers().clone();
+                if status == StatusCode::PARTIAL_CONTENT
+                    || headers.contains_key(reqwest::header::CONTENT_RANGE)
+                {
+                    return Err(Failure::validation(
+                        IncompleteDocument {
+                            status: status.as_u16(),
+                        }
+                        .into(),
+                    ));
+                }
+                if !status.is_success() {
+                    return Err(Failure::status(
+                        DocumentStatus(status.as_u16()).into(),
+                        status,
+                        &headers,
+                        policy,
+                    ));
+                }
+                let body = crate::limits::read_unlogged(
+                    response,
+                    options.limit,
+                    "document",
+                    options.setting,
+                )
                 .await
                 .map_err(Failure::body)?;
-            Ok((status, headers, body))
+                Ok((status, headers, body))
+            }
         },
     )
     .await
-    .inspect_err(|failure| {
-        let reason = match failure.kind {
-            acquisition::FailureKind::HttpStatus(_) => "HTTP response rejected",
-            acquisition::FailureKind::Transport
-                if failure
-                    .error
-                    .downcast_ref::<reqwest::Error>()
-                    .is_some_and(reqwest::Error::is_timeout) =>
-            {
-                "transport timeout"
-            }
-            acquisition::FailureKind::Transport => "transport failure",
-            _ => "document rejected",
-        };
-        tracing::warn!(reason, "Unsigned document acquisition failed");
-    })?;
+    .inspect_err(|failure| log_origin_failure(options, failure, attempts))?;
     let (status, headers, body) = result.value;
     Ok(Document {
         status,
@@ -290,6 +300,72 @@ pub(crate) async fn origin(options: &Options) -> Result<Document, Failure> {
         payment_may_have_occurred: false,
         origin: Some((selected, result.current)),
     })
+}
+
+fn log_origin_failure(options: &Options, failure: &Failure, attempts: (usize, usize)) {
+    let http_status = match failure.kind {
+        acquisition::FailureKind::HttpStatus(status) => Some(status.as_u16()),
+        _ => SharedFailure::capture(&failure.error, "document request failed").status(),
+    };
+    let limit = failure.error.downcast_ref::<crate::limits::DownloadLimit>();
+    let reason = if limit.is_some() {
+        "document exceeds the download limit; content rejected without partial output"
+    } else if failure.error.is::<IncompleteDocument>() {
+        "partial response rejected; a complete document is required"
+    } else {
+        match http_status {
+            Some(401) => "service requires authentication",
+            Some(403) => "service denied access",
+            Some(404 | 410) => "document does not exist at this location",
+            Some(429) => "service rate limit reached",
+            Some(300..=399) => "redirect received; origin requests do not follow redirects",
+            Some(500..=599) => "remote service returned a server error",
+            Some(_) => "service returned an unsuccessful HTTP status",
+            None => "document request or response failed validation or transport",
+        }
+    };
+    let transport_reason = failure
+        .error
+        .downcast_ref::<reqwest::Error>()
+        .map(crate::payment::diagnostics::transport_reason);
+    let (attempt, max_attempts) = attempts;
+    let relay_fallback_eligible = failure.fallback;
+    let failure_kind = failure.kind;
+    let route = &network::global().policy.mode;
+    let resource = limit.map(|limit| limit.kind);
+    let setting = limit.map(|limit| limit.setting);
+    let limit_bytes = limit.map(|limit| limit.limit);
+    if options.kind == RequestKind::Document {
+        tracing::warn!(
+            http_status,
+            reason,
+            transport_reason,
+            ?failure_kind,
+            ?route,
+            attempt,
+            max_attempts,
+            relay_fallback_eligible,
+            resource,
+            setting,
+            limit_bytes,
+            "Could not retrieve document from its origin; see status and reason"
+        );
+    } else {
+        tracing::debug!(
+            http_status,
+            reason,
+            transport_reason,
+            ?failure_kind,
+            ?route,
+            attempt,
+            max_attempts,
+            relay_fallback_eligible,
+            resource,
+            setting,
+            limit_bytes,
+            "Optional discovery probe did not retrieve a document; candidate URLs may be unavailable"
+        );
+    }
 }
 
 /// Immutable existing relay preparation, without authority or accepted I/O.
@@ -318,6 +394,8 @@ pub(crate) fn prepare_fallback(
 }
 
 impl PreparedDocument {
+    #[tracing::instrument(name = "document_request", level = "warn", skip_all,
+        fields(document_id = %self.options.id, request_kind = ?self.options.kind))]
     pub(crate) async fn acquire(self, client: &PaidClient, failure: Failure) -> Result<Document> {
         if !failure.fallback || !client.has_document_authority() {
             return Err(failure.error);
@@ -383,3 +461,7 @@ pub(crate) async fn read(client: &PaidClient, options: &Options) -> Result<Docum
         Err(failure) => fallback(client, options, failure).await,
     }
 }
+
+#[cfg(test)]
+#[path = "document_diagnostics_tests.rs"]
+mod diagnostics_tests;

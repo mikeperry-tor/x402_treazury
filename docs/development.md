@@ -194,6 +194,22 @@ identify failures, degraded operation or actionable configuration problems.
 Normal capacity waits, retained observation deferrals and disposable cache eviction
 belong at DEBUG, even when they delay work or discard advisory cached data.
 
+Unsigned document acquisitions carry an ephemeral `document_id` and trusted
+`request_kind`, shared by origin and paid relay spans. Origin failures report safe
+HTTP status, a plain-language reason, direct/Tor route, typed failure/transport
+categories and final attempt/maximum counts. `relay_fallback_eligible` describes
+the origin failure, not configured relay availability, payment authority or
+successful recovery.
+Explicit document origin failures are WARN; speculative OpenAPI, directory and
+documentation URL probe failures are DEBUG, including missing paths and blocked
+responses. Enable `RUST_LOG=warn,x402_treazury=debug` for these probe diagnostics;
+oversized origin candidates also use DEBUG with resource, setting and byte limit,
+while explicit document rejection retains WARN. The tool response retains per-URL
+outcomes. No URLs, hosts, arguments or upstream
+error prose are logged. Paid relay failures retain ordinary payment WARN diagnostics
+and possible-charge facts. A successful relay HTTP call does not establish usable
+target documentation or settlement; consumers still validate the document.
+
 A valid first-page `tools/list` with more than 250 advertised definitions emits
 an advisory WARN with listener ID, count and `discover_on_demand = true` suggestion,
 without URLs, descriptions or credentials. It observes inventory, not model context;

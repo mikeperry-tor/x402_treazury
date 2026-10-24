@@ -55,7 +55,7 @@ pub(crate) fn unsigned_attempt(attempt: usize, max_attempts: usize) {
 }
 
 /// Fixed categories only: error display/source text can contain credentials.
-fn transport_reason(error: &reqwest::Error) -> &'static str {
+pub(crate) fn transport_reason(error: &reqwest::Error) -> &'static str {
     if crate::network::tls_failure(error) {
         "tls_failure"
     } else if error.is_timeout() && error.is_connect() {
