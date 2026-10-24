@@ -3,7 +3,10 @@
 ## Intent, baseline and scope
 
 Implement generic host-managed authentication only where an operation's effective
-OpenAPI security requirements declare it. Clear reusable authentication on wallet
+OpenAPI security requirements declare it. The separate
+[manual raw-call headers plan](raw_call_headers.md) permits explicit caller headers
+without automatic credential lookup; it is not a prerequisite for this mechanism.
+Clear reusable authentication on wallet
 rotation by default. Allow a provider/source option to preserve authentication
 across rotation, explicitly accepting provider-visible linkage between payers.
 
@@ -181,14 +184,16 @@ the authorized operation and payer before attaching secrets. Inject through the
 existing `src/network.rs` transports and `PaidClient` request path; no new vendor
 HTTP clients, direct Tor fallback or authentication preflight on every call.
 
-Generated tools, on-demand invocation and authenticated raw calls must use the same
+Generated tools, on-demand invocation and host-authenticated raw calls use the same
 resolver. Extend raw calls with source/operation and opaque auth references only
-as necessary. Authenticated raw URLs/methods must resolve uniquely to an accessible
+as necessary. Host-authenticated raw URLs/methods resolve uniquely to an accessible
 registered/configured OpenAPI operation, including its effective server URL, path
 parameters and security requirements. Reject ambiguous/unmatched requests before
 credential lookup or network I/O. Existing unauthenticated raw calls remain usable
-without registration. Do not add arbitrary Authorization headers or a process-wide
-automatic bearer cookie jar; raw authority alone grants no credential access.
+without registration. Manual raw Authorization belongs to the separate manual-header
+contract and cannot be combined with host-managed auth in one call. Reject mixed
+modes before credential lookup or I/O. Do not add a process-wide automatic bearer
+cookie jar; raw authority alone grants no host credential access.
 
 Do not forward secrets to discovery/help/spec URLs, other resources, redirects or
 paid relays. Preserve current redirect policy and relay credential exclusions;
@@ -309,7 +314,9 @@ Verify `docs/authentication.md` owns the enduring rules; configuration owns exac
 settings/defaults; wallet/network/source guides own their respective boundaries;
 providers/README.md and CAVEATS.md describe actual provider support; testing owns
 qualification claims. Verify AGENTS.md and `docs/README.md` link the owning guide.
-Remove this plan and fix its index links in A04 only after that handoff. Independently
+Remove this plan and fix its index links in A04 only after that handoff. Replace
+incoming sibling-plan links with permanent owning-guide links regardless of which
+plan finishes first. Independently
 review the exact cleanup SHA and the final combined branch as well; retain no
 completed-plan archive and erase no private financial or credential evidence.
 
