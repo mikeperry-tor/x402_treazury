@@ -604,6 +604,7 @@ async fn ordinary_no_relay_serving_binds_without_bootstrap_or_payment_io() {
                 let error = tokio::time::timeout(
                     Duration::from_secs(2),
                     payer.execute(crate::catalog::RoutedRequest {
+                        headers: Default::default(),
                         method: "GET".into(),
                         url: provider_url,
                         query: Default::default(),
@@ -706,6 +707,7 @@ async fn enabled_relay_binds_empty_managed_pool_without_starting_funding_or_prov
     let error = tokio::time::timeout(
         Duration::from_secs(2),
         payer.execute(crate::catalog::RoutedRequest {
+            headers: Default::default(),
             method: "GET".into(),
             url: provider_url,
             query: Default::default(),

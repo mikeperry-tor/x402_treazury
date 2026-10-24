@@ -40,6 +40,7 @@ async fn direct_relay_failure_retains_delay_and_drops_body_after_one_unsigned_at
     let result = tokio::time::timeout(
         Duration::from_secs(2),
         client.execute_response(RoutedRequest {
+            headers: Default::default(),
             method: "POST".into(),
             url,
             query: Default::default(),
@@ -159,6 +160,7 @@ async fn capacity_fixture() {
         async move {
             client
                 .execute_response(RoutedRequest {
+                    headers: Default::default(),
                     method: "POST".into(),
                     url: "https://spec.example.com/relay".into(),
                     query: Default::default(),
@@ -347,6 +349,7 @@ async fn partial_fixture() {
             Duration::from_secs(2),
             client.execute_response_observed(
                 RoutedRequest {
+                    headers: Default::default(),
                     method: "POST".into(),
                     url: format!("https://spec.example.com{path}"),
                     query: Default::default(),
@@ -383,6 +386,7 @@ async fn partial_fixture() {
     let client = PaidClient::unsigned();
     let output = client
         .execute_response(RoutedRequest {
+            headers: Default::default(),
             method: "POST".into(),
             url: "https://spec.example.com/ordinary".into(),
             query: Default::default(),

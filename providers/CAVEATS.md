@@ -376,8 +376,8 @@ closed via `additional_properties = false`. Caveats:
 
 - `/v1/grants/pass` ($15 non-renewing 30-day pass) is **excluded on
   purpose**: the pass buys bearer-token (`Authorization` header) access,
-  which this server cannot attach to vendor calls (headers are not
-  agent-settable; x402 replaces auth), so activating it would be $15 for a
+  which this server cannot attach to vendor calls (Authorization remains
+  runtime-owned and bearer-token workflows are unsupported), so activating it would be $15 for a
   token no tool can use.
 - preflight ($5.00) exceeds the default `X402_MAX_PRICE_USD=1.00` spend cap
   and is rejected pre-sign at the default — raise the cap to use it.
@@ -747,8 +747,8 @@ atomic units ($0.01). This checks a representative challenge, not funded executi
 or the behavior of every catalog endpoint.
 
 The vendor describes idempotent replay using the same key, payment credential and
-body. Although the spec includes optional `Idempotency-Key` headers, the generic
-catalog does not expose arbitrary headers or provide durable vendor replay keys.
+body. Declared `Idempotency-Key` headers are generated per invocation and
+preserved through existing attempts, but Treazury provides no durable vendor replay keys.
 Do not promise that a new tool invocation is a replay. The guide also asserts
 that a missing payment receipt proves no charge; this is not a safe conclusion
 when a response is lost or a call times out. Existing uncertainty accounting

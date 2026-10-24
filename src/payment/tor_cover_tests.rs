@@ -104,6 +104,7 @@ async fn endpoint(State(f): State<Fixture>, uri: Uri, headers: HeaderMap) -> Res
 }
 fn route(path: &str) -> RoutedRequest {
     RoutedRequest {
+        headers: Default::default(),
         method: "GET".into(),
         url: format!("https://api.example.com{path}"),
         query: BTreeMap::new(),

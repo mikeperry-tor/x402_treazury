@@ -63,6 +63,7 @@ async fn canceled_direct_waiter_retains_exact_signed_dispatch_and_body_drain() {
             client
                 .execute_response_observed(
                     RoutedRequest {
+                        headers: Default::default(),
                         method: "GET".into(),
                         url,
                         query: Default::default(),
@@ -108,6 +109,7 @@ async fn canceled_direct_waiter_retains_exact_signed_dispatch_and_body_drain() {
     assert!(
         client
             .execute_response(RoutedRequest {
+                headers: Default::default(),
                 method: "GET".into(),
                 url: "http://127.0.0.1:1".into(),
                 query: Default::default(),

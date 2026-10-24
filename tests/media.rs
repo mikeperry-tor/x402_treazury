@@ -321,6 +321,7 @@ async fn paid_image_decode_failure_is_explicit_and_never_replays() {
     );
     let output = client
         .execute_response(RoutedRequest {
+            headers: Default::default(),
             method: "GET".into(),
             url: format!("{base}/image"),
             query: Default::default(),

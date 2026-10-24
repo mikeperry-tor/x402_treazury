@@ -104,6 +104,7 @@ fn client(cap: &str) -> PaidClient {
 }
 fn route(url: String) -> RoutedRequest {
     RoutedRequest {
+        headers: Default::default(),
         method: "GET".into(),
         url,
         query: BTreeMap::new(),
@@ -611,6 +612,7 @@ async fn signed_post_failures_preserve_request_bytes_and_never_replay() {
         });
         let body = json!({"text":"雪","nested":{"enabled":true},"count":3});
         let request = RoutedRequest {
+            headers: Default::default(),
             method: "POST".into(),
             url,
             query: BTreeMap::from([
@@ -647,6 +649,7 @@ async fn agentutility_captured_v2_challenge_signs_base_with_static_payer() {
     assert_eq!(
         client
             .execute(RoutedRequest {
+                headers: Default::default(),
                 method: "POST".into(),
                 url,
                 query: Default::default(),

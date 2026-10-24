@@ -125,6 +125,7 @@ async fn saturation_child() {
         .map(|pool| PaidClient::managed(pool.clone()))
         .collect();
     let route = || RoutedRequest {
+        headers: Default::default(),
         method: "GET".into(),
         url: format!("{origin}/pay"),
         query: Default::default(),

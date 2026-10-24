@@ -158,6 +158,7 @@ impl Fixture {
     }
     fn route(&self) -> RoutedRequest {
         RoutedRequest {
+            headers: Default::default(),
             method: "GET".into(),
             url: format!("{}/items", self.base),
             query: Default::default(),

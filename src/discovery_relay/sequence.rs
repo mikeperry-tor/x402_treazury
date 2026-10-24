@@ -565,6 +565,7 @@ impl Entry {
         let result = scoped
             .execute_response_scoped(
                 RoutedRequest {
+                    headers: Default::default(),
                     method: "POST".into(),
                     url: self.endpoint.clone(),
                     query: BTreeMap::new(),

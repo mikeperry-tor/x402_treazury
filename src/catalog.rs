@@ -239,6 +239,15 @@ pub struct ToolInspection<'a> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HeaderParameter {
+    pub name: String,
+    pub required: bool,
+    pub explode: bool,
+}
+
+pub(crate) mod headers;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_mapping: Option<crate::output::ResponseMapping>,
@@ -253,6 +262,8 @@ pub struct ToolSpec {
     pub path: String,
     pub input_schema: Value,
     pub param_routes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub header_params: BTreeMap<String, HeaderParameter>,
     pub has_body: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub help_url: Option<String>,
@@ -265,6 +276,8 @@ pub struct RoutedRequest {
     pub method: String,
     pub url: String,
     pub query: BTreeMap<String, Value>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
     pub body: Option<Value>,
 }
 
@@ -273,7 +286,11 @@ impl ToolSpec {
         let mut path = self.path.clone();
         let mut query = BTreeMap::new();
         let mut body = Map::new();
+        let headers = headers::route(&self.header_params, args)?;
         for (key, value) in args {
+            if self.header_params.contains_key(key) {
+                continue;
+            }
             match self
                 .param_routes
                 .get(key)
@@ -337,6 +354,7 @@ impl ToolSpec {
         };
         reqwest::Url::parse(&url).context("invalid request URL")?;
         Ok(RoutedRequest {
+            headers,
             method: self.method.clone(),
             url,
             query,
@@ -1076,10 +1094,17 @@ fn openapi_operation(
         .chain(op["parameters"].as_array().into_iter().flatten())
         .filter_map(|p| openapi_parameter(root, p))
     {
-        if let Some(previous) = params
-            .iter_mut()
-            .find(|p| p["name"] == parameter["name"] && p["in"] == parameter["in"])
-        {
+        if let Some(previous) = params.iter_mut().find(|p| {
+            p["in"] == parameter["in"]
+                && if p["in"] == "header" {
+                    p["name"]
+                        .as_str()
+                        .unwrap_or("")
+                        .eq_ignore_ascii_case(parameter["name"].as_str().unwrap_or(""))
+                } else {
+                    p["name"] == parameter["name"]
+                }
+        }) {
             *previous = parameter;
         } else {
             params.push(parameter);
@@ -1095,20 +1120,40 @@ fn openapi_operation(
         "pricing":pricing_key.and_then(|k| op.get(k)), "credit_pricing":credit_key.and_then(|k| op.get(k)), "params":params, "body":body})
 }
 
-fn openapi_parameter(root: &Value, parameter: &Value) -> Option<Value> {
-    let p = resolve(root, parameter, &mut BTreeSet::new());
+fn openapi_parameter(root: &Value, parameter_source: &Value) -> Option<Value> {
+    let p = resolve(root, parameter_source, &mut BTreeSet::new());
     if !p["name"].is_string() {
         return None;
     }
-    let s = schema(&resolve(
+    let original_schema = resolve(
         root,
         p.get("schema").unwrap_or(&json!({})),
         &mut BTreeSet::new(),
-    ));
-    Some(json!({"name": p["name"], "in": p["in"],
+    );
+    let s = schema(&original_schema);
+    let mut parameter = json!({"name": p["name"], "in": p["in"],
         "required": p["required"].as_bool().unwrap_or(false),
         "description": p.get("description").filter(|v| !v.is_null()).unwrap_or(&s["description"]),
-        "schema": s}))
+        "schema": s});
+    // Header serialization belongs to the original parameter contract.
+    if p["in"] == "header" {
+        for key in ["style", "explode", "content"] {
+            if let Some(value) = p.get(key) {
+                parameter[key] = value.clone();
+            }
+        }
+    }
+    if p["in"] == "header"
+        && p["name"]
+            .as_str()
+            .is_some_and(|name| name.eq_ignore_ascii_case("idempotency-key"))
+    {
+        // This managed header never becomes a caller argument. Keep its authored
+        // constraints instead of the lossy tool-schema projection so automatic
+        // generation and digest input use the same authoritative schema field.
+        parameter["schema"] = headers::original_key_schema(root, parameter_source);
+    }
+    Some(parameter)
 }
 
 /// Listener tags match the exact path and case-insensitive HTTP method. Tag values
@@ -1233,7 +1278,7 @@ pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolS
         tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description: format!(
             "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
             method:"GET".into(), path:url.clone(), input_schema:json!({"type":"object","properties":{}}),
-            param_routes:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), body_names:BTreeMap::new() });
+            param_routes:BTreeMap::new(), header_params:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), body_names:BTreeMap::new() });
     }
     // Authored overrides also apply to help and always follow generated text/schema.
     for tool in &mut tools {
@@ -1411,6 +1456,7 @@ struct OperationInput {
     schema: Value,
     routes: BTreeMap<String, String>,
     body_names: BTreeMap<String, String>,
+    header_params: BTreeMap<String, HeaderParameter>,
     has_body: bool,
 }
 
@@ -1429,6 +1475,7 @@ fn operation_input(op: &Value) -> Result<OperationInput> {
         &mut required,
         &mut body_names,
     )?;
+    let header_params = headers::collect(&op["params"], &mut props, &mut required)?;
     let mut input_schema = json!({"type":"object", "properties":props});
     if !required.is_empty() {
         input_schema["required"] = json!(required);
@@ -1438,6 +1485,7 @@ fn operation_input(op: &Value) -> Result<OperationInput> {
         schema: sanitize(&input_schema),
         routes,
         body_names,
+        header_params,
         has_body,
     })
 }
@@ -1615,6 +1663,7 @@ fn operation_tool(
         path: op["path"].as_str().unwrap().into(),
         input_schema: input.schema,
         param_routes: input.routes,
+        header_params: input.header_params,
         has_body: input.has_body,
         help_url: None,
         body_names: input.body_names,

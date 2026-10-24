@@ -719,6 +719,7 @@ mod tests {
         });
         let error = claim
             .invoke(client.execute_response(crate::catalog::RoutedRequest {
+                headers: Default::default(),
                 method: "GET".into(),
                 url,
                 query: Default::default(),
@@ -874,6 +875,7 @@ mod tests {
         )
         .with_document_relay(Some(relay));
         let route = || crate::catalog::RoutedRequest {
+            headers: Default::default(),
             method: "GET".into(),
             url: "https://api.example.com/read".into(),
             query: Default::default(),

@@ -483,6 +483,7 @@ async fn public_transport_child() {
     );
     let payer = payer().public_destinations();
     let request = crate::catalog::RoutedRequest {
+        headers: Default::default(),
         method: "GET".into(),
         url: "https://api.example.com/read".into(),
         query: BTreeMap::new(),

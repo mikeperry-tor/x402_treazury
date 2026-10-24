@@ -53,8 +53,15 @@ parameters before merging body properties; renamed body arguments retain their
 original wire keys, and presence-only alternatives follow those renamed arguments.
 Final sanitization applies to the assembled schema. Path filters respect segment
 boundaries; OpenAPI boolean exclusive bounds normalize to numeric bounds.
-Header parameters do not grant
-agents control over payment headers. Schema conversion is not a general-purpose OpenAPI implementation;
+Declared business header parameters retain their original names and simple-style
+serialization in serializable tool routing metadata. Collisions with flattened
+query/body arguments use a `_header` argument suffix. OpenAPI's ignored Accept,
+Content-Type and Authorization parameters remain ignored; payment signatures,
+cookies and HTTP transport/framing headers cannot be supplied as API arguments.
+A declared Idempotency-Key is generated once per routed invocation and retained
+in the request cloned by existing unsigned and signed attempts. It is not a caller
+argument and grants no retry authority. See [header contracts](configuration.md#openapi-header-parameters-and-idempotency).
+Schema conversion is not a general-purpose OpenAPI implementation;
 for example, file uploads and asynchronous job orchestration are unsupported.
 
 `src/deployment.rs` validates listeners, filters and wallet references and resolves

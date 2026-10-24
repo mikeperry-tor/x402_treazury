@@ -445,6 +445,7 @@ impl Harness {
     }
     fn route(&self) -> RoutedRequest {
         RoutedRequest {
+            headers: Default::default(),
             method: "GET".into(),
             url: self.url.clone(),
             query: BTreeMap::new(),

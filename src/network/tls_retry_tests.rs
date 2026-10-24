@@ -480,6 +480,7 @@ async fn fixture() {
                     }
                     "api" => crate::payment::PaidClient::new(payer)
                         .execute_response(crate::catalog::RoutedRequest {
+                            headers: Default::default(),
                             method: "GET".into(),
                             url: endpoint.clone(),
                             query: BTreeMap::new(),
@@ -546,6 +547,7 @@ async fn fixture() {
         let client = crate::payment::PaidClient::new(payer).with_transport(HttpPolicy::COMPATIBLE);
         let error = client
             .execute_response(crate::catalog::RoutedRequest {
+                headers: Default::default(),
                 method: "GET".into(),
                 url: endpoint.into(),
                 query: BTreeMap::new(),
@@ -688,6 +690,7 @@ async fn body_cases(
             _ => crate::payment::PaidClient::new(payer)
                 .with_transport(HttpPolicy::COMPATIBLE)
                 .execute_response(crate::catalog::RoutedRequest {
+                    headers: Default::default(),
                     method: "GET".into(),
                     url: endpoint.clone(),
                     query: BTreeMap::new(),

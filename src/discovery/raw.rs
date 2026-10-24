@@ -42,6 +42,7 @@ fn request(args: &Map<String, Value>) -> Result<RoutedRequest> {
         );
     }
     Ok(RoutedRequest {
+        headers: Default::default(),
         method: method.to_string(),
         url: url.into(),
         query: input.query,

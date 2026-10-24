@@ -192,6 +192,7 @@ async fn run() {
         .with_cover(Some(cfg), scope.clone())
     };
     let route = |path: &str| RoutedRequest {
+        headers: Default::default(),
         method: "GET".into(),
         url: format!("https://api.example.com{path}"),
         query: Default::default(),

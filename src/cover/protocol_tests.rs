@@ -115,6 +115,7 @@ async fn run() {
         },
     );
     let route = |path: &str| crate::catalog::RoutedRequest {
+        headers: Default::default(),
         method: "GET".into(),
         url: format!("https://api.example.com{path}"),
         query: BTreeMap::new(),

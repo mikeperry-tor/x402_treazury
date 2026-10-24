@@ -62,7 +62,7 @@ fn consume(store: Store, state: &Path, key: &Path, pool: &str, replace: bool) ->
             let (handle,owner)=StoreHandle::spawn(store);
             let manager=ManagedPool::new(handle.clone(),pool.clone(),BaseRpc::new(&format!("{url}/rpc"), 12).unwrap(),SpendPolicy::dollars("1").unwrap()).unwrap();
             let client=PaidClient::managed(Arc::new(manager));
-            assert_eq!(client.execute(RoutedRequest {method:"GET".into(),url:format!("{url}/pay"),query:BTreeMap::new(),body:None}).await.unwrap(),"paid");
+            assert_eq!(client.execute(RoutedRequest {headers: Default::default(),method:"GET".into(),url:format!("{url}/pay"),query:BTreeMap::new(),body:None}).await.unwrap(),"paid");
             let selected_pool=pool.clone();
             let expected_ready=ready.id.clone();
             handle.call(move |store| {

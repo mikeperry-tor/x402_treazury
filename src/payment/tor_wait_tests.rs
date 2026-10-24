@@ -113,6 +113,7 @@ async fn handler(State(observed): State<Observations>, uri: Uri, headers: Header
 
 fn route(path: &str) -> RoutedRequest {
     RoutedRequest {
+        headers: Default::default(),
         method: "POST".into(),
         url: format!("http://wait-api.example.com{path}"),
         query: BTreeMap::new(),

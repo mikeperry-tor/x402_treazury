@@ -11,7 +11,7 @@ fn parameter_defaults_duplicates_and_skips_preserve_complete_input() {
     let op = json!({"params":[
         {"name":"duplicate","in":"path","required":true,"schema":{"type":"integer"}},
         {"name":"duplicate","in":"cookie","required":false,"description":"last","schema":null},
-        {"name":"header","in":"header","required":true,"schema":{"type":"number"}},
+        {"name":"Authorization","in":"header","required":true,"schema":{"type":"number"}},
         {"in":"path","required":true}, {"name":7,"required":true},
         {"name":"bare","required":"true","schema":[]},
         {"name":"empty","description":"","schema":false},
@@ -33,12 +33,12 @@ fn parameter_defaults_duplicates_and_skips_preserve_complete_input() {
         })
     );
     // Later optional duplicates replace schema and route, but do not remove an
-    // earlier required name. Header duplicates do not replace anything.
+    // earlier required name. A header collision gets its own argument.
     let op = json!({"params":[{"name":"x","in":"query","required":true},
         {"name":"x","in":"header","schema":{"type":"number"}}]});
     assert_eq!(
         complete_input(&op),
-        json!({"schema":{"type":"object","properties":{"x":{"type":"string"}},"required":["x"]},"routes":{"x":"query"},"body_names":{},"has_body":false})
+        json!({"schema":{"type":"object","properties":{"x":{"type":"string"},"x_header":{"type":"number"}},"required":["x"]},"routes":{"x":"query"},"body_names":{},"has_body":false})
     );
 }
 

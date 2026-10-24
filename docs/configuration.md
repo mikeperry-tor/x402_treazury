@@ -743,7 +743,9 @@ Filters accept comma-separated values. Supported
 `HELP_URL`, and `MAX_DESCRIPTION_CHARS`. Precedence is CLI > environment > config
 > default; explicit env-file values override inherited environment values.
 Use `--help` for the complete CLI. `catalog route NAME --args '{...}'` prints
-method, URL, query and JSON body without making a request or loading a signer.
+method, URL, query, declared headers and JSON body without making a request or
+loading a signer. Previewed idempotency keys belong only to that preview; an actual
+tool invocation generates its own key.
 
 All MCP listeners paginate `tools/list` at 25 definitions per page. Follow
 `nextCursor` until absent. Tool search also defaults to 25; explicit positive
@@ -751,6 +753,46 @@ All MCP listeners paginate `tools/list` at 25 definitions per page. Follow
 and catalog snapshot; publication requires restarting enumeration. Remote directory
 browse defaults to 25 and retains its upstream maximum of 100. Pagination selects
 pages and does not reject or trim the full inventory.
+
+## OpenAPI header parameters and idempotency
+
+OpenAPI `in: header` business parameters become ordinary tool arguments. Header
+names are case-insensitive on the wire and for operation overrides of inherited
+parameters. Argument names preserve the declared spelling; a collision with a
+query/body argument adds `_header`, retaining the original wire name. An
+unresolvable alias collision is an explicit catalog error. Required headers must
+be supplied before dispatch; absent/null optional values are omitted.
+
+Header serialization supports OpenAPI `simple` style: scalar values become text,
+arrays join with commas, and flat objects become `key,value` pairs or `key=value`
+pairs with `explode = true`. Unsupported styles, content-based header parameters,
+nested values and invalid HTTP names/values fail explicitly. Values are never
+included in validation error messages. As required by OpenAPI, header parameters
+named Accept, Content-Type and Authorization are ignored. Cookies, x402 payment
+headers and HTTP framing/connection/proxy headers remain runtime-owned and are
+rejected. Explicit custom API-key headers are ordinary declared arguments; existing
+relay policy still forbids credential forwarding and skips adapters unable to
+preserve all business headers.
+
+A header named `Idempotency-Key` is managed automatically, even when optional in
+the schema. It is omitted from tool arguments. Each invocation generates a random
+UUID string and preserves it through the existing unsigned retries, signing and
+recognized insufficient-funds wallet traversal. Identical arguments in two calls
+produce different keys and can intentionally buy twice. Automatic generation
+accepts unconstrained string declarations, optional `format = "uuid"` and length
+bounds admitting 36 characters; incompatible formats or other validators fail
+visibly at catalog construction rather than inventing a vendor key format.
+Pure local schema references are followed. References with sibling constraints,
+unresolved references and cycles remain unsupported and fail explicitly; the
+general tool-schema projection cannot erase constraints to permit generation.
+
+Accepted in-process work retains the request after waiter cancellation. No HTTP
+key/request recovery journal or cross-call deduplication is added; interrupted
+calls are not automatically replayed after restart. A key neither proves vendor
+deduplication nor prevents a second x402 debit, and ambiguous signed outcomes
+still grant no automatic replay authority. This behavior applies to static and
+registered OpenAPI tools, including on-demand calls. The separate `raw_call`
+interface has no declared headers and does not generate keys.
 
 ## Optional agent API discovery
 

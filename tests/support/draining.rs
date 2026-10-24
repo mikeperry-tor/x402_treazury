@@ -14,6 +14,7 @@ fn binding(h: &Harness, method: &str) -> BoundTool {
             path: "/pay".into(),
             input_schema: json!({"type":"object"}),
             param_routes: Default::default(),
+            header_params: Default::default(),
             has_body: false,
             help_url: None,
             body_names: Default::default(),

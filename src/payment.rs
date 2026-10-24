@@ -1207,6 +1207,16 @@ fn build_request(route: RoutedRequest) -> Result<reqwest::Request> {
     let mut request =
         reqwest::Request::new(route.method.parse()?, reqwest::Url::parse(&route.url)?);
     let mut query = Vec::new();
+    for (name, value) in route.headers {
+        let name = crate::catalog::headers::business_name(&name)?;
+        ensure!(
+            !request.headers().contains_key(&name),
+            "duplicate API header"
+        );
+        request
+            .headers_mut()
+            .insert(name, value.parse().context("invalid API header value")?);
+    }
     for (key, value) in route.query {
         if let Some(values) = value.as_array() {
             for v in values {
@@ -1302,3 +1312,7 @@ fn insufficient_funds(headers: &reqwest::header::HeaderMap) -> bool {
 #[cfg(test)]
 #[path = "payment/relay_retry_tests.rs"]
 mod relay_retry_tests;
+
+#[cfg(test)]
+#[path = "payment/header_tests.rs"]
+mod header_tests;

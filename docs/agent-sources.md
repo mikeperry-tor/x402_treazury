@@ -408,6 +408,11 @@ called with `raw_call` without registration.
 
 ### Direct calls to x402 URLs
 
+Imported OpenAPI tools expose declared business headers and automatically manage
+declared `Idempotency-Key` headers under the [shared header contract](configuration.md#openapi-header-parameters-and-idempotency).
+This applies equally to direct tool invocation and on-demand `tool_call`; a new
+invocation is a new operation, even with identical arguments.
+
 `raw_call` calls any documented public HTTPS x402 API URL. Supply its exact HTTP
 `method`, optional `query` parameters and optional JSON `body`. The method is
 validated as an HTTP token and forwarded without changing its spelling. Query

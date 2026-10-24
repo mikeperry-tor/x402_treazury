@@ -444,6 +444,32 @@ mod tests {
     }
 
     #[test]
+    fn purchase_business_headers_require_faithful_relay_representation() {
+        let mut target = target();
+        target.method = Method::POST;
+        target
+            .headers
+            .insert("x-quote-id", "quote-123".parse().unwrap());
+        target.headers.insert(
+            "idempotency-key",
+            "24a08964-2c6e-43c5-a127-3765185dbcea".parse().unwrap(),
+        );
+        let encoded = Format::Agproxy.encode(&target, 1024).unwrap().unwrap();
+        assert_eq!(encoded["headers"]["x-quote-id"], "quote-123");
+        assert_eq!(
+            encoded["headers"]["idempotency-key"],
+            "24a08964-2c6e-43c5-a127-3765185dbcea"
+        );
+        assert!(Format::Curl.encode(&target, 1024).unwrap().is_none());
+        assert!(
+            Format::Horizonpulse
+                .encode(&target, 1024)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
     fn filtered_required_headers_and_external_request_caps_skip_before_dispatch() {
         let mut target = target();
         target

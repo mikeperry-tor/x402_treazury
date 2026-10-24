@@ -26,6 +26,78 @@ async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
 }
 
 #[tokio::test]
+async fn direct_and_on_demand_calls_route_declared_headers_and_own_distinct_keys() {
+    use axum::http::HeaderMap;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured = seen.clone();
+    let (base, task) = serve(Router::new().route(
+        "/read",
+        get(move |headers: HeaderMap| {
+            captured.lock().unwrap().push((
+                headers["x-quote-id"].to_str().unwrap().to_owned(),
+                headers["idempotency-key"].to_str().unwrap().to_owned(),
+            ));
+            async { "complete result" }
+        }),
+    ))
+    .await;
+    let tools = build_tools(
+        &Config::default(),
+        &json!({"paths":{"/read":{"get":{
+            "parameters":[
+                {"name":"X-Quote-Id","in":"header","required":true,"schema":{"type":"string"}},
+                {"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string"}}
+            ]
+        }}}}),
+        "fixture",
+    )
+    .unwrap();
+    let mut server = Server::new(tools, PaidClient::unsigned(), base, None);
+    let args = json!({"X-Quote-Id":"quote-from-agent"});
+    assert_eq!(
+        server
+            .invoke("fixture_read", args.as_object().unwrap())
+            .await
+            .unwrap(),
+        "complete result"
+    );
+    server.discover_on_demand = true;
+    let search: Value = serde_json::from_str(
+        &server
+            .invoke(
+                "x402_treazury_tools_search",
+                json!({"query":"fixture_read"}).as_object().unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let properties = &search["items"][0]["input_schema"]["properties"];
+    assert!(properties.get("X-Quote-Id").is_some(), "{search}");
+    assert!(properties.get("Idempotency-Key").is_none());
+    assert_eq!(
+        server
+            .invoke(
+                "x402_treazury_tool_call",
+                json!({"tool_id":"fixture_read","arguments":args})
+                    .as_object()
+                    .unwrap()
+            )
+            .await
+            .unwrap(),
+        "complete result"
+    );
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert!(
+        seen.iter()
+            .all(|(quote, key)| quote == "quote-from-agent" && uuid::Uuid::parse_str(key).is_ok())
+    );
+    assert_ne!(seen[0].1, seen[1].1);
+    task.abort();
+}
+
+#[tokio::test]
 async fn authenticated_mcp_paid_call_signs_once_and_delivers_the_provider_result() {
     use axum::http::{HeaderMap, StatusCode};
     use base64::{Engine, engine::general_purpose::STANDARD};

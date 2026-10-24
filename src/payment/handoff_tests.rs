@@ -284,6 +284,7 @@ async fn run_case(
     let client = PaidClient::managed(manager.clone());
     let result = client
         .execute(RoutedRequest {
+            headers: Default::default(),
             method: method.into(),
             url: format!("{origin}/protected"),
             query: BTreeMap::from([("business".into(), json!("unchanged & exact"))]),

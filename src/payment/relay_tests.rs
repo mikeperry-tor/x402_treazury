@@ -296,6 +296,7 @@ async fn relay(
 
 fn route(method: &str, kind: &str) -> RoutedRequest {
     RoutedRequest {
+        headers: Default::default(),
         method: method.into(),
         url: format!("https://api.example.com/target/{method}-{kind}?literal=%2F%20"),
         query: BTreeMap::from([("q".into(), json!(["one two", "x+y"]))]),

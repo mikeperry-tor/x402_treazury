@@ -59,6 +59,7 @@ async fn payment_crash_child() {
 
 fn route(base: &str) -> crate::catalog::RoutedRequest {
     crate::catalog::RoutedRequest {
+        headers: Default::default(),
         method: "GET".into(),
         url: format!("{base}/pay"),
         query: Default::default(),

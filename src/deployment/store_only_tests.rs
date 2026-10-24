@@ -181,6 +181,7 @@ async fn base_service(fault: &str, relay_enabled: bool) {
     pool.reconcile().await.unwrap();
     let payer = PaidClient::managed(pool.clone());
     let route = || crate::catalog::RoutedRequest {
+        headers: Default::default(),
         method: "GET".into(),
         url: format!("{origin}/read"),
         query: Default::default(),
@@ -556,6 +557,7 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
             .clone()
             .with_source_identity("dynamic")
             .execute(crate::catalog::RoutedRequest {
+                headers: Default::default(),
                 method: "GET".into(),
                 url: format!("{origin}/read"),
                 query: Default::default(),

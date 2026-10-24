@@ -77,6 +77,8 @@ async fn seller(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    assert_eq!(headers["idempotency-key"], "same-logical-call-key");
+    assert_eq!(headers["x-quote-id"], "same-quote");
     f.requests
         .lock()
         .unwrap()
@@ -430,6 +432,10 @@ async fn run(
         16384,
     );
     let route = RoutedRequest {
+        headers: BTreeMap::from([
+            ("idempotency-key".into(), "same-logical-call-key".into()),
+            ("x-quote-id".into(), "same-quote".into()),
+        ]),
         method: method.into(),
         url: format!("{origin}/pay"),
         query: BTreeMap::from([("original".into(), json!("same & bytes"))]),
@@ -840,6 +846,7 @@ async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_s
     for method in ["GET", "POST"] {
         peers.lock().unwrap().clear();
         let route = RoutedRequest {
+            headers: Default::default(),
             method: method.into(),
             url: format!("{origin}/pay"),
             query: BTreeMap::from([("q".into(), json!("exact & value"))]),
@@ -874,6 +881,7 @@ async fn coherent_transport_retained_across_cache_eviction_and_unsigned_errors_s
         for method in ["GET", "POST"] {
             peers.lock().unwrap().clear();
             let route = RoutedRequest {
+                headers: Default::default(),
                 method: method.into(),
                 url: format!("{origin}/pay"),
                 query: BTreeMap::new(),
@@ -1162,6 +1170,7 @@ async fn tor_unsigned_retry_child() {
                     steps.push_back(TorStep::Signed200(b"paid-ok".to_vec()));
                 }
                 let make_matrix_route = || RoutedRequest {
+                    headers: Default::default(),
                     method: method.into(),
                     url: "http://api-a.example.com/pay".into(),
                     query: BTreeMap::from([("q".into(), json!("exact & value"))]),
@@ -1294,6 +1303,7 @@ async fn tor_unsigned_retry_child() {
         }
     }
     let make_route = || RoutedRequest {
+        headers: Default::default(),
         method: "POST".into(),
         url: "http://api-a.example.com/pay".into(),
         query: BTreeMap::new(),
@@ -1433,6 +1443,7 @@ async fn tor_unsigned_retry_child() {
         let before_dead = proxy.records.lock().unwrap().len();
         let before_signed = script_a.signed_payers.lock().unwrap().len();
         let dead_route = RoutedRequest {
+            headers: Default::default(),
             method: method.into(),
             url: "http://dead.example.com/pay".into(),
             query: BTreeMap::new(),
@@ -1814,6 +1825,7 @@ async fn tor_unsigned_retry_child() {
         steps.push_back(TorStep::Signed200(b"managed-paid".to_vec()));
     }
     let managed_route = RoutedRequest {
+        headers: Default::default(),
         method: "POST".into(),
         url: "http://api-b.example.com/pay".into(),
         query: BTreeMap::from([("mode".into(), json!("handoff"))]),
@@ -2019,6 +2031,7 @@ async fn prior_wallet_liability_relay_child() {
         }),
     );
     let route = || RoutedRequest {
+        headers: Default::default(),
         method: "GET".into(),
         url: "https://api.example.com/pay".into(),
         query: BTreeMap::from([("original".into(), json!("same & bytes"))]),
