@@ -62,7 +62,7 @@ API registrations last until the process exits. Exa's catalog loads from its pub
 OpenAPI specification; no Exa API key is required.
 
 ```sh
-scripts/zcash.sh build
+make build
 cp examples/deployments/managed.toml examples/deployments/managed.local.toml
 ```
 
@@ -174,12 +174,14 @@ restored after restart; their tools are available only on the toolbox endpoint.
 Run these commands from the repository checkout directory:
 
 ```sh
-scripts/zcash.sh build
+make build
 
 cp examples/deployments/comprehensive.toml examples/deployments/comprehensive.local.toml
 ```
 
-The wrapper uses the pinned Rust/Cargo toolchain and supplies protoc.
+The Makefile verifies the pinned Rust/Cargo toolchain and supplies protoc.
+Builds require GNU Make 3.81+ and a POSIX shell, including on Windows; see
+the [development entrypoints](scripts/README.md).
 Zcash is always included; static-wallet deployments omit treasury configuration.
 Only synthetic proving and local consensus tests use opt-in Cargo features.
 See [build reproducibility](docs/reproducible-builds.md) for toolchain setup.
@@ -188,7 +190,7 @@ The cargo download dependencies and Zcash proving parameters are downloaded
 outside of Tor routing by default.
 
 The build produces `target/release/x402_treazury`. For incremental development
-builds, use `scripts/zcash.sh build --developer`; see
+builds, use `make build-dev`; see
 [build storage options](docs/development.md#build-storage-options).
 
 Start Tor Browser, or use an installed Tor daemon. Tor is not bundled or started by
@@ -571,8 +573,23 @@ sources do not automatically authorize cover traffic. See the
 | [Development](docs/development.md) | Tests, coverage and complexity tools |
 | [Documentation index](docs/README.md) | Architecture, demos, plans and further references |
 
-Run `scripts/check.sh` for the full offline test suite. Live tests are separately
-funded and opt-in; ordinary tests use temporary state and unfunded fixture keys.
+Common development commands run from the repository root:
+
+| Command | Purpose |
+| --- | --- |
+| `make` / `make build` | Optimized release build |
+| `make build-dev` | Incremental development build |
+| `make test` | Default test suite |
+| `make cargo-check` | Fast compilation check |
+| `make fmt` / `make fmt-check` | Apply / check formatting |
+| `make clippy` | Clippy with warnings denied |
+| `make check` | Full ordered development checks |
+| `make coverage` | Default coverage report |
+| `make help` | All entrypoints and argument examples |
+
+See the [entrypoint reference](scripts/README.md) for prerequisites, focused tests
+and optional coverage modes. Run `make check` for the full offline test suite.
+Live tests are separately funded and opt-in; ordinary tests use temporary state and unfunded fixture keys.
 
 ## Related projects
 

@@ -30,7 +30,7 @@ workloads and no provider index. Source witnesses for authored transformations
 have focused fidelity consumers; their distinct production local catalogs remain
 necessary. Do not retain an unconsumed vendor capture as a completeness claim.
 
-Use `scripts/zcash.sh test --test provider_catalogs --test config` from the repository
+Use `make test CARGO_ARGS='--test provider_catalogs --test config'` from the repository
 root. Tests use no Python, credentials or live vendors. Review input/schema/routing
 changes together; never regenerate snapshots merely to obtain a passing result.
 Preserve full inputs only where a concrete comparison needs the entire inventory.

@@ -136,7 +136,7 @@ class ReproducibleTests(unittest.TestCase):
                 path.write_text(f"#!/bin/sh\necho '{tool} {expected} (fixture)'\n")
                 path.chmod(0o755)
             env = {"PATH": f"{tmp}:/usr/bin:/bin"}
-            command = ["sh", str(r.ROOT / "scripts/check_toolchain.sh")]
+            command = ["make", "--no-print-directory", "-C", str(r.ROOT), "toolchain"]
             subprocess.run(command, env=env, check=True)
             (Path(tmp) / "rustc").write_text("#!/bin/sh\necho 'rustc 1.98.0 (fixture)'\n")
             failure = subprocess.run(command, env=env, capture_output=True, text=True)

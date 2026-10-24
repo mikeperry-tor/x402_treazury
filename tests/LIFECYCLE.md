@@ -51,13 +51,13 @@ side effects, without introducing runtime deadlines or a separate test framework
 Run the offline application suite:
 
 ```sh
-scripts/zcash.sh test --offline --all-targets
+make test CARGO_ARGS='--offline --all-targets'
 ```
 
 Fast synthetic wallet checks use the test-utilities feature without proving or Docker:
 
 ```sh
-scripts/zcash.sh test --offline --features zcash-testutils --lib treasury::expiry
+make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::expiry'
 ```
 
 These check output evidence for transparent, Sapling, Orchard and Ironwood inputs,
@@ -75,14 +75,14 @@ claim; after local publication succeeds, reopen preserves those identical bytes.
 No second calculation or broadcast occurs. Run it with:
 
 ```sh
-scripts/zcash.sh test --offline --features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1
+make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::send::proving_tests' TEST_ARGS='--test-threads=1'
 ```
 
-`scripts/check.sh` includes the synthetic-chain source lifecycle. Run it separately
+`make check` includes the synthetic-chain source lifecycle. Run it separately
 without Docker or external services:
 
 ```sh
-scripts/zcash.sh test --offline --features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=1
+make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::lifecycle_tests' TEST_ARGS='--test-threads=1'
 ```
 
 This opt-in test uses public deterministic keys and a test-only network namespace
@@ -93,10 +93,7 @@ Run consensus qualification separately; [REGTEST.md](REGTEST.md) describes the
 pinned images and isolated networking:
 
 ```sh
-RUST_BACKTRACE=0 scripts/zcash.sh test --offline \
-  --features zcash-regtest --lib \
-  treasury::regtest::deposit_settlement_and_reorg_recovery \
-  -- --ignored --exact --nocapture --test-threads=1
+RUST_BACKTRACE=0 make test CARGO_ARGS='--offline --features zcash-regtest --lib treasury::regtest::deposit_settlement_and_reorg_recovery' TEST_ARGS='--ignored --exact --nocapture --test-threads=1'
 ```
 
 Run the other named scenarios separately using the same exact-filter pattern.

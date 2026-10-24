@@ -29,7 +29,7 @@ the repository neither bundles nor downloads Tor. Discover the exact default-bui
 integration-test executable from Cargo's output:
 
 ```sh
-scripts/zcash.sh test --offline --test network --no-run --message-format=json > /tmp/treazury-network-build.jsonl
+make test CARGO_ARGS='--offline --test network --no-run --message-format=json' > /tmp/treazury-network-build.jsonl
 python3 - <<'PYCODE'
 import json
 from pathlib import Path
@@ -119,8 +119,7 @@ For a read-only smoke check alone against an independently managed Tor endpoint
 (without circuit observation or OS confinement):
 
 ```sh
-TOR_SMOKE_SOCKS=127.0.0.1:SOCKS_PORT scripts/zcash.sh test --offline \
-  --test network live_tor_unfunded_smoke -- --ignored --exact --nocapture
+TOR_SMOKE_SOCKS=127.0.0.1:SOCKS_PORT make test CARGO_ARGS='--offline --test network live_tor_unfunded_smoke' TEST_ARGS='--ignored --exact --nocapture'
 ```
 
 Tor's [SOCKS extensions](https://spec.torproject.org/socks-extensions.html) define

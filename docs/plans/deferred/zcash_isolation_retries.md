@@ -132,7 +132,7 @@ boundary changes. Material later changes reopen affected checks and reviews.
 Follow AGENTS.md exact-SHA reviews by non-authors, introducing-SHA fixup commits and
 independent fixup review; preserve unsquashed history through final integration.
 Use independent read-only design review before edits and analyze recurring fixup
-causes at both gates. Run focused default-Zcash tests through `scripts/zcash.sh`,
+causes at both gates. Run focused default-Zcash tests through the Makefile entrypoints,
 verify named tests execute nonzero cases, and run applicable formatting/lint checks.
 Keep sources/builds coordinated and metrics under ignored `target/` or private
 storage. Local fixtures do not qualify live Tor circuits or settlement. Real-funded,

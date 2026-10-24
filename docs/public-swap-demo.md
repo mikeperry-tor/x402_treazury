@@ -26,7 +26,7 @@ EVM private key needs to be shared.
 From the repository root:
 
 ```sh
-scripts/zcash.sh build --developer --offline
+make build-dev CARGO_ARGS='--offline'
 target/debug/x402_treazury config show \
   --config tests/live/deployments/public-swap-demo.toml
 target/debug/x402_treazury config check \
@@ -43,7 +43,7 @@ live seller's current schema or price still matches the fixture.
 Optionally inspect a current public route without credentials or funds:
 
 ```sh
-scripts/zcash.sh run --offline --example quote_near
+make run CARGO_ARGS='--offline --example quote_near'
 ```
 
 Cargo's `--offline` only disables dependency fetching. This example makes a real

@@ -30,7 +30,7 @@ Build the application and runner together; preparation pins their build identity
 Default builds include Zcash. Build traffic is separate from runtime Tor policy.
 
 ```sh
-scripts/zcash.sh build --bin x402_treazury --example live_integration
+make build CARGO_ARGS='--bin x402_treazury --example live_integration'
 ```
 
 Before preparation, copy both executables into an owner-only directory for this

@@ -149,8 +149,7 @@ fresh spec to a temporary path, then review selected complete objects and their
 reference closure with the [fixture consumers](../tests/fixtures/catalogs/README.md):
 
 ```sh
-scripts/zcash.sh run --example snapshot_spec -- \
-  https://www.socialfetch.dev/openapi.json /tmp/socialfetch-requests.json
+make run CARGO_ARGS='--example snapshot_spec -- https://www.socialfetch.dev/openapi.json /tmp/socialfetch-requests.json'
 ```
 
 ## deepline.toml — Deepline GTM (stable-deepline.dev)
@@ -866,10 +865,8 @@ explain these boundaries without truncating the guide.
 Fetch the public OpenAPI and registry JSON to temporary local files, then run:
 
 ```sh
-scripts/zcash.sh run --offline --example snapshot_agentutility -- \
-  /tmp/agentutility-openapi.json /tmp/agentutility-registry.json \
-  providers/agentutility/openapi.json
-scripts/zcash.sh test --offline --example snapshot_agentutility
+make run CARGO_ARGS='--offline --example snapshot_agentutility -- /tmp/agentutility-openapi.json /tmp/agentutility-registry.json providers/agentutility/openapi.json'
+make test CARGO_ARGS='--offline --example snapshot_agentutility'
 ```
 
 Review request/description/pricing changes, new aliases, tags and response envelopes.

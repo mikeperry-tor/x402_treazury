@@ -195,19 +195,19 @@ required behavior, regression coverage and provenance before counting a retireme
 ## Commands and test exceptions
 
 Run commands from the repository root. Zcash is unconditional in the application
-build; static wallet deployments simply omit treasury configuration. Use the wrapper for pinned
-Cargo and Cargo-managed protoc. `build` defaults to release without incremental
-caches; `build --developer` opts into an incremental development build.
+build; static wallet deployments simply omit treasury configuration. Use the
+[Makefile entrypoints](scripts/README.md) for pinned Cargo and Cargo-managed protoc. `make build` defaults to release without incremental caches;
+`make build-dev` opts into an incremental development build.
 
 ```sh
-scripts/zcash.sh build
-scripts/zcash.sh test --all-targets -- --test-threads=1
-scripts/zcash.sh clippy --all-targets -- -D warnings
-cargo fmt --check
+make build
+make test
+make clippy
+make fmt-check
 ```
 
 - Prefer focused tests for a change. Do not repeat full suites after a localized
-  fix unless new changes or unresolved concerns justify it. `scripts/check.sh` is
+  fix unless new changes or unresolved concerns justify it. `make check` is
   the full application check, including Clippy, vendor/compatibility verification,
   complexity analysis and the synthetic-chain treasury lifecycle.
 - Choose sandbox permissions before running tests. Keep socket-free tests in the
@@ -227,7 +227,7 @@ cargo fmt --check
   absent. Cover slow progress versus true stalls, cancellation/restart and unrelated
   concurrent progress when changing failure policy. Do not loosen contracts or trim
   documentation to make tests pass.
-- Run `sh scripts/check_toolchain.sh` before plain Homebrew Cargo commands. Do not
+- Run `make toolchain` before plain Homebrew Cargo commands. Do not
   change toolchain/profile pins or weaken the reproducible-build sandbox to pass a
   check. Patch dependencies in reviewed `vendor/` sources, never Cargo caches or
   reference checkouts. Python is development tooling, never a runtime dependency.

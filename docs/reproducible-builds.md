@@ -10,10 +10,10 @@ systems, independent machines or different toolchain distributions.
 
 ## Toolchain and release environment
 
-`rust-toolchain.toml` selects Rust 1.99.1 for rustup. The Zcash and check wrappers
-also run `scripts/check_toolchain.sh`, which rejects a different Rust or Cargo
-version under Homebrew/system installations. Direct Cargo commands under
-Homebrew bypass that wrapper; run the checker first. `rust-version` in
+`rust-toolchain.toml` selects Rust 1.99.1 for rustup. The Makefile application targets
+also run `make toolchain`, which rejects a different Rust or Cargo
+version under Homebrew/system installations. Before direct Cargo commands under
+Homebrew, run `make toolchain`. `rust-version` in
 `Cargo.toml` remains the minimum supported language version, not a toolchain pin.
 Optional nightly branch coverage deliberately uses a separate toolchain.
 
@@ -39,10 +39,10 @@ does not need a separate provider data directory for bundled source discovery.
 Preparation may use the network. From the repository root:
 
 ```sh
-sh scripts/check_toolchain.sh
+make toolchain
 cargo fetch --locked --target aarch64-apple-darwin
 cargo fetch --locked --manifest-path compat/protoc/Cargo.toml
-scripts/zcash.sh build
+make build
 ```
 
 The last command populates Zingolib's public Sapling parameter cache. On the

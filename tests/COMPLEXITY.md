@@ -1,6 +1,6 @@
 # Rust complexity audit
 
-Use `python3 scripts/complexity.py` from the repository root. `scripts/check.sh`
+Use `python3 scripts/complexity.py` from the repository root. `make check`
 runs it and the analyzer's syntax qualification tests by default, separately from
 application tests. Complexity warnings are advisory; there are no numerical merge
 gates or application/runtime dependencies. First use downloads development crates;
@@ -18,7 +18,7 @@ baseline when updating the analyzer or its grammar dependencies.
 ## Inputs and artifacts
 
 The default comparison uses the merge base of `HEAD` and local `main`. Supply
-`--base REF` for another PR target; `scripts/check.sh` accepts
+`--base REF` for another PR target; `make check` accepts
 `COMPLEXITY_BASE_REF=REF`. CI must fetch that ref and enough history for a merge
 base. A missing ref or incomplete baseline fails visibly. `--no-compare` explicitly
 requests a standalone report without regression warnings; the default check never

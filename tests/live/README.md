@@ -12,8 +12,8 @@ bodies are API reads, not job creation or account mutation. No secrets belong he
 Build before applying runtime network confinement:
 
 ```sh
-scripts/zcash.sh test --example provider_preflight --example quote_near
-scripts/zcash.sh build --example provider_preflight --example quote_near
+make test CARGO_ARGS='--example provider_preflight --example quote_near'
+make build CARGO_ARGS='--example provider_preflight --example quote_near'
 ```
 
 With an independently started Tor instance and a `[network]` file pointing to it:

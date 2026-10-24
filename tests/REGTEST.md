@@ -15,7 +15,7 @@ Zaino requires amd64 emulation on ARM hosts.
 ```sh
 docker pull docker.io/zfnd/zebra:6.0.0@sha256:78a10b7f24b83a86e6223d97e857094a353454e3268f84a87bd987e7140a33bb
 docker pull --platform linux/amd64 docker.io/zingodevops/zaino:0.6.0-rc.1-no-tls@sha256:e48b133dbf53dbed77b872de74d65aa8a45357a3844b658ea472a340949feb7f
-scripts/zcash.sh test --features zcash-regtest --lib treasury::regtest::deposit_settlement_and_reorg_recovery -- --ignored --exact --nocapture
+make test CARGO_ARGS='--features zcash-regtest --lib treasury::regtest::deposit_settlement_and_reorg_recovery' TEST_ARGS='--ignored --exact --nocapture'
 ```
 
 The network selector's regtest variant is compiled only into this crate's unit
@@ -69,10 +69,10 @@ Run each scenario in its own test process, using its complete name and `--exact`
 For an instrumented run of exactly one scenario:
 
 ```sh
-scripts/coverage.sh --consensus high_index_refunds_and_separate_shielding
+make coverage-consensus TEST=high_index_refunds_and_separate_shielding
 ```
 
-Use `scripts/coverage.sh --proving` for the synthetic proving test without Docker.
+Use `make coverage-proving` for the synthetic proving test without Docker.
 These commands are optional qualification, not tests run by the default suite.
 A fake SOCKS endpoint proves client routing/credentials, not real Tor circuit
 selection. Neither the optional suite nor its coverage qualifies real NEAR swaps.
@@ -97,7 +97,7 @@ known stdout prefix is removed before asserting the dispatcher emits one JSON va
 
 Run this scenario separately with `--features zcash-regtest --lib
  treasury::regtest::recovery_cli_lifecycle -- --ignored --exact --nocapture` or
-`scripts/coverage.sh --consensus recovery_cli_lifecycle`. It has a thirty-minute
+`make coverage-consensus TEST=recovery_cli_lifecycle`. It has a thirty-minute
 outer deadline and each child has a three-minute deadline. The ordinary executable
 is still mainnet-only, so this qualifies shared command orchestration with a test
 network adapter, not a funded mainnet invocation.

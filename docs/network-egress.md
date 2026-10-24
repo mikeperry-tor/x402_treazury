@@ -571,7 +571,7 @@ financial accounting, refunds and expiry recovery.
 Run the complete local regression suite:
 
 ```sh
-scripts/zcash.sh test --offline --all-targets -- --test-threads=1
+make test CARGO_ARGS='--offline --all-targets' TEST_ARGS='--test-threads=1'
 python3 vendor/verify.py
 python3 vendor/verify_zingo.py
 python3 scripts/check_compat.py
@@ -581,8 +581,7 @@ Run the Ironwood consensus lifecycle through the fake SOCKS proxy, alone in its
 process because network policy is immutable (requires Docker, no real funds):
 
 ```sh
-scripts/zcash.sh test --offline --features zcash-regtest --lib \
-  treasury::regtest::tor_consensus_lifecycle -- --ignored --exact --nocapture
+make test CARGO_ARGS='--offline --features zcash-regtest --lib treasury::regtest::tor_consensus_lifecycle' TEST_ARGS='--ignored --exact --nocapture'
 ```
 
 For controlled real-Tor circuit observation and per-process egress qualification,
@@ -595,8 +594,7 @@ Local SOCKS tests and funded-swap tests remain separate evidence.
 For a deliberately enabled, read-only real-Tor HTTPS/gRPC smoke check:
 
 ```sh
-TOR_SMOKE_SOCKS=127.0.0.1:9150 scripts/zcash.sh test --offline \
-  --test network live_tor_unfunded_smoke -- --ignored --exact --nocapture
+TOR_SMOKE_SOCKS=127.0.0.1:9150 make test CARGO_ARGS='--offline --test network live_tor_unfunded_smoke' TEST_ARGS='--ignored --exact --nocapture'
 ```
 
 This contacts zec.rocks, checks mainnet identity and Ironwood tree support, and

@@ -25,7 +25,7 @@ if [ "$#" -ne 0 ]; then usage >&2; exit 2; fi
 if [ "$mode" = branch ]; then
     case $(rustc --version) in
         *nightly*) ;;
-        *) echo 'Branch coverage requires nightly Rust: RUSTUP_TOOLCHAIN=nightly scripts/coverage.sh --branch' >&2; exit 2 ;;
+        *) echo 'Branch coverage requires nightly Rust: RUSTUP_TOOLCHAIN=nightly make coverage-branch' >&2; exit 2 ;;
     esac
 fi
 # Respect explicit tools. A rustup nightly must use its own matching LLVM tools.

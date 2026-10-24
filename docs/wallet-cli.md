@@ -168,8 +168,8 @@ parameters. The wallet dependency is pinned upstream at zingolib v7.0.0 commit
 `bfb0a2156819ea7f75a9b09b1724abfd06c8925e`; no reference checkout is needed.
 
 ```sh
-scripts/zcash.sh build
-scripts/zcash.sh test --all-targets
+make build
+make test CARGO_ARGS='--all-targets'
 ```
 
 The binary supports these treasury commands:
@@ -490,7 +490,7 @@ Run the read-only $5 route demo (public test addresses, no credentials, no walle
 no deposit allocation or transfer):
 
 ```sh
-scripts/zcash.sh run --offline --example quote_near
+make run CARGO_ARGS='--offline --example quote_near'
 ```
 
 Cargo's `--offline` disables dependency fetching; the example itself calls NEAR.
@@ -541,7 +541,7 @@ keys, verifies the resulting proof, and restores identical pending bytes and wal
 state after reopening:
 
 ```sh
-scripts/zcash.sh test --features zcash-testutils --all-targets
+make test CARGO_ARGS='--features zcash-testutils --all-targets'
 ```
 
 `zcash-testutils` opts into upstream test helpers and an Orchard verifier; normal
@@ -746,9 +746,7 @@ A read-only diagnostic can exercise concurrent verification without keys or chan
 to wallet state:
 
 ```sh
-scripts/zcash.sh run --example diagnose_credit -- \
-  --network-config examples/network/tor.toml --state-dir state/demo \
-  --rpc-url "$BASE_RPC_URL" --rounds 3
+make run CARGO_ARGS='--example diagnose_credit -- --network-config examples/network/tor.toml --state-dir state/demo --rpc-url "$$BASE_RPC_URL" --rounds 3'
 ```
 
 The diagnostic sends the state's public EVM addresses to the selected RPC and

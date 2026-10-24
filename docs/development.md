@@ -61,13 +61,15 @@ their original metadata and remain observation-only.
 For end users, build an optimized executable without incremental compiler caches:
 
 ```sh
-scripts/zcash.sh build
+make build
 target/release/x402_treazury --help
 ```
 
-The wrapper defaults `build` (and an invocation without a command) to release
-mode and sets `CARGO_INCREMENTAL=0`, including for its protoc helper. Explicit
-`--release` and `--profile NAME` remain supported with incremental caches disabled.
+Bare `make` and `make build` default to release mode and set
+`CARGO_INCREMENTAL=0`, including for the protoc helper. Use `PROFILE=NAME`
+to select another profile with incremental caches disabled. The Makefile requires
+GNU Make 3.81+ and a POSIX shell; see the [entrypoint reference](../scripts/README.md)
+for prerequisites and argument forwarding.
 Release compilation takes longer, but produces optimized code without debug info.
 This ordinary build is separate from the qualified
 [reproducible release workflow](reproducible-builds.md).
@@ -78,22 +80,23 @@ backtraces but omits type and variable information needed for richer debugger
 inspection. Enable incremental development builds explicitly:
 
 ```sh
-scripts/zcash.sh build --developer
+make build-dev
 # Development profile without incremental caches:
-scripts/zcash.sh build --profile dev
+make build PROFILE=dev
 ```
 
-`--developer` sets `CARGO_INCREMENTAL=1` and cannot be combined with `--release`
-or `--profile`. The build wrapper selects its incremental setting even when a
-value is inherited from the shell. `test`, `check`, and `clippy` retain normal Cargo
-profiles and respect the inherited environment; `--developer` is build-only.
+`make build-dev` selects the dev profile and sets `CARGO_INCREMENTAL=1`.
+Build targets select their incremental setting even when a value is inherited
+from the shell. Select profiles through `PROFILE`, rather than passing Cargo
+profile flags in `CARGO_ARGS`; `build-dev` always uses dev. `test`, `cargo-check`,
+and `clippy` retain normal Cargo profiles and respect the inherited environment.
 To disable incremental compilation for tests:
 
 ```sh
-CARGO_INCREMENTAL=0 scripts/zcash.sh test --all-targets -- --test-threads=1
+CARGO_INCREMENTAL=0 make test
 ```
 
-For full debugger information, set `CARGO_PROFILE_DEV_DEBUG=2` with `build --developer` or
+For full debugger information, set `CARGO_PROFILE_DEV_DEBUG=2` with `make build-dev` or
 `CARGO_PROFILE_TEST_DEBUG=2` for tests. Profile changes can require dependency
 recompilation and leave previous artifacts on disk. Disabling incremental
 compilation does not delete existing caches or other dependency/test artifacts.
@@ -111,16 +114,16 @@ as routine disk cleanup.
 
 ## Verification
 
-Run `scripts/check.sh` for the application, test-feature Clippy, compatibility
+Run `make check` for the application, test-feature Clippy, compatibility
 checks and the local synthetic-chain treasury lifecycle. Run feature configurations
 sequentially because CLI tests share the executable path. See
 [development tools](../scripts/README.md).
 Individual commands:
 
 ```sh
-scripts/zcash.sh test --all-targets -- --test-threads=1
-scripts/zcash.sh clippy --all-targets -- -D warnings
-cargo fmt --check
+make test
+make clippy
+make fmt-check
 ```
 
 Tests cover local x402 handshakes and signatures, spend limits, managed admission
@@ -143,7 +146,7 @@ Run `python3 scripts/complexity.py` for a local audit using pinned
 `rust-code-analysis`. Open `target/complexity/report.md`; full JSON/CSV retain all
 scores. Production callables, tests and examples are separated, parser failures
 are explicit, and existing coverage is joined only for unchanged source files.
-`scripts/check.sh` runs the audit by default. New or worsening hotspots above CogC
+`make check` runs the audit by default. New or worsening hotspots above CogC
 20 or CycC 40 receive advisory review warnings against the merge base with `main`;
 scores do not fail the check. Use `--base REF` or `COMPLEXITY_BASE_REF` for another
 review target. Incomplete analysis fails visibly. Apply the
@@ -155,7 +158,7 @@ for syntax qualification, macro/feature limitations and the independent tool bui
 
 Install `cargo-llvm-cov` (`cargo install cargo-llvm-cov --locked`) and LLVM tools
 matching `rustc -vV` (or `rustup component add llvm-tools-preview` for rustup).
-Run `scripts/coverage.sh` for the default Zcash build, all test targets and examples.
+Run `make coverage` for the default Zcash build, all test targets and examples.
 It supplies protoc and detects Homebrew LLVM; `LLVM_COV` and `LLVM_PROFDATA` can
 select another matching installation. Rust 1.99.1 from Homebrew uses LLVM 23.1.3.
 
@@ -172,7 +175,7 @@ on PATH:
 
 ```sh
 rustup toolchain install nightly --profile minimal --component llvm-tools-preview
-RUSTUP_TOOLCHAIN=nightly scripts/coverage.sh --branch
+RUSTUP_TOOLCHAIN=nightly make coverage-branch
 ```
 
 This writes HTML/JSON/text to `target/coverage-branch` and keeps its build/profiles
@@ -297,10 +300,10 @@ the repository.
 The root workspace includes Pepper Sync so its private shard-merge regression can
 run with the application's reviewed patches and lockfile. Ordinary root commands
 select only the application; the other vendored dependencies remain nonmembers.
-`scripts/check.sh` explicitly runs the real three-pool merge-conflict fixture:
+`make check` explicitly runs the real three-pool merge-conflict fixture:
 
 ```sh
-scripts/zcash.sh test -p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context -- --exact
+make test CARGO_ARGS='-p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context' TEST_ARGS='--exact'
 ```
 
 Run source verification and the combined suite with the reviewed vendored patches:

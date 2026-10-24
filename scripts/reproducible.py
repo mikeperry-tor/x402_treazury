@@ -33,7 +33,7 @@ def verify_parameters(directory):
     for name, (size, expected) in PARAMETERS.items():
         path = directory / name
         if not path.is_file() or path.stat().st_size != size or digest(path, "blake2b") != expected:
-            raise RuntimeError(f"Missing or invalid {path}; prefetch public parameters with scripts/zcash.sh build")
+            raise RuntimeError(f"Missing or invalid {path}; prefetch public parameters with make build")
         result[name] = {"size": size, "blake2b": expected}
     return result
 
@@ -161,7 +161,7 @@ def compare(first, second):
 def qualify(run):
     report = {"status": "incomplete", "features": "default", "artifacts": [], "builds": []}
     try:
-        subprocess.run(["sh", str(ROOT / "scripts/check_toolchain.sh")], check=True)
+        subprocess.run(["make", "--no-print-directory", "-C", str(ROOT), "toolchain"], check=True)
         if output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT):
             raise RuntimeError("Tracked changes present; commit the candidate before release qualification (untracked files are excluded)")
         profile = json.loads((ROOT / "scripts/release-environment.json").read_text())

@@ -69,13 +69,13 @@ the [development guide](docs/development.md) for build and test tooling. From th
 repository root, typical checks are:
 
 ```sh
-scripts/zcash.sh build
-cargo fmt --check
-scripts/zcash.sh test --all-targets -- --test-threads=1
-scripts/zcash.sh clippy --all-targets -- -D warnings
+make build
+make fmt-check
+make test
+make clippy
 ```
 
-Run focused tests while developing; `scripts/check.sh` is the complete check suite.
+Run focused tests while developing; `make check` is the complete check suite.
 Use the pinned toolchain. Run requested test-feature configurations sequentially
 because subprocess tests share an executable path. State which checks passed,
 failed or could not run. See [testing](docs/testing.md) for qualification limits;

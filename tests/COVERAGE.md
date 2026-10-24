@@ -1,7 +1,7 @@
 # Coverage workflow and test map
 
 Use [the testing guide](../docs/testing.md) for commands and qualification status.
-`scripts/coverage.sh` writes line, region and function evidence under `target/`.
+`make coverage` writes line, region and function evidence under `target/`.
 Each report records source/compiler/features/lockfile provenance. Failed or empty
 collections must not replace a successful report; `scripts/tests/coverage.sh`
 checks that publication boundary. Compare identical denominators and features.

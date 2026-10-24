@@ -2,7 +2,7 @@
 
 These Rust utilities are explicit root-package Cargo `[[example]]` targets. Their
 source lives here so `examples/` stays focused on deployment starting points.
-Use the existing `scripts/zcash.sh run --example NAME -- ...` commands; build output
+Use the existing `make run CARGO_ARGS='--example NAME -- ...'` commands; build output
 still lives in `target/{profile}/examples/`. Ordinary application builds do not
 build these targets. The [live runner](../tests/live/INTEGRATION.md) follows the
 same arrangement with source beside its qualification inputs and runbooks.

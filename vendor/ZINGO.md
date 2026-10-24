@@ -88,7 +88,7 @@ instrumentation. The private three-pool merge-conflict fixture must remain
 executable, not just copied in a dependency:
 
 ```sh
-scripts/zcash.sh test -p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context -- --exact
+make test CARGO_ARGS='-p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context' TEST_ARGS='--exact'
 ```
 
 See [workspace verification](../docs/development.md#combined-workspace-verification).

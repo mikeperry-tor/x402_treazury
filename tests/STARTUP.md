@@ -14,8 +14,8 @@ share credentials, different origins do not. It does not require real Tor.
 Run the focused regression suites sequentially:
 
 ```sh
-scripts/zcash.sh test --test startup --test deployment --test provider_catalogs --test network_audit
-scripts/zcash.sh build
+make test CARGO_ARGS='--test startup --test deployment --test provider_catalogs --test network_audit'
+make build
 ```
 
 The application includes Zcash. The ignored SOCKS child is exercised by its parent.
@@ -76,7 +76,7 @@ local fixtures do not qualify live settlement or Tor.
 ## Reproducible measurement
 
 ```sh
-scripts/zcash.sh test --test startup_benchmark -- --ignored --nocapture
+make test CARGO_ARGS='--test startup_benchmark' TEST_ARGS='--ignored --nocapture'
 ```
 
 This opt-in test uses three independent synthetic OpenAPI documents: small

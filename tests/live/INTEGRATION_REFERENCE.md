@@ -327,9 +327,9 @@ catalog evidence fails explicitly; split the deployment into smaller reviewed ru
 rather than truncate a spec. Keep historical private financial ledgers unchanged.
 
 ```sh
-scripts/zcash.sh build --example live_integration
-target/debug/examples/live_integration plan --manifest /private/path/run.toml
-scripts/zcash.sh test --example live_integration
+make build CARGO_ARGS='--example live_integration'
+target/release/examples/live_integration plan --manifest /private/path/run.toml
+make test CARGO_ARGS='--example live_integration'
 ```
 
 ## Planning and concurrency assertions
@@ -840,10 +840,9 @@ fund**, with zero API/source/job authority. The fixture writer is explicitly
 ignored in normal test runs and itself performs no network requests:
 
 ```sh
-scripts/zcash.sh build --developer --bin x402_treazury --example live_integration
+make build-dev CARGO_ARGS='--bin x402_treazury --example live_integration'
 TREAZURY_M4_FIXTURE_DIR=/private/tmp/treazury-m4-new \
-  scripts/zcash.sh test --test integration_preparation \
-  prepare_real_tor_qualification_fixture -- --ignored --exact --nocapture
+  make test CARGO_ARGS='--test integration_preparation prepare_real_tor_qualification_fixture' TEST_ARGS='--ignored --exact --nocapture'
 # Review run.toml/deployment.toml; adjust the installed Tor path if necessary.
 target/debug/examples/live_integration prepare \
   --state-dir /private/tmp/treazury-m4-new/state \
@@ -877,7 +876,7 @@ The local opt-in matrix drives real MCP calls through a TLS-over-SOCKS fixture,
 without Tor, live providers or funds:
 
 ```sh
-scripts/zcash.sh test --lib cover::matrix_tests::cover_distribution_matrix -- --ignored --exact
+make test CARGO_ARGS='--lib cover::matrix_tests::cover_distribution_matrix' TEST_ARGS='--ignored --exact'
 ```
 
 It writes `target/cover/matrix.json`: no cover/ranges/padding/combined × five
@@ -889,7 +888,7 @@ fixtures verify physical reuse, never-indexed HPACK, faults and stream priority.
 Generate a private real-Tor fixture with no network traffic:
 
 ```sh
-scripts/zcash.sh build --developer --bin x402_treazury --example live_integration
+make build-dev CARGO_ARGS='--bin x402_treazury --example live_integration'
 target/debug/examples/live_integration cover-fixture \
   --directory /private/tmp/treazury-cover-qualification \
   --binary "$PWD/target/debug/x402_treazury" \

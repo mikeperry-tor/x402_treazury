@@ -1,27 +1,68 @@
 # Development tools
 
-The application and normal Rust tests do not need Python. These tools run from
-any working directory unless a command explicitly supplies relative data paths.
+The root Makefile is the entrypoint for common operations. It requires GNU Make
+3.81+ (including macOS's installed Make), a POSIX shell and standard shell tools.
+On Windows, use a GNU Make/POSIX shell environment such as MSYS2; this does not
+establish native Windows application or qualification support. Install Rust/Cargo
+matching `rust-toolchain.toml`; Make verifies both versions before application
+Cargo commands, including under Homebrew. Protoc comes from the locked Cargo
+helper, not a system installation. The application and normal Rust tests do not
+need Python. The full `make check` also requires Python 3.11+ for development tools.
+If `python3` selects an older version, use `make check PYTHON=python3.13`
+(or another installed Python 3.11+ executable).
+
+Run Make from the repository root, or use `make -C /path/to/checkout TARGET`.
+`make help` and dry runs do not invoke Cargo or build protoc. Targets run serially
+even under `make -j`, since CLI fixtures share executable paths. Separate Make
+processes still need coordination; do not change sources or build feature
+configurations concurrently during validation.
+
+`CARGO_ARGS` is a shell-quoted argument list. For `test` and `clippy`, it **replaces**
+the default `--all-targets`; include that flag explicitly when adding options for
+the complete suite. `TEST_ARGS` replaces the default `--test-threads=1` harness
+arguments. Do not include the separating `--` in `TEST_ARGS`; Make supplies it.
+`run` accepts both Cargo and application arguments in `CARGO_ARGS`, separated by
+`--`. These are trusted shell fragments, not a structured argument API. Quote the
+outer assignment so your shell passes it as one Make argument; retain inner quotes
+for individual arguments containing spaces. Use `$$` for a dollar sign that must
+reach the recipe shell (for example, `"$$BASE_RPC_URL"` inside a single-quoted
+assignment). Do not place secrets in command arguments.
+
+```sh
+make test CARGO_ARGS='--test payments' TEST_ARGS='case_name --exact --test-threads=1'
+make test CARGO_ARGS='--all-targets --offline'
+make run CARGO_ARGS='--example snapshot_spec -- "path with spaces/input.json" /tmp/output.json'
+make build PROFILE=dev CARGO_ARGS='--offline'
+```
+
+Build targets own profile selection: use `PROFILE=NAME` with `build` or
+`build-dev` for incremental dev; Cargo profile flags in `CARGO_ARGS` are rejected.
+`make check` uses fixed selections and ordering regardless of `CARGO_ARGS` and
+`TEST_ARGS`. It stops on the first failing stage.
+
+Coverage keeps an internal shell helper for provenance, failure preservation and
+atomic report publication; invoke its public Make targets below. Specialized Python tools remain
+available directly.
 
 | Tool | Purpose |
 | --- | --- |
 | `python3 scripts/reproducible.py` | Two clean, network-denied release builds with binary hash comparison; see [release qualification](../docs/reproducible-builds.md) |
-| `check_toolchain.sh` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
-| `check.sh` | Format, complexity review, vendor provenance, SDK merge diagnostics, application/treasury tests, Clippy and compatibility suite |
+| `make toolchain` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
+| `make check` | Format, complexity review, vendor provenance, SDK merge diagnostics, application/treasury tests, Clippy and compatibility suite |
 | `python3 scripts/complexity.py` | Pinned complexity metrics and advisory regressions against merge-base with `main`; Markdown and complete JSON/CSV under `target/complexity` |
-| `coverage.sh` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
-| `coverage.sh --branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |
-| `coverage.sh --proving` | Only the named synthetic proving test; `target/coverage-proving` |
-| `coverage.sh --consensus TEST` | One explicitly selected consensus test; `target/coverage-consensus-TEST` |
-| `tests/coverage.sh` | Offline regression check for report publication and failure preservation |
-| `zcash.sh build` / `zcash.sh test --all-targets` | Cargo-managed protoc; the application always includes Zcash |
+| `make coverage` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
+| `make coverage-branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |
+| `make coverage-proving` | Only the named synthetic proving test; `target/coverage-proving` |
+| `make coverage-consensus TEST=NAME` | One explicitly selected consensus test; `target/coverage-consensus-NAME` |
+| `scripts/tests/coverage.sh` | Offline regression check for report publication and failure preservation |
+| `make build` / `make test` | Cargo-managed protoc; the application always includes Zcash |
 | `check_compat.py` | Standard-library Python orchestration of the separate payment/Zingolib compatibility workspace |
 | `generate_crypto_vectors.py` | Independent Python Keccak/EIP-712 reference vectors using pinned script dependencies |
 
 Zcash support is unconditional; static-wallet deployments omit treasury
 configuration. Only synthetic proving and local consensus are opt-in test features.
 Run feature configurations sequentially: CLI tests share
-`target/debug/x402_treazury`. `check.sh` leaves the application executable there.
+`target/debug/x402_treazury`. `make check` leaves the application executable there.
 Its complexity audit warns above CogC 20 or CycC 40 for new/unmatched or worsening
 callables; scores never fail tests. Missing baseline history or incomplete analysis
 fails the audit. Set `COMPLEXITY_BASE_REF` for another review target; CI must fetch
@@ -42,11 +83,10 @@ evidence on failure. Shared-cache comparison does not qualify independent caches
 `vendor/verify_zingo.py` verifies only the retained Pepper snapshot/patches and
 copied-code notice; both graphs use ordinary pinned upstream SDK/netutils sources.
 
-`zcash.sh build` (also the default with no command) produces
-`target/release/x402_treazury` with incremental caches disabled, including for the
-protoc helper. `zcash.sh build --developer` selects an incremental development
-build at `target/debug/x402_treazury`. Explicit `--release` or `--profile NAME`
-selects a non-incremental build and cannot be combined with `--developer`.
+`make build` (also bare `make`) produces `target/release/x402_treazury` with
+incremental caches disabled, including for the protoc helper. `make build-dev`
+selects an incremental development build at `target/debug/x402_treazury`.
+`make build PROFILE=NAME` selects a non-incremental build with another profile.
 Tests, checks and Clippy retain normal Cargo profiles and environment behavior.
 See [build storage options](../docs/development.md#build-storage-options) for
 debug-information settings and selective cache cleanup.
@@ -55,7 +95,7 @@ Regenerate the independent cryptographic vectors with:
 
 ```sh
 uv run --script scripts/generate_crypto_vectors.py
-cargo test --locked --test crypto_vectors
+make test CARGO_ARGS='--test crypto_vectors'
 ```
 
 `uv` is needed only for this optional regeneration command; it manages an isolated
@@ -66,7 +106,7 @@ accepting new expected values.
 Build OpenAPI request fixtures with the Rust utility:
 
 ```sh
-cargo run --locked --example snapshot_spec -- SOURCE_JSON_OR_URL OUTPUT_JSON
+make run CARGO_ARGS='--example snapshot_spec -- SOURCE_JSON_OR_URL OUTPUT_JSON'
 ```
 
 See `tests/fixtures/catalogs/README.md` for provider contract review and
@@ -96,7 +136,7 @@ preserve `LLVM_PROFILE_FILE`. Abruptly exited children may not flush coverage;
 parent assertions establish their test outcomes independently. Run from a stable
 working tree and do not run two coverage commands concurrently for the same mode.
 
-Optional modes do not run the default suite. Consensus accepts only the five
+Optional modes do not run the default suite. Consensus accepts only the
 named cases in `tests/REGTEST.md`, one per process; it never enables a broad ignored
 test filter. Docker/images must already be available. No live Tor or mainnet tests
 are selected. Keep optional results distinct from default-build percentages.
@@ -106,7 +146,7 @@ The optional complexity reporter builds a small independent Rust helper in
 application dependencies. Python 3.11+ assembles reports and joins existing LLVM
 coverage only for byte-identical source files. See [COMPLEXITY.md](../tests/COMPLEXITY.md)
 for parser qualification, score definitions, baseline findings and limitations.
-`check.sh` runs the offline report-integrity tests without installing the analyzer.
+`make check` runs the offline report-integrity tests without installing the analyzer.
 The helper's syntax probes are an explicit development-tool check:
 
 ```sh

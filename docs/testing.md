@@ -29,19 +29,20 @@ identify its selected requests, caps, authority and unobserved outcomes.
 
 ## Default development checks
 
-The application always includes Zcash. `scripts/zcash.sh` supplies the pinned Cargo
-invocation and Cargo-managed protoc; do not append a second `--locked` flag.
+The application always includes Zcash. The [Makefile](../Makefile) verifies pinned Cargo
+and supplies Cargo-managed protoc; do not append a second `--locked` flag.
+See the [entrypoint reference](../scripts/README.md) for focused test arguments.
 
 ```sh
-scripts/zcash.sh test --all-targets -- --test-threads=1
-cargo fmt --check
-scripts/zcash.sh clippy --all-targets -- -D warnings
+make test
+make fmt-check
+make clippy
 ```
 
 Run requested test-feature configurations sequentially: subprocess tests use the
 built executable path. Prefer focused tests for a change, then the relevant
 broader suite.
-`scripts/check.sh` is the full qualification wrapper, including compatibility and
+`make check` is the full development check, including compatibility and
 vendor verification. Building dependencies/proving parameters can require network
 access; normal runtime fixtures use localhost and deterministic unfunded keys,
 never a developer's `.env` or mainnet wallet. Ignored child-process helpers invoked
@@ -69,7 +70,7 @@ permits the required operations needs no extra approval.
 | --- | --- |
 | `crypto_vectors`, `provider_catalogs`, `managed_config`, `network_audit`, `cli_layout` | Currently socket-free complete test targets: local computation/files and, for CLI inspection, child processes. Run in the ordinary sandbox. |
 | `network`, `startup`, `cli_contracts`, `config` | Representative targets containing localhost fixtures. Use socket-capable execution for the complete target. |
-| `scripts/zcash.sh test --all-targets`, `scripts/check.sh` | Include socket fixtures and require localhost socket access. |
+| `make test`, `make check` | Include socket fixtures and require localhost socket access. |
 
 Names above are Cargo test targets (`--test NAME`). For filtered tests, follow
 helper and child-process calls: `config` and `cli_contracts` mix socket-free
@@ -335,7 +336,7 @@ The characterization protects validation orchestration, not all runtime interlea
 [Catalog startup qualification](../tests/STARTUP.md) documents rolling-concurrency
 and isolation tests, an opt-in local provider replay, and measurement methodology.
 
-`scripts/coverage.sh` produces default line, region and function reports with
+`make coverage` produces default line, region and function reports with
 compiler/source/lockfile provenance. Generated reports stay under ignored `target/`;
 failed collection must not replace the latest successful report. Application
 filters exclude external/vendor/test/example paths, although inline test helpers
@@ -344,8 +345,9 @@ sets and filters, and explain denominator changes before attributing a percentag
 change to better tests.
 
 Branch collection is an optional separate invocation using a compatible nightly
-compiler and matching LLVM tooling: `RUSTUP_TOOLCHAIN=nightly scripts/coverage.sh
---branch`. Stable region coverage is not branch coverage. Optional proving,
+compiler and matching LLVM tooling:
+`RUSTUP_TOOLCHAIN=nightly make coverage-branch`. Stable region coverage is not
+branch coverage. Optional proving,
 consensus and Tor results remain distinct from default report percentages.
 The development guide's [coverage section](development.md#local-coverage) documents setup and
 artifact locations; its [complexity section](development.md#local-complexity-metrics)
