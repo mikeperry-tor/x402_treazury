@@ -242,7 +242,7 @@ fn flat_schema_keeps_shared_types_and_coinbase_only_query_bound() {
 }
 
 #[tokio::test]
-async fn terminal_origin_transport_failure_warns_without_private_url() {
+async fn origin_transport_failure_leaves_warning_to_terminal_search() {
     use tracing::instrument::WithSubscriber;
     let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = socket.local_addr().unwrap();
@@ -262,6 +262,7 @@ async fn terminal_origin_transport_failure_warns_without_private_url() {
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_env_filter("warn,x402_treazury=debug")
         .with_writer(logs.reopen().unwrap())
         .finish();
     let result = origin(&url, &selected, 1024)
@@ -273,7 +274,7 @@ async fn terminal_origin_transport_failure_warns_without_private_url() {
     ));
     let text = std::fs::read_to_string(logs.path()).unwrap();
     assert!(
-        text.contains("WARN") && text.contains("coinbase_search_origin"),
+        !text.contains("WARN") && text.contains("DEBUG") && text.contains("coinbase_search_origin"),
         "{text}"
     );
     assert!(

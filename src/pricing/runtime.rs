@@ -138,13 +138,13 @@ impl RuntimeHints {
             // Keep the newest receipts, including when old validation finishes
             // after eviction. No per-key tombstones or second retention bound.
             if receipt <= oldest {
-                tracing::warn!(
+                tracing::debug!(
                     limit_entries = CAPACITY,
                     "Runtime price hint capacity reached; older incoming hint discarded"
                 );
                 return;
             }
-            tracing::warn!(
+            tracing::debug!(
                 limit_entries = CAPACITY,
                 "Runtime price hint capacity reached; oldest receipt evicted"
             );
@@ -233,6 +233,7 @@ mod tests {
         let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
             .with_writer(log.reopen().unwrap())
             .finish();
         let _guard = tracing::subscriber::set_default(subscriber);
@@ -286,7 +287,7 @@ mod tests {
         for message in ["older incoming hint discarded", "oldest receipt evicted"] {
             assert!(
                 logs.lines()
-                    .any(|line| line.contains("WARN") && line.contains(message))
+                    .any(|line| line.contains("DEBUG") && line.contains(message))
             );
         }
         assert!(logs.contains("limit_entries=65535"));

@@ -303,11 +303,12 @@ qualification, the summary is WARN and records retained
 `cover_qualification_cancelled`, even when the episode reason is
 `cover_budget_unspent`. Previously available capability may remain available at
 the same deadline. Summaries for already cached unavailability are DEBUG.
-Unexpected task or sampling failures and actual process-budget or episode
-reservation refusals remain WARN even when capability has not changed. Normal
+Unexpected task or sampling failures and actual process-budget refusals remain
+WARN even when capability has not changed. The aggregate `cover_episode_limit`
+reservation result can represent ordinary target, deadline or scheduling completion
+and uses the INFO/DEBUG lifecycle level unless qualification becomes unavailable. Normal
 budget completion, an authorized episode request-count completion, and an available
-resource's deadline shortfall remain INFO. Capacity-driven owner eviction also
-WARNs with the owner limit, without logging owner identities. Summaries retain the
+resource's deadline shortfall remain INFO. Capacity-driven owner eviction logs DEBUG with the owner limit, without logging owner identities. Summaries retain the
 configured episode/process limit fields alongside actual usage, including stream
 and accounting-history bounds. These observations do not change retry, cache lifetime, fallback or
 budget policy.

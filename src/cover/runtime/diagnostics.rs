@@ -150,7 +150,6 @@ pub(super) fn episode(
                 | "cover_body_limit"
                 | "cover_padding_limit"
                 | "cover_history_limit"
-                | "cover_episode_limit"
         ) {
             event!(
                 Level::WARN,

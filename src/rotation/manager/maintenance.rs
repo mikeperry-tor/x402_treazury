@@ -177,7 +177,7 @@ impl ManagedPool {
                 }
             }
             if capacity_deferred {
-                tracing::warn!(
+                tracing::debug!(
                     limit_reads = BALANCE_READS,
                     "Advisory balance observation capacity reached; remaining inventory retained for a later pass"
                 );

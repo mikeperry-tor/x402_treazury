@@ -152,6 +152,7 @@ impl Manager {
                 Err(failure) if !failure.fallback => Err(failure.error.context("coinbase_search origin response rejected")),
                 Err(failure) => {
                     let Some(relay) = manager.search_relay.as_ref().filter(|relay| relay.enabled(crate::discovery_relay::Purpose::SourceDiscovery)) else {
+                        tracing::warn!(stage = "coinbase_search", "Coinbase search failed; origin acquisition exhausted and fallback unavailable");
                         return Err(failure.error.context("coinbase_search origin failed; fallback unavailable"));
                     };
                     let response = relay.fetch(owned_client, url.as_str(), &manager.policy, validate_response, failure.retry_after).await
@@ -226,8 +227,8 @@ async fn origin(
     )
     .await
     .inspect_err(|failure| {
-        // Byte limits already warn at collection; report terminal transport and
-        // exhausted origin attempts without retaining upstream error prose.
+        // Origin exhaustion can still recover through the configured relay.
+        // Report attempt details without upstream prose or a premature warning.
         if matches!(
             failure.kind,
             acquisition::FailureKind::Transport | acquisition::FailureKind::HttpStatus(_)
@@ -242,7 +243,7 @@ async fn origin(
             } else {
                 "http_status"
             };
-            tracing::warn!(
+            tracing::debug!(
                 stage = "coinbase_search_origin",
                 reason,
                 "Unsigned Coinbase origin acquisition failed"

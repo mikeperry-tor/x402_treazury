@@ -358,7 +358,9 @@ async fn fixture() {
     );
 
     let first_record = proxy.records.lock().unwrap().len();
-    let first = invoke(&m, "writer", "retry").await.unwrap();
+    let (first, logs) = crate::limits::tests::capture(invoke(&m, "writer", "retry")).await;
+    let first = first.unwrap();
+    assert!(!logs.contains("WARN"), "successful relay fallback: {logs}");
     assert_eq!(first["directory"], "coinbase");
     assert_eq!(first["acquisition"]["via"], "curl");
     assert_eq!(first["response"], search_response("retry"));
@@ -395,7 +397,16 @@ async fn fixture() {
     .await
     .unwrap();
     *disabled.fixture_coinbase.lock().unwrap() = Some(ORIGIN.into());
-    assert!(invoke(&disabled, "writer", "disabled").await.is_err());
+    let (result, logs) =
+        crate::limits::tests::capture(invoke(&disabled, "writer", "disabled")).await;
+    assert!(result.is_err());
+    assert!(
+        logs.lines().any(|line| line.contains("WARN")
+            && line.contains(
+                "Coinbase search failed; origin acquisition exhausted and fallback unavailable"
+            )),
+        "{logs}"
+    );
     assert_eq!(
         sequence(&f, "disabled"),
         ["origin", "origin", "origin"],

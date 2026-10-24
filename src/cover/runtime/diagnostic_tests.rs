@@ -204,7 +204,6 @@ async fn capacity_refusal_summaries_warn_without_reclassifying_normal_completion
                     | "cover_body_limit"
                     | "cover_padding_limit"
                     | "cover_history_limit"
-                    | "cover_episode_limit"
             );
             let expected_level = if refusal {
                 "WARN"

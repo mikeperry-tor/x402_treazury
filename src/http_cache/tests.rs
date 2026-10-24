@@ -388,6 +388,7 @@ async fn cache_bounds_evict_and_report_without_losing_complete_catalog() {
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(log.reopen().unwrap())
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
@@ -418,7 +419,7 @@ async fn cache_bounds_evict_and_report_without_losing_complete_catalog() {
     assert!(logs.contains("limit_bytes=1024"));
     assert!(
         logs.lines()
-            .any(|line| line.contains("WARN") && line.contains("oldest disposable entry evicted"))
+            .any(|line| line.contains("DEBUG") && line.contains("oldest disposable entry evicted"))
     );
     assert!(logs.contains("limit_entries=4096"));
     assert!(!logs.contains(&url));

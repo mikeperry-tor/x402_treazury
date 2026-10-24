@@ -316,7 +316,7 @@ fn evict_oldest<K: Clone + Eq + std::hash::Hash, T>(
             .map(|(key, _)| key.clone())
     {
         cache.remove(&key);
-        tracing::warn!(
+        tracing::debug!(
             resource,
             limit_entries = 256,
             action = "evicted",
@@ -1217,11 +1217,12 @@ mod retention_tests {
     }
 
     #[test]
-    fn transport_cache_eviction_warns_for_both_resources_without_keys() {
+    fn transport_cache_eviction_preserves_handles_without_warning_or_keys() {
         let logs = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
             .with_writer(logs.reopen().unwrap())
             .finish();
         tracing::subscriber::with_default(subscriber, || {
@@ -1242,7 +1243,7 @@ mod retention_tests {
         });
         let text = std::fs::read_to_string(logs.path()).unwrap();
         assert_eq!(
-            text.lines().filter(|line| line.contains("WARN")).count(),
+            text.lines().filter(|line| line.contains("DEBUG")).count(),
             2,
             "{text}"
         );
@@ -1255,6 +1256,7 @@ mod retention_tests {
             assert!(text.contains(expected), "{text}");
         }
         assert!(!text.contains("PRIVATE_"), "{text}");
+        assert!(!text.contains("WARN"), "{text}");
     }
 
     #[tokio::test]
@@ -1284,6 +1286,7 @@ mod retention_tests {
         let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
             .with_writer(logs.reopen().unwrap())
             .finish();
         let _subscriber = tracing::subscriber::set_default(subscriber);
@@ -1313,8 +1316,9 @@ mod retention_tests {
         );
         assert_eq!(retained.read_timeout(), Duration::from_secs(60));
         let text = std::fs::read_to_string(logs.path()).unwrap();
+        assert!(!text.contains("WARN"), "{text}");
         assert!(
-            text.contains("WARN")
+            text.contains("DEBUG")
                 && text.contains("http_transport")
                 && text.contains("limit_entries=256")
                 && text.contains("action=\"evicted\""),

@@ -33,6 +33,7 @@ async fn cleanup_ownership_outlives_zero_counters_and_prevents_replacement() {
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(log.reopen().unwrap())
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
@@ -101,7 +102,7 @@ async fn cleanup_ownership_outlives_zero_counters_and_prevents_replacement() {
         .lines()
         .find(|line| line.contains("Cover owner cache capacity reached"))
         .unwrap();
-    assert!(eviction.contains("WARN") && eviction.contains("limit_owners=1"));
+    assert!(eviction.contains("DEBUG") && eviction.contains("limit_owners=1"));
     assert!(!eviction.contains("first") && !eviction.contains("next"));
     assert!(!eviction.contains("api.example.com"));
     drop(call);

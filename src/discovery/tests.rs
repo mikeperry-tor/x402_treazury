@@ -1988,6 +1988,7 @@ async fn import_aliases_share_active_fetches_and_failed_fetches_recover() {
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(log.reopen().unwrap())
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
@@ -2048,7 +2049,7 @@ async fn import_aliases_share_active_fetches_and_failed_fetches_recover() {
     ));
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(
-        logs.lines().any(|line| line.contains("WARN")
+        logs.lines().any(|line| line.contains("DEBUG")
             && line.contains("Completed import cache capacity reached"))
     );
     assert!(logs.contains("limit_entries=4"));
@@ -2527,7 +2528,7 @@ async fn rejected_static_publications_preserve_revision_and_catalog() {
 }
 
 #[tokio::test]
-async fn saturated_static_publication_warns_and_waits_without_rejecting() {
+async fn saturated_static_publication_waits_without_warning_or_rejection() {
     let (_, logs) = crate::limits::tests::capture(async {
         let m = manager(None).await;
         let base = m.static_snapshot().await.unwrap();
@@ -2545,7 +2546,8 @@ async fn saturated_static_publication_warns_and_waits_without_rejecting() {
         assert_eq!(m.catalog.read().generation, 1);
     })
     .await;
-    assert_eq!(logs.matches("WARN").count(), 1, "{logs}");
+    assert!(!logs.contains("WARN"), "{logs}");
+    assert!(logs.contains("DEBUG"), "{logs}");
     assert!(
         logs.contains("mutation_queue_full") && logs.contains("limit=16"),
         "{logs}"

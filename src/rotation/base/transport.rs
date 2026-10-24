@@ -308,7 +308,7 @@ pub(super) async fn rpc<T>(
             "Read-only Base RPC request failed");
         if !retry {
             if failure.public.category == "timeout" {
-                tracing::warn!(
+                tracing::debug!(
                     stage = "base_rpc",
                     method,
                     phase = failure.public.phase,

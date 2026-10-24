@@ -485,7 +485,7 @@ impl Manager {
         completed.sort_unstable_by_key(|(_, time)| *time);
         let excess = completed.len().saturating_sub(max);
         if excess > 0 {
-            tracing::warn!(
+            tracing::debug!(
                 limit_entries = max,
                 evicted_entries = excess,
                 "Completed import cache capacity reached; oldest completed entries evicted; active work retained"

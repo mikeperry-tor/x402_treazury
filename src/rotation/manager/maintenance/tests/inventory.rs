@@ -269,11 +269,12 @@ async fn held_pending_read_allows_full_live_inventory_and_retains_a_new_failure(
 }
 
 #[tokio::test]
-async fn advisory_capacity_warns_while_complete_inventory_still_drains() {
+async fn advisory_capacity_reports_while_complete_inventory_still_drains() {
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(log.reopen().unwrap())
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
@@ -286,7 +287,7 @@ async fn advisory_capacity_warns_while_complete_inventory_still_drains() {
     assert_eq!(f.rpc.reads.lock().unwrap().calls.len(), WALLETS);
     f.assert_no_financial_side_effects();
     let logs = std::fs::read_to_string(log.path()).unwrap();
-    assert!(logs.lines().any(|line| line.contains("WARN")
+    assert!(logs.lines().any(|line| line.contains("DEBUG")
         && line.contains("Advisory balance observation capacity reached")));
     assert!(logs.contains("limit_reads=4"));
     assert!(!logs.contains(&f.rpc.first_address));
@@ -300,6 +301,7 @@ async fn advisory_capacity_looks_past_coalesced_rows_and_keeps_coalescing_silent
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(log.reopen().unwrap())
         .finish();
     let mut f = Inventory::new(true, false, false).await;
@@ -336,7 +338,7 @@ async fn advisory_capacity_looks_past_coalesced_rows_and_keeps_coalescing_silent
         loop {
             let logs = std::fs::read_to_string(log.path()).unwrap();
             if logs.lines().any(|line| {
-                line.contains("WARN")
+                line.contains("DEBUG")
                     && line.contains("Advisory balance observation capacity reached")
             }) {
                 break;

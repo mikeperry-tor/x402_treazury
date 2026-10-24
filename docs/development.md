@@ -188,6 +188,8 @@ JSON. Process `RUST_LOG` overrides the default `warn,x402_treazury=info` filter 
 every command. Info reports catalog completion, listener startup and
 funding progress. Download, parse and protocol details belong at debug; warnings
 identify failures, degraded operation or actionable configuration problems.
+Normal capacity waits, retained observation deferrals and disposable cache eviction
+belong at DEBUG, even when they delay work or discard advisory cached data.
 
 A valid first-page `tools/list` with more than 250 advertised definitions emits
 an advisory WARN with listener ID, count and `discover_on_demand = true` suggestion,

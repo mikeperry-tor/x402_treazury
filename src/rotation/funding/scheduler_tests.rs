@@ -181,6 +181,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(log.reopen().unwrap())
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
@@ -276,18 +277,19 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(
         logs.lines()
-            .any(|line| line.contains("WARN") && line.contains("due inactive record evicted"))
+            .any(|line| line.contains("DEBUG") && line.contains("due inactive record evicted"))
     );
     assert!(logs.contains("limit_records=256"));
     assert!(!logs.contains("next-operation"));
 }
 
 #[tokio::test]
-async fn occupied_observation_lanes_warn_once_per_pass_and_preserve_pending_work() {
+async fn occupied_observation_lanes_report_once_per_pass_and_preserve_pending_work() {
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(log.reopen().unwrap())
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
@@ -367,19 +369,19 @@ async fn occupied_observation_lanes_warn_once_per_pass_and_preserve_pending_work
     assert!(flight.reads.is_empty());
     assert_eq!(reads.credit_calls.load(Ordering::SeqCst), 0);
     let logs = std::fs::read_to_string(log.path()).unwrap();
-    let warnings: Vec<_> = logs
+    let diagnostics: Vec<_> = logs
         .lines()
         .filter(|line| line.contains("Funding observation capacity reached"))
         .collect();
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("WARN"));
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0].contains("DEBUG"));
     for field in [
         "credit_deferred=true",
         "status_deferred=true",
         "source_deferred=true",
         "quote_deferred=true",
     ] {
-        assert!(warnings[0].contains(field));
+        assert!(diagnostics[0].contains(field));
     }
     assert!(!logs.contains(&job.operation_id));
     flight.credit_active = 0;
@@ -410,7 +412,7 @@ async fn occupied_observation_lanes_warn_once_per_pass_and_preserve_pending_work
     assert!(flight.reads.is_empty());
     assert_eq!(reads.credit_calls.load(Ordering::SeqCst), 0);
     let logs = std::fs::read_to_string(log.path()).unwrap();
-    assert!(logs.lines().any(|line| line.contains("WARN")
+    assert!(logs.lines().any(|line| line.contains("DEBUG")
         && line.contains("metadata_deferred=true")
         && line.contains("metadata_capacity_per_kind=256")));
     assert!(!logs.contains(&job.operation_id));

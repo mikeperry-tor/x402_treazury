@@ -274,6 +274,7 @@ async fn stalled_body_inactivity_reports_body_not_headers() {
     let subscriber = tracing_subscriber::fmt()
         .without_time()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(logs.reopen().unwrap())
         .finish();
     let error = rpc(
@@ -290,7 +291,8 @@ async fn stalled_body_inactivity_reports_body_not_headers() {
     assert!(!error.to_string().contains("http://"));
     let text = std::fs::read_to_string(logs.path()).unwrap();
     assert!(
-        text.contains("WARN")
+        !text.contains("WARN")
+            && text.contains("DEBUG")
             && text.contains("base_rpc")
             && text.contains("phase=\"body\"")
             && text.contains("reason=\"timeout\"")

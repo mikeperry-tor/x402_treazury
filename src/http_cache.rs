@@ -586,7 +586,7 @@ impl Slot {
                         let (bytes, count): (i64, i64) = tx.query_row("SELECT coalesce(sum(length(CAST(metadata AS BLOB))+length(data)),0),count(*) FROM entries", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
                         if bytes + size as i64 <= CAPACITY as i64 && count < ENTRIES as i64 { break; }
                         tx.execute("DELETE FROM entries WHERE key=(SELECT key FROM entries ORDER BY stored,key LIMIT 1)", [])?;
-                        tracing::warn!(limit_bytes = CAPACITY, limit_entries = ENTRIES, "HTTP cache capacity reached; oldest disposable entry evicted");
+                        tracing::debug!(limit_bytes = CAPACITY, limit_entries = ENTRIES, "HTTP cache capacity reached; oldest disposable entry evicted");
                     }
                     tx.execute("INSERT INTO entries VALUES(?1,?2,?3,?4)", params![slot.key, metadata, entry.data, i64::try_from(entry.metadata.stored)?])?;
                     stored = true;

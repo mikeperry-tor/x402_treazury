@@ -555,7 +555,7 @@ eight entries or `128 MiB / max_spec_bytes`. This is a cache-retention allowance
 not a total bound on documents retained by active callers.
 At most 16 mutation jobs can be outstanding. Dynamic registration saturation
 emits WARN and returns an explicit busy error; static catalog publication emits
-WARN with limit 16 and waits for the same shared gate. Publication and collision
+DEBUG with limit 16 and waits for the same shared gate. Publication and collision
 checks are serialized, so concurrent additions cannot publish partial sources.
 
 JSON/reference traversal remains bounded to depth 64, 500,000 expanded nodes and
@@ -567,8 +567,8 @@ records, including removed records, are governed by that same serialized byte bo
 on save and load. Record/receipt counts introduce no separate admission or reload
 gate. Resource-limit
 rejections emit WARN diagnostics with safe counts, thresholds and adjustment
-settings where applicable. Mutation saturation, transport timeouts and rejected destination/reference/server
-policies also warn.
+settings where applicable. Rejected mutations, terminal transport failures and rejected destination/reference/server
+policies also warn. Retained waits and completed-cache eviction log at DEBUG.
 Limits reject visibly rather than trimming documents; warnings never include
 submitted names, URLs, schemas or upstream prose.
 

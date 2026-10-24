@@ -57,7 +57,7 @@ pub(crate) fn try_capacity<'a>(
 }
 
 fn waiting(reason: &'static str, limit: Option<usize>, setting: &'static str) {
-    tracing::warn!(
+    tracing::debug!(
         reason,
         limit,
         setting,
@@ -204,6 +204,7 @@ pub(crate) mod tests {
         let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
             .with_writer(move || sink.clone())
             .finish();
         let result = future.with_subscriber(subscriber).await;
@@ -240,7 +241,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn capacity_waits_warn_once_and_resume_without_new_admission() {
+    async fn capacity_waits_resume_without_warning_or_new_admission() {
         let (_, logs) = capture(async {
             let gate = Arc::new(tokio::sync::Semaphore::new(1));
             let held = gate.acquire().await.unwrap();
@@ -286,7 +287,8 @@ pub(crate) mod tests {
             );
         })
         .await;
-        assert_eq!(logs.matches("WARN").count(), 2, "{logs}");
+        assert!(!logs.contains("WARN"), "{logs}");
+        assert_eq!(logs.matches("DEBUG").count(), 2, "{logs}");
         assert!(
             logs.contains("borrowed_busy") && logs.contains("owned_busy"),
             "{logs}"
@@ -302,7 +304,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn full_queue_warns_once_and_preserves_exact_payload_and_closed_error() {
+    async fn full_queue_preserves_exact_payload_and_closed_error_without_warning() {
         let (_, logs) = capture(async {
             let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
             send_capacity(&sender, String::from("PRIVATE_FIRST"), "test_queue_full", 1)
@@ -333,7 +335,8 @@ pub(crate) mod tests {
             assert_eq!(error.0, "PRIVATE_CLOSED");
         })
         .await;
-        assert_eq!(logs.matches("WARN").count(), 1, "{logs}");
+        assert!(!logs.contains("WARN"), "{logs}");
+        assert_eq!(logs.matches("DEBUG").count(), 1, "{logs}");
         assert!(
             logs.contains("test_queue_full") && logs.contains("limit=1"),
             "{logs}"

@@ -187,7 +187,7 @@ impl Registry {
         let e = Arc::new(Mutex::new(Episode::new(&config, now, rng)?));
         if let Some(oldest) = eviction {
             self.owners.remove(&oldest);
-            tracing::warn!(
+            tracing::debug!(
                 limit_owners = self.limits.max_owners,
                 "Cover owner cache capacity reached; least recently used inactive owner evicted"
             );

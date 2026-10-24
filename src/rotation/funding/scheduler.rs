@@ -606,7 +606,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
         }
         if capacity_deferred.into_iter().any(|deferred| deferred) || metadata_deferred {
-            tracing::warn!(
+            tracing::debug!(
                 credit_capacity = CREDIT_READS,
                 status_capacity = STATUS_READS,
                 quote_capacity = QUOTE_READS,
@@ -631,7 +631,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         clock: &TickClock,
     ) {
         if flight.quote_active == QUOTE_READS && flight.quote_pending.is_some() {
-            tracing::warn!(
+            tracing::debug!(
                 limit = QUOTE_READS,
                 "Funding quote capacity reached; pending prerequisite retained"
             );
@@ -666,7 +666,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 );
             } else {
                 if admitted.is_none() {
-                    tracing::warn!(
+                    tracing::debug!(
                         limit_records = RECORDS,
                         "Funding scheduling metadata capacity reached; pending quote retained"
                     );
@@ -926,7 +926,7 @@ impl State {
                 .min_by_key(|(_, record)| record.due)
                 .map(|(key, _)| key.clone())?;
             self.records.remove(&old);
-            tracing::warn!(limit_records = RECORDS, observation = ?key.kind,
+            tracing::debug!(limit_records = RECORDS, observation = ?key.kind,
                 "Funding scheduling metadata capacity reached; due inactive record evicted");
         }
         // Persisted next_poll is aggregate reporting from older coordinators;
