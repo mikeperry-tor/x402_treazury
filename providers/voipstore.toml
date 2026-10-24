@@ -1,21 +1,24 @@
-description = "Virtual-number service and country discovery, price quotes and SMS status for existing orders."
+description = "Virtual phone numbers and SMS verification: service/country discovery, price quotes, purchases and order status."
 spec = "https://api.voipstore.xyz/openapi.json"
 name = "VoIPStore"
 base_url = "https://api.voipstore.xyz"
 prefix = "voipstore"
 include = ["/agent/v1", ""]
-# Purchases require X-Quote-Id and Idempotency-Key; top-ups require Idempotency-Key.
-# The catalog router cannot supply these required vendor headers.
-exclude_operations = ["POST /agent/v1/orders", "POST /agent/v1/topup"]
+# Prepaid funding is deliberately unavailable to avoid persistent balance linkage
+# and upfront spending beyond individual purchases.
+exclude = ["/agent/v1/topup"]
 pricing_key = "x-payment-info"
 help_url = "https://api.voipstore.xyz/llms.txt"
-instructions_text = "Use service_id and country_id from the catalog when requesting a quote."
+instructions_text = "Find service_id and country_id in the catalog, obtain a quote, then purchase using the returned quote ID and matching service, country and operator. Poll the returned order_id for SMS status. Purchases use direct x402 payment; prepaid funding is unavailable."
 
 [overrides.voipstore_quote]
-description = "Get a price quote for service_id and country_id from the catalog, with an optional operator preference. The guide says quotes lock the price for five minutes. Number purchases are unavailable through this provider."
+description = "Get a price quote for service_id and country_id from the catalog, with an optional operator preference. Quotes lock the price for five minutes. Pass the returned quote ID as X-Quote-Id when purchasing with the same selection."
+
+[overrides.voipstore_orders]
+description = "Buy one virtual number using a current X-Quote-Id from the quote tool and matching service_id, country_id and operator. Purchase price is set by the quote; unpaid probes advertise a fallback from $0.01. Treazury supplies Idempotency-Key automatically. Returns an order_id for SMS status polling. No prepaid top-up is required."
 
 [overrides.voipstore_orders_order_id]
-description = "Read SMS status for an existing order created outside this provider. Poll until status is received or expired; received SMS includes sms_code and sms_text. Each status call is advertised at $0.001. Number purchases and prepaid top-ups are unavailable through this provider."
+description = "Read SMS status for an order_id returned by a purchase. Poll until status is received or expired; received SMS includes sms_code and sms_text. Each status call is advertised at $0.001."
 
 [overrides.voipstore_help]
-description = "Read VoIPStore's virtual-number and SMS API guide. It also describes purchases and prepaid top-ups, which are unavailable through this provider."
+description = "Read VoIPStore's virtual-number and SMS API guide. Treazury supplies Idempotency-Key automatically. The guide also describes prepaid top-ups, which are unavailable through this provider."

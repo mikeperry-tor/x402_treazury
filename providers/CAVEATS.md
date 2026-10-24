@@ -1305,22 +1305,25 @@ lists never permit another paid attempt after an ambiguous signed relay outcome.
 
 The primary [OpenAPI schema](https://api.voipstore.xyz/openapi.json) omits
 `servers`, so the provider supplies the API base advertised by the
-[guide](https://api.voipstore.xyz/llms.txt). Catalog, quote, health and existing-order
-status reads remain available. The `/agent/v1` naming anchor has a root fallback
+[guide](https://api.voipstore.xyz/llms.txt). Catalog, quote, purchase, health and
+order status operations are available. The `/agent/v1` naming anchor has a root fallback
 so new compatible routes remain visible.
 
-`POST /agent/v1/orders` requires `X-Quote-Id` and `Idempotency-Key` headers;
-`POST /agent/v1/topup` requires `Idempotency-Key`. The generic catalog router
-skips header parameters and cannot preserve these purchase/replay contracts.
-Exact operation exclusions retain the supported order-status GET and future
-compatible child routes. This provider cannot buy numbers or credit prepaid
-balances. Status accepts an existing externally created `order_id`; the schema
-documents no additional ownership credential for that GET.
+`POST /agent/v1/orders` requires a quote ID as the `X-Quote-Id` tool argument;
+Treazury generates `Idempotency-Key` under the [shared header contract](../docs/configuration.md#openapi-header-parameters-and-idempotency).
+Use catalog IDs to quote, purchase with the same selection and then poll the
+returned `order_id`. The schema documents no additional ownership credential for
+status reads. Purchases pay directly through x402; prepaid funding is optional at
+the vendor and deliberately unavailable here. The `/agent/v1/topup` namespace,
+including future methods and children, is excluded to avoid persistent prepaid
+balance linkage and upfront spending beyond individual purchases. This is an
+explicit funding-policy choice, independent of generic header support.
 
 The guide advertises five-minute quotes, catalog reads at $0.002 and each status
-poll at $0.001. Status progresses to `received` or `expired`, with `sms_code` and
+poll at $0.001. Purchase prices come from the quote; the guide's unpaid probe
+fallback starts at $0.01. Status progresses to `received` or `expired`, with `sms_code` and
 `sms_text` on receipt. `x-payment-info` supplies price hints; the guide advertises
-x402 exact USDC on Base. Help includes unsupported writes, called out in its
+x402 exact USDC on Base. Help includes unsupported top-ups, called out in its
 tool description. Public schema/guide inspection and offline routing tests do
 not qualify funded delivery or current payment compatibility.
 

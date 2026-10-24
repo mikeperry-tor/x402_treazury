@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::path::Path;
 
 #[tokio::test]
-async fn voipstore_excludes_required_header_writes_and_preserves_read_routing() {
+async fn voipstore_routes_purchases_with_managed_keys_and_excludes_prepaid_topups() {
     use serde_json::json;
     use x402_treazury::{catalog, config};
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -22,16 +22,25 @@ async fn voipstore_excludes_required_header_writes_and_preserves_read_routing() 
                 .any(|p| p["in"] == "header" && p["required"] == true)
         );
     }
-    // Exact write exclusions must preserve compatible children and routes outside
-    // the naming anchor; these are synthetic future-route witnesses.
-    for path in ["/agent/v1/orders/history", "/public/status"] {
+    // Keep future compatible routes while excluding the prepaid funding namespace.
+    for path in [
+        "/agent/v1/orders/history",
+        "/agent/v1/topup-info",
+        "/public/status",
+        "/agent/v1/topup/status",
+    ] {
         doc["paths"][path] = json!({"get":{"summary":"Public read"}});
     }
+    doc["paths"]["/agent/v1/topup"]["get"] = json!({"summary":"Future prepaid workflow"});
     let tools = catalog::build_tools(&cfg, &doc, "voipstore").unwrap();
-    for path in ["/agent/v1/orders", "/agent/v1/topup"] {
-        assert!(!tools.iter().any(|t| t.path == path && t.method == "POST"));
+    for path in ["/agent/v1/topup", "/agent/v1/topup/status"] {
+        assert!(!tools.iter().any(|t| t.path == path));
     }
-    for path in ["/agent/v1/orders/history", "/public/status"] {
+    for path in [
+        "/agent/v1/orders/history",
+        "/agent/v1/topup-info",
+        "/public/status",
+    ] {
         assert!(tools.iter().any(|t| t.path == path && t.method == "GET"));
     }
     let catalog = tools
@@ -62,6 +71,41 @@ async fn voipstore_excludes_required_header_writes_and_preserves_read_routing() 
     assert_eq!(route.query["service_id"], 1012);
     assert_eq!(route.query["country_id"], 1);
     assert_eq!(route.query["operator"], "any");
+    let purchase = tools.iter().find(|t| t.name == "voipstore_orders").unwrap();
+    assert_eq!(purchase.method, "POST");
+    assert!(
+        purchase.input_schema["properties"]
+            .get("X-Quote-Id")
+            .is_some()
+    );
+    assert!(
+        purchase.input_schema["properties"]
+            .get("Idempotency-Key")
+            .is_none()
+    );
+    let args =
+        json!({"service_id":1012,"country_id":1,"operator":"any","X-Quote-Id":"q_from_quote"});
+    let route = purchase
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.url, "https://api.voipstore.xyz/agent/v1/orders");
+    assert_eq!(
+        serde_json::to_value(&route.query).unwrap(),
+        json!({"service_id":1012,"country_id":1,"operator":"any"})
+    );
+    assert_eq!(route.headers["x-quote-id"], "q_from_quote");
+    assert!(uuid::Uuid::parse_str(&route.headers["idempotency-key"]).is_ok());
+    assert!(route.body.is_none());
+    assert!(
+        purchase
+            .route(
+                cfg.base_url.as_ref().unwrap(),
+                json!({"service_id":1012,"country_id":1})
+                    .as_object()
+                    .unwrap()
+            )
+            .is_err()
+    );
     let status = tools
         .iter()
         .find(|t| t.name == "voipstore_orders_order_id")
@@ -78,7 +122,6 @@ async fn voipstore_excludes_required_header_writes_and_preserves_read_routing() 
     );
     assert!(route.query.is_empty());
     assert!(route.body.is_none());
-    assert!(status.description.contains("created outside this provider"));
     assert!(status.description.contains("$0.001"));
     assert!(
         tools

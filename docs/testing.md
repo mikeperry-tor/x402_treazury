@@ -68,7 +68,7 @@ permits the required operations needs no extra approval.
 
 | Selection | Runtime requirements |
 | --- | --- |
-| `crypto_vectors`, `provider_catalogs`, `managed_config`, `network_audit`, `cli_layout` | Currently socket-free complete test targets: local computation/files and, for CLI inspection, child processes. Run in the ordinary sandbox. |
+| `crypto_vectors`, `headers`, `provider_catalogs`, `managed_config`, `network_audit`, `cli_layout` | Currently socket-free complete test targets: local computation/files and, for CLI inspection, child processes. Run in the ordinary sandbox. |
 | `network`, `startup`, `cli_contracts`, `config` | Representative targets containing localhost fixtures. Use socket-capable execution for the complete target. |
 | `make test`, `make check` | Include socket fixtures and require localhost socket access. |
 

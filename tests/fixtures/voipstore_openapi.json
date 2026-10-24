@@ -404,5 +404,5 @@
       }
     }
   },
-  "x-treazury-fixture-scope": "VoIPStore required-header purchase/topup exclusions and catalog, quote, existing-order status routing witnesses; health omitted."
+  "x-treazury-fixture-scope": "VoIPStore quote/idempotency-header purchase routing, prepaid topup exclusion and catalog, quote, order status read witnesses; health omitted."
 }

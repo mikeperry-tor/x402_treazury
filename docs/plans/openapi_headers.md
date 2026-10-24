@@ -41,8 +41,8 @@ Owning guides: [architecture](../architecture.md), [configuration](../configurat
    preservation and nonrepresentability checks; static and on-demand call paths.
    Use socket-capable execution for socket fixtures, frozen sources and sequential
    builds. Run formatting and focused Clippy.
-3. **H2 — VoIPStore purchases:** remove only purchase exclusion, keep exact top-up
-   exclusion with privacy/spend rationale, document catalog → quote → purchase →
+3. **H2 — VoIPStore purchases:** remove purchase exclusion, exclude the top-up
+   namespace with privacy/spend rationale (including future methods/children), document catalog → quote → purchase →
    status and advertised prices. Adapt the captured header-boundary regression to
    assert quote header routing and automatic key ownership with no top-up route.
    Keep supported reads and future compatible children. Evidence: provider tests,
