@@ -253,8 +253,14 @@ make fmt-check
   WARN/ERROR. Expected negative results and routine successes normally belong at
   DEBUG/TRACE. Follow the [severity policy](docs/development.md#log-severity)
   for scope and examples.
-- Correct log-level violations encountered during development, including excess
-  INFO, and update their owning documentation and affected diagnostic tests.
+- INFO and higher need plain-language message strings a user can understand
+  without reading source code. WARN/ERROR also need enough safe diagnostic context
+  to identify what failed, its impact and the known cause or uncertainty. Follow
+  [message clarity and diagnostic detail](docs/development.md#message-clarity-and-diagnostic-detail);
+  fields and correlation IDs supplement meaningful messages, never replace them.
+- Correct logging-policy violations encountered during development, including
+  excess INFO, unclear messages and inadequate failure detail, and update their
+  owning documentation and affected diagnostic tests.
   Existing call sites are not precedent; a repository-wide logging cleanup is not
   required for unrelated work.
 - Limits that reject or truncate content must be visible to the affected consumer;

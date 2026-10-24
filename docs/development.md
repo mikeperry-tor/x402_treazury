@@ -231,9 +231,34 @@ successful HTTP response never establishes settlement, grants replay authority o
 changes recovery policy. All levels obey the same privacy and sanitization rules.
 
 Apply this policy to new diagnostics and correct violations encountered in the
-affected development work, including excessive INFO. Update owning documentation
-and affected diagnostic tests with the correction. Existing levels and tests do
-not establish exceptions; unrelated work does not require a broad logging audit.
+affected development work, including excessive INFO, unclear messages and
+inadequate failure detail. Update owning documentation and affected diagnostic
+tests with the correction. Existing logs and tests do not establish exceptions;
+unrelated work does not require a broad logging audit.
+
+### Message clarity and diagnostic detail
+
+INFO, WARN and ERROR message strings must explain what happened in plain language
+that a user can understand without reading source code or decoding internal stage
+names, enum variants or error codes. Structured fields supply identities, counts
+and other context; they do not replace a meaningful message. Keep implementation
+detail at DEBUG/TRACE unless it helps explain the user-visible event or failure.
+
+WARN/ERROR diagnostics must provide enough available, safe detail to identify the
+failed operation or unavailable capability, its affected scope, the known cause
+or failure category, and the resulting impact and recovery status. Include a
+useful next action when established. If the cause or outcome is uncertain, say
+so; do not invent a root cause, promise recovery or imply that a payment is safe
+to repeat. Requirements scale with the failure: include relevant facts rather
+than a fixed inventory of fields on every event.
+
+Diagnostic context may be in the message, structured fields or an explicitly
+referenced, correlated WARN/ERROR event. For example, an endpoint ERROR can name
+the unavailable endpoint and point to its source's catalog WARN for the cause.
+The basic explanation must remain available at WARN filtering; DEBUG/TRACE may
+support deeper investigation. Preserve existing sanitization contracts: sufficient
+detail means safe reasons, status codes, stages and correlation, never credentials,
+upstream prose, raw error chains or other prohibited content.
 
 ### Diagnostic context
 
