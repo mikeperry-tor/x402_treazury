@@ -323,7 +323,7 @@ include_tools = ["genuinegood_search", "genuinegood_detail"]
 instructions_text = "Web research and aggregate keyword trends. Preserve source links, dates and coverage; trends do not describe an individual’s behavior."
 # discover_on_demand = true # advertise search/call wrappers; fetch schemas as needed
 listen = "127.0.0.1:6337"
-bearer_token_env = "TREAZURY_MCP_TOKEN"
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
 sources = ["exa", "webinfo", "googletrends"]
 
@@ -345,14 +345,14 @@ Social tool keywords to search for:
   `stableenrich_serper_people_image_search` (people images).
 """
 listen = "127.0.0.1:6338"
-bearer_token_env = "TREAZURY_MCP_TOKEN"
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "company"
 sources = ["social", "telesint", "pdl_people", "social_stableenrich"]
 
 [servers.company]
 instructions_text = "Company and public-record research. Verify entity identity; preserve source links, dates and partial results. Missing findings do not prove absence."
 listen = "127.0.0.1:6339"
-bearer_token_env = "TREAZURY_MCP_TOKEN"
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "company"
 sources = ["genuinegood", "pdl_company", "company_otto", "company_claw402", "company_deepline", "company_x402stock", "company_stableenrich", "company_hirescrape", "company_agosint", "company_relayshield", "company_relayshield_phone", "company_netintel", "company_ipintel", "company_vaaya"]
 
@@ -360,7 +360,7 @@ sources = ["genuinegood", "pdl_company", "company_otto", "company_claw402", "com
 [servers.toolbox]
 instructions_text = "" # Discovery wrappers carry the source-management workflow.
 listen = "127.0.0.1:6340"
-bearer_token_env = "TREAZURY_MCP_TOKEN"
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "company"
 source_management = true
 source_registry_file = "../../state/privacy-sources.sqlite" # Toolbox-local registrations.

@@ -301,3 +301,26 @@ fn retired_response_character_setting_is_rejected_by_name() {
     let error = serde_json::from_value::<MetaConfig>(value).err().unwrap();
     assert!(error.to_string().contains("max_response_chars"));
 }
+
+#[test]
+fn canonical_listener_token_is_optional_only_when_absent() {
+    let mut value = fixture();
+    value["servers"]["one"]["bearer_token_env"] = json!("X402_TREAZURY_MCP_TOKEN");
+    let listener = config(&value).servers.remove("one").unwrap();
+    let mut env = std::collections::BTreeMap::new();
+    assert_eq!(listener.token(&env).unwrap(), None);
+    for token in ["", " \t"] {
+        env.insert("X402_TREAZURY_MCP_TOKEN".into(), token.into());
+        assert!(listener.token(&env).is_err());
+    }
+    env.insert("X402_TREAZURY_MCP_TOKEN".into(), "fixture-token".into());
+    assert_eq!(
+        listener.token(&env).unwrap().as_deref(),
+        Some("fixture-token")
+    );
+    let mut custom = listener.clone();
+    custom.bearer_token_env = "CUSTOM_TOKEN".into();
+    assert!(custom.token(&env).is_err());
+    custom.auth = false;
+    assert_eq!(custom.token(&env).unwrap(), None);
+}

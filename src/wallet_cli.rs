@@ -9,7 +9,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 pub struct WalletArgs {
     /// Deployment configuration; bootstrap also consumes wallet and funding settings.
-    #[arg(long, alias = "meta-config", global = true, conflicts_with_all = ["state_dir", "key_file", "treasury_id"])]
+    #[arg(long, alias = "meta-config", env = "X402_TREAZURY_CONFIG", global = true, conflicts_with_all = ["state_dir", "key_file", "treasury_id"])]
     config: Option<PathBuf>,
     #[arg(long, global = true)]
     network_config: Option<PathBuf>,

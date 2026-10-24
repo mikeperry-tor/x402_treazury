@@ -8,7 +8,10 @@ Commands run from the repository root; `x402_treazury` means the built executabl
 ## One configuration for wallet commands
 
 Use the same deployment file for initialization, inspection, backup, sync and
-serving. `--meta-config` remains an alias for `--config`. Wallet commands do not fetch provider catalogs or require listener tokens.
+serving. Export `X402_TREAZURY_CONFIG` to use it by default; an explicit
+`--config FILE` overrides the environment path. Unset it before using standalone
+`--state-dir`, `--key-file` or `--treasury-id` options. `--meta-config` remains an alias for `--config`. Wallet commands do not
+fetch provider catalogs or require listener tokens.
 `wallet bootstrap` also consumes wallet assignments and funding settings to fund
 initial managed capacity; other administration commands do not start funding workers.
 

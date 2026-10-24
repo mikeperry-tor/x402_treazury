@@ -9,7 +9,7 @@ extends = "../../providers/exa.toml"
 
 [servers.research]
 listen = "127.0.0.1:8000"
-bearer_token_env = "TREAZURY_MCP_TOKEN"
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "research"
 sources = ["exa"]
 ```

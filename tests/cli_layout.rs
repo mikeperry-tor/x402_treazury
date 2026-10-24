@@ -129,3 +129,70 @@ fn retired_response_character_flag_is_rejected_by_name() {
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stderr).contains("--max-response-chars"));
 }
+
+#[test]
+fn deployment_config_environment_applies_to_each_command_and_cli_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str], config: Option<&str>| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
+        command.env_clear().current_dir(dir.path()).args(args);
+        if let Some(config) = config {
+            command.env("X402_TREAZURY_CONFIG", config);
+        }
+        command.output().unwrap()
+    };
+    for args in [
+        vec!["serve"],
+        vec!["catalog", "tools"],
+        vec!["catalog", "tags"],
+        vec!["catalog", "warm"],
+        vec!["config", "show"],
+        vec!["config", "check"],
+        vec!["wallet", "status"],
+        vec!["sources", "inspect"],
+        vec![
+            "sources", "refresh", "--server", "research", "--source", "api",
+        ],
+        vec!["sources", "remove", "--server", "research", "--all"],
+    ] {
+        let inherited = run(&args, Some("missing.toml"));
+        let mut explicit_args = args.clone();
+        explicit_args.extend(["--config", "missing.toml"]);
+        let explicit = run(&explicit_args, None);
+        let overridden = run(&explicit_args, Some("wrong.toml"));
+        assert!(!inherited.status.success(), "{args:?}");
+        assert_eq!(inherited.status.code(), explicit.status.code(), "{args:?}");
+        assert_eq!(inherited.stderr, explicit.stderr, "{args:?}");
+        assert_eq!(overridden.stderr, explicit.stderr, "{args:?}");
+        assert!(!String::from_utf8_lossy(&inherited.stderr).contains("required arguments"));
+    }
+    for args in [
+        vec!["config", "show", "--provider", "provider.toml"],
+        vec![
+            "catalog",
+            "route",
+            "api_read",
+            "--provider",
+            "provider.toml",
+        ],
+        vec!["wallet", "status", "--state-dir", "state"],
+    ] {
+        let result = run(&args, Some("missing.toml"));
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("cannot be used"));
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join("examples/deployments/managed.toml");
+    let shown = run(&["config", "show"], Some(path.to_str().unwrap()));
+    assert!(
+        shown.status.success(),
+        "{}",
+        String::from_utf8_lossy(&shown.stderr)
+    );
+    let explicit = run(
+        &["config", "show", "--config", path.to_str().unwrap()],
+        Some("wrong.toml"),
+    );
+    assert!(explicit.status.success());
+    assert_eq!(shown.stdout, explicit.stdout);
+}

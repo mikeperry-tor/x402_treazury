@@ -58,7 +58,7 @@ pub enum Configuration {
 pub enum Sources {
     /// Remove a saved source while serving is stopped. Does not affect wallet state.
     Remove {
-        #[arg(long)]
+        #[arg(long, env = "X402_TREAZURY_CONFIG")]
         config: PathBuf,
         #[arg(long)]
         server: String,
@@ -71,7 +71,7 @@ pub enum Sources {
     },
     /// Fetch and validate a saved source's current specification while serving is stopped.
     Refresh {
-        #[arg(long)]
+        #[arg(long, env = "X402_TREAZURY_CONFIG")]
         config: PathBuf,
         /// Replace network policy and optionally deployment discovery-relay settings.
         #[arg(long)]
@@ -84,7 +84,7 @@ pub enum Sources {
     },
     /// List persisted agent-added sources and saved tools without fetching or modifying them.
     Inspect {
-        #[arg(long, alias = "meta-config")]
+        #[arg(long, alias = "meta-config", env = "X402_TREAZURY_CONFIG")]
         config: PathBuf,
     },
 }
@@ -92,7 +92,7 @@ pub enum Sources {
 #[derive(ClapArgs, Default)]
 pub struct Input {
     /// Deployment configuration. Standalone overrides belong in its TOML instead.
-    #[arg(long = "config", alias = "meta-config")]
+    #[arg(long = "config", alias = "meta-config", env = "X402_TREAZURY_CONFIG")]
     meta_config: Option<PathBuf>,
     /// Reusable provider TOML for standalone serving or inspection.
     #[arg(long = "provider")]
@@ -170,7 +170,7 @@ pub struct Serve {
 #[derive(ClapArgs)]
 pub struct Warm {
     /// Deployment whose existing treasury state directory and cache policy are used.
-    #[arg(long, alias = "meta-config")]
+    #[arg(long, alias = "meta-config", env = "X402_TREAZURY_CONFIG")]
     pub config: PathBuf,
     /// Replace network/relay settings; --direct still explicitly selects direct fetching.
     #[arg(long)]
@@ -207,7 +207,7 @@ pub struct Route {
 #[derive(ClapArgs)]
 #[group(required = true, multiple = false)]
 pub struct Location {
-    #[arg(long = "config", alias = "meta-config")]
+    #[arg(long = "config", alias = "meta-config", env = "X402_TREAZURY_CONFIG")]
     meta_config: Option<PathBuf>,
     #[arg(long = "provider")]
     config: Option<String>,

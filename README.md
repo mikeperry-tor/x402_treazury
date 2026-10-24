@@ -69,16 +69,27 @@ cp examples/deployments/managed.toml examples/deployments/managed.local.toml
 Initialize its treasury explicitly, then start the authenticated listener:
 
 ```sh
-target/release/x402_treazury wallet init --config examples/deployments/managed.local.toml
-export TREAZURY_MCP_TOKEN="replace_with_a_secret_bearer_token"
-target/release/x402_treazury serve --config examples/deployments/managed.local.toml
+export X402_TREAZURY_CONFIG="examples/deployments/managed.local.toml"
+export X402_TREAZURY_MCP_TOKEN="replace_with_a_secret_bearer_token"
+target/release/x402_treazury wallet init
+target/release/x402_treazury serve
 ```
+
+`X402_TREAZURY_CONFIG` supplies the deployment file for serving, wallet, catalog,
+config and source commands. An explicit `--config FILE` overrides it. Export it
+in each terminal where you run commands. Unset it for standalone `--provider`
+commands or wallet commands using `--state-dir`.
+
+`X402_TREAZURY_MCP_TOKEN` is optional: when absent, the example listeners allow
+requests without authentication and log a WARN. Set it to require bearer auth;
+an empty value is rejected. Existing local configs must change their
+`bearer_token_env` references to `X402_TREAZURY_MCP_TOKEN` to use this behavior.
 
 To serve over Tor instead, start Tor Browser with its SOCKS listener at
 `127.0.0.1:9150`. Pass [the Tor and discovery-relay settings](examples/network/tor.toml):
 
 ```sh
-target/release/x402_treazury serve --config examples/deployments/managed.local.toml \
+target/release/x402_treazury serve \
   --network-config examples/network/tor.toml
 ```
 
@@ -86,7 +97,7 @@ Or embed those settings once in the fresh local deployment and use the basic com
 
 ```sh
 cat examples/network/tor.toml >> examples/deployments/managed.local.toml
-target/release/x402_treazury serve --config examples/deployments/managed.local.toml
+target/release/x402_treazury serve
 ```
 
 `--network-config` replaces the complete `[network]` policy and, when present,
@@ -101,13 +112,13 @@ requests a $2 USDC reserve, accepting bridge-minimum increases up to $3 before
 fees; allow funds for fees and future replacements. Each payment is capped at
 $0.50. Funding starts after the listener binds, so tools remain visible while
 funding is pending. Connect your MCP client with
-`Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.
+`Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
 
 The default key file lives with treasury state at `state/managed/wallet.key`;
 protect that directory because it contains both state and decryption material.
 Run one serving process per treasury.
 
-`x402_treazury wallet status --config examples/deployments/managed.local.toml`
+`x402_treazury wallet status`
 reads saved status alongside serving;
 other exclusive wallet administration requires stopping it. See
 [wallet administration](docs/wallet-cli.md) and the
@@ -194,8 +205,8 @@ Keep Tor running throughout.
 ### 2. Create the treasury
 
 ```sh
-target/release/x402_treazury wallet init \
-  --config examples/deployments/comprehensive.local.toml
+export X402_TREAZURY_CONFIG="examples/deployments/comprehensive.local.toml"
+target/release/x402_treazury wallet init
 ```
 
 Initialization creates the configured wallet directory (`./state/privacy`),
@@ -208,12 +219,13 @@ state and decryption material.
 
 ### 3. Start the MCP server
 
-Set `TREAZURY_MCP_TOKEN` to a secret bearer token, then launch:
+Set `X402_TREAZURY_MCP_TOKEN` to require bearer authentication, then launch
+using the exported `X402_TREAZURY_CONFIG` path. Leaving the token absent disables
+authentication and logs a WARN:
 
 ```sh
-export TREAZURY_MCP_TOKEN="treazury_bearer_auth_key_here"
-target/release/x402_treazury serve \
-  --config examples/deployments/comprehensive.local.toml
+export X402_TREAZURY_MCP_TOKEN="treazury_bearer_auth_key_here"
+target/release/x402_treazury serve
 ```
 
 `serve` synchronizes the treasury, discovers API catalogs, and funds
@@ -236,8 +248,8 @@ In another terminal, display the shielded receive address, saved balances and sy
 progress using the same deployment file:
 
 ```sh
-target/release/x402_treazury wallet status \
-  --config examples/deployments/comprehensive.local.toml
+export X402_TREAZURY_CONFIG="examples/deployments/comprehensive.local.toml"
+target/release/x402_treazury wallet status
 ```
 
 Send ZEC to that **shielded receive address**. The example's two wallet groups each request a $2 USDC reserve: **$4 USDC total before fees and accepted bridge-minimum increases**. Allow additional ZEC for those costs and future wallet replacements.
@@ -269,7 +281,7 @@ Relay fees depend on the configured provider and request; relay-dependent catalo
 appear when their payer wallet becomes usable.
 
 Connect your MCP client to the endpoint(s) in the table above, authenticating with
-`Authorization: Bearer <your TREAZURY_MCP_TOKEN>`.
+`Authorization: Bearer <your X402_TREAZURY_MCP_TOKEN>`.
 
 To stop, press Ctrl-C once and allow the announced transaction-safety drain to finish.
 
@@ -501,8 +513,8 @@ without it, additions last only until the process exits.
 To view saved API sources and each source's tool names, HTTP methods and paths:
 
 ```sh
-target/release/x402_treazury sources inspect \
-  --config path/to/deployment_config.toml
+export X402_TREAZURY_CONFIG="path/to/deployment_config.toml"
+target/release/x402_treazury sources inspect
 ```
 
 Each source's `tools` list is rebuilt offline from its saved specification and
@@ -517,19 +529,17 @@ not automatically follow vendor updates; they must be updated manually.
 First, stop the server, then:
 
 ```sh
-target/release/x402_treazury sources refresh --server research --source SOURCE_ID_OR_NAME \
-  --config path/to/deployment_config.toml
+target/release/x402_treazury sources refresh --server research --source SOURCE_ID_OR_NAME
 ```
 
 To remove a source:
 
 ```sh
-target/release/x402_treazury sources remove --server research --source SOURCE_ID_OR_NAME \
-  --config path/to/deployment_config.toml
+target/release/x402_treazury sources remove --server research --source SOURCE_ID_OR_NAME
 ```
 
 Use an exact saved ID or name with `--source`. To remove every saved source on
-that endpoint, use `sources remove --server research --all --config FILE`.
+that endpoint, use `sources remove --server research --all`.
 Removal revokes API access without network or wallet work and preserves financial journals.
 
 See the [configuration and authority reference](docs/agent-sources.md#configuration-and-authority)

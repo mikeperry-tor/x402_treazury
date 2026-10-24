@@ -29,6 +29,14 @@ retain their distinct authority and side effects.
 
 ## Configuration file roles
 
+`X402_TREAZURY_CONFIG` supplies the default path for every deployment `--config`
+option, including wallet, catalog, config and source commands. An explicit
+`--config FILE` (or `--meta-config FILE`) overrides it. This variable must be in
+the process environment; `--env-file` is loaded after CLI parsing. The selected
+deployment retains the same conflicts with standalone provider options and wallet
+`--state-dir`, `--key-file` and `--treasury-id`; unset the variable to use those
+options without a deployment.
+
 `--config FILE` selects a deployment: sources, listeners, wallets and network
 policy. Wallet commands accept the same file without loading API sources.
 `wallet sync` requires exclusive administration ownership (stop `serve` first).
@@ -94,7 +102,7 @@ and publish remote tools as they arrive:
 listen = "127.0.0.1:8000"
 sources = ["company_stableenrich"]
 wallet = "research"
-bearer_token_env = "TREAZURY_MCP_TOKEN"
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wait_for_catalogs = true # Default; false enables incremental availability.
 ```
 
@@ -152,7 +160,7 @@ offline; `config check` and `catalog tools` load the remote catalog.
 
 Initialize the treasury explicitly and fund its shielded address before paid use;
 see the [quickstart](../README.md#quickstart-z-cash-wallet-with-dynamically-managed-tools). Serving needs
-`TREAZURY_MCP_TOKEN` and the initialized treasury, and binds the listener before
+the initialized treasury and binds the listener before
 background funding. The [comprehensive deployment](../examples/deployments/comprehensive.toml)
 adds multiple research listeners, Tor, relay and persistent source registrations.
 
@@ -317,6 +325,13 @@ Neither setting enables discovery or source management. See
 [endpoint instruction placement](agent-sources.md#endpoint-instruction-placement)
 for defaults, client caching and guidance placement.
 
+
+Listeners configured with `bearer_token_env = "X402_TREAZURY_MCP_TOKEN"` use
+bearer authentication when that variable is set. If it is absent, they serve
+without authentication and log a WARN. Empty or whitespace-only values are
+rejected. Custom `bearer_token_env` names still require a nonempty value.
+Existing local configurations using `TREAZURY_MCP_TOKEN` must update the reference
+to adopt the new optional variable.
 
 To disable HTTP authentication for one listener, set `auth = false` and omit
 `bearer_token_env` in its `[servers.NAME]` table. Other listeners retain their own

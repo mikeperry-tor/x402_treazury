@@ -104,6 +104,18 @@ pub struct ListenerConfig {
     #[serde(default)]
     pub exclude_tools: Vec<String>,
 }
+impl ListenerConfig {
+    fn token(&self, env: &BTreeMap<String, String>) -> Result<Option<String>> {
+        if !self.auth
+            || (self.bearer_token_env == "X402_TREAZURY_MCP_TOKEN"
+                && !env.contains_key(&self.bearer_token_env))
+        {
+            return Ok(None);
+        }
+        required_secret(env, &self.bearer_token_env).map(Some)
+    }
+}
+
 #[derive(Clone)]
 struct Source {
     config: Config,
@@ -488,7 +500,7 @@ impl Deployment {
     }
     fn validate_listener_credentials(&self, env: &BTreeMap<String, String>) -> Result<()> {
         for server in self.config.servers.values().filter(|s| s.auth) {
-            required_secret(env, &server.bearer_token_env)?;
+            server.token(env)?;
         }
         Ok(())
     }
@@ -1228,14 +1240,7 @@ impl Deployment {
         // Validate every credential before opening any port.
         let mut tokens = BTreeMap::new();
         for (name, cfg) in &self.config.servers {
-            tokens.insert(
-                name.clone(),
-                if cfg.auth {
-                    Some(required_secret(env, &cfg.bearer_token_env)?)
-                } else {
-                    None
-                },
-            );
+            tokens.insert(name.clone(), cfg.token(env)?);
         }
         let initialized = if unsigned {
             self.unsigned_wallets()?

@@ -397,33 +397,38 @@ async fn optional_auth_is_explicit_and_independent_per_listener() {
     );
     write_config(dir.path(), &conflicting);
     assert!(Deployment::show_config(&path).await.is_err());
-    let text = original.replace("bearer_token_env = \"RESEARCH_TOKEN\"", "auth = false");
-    write_config(dir.path(), &text);
-    let shown = Deployment::show_config(&path).await.unwrap();
-    assert_eq!(shown["servers"]["research"]["auth"], false);
-    assert_eq!(shown["servers"]["beta_only"]["auth"], true);
-    let mut environment = env();
-    environment.remove("RESEARCH_TOKEN");
-    let running = Deployment::load(&path)
-        .await
-        .unwrap()
-        .bind(&environment)
-        .await
-        .unwrap();
-    let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
-    let stop = CancellationToken::new();
-    let task = tokio::spawn(running.serve(stop.clone()));
-    let http = reqwest::Client::builder().no_proxy().build().unwrap();
-    for (listener, expected) in [("research", 200), ("beta_only", 401)] {
-        let response = http.post(format!("http://{}/mcp", addresses[listener]))
+    for (replacement, configured_auth) in [
+        ("auth = false", false),
+        ("bearer_token_env = \"X402_TREAZURY_MCP_TOKEN\"", true),
+    ] {
+        let text = original.replace("bearer_token_env = \"RESEARCH_TOKEN\"", replacement);
+        write_config(dir.path(), &text);
+        let shown = Deployment::show_config(&path).await.unwrap();
+        assert_eq!(shown["servers"]["research"]["auth"], configured_auth);
+        assert_eq!(shown["servers"]["beta_only"]["auth"], true);
+        let mut environment = env();
+        environment.remove("RESEARCH_TOKEN");
+        let running = Deployment::load(&path)
+            .await
+            .unwrap()
+            .bind(&environment)
+            .await
+            .unwrap();
+        let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
+        let stop = CancellationToken::new();
+        let task = tokio::spawn(running.serve(stop.clone()));
+        let http = reqwest::Client::builder().no_proxy().build().unwrap();
+        for (listener, expected) in [("research", 200), ("beta_only", 401)] {
+            let response = http.post(format!("http://{}/mcp", addresses[listener]))
             .header("accept", "application/json, text/event-stream")
             .json(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
                 "protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}))
             .send().await.unwrap();
-        assert_eq!(response.status().as_u16(), expected);
+            assert_eq!(response.status().as_u16(), expected);
+        }
+        stop.cancel();
+        task.await.unwrap().unwrap();
     }
-    stop.cancel();
-    task.await.unwrap().unwrap();
 }
 
 #[tokio::test]
