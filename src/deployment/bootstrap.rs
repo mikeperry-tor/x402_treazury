@@ -78,8 +78,12 @@ pub async fn bootstrap_wallets_with_network(
         !crate::qualification::active() && !catalog_evidence::collecting(),
         "wallet bootstrap is unavailable during qualification"
     );
-    let mut config =
-        MetaConfig::parse_with_network(&tokio::fs::read_to_string(path).await?, network_override)?;
+    let mut config = MetaConfig::parse_with_network(
+        &tokio::fs::read_to_string(path).await.with_context(|| {
+            format!("failed to read deployment config file '{}'", path.display())
+        })?,
+        network_override,
+    )?;
     crate::discovery::policy::resolve(&mut config, path);
     let wallet_resolution = config.validate()?;
     crate::network::install(config.network.clone())?;

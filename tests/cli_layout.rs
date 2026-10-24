@@ -149,6 +149,10 @@ fn deployment_config_environment_applies_to_each_command_and_cli_wins() {
         vec!["config", "show"],
         vec!["config", "check"],
         vec!["wallet", "status"],
+        vec!["wallet", "init"],
+        vec!["wallet", "sync"],
+        vec!["wallet", "bootstrap"],
+        vec!["wallet", "recover"],
         vec!["sources", "inspect"],
         vec![
             "sources", "refresh", "--server", "research", "--source", "api",
@@ -164,7 +168,12 @@ fn deployment_config_environment_applies_to_each_command_and_cli_wins() {
         assert_eq!(inherited.status.code(), explicit.status.code(), "{args:?}");
         assert_eq!(inherited.stderr, explicit.stderr, "{args:?}");
         assert_eq!(overridden.stderr, explicit.stderr, "{args:?}");
-        assert!(!String::from_utf8_lossy(&inherited.stderr).contains("required arguments"));
+        let error = String::from_utf8_lossy(&inherited.stderr);
+        assert!(
+            error.contains("failed to read deployment config file 'missing.toml':"),
+            "{args:?}: {error}"
+        );
+        assert!(!error.contains("required arguments"));
     }
     for args in [
         vec!["config", "show", "--provider", "provider.toml"],

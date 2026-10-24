@@ -32,8 +32,12 @@ pub async fn warm_cache_with_network(
         !crate::qualification::active() && !catalog_evidence::collecting(),
         "cache warming is not a qualification operation"
     );
-    let mut config =
-        MetaConfig::parse_with_network(&tokio::fs::read_to_string(path).await?, network_override)?;
+    let mut config = MetaConfig::parse_with_network(
+        &tokio::fs::read_to_string(path).await.with_context(|| {
+            format!("failed to read deployment config file '{}'", path.display())
+        })?,
+        network_override,
+    )?;
     crate::discovery::policy::resolve(&mut config, path);
     config.validate()?;
     if let Some(treasury) = &mut config.treasury {

@@ -949,7 +949,12 @@ fn page(
 }
 pub async fn inspect_cli(meta_config: &std::path::Path) -> Result<()> {
     let mut cfg: crate::deployment::MetaConfig =
-        toml::from_str(&std::fs::read_to_string(meta_config)?)?;
+        toml::from_str(&std::fs::read_to_string(meta_config).with_context(|| {
+            format!(
+                "failed to read deployment config file '{}'",
+                meta_config.display()
+            )
+        })?)?;
     policy::resolve(&mut cfg, meta_config);
     let registries: Vec<_> = cfg
         .servers
@@ -1076,7 +1081,9 @@ async fn maintain_cli_owned(
 ) -> Result<()> {
     crate::deployment::Deployment::show_config_with_network(path, network_override).await?;
     let mut cfg = crate::deployment::MetaConfig::parse_with_network(
-        &std::fs::read_to_string(path)?,
+        &std::fs::read_to_string(path).with_context(|| {
+            format!("failed to read deployment config file '{}'", path.display())
+        })?,
         network_override,
     )?;
     if let Some(t) = &mut cfg.treasury {

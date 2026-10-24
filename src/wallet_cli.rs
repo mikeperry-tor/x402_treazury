@@ -223,7 +223,9 @@ fn load_wallet_settings(
     use anyhow::{Context, ensure};
     let settings = if let Some(path) = config_path {
         let config = crate::deployment::MetaConfig::parse_with_network(
-            &std::fs::read_to_string(path)?,
+            &std::fs::read_to_string(path).with_context(|| {
+                format!("failed to read deployment config file '{}'", path.display())
+            })?,
             policy,
         )?;
         ensure!(config.version == 1, "unsupported deployment version");
@@ -630,7 +632,9 @@ async fn recover_funding(
     policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<()> {
     let config = crate::deployment::MetaConfig::parse_with_network(
-        &tokio::fs::read_to_string(&path).await?,
+        &tokio::fs::read_to_string(&path).await.with_context(|| {
+            format!("failed to read deployment config file '{}'", path.display())
+        })?,
         policy,
     )?;
     let allow_new_attempt = config
@@ -892,7 +896,9 @@ async fn configured(
     crate::rotation::config::TreasuryConfig,
 )> {
     let config = crate::deployment::MetaConfig::parse_with_network(
-        &tokio::fs::read_to_string(path).await?,
+        &tokio::fs::read_to_string(path).await.with_context(|| {
+            format!("failed to read deployment config file '{}'", path.display())
+        })?,
         policy,
     )?;
     crate::network::install(config.network.clone())?;

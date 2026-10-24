@@ -50,7 +50,12 @@ pub(super) async fn run(
     policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<()> {
     let mut parent = crate::supervision::Parent::from_stdin(supervised)?;
-    let config = MetaConfig::parse_with_network(&tokio::fs::read_to_string(&path).await?, policy)?;
+    let config = MetaConfig::parse_with_network(
+        &tokio::fs::read_to_string(&path).await.with_context(|| {
+            format!("failed to read deployment config file '{}'", path.display())
+        })?,
+        policy,
+    )?;
     anyhow::ensure!(config.version == 1, "unsupported deployment version");
     crate::network::install(config.network.clone())?;
     let mut settings = config.treasury.clone().context("missing [treasury]")?;

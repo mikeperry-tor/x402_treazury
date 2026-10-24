@@ -411,7 +411,9 @@ impl Deployment {
         network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<serde_json::Value> {
         let mut config = MetaConfig::parse_with_network(
-            &tokio::fs::read_to_string(path).await?,
+            &tokio::fs::read_to_string(path).await.with_context(|| {
+                format!("failed to read deployment config file '{}'", path.display())
+            })?,
             network_override,
         )?;
         crate::discovery::policy::resolve(&mut config, path);
@@ -593,7 +595,9 @@ impl Deployment {
         network_override: Option<&crate::network::NetworkConfig>,
     ) -> Result<Self> {
         let mut config = MetaConfig::parse_with_network(
-            &tokio::fs::read_to_string(path).await?,
+            &tokio::fs::read_to_string(path).await.with_context(|| {
+                format!("failed to read deployment config file '{}'", path.display())
+            })?,
             network_override,
         )?;
         crate::discovery::policy::resolve(&mut config, path);
