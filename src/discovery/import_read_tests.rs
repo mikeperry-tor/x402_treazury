@@ -2,6 +2,114 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[tokio::test]
+async fn concurrent_imports_outlive_waiters_and_completed_cache_churn() {
+    use tokio::sync::Semaphore;
+    const IMPORTS: usize = 6;
+    let m = manager(None).await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let arrived = Arc::new(Semaphore::new(0));
+    let release = Arc::new(Semaphore::new(0));
+    let app = axum::Router::new().fallback({
+        let (calls, arrived, release) = (calls.clone(), arrived.clone(), release.clone());
+        move || {
+            let (calls, arrived, release) = (calls.clone(), arrived.clone(), release.clone());
+            async move {
+                if calls.fetch_add(1, Ordering::SeqCst) < IMPORTS {
+                    arrived.add_permits(1);
+                    release.acquire().await.unwrap().forget();
+                }
+                axum::Json(spec())
+            }
+        }
+    });
+    let (url, server) = listen(app).await;
+    *m.fixture_endpoint.lock().unwrap() = Some(url);
+    let mut adds = Vec::new();
+    for n in 0..IMPORTS {
+        let m = m.clone();
+        adds.push(tokio::spawn(async move {
+            m.invoke(
+                "writer",
+                "x402_treazury_source_add",
+                json!({"spec_url":format!("https://api.example.com/import{n}"),"name":format!("import{n}")}),
+            )
+            .await
+        }));
+    }
+    tokio::time::timeout(Duration::from_secs(5), arrived.acquire_many(IMPORTS as u32))
+        .await
+        .expect("all distinct same-listener imports must reach I/O together")
+        .unwrap()
+        .forget();
+    assert!(m.inner.lock().unwrap().state.records.is_empty());
+    let active: Vec<_> = m
+        .fetches
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(key, cell)| (key.clone(), cell.clone()))
+        .collect();
+    assert_eq!(active.len(), IMPORTS);
+    adds.remove(0).abort();
+
+    // More completed documents than the retention allowance cannot displace any
+    // active acquisition, including the one whose original waiter disconnected.
+    for n in 0..12 {
+        m.invoke(
+            "writer",
+            "x402_treazury_source_add",
+            json!({"spec_url":format!("https://api.example.com/churn{n}"),"name":format!("churn{n}")}),
+        )
+        .await
+        .unwrap();
+    }
+    {
+        let cache = m.fetches.lock().unwrap();
+        for (key, cell) in &active {
+            assert!(Arc::ptr_eq(&cache[key], cell));
+            assert!(cell.get().is_none());
+        }
+    }
+    let alias = tokio::spawn({
+        let m = m.clone();
+        async move {
+            m.invoke(
+                "writer",
+                "x402_treazury_source_add",
+                json!({"spec_url":"https://api.example.com/import0","name":"import0"}),
+            )
+            .await
+        }
+    });
+    // Confirm the alias has joined the active cell before releasing origin I/O.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let key = fetch_key(&m, "https://api.example.com/import0");
+        let (_, cell) = active
+            .iter()
+            .find(|(active_key, _)| *active_key == key)
+            .unwrap();
+        while Arc::strong_count(cell) < 4 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), IMPORTS + 12);
+    release.add_permits(IMPORTS);
+    for add in adds {
+        assert_eq!(add.await.unwrap().unwrap()["status"], "available");
+    }
+    assert_eq!(alias.await.unwrap().unwrap()["status"], "available");
+    assert_eq!(calls.load(Ordering::SeqCst), IMPORTS + 12);
+    assert_eq!(m.inner.lock().unwrap().state.records.len(), IMPORTS + 12);
+    assert_eq!(m.catalog.read().views["writer"].len(), 2 * (IMPORTS + 12));
+    let cache = m.fetches.lock().unwrap();
+    assert!(cache.values().all(|cell| cell.get().is_some()));
+    assert_eq!(cache.len(), 128 * 1024 * 1024 / m.policy.max_spec_bytes);
+    server.abort();
+}
+
+#[tokio::test]
 async fn accepted_import_retains_fetch_validation_and_publication_after_disconnect() {
     let manager = manager(None).await;
     let arrived = Arc::new(tokio::sync::Notify::new());

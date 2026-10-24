@@ -89,6 +89,7 @@ struct Fetched {
     result: std::result::Result<Arc<Document>, SharedFailure>,
 }
 type FetchCell = Arc<OnceCell<Fetched>>;
+
 pub struct Manager {
     #[cfg(test)]
     commit_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
@@ -109,8 +110,6 @@ pub struct Manager {
     catalog: Arc<CatalogState>,
     inner: Mutex<Inner>,
     fetches: Mutex<BTreeMap<FetchKey, FetchCell>>,
-    global_import: Arc<Semaphore>,
-    owner_import: BTreeMap<String, Arc<Semaphore>>,
     mutations: Arc<Semaphore>,
 }
 #[derive(Deserialize, Serialize)]
@@ -255,10 +254,6 @@ impl Manager {
             Ok((store, state))
         })
         .await??;
-        let owner_import = listeners
-            .keys()
-            .map(|id| (id.clone(), Arc::new(Semaphore::new(1))))
-            .collect();
         let manager = Arc::new(Self {
             #[cfg(test)]
             fixture_endpoint: Mutex::new(None),
@@ -283,8 +278,6 @@ impl Manager {
             }),
             catalog,
             fetches: Mutex::new(BTreeMap::new()),
-            global_import: Arc::new(Semaphore::new(4)),
-            owner_import,
             mutations: Arc::new(Semaphore::new(16)),
         });
         let m = manager.clone();
@@ -473,6 +466,29 @@ impl Manager {
             )?))),
         }
     }
+    fn prune_fetches(&self) {
+        let mut cache = self.fetches.lock().unwrap();
+        cache.retain(|_, cell| match cell.get() {
+            None => Arc::strong_count(cell) > 1,
+            Some(done) => {
+                let retention = if done.result.is_ok() { 300 } else { 1 };
+                done.completed.elapsed() < Duration::from_secs(retention)
+            }
+        });
+        // Active acquisitions have owners and cannot be evicted or reject new work.
+        // Only optional completed retention uses the existing byte/count allowance.
+        let max = (128 * 1024 * 1024 / self.policy.max_spec_bytes).min(8);
+        let mut completed: Vec<_> = cache
+            .iter()
+            .filter_map(|(key, cell)| cell.get().map(|done| (key.clone(), done.completed)))
+            .collect();
+        completed.sort_unstable_by_key(|(_, time)| *time);
+        let excess = completed.len().saturating_sub(max);
+        for (key, _) in completed.into_iter().take(excess) {
+            cache.remove(&key);
+        }
+    }
+
     async fn document_with(
         &self,
         owner: &str,
@@ -489,32 +505,9 @@ impl Manager {
             transport: provider.map(|p| p.settings.transport()).unwrap_or_default(),
             timeout: import::read_timeout(&self.policy, provider),
         };
+        self.prune_fetches();
         let cell = {
             let mut cache = self.fetches.lock().unwrap();
-            cache.retain(|_, cell| {
-                if cell.get().is_none() {
-                    return Arc::strong_count(cell) > 1;
-                }
-                cell.get().is_none_or(|done| {
-                    let retention = if done.result.is_ok() { 300 } else { 1 };
-                    done.completed.elapsed() < Duration::from_secs(retention)
-                })
-            });
-            let max = (128 * 1024 * 1024 / self.policy.max_spec_bytes).min(8);
-            if !cache.contains_key(&key) && cache.len() >= max {
-                // Never evict active work. Completed retention is optional;
-                // capacity churn must not cause duplicate in-flight fetches.
-                let oldest = cache
-                    .iter()
-                    .filter_map(|(key, cell)| cell.get().map(|done| (key.clone(), done.completed)))
-                    .min_by_key(|(_, time)| *time)
-                    .map(|(key, _)| key);
-                if let Some(key) = oldest {
-                    cache.remove(&key);
-                } else {
-                    anyhow::bail!(crate::limits::busy("imports_busy", max));
-                }
-            }
             cache
                 .entry(key)
                 .or_insert_with(|| Arc::new(OnceCell::new()))
@@ -522,33 +515,22 @@ impl Manager {
         };
         let done = cell
             .get_or_init(|| async {
-                // Only the initializer consumes import capacity; aliases merely
-                // waiting for its result cannot starve independent imports.
-                let result = async {
-                    let owner = self
-                        .owner_import
-                        .get(owner)
-                        .ok_or_else(|| SharedFailure::local("unknown_owner"))?;
-                    let _owner = owner.try_acquire().map_err(|_| {
-                        SharedFailure::local(crate::limits::busy("owner_import_busy", 1))
-                    })?;
-                    let _global = self.global_import.try_acquire().map_err(|_| {
-                        SharedFailure::local(crate::limits::busy("imports_busy", 4))
-                    })?;
-                    self.fetch_document(url, provider, &client)
-                        .await
-                        .map(Arc::new)
-                        .map_err(|error| {
-                            SharedFailure::capture(&error, "source_fetch_failed_or_rejected")
-                        })
-                }
-                .await;
+                let result = self
+                    .fetch_document(url, provider, &client)
+                    .await
+                    .map(Arc::new)
+                    .map_err(|error| {
+                        SharedFailure::capture(&error, "source_fetch_failed_or_rejected")
+                    });
                 Fetched {
                     completed: Instant::now(),
                     result,
                 }
             })
             .await;
+        // Completed retention must not turn active coalescing into admission.
+        // Trim after completion too, so a burst leaves no oversized idle cache.
+        self.prune_fetches();
         done.result.clone().map_err(|failure| failure.error())
     }
 

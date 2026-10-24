@@ -146,13 +146,6 @@ pub(crate) struct SharedFailure {
     possible: bool,
 }
 impl SharedFailure {
-    pub fn local(reason: &'static str) -> Self {
-        Self {
-            reason,
-            cause: Cause::Other,
-            possible: false,
-        }
-    }
     pub fn capture(error: &anyhow::Error, reason: &'static str) -> Self {
         let cause = if let Some(limit) = error.downcast_ref::<crate::limits::DownloadLimit>() {
             Cause::Limit {

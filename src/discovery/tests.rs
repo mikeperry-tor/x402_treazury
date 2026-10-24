@@ -1983,7 +1983,7 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
 }
 
 #[tokio::test]
-async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
+async fn import_aliases_share_active_fetches_and_failed_fetches_recover() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let m = manager(None).await;
     let calls = Arc::new(AtomicUsize::new(0));
@@ -2019,9 +2019,9 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
     arrived.notified().await;
     tokio::task::yield_now().await;
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    // A different URL still has capacity despite twenty coalesced waiters.
+    // A different URL on the same listener proceeds despite twenty coalesced waiters.
     assert!(
-        m.document("reader", "https://api.example.com/other")
+        m.document("writer", "https://api.example.com/other")
             .await
             .is_ok()
     );
@@ -2030,7 +2030,7 @@ async fn import_aliases_share_active_capacity_and_failed_fetches_recover() {
     // Churn completed retention beyond capacity; an active fetch is never evicted.
     for n in 0..12 {
         assert!(
-            m.document("reader", &format!("https://api.example.com/churn{n}"))
+            m.document("writer", &format!("https://api.example.com/churn{n}"))
                 .await
                 .is_ok()
         );

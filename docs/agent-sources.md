@@ -544,14 +544,18 @@ responses have no total HTTP download deadline. `fetch_timeout_seconds` is a
 legacy alias.
 
 The specification byte override accepts up to 64 MiB.
-Management requests have a 64 KiB limit; forwarded API calls retain normal API behavior. Import
-concurrency is four process-wide and one per endpoint; at most 16 mutation jobs can
-be outstanding. Aliases share an active fetch without each consuming a permit.
-Active fetches cannot be evicted by retention age or completed-cache churn; a full
-active cache returns busy. Success retention is 300 seconds from completion,
-transient failure backoff one second. Completed entries remain byte/count bounded.
-Saturation returns an explicit busy error. Publication and collision
-checks are serialized, so concurrent additions cannot publish partial sources.
+Management requests have a 64 KiB limit; forwarded API calls retain normal API behavior.
+Remote imports have no separate per-listener, global-import or active-cache admission
+quota; they retain the existing foreground work ownership. Equivalent aliases share
+an active fetch keyed by payer authority, document policy and transport settings.
+Active fetches cannot be evicted by retention age or completed-cache churn.
+Completed fetches retain successes for 300 seconds and failures for one second;
+optional completed retention is trimmed on lookup and completion to the smaller of
+eight entries or `128 MiB / max_spec_bytes`. This is a cache-retention allowance,
+not a total bound on documents retained by active callers.
+At most 16 mutation jobs can be outstanding; saturation returns an explicit busy
+error. Publication and collision checks are serialized, so concurrent additions
+cannot publish partial sources.
 
 JSON/reference traversal remains bounded to depth 64, 500,000 expanded nodes and
 64 MiB of expanded string/key content. Import rejects over 10,000 operations,
@@ -562,7 +566,7 @@ records, including removed records, are governed by that same serialized byte bo
 on save and load. Record/receipt counts introduce no separate admission or reload
 gate. Resource-limit
 rejections emit WARN diagnostics with safe counts, thresholds and adjustment
-settings where applicable. Import saturation, transport timeouts and rejected destination/reference/server
+settings where applicable. Mutation saturation, transport timeouts and rejected destination/reference/server
 policies also warn.
 Limits reject visibly rather than trimming documents; warnings never include
 submitted names, URLs, schemas or upstream prose.

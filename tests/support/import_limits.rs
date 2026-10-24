@@ -355,32 +355,7 @@ async fn capture_future_logs<T>(future: impl std::future::Future<Output = T>) ->
 }
 
 #[tokio::test]
-async fn saturated_import_and_mutation_capacity_warns_before_io() {
-    for global in [false, true] {
-        let m = manager(None).await;
-        let permits = if global {
-            m.global_import.clone()
-        } else {
-            m.owner_import["writer"].clone()
-        };
-        let _held = permits
-            .try_acquire_many_owned(if global { 4 } else { 1 })
-            .unwrap();
-        let (result, logs) =
-            capture_future_logs(m.document("writer", "https://api.example.com/PRIVATE_SPEC")).await;
-        let reason = if global {
-            "imports_busy"
-        } else {
-            "owner_import_busy"
-        };
-        assert!(result.unwrap_err().to_string().contains(reason));
-        assert!(logs.contains("WARN") && logs.contains(reason), "{logs}");
-        assert!(
-            !logs.contains("PRIVATE_") && !logs.contains("api.example.com"),
-            "{logs}"
-        );
-        assert!(m.inner.lock().unwrap().state.records.is_empty());
-    }
+async fn saturated_mutation_capacity_warns_before_publication() {
     let m = manager(None).await;
     seed(&m).await;
     let _held = m.mutations.clone().try_acquire_many_owned(16).unwrap();
