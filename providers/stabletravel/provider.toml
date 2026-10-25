@@ -1,0 +1,25 @@
+description = "Cash flight prices and booking links, cached mileage awards, flight tracking, airport operations and flight history."
+# Authored vendor path-parameter repair; provenance and update rules in providers/CAVEATS.md.
+spec = "openapi.json"
+name = "StableTravel"
+base_url = "https://stabletravel.dev"
+prefix = "stabletravel"
+include = ["/api", ""]
+pricing_key = "x-payment-info"
+help_url = "https://stabletravel.dev/llms.txt"
+instructions_text = "Use Google Flights search then booking for cash fares and booking links; Seats.aero search then trips for cached mileage awards. FlightAware covers operations: resolve a flight ident first, then use its fa_flight_id for position, track and map. Preserve source timestamps and availability limits. Booking links do not issue tickets or hold reservations."
+
+[overrides.stabletravel_google_flights_search.params]
+type = "String enum: 1 = round trip (default; requires return_date), 2 = one way, 3 = multi-city."
+return_date = "Return date in YYYY-MM-DD; required when type is 1 (including its default)."
+
+[overrides.stabletravel_google_flights_booking.params]
+departure_token = "Token returned by Google Flights search for the selected itinerary; returns booking links rather than purchasing a ticket."
+return_date = "Return date in YYYY-MM-DD; required when type is 1 (including its default)."
+
+[overrides.stabletravel_flightaware_flights_ident_intents]
+description = "Submit the vendor's advertised flight-intent request using ident and intent. This is a write operation, not a flight lookup. The guide calls it push notifications, but exposes no callback registration or notification-management workflow. FlightAware's upstream intent semantics differ from that label; delivery semantics are unqualified. Cost: ~$0.001/call [spec]."
+
+[overrides.stabletravel_flightaware_flights_ident_intents.params]
+ident = "Flight identifier in the URL. Use the same identifier in ident_body."
+ident_body = "Flight identifier in the JSON body; use the same value as the path ident."

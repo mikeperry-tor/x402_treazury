@@ -47,6 +47,14 @@ is retained; `x-treazury-fixture-scope` labels the reduced capture separately.
 
 | Input | Retained contract and consumer |
 | --- | --- |
+| StableTravel paths | Original literal placeholder slots, preserved request/response fields and prices; verifies flight, airport-pair, award-trip, aircraft and disruption routing repairs. |
+| AX1 request branches | Original external/Console `anyOf` witness; verifies the runtime external projection and required token input. |
+| CoinMarketCap projection | Original paid DEX query parameters and public holder POST body; verifies authored path/security projection without changing requests. |
+| Nansen keyless contracts | Request/authentication excerpts for keyless analytics versus API-key operations, feedback key constraints and SSE agents. Response declarations are omitted. |
+| BlockRun gateways | Request excerpts for synchronous Messages/Responses and the unrestricted RPC boundary. Response declarations are omitted. |
+| AgData contracts | x402-capable aliases, root routing, screenshot/PDF JSON and managed idempotency header. |
+| Degenscan contracts | Keyless Carry price overrides, public forecast submit/poll and credential/transport exclusions. |
+| Market Intelligence contracts | POST opportunity constraints and prepaid/webhook/feedback boundaries preserving public reads. |
 | AgentFund | `/x402/treasury_yield_curve`: independent reviewed preset body schema. |
 | Brazilayer | `/v1/cnpj/situacao/{cnpj}`: reviewed path argument and original parameter/response reference closure. |
 | Deepline | `/api/company/enrich`: reviewed enrichment request, full nested schema and guidance. |

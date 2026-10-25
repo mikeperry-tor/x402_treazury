@@ -1,0 +1,1802 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Market Intelligence API",
+    "description": "Pay-per-call market intelligence for AI agents, built on observed data. On-chain order flow from executed DEX trades on Base, Ethereum, Arbitrum, Optimism, Polygon, Robinhood Chain and Solana (buy/sell pressure, momentum, anomalies vs each asset's own baseline, large trades, smart-money wallets, candles and daily datasets); token risk checks and swap quotes; Hyperliquid perps funding, open interest and crowding; SEC EDGAR (XBRL fundamentals, Form 4, Form 144, 13D/13G, dividends, fails-to-deliver, 8-K) and European ESEF fundamentals; European short interest (AMF); ECB, Eurostat, US Treasury and Federal Reserve data; CFTC positioning, EIA oil inventories and the official macro calendar; GDELT and SEC news; and deterministic analytics primitives on numbers you supply. Every answer is timestamped and names its source. Decisions (/api/v1/decision*) are a rule-based aggregation of these data with a free, live track record (/api/v1/decision/track-record). The chain query parameter of the token routes names the chain the token lives on; it is never the payment network, which every paid route lists in x-payment-info.networks as CAIP-2 ids.",
+    "contact": {
+      "name": "Market Intelligence API",
+      "email": "hisazzul@gmail.com",
+      "url": "https://api.marketintelligenceapi.com"
+    },
+    "version": "1.3.0",
+    "x-guidance": "Every paid route answers HTTP 402 with x402 payment requirements (USDC on Base, Polygon, Arbitrum, World Chain or Solana; EURC on Base or World Chain); pay and repeat the request. You are charged only on HTTP 2xx: an unknown symbol is a free 404. Start with GET /api/v1/intelligence/{symbol} (live on-chain order flow of one asset), GET /api/v1/intelligence/summary (what is moving), GET /api/v1/intelligence/token-risk/{address} (before buying a token) or GET /api/v1/report/{symbol} (filings, flow and news of one stock). Free: /coverage (which symbols and sources exist), /api/v1/datasets, /status (data freshness), /api/v1/decision/track-record (measured hit rates). A signal of INSUFFICIENT_DATA means too few trades in the window. Full guide: /llms.txt.",
+    "x-operator": {
+      "name": "Market Intelligence API",
+      "type": "independent operator",
+      "jurisdiction": "BG",
+      "country": "Bulgaria",
+      "website": "https://api.marketintelligenceapi.com"
+    },
+    "summary": "Market data for AI agents, paid per call with x402: token safety, on-chain order flow, SEC filings, macro, perps and news.",
+    "license": {
+      "name": "Proprietary: pay-per-call terms",
+      "url": "https://api.marketintelligenceapi.com/transparency"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.marketintelligenceapi.com"
+    }
+  ],
+  "x-discovery": {
+    "ownershipProofs": [
+      "0x48d5A78d480B4C32dE319C2aEF69e682Dc304615"
+    ]
+  },
+  "tags": [
+    {
+      "name": "European Markets",
+      "description": "ECB FX and rates, Eurostat macro, AMF short positions and ESEF fundamentals"
+    },
+    {
+      "name": "Market News",
+      "description": "Crypto and stock headlines with publisher, sentiment and event type."
+    },
+    {
+      "name": "Crypto News",
+      "description": "Latest crypto market headlines."
+    },
+    {
+      "name": "Stock News",
+      "description": "Latest stock market headlines and SEC 8-K events."
+    },
+    {
+      "name": "Symbol News",
+      "description": "Headlines and filings tagged with one ticker or crypto pair."
+    },
+    {
+      "name": "Agent Tools",
+      "description": "One-call answers for agents: pre-trade checks, token risk, decisions, reports and opportunity scans."
+    },
+    {
+      "name": "Market Intelligence",
+      "description": "Live on-chain trade flow per symbol: buy pressure, momentum, anomalies and rankings, windows 1m to 24h."
+    },
+    {
+      "name": "MCP",
+      "description": "The same data as Model Context Protocol tools: POST /mcp (all tools) or /mcp/core (the most used)."
+    },
+    {
+      "name": "SEC Fundamentals",
+      "description": "Fundamentals from SEC XBRL filings: revenue, margins, growth, balance sheet and a signal."
+    },
+    {
+      "name": "Stock Fundamentals",
+      "description": "Fundamentals and insider activity of US-listed companies."
+    },
+    {
+      "name": "Financial Statements",
+      "description": "Reported financial statement items from SEC and ESEF filings."
+    },
+    {
+      "name": "Free",
+      "description": "Free discovery, samples, coverage, status and track records: no payment needed."
+    },
+    {
+      "name": "Macro",
+      "description": "Treasury yields, Fed odds, liquidity, bank credit, COT positioning, oil inventories and the macro calendar."
+    },
+    {
+      "name": "Analytics Primitives",
+      "description": "Deterministic analytical primitives for AI agents: statistics on numbers the caller supplies. No market data is fetched or verified."
+    }
+  ],
+  "x-agentcash-guidance": {
+    "llmsTxtUrl": "https://api.marketintelligenceapi.com/llms.txt"
+  },
+  "x-mcp": {
+    "endpoint": "/mcp",
+    "core": "/mcp/core",
+    "transport": "streamable-http",
+    "note": "Each operation's x-mcp-tool is the tool with the same answer and price; free routes have free tools."
+  },
+  "paths": {
+    "/api/v1/intelligence/opportunities": {
+      "get": {
+        "operationId": "findOpportunities",
+        "summary": "Search trading opportunities matching a goal",
+        "description": "Goal-driven opportunity scan for agents. Name an objective and constraints; get ranked symbols with supporting and conflicting evidence grouped by independent source (spot_dex_flow, perp_positioning, smart_money), typed risk factors, data quality, the live 1h hit rate of the signal and the next calls to make. Deterministic, no model in the loop. Objectives: unusual_buying, unusual_selling, breakout, breakdown, crowded_positioning (direction against the crowd), smart_money_accumulation, smart_money_distribution. An empty result list is a valid answer when data is fresh (filteredOut says why); 404 (not charged) only without fresh data; 400 (not charged) lists accepted values.",
+        "tags": [
+          "Agent Tools"
+        ],
+        "security": [
+          {},
+          {
+            "siwx": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "objective",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "unusual_buying",
+                "unusual_selling",
+                "breakout",
+                "breakdown",
+                "crowded_positioning",
+                "smart_money_accumulation",
+                "smart_money_distribution"
+              ]
+            },
+            "description": "What to look for",
+            "example": "unusual_buying"
+          },
+          {
+            "name": "universe",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated symbols (max 100); omit for all covered symbols",
+            "example": "all"
+          },
+          {
+            "name": "assetClass",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "crypto",
+                "us_equity",
+                "perp_only"
+              ]
+            },
+            "description": "Asset class filter: crypto, us_equity or perp_only",
+            "example": "crypto"
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1m",
+                "5m",
+                "15m"
+              ],
+              "default": "5m"
+            },
+            "description": "Aggregation window of the signal: 1m, 5m, 15m, 1h, 4h or 24h",
+            "example": "5m"
+          },
+          {
+            "name": "minBuyPressure",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 50,
+              "maximum": 100,
+              "default": 60
+            },
+            "description": "Pressure on the objective's side (sell pressure for selling objectives)",
+            "example": 60
+          },
+          {
+            "name": "minVolumeMultiple",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 1.5
+            },
+            "description": "Volume vs the symbol's own baseline",
+            "example": 1.5
+          },
+          {
+            "name": "minVolumeUsd",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0
+            },
+            "description": "USD traded in the window",
+            "example": 0
+          },
+          {
+            "name": "minConfidence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 50
+            },
+            "description": "Minimum signal confidence (0-100)",
+            "example": 50
+          },
+          {
+            "name": "minIndependentSources",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3,
+              "default": 1
+            },
+            "description": "Distinct sources confirming the direction",
+            "example": 1
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated: metrics, evidence, risk_factors, data_quality, track_record, market_context (default all)",
+            "example": "metrics,evidence,risk_factors"
+          },
+          {
+            "name": "maxResults",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            },
+            "description": "Maximum number of ranked results (1-50)",
+            "example": 10
+          }
+        ],
+        "x-payment-info": {
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ],
+          "networks": [
+            "eip155:8453",
+            "eip155:137",
+            "eip155:42161",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "eip155:480"
+          ],
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.03"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked opportunities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "objective": {
+                      "type": "string"
+                    },
+                    "objectiveDefinition": {
+                      "type": "string"
+                    },
+                    "window": {
+                      "type": "string"
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "algoVersion": {
+                      "type": "string"
+                    },
+                    "request": {
+                      "type": "object",
+                      "description": "The request with defaults applied"
+                    },
+                    "symbolsScanned": {
+                      "type": "integer"
+                    },
+                    "matches": {
+                      "type": "integer"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "rank": {
+                            "type": "integer"
+                          },
+                          "symbol": {
+                            "type": "string"
+                          },
+                          "assetClass": {
+                            "type": "string",
+                            "enum": [
+                              "crypto",
+                              "us_equity",
+                              "perp_only"
+                            ]
+                          },
+                          "direction": {
+                            "type": "string",
+                            "enum": [
+                              "BULLISH",
+                              "BEARISH"
+                            ]
+                          },
+                          "score": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100,
+                            "description": "40 for meeting the objective + up to 20 for strength + 15 per extra confirming source +/- up to 15 for calibration (live hit rate minus 50 on >= 30 samples), - 10 per conflicting item, - 5 per HIGH risk"
+                          },
+                          "independentSourcesConfirming": {
+                            "type": "integer"
+                          },
+                          "confirmingSources": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "price": {
+                            "type": "number"
+                          },
+                          "signal": {
+                            "type": "string"
+                          },
+                          "eventType": {
+                            "type": "string"
+                          },
+                          "metrics": {
+                            "type": "object",
+                            "description": "buyPressure, momentumScore, priceChangePercent, volumeUsd, volumeMultiple, anomalyScore, activityScore, tradeCount, largeTradeCount, confidenceScore, asOf"
+                          },
+                          "supportingEvidence": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "spot_dex_flow",
+                                    "perp_positioning",
+                                    "smart_money"
+                                  ]
+                                },
+                                "type": {
+                                  "type": "string",
+                                  "description": "buy_pressure, momentum, volume_anomaly, market_event, large_trades, long_short_open_interest, top_wallet_net_flow"
+                                },
+                                "direction": {
+                                  "type": "string",
+                                  "enum": [
+                                    "BULLISH",
+                                    "BEARISH",
+                                    "NEUTRAL",
+                                    "ACTIVITY"
+                                  ]
+                                },
+                                "observedValue": {},
+                                "unit": {
+                                  "type": "string"
+                                },
+                                "detail": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "conflictingEvidence": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "spot_dex_flow",
+                                    "perp_positioning",
+                                    "smart_money"
+                                  ]
+                                },
+                                "type": {
+                                  "type": "string",
+                                  "description": "buy_pressure, momentum, volume_anomaly, market_event, large_trades, long_short_open_interest, top_wallet_net_flow"
+                                },
+                                "direction": {
+                                  "type": "string",
+                                  "enum": [
+                                    "BULLISH",
+                                    "BEARISH",
+                                    "NEUTRAL",
+                                    "ACTIVITY"
+                                  ]
+                                },
+                                "observedValue": {},
+                                "unit": {
+                                  "type": "string"
+                                },
+                                "detail": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "riskFactors": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "description": "thin_liquidity, low_confidence, bot_dominated_flow, baseline_not_ready, crowded_positioning, price_dislocation, us_market_closed, corporate_action, macro_event, conflicting_evidence, weak_signal_track_record"
+                                },
+                                "severity": {
+                                  "type": "string",
+                                  "enum": [
+                                    "LOW",
+                                    "MEDIUM",
+                                    "HIGH"
+                                  ]
+                                },
+                                "detail": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "dataQuality": {
+                            "type": "object",
+                            "description": "sourcesAvailable, sourcesMissing, signalAgeSeconds, confidenceScore, tradeCount, baselineReady, organicSharePercent, freshPools, oracleDeviationBps"
+                          },
+                          "signalTrackRecord1h": {
+                            "type": "object",
+                            "description": "Live 1h hit rate of this signal label over 30 days (all symbols); hitRatePercent is null below 30 evaluated signals; appliesToThisDirection says whether the signal points the same way as the result (only then it counts in the score)"
+                          },
+                          "nextCalls": {
+                            "type": "object",
+                            "description": "Follow-up routes: preTradeCheck, positioning, smartMoney, trackRecord"
+                          },
+                          "calibratedHitRatePercent": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "description": "Live hit rate behind this result (the signal 1h record in the result direction, or crowding events 4h for crowded_positioning); null below 30 evaluated samples"
+                          },
+                          "positioningTrackRecord4h": {
+                            "type": "object",
+                            "description": "crowded_positioning only: 4h record of crowding events on this side"
+                          }
+                        }
+                      }
+                    },
+                    "noMatchReason": {
+                      "type": "string"
+                    },
+                    "filteredOut": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "description": "Why symbols were excluded, with counts"
+                    },
+                    "notCovered": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "marketContext": {
+                      "type": "object",
+                      "description": "regime, usMarketSession, stablecoinNetIssuance24hUsd, macroEventsNext2h"
+                    },
+                    "method": {
+                      "type": "string"
+                    },
+                    "disclaimer": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "objective": "unusual_buying",
+                  "window": "15m",
+                  "asOf": "2026-09-25T11:00:00Z",
+                  "algoVersion": "opportunities-v1-2026-09-25",
+                  "symbolsScanned": 104,
+                  "matches": 1,
+                  "results": [
+                    {
+                      "rank": 1,
+                      "symbol": "ETHUSD",
+                      "assetClass": "crypto",
+                      "direction": "BULLISH",
+                      "score": 78,
+                      "independentSourcesConfirming": 2,
+                      "confirmingSources": [
+                        "spot_dex_flow",
+                        "smart_money"
+                      ],
+                      "price": 2692.07,
+                      "signal": "BUYING_ACTIVITY",
+                      "eventType": "BULLISH_ACCUMULATION",
+                      "metrics": {
+                        "momentumScore": 66.1,
+                        "confidenceScore": 96.0,
+                        "buyPressure": 72.4,
+                        "volumeUsd": 3400000,
+                        "volumeMultiple": 2.8
+                      },
+                      "supportingEvidence": [
+                        {
+                          "source": "spot_dex_flow",
+                          "type": "buy_pressure",
+                          "direction": "BULLISH",
+                          "observedValue": 72.4,
+                          "unit": "percent of organic aggressor volume",
+                          "detail": "Buy pressure 72.4% over 15m (55+ bullish, 45- bearish)"
+                        }
+                      ],
+                      "conflictingEvidence": [],
+                      "riskFactors": [
+                        {
+                          "severity": "MEDIUM",
+                          "type": "macro_event",
+                          "detail": "US CPI in 45 min"
+                        }
+                      ],
+                      "dataQuality": {
+                        "freshPools": 28,
+                        "organicSharePercent": 67.0,
+                        "sourcesAvailable": [
+                          "spot_dex_flow",
+                          "perp_positioning",
+                          "smart_money"
+                        ],
+                        "signalAgeSeconds": 38
+                      },
+                      "signalTrackRecord1h": {
+                        "evaluated": 145,
+                        "hitRatePercent": 71.7,
+                        "sufficientSample": true,
+                        "signal": "BUYING_ACTIVITY"
+                      },
+                      "nextCalls": {
+                        "preTradeCheck": "/api/v1/intelligence/pre-trade?symbol=ETHUSD&side=buy&window=15m"
+                      }
+                    }
+                  ],
+                  "filteredOut": {
+                    "volume_not_unusual": 15,
+                    "buy_pressure_below_minBuyPressure": 88
+                  },
+                  "marketContext": {
+                    "regime": "MIXED",
+                    "usMarketSession": "REGULAR"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request with the accepted values (not charged)"
+          },
+          "402": {
+            "description": "Payment Required"
+          },
+          "404": {
+            "description": "No fresh market data (not charged)"
+          }
+        },
+        "x-mcp-tool": "find_opportunities"
+      },
+      "post": {
+        "operationId": "findOpportunitiesPost",
+        "summary": "Search opportunities from a JSON goal and constraints",
+        "description": "Goal-driven opportunity scan for agents. Name an objective and constraints; get ranked symbols with supporting and conflicting evidence grouped by independent source (spot_dex_flow, perp_positioning, smart_money), typed risk factors, data quality, the live 1h hit rate of the signal and the next calls to make. Deterministic, no model in the loop. Objectives: unusual_buying, unusual_selling, breakout, breakdown, crowded_positioning (direction against the crowd), smart_money_accumulation, smart_money_distribution. An empty result list is a valid answer when data is fresh (filteredOut says why); 404 (not charged) only without fresh data; 400 (not charged) lists accepted values.",
+        "tags": [
+          "Agent Tools"
+        ],
+        "security": [
+          {},
+          {
+            "siwx": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "objective"
+                ],
+                "properties": {
+                  "objective": {
+                    "type": "string",
+                    "enum": [
+                      "unusual_buying",
+                      "unusual_selling",
+                      "breakout",
+                      "breakdown",
+                      "crowded_positioning",
+                      "smart_money_accumulation",
+                      "smart_money_distribution"
+                    ]
+                  },
+                  "universe": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "description": "Symbols to scan; omit for all covered"
+                  },
+                  "constraints": {
+                    "type": "object",
+                    "description": "Optional; the same keys are also accepted at the top level",
+                    "properties": {
+                      "assetClass": {
+                        "type": "string",
+                        "enum": [
+                          "crypto",
+                          "us_equity",
+                          "perp_only"
+                        ]
+                      },
+                      "window": {
+                        "type": "string",
+                        "enum": [
+                          "1m",
+                          "5m",
+                          "15m"
+                        ],
+                        "default": "5m"
+                      },
+                      "minBuyPressure": {
+                        "type": "number",
+                        "minimum": 50,
+                        "maximum": 100,
+                        "default": 60,
+                        "description": "Pressure on the objective's side"
+                      },
+                      "minVolumeMultiple": {
+                        "type": "number",
+                        "default": 1.5
+                      },
+                      "minVolumeUsd": {
+                        "type": "number",
+                        "default": 0
+                      },
+                      "minConfidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "default": 50
+                      },
+                      "minIndependentSources": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 3,
+                        "default": 1
+                      }
+                    }
+                  },
+                  "include": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "metrics",
+                        "evidence",
+                        "risk_factors",
+                        "data_quality",
+                        "track_record",
+                        "market_context"
+                      ]
+                    }
+                  },
+                  "maxResults": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 10
+                  },
+                  "window": {
+                    "type": "string",
+                    "enum": [
+                      "1m",
+                      "5m",
+                      "15m",
+                      "1h",
+                      "4h",
+                      "24h"
+                    ],
+                    "default": "5m",
+                    "description": "Signal window to scan."
+                  }
+                }
+              },
+              "example": {
+                "objective": "unusual_buying",
+                "window": "15m",
+                "constraints": {
+                  "minBuyPressure": 60
+                },
+                "maxResults": 10
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ],
+          "networks": [
+            "eip155:8453",
+            "eip155:137",
+            "eip155:42161",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "eip155:480"
+          ],
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.03"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ranked opportunities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "objective": {
+                      "type": "string"
+                    },
+                    "objectiveDefinition": {
+                      "type": "string"
+                    },
+                    "window": {
+                      "type": "string"
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "algoVersion": {
+                      "type": "string"
+                    },
+                    "request": {
+                      "type": "object",
+                      "description": "The request with defaults applied"
+                    },
+                    "symbolsScanned": {
+                      "type": "integer"
+                    },
+                    "matches": {
+                      "type": "integer"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "rank": {
+                            "type": "integer"
+                          },
+                          "symbol": {
+                            "type": "string"
+                          },
+                          "assetClass": {
+                            "type": "string",
+                            "enum": [
+                              "crypto",
+                              "us_equity",
+                              "perp_only"
+                            ]
+                          },
+                          "direction": {
+                            "type": "string",
+                            "enum": [
+                              "BULLISH",
+                              "BEARISH"
+                            ]
+                          },
+                          "score": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100,
+                            "description": "40 for meeting the objective + up to 20 for strength + 15 per extra confirming source +/- up to 15 for calibration (live hit rate minus 50 on >= 30 samples), - 10 per conflicting item, - 5 per HIGH risk"
+                          },
+                          "independentSourcesConfirming": {
+                            "type": "integer"
+                          },
+                          "confirmingSources": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "price": {
+                            "type": "number"
+                          },
+                          "signal": {
+                            "type": "string"
+                          },
+                          "eventType": {
+                            "type": "string"
+                          },
+                          "metrics": {
+                            "type": "object",
+                            "description": "buyPressure, momentumScore, priceChangePercent, volumeUsd, volumeMultiple, anomalyScore, activityScore, tradeCount, largeTradeCount, confidenceScore, asOf"
+                          },
+                          "supportingEvidence": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "spot_dex_flow",
+                                    "perp_positioning",
+                                    "smart_money"
+                                  ]
+                                },
+                                "type": {
+                                  "type": "string",
+                                  "description": "buy_pressure, momentum, volume_anomaly, market_event, large_trades, long_short_open_interest, top_wallet_net_flow"
+                                },
+                                "direction": {
+                                  "type": "string",
+                                  "enum": [
+                                    "BULLISH",
+                                    "BEARISH",
+                                    "NEUTRAL",
+                                    "ACTIVITY"
+                                  ]
+                                },
+                                "observedValue": {},
+                                "unit": {
+                                  "type": "string"
+                                },
+                                "detail": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "conflictingEvidence": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "enum": [
+                                    "spot_dex_flow",
+                                    "perp_positioning",
+                                    "smart_money"
+                                  ]
+                                },
+                                "type": {
+                                  "type": "string",
+                                  "description": "buy_pressure, momentum, volume_anomaly, market_event, large_trades, long_short_open_interest, top_wallet_net_flow"
+                                },
+                                "direction": {
+                                  "type": "string",
+                                  "enum": [
+                                    "BULLISH",
+                                    "BEARISH",
+                                    "NEUTRAL",
+                                    "ACTIVITY"
+                                  ]
+                                },
+                                "observedValue": {},
+                                "unit": {
+                                  "type": "string"
+                                },
+                                "detail": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "riskFactors": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "description": "thin_liquidity, low_confidence, bot_dominated_flow, baseline_not_ready, crowded_positioning, price_dislocation, us_market_closed, corporate_action, macro_event, conflicting_evidence, weak_signal_track_record"
+                                },
+                                "severity": {
+                                  "type": "string",
+                                  "enum": [
+                                    "LOW",
+                                    "MEDIUM",
+                                    "HIGH"
+                                  ]
+                                },
+                                "detail": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "dataQuality": {
+                            "type": "object",
+                            "description": "sourcesAvailable, sourcesMissing, signalAgeSeconds, confidenceScore, tradeCount, baselineReady, organicSharePercent, freshPools, oracleDeviationBps"
+                          },
+                          "signalTrackRecord1h": {
+                            "type": "object",
+                            "description": "Live 1h hit rate of this signal label over 30 days (all symbols); hitRatePercent is null below 30 evaluated signals; appliesToThisDirection says whether the signal points the same way as the result (only then it counts in the score)"
+                          },
+                          "nextCalls": {
+                            "type": "object",
+                            "description": "Follow-up routes: preTradeCheck, positioning, smartMoney, trackRecord"
+                          },
+                          "calibratedHitRatePercent": {
+                            "type": [
+                              "number",
+                              "null"
+                            ],
+                            "description": "Live hit rate behind this result (the signal 1h record in the result direction, or crowding events 4h for crowded_positioning); null below 30 evaluated samples"
+                          },
+                          "positioningTrackRecord4h": {
+                            "type": "object",
+                            "description": "crowded_positioning only: 4h record of crowding events on this side"
+                          }
+                        }
+                      }
+                    },
+                    "noMatchReason": {
+                      "type": "string"
+                    },
+                    "filteredOut": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "description": "Why symbols were excluded, with counts"
+                    },
+                    "notCovered": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "marketContext": {
+                      "type": "object",
+                      "description": "regime, usMarketSession, stablecoinNetIssuance24hUsd, macroEventsNext2h"
+                    },
+                    "method": {
+                      "type": "string"
+                    },
+                    "disclaimer": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "objective": "unusual_buying",
+                  "window": "15m",
+                  "asOf": "2026-09-25T11:00:00Z",
+                  "algoVersion": "opportunities-v1-2026-09-25",
+                  "symbolsScanned": 104,
+                  "matches": 1,
+                  "results": [
+                    {
+                      "rank": 1,
+                      "symbol": "ETHUSD",
+                      "assetClass": "crypto",
+                      "direction": "BULLISH",
+                      "score": 78,
+                      "independentSourcesConfirming": 2,
+                      "confirmingSources": [
+                        "spot_dex_flow",
+                        "smart_money"
+                      ],
+                      "price": 2692.07,
+                      "signal": "BUYING_ACTIVITY",
+                      "eventType": "BULLISH_ACCUMULATION",
+                      "metrics": {
+                        "momentumScore": 66.1,
+                        "confidenceScore": 96.0,
+                        "buyPressure": 72.4,
+                        "volumeUsd": 3400000,
+                        "volumeMultiple": 2.8
+                      },
+                      "supportingEvidence": [
+                        {
+                          "source": "spot_dex_flow",
+                          "type": "buy_pressure",
+                          "direction": "BULLISH",
+                          "observedValue": 72.4,
+                          "unit": "percent of organic aggressor volume",
+                          "detail": "Buy pressure 72.4% over 15m (55+ bullish, 45- bearish)"
+                        }
+                      ],
+                      "conflictingEvidence": [],
+                      "riskFactors": [
+                        {
+                          "severity": "MEDIUM",
+                          "type": "macro_event",
+                          "detail": "US CPI in 45 min"
+                        }
+                      ],
+                      "dataQuality": {
+                        "freshPools": 28,
+                        "organicSharePercent": 67.0,
+                        "sourcesAvailable": [
+                          "spot_dex_flow",
+                          "perp_positioning",
+                          "smart_money"
+                        ],
+                        "signalAgeSeconds": 38
+                      },
+                      "signalTrackRecord1h": {
+                        "evaluated": 145,
+                        "hitRatePercent": 71.7,
+                        "sufficientSample": true,
+                        "signal": "BUYING_ACTIVITY"
+                      },
+                      "nextCalls": {
+                        "preTradeCheck": "/api/v1/intelligence/pre-trade?symbol=ETHUSD&side=buy&window=15m"
+                      }
+                    }
+                  ],
+                  "filteredOut": {
+                    "volume_not_unusual": 15,
+                    "buy_pressure_below_minBuyPressure": 88
+                  },
+                  "marketContext": {
+                    "regime": "MIXED",
+                    "usMarketSession": "REGULAR"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request with the accepted values (not charged)"
+          },
+          "402": {
+            "description": "Payment Required"
+          },
+          "404": {
+            "description": "No fresh market data (not charged)"
+          }
+        },
+        "x-mcp-tool": "find_opportunities"
+      }
+    },
+    "/api/v1/feedback": {
+      "get": {
+        "operationId": "getFeedbackInfo",
+        "summary": "How to send feedback to the operator",
+        "description": "Free. The fields accepted by POST /api/v1/feedback.",
+        "tags": [
+          "Agent Tools"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Fields and an example",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter: the message says which and what is allowed. Never charged."
+          }
+        },
+        "x-mcp-tool": "send_feedback"
+      },
+      "post": {
+        "operationId": "sendFeedback",
+        "summary": "Tell the operator what was missing",
+        "description": "Free. Tell us what was missing or wrong: a route or tool you expected, a symbol without data, a confusing parameter. At least one of rating, missing or message; 10 per hour per client. Read by a human.",
+        "tags": [
+          "Agent Tools"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "route": {
+                    "type": "string",
+                    "description": "Route or MCP tool it is about"
+                  },
+                  "rating": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "missing": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "contact": {
+                    "type": "string",
+                    "maxLength": 120
+                  }
+                }
+              },
+              "example": {
+                "route": "/api/v1/intelligence/SOLUSD",
+                "rating": 3,
+                "missing": "funding rate history per venue"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Received"
+          },
+          "400": {
+            "description": "Empty or invalid"
+          },
+          "429": {
+            "description": "More than 10 in an hour"
+          }
+        },
+        "x-mcp-tool": "send_feedback"
+      }
+    },
+    "/api/v1/credits/buy/{usd}": {
+      "post": {
+        "operationId": "buyCredits",
+        "summary": "Buy or top up prepaid credits",
+        "description": "One x402 payment of the pack price ($5, $20 or $50; credit $5, $22 or $60) returns an API key with that credit (shown once). With an existing credit key in X-API-Key the pack is added to it. Each call made with the key costs the route's x402 price; calls answered with HTTP 400 or above are refunded. Main-network payments only (no testnet).",
+        "tags": [
+          "Agent Tools"
+        ],
+        "security": [
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "usd",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "enum": [
+                5,
+                20,
+                50
+              ]
+            },
+            "description": "Pack price in USD: 5, 20 or 50.",
+            "example": 5
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional: a credit key to top up",
+            "example": "mi_..."
+          }
+        ],
+        "x-payment-info": {
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ],
+          "networks": [
+            "eip155:8453",
+            "eip155:137",
+            "eip155:42161",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "eip155:480"
+          ],
+          "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": "5.00",
+            "max": "50.00"
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "apiKey (new) or toppedUp",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "creditUsd": {
+                      "type": "integer"
+                    },
+                    "apiKey": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "Fields of the example; real answers carry more (the schema is open)."
+                },
+                "example": {
+                  "creditUsd": 22,
+                  "apiKey": "mi_...",
+                  "status": "active once the payment settles"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown pack or testnet payment (not charged)"
+          },
+          "402": {
+            "description": "Payment Required (the pack price)"
+          },
+          "404": {
+            "description": "No data for this symbol, window or input right now. Never charged; the body names the covered values and the right route."
+          }
+        }
+      }
+    },
+    "/api/v1/alerts": {
+      "get": {
+        "operationId": "getAlertCatalog",
+        "summary": "Webhook alert events, filters, pack and signing (free)",
+        "tags": [
+          "Agent Tools"
+        ],
+        "security": [],
+        "description": "Free. Lists the events that can be pushed to a webhook, their filters, the prepaid pack (price, days, deliveries), the delivery format and how to verify the HMAC-SHA256 signature.",
+        "responses": {
+          "200": {
+            "description": "Alert catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter: the message says which and what is allowed. Never charged."
+          }
+        },
+        "x-mcp-tool": "manage_alert_subscription"
+      }
+    },
+    "/api/v1/alerts/subscriptions": {
+      "post": {
+        "operationId": "subscribeAlerts",
+        "summary": "Subscribe a webhook to market alerts (prepaid pack)",
+        "tags": [
+          "Agent Tools"
+        ],
+        "description": "Push instead of polling. One x402 payment buys a pack of 7 days and up to 200 deliveries to your public HTTPS URL; the pack starts when the payment settles. Events: decision_change (the hourly decision of a symbol with live on-chain trading, about 40, changed action), unusual_flow (non-normal 5m trade-flow event with confidence >= 60, at most hourly per symbol), funding_extreme (a Hyperliquid perp with over $5M open interest reaches >= 50%/yr or <= -25%/yr funding), news (classified news or filing with materiality >= minMateriality, default 4 of 5; filter by categories and symbols) token_risk_change (the verdict or sell simulation of up to 5 watched tokens changed; checked every 30 minutes) and stablecoin_depeg (a dollar stablecoin reaches WATCH at 30 bps or DEPEG at 100 bps; checked every 5 minutes). Each delivery is a JSON POST {id, subscriptionId, event, symbol, occurredAt, data, deliveriesLeft, expiresAt} with headers X-MI-Event, X-MI-Delivery, X-MI-Timestamp and X-MI-Signature = sha256=hex(HMAC_SHA256(secret, timestamp + \".\" + body)). A 2xx within 10 s counts as delivered; failures are retried after 30 s and 5 min and do not use up the pack. After 50 failures in a row the subscription is suspended until POST /{id}/resume; missed events can be fetched from GET /{id}/events. Private, loopback and non-HTTPS URLs are refused and redirects are not followed.",
+        "security": [
+          {},
+          {
+            "siwx": []
+          }
+        ],
+        "x-payment-info": {
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ],
+          "networks": [
+            "eip155:8453",
+            "eip155:137",
+            "eip155:42161",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "eip155:480"
+          ],
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.50"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "events"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Public HTTPS URL that receives the POSTs"
+                  },
+                  "events": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "decision_change",
+                        "unusual_flow",
+                        "funding_extreme",
+                        "news",
+                        "token_risk_change",
+                        "stablecoin_depeg",
+                        "sec_filing",
+                        "prediction_market_move"
+                      ]
+                    }
+                  },
+                  "symbols": {
+                    "type": "array",
+                    "maxItems": 25,
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Only these symbols (empty = all)"
+                  },
+                  "tokens": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "description": "For token_risk_change",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "address"
+                      ],
+                      "properties": {
+                        "address": {
+                          "type": "string",
+                          "description": "ERC-20 contract (0x...) or Solana mint"
+                        },
+                        "chain": {
+                          "type": "string",
+                          "enum": [
+                            "base",
+                            "ethereum",
+                            "arbitrum",
+                            "optimism",
+                            "polygon",
+                            "solana"
+                          ],
+                          "description": "Default base (solana for a base58 mint)"
+                        }
+                      }
+                    }
+                  },
+                  "categories": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "crypto",
+                        "stocks",
+                        "europe",
+                        "policy",
+                        "filings"
+                      ]
+                    },
+                    "description": "News categories (empty = all)"
+                  },
+                  "minMateriality": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 4
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "forms": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "4",
+                        "8-K",
+                        "144",
+                        "SC 13D",
+                        "SC 13G",
+                        "10-Q",
+                        "10-K",
+                        "S-1",
+                        "DEF 14A"
+                      ]
+                    },
+                    "description": "For sec_filing: only these SEC forms (default all). sec_filing needs symbols (US tickers)."
+                  }
+                }
+              },
+              "example": {
+                "url": "https://your-agent.example.com/hooks/market",
+                "events": [
+                  "decision_change",
+                  "funding_extreme"
+                ],
+                "symbols": [
+                  "ETHUSD",
+                  "BTCUSD",
+                  "NVDA"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The subscription with its secret (shown only once)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "active",
+                        "used_up",
+                        "expired",
+                        "cancelled",
+                        "suspended"
+                      ]
+                    },
+                    "secret": {
+                      "type": "string",
+                      "description": "Only in the response to the subscribe call"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "decision_change",
+                          "unusual_flow",
+                          "funding_extreme",
+                          "news",
+                          "token_risk_change",
+                          "stablecoin_depeg",
+                          "sec_filing",
+                          "prediction_market_move"
+                        ]
+                      }
+                    },
+                    "symbols": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "tokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "minMateriality": {
+                      "type": "integer"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "deliveriesLeft": {
+                      "type": "integer"
+                    },
+                    "delivered": {
+                      "type": "integer"
+                    },
+                    "manage": {
+                      "type": "object"
+                    },
+                    "recentDeliveries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "events": [
+                    "decision_change",
+                    "funding_extreme"
+                  ],
+                  "id": "sub_3f9c2a61d0b84e5a9c7e1f20",
+                  "status": "active",
+                  "deliveriesLeft": 200,
+                  "secret": "whsec_...",
+                  "expiresAt": "2026-10-06T08:00:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (nothing is charged)"
+          },
+          "402": {
+            "description": "Payment Required, or the payment did not settle (nothing activated)"
+          },
+          "404": {
+            "description": "No data for this symbol, window or input right now. Never charged; the body names the covered values and the right route."
+          }
+        },
+        "x-mcp-tool": "subscribe_alerts"
+      }
+    },
+    "/api/v1/alerts/subscriptions/{id}/events": {
+      "get": {
+        "operationId": "getAlertEvents",
+        "summary": "Catch up on missed webhook events (free with the secret)",
+        "tags": [
+          "Agent Tools"
+        ],
+        "security": [],
+        "description": "Events of the subscription since a time (default 24 hours, at most 14 days), oldest first, with their full payloads and delivery status: lets a subscriber whose endpoint was down catch up without polling the paid routes. Events that were not delivered count against the pack when first fetched here, so the pack is the same whether events are pushed or pulled; those beyond what is left are withheld. Up to 100 per call; follow next.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^sub_[0-9a-f]{24}$"
+            },
+            "description": "Subscription id",
+            "example": "sub_3f9c2a61d0b84e5a9c7e1f20"
+          },
+          {
+            "name": "X-Alert-Secret",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The secret returned when subscribing",
+            "example": "whsec_..."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Endpoint query parameter"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            },
+            "example": 100,
+            "description": "Maximum number of results to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events with payloads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid since"
+          },
+          "404": {
+            "description": "Subscription not found or wrong secret"
+          }
+        },
+        "x-mcp-tool": "manage_alert_subscription"
+      }
+    },
+    "/api/v1/gifts/config": {
+      "get": {
+        "operationId": "getGiftLinksConfig",
+        "summary": "Get the gift links contract, chain and fee",
+        "description": "Free. Gift links send USDC by link or QR code: the sender locks the amount in a contract with no owner or admin (create at /gift), the link carries a one-time key, and whoever holds it claims the whole gift to their own wallet. Gifts are 0.01 to 10 000 USDC; the sender pays a 1% fee on top, kept only when the gift is claimed: a cancelled or expired gift goes back to the sender with the fee. Addresses on the OFAC SDN list are refused. This server never holds the money or the key. USDC on Base.",
+        "tags": [
+          "Agent Tools"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Contract address, chain id, token, fee percent and explorer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameter: the message says which and what is allowed. Never charged."
+          }
+        },
+        "x-mcp-tool": "get_gift_link"
+      }
+    },
+    "/mcp/core": {
+      "post": {
+        "operationId": "McpController_core",
+        "summary": "Use when the MCP client should load few tools",
+        "description": "Use when the MCP client should load few tools. Compact MCP server with the 18 most used tools: live decision, pre-trade check, opportunity scan, snapshot, move explanation, token verdict and risk, new tokens, swap quote, Fed rate odds, prediction markets, DeFi yields, market summary, macro calendar, news and fundamentals. Each tools/call costs its HTTP route price; the full server is /mcp.",
+        "tags": [
+          "Agent Tools"
+        ],
+        "x-generated": true,
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "example": {
+                  "jsonrpc": "2.0",
+                  "result": {
+                    "tools": [
+                      {
+                        "name": "get_decision_lite"
+                      }
+                    ]
+                  },
+                  "id": 1
+                },
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "tools": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": true
+                          }
+                        }
+                      },
+                      "additionalProperties": true
+                    },
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "additionalProperties": true,
+                  "description": "Fields of the example; real answers carry more (the schema is open)."
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required: the x402 requirements (price, networks, payTo) are in the PAYMENT-REQUIRED header and the body. Sign one of accepts[] and repeat the request with PAYMENT-SIGNATURE. Nothing is charged until a 2xx answer."
+          },
+          "404": {
+            "description": "No data for this symbol, window or input right now. Never charged; the body names the covered values and the right route."
+          },
+          "400": {
+            "description": "Invalid parameter: the message says which and what is allowed. Never charged."
+          }
+        },
+        "x-payment-info": {
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ],
+          "networks": [
+            "eip155:8453",
+            "eip155:137",
+            "eip155:42161",
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "eip155:480"
+          ],
+          "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": "0.001",
+            "max": "0.05"
+          }
+        },
+        "security": [
+          {},
+          {
+            "siwx": []
+          }
+        ]
+      }
+    }
+  },
+  "x-treazury-fixture-scope": "Reduced primary OpenAPI capture for provider compatibility, method and output regressions; not a complete catalog."
+}

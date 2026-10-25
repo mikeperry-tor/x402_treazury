@@ -1,0 +1,30 @@
+description = "Cross-asset event intelligence, exposure graphs, crypto market data, funding carry and probability forecasts."
+spec = "https://intel.degenscan.io/openapi.json"
+name = "Degenscan Intel"
+base_url = "https://intel.degenscan.io"
+prefix = "degenscan"
+include = ["/v1", ""]
+# Credential issuance/prepaid subscriptions and MCP transport are separate workflows.
+exclude = ["/v1/keys", "/mcp"]
+pricing_key = "x-price-usd"
+help_url = "https://intel.degenscan.io/llms.txt"
+instructions_text = "Preserve event timestamps, sources and heuristic confidence. Forecast submission returns forecast_id; use the forecast status read to poll until done or failed. A queued or running response is not a completed forecast."
+
+# The guide documents keyless x402 prices omitted by the subscription-oriented schema.
+[overrides.degenscan_carry_funding_matrix]
+description = "Retrieve annualised funding, mark, open interest, volume and spot availability for Hyperliquid perps across dexes. Supports keyless per-call x402 as well as the vendor subscription. Cost: ~$0.03/call [vendor guide]."
+
+[overrides.degenscan_carry_xdex]
+description = "Compare same-ticker funding across HIP-3 dexes, including current and 14-day spreads, positive-hour share, basis and liquidity. Supports keyless per-call x402. Cost: ~$0.05/call [vendor guide]."
+
+[overrides.degenscan_carry_spot_perp]
+description = "Compare main-dex perp funding with spot, including current and 14-day funding, positive-hour share and basis. Supports keyless per-call x402. Cost: ~$0.03/call [vendor guide]."
+
+[overrides.degenscan_carry_history_coin]
+description = "Retrieve hourly funding, premium, mark, open interest and volume history for coin beyond Hyperliquid's 500-hour retention. Prefix HIP-3 coins with their dex, e.g. xyz:NBIS. Supports keyless per-call x402. Cost: ~$0.02/call [vendor guide]."
+
+[overrides.degenscan_carry_naked]
+description = "Retrieve Hyperliquid funding extremes without an available hedge leg. Supports keyless per-call x402. Cost: ~$0.01/call [vendor guide]."
+
+[overrides.degenscan_carry_watchdog]
+description = "Retrieve Carry Oracle market and dex health. Supports keyless per-call x402. Cost: ~$0.01/call [vendor guide]."

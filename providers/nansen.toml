@@ -1,0 +1,13 @@
+description = "Keyless on-chain analytics: smart money, wallet profiling, token flows, historical data and prediction markets."
+spec = "https://api.nansen.ai/openapi.json"
+name = "Nansen"
+base_url = "https://api.nansen.ai"
+prefix = "nansen"
+include = ["/api/v1", ""]
+# API-key account/lifecycle namespaces and SSE-only conversational agents.
+exclude = ["/api/v1/account", "/api/v1/feedback", "/api/v1/smart-alert", "/api/v1/trade", "/api/v1/perp", "/api/v1/agent"]
+# These analytics/search operations inherit API-key authentication without x402.
+exclude_operations = ["POST /api/v1/profiler/address/labels", "POST /api/v1/profiler/address/premium-labels", "POST /api/v1/portfolio/defi-holdings", "POST /api/v1/search/entity-name", "GET /api/v1/search/token-sectors", "POST /api/v1/search/general"]
+pricing_key = "x-payment-info"
+help_url = "https://docs.nansen.ai/getting-started/agentic-payments/x402-payments.md"
+instructions_text = "Preserve chain coverage, observation dates, pagination and data gaps. Historical backtesting endpoints differ from recent-data screeners. Omit premium_labels or set false; true requires a paid API-key plan."

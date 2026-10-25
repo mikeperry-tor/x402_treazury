@@ -1,0 +1,21 @@
+description = "Public token Verdicts for Base and Solana, with free purchase receipt and result lookup."
+# External request projection; see providers/CAVEATS.md for capture and update rules.
+spec = "openapi.json"
+name = "AX1 Verdict"
+base_url = "https://www.ax1.vc"
+prefix = "ax1"
+include = ["/api/dashboard/q-verdict", "/api/q-verdict", ""]
+# Console run ownership requires a Privy session; external receipts are public.
+exclude = ["/api/dashboard/q-verdict/runs"]
+pricing_key = "x-payment-info"
+help_url = "https://www.ax1.vc/agents.md"
+instructions_text = "Verdicts are entertainment, not trading advice. Show result.disclaimer beside the verdict and link page_url. Save operation_id from submission; use the operation status tool for free status/result reads. HTTP 202 is pending or unknown; HTTP 200 still requires checking status. Missing results never authorize another purchase. External calls earn no Console rewards."
+
+[overrides.ax1_resource]
+description = "Buy a public token Verdict with grade, one_liner, roast and metrics. No account or Privy session is required. tokenAddress is required; chain defaults to base, or use solana for a case-sensitive mint. requestKey is optional correlation, not recovery authority. Payment is USDC on Base for either token chain. HTTP 202 means pending or unknown: save operation_id and use the free operation status tool; inspect status even on HTTP 200. Missing results never authorize another purchase. Exact signed-request recovery is unavailable through a new tool invocation, which creates a new purchase. Show result.disclaimer beside the verdict and link page_url; image_url remains a hosted link. External calls earn no Console rewards. Entertainment, not trading advice. Cost: ~$0.02/call [spec]."
+
+[overrides.ax1_resource.params]
+tokenAddress = "Token contract on Base (0x plus 40 hex characters), or case-sensitive Solana mint when chain=solana. Payment always uses USDC on Base."
+
+[overrides.ax1_help]
+description = "Read AX1's external Verdict guide, response fields and free status workflow. Exact signed-request recovery requires the original signature; a new tool invocation is a new purchase."

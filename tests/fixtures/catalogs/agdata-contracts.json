@@ -1,0 +1,765 @@
+{
+  "info": {
+    "contact": {
+      "email": "agdata@shveik.dev"
+    },
+    "description": "Unblocking and web data API for AI agents: any URL as clean Markdown, HTML or text, screenshots and PDFs of pages, YouTube transcripts, Google Maps reviews, job listings, Google News, Amazon reviews, web search with page content and fast search with excerpts, plus social, maps and search data as JSON. Endpoints: unblock, instagram, google-maps, tiktok, linkedin, youtube, twitter, reddit, amazon, google-search, google-maps-reviews, youtube-transcript, screenshot, linkedin-jobs, indeed-jobs, shopify-products, google-news, amazon-reviews, google-play-reviews, linkedin-company, web-search, x-replies, youtube-comments, tiktok-comments, instagram-comments, ebay-sold, meta-ads, linkedin-profile-email, linkedin-posts, facebook-page, facebook-posts, facebook-comments, domain-contacts, maps-contacts, email-verify, search-plus. Returns structured JSON. Payment is in stablecoins: x402 on Base and Polygon (plus Solana on most routes) or MPP on Base. x402 uses the exact scheme; no API keys, accounts or subscriptions. A failed scrape is never charged; otherwise a call pays a small fixed fee plus the results it returns, and results paid for but not delivered are refunded. Feedback is free: POST /feedback (or the MCP tool feedback) sends a note to the people who run the service. Every response carries RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset and RateLimit-Policy headers: they show the per-IP budget of the request class (free documents 120 per minute, unpaid quote requests 300 per minute; a request that carries a payment is never limited). Free GET documents (/openapi.json, /llms.txt, /agents.md, /pricing.md, /docs, /ask and /health) are limited to 120 requests per minute per client IP and return RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset and RateLimit-Policy; a 429 also includes Retry-After. API deprecation policy: https://agdata.shveik.dev/deprecation-policy.",
+    "title": "agdata",
+    "version": "1.1.0",
+    "x-api-lifecycle": {
+      "deprecation": "Deprecation and Sunset response headers with at least 90 days notice",
+      "policy": "https://agdata.shveik.dev/deprecation-policy",
+      "versioning": "URL prefix /v1"
+    },
+    "x-guidance": "POST a small JSON body (see each operation's requestBody) with no payment to get a 402 carrying a PAYMENT-REQUIRED header (x402) and a WWW-Authenticate: Payment challenge (MPP). Sign either and retry the same request with a PAYMENT-SIGNATURE header (x402) or Authorization: Payment (MPP) to receive the JSON dataset. The 402 quotes the price for your requested limit: a fixed per-call fee plus a per-result price for each result; endpoints without a limit field return one result. If fewer results come back than you asked for, the per-result price of the missing ones is refunded on-chain to the paying address (refunds too small to be worth a transfer are not sent); a scrape with no results keeps only the fixed fee and refunds every result; a failed scrape is not settled. Response headers X-Agdata-Results-Requested, X-Agdata-Results-Delivered and X-Agdata-Refund (USDC base units) report it. On unblock, a page that could not be fetched (blocked, an error status or empty) is not settled and nothing is kept for it (502, error not_fetched). On instagram, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On google-maps, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On tiktok, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On linkedin, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On youtube, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On twitter, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On reddit, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On amazon, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On google-search, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On google-maps-reviews, a place with no reviews is not settled and nothing is kept for it (502, error not_fetched). On youtube-transcript, a video without subtitles in the requested language is not settled and nothing is kept for it (502, error not_fetched). On screenshot, a page that could not be captured, renders blank or gives an image over 5 MiB is not settled and nothing is kept for it (502, error not_fetched). On linkedin-jobs, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On indeed-jobs, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On shopify-products, a site that is not a Shopify store, or has no public products is not settled and nothing is kept for it (502, error not_fetched). On google-news, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On amazon-reviews, a product with no reviews (or an unknown one) is not settled and nothing is kept for it (502, error not_fetched). On google-play-reviews, an app with no reviews (or an unknown one) is not settled and nothing is kept for it (502, error not_fetched). On linkedin-company, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On web-search, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On x-replies, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On youtube-comments, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On tiktok-comments, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On instagram-comments, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On ebay-sold, a search that returned no sold listings is not settled and nothing is kept for it (502, error not_fetched). On meta-ads, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On linkedin-profile-email, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On linkedin-posts, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). On facebook-page, a page that is private, unknown or not a page is not settled and nothing is kept for it (502, error not_fetched). On facebook-posts, a page with no readable posts is not settled and nothing is kept for it (502, error not_fetched). On facebook-comments, a post with no readable comments is not settled and nothing is kept for it (502, error not_fetched). On domain-contacts, sites where no email, phone or social link was found is not settled and nothing is kept for it (502, error not_fetched). On maps-contacts, a search that matched no places is not settled and nothing is kept for it (502, error not_fetched). On email-verify, addresses that got no verdict is not settled and nothing is kept for it (502, error not_fetched). On search-plus, a call that delivers nothing is not settled and nothing is kept for it (502, error not_fetched). The unblock endpoint fetches one page per call and has no limit field. A fetch can take up to about 90 s: keep the connection open; retrying with the same payment returns the stored result. youtube-transcript, screenshot and search-plus can take up to about 60 s: keep the connection open; retrying with the same payment returns the stored result. twitter, youtube-transcript, web-search, x-replies, meta-ads, domain-contacts, maps-contacts and email-verify are not offered on Solana. Results are returned as one JSON array; limit is a maximum-result count (clamped to endpoint bounds). Paid results have no cursor or continuation token; the only paginated resource is the free GET /endpoints list (limit, cursor, next_cursor). Calls are synchronous; scrape timeout is bounded by configured upstream and settlement windows. An occasional 202 means settlement may have reached the chain, not an asynchronous job; retry the same payment to resolve/retrieve, and there is no status URL."
+  },
+  "openapi": "3.1.0",
+  "servers": [
+    {
+      "description": "Current stable API routes; legacy unversioned routes remain available.",
+      "url": "https://agdata.shveik.dev/v1"
+    },
+    {
+      "description": "Unversioned compatibility routes.",
+      "url": "https://agdata.shveik.dev"
+    }
+  ],
+  "tags": [
+    {
+      "description": "Synchronous data retrieval; each request completes in the HTTP response.",
+      "name": "Scraping"
+    },
+    {
+      "description": "Free, unpaid API metadata.",
+      "name": "Discovery"
+    }
+  ],
+  "x-api-versioning": {
+    "current": "v1",
+    "policy": "The /v1 prefix identifies the current stable API. Unversioned paths remain compatibility aliases. Breaking changes will use a new major path and be announced with a deprecation period; no fixed sunset date is promised."
+  },
+  "x-discovery": {
+    "ownershipProofs": [
+      "0x4ffdf47416ffbbc8b180b751a1c18efe380b16b65d72717852cf220c5be3efe46349ab913f124e093bbc9f37e63f9f1de31f5165af3dfe07da884705dcd27cbf1b",
+      "0xb7d25846f7bb4548b1bae18daf930ec61b5b859d3f47d03209293afb9e967cc363cd5861f76e3dc8beef3f63d64098c314434789f0c97fffe5ea7cdc50697c4a1c",
+      "b1cms5zVangJCETnpvwDewgRKyavSgnaPqQFtL3Wrg4GdonoN13K9LHmVVfWsi8Nigi1MY7LXqpimyUeyuEV5B1"
+    ]
+  },
+  "x-service-info": {
+    "categories": [
+      "unblocker",
+      "screenshots",
+      "web-scraping",
+      "data",
+      "ai"
+    ],
+    "docs": {
+      "homepage": "https://agdata.shveik.dev"
+    }
+  },
+  "paths": {
+    "/endpoints": {
+      "get": {
+        "description": "Lists the paid endpoints with their paths and quote URLs, the same entries as the /v1 index. Pages hold limit entries (default 10, at most 50); when next_cursor is not null, pass it back as cursor for the next page. A malformed limit or cursor is a 400 error.",
+        "operationId": "listEndpoints",
+        "parameters": [
+          {
+            "description": "Entries per page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor: the next_cursor of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "next_cursor": {
+                      "description": "Cursor of the next page; null on the last page.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "total": {
+                      "description": "Number of endpoints in the whole list.",
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next_cursor",
+                    "total"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "One page of endpoints."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid limit or cursor (error invalid_request)."
+          }
+        },
+        "summary": "List the API endpoints, one page at a time",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/x402/screenshot": {
+      "post": {
+        "description": "Screenshot API for AI agents: send {url}, get JPEG, PNG, WebP or PDF as base64 JSON. Options: viewport, full page, dark mode, selector. It does not get past bot protection (use unblock for those pages' text). Failed or blank captures aren't charged. Send the JSON body with no payment to get a 402 with an x402 challenge (PAYMENT-REQUIRED) and an MPP challenge (WWW-Authenticate); sign the x402 one (exact scheme) and retry with a PAYMENT-SIGNATURE header. Both paths take either protocol: /x402/<name> and /mpp/<name> are the same endpoint. GET /x402/screenshot with no body answers the 402 quote for one result without starting a scrape.",
+        "operationId": "x402Screenshot",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "colorScheme": {
+                    "description": "emulated prefers-color-scheme",
+                    "enum": [
+                      "light",
+                      "dark"
+                    ],
+                    "type": "string"
+                  },
+                  "delayMs": {
+                    "default": 0,
+                    "description": "extra wait after the page loaded, in milliseconds",
+                    "maximum": 5000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "device": {
+                    "default": "desktop",
+                    "description": "viewport: desktop 1920x1080, desktop_hd 1366x768, mobile (phone), tablet",
+                    "enum": [
+                      "desktop",
+                      "desktop_hd",
+                      "mobile",
+                      "tablet"
+                    ],
+                    "type": "string"
+                  },
+                  "format": {
+                    "default": "jpeg",
+                    "description": "image or document format of the capture; pdf is always the full page",
+                    "enum": [
+                      "jpeg",
+                      "png",
+                      "webp",
+                      "pdf"
+                    ],
+                    "type": "string"
+                  },
+                  "fullPage": {
+                    "default": false,
+                    "description": "capture the whole scrollable page (height is capped at 16,384 px), not just the viewport",
+                    "type": "boolean"
+                  },
+                  "height": {
+                    "description": "custom viewport height in pixels (ignored with fullPage)",
+                    "maximum": 1200,
+                    "minimum": 240,
+                    "type": "integer"
+                  },
+                  "selector": {
+                    "description": "CSS selector: capture only the first matching element",
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "url": {
+                    "description": "absolute http or https URL of a public page, e.g. \"https://example.com/\"",
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "waitForSelector": {
+                    "description": "CSS selector to wait for before capturing",
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "width": {
+                    "description": "custom viewport width in pixels (overrides the device)",
+                    "maximum": 1920,
+                    "minimum": 320,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The dataset, after the payment settled.",
+            "headers": {
+              "PAYMENT-RESPONSE": {
+                "description": "Base64 x402 settlement response (x402 payments).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Payment-Receipt": {
+                "description": "MPP receipt (MPP payments).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Agdata-Refund": {
+                "description": "USDC base units refunded to the paying address for results not delivered (only when a refund is due).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Agdata-Results-Delivered": {
+                "description": "Number of results delivered.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Agdata-Results-Requested": {
+                "description": "Number of results the quote was for.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid request: a request body that is invalid (a payment was attached; without a payment an invalid body gets the 402 below), or a payment header that cannot be read (error invalid_payment). Nothing is charged."
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "The x402 PaymentRequired object (the same as the PAYMENT-REQUIRED header).",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Payment required: the quote, with both challenges (also the answer when a payment was not accepted: read error). An unpaid request with an invalid body also gets this 402, quoted for 1 result, with X-Agdata-Invalid-Request: 1 and the reason in error; do not sign that one.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64-encoded x402 payment-required JSON.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "WWW-Authenticate": {
+                "description": "MPP Payment challenge (RFC 9110 auth-params): id, realm, method=evm, intent=charge, request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Agdata-Invalid-Request": {
+                "description": "1 when the request body is invalid and the quote is for 1 result only.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The same payment is already being worked on: wait and retry with the same payment."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The stored copy of this payment's result has expired (error expired): nothing is charged or run; sign a new payment to ask again."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The request body is over 65536 bytes."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used with a different request body."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Too many calls for this host or route are in flight (Retry-After: 5): no payment was taken.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error: no payment was settled for it."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Nothing was delivered: a page that could not be captured, renders blank or gives an image over 5 MiB. Error not_fetched; the payment is not settled and nothing is charged. Also the answer when the upstream failed (upstream_failed) or the payment could not be settled (settlement_failed)."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Temporarily unavailable (the endpoint, a payment network or the upstream is switched off or over its failure budget): no payment was taken. Try again later."
+          }
+        },
+        "summary": "Website screenshot or PDF of any URL",
+        "tags": [
+          "Scraping"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.01719",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "x-quote-probe": {
+          "description": "GET /x402/screenshot with no body answers the 402 quote for one result without starting a scrape. A quote for a request-specific limit needs this POST body.",
+          "method": "GET"
+        }
+      }
+    },
+    "/mpp/screenshot": {
+      "post": {
+        "description": "Screenshot API for AI agents: send {url}, get JPEG, PNG, WebP or PDF as base64 JSON. Options: viewport, full page, dark mode, selector. It does not get past bot protection (use unblock for those pages' text). Failed or blank captures aren't charged. Send the JSON body with no payment to get a 402 with an MPP challenge (WWW-Authenticate) and an x402 challenge (PAYMENT-REQUIRED); sign the MPP one (evm/authorization) and retry with an Authorization header. Both paths take either protocol: /x402/<name> and /mpp/<name> are the same endpoint. GET /mpp/screenshot with no body answers the 402 quote for one result without starting a scrape.",
+        "operationId": "mppScreenshot",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "colorScheme": {
+                    "description": "emulated prefers-color-scheme",
+                    "enum": [
+                      "light",
+                      "dark"
+                    ],
+                    "type": "string"
+                  },
+                  "delayMs": {
+                    "default": 0,
+                    "description": "extra wait after the page loaded, in milliseconds",
+                    "maximum": 5000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "device": {
+                    "default": "desktop",
+                    "description": "viewport: desktop 1920x1080, desktop_hd 1366x768, mobile (phone), tablet",
+                    "enum": [
+                      "desktop",
+                      "desktop_hd",
+                      "mobile",
+                      "tablet"
+                    ],
+                    "type": "string"
+                  },
+                  "format": {
+                    "default": "jpeg",
+                    "description": "image or document format of the capture; pdf is always the full page",
+                    "enum": [
+                      "jpeg",
+                      "png",
+                      "webp",
+                      "pdf"
+                    ],
+                    "type": "string"
+                  },
+                  "fullPage": {
+                    "default": false,
+                    "description": "capture the whole scrollable page (height is capped at 16,384 px), not just the viewport",
+                    "type": "boolean"
+                  },
+                  "height": {
+                    "description": "custom viewport height in pixels (ignored with fullPage)",
+                    "maximum": 1200,
+                    "minimum": 240,
+                    "type": "integer"
+                  },
+                  "selector": {
+                    "description": "CSS selector: capture only the first matching element",
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "url": {
+                    "description": "absolute http or https URL of a public page, e.g. \"https://example.com/\"",
+                    "maxLength": 2048,
+                    "type": "string"
+                  },
+                  "waitForSelector": {
+                    "description": "CSS selector to wait for before capturing",
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "width": {
+                    "description": "custom viewport width in pixels (overrides the device)",
+                    "maximum": 1920,
+                    "minimum": 320,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The dataset, after the payment settled.",
+            "headers": {
+              "PAYMENT-RESPONSE": {
+                "description": "Base64 x402 settlement response (x402 payments).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Payment-Receipt": {
+                "description": "MPP receipt (MPP payments).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Agdata-Refund": {
+                "description": "USDC base units refunded to the paying address for results not delivered (only when a refund is due).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Agdata-Results-Delivered": {
+                "description": "Number of results delivered.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Agdata-Results-Requested": {
+                "description": "Number of results the quote was for.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid request: a request body that is invalid (a payment was attached; without a payment an invalid body gets the 402 below), or a payment header that cannot be read (error invalid_payment). Nothing is charged."
+          },
+          "402": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "The x402 PaymentRequired object (the same as the PAYMENT-REQUIRED header).",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Payment required: the quote, with both challenges (also the answer when a payment was not accepted: read error). An unpaid request with an invalid body also gets this 402, quoted for 1 result, with X-Agdata-Invalid-Request: 1 and the reason in error; do not sign that one.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64-encoded x402 payment-required JSON.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "WWW-Authenticate": {
+                "description": "MPP Payment challenge (RFC 9110 auth-params): id, realm, method=evm, intent=charge, request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Agdata-Invalid-Request": {
+                "description": "1 when the request body is invalid and the quote is for 1 result only.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The same payment is already being worked on: wait and retry with the same payment."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The stored copy of this payment's result has expired (error expired): nothing is charged or run; sign a new payment to ask again."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The request body is over 65536 bytes."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Idempotency-Key was already used with a different request body."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Too many calls for this host or route are in flight (Retry-After: 5): no payment was taken.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal error: no payment was settled for it."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Nothing was delivered: a page that could not be captured, renders blank or gives an image over 5 MiB. Error not_fetched; the payment is not settled and nothing is charged. Also the answer when the upstream failed (upstream_failed) or the payment could not be settled (settlement_failed)."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Temporarily unavailable (the endpoint, a payment network or the upstream is switched off or over its failure budget): no payment was taken. Try again later."
+          }
+        },
+        "summary": "Website screenshot or PDF of any URL",
+        "tags": [
+          "Scraping"
+        ],
+        "x-payment-info": {
+          "price": {
+            "amount": "0.01719",
+            "currency": "USD",
+            "mode": "fixed"
+          },
+          "protocols": [
+            {
+              "mpp": {
+                "currency": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "intent": "charge",
+                "method": "evm"
+              }
+            }
+          ]
+        },
+        "x-quote-probe": {
+          "description": "GET /mpp/screenshot with no body answers the 402 quote for one result without starting a scrape. A quote for a request-specific limit needs this POST body.",
+          "method": "GET"
+        }
+      }
+    }
+  },
+  "x-treazury-fixture-scope": "Reduced primary OpenAPI capture for provider compatibility, method and output regressions; not a complete catalog.",
+  "components": {
+    "parameters": {
+      "IdempotencyKey": {
+        "description": "Optional retry key; reusing it with a different request body returns 422.",
+        "in": "header",
+        "name": "Idempotency-Key",
+        "required": false,
+        "schema": {
+          "maxLength": 128,
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "description": "a short stable code: invalid_request, invalid_payment, body_too_large, payment_in_progress, rate_limited, unavailable, upstream_failed, not_fetched, settlement_failed, expired, internal_error, not_found, method_not_allowed",
+            "type": "string"
+          },
+          "message": {
+            "description": "a human sentence",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "type": "object"
+      }
+    }
+  }
+}

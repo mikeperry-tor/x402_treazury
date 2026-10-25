@@ -1,0 +1,2852 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Nansen API",
+    "description": "Nansen API v1 endpoints",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/smart-money/holdings": {
+      "post": {
+        "tags": [
+          "Smart Money"
+        ],
+        "summary": "Get Smart Money Holdings Data",
+        "description": "Retrieve aggregated token balances held by smart traders across multiple blockchains. This endpoint provides insights into what tokens are being accumulated by sophisticated market participants, excluding whales, large holders, and influencers to focus specifically on trading expertise.\n\nKey Features:\n\n- Aggregated balances (not per-wallet breakdowns)\n- 24-hour balance change tracking updated in realtime\n- Sector categorization for tokens",
+        "operationId": "get_smart_money_holdings_api_v1_smart_money_holdings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmartMoneyHoldingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 5,
+          "pro": 5
+        },
+        "x-payment-info": {
+          "protocols": [
+            "x402",
+            "mpp"
+          ],
+          "pricingMode": "fixed",
+          "price": "$0.05"
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "X402Payment": []
+          },
+          {
+            "MppPayment": []
+          }
+        ]
+      }
+    },
+    "/api/v1/tgm/holders": {
+      "post": {
+        "tags": [
+          "Token God Mode"
+        ],
+        "summary": "Get \"Token God Mode\" (TGM) holders data",
+        "description": "Retrieve the top token holders with their current balances, historical activity, and recent balance changes. Provides insights into token distribution, smart money and fund holdings.\n\n**Performance Optimization for Native Tokens:**\nWhen querying native tokens with `label_type: \"all_holders\"`, this endpoint uses an optimized model to prevent timeouts. This optimization has the following limitations:\n- **Ordering**: Only `token_amount` field is supported\n- **Filters**: Limited to: `token_amount`, `total_outflow`, `total_inflow`, `address`, `include_smart_money_labels`, `exclude_smart_money_labels`\n\nTo use advanced filters and ordering on native tokens, specify a `label_type` other than \"all_holders\" (e.g., \"smart_money\", \"whale\", \"exchange\").\n\n**Label Tier Control (`premium_labels`):**\nWhen omitted or set to `false` (the default), the response contains free-tier labels and the request is billed at the standard credit cost for this endpoint. Passing `premium_labels=true` returns premium labels (Smart Money, Fund, and other advanced labels), is billed at **150 credits per call**, and requires a paid plan.",
+        "operationId": "get_tgm_holders_api_v1_tgm_holders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TGMHoldersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 5,
+          "pro": 5
+        },
+        "x-credit-cost-variants": {
+          "omitted or premium_labels=false (default)": {
+            "free": 5,
+            "pro": 5
+          },
+          "premium_labels=true": {
+            "pro": 150
+          }
+        },
+        "x-payment-info": {
+          "protocols": [
+            "x402",
+            "mpp"
+          ],
+          "pricingMode": "fixed",
+          "price": "$0.05"
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "X402Payment": []
+          },
+          {
+            "MppPayment": []
+          }
+        ]
+      }
+    },
+    "/api/v1/perp-screener": {
+      "post": {
+        "tags": [
+          "Token Screener"
+        ],
+        "summary": "Get Perpetual Contract Screening Data",
+        "description": "Discover and screen perpetual contracts on Hyperliquid with advanced filtering capabilities. This endpoint helps identify trending perpetual contracts, trading activity, funding rates, and smart money movements by combining metrics like volume, open interest, funding rates, and position data.\n\n**What it helps to answer:**\n\n1. **Which perpetual contracts are experiencing significant trading volume and activity?**\n2. **How do funding rates correlate with trading patterns and smart money positions?**\n3. **What perpetual contracts show strong fundamentals in terms of open interest and trading patterns?**\n4. **Which perpetual contracts are attracting smart money participation with long/short positions?**",
+        "operationId": "get_perp_screener_api_v1_perp_screener_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PerpScreenerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 1,
+          "pro": 1
+        },
+        "x-payment-info": {
+          "protocols": [
+            "x402",
+            "mpp"
+          ],
+          "pricingMode": "fixed",
+          "price": "$0.01"
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "X402Payment": []
+          },
+          {
+            "MppPayment": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/fast": {
+      "post": {
+        "tags": [
+          "Agent"
+        ],
+        "summary": "Interact with the Nansen Research Agent in \"fast\" mode",
+        "description": "Ask the Nansen AI agent a research question and receive a streamed answer backed by on-chain data. The **fast** variant uses a lighter model optimised for low-latency responses.\n\n**What it helps to answer:**\n\n1. **Which tokens are smart money accumulating right now?**\n2. **What is the current narrative driving activity in DeFi?**\n3. **Which wallets are connected to a specific address?**\n4. **What is the on-chain story behind a recent price move?**\n\n**SSE event types:**\n\nThe response is a `text/event-stream` with the following JSON event types:\n\n| type | payload | description |\n|---|---|---|\n| `delta` | `{\"type\": \"delta\", \"text\": \"…\"}` | Incremental text chunk of the agent's answer. |\n| `tool_call` | `{\"type\": \"tool_call\", \"name\": \"…\"}` | Emitted once per unique Nansen tool the agent invokes. |\n| `finish` | `{\"type\": \"finish\", \"conversation_id\": \"…\", \"tool_calls\": [...]}` | Final event. Contains the `conversation_id` for follow-up requests and the full list of tools used. |\n| `error` | `{\"type\": \"error\", \"error\": \"…\", \"status_code\": …}` | Emitted instead of `finish` if the agent fails or times out after the stream has started. A `status_code` of `400` means the conversation is too long: start a new one by omitting `conversation_id`. |\n\nA completed answer ends with `finish` followed by a `data: [DONE]` sentinel. A stream that ends with an `error` event has no `finish`, and its answer is incomplete.\n\n**Errors before the stream starts:** if the agent cannot take the request, the endpoint returns an HTTP error status with a JSON error body instead of a stream, and no credits are charged. A `conversation_id` that belongs to another account returns `404`; an unavailable agent returns `502`, and one that does not respond in time returns `504`.\n\n**Fast vs Expert:** Use `/agent/fast` for quick factual lookups and simple questions. Use `/agent/expert` when you need deeper multi-step analysis or synthesis across multiple data sources.",
+        "operationId": "agent_fast_api_v1_agent_fast_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentResearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 200,
+          "pro": 200
+        },
+        "x-payment-info": {
+          "protocols": [
+            "x402",
+            "mpp"
+          ],
+          "pricingMode": "fixed",
+          "price": "$2.00"
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "X402Payment": []
+          },
+          {
+            "MppPayment": []
+          }
+        ]
+      }
+    },
+    "/api/v1/account": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "Retrieve account information",
+        "description": "Verify your credential is working and retrieve your account details.\n\nReturns your verified account identifier, current subscription plan and total remaining credits. This endpoint does not consume any credits.\n\nUse this to:\n- Confirm your credential is valid and active\n- Check your remaining credit balance before making calls\n- Verify your subscription plan",
+        "operationId": "get_account_api_v1_account_get",
+        "x-credit-cost": {
+          "free": 0,
+          "pro": 0
+        }
+      }
+    },
+    "/api/v1/feedback": {
+      "post": {
+        "tags": [
+          "Feedback"
+        ],
+        "summary": "Submit product feedback",
+        "description": "Send one concise feedback report to the Nansen API team and receive a durable receipt.\n\nSubmission is free, requires a verified Nansen account, and counts against a shared allowance of seven accepted reports per account per UTC week, resetting Monday 00:00 UTC. Every call needs an `Idempotency-Key` header: 1 to 128 ASCII letters, digits, underscores or hyphens, fresh for each new report. Retrying a lost response with the same key and the same report returns `200` with `replayed: true`; the same key with different content returns `409`. Receipts and retry protection last one year. A key whose report was erased early returns `409` with reason `feedback_erased`: stop retrying it, and send the report again only as a deliberate new submission with a new key.\n\nNew reports require feedback to be enabled for your account. Otherwise the API returns `403` with code `forbidden` and reason `feedback_not_enabled`, without a retry delay. Stop automatic retries and keep the submission ID. Accepted submissions can still be replayed and receipts read after access is removed. Never switch accounts or use payment to bypass a denial.\n\nDo not include credentials, full conversations or raw responses; recognised credential material is rejected.",
+        "operationId": "submit_feedback_api_v1_feedback_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Caller-generated submission ID: 1 to 128 ASCII letters, digits, underscores or hyphens. Reuse it only to retry the same report.",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "title": "Idempotency-Key"
+            },
+            "description": "Caller-generated submission ID: 1 to 128 ASCII letters, digits, underscores or hyphens. Reuse it only to retry the same report."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackReport"
+              }
+            }
+          }
+        },
+        "x-credit-cost": {
+          "free": 0,
+          "pro": 0
+        }
+      }
+    },
+    "/api/v1/smart-alert": {
+      "post": {
+        "tags": [
+          "Smart Alerts"
+        ],
+        "summary": "Create a smart alert",
+        "description": "Create a smart alert that watches on-chain activity and notifies the configured channels. Choose a `type` (common-token-transfer, sm-token-flows, or smart-contract-call), an evaluation `timeWindow`, one or more delivery `channels`, and the type-specific `data` filters. If `createdBy` is omitted it defaults to `agent`.",
+        "operationId": "smart_alert_create_api_v1_smart_alert_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAlertRequest"
+              },
+              "examples": {
+                "common-token-transfer": {
+                  "summary": "Track large ETH transfers by smart money",
+                  "value": {
+                    "name": "Large ETH Smart Money Transfer",
+                    "type": "common-token-transfer",
+                    "timeWindow": "realtime",
+                    "channels": [
+                      {
+                        "type": "telegram",
+                        "data": {
+                          "chatId": "-1001234567890"
+                        }
+                      }
+                    ],
+                    "data": {
+                      "chains": [
+                        "ethereum"
+                      ],
+                      "subjects": [
+                        {
+                          "type": "label",
+                          "value": "smart_money"
+                        }
+                      ],
+                      "events": [
+                        "send",
+                        "receive"
+                      ],
+                      "usdValue": {
+                        "min": 100000
+                      },
+                      "inclusion": {},
+                      "exclusion": {}
+                    }
+                  }
+                },
+                "sm-token-flows": {
+                  "summary": "Alert when smart money net inflow exceeds $500K in 24h",
+                  "value": {
+                    "name": "ETH Smart Money Netflow > $500K",
+                    "type": "sm-token-flows",
+                    "timeWindow": "1d",
+                    "channels": [
+                      {
+                        "type": "telegram",
+                        "data": {
+                          "chatId": "-1001234567890"
+                        }
+                      }
+                    ],
+                    "data": {
+                      "chains": [
+                        "ethereum"
+                      ],
+                      "events": [
+                        "sm-token-flows"
+                      ],
+                      "netflow_1d": {
+                        "min": 500000
+                      },
+                      "inclusion": {},
+                      "exclusion": {}
+                    }
+                  }
+                },
+                "smart-contract-call": {
+                  "summary": "Alert on Uniswap V3 swap calls",
+                  "value": {
+                    "name": "Uniswap V3 Swap Monitor",
+                    "type": "smart-contract-call",
+                    "timeWindow": "realtime",
+                    "channels": [
+                      {
+                        "type": "webhook",
+                        "data": {
+                          "webhookUrl": "https://your-server.com/alerts",
+                          "secret": "your-signing-secret"
+                        }
+                      }
+                    ],
+                    "data": {
+                      "chains": [
+                        "ethereum"
+                      ],
+                      "events": [
+                        "smart-contract-call"
+                      ],
+                      "signatureHash": [
+                        "0x128acb08"
+                      ],
+                      "inclusion": {
+                        "smartContract": [
+                          {
+                            "type": "label",
+                            "value": "uniswap_v3"
+                          }
+                        ]
+                      },
+                      "exclusion": {}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 0,
+          "pro": 0
+        }
+      },
+      "patch": {
+        "tags": [
+          "Smart Alerts"
+        ],
+        "summary": "Update a smart alert",
+        "description": "Update an existing smart alert. Provide the alert `id` plus any fields you want to change; omitted fields are left unchanged.",
+        "operationId": "smart_alert_update_api_v1_smart_alert_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAlertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 0,
+          "pro": 0
+        }
+      }
+    },
+    "/api/v1/trade/execute": {
+      "post": {
+        "tags": [
+          "Trading"
+        ],
+        "summary": "Broadcast a signed swap transaction",
+        "description": "Broadcast a signed swap transaction.\n\nThe caller is responsible for signing the transaction data returned by `/api/v1/trade/quote`.\n\n- **Solana:** `signed_transaction` is a base64-encoded serialized `VersionedTransaction`\n- **EVM (Base):** `signed_transaction` is a `0x`-prefixed signed transaction hex\n\nThe signed transaction is broadcast as-is; the response reports the resulting transaction hash and status.\n\n**⚠️ This endpoint always broadcasts. There is no dry-run mode.** Every call that passes\nvalidation submits the transaction to the network, and a successful transaction is a real\nexecuted trade that moves real funds. No request field prevents that.\n\nThe transaction is always simulated first, and the broadcast is aborted if that simulation\nfails — so a transaction that would revert does not reach the network. Simulation passing is\nnot a preview: it is what allows the broadcast to proceed.\n\nA retried request broadcasts again — a network timeout is indistinguishable from a request\nthat never arrived. Send `quote_id` to make a retry safe: a second execute for the same quote\nis refused with a `409` instead of broadcasting a second trade. Without it, check the wallet\nbefore resubmitting rather than retrying blind.\n\n**Cross-chain:** when the quote was a bridge swap, send `to_chain` alongside `chain` so the\ntrade is attributed to the right destination. Omit it for a same-chain swap.\n\n`status` is `\"Success\"` or `\"Failed\"`. `\"Success\"` means the transaction was accepted and\nbroadcast, **not** that it confirmed: a broadcast transaction can still revert or fail to be\nincluded. Look the transaction hash up on the chain (on EVM, its receipt `status`) before\ntreating the trade as complete. A `\"Failed\"` result with a transaction hash reached the chain\nand reverted. It is not an error — the trade is spent either way, so request a fresh quote\nrather than retrying this one.",
+        "operationId": "execute_trading_api_v1_trade_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradingExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 0,
+          "pro": 0
+        }
+      }
+    },
+    "/api/v1/perp/order": {
+      "post": {
+        "tags": [
+          "Perp"
+        ],
+        "summary": "Prepare a perp order",
+        "description": "Build an unsigned Hyperliquid order for you to sign locally.\n\nThis is the first step of the **prepare → sign → execute** flow. Nothing reaches the exchange\nuntil you submit the signed payload to `/api/v1/perp/execute`, so this call places no order and\nmoves no funds.\n\n**Prerequisite:** orders are routed with Nansen's builder code, and Hyperliquid rejects them\nuntil the wallet has approved a matching fee rate. Check `/api/v1/perp/builder-fee` first and, if\n`approved` is false, run the one-time approval through `/api/v1/perp/approve-builder-fee`.\n\n**What you get back:** `action` (the exchange action), `nonce`, and `eip712` (the typed data to\nsign). Sign the EIP-712 payload with the wallet's key — the key never leaves your side — then\npost `action`, `nonce` and the resulting `{r, s, v}` signature to `/api/v1/perp/execute` exactly\nas returned. Any edit to `action` or `nonce` invalidates the signature. An order may be signed by\nthe wallet's own key or by an API (agent) wallet the wallet has approved. The `nonce` is a\ntimestamp, so sign and submit promptly rather than caching a prepared payload.\n\n**Market vs limit:** `order_type: \"market\"` turns `price` into a slippage-adjusted\nimmediate-or-cancel limit, so pass the current mark price and set `slippage`. For\n`order_type: \"limit\"`, `price` is the limit price and `tif` applies.\n\n**Sizes and prices are rounded** to the precision the asset accepts. The `size` and `price`\nfields in the response echo what is actually encoded in the signed action, which can differ from\nwhat you sent — show those to the user, not your own inputs.\n\n**Bracket orders:** setting `take_profit` and/or `stop_loss` submits reduce-only trigger orders\nalongside the entry in one signed action. A take-profit must sit above the entry price for a long\n(below for a short) and a stop-loss below it (above for a short); the wrong side is rejected with\na `422` instead of triggering immediately and closing the position as it opens.",
+        "operationId": "prepare_perp_order_api_v1_perp_order_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PerpOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 0,
+          "pro": 0
+        }
+      }
+    },
+    "/api/v1/profiler/address/labels": {
+      "post": {
+        "tags": [
+          "Profiler"
+        ],
+        "summary": "Retrieve address label data",
+        "description": "Get labels for a wallet address. Returns non-premium labels only.\n\nLabels include ENS domains, behavioral labels, DeFi labels, CEX labels, and more.\nPremium labels (smart money, alpha trader) are excluded from this endpoint.\n\nUse /api/v1/profiler/address/premium-labels to get all labels including premium ones.\n\nSuccessful empty responses cost 0 credits; nonempty responses cost 100 credits.\nThe upfront balance check still requires 100 credits. Empty first pages for\na specific EVM chain may include a generic hint to use chain=\"all\". The hint does not report whether labels exist on other chains.\nEmpty later pages are also free.",
+        "operationId": "get_profiler_address_labels_api_v1_profiler_address_labels_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfilerAddressLabelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 100,
+          "pro": 100
+        }
+      }
+    },
+    "/api/v1/portfolio/defi-holdings": {
+      "post": {
+        "tags": [
+          "Portfolio"
+        ],
+        "summary": "Get Portfolio DeFi Holdings Data",
+        "description": "Get simplified DeFi holdings for a wallet address with aggregated tokens\n        and protocol summaries in a user-friendly format.",
+        "operationId": "portfolio_defi_holdings_v1_api_v1_portfolio_defi_holdings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioDefiHoldingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 1,
+          "pro": 1
+        }
+      }
+    },
+    "/api/v1/search/general": {
+      "post": {
+        "tags": [
+          "Search"
+        ],
+        "summary": "Search across all categories",
+        "description": "Search for tokens and entities by name, symbol, or contract address. This endpoint provides a unified search experience across all Nansen data.\n\n**Use Cases:**\n1. **Find token addresses**: Search by name or symbol to get contract addresses (e.g., \"AAVE\", \"Uniswap\")\n2. **Discover entities**: Find known entities like exchanges, funds, and public figures (e.g., \"vitalik\", \"Binance\")\n3. **Resolve addresses**: Search by contract address to identify tokens\n4. **Filter by chain**: Narrow down results to specific blockchains\n\n**Search Parameters:**\n- `search_query`: Token name, symbol, contract address, or entity name\n- `result_type`: Filter by \"token\", \"entity\", or \"any\" (default: \"any\")\n- `chain`: Optional blockchain filter (e.g., \"ethereum\", \"solana\", \"base\")\n- `limit`: Maximum results (1-50, default: 25)\n\n**Example Request:**\n```json\n{\n  \"search_query\": \"AAVE\",\n  \"result_type\": \"token\",\n  \"chain\": \"ethereum\"\n}\n```\n\n**Example Response:**\n```json\n{\n  \"tokens\": [\n    {\n      \"name\": \"Aave\",\n      \"symbol\": \"AAVE\",\n      \"chain\": \"ethereum\",\n      \"address\": \"0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9\",\n      \"price\": 123.45,\n      \"volume_24h\": 50000000,\n      \"market_cap\": 1500000000,\n      \"rank\": 25\n    }\n  ],\n  \"entities\": [],\n  \"total_results\": 1\n}\n```\n\n**Important Notes:**\n- Prices may be delayed; use token OHLCV endpoints for real-time prices\n- Results are sorted by relevance/popularity rank\n- Use the `chain` parameter (not the query string) to filter by blockchain",
+        "operationId": "general_search_api_v1_search_general_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeneralSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "x-credit-cost": {
+          "free": 0,
+          "pro": 0
+        }
+      }
+    }
+  },
+  "x-treazury-fixture-scope": "Reduced primary request/authentication contracts for named provider regressions. Response declarations deliberately omitted; not a complete inventory.",
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "components": {
+    "schemas": {
+      "AgentResearchRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Text",
+            "description": "Research query or question for the Nansen AI agent.",
+            "examples": [
+              "Which tokens are whales accumulating on Ethereum this week?"
+            ]
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Conversation Id",
+            "description": "Optional conversation ID for multi-turn interactions. Returned in the finish event of a previous response. Omit to start a new conversation.",
+            "examples": [
+              "conv_abc123"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "AgentResearchRequest",
+        "description": "Request model for Agent Research endpoints (fast and expert)."
+      },
+      "CreateAlertRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable name for the alert."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "common-token-transfer",
+              "sm-token-flows",
+              "smart-contract-call"
+            ],
+            "title": "Type",
+            "description": "The kind of activity to watch."
+          },
+          "timeWindow": {
+            "type": "string",
+            "enum": [
+              "realtime",
+              "1m",
+              "5m",
+              "10m",
+              "30m",
+              "1h",
+              "4h",
+              "12h",
+              "1d",
+              "1w"
+            ],
+            "title": "Timewindow",
+            "description": "Evaluation window. Use `realtime` to fire per matching event."
+          },
+          "channels": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/TelegramChannel"
+                },
+                {
+                  "$ref": "#/components/schemas/SlackChannel"
+                },
+                {
+                  "$ref": "#/components/schemas/DiscordChannel"
+                },
+                {
+                  "$ref": "#/components/schemas/WebhookChannel"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "discord": "#/components/schemas/DiscordChannel",
+                  "slack": "#/components/schemas/SlackChannel",
+                  "telegram": "#/components/schemas/TelegramChannel",
+                  "webhook": "#/components/schemas/WebhookChannel"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Channels",
+            "description": "One or more destinations that receive alert notifications."
+          },
+          "data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Data",
+            "description": "Type-specific filter configuration. The accepted fields depend on `type` (see the API reference and the worked examples on this endpoint). Common keys include `chains`, `events`, `inclusion` and `exclusion`."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Description",
+            "description": "Optional longer description of the alert."
+          },
+          "isEnabled": {
+            "type": "boolean",
+            "title": "Isenabled",
+            "description": "Whether the alert is active on creation.",
+            "default": true
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Createdby",
+            "description": "Origin of the alert. Defaults to `agent` when omitted."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "timeWindow",
+          "channels",
+          "data"
+        ],
+        "title": "CreateAlertRequest",
+        "description": "Request body for creating a smart alert."
+      },
+      "UpdateAlertRequest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "ID of the alert to update."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Name",
+            "description": "New name for the alert."
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "common-token-transfer",
+                  "sm-token-flows",
+                  "smart-contract-call"
+                ]
+              }
+            ],
+            "title": "Type",
+            "description": "New activity type to watch."
+          },
+          "timeWindow": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "realtime",
+                  "1m",
+                  "5m",
+                  "10m",
+                  "30m",
+                  "1h",
+                  "4h",
+                  "12h",
+                  "1d",
+                  "1w"
+                ]
+              }
+            ],
+            "title": "Timewindow",
+            "description": "New evaluation window."
+          },
+          "channels": {
+            "anyOf": [
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/TelegramChannel"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SlackChannel"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DiscordChannel"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WebhookChannel"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "type",
+                    "mapping": {
+                      "discord": "#/components/schemas/DiscordChannel",
+                      "slack": "#/components/schemas/SlackChannel",
+                      "telegram": "#/components/schemas/TelegramChannel",
+                      "webhook": "#/components/schemas/WebhookChannel"
+                    }
+                  }
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Channels",
+            "description": "Replacement set of delivery destinations."
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
+            "title": "Data",
+            "description": "Type-specific filter configuration. The accepted fields depend on `type` (see the API reference and the worked examples on this endpoint). Common keys include `chains`, `events`, `inclusion` and `exclusion`."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Description",
+            "description": "New description for the alert."
+          },
+          "isEnabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Isenabled",
+            "description": "Enable or disable the alert."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "UpdateAlertRequest",
+        "description": "Request body for updating an existing smart alert.\n\nOnly `id` is required; any other field provided replaces its current value."
+      },
+      "PerpScreenerRequest": {
+        "properties": {
+          "date": {
+            "$ref": "#/components/schemas/DateRange",
+            "description": "Date range for the perp screener",
+            "examples": [
+              {
+                "from": "2026-10-01T00:00:00Z",
+                "to": "2026-10-05T23:59:59Z"
+              }
+            ]
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PaginationRequest",
+            "description": "Pagination parameters"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PerpScreenerFilters"
+              }
+            ],
+            "description": "Additional filters to apply",
+            "examples": [
+              {
+                "token_symbol": "BTC",
+                "volume": {
+                  "min": 10000
+                }
+              }
+            ]
+          },
+          "include_price_change": {
+            "type": "boolean",
+            "title": "Include Price Change",
+            "description": "Return previous_price_usd, window_end_price_usd and price_change for notable-label trader cohorts even when not sorting or filtering by price. These fields are otherwise null unless price_change or previous_price_usd is used for sorting, or previous_price_usd is used for filtering. All and Smart Money results always include these fields.",
+            "default": false
+          },
+          "order_by": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PerpScreenerSortOrder"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Order By",
+            "description": "Custom sort order to override the endpoint's default ordering.\n\nExamples:\n- [{\"field\": \"volume\", \"direction\": \"DESC\"}] - Sort by volume descending\n- [{\"field\": \"net_position_change\", \"direction\": \"DESC\"}] - Sort by net_position_change descending\n- [{\"field\": \"buy_sell_pressure\", \"direction\": \"DESC\"}] - Sort by buy/sell pressure descending\n- [{\"field\": \"price_change\", \"direction\": \"DESC\"}] - Top gainers first\n\nAvailable sort fields depend on trader_type: buy_sell_pressure only applies to\ntrader_type all, net_position_change to the other trader types. price_change\napplies to every trader type. Rows with a null price_change (outcome contracts,\nmissing prices) sort last in both directions, and token_symbol ASC\nis added as a final tie-breaker so pages don't overlap.\n\nDefault behavior:\n- trader_type all (or unset): sorts by buy_sell_pressure DESC\n- all other trader types: sorts by net_position_change DESC",
+            "examples": [
+              [
+                {
+                  "direction": "DESC",
+                  "field": "buy_sell_pressure"
+                }
+              ]
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "date"
+        ],
+        "title": "PerpScreenerRequest",
+        "description": "Request model for Perp Screener endpoint."
+      },
+      "SmartMoneyHoldingsRequest": {
+        "properties": {
+          "chains": {
+            "items": {
+              "$ref": "#/components/schemas/SmartMoneyChain"
+            },
+            "type": "array",
+            "title": "Chains",
+            "description": "Chains to include in the analysis (only smart money supported chains). Use 'all' to include all available chains.",
+            "examples": [
+              [
+                "ethereum",
+                "solana"
+              ]
+            ]
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SmartMoneyHoldingsFilters"
+              }
+            ],
+            "description": "Additional filters to apply. Only filters for columns that are being selected will be applied.",
+            "examples": [
+              {
+                "balance_24h_percent_change": {
+                  "max": 0.1,
+                  "min": -0.1
+                },
+                "exclude_smart_money_labels": [
+                  "30D Smart Trader"
+                ],
+                "include_native_tokens": false,
+                "include_smart_money_labels": [
+                  "Smart Trader"
+                ],
+                "include_stablecoins": false,
+                "token_age_days": {
+                  "max": 30
+                },
+                "value_usd": {
+                  "max": 100000,
+                  "min": 1000
+                }
+              }
+            ]
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PaginationRequest",
+            "description": "Pagination parameters"
+          },
+          "order_by": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SmartMoneyHoldingsSortOrder"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Order By",
+            "description": "Custom sort order to override the endpoint's default ordering.\n\nExamples:\n- [{\"field\": \"value_usd\", \"direction\": \"DESC\"}] - Sort by value USD descending\n- [{\"field\": \"holders_count\", \"direction\": \"ASC\"}] - Sort by number of holders ascending\n- [{\"field\": \"value_usd\", \"direction\": \"DESC\"}, {\"field\": \"holders_count\", \"direction\": \"ASC\"}] - Sort by value USD descending, then number of holders ascending"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chains"
+        ],
+        "title": "SmartMoneyHoldingsRequest",
+        "description": ""
+      },
+      "GeneralSearchRequest": {
+        "properties": {
+          "search_query": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Search Query",
+            "description": "Search query - token name, symbol, contract address, or entity name.",
+            "examples": [
+              "AAVE",
+              "vitalik",
+              "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9"
+            ]
+          },
+          "result_type": {
+            "type": "string",
+            "enum": [
+              "token",
+              "entity",
+              "any"
+            ],
+            "title": "Result Type",
+            "description": "Type filter - 'token' for tokens only, 'entity' for entities only, 'any' for both.",
+            "default": "any"
+          },
+          "chain": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Chain",
+            "description": "Optional chain filter to narrow down token results (e.g., 'ethereum', 'solana', 'base').",
+            "examples": [
+              "ethereum",
+              "solana",
+              "base",
+              "bnb",
+              "polygon"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "description": "Maximum number of results to return (default: 25, max: 50).",
+            "default": 25
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "search_query"
+        ],
+        "title": "GeneralSearchRequest",
+        "description": "Request model for general search endpoint.\n\nThis endpoint searches for tokens and entities by name, symbol, or address."
+      },
+      "TradingExecuteRequest": {
+        "properties": {
+          "signed_transaction": {
+            "type": "string",
+            "title": "Signed Transaction",
+            "description": "Signed transaction: base64 for Solana, 0x hex for EVM",
+            "examples": [
+              "0xdeadbeef"
+            ]
+          },
+          "chain": {
+            "type": "string",
+            "enum": [
+              "base",
+              "solana"
+            ],
+            "title": "Chain",
+            "description": "Chain the transaction is for: 'solana' or 'base'",
+            "examples": [
+              "base"
+            ]
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Request Id",
+            "description": "Jupiter request ID (Solana only)"
+          },
+          "quote_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              }
+            ],
+            "title": "Quote Id",
+            "description": "The top-level `metadata.quoteId` from the quote response this transaction was built from. Supplying it enables duplicate-submission protection: a second execute for the same quote is refused with a 409 instead of broadcasting again. Strongly recommended. Take it from the response envelope, which always carries one — **not** from `quotes[].metadata.quoteId`, which some providers also set. That one is the provider's own route id in a different namespace, and sending it buys no protection while looking like it does.",
+            "examples": [
+              "3f1a9c2e-6b40-4a77-9d8e-5c2b1f0a7e43"
+            ]
+          },
+          "aggregator": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "jupiter",
+                  "okx",
+                  "lifi",
+                  "relay"
+                ]
+              }
+            ],
+            "title": "Aggregator",
+            "description": "Aggregator that produced the quote. Defaults to `jupiter` on Solana when `request_id` is supplied, matching how a Jupiter quote is executed.",
+            "examples": [
+              "lifi"
+            ]
+          },
+          "to_chain": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "base",
+                  "solana"
+                ]
+              }
+            ],
+            "title": "To Chain",
+            "description": "Destination chain, for a cross-chain swap. Supplying it restores bridge attribution on the trade; omit it for a same-chain swap.",
+            "examples": [
+              "solana"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "signed_transaction",
+          "chain"
+        ],
+        "title": "TradingExecuteRequest"
+      },
+      "ProfilerAddressLabelsRequest": {
+        "properties": {
+          "address": {
+            "type": "string",
+            "title": "Address",
+            "description": "Wallet address to get labels for",
+            "examples": [
+              "0x4a7c6899cdcb379e284fbfd045462e751da4c7ce",
+              "HuB5nXrX3AY1eCw688hXGdDgNcfWmZL74kXs7VUxLZFw"
+            ]
+          },
+          "chain": {
+            "$ref": "#/components/schemas/ProfilerLabelsChain",
+            "description": "Blockchain chain. Use 'all' to search all chains compatible with the address format.",
+            "examples": [
+              "ethereum",
+              "solana",
+              "all"
+            ]
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PaginationRequest",
+            "description": "Pagination parameters (default: 100 per page)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "address",
+          "chain"
+        ],
+        "title": "ProfilerAddressLabelsRequest",
+        "description": "Request model for Address Labels endpoint.",
+        "examples": [
+          {
+            "address": "0x4a7c6899cdcb379e284fbfd045462e751da4c7ce",
+            "chain": "ethereum",
+            "pagination": {
+              "page": 1,
+              "per_page": 100
+            }
+          },
+          {
+            "address": "HuB5nXrX3AY1eCw688hXGdDgNcfWmZL74kXs7VUxLZFw",
+            "chain": "solana",
+            "pagination": {
+              "page": 1,
+              "per_page": 100
+            }
+          }
+        ]
+      },
+      "FeedbackReport": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/FeedbackCategory",
+            "description": "Kind of friction reported"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "description": "What happened and what was needed, at most 2,000 characters"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint",
+            "description": "API endpoint path involved, without query string or credentials"
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool",
+            "description": "Tool name involved"
+          },
+          "goal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goal",
+            "description": "What the caller was trying to achieve"
+          },
+          "expected_behavior": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Behavior",
+            "description": "What the caller expected"
+          },
+          "observed_behavior": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Behavior",
+            "description": "What the caller observed"
+          },
+          "workaround": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workaround",
+            "description": "Any workaround used"
+          },
+          "request_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "minLength": 1
+                },
+                "type": "array",
+                "maxItems": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Ids",
+            "description": "Up to 10 distinct request IDs from the caller's own requests, as evidence references"
+          },
+          "client": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeedbackClient"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Declared client name and version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "category",
+          "description"
+        ],
+        "title": "FeedbackReport",
+        "description": "One product feedback report. Remove secrets and unnecessary personal context before sending."
+      },
+      "TGMHoldersRequest": {
+        "properties": {
+          "chain": {
+            "$ref": "#/components/schemas/TGMHoldersChain",
+            "description": "Blockchain chain",
+            "examples": [
+              "solana"
+            ]
+          },
+          "token_address": {
+            "type": "string",
+            "title": "Token Address",
+            "description": "Token address",
+            "examples": [
+              "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv"
+            ]
+          },
+          "aggregate_by_entity": {
+            "type": "boolean",
+            "title": "Aggregate By Entity",
+            "description": "Whether to return entity data",
+            "default": false,
+            "examples": [
+              false
+            ]
+          },
+          "label_type": {
+            "$ref": "#/components/schemas/TGMHoldersLabel",
+            "description": "Label type. You must also include the labels filter to match the label type. For example, for label type 'smart_money', you must include '30D Smart Trader', '90D Smart Trader', '180D Smart Trader', 'Fund' or 'Smart Trader' in the filters.labels.include parameter.",
+            "default": "all_holders",
+            "examples": [
+              "all_holders"
+            ]
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PaginationRequest",
+            "description": "Pagination parameters"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TGMHoldersFilters"
+              }
+            ],
+            "description": "Additional filters to apply to the query.",
+            "examples": [
+              {
+                "include_smart_money_labels": [
+                  "30D Smart Trader",
+                  "Fund"
+                ],
+                "ownership_percentage": {
+                  "min": 0.01
+                },
+                "token_amount": {
+                  "min": 1000
+                },
+                "value_usd": {
+                  "min": 10000
+                }
+              }
+            ]
+          },
+          "premium_labels": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Premium Labels",
+            "description": "Controls label tier in the response. When null/omitted or false (the default), returns free-tier labels at the standard credit cost for this endpoint. When true, returns premium labels (Smart Money, Fund, and other advanced labels), is billed at 150 credits per call, and requires a paid plan."
+          },
+          "order_by": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TGMHoldersSortOrder"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Order By",
+            "description": "Custom sort order to override the endpoint's default ordering.\n\nExamples:\n- [{\"field\": \"value_usd\", \"direction\": \"DESC\"}] - Sort by value USD descending\n- [{\"field\": \"token_amount\", \"direction\": \"ASC\"}] - Sort by token amount ascending\n- [{\"field\": \"ownership_percentage\", \"direction\": \"DESC\"}] - Sort by ownership percentage descending"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "chain",
+          "token_address"
+        ],
+        "title": "TGMHoldersRequest",
+        "description": "Request model for TGM holders endpoint.\n\nThis endpoint provides comprehensive data on token holders and their balances.\nRetrieve holders by various criteria including smart money, exchanges, public figures,\nwhales, and top holders with detailed balance information and filtering options."
+      },
+      "PortfolioDefiHoldingsRequest": {
+        "properties": {
+          "wallet_address": {
+            "type": "string",
+            "title": "Wallet Address",
+            "description": "Wallet address to get DeFi holdings for",
+            "examples": [
+              "0x4062b997279de7213731dbe00485722a26718892"
+            ]
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Address",
+            "description": "Deprecated: Use 'wallet_address' instead. Alias of `wallet_address`. If you send both fields, they must contain the same address.",
+            "deprecated": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_address"
+        ],
+        "title": "PortfolioDefiHoldingsRequest",
+        "description": "Request model for portfolio DeFi holdings endpoint."
+      },
+      "PerpOrderRequest": {
+        "properties": {
+          "wallet_address": {
+            "type": "string",
+            "title": "Wallet Address",
+            "description": "Wallet address on Hyperliquid",
+            "examples": [
+              "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
+            ]
+          },
+          "coin": {
+            "type": "string",
+            "title": "Coin",
+            "description": "Asset symbol (e.g. BTC, ETH)",
+            "examples": [
+              "BTC"
+            ]
+          },
+          "is_buy": {
+            "type": "boolean",
+            "title": "Is Buy",
+            "description": "True opens a long, false opens a short",
+            "examples": [
+              true
+            ]
+          },
+          "size": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Size",
+            "description": "Order size in units of the asset itself, not USD. Rounded to the asset's supported precision (sz_decimals from /api/v1/perp/meta); the response echoes the rounded value that is actually signed.",
+            "examples": [
+              0.01
+            ]
+          },
+          "price": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Price",
+            "description": "For a limit order, the limit price. For a market order, the current mark price — it is adjusted by `slippage` to produce the immediate-or-cancel limit that is actually submitted.",
+            "examples": [
+              65000
+            ]
+          },
+          "order_type": {
+            "type": "string",
+            "enum": [
+              "market",
+              "limit"
+            ],
+            "title": "Order Type",
+            "description": "`limit` rests on the book subject to `tif`; `market` submits an immediate-or-cancel order priced off `price` and `slippage`",
+            "default": "limit",
+            "examples": [
+              "market"
+            ]
+          },
+          "reduce_only": {
+            "type": "boolean",
+            "title": "Reduce Only",
+            "description": "When true the order can only shrink an existing position, never open or flip one",
+            "default": false,
+            "examples": [
+              false
+            ]
+          },
+          "tif": {
+            "type": "string",
+            "enum": [
+              "Gtc",
+              "Ioc",
+              "Alo"
+            ],
+            "title": "Tif",
+            "description": "Time-in-force for limit orders (Gtc=good-til-cancel, Ioc=immediate-or-cancel, Alo=add-liquidity-only). Ignored for market orders, which are always immediate-or-cancel.",
+            "default": "Gtc",
+            "examples": [
+              "Gtc"
+            ]
+          },
+          "slippage": {
+            "type": "number",
+            "maximum": 0.5,
+            "minimum": 0.0,
+            "title": "Slippage",
+            "description": "Slippage tolerance for market orders as a fraction, not a percentage (0.03 = 3%). Ignored for limit orders.",
+            "default": 0.03,
+            "examples": [
+              0.03
+            ]
+          },
+          "take_profit": {
+            "anyOf": [
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Take Profit",
+            "description": "Optional take-profit trigger price, submitted as a reduce-only trigger order alongside the entry. Must be above `price` for a long and below it for a short.",
+            "examples": [
+              70000
+            ]
+          },
+          "stop_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Stop Loss",
+            "description": "Optional stop-loss trigger price, submitted as a reduce-only trigger order alongside the entry. Must be below `price` for a long and above it for a short.",
+            "examples": [
+              60000
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "wallet_address",
+          "coin",
+          "is_buy",
+          "size",
+          "price"
+        ],
+        "title": "PerpOrderRequest",
+        "description": "Order to prepare: market or limit, with an optional take-profit / stop-loss bracket."
+      },
+      "DiscordChannel": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "discord",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DiscordChannelData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "DiscordChannel",
+        "description": "Deliver alerts to a Discord channel via a webhook."
+      },
+      "PerpScreenerSortOrder": {
+        "properties": {
+          "field": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PerpScreenerSortFieldDefault"
+              },
+              {
+                "$ref": "#/components/schemas/PerpScreenerSortFieldSmartMoney"
+              },
+              {
+                "$ref": "#/components/schemas/PerpScreenerSortFieldNotableLabel"
+              }
+            ],
+            "title": "Field",
+            "description": "Field to sort by"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/SortDirection",
+            "description": "Sort direction (ASC or DESC)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "direction"
+        ],
+        "title": "PerpScreenerSortOrder"
+      },
+      "FeedbackCategory": {
+        "type": "string",
+        "enum": [
+          "bug",
+          "data_quality",
+          "documentation",
+          "missing_capability",
+          "usability",
+          "other"
+        ],
+        "title": "FeedbackCategory",
+        "description": "What kind of friction the report describes."
+      },
+      "TGMHoldersChain": {
+        "type": "string",
+        "enum": [
+          "arbitrum",
+          "arc",
+          "avalanche",
+          "base",
+          "bitcoin",
+          "bnb",
+          "ethereum",
+          "hyperevm",
+          "injective",
+          "iotaevm",
+          "linea",
+          "mantle",
+          "mantra",
+          "monad",
+          "near",
+          "optimism",
+          "plasma",
+          "polygon",
+          "robinhood",
+          "sei",
+          "solana",
+          "sonic",
+          "starknet",
+          "sui",
+          "ton",
+          "tron"
+        ],
+        "title": "TGMHoldersChain",
+        "description": "Chains supported for TGM holders endpoint."
+      },
+      "TGMHoldersSortOrder": {
+        "properties": {
+          "field": {
+            "$ref": "#/components/schemas/TGMHoldersSortField",
+            "description": "Field to sort by"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/SortDirection",
+            "description": "Sort direction (ASC or DESC)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "direction"
+        ],
+        "title": "TGMHoldersSortOrder"
+      },
+      "DateRange": {
+        "properties": {
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "From",
+            "description": "Start date in ISO 8601 format (e.g., 2025-01-01T00:00:00Z or 2025-01-01)",
+            "examples": [
+              "2025-01-01T00:00:00Z"
+            ]
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "To",
+            "description": "End date in ISO 8601 format (e.g., 2025-01-31T23:59:59Z or 2025-01-31)",
+            "examples": [
+              "2025-01-31T23:59:59Z"
+            ]
+          }
+        },
+        "type": "object",
+        "title": "DateRange",
+        "description": "Date range model matching the API schema."
+      },
+      "FeedbackClient": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Client name"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Version",
+            "description": "Client version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "FeedbackClient",
+        "description": "Declared client metadata. Attribution only; never identity or authorization."
+      },
+      "TelegramChannel": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "telegram",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TelegramChannelData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "TelegramChannel",
+        "description": "Deliver alerts to a Telegram chat."
+      },
+      "ProfilerLabelsChain": {
+        "type": "string",
+        "enum": [
+          "all",
+          "arbitrum",
+          "arc",
+          "avalanche",
+          "base",
+          "bnb",
+          "ethereum",
+          "hyperevm",
+          "hyperliquid",
+          "iotaevm",
+          "linea",
+          "mantle",
+          "monad",
+          "optimism",
+          "plasma",
+          "polygon",
+          "robinhood",
+          "sei",
+          "solana",
+          "sonic",
+          "tron"
+        ],
+        "title": "ProfilerLabelsChain",
+        "description": "Chains supported for Profiler Address Labels endpoint."
+      },
+      "TGMHoldersFilters": {
+        "properties": {
+          "include_smart_money_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LabelType"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Include Smart Money Labels",
+            "description": "Include smart money labels for holders",
+            "examples": [
+              [
+                "Public Figure"
+              ],
+              [
+                "Exchange"
+              ]
+            ]
+          },
+          "exclude_smart_money_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LabelType"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Exclude Smart Money Labels",
+            "description": "Exclude smart money labels for holders",
+            "examples": [
+              [
+                "Public Figure"
+              ],
+              [
+                "Exchange"
+              ]
+            ]
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address",
+            "description": "Holder address filter",
+            "examples": [
+              "0x28c6c06298d514db089934071355e5743bf21d60"
+            ]
+          },
+          "address_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Label",
+            "description": "Holder label filter",
+            "examples": [
+              "Smart Money",
+              "%Fund%"
+            ]
+          },
+          "token_amount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Token amount range filter",
+            "examples": [
+              {
+                "min": 1000
+              }
+            ]
+          },
+          "total_outflow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Total outflow range filter",
+            "examples": [
+              {
+                "min": 100
+              }
+            ]
+          },
+          "total_inflow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Total inflow range filter",
+            "examples": [
+              {
+                "min": 100
+              }
+            ]
+          },
+          "balance_change_24h": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "24-hour balance change range filter",
+            "examples": [
+              {
+                "max": 1000,
+                "min": -1000
+              }
+            ]
+          },
+          "balance_change_7d": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "7-day balance change range filter",
+            "examples": [
+              {
+                "max": 5000,
+                "min": -5000
+              }
+            ]
+          },
+          "balance_change_30d": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "30-day balance change range filter",
+            "examples": [
+              {
+                "max": 10000,
+                "min": -10000
+              }
+            ]
+          },
+          "ownership_percentage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Ownership percentage range filter",
+            "examples": [
+              {
+                "max": 10,
+                "min": 0.01
+              }
+            ]
+          },
+          "value_usd": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Balance range filter in USD. Defaults to min: 1.0 to exclude dust holders. Set explicitly to override (e.g., {\"min\": 0} to include all holders). Note: This default does not apply to native tokens with 'all_holders' label.",
+            "examples": [
+              {
+                "min": 10000
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "TGMHoldersFilters",
+        "description": "Filters for TGM holders endpoint.\n\nThese filters control which holders are included in the analysis."
+      },
+      "SmartMoneyHoldingsFilters": {
+        "properties": {
+          "include_smart_money_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SmartMoneyFilterType"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Include Smart Money Labels",
+            "description": "Smart money category filters. `Fund` is deprecated for this endpoint. Including `Fund` returns no rows because Fund wallets are no longer part of the current Smart Money cohort; use /api/v1beta1/funds/holdings for current Fund holdings.",
+            "examples": [
+              [
+                "Smart Trader",
+                "30D Smart Trader"
+              ]
+            ]
+          },
+          "exclude_smart_money_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SmartMoneyFilterType"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Exclude Smart Money Labels",
+            "description": "Smart money category filters. `Fund` is deprecated for this endpoint. Excluding `Fund` has no effect because Fund wallets are no longer part of the current Smart Money cohort.",
+            "examples": [
+              [
+                "30D Smart Trader"
+              ]
+            ]
+          },
+          "include_stablecoins": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Include Stablecoins",
+            "description": "Whether to include stablecoins in the results",
+            "default": false
+          },
+          "include_native_tokens": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Include Native Tokens",
+            "description": "Whether to include native tokens (e.g., ETH, SOL) in the results",
+            "default": false
+          },
+          "value_usd": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Value range filter in USD",
+            "examples": [
+              {
+                "max": 100000,
+                "min": 1000
+              }
+            ]
+          },
+          "balance_24h_percent_change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "24-hour balance change percentage range filter",
+            "examples": [
+              {
+                "max": 0.5,
+                "min": -0.5
+              }
+            ]
+          },
+          "holders_count": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntegerRangeFilter"
+              }
+            ],
+            "description": "Number of holders range filter",
+            "examples": [
+              {
+                "max": 1000,
+                "min": 10
+              }
+            ]
+          },
+          "share_of_holdings_percent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Range filter for the fraction of total Smart Money USD holdings across all chains. A value of 0.05 means 5%; chain, label, and token filters do not narrow the denominator.",
+            "examples": [
+              {
+                "max": 0.1,
+                "min": 0.01
+              }
+            ]
+          },
+          "token_age_days": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Token age range filter in days",
+            "examples": [
+              {
+                "max": 365,
+                "min": 1
+              }
+            ]
+          },
+          "market_cap_usd": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Market cap range filter in USD",
+            "examples": [
+              {
+                "max": 10000000,
+                "min": 1000000
+              }
+            ]
+          },
+          "token_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Address",
+            "description": "Token address filter",
+            "examples": [
+              "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+            ]
+          },
+          "token_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Symbol",
+            "description": "Token symbol filter",
+            "examples": [
+              "USDC"
+            ]
+          },
+          "token_sectors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Token Sectors",
+            "description": "Token sectors filter",
+            "examples": [
+              [
+                "DeFi",
+                "Gaming"
+              ]
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SmartMoneyHoldingsFilters",
+        "description": "Filters for smart money holdings endpoint.\n\nThese filters control which token holdings, smart money categories,\nand data are included in the holdings analysis."
+      },
+      "PaginationRequest": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "Page number (1-based)",
+            "default": 1
+          },
+          "per_page": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Per Page",
+            "description": "Number of records per page (max 1000)",
+            "default": 10
+          }
+        },
+        "type": "object",
+        "title": "PaginationRequest",
+        "description": "Pagination parameters for API requests."
+      },
+      "TGMHoldersLabel": {
+        "type": "string",
+        "enum": [
+          "whale",
+          "public_figure",
+          "smart_money",
+          "all_holders",
+          "exchange"
+        ],
+        "title": "TGMHoldersLabel",
+        "description": "TGM holders label types."
+      },
+      "PerpScreenerFilters": {
+        "properties": {
+          "trader_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PerpTraderType"
+              }
+            ],
+            "description": "Filter by trader type. Overrides only_smart_money when provided. Values: all, sm, whale, public_figure, high_winrate_hl_perps_trader.",
+            "examples": [
+              "whale"
+            ]
+          },
+          "only_smart_money": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Only Smart Money",
+            "description": "Deprecated: Use 'trader_type=sm' instead.",
+            "default": false,
+            "deprecated": true,
+            "examples": [
+              true
+            ]
+          },
+          "sectors_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Sectors Filter",
+            "description": "Filter by sector in category:subcategory format (e.g. Crypto:DeFi, Crypto:AI, TradFi:Stocks). Values in any other format are rejected. Note: this differs from the token screener's sectors filter, which uses bare sector names. Applied server-side.",
+            "examples": [
+              [
+                "Crypto:DeFi"
+              ]
+            ]
+          },
+          "sm_label_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Sm Label Filter",
+            "description": "Filter by Nansen smart money label. Applies when trader_type is all or sm; ignored for other trader types. Applied server-side.",
+            "examples": [
+              [
+                "30D Smart Trader"
+              ]
+            ]
+          },
+          "trader_label_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Trader Label Filter",
+            "description": "Filter by Hyperliquid perps trader label (e.g. HL Perps Whale, HL Perps Swing Trader). Applies when trader_type is all or sm; ignored for other trader types. Applied server-side.",
+            "examples": [
+              [
+                "HL Perps Whale"
+              ]
+            ]
+          },
+          "token_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Token Symbol",
+            "description": "Asset symbol filter (e.g., BTC, ETH)",
+            "examples": [
+              "BTC",
+              "ETH"
+            ]
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Total traded notional in USD range filter",
+            "examples": [
+              {
+                "min": 1000000
+              }
+            ]
+          },
+          "buy_volume": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Total USD value of market buy trades range filter",
+            "examples": [
+              {
+                "min": 500000
+              }
+            ]
+          },
+          "sell_volume": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Total USD value of market sell trades range filter",
+            "examples": [
+              {
+                "min": 500000
+              }
+            ]
+          },
+          "buy_sell_pressure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Net USD flow range filter",
+            "examples": [
+              {
+                "max": 1000000,
+                "min": -1000000
+              }
+            ]
+          },
+          "trader_count": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntegerRangeFilter"
+              }
+            ],
+            "description": "Number of unique traders range filter",
+            "examples": [
+              {
+                "min": 10
+              }
+            ]
+          },
+          "mark_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Latest mark price range filter",
+            "examples": [
+              {
+                "max": 100000,
+                "min": 0.01
+              }
+            ]
+          },
+          "funding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Latest funding rate range filter",
+            "examples": [
+              {
+                "max": 0.01,
+                "min": -0.01
+              }
+            ]
+          },
+          "previous_price_usd": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Window-start mark price range filter: the close of the last complete 5-minute bucket ending at or before date.from (UTC). Rows with a null start price match only a filter with no max and a min of 0 or less.",
+            "examples": [
+              {
+                "max": 100000,
+                "min": 0.01
+              }
+            ]
+          },
+          "open_interest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Latest open interest range filter",
+            "examples": [
+              {
+                "min": 1000000
+              }
+            ]
+          },
+          "smart_money_volume": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Total traded notional in USD by Smart Money range filter",
+            "examples": [
+              {
+                "min": 100000
+              }
+            ]
+          },
+          "smart_money_buy_volume": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Total USD value of Smart Money market buy trades range filter",
+            "examples": [
+              {
+                "min": 50000
+              }
+            ]
+          },
+          "smart_money_sell_volume": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Total USD value of Smart Money market sell trades range filter",
+            "examples": [
+              {
+                "min": 50000
+              }
+            ]
+          },
+          "net_position_change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Net USD flow (buy_market_vol - sell_market_vol) range filter",
+            "examples": [
+              {
+                "max": 1000000,
+                "min": -1000000
+              }
+            ]
+          },
+          "current_smart_money_position_longs_usd": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Aggregate USD value of Smart Money long positions range filter",
+            "examples": [
+              {
+                "min": 0
+              }
+            ]
+          },
+          "current_smart_money_position_shorts_usd": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericRangeFilter"
+              }
+            ],
+            "description": "Aggregate USD value of Smart Money short positions range filter",
+            "examples": [
+              {
+                "min": 0
+              }
+            ]
+          },
+          "smart_money_longs_count": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntegerRangeFilter"
+              }
+            ],
+            "description": "Number of Smart Money accounts with net long position range filter",
+            "examples": [
+              {
+                "min": 0
+              }
+            ]
+          },
+          "smart_money_shorts_count": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IntegerRangeFilter"
+              }
+            ],
+            "description": "Number of Smart Money accounts with net short position range filter",
+            "examples": [
+              {
+                "min": 0
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PerpScreenerFilters",
+        "description": "Filters for perp screener endpoints.\n\nThese filters control which perpetual contracts are included in the screening\nresults based on various criteria."
+      },
+      "WebhookChannel": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "webhook",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/WebhookChannelData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "WebhookChannel",
+        "description": "Deliver alerts as an HTTP POST to your own HTTPS endpoint."
+      },
+      "SmartMoneyHoldingsSortOrder": {
+        "properties": {
+          "field": {
+            "$ref": "#/components/schemas/SmartMoneyHoldingsSortField",
+            "description": "Field to sort by"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/SortDirection",
+            "description": "Sort direction (ASC or DESC)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "direction"
+        ],
+        "title": "SmartMoneyHoldingsSortOrder"
+      },
+      "SlackChannel": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "slack",
+            "title": "Type"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SlackChannelData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "data"
+        ],
+        "title": "SlackChannel",
+        "description": "Deliver alerts to a Slack channel via an incoming webhook."
+      },
+      "SmartMoneyChain": {
+        "type": "string",
+        "enum": [
+          "all",
+          "arbitrum",
+          "arc",
+          "avalanche",
+          "base",
+          "bnb",
+          "ethereum",
+          "hyperevm",
+          "iotaevm",
+          "linea",
+          "mantle",
+          "monad",
+          "optimism",
+          "plasma",
+          "polygon",
+          "robinhood",
+          "sei",
+          "solana",
+          "sonic"
+        ],
+        "title": "SmartMoneyChain",
+        "description": "Chains supported in smart money analysis."
+      },
+      "PerpTraderType": {
+        "type": "string",
+        "enum": [
+          "all",
+          "sm",
+          "whale",
+          "public_figure",
+          "high_winrate_hl_perps_trader"
+        ],
+        "title": "PerpTraderType",
+        "description": "Trader type for perp screener."
+      },
+      "PerpScreenerSortFieldDefault": {
+        "type": "string",
+        "enum": [
+          "token_symbol",
+          "volume",
+          "buy_volume",
+          "sell_volume",
+          "buy_sell_pressure",
+          "trader_count",
+          "mark_price",
+          "funding",
+          "previous_price_usd",
+          "price_change",
+          "open_interest"
+        ],
+        "title": "PerpScreenerSortFieldDefault",
+        "description": "Sort fields available for default perp screener data (only_smart_money=False)."
+      },
+      "PerpScreenerSortFieldSmartMoney": {
+        "type": "string",
+        "enum": [
+          "token_symbol",
+          "smart_money_volume",
+          "smart_money_buy_volume",
+          "smart_money_sell_volume",
+          "net_position_change",
+          "trader_count",
+          "mark_price",
+          "funding",
+          "previous_price_usd",
+          "price_change",
+          "open_interest",
+          "current_smart_money_position_longs_usd",
+          "current_smart_money_position_shorts_usd",
+          "smart_money_longs_count",
+          "smart_money_shorts_count"
+        ],
+        "title": "PerpScreenerSortFieldSmartMoney",
+        "description": "Sort fields available for smart money perp screener data (only_smart_money=True)."
+      },
+      "IntegerRangeFilter": {
+        "properties": {
+          "min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Min",
+            "description": "Minimum value (inclusive)",
+            "examples": [
+              10,
+              100,
+              1000
+            ]
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Max",
+            "description": "Maximum value (inclusive)",
+            "examples": [
+              100,
+              1000,
+              10000
+            ]
+          }
+        },
+        "type": "object",
+        "title": "IntegerRangeFilter",
+        "description": "Filter for integer values with optional min/max bounds.\nUse for counts, numbers of items, and other whole number values. - Values between 5 and 100"
+      },
+      "WebhookChannelData": {
+        "properties": {
+          "webhookUrl": {
+            "type": "string",
+            "title": "Webhookurl",
+            "description": "HTTPS endpoint to receive alert payloads."
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Secret",
+            "description": "Optional signing secret (16–512 characters). When set, each webhook delivery carries an `X-Nansen-Signature: sha256=<hex>` header whose value is the HMAC-SHA256 of the raw request body, keyed by this secret (encoded as UTF-8)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "webhookUrl"
+        ],
+        "title": "WebhookChannelData"
+      },
+      "PerpScreenerSortFieldNotableLabel": {
+        "type": "string",
+        "enum": [
+          "token_symbol",
+          "volume",
+          "buy_volume",
+          "sell_volume",
+          "net_position_change",
+          "trader_count",
+          "mark_price",
+          "funding",
+          "previous_price_usd",
+          "price_change",
+          "open_interest",
+          "current_position_longs_usd",
+          "current_position_shorts_usd",
+          "longs_count",
+          "shorts_count"
+        ],
+        "title": "PerpScreenerSortFieldNotableLabel",
+        "description": "Sort fields available for notable-label perp screener data (trader_type whale/public_figure/high_winrate_hl_perps_trader)."
+      },
+      "LabelType": {
+        "type": "string",
+        "enum": [
+          "30D Smart Trader",
+          "90D Smart Trader",
+          "180D Smart Trader",
+          "Fund",
+          "Smart Trader",
+          "Public Figure",
+          "Exchange",
+          "Whale",
+          "BananaGun Bot User",
+          "Top Maestro Bot User",
+          "Top BananaGun Bot User",
+          "Maestro Bot User",
+          "Early MAGIC Miner",
+          "First Mover LP",
+          "First Mover Staking",
+          "Profitable LP",
+          "Smart HL Perps Trader"
+        ],
+        "title": "LabelType",
+        "description": "Filter by entity label type."
+      },
+      "SmartMoneyFilterType": {
+        "type": "string",
+        "enum": [
+          "Fund",
+          "Smart Trader",
+          "30D Smart Trader",
+          "90D Smart Trader",
+          "180D Smart Trader",
+          "Smart HL Perps Trader"
+        ],
+        "title": "SmartMoneyFilterType",
+        "description": "Filter by smart money label type."
+      },
+      "SmartMoneyHoldingsSortField": {
+        "type": "string",
+        "enum": [
+          "chain",
+          "token_address",
+          "token_symbol",
+          "value_usd",
+          "balance_24h_percent_change",
+          "holders_count",
+          "share_of_holdings_percent",
+          "token_age_days",
+          "market_cap_usd"
+        ],
+        "title": "SmartMoneyHoldingsSortField",
+        "description": "Enum for sortable fields in smart money holdings."
+      },
+      "DiscordChannelData": {
+        "properties": {
+          "webhookUrl": {
+            "type": "string",
+            "title": "Webhookurl",
+            "description": "Discord webhook URL (https only)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "webhookUrl"
+        ],
+        "title": "DiscordChannelData"
+      },
+      "NumericRangeFilter": {
+        "properties": {
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Min",
+            "description": "Minimum value (inclusive)",
+            "examples": [
+              1000.0,
+              1000000.0,
+              -50.0,
+              0.0
+            ]
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Max",
+            "description": "Maximum value (inclusive)",
+            "examples": [
+              50000.0,
+              10000000.0,
+              100.0
+            ]
+          }
+        },
+        "type": "object",
+        "title": "NumericRangeFilter",
+        "description": "Filter for numeric values (floats) with optional min/max bounds.\nUse for prices, volumes, ratios, and other decimal values. - Values between -10.5 and 100.75"
+      },
+      "TGMHoldersSortField": {
+        "type": "string",
+        "enum": [
+          "address",
+          "name",
+          "token_amount",
+          "total_outflow",
+          "total_inflow",
+          "balance_change_24h",
+          "balance_change_7d",
+          "balance_change_30d",
+          "ownership_percentage",
+          "value_usd"
+        ],
+        "title": "TGMHoldersSortField",
+        "description": "Enum for sortable fields in TGM holders."
+      },
+      "TelegramChannelData": {
+        "properties": {
+          "chatId": {
+            "type": "string",
+            "title": "Chatid",
+            "description": "Telegram chat ID. Prefix with '-' for group chats."
+          }
+        },
+        "type": "object",
+        "required": [
+          "chatId"
+        ],
+        "title": "TelegramChannelData"
+      },
+      "SlackChannelData": {
+        "properties": {
+          "webhookUrl": {
+            "type": "string",
+            "title": "Webhookurl",
+            "description": "Slack incoming webhook URL (https only)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "webhookUrl"
+        ],
+        "title": "SlackChannelData"
+      },
+      "SortDirection": {
+        "type": "string",
+        "enum": [
+          "ASC",
+          "DESC"
+        ],
+        "title": "SortDirection",
+        "description": "Enum for sort directions."
+      }
+    }
+  }
+}

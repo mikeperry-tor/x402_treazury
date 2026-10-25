@@ -1,0 +1,29 @@
+description = "CoinMarketCap keyless public market data and four paid x402 quote, listing and DEX endpoints."
+# Authored union of official keyless and standard schemas; see providers/CAVEATS.md.
+spec = "openapi.json"
+name = "CoinMarketCap"
+base_url = "https://pro-api.coinmarketcap.com"
+prefix = "coinmarketcap"
+include = ["/x402", ""]
+pricing_key = "x-payment-info"
+help_url = "https://coinmarketcap.com/api/documentation/pro-api-reference/keyless-public-api.md"
+instructions_text = "Prefer public-api counterparts when their coverage meets the request. Preserve status.error_code, source timestamps and pagination; HTTP success alone does not prove a successful data result. CoinMarketCap IDs disambiguate duplicate symbols. Comma-separated selectors are strings, not arrays."
+
+[overrides.coinmarketcap_v4_dex_pairs_quotes_latest]
+description = "This tool calls the paid x402 route. The free counterpart is coinmarketcap_public_api_v4_dex_pairs_quotes_latest. Returns the latest market quote for 1 or more spot pairs. Use the \"convert\" option to return market values in multiple fiat and cryptocurrency conversions in the same call.\n\n Cost: ~$0.01/call [spec]."
+
+[overrides.coinmarketcap_v4_dex_pairs_quotes_latest.params]
+contract_address = "DEX pool/pair contract address, not a token address. Use network_id or network_slug to identify its chain. The generic x402 guide's pair_address example does not match the official parameter schema."
+
+[overrides.coinmarketcap_v1_dex_search]
+description = "This tool calls the paid x402 route. The free counterpart is coinmarketcap_public_api_v1_dex_search. Search for tokens by keyword\n\n Cost: ~$0.01/call [spec]."
+
+[overrides.coinmarketcap_v1_dex_search.params]
+q = "Search keyword, symbol or contract address. The actual parameter is q, not keyword."
+
+[overrides.coinmarketcap_v3_cryptocurrency_listings_latest]
+description = "This tool calls the paid x402 route. The free counterpart is coinmarketcap_public_api_v3_cryptocurrency_listings_latest. Returns a paginated list of all active cryptocurrencies with latest market data. The default \"market_cap\" sort returns cryptocurrency in order of CoinMarketCap's market cap rank (as outlined in [our methodology](https://coinmarketcap.com/methodology/)) but you may configure this call to order by another market ranking field. Use the \"convert\" option to return market values in multiple fiat and cryptocurrency conversions in the same call.\n\nYou may sort against any of the following:  \n**market_cap**: CoinMarketCap's market cap rank as outlined in [our methodology](https://coinmarketcap.com/methodology/).  \n**market_cap_strict**: A strict market cap sort (latest trade price x circulating supply).  \n**name**: The cryptocurrency name.  \n**symbol**: The cryptocurrency symbol.  \n**date_added**: Date cryptocurrency was added to the system.  \n**price**: latest average trade price across markets.  \n**circulating_supply**: approximate number of coins currently in circulation.  \n**total_supply**: approximate total amount of coins in existence right now (minus any coins that have been verifiably burned).  \n**max_supply**: our best approximation of the maximum amount of coins that will ever exist in the lifetime of the currency.  \n**num_market_pairs**: number of market pairs across all exchanges trading each currency.  \n**market_cap_by_total_supply_strict**: market cap by total supply.  \n**volume_24h**: rolling 24 hour adjusted trading volume.  \n**volume_7d**: rolling 24 hour adjusted trading volume.  \n**volume_30d**: rolling 24 hour adjusted trading volume.  \n**percent_change_1h**: 1 hour trading price percentage change for each currency.  \n**percent_change_24h**: 24 hour trading price percentage change for each currency.  \n**percent_change_7d**: 7 day trading price percentage change for each currency.  \n\n**Cache / Update frequency:** Every 60 seconds.  \n**CMC equivalent pages:** Our latest cryptocurrency listing and ranking pages like [coinmarketcap.com/all/views/all/](https://coinmarketcap.com/all/views/all/), [coinmarketcap.com/tokens/](https://coinmarketcap.com/tokens/), [coinmarketcap.com/gainers-losers/](https://coinmarketcap.com/gainers-losers/), [coinmarketcap.com/new/](https://coinmarketcap.com/new/).     \n  \n***NOTE:** Use this endpoint if you need a sorted and paginated list of all cryptocurrencies. If you want to query for market data on a few specific cryptocurrencies use `/v3/cryptocurrency/quotes/latest` which is optimized for that purpose. The response data between these endpoints is otherwise the same.*  Cost: ~$0.01/call [spec]."
+
+
+[overrides.coinmarketcap_v3_cryptocurrency_quotes_latest]
+description = "This tool calls the paid x402 route. The free counterpart is coinmarketcap_public_api_v3_cryptocurrency_quotes_latest. Returns the latest market quote for 1 or more cryptocurrencies. Use the \"convert\" option to return market values in multiple fiat and cryptocurrency conversions in the same call.\n\n**Please note**: This documentation relates to our updated V3 endpoint, which may be incompatible with our V2 versions. Documentation for deprecated endpoints can be found [the deprecated section](/pro-api-reference/deprecated).\n\n**Cache / Update frequency:** Every 60 seconds.  \n**CMC equivalent pages:** Latest market data pages for specific cryptocurrencies like [coinmarketcap.com/currencies/bitcoin/](https://coinmarketcap.com/currencies/bitcoin/).  \n   \n***NOTE:** Use this endpoint to request the latest quote for specific cryptocurrencies. If you need to request all cryptocurrencies use `/v3/cryptocurrency/listings/latest` which is optimized for that purpose. The response data between these endpoints is otherwise the same.* Cost: ~$0.01/call [spec]."

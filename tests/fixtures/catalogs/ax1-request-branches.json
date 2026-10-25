@@ -1,0 +1,89 @@
+{
+  "anyOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokenAddress": {
+          "type": "string",
+          "description": "Base EVM contract (case-insensitive) or Solana base58 mint (case-sensitive, decodes to 32 bytes)."
+        },
+        "chain": {
+          "type": "string",
+          "enum": [
+            "base",
+            "solana"
+          ],
+          "description": "Default base. Solana requires chain=solana and deployment readiness; inspect supported_token_chains in the unsigned quote."
+        },
+        "requestKey": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$",
+          "description": "Optional correlation key. Does not replace the original payment authorization for recovery."
+        }
+      },
+      "required": [
+        "tokenAddress"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "chain": {
+                "const": "solana"
+              }
+            },
+            "required": [
+              "chain"
+            ]
+          },
+          "then": {
+            "properties": {
+              "tokenAddress": {
+                "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "tokenAddress": {
+                "pattern": "^0x[0-9a-fA-F]{40}$"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestKey": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$",
+          "description": "Console caller idempotency key; reuse with the same input for retries."
+        },
+        "tokenAddress": {
+          "type": "string",
+          "description": "Token address on the selected Console network."
+        },
+        "chain": {
+          "enum": [
+            "base",
+            "robinhood",
+            "solana"
+          ],
+          "description": "Default base; other Console token networks require deployment enablement. Payment remains on Base."
+        }
+      },
+      "required": [
+        "requestKey",
+        "tokenAddress"
+      ]
+    }
+  ]
+}

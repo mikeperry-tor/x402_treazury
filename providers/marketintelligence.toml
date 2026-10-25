@@ -1,0 +1,19 @@
+description = "Market signals, token risk, on-chain trade flow, SEC filings, macro rates, DeFi yields and portfolio analytics."
+spec = "https://api.marketintelligenceapi.com/openapi.json"
+name = "Market Intelligence API"
+base_url = "https://api.marketintelligenceapi.com"
+prefix = "marketintelligence"
+include = ["/api/v1", ""]
+# Prepaid capital, persistent webhook ownership and MCP transport are separate workflows.
+exclude = ["/api/v1/credits/buy", "/api/v1/alerts/subscriptions", "/mcp"]
+# Free feedback persists a message without an x402 execution gate.
+exclude_operations = ["POST /api/v1/feedback"]
+pricing_key = "x-payment-info"
+help_url = "https://api.marketintelligenceapi.com/llms.txt"
+instructions_text = "Preserve timestamps, source attribution, module availability and measured track records. Several flow metrics share one underlying trade source; do not count them as independent evidence. Missing coverage is not a neutral market signal."
+
+[overrides.marketintelligence_intelligence_opportunities.params]
+constraints = "Optional filters such as window, minBuyPressure, minVolumeUsd, minConfidence and minIndependentSources belong inside this object. universe and include are arrays in the POST body."
+
+[overrides.marketintelligence_agent_opportunities.params]
+constraints = "Optional filters such as window, minBuyPressure, minVolumeUsd, minConfidence and minIndependentSources belong inside this object. universe and include are arrays in the POST body."

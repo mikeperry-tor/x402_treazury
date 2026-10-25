@@ -3,6 +3,495 @@ use serde_json::Value;
 use std::path::Path;
 
 #[tokio::test]
+async fn stabletravel_repairs_literal_path_slots_without_changing_vendor_operations() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/stabletravel/provider.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("../providers/stabletravel/openapi.json")).unwrap();
+    let witness: Value =
+        serde_json::from_str(include_str!("fixtures/catalogs/stabletravel-paths.json")).unwrap();
+    for (original_path, original_item) in witness["paths"].as_object().unwrap() {
+        let repaired_path = doc["x-treazury-provenance"]["path_repairs"][original_path]
+            .as_str()
+            .unwrap();
+        assert!(doc["paths"].get(original_path).is_none());
+        let mut repaired_item = doc["paths"][repaired_path].clone();
+        for (method, operation) in repaired_item.as_object_mut().unwrap() {
+            let params = operation["parameters"].as_array_mut().unwrap();
+            let slots: Vec<_> = params.iter().filter(|p| p["in"] == "path").collect();
+            assert!(!slots.is_empty());
+            for param in slots {
+                assert_eq!(param["required"], true);
+                assert!(
+                    repaired_path.contains(&format!("{{{}}}", param["name"].as_str().unwrap()))
+                );
+            }
+            params.retain(|p| p["in"] != "path");
+            if original_item[method].get("parameters").is_none() {
+                assert!(params.is_empty());
+                operation.as_object_mut().unwrap().remove("parameters");
+            }
+        }
+        assert_eq!(&repaired_item, original_item);
+    }
+    let tools = catalog::build_tools(&cfg, &doc, "stabletravel").unwrap();
+    for (path, args, suffix) in [
+        (
+            "/api/flightaware/flights/{ident}",
+            json!({"ident":"UAL123"}),
+            "/api/flightaware/flights/UAL123",
+        ),
+        (
+            "/api/flightaware/airports/{id}/routes/{dest_id}",
+            json!({"id":"KJFK", "dest_id":"KLAX"}),
+            "/api/flightaware/airports/KJFK/routes/KLAX",
+        ),
+        (
+            "/api/seats-aero/trips/{id}",
+            json!({"id":"availability/123"}),
+            "/api/seats-aero/trips/availability%2F123",
+        ),
+        (
+            "/api/flightaware/history/aircraft/{registration}/last-flight",
+            json!({"registration":"N12345"}),
+            "/api/flightaware/history/aircraft/N12345/last-flight",
+        ),
+        (
+            "/api/flightaware/disruption-counts/{entity_type}/{id}",
+            json!({"entity_type":"origin", "id":"KJFK"}),
+            "/api/flightaware/disruption-counts/origin/KJFK",
+        ),
+    ] {
+        let tool = tools.iter().find(|t| t.path == path).unwrap();
+        let route = tool
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.url, format!("https://stabletravel.dev{suffix}"));
+        assert!(route.query.is_empty());
+        assert!(
+            tool.route(
+                cfg.base_url.as_ref().unwrap(),
+                json!({}).as_object().unwrap()
+            )
+            .is_err()
+        );
+    }
+    let intent = tools
+        .iter()
+        .find(|t| t.name == "stabletravel_flightaware_flights_ident_intents")
+        .unwrap();
+    let route = intent
+        .route(
+            cfg.base_url.as_ref().unwrap(),
+            json!({"ident":"UAL123", "ident_body":"UAL123", "intent":"departed"})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        route.url,
+        "https://stabletravel.dev/api/flightaware/flights/UAL123/intents"
+    );
+    assert_eq!(
+        route.body.unwrap(),
+        json!({"ident":"UAL123", "intent":"departed"})
+    );
+    assert!(intent.description.contains("write operation"));
+    let search = tools
+        .iter()
+        .find(|t| t.name == "stabletravel_google_flights_search")
+        .unwrap();
+    assert!(
+        search.input_schema["properties"]["return_date"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("default")
+    );
+    let route = search.route(cfg.base_url.as_ref().unwrap(),
+        json!({"departure_id":"JFK", "arrival_id":"LAX", "outbound_date":"2026-12-01", "type":"2"}).as_object().unwrap()).unwrap();
+    assert_eq!(route.query["type"], "2");
+    assert!(search.description.contains("$0.02"));
+    for tool in tools.iter().filter(|t| t.path.ends_with("/map")) {
+        assert!(tool.response_mapping.is_none());
+    }
+}
+
+#[tokio::test]
+async fn coinmarketcap_projects_keyless_paths_without_losing_dex_request_contracts() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/coinmarketcap/provider.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("../providers/coinmarketcap/openapi.json")).unwrap();
+    let witness: Value = serde_json::from_str(include_str!(
+        "fixtures/catalogs/coinmarketcap-projection.json"
+    ))
+    .unwrap();
+    for path in ["/v1/dex/search", "/v4/dex/pairs/quotes/latest"] {
+        assert_eq!(
+            doc["paths"][format!("/x402{path}")]["get"]["parameters"],
+            witness["standard"]["paths"][path]["get"]["parameters"]
+        );
+        assert_eq!(
+            doc["paths"][format!("/x402{path}")]["get"]["security"],
+            json!([])
+        );
+    }
+    let holder_path = "/v1/dex/holders/list";
+    assert_eq!(
+        doc["paths"][format!("/public-api{holder_path}")]["post"]["requestBody"],
+        witness["public"]["paths"][holder_path]["post"]["requestBody"]
+    );
+    let tools = catalog::build_tools(&cfg, &doc, "coinmarketcap").unwrap();
+    for tool in tools.iter().filter(|tool| tool.path.starts_with("/x402/")) {
+        assert!(tool.description.contains("paid x402 route"));
+        assert!(tool.description.contains("coinmarketcap_public_api_"));
+        assert!(!tool.description.contains("Plan credit use"));
+        assert!(!tool.description.contains("API plans"));
+    }
+    let dex = tools
+        .iter()
+        .find(|t| t.name == "coinmarketcap_v4_dex_pairs_quotes_latest")
+        .unwrap();
+    assert!(dex.input_schema["properties"].get("pair_address").is_none());
+    let args =
+        json!({"contract_address":"0x0000000000000000000000000000000000000001", "network_id":"1"});
+    let route = dex
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(
+        route.url,
+        "https://pro-api.coinmarketcap.com/x402/v4/dex/pairs/quotes/latest"
+    );
+    assert_eq!(serde_json::to_value(route.query).unwrap(), args);
+    assert!(dex.description.contains("$0.01"));
+    let public = tools
+        .iter()
+        .find(|t| t.path == "/public-api/v3/cryptocurrency/listings/latest")
+        .unwrap();
+    assert!(public.description.contains("free [spec]"));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.path == "/x402/v3/cryptocurrency/listings/latest")
+    );
+    for path in [
+        "/public-api/v1/dex/holders/list",
+        "/public-api/v1/dex/holders/detail",
+    ] {
+        let tool = tools.iter().find(|t| t.path == path).unwrap();
+        assert_eq!(tool.method, "POST");
+        assert!(tool.has_body);
+    }
+    assert!(!tools.iter().any(|t| !t.path.starts_with("/x402/")
+        && !t.path.starts_with("/public-api/")
+        && t.help_url.is_none()));
+}
+
+#[tokio::test]
+async fn ax1_projects_external_request_and_preserves_free_receipt_routing() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/ax1/provider.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value = serde_json::from_str(include_str!("../providers/ax1/openapi.json")).unwrap();
+    let witness: Value =
+        serde_json::from_str(include_str!("fixtures/catalogs/ax1-request-branches.json")).unwrap();
+    let path = "/api/dashboard/q-verdict/resource";
+    assert_eq!(
+        doc["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"],
+        witness["anyOf"][0]
+    );
+    assert_eq!(witness["anyOf"][0]["required"], json!(["tokenAddress"]));
+    assert_eq!(
+        witness["anyOf"][1]["required"],
+        json!(["requestKey", "tokenAddress"])
+    );
+    let tools = catalog::build_tools(&cfg, &doc, "ax1").unwrap();
+    let buy = tools.iter().find(|t| t.name == "ax1_resource").unwrap();
+    assert!(
+        buy.description
+            .contains("No account or Privy session is required")
+    );
+    assert!(buy.description.contains("requestKey is optional"));
+    assert!(buy.description.contains("new purchase"));
+    assert!(!buy.description.contains("Console mode"));
+    assert!(!buy.description.contains("Paid execution still requires"));
+    assert_eq!(buy.input_schema["required"], json!(["tokenAddress"]));
+    assert!(
+        buy.input_schema["properties"]
+            .get("PAYMENT-SIGNATURE")
+            .is_none()
+    );
+    assert_eq!(
+        buy.input_schema["properties"]["chain"]["enum"],
+        json!(["base", "solana"])
+    );
+    let args =
+        json!({"tokenAddress":"So11111111111111111111111111111111111111112", "chain":"solana"});
+    let route = buy
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(
+        route.url,
+        "https://www.ax1.vc/api/dashboard/q-verdict/resource"
+    );
+    assert_eq!(route.body.unwrap(), args);
+    let poll = tools
+        .iter()
+        .find(|t| t.name == "ax1_operations_operationid")
+        .unwrap();
+    assert_eq!(poll.method, "GET");
+    let route = poll
+        .route(
+            cfg.base_url.as_ref().unwrap(),
+            json!({"operationId":"00000000-0000-0000-0000-000000000001"})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        route.url,
+        "https://www.ax1.vc/api/q-verdict/operations/00000000-0000-0000-0000-000000000001"
+    );
+    assert!(route.headers.is_empty());
+    assert!(
+        !tools
+            .iter()
+            .any(|t| t.path.starts_with("/api/dashboard/q-verdict/runs"))
+    );
+}
+
+#[tokio::test]
+async fn nansen_keeps_keyless_analytics_without_api_key_or_sse_lifecycles() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/nansen.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let mut doc: Value = serde_json::from_str(include_str!(
+        "fixtures/catalogs/nansen-keyless-contracts.json"
+    ))
+    .unwrap();
+    // Keep future keyless search outside the three authenticated helper exclusions.
+    doc["paths"]["/api/v1/search/synthetic-keyless"] =
+        json!({"post":{"summary":"Synthetic future keyless research"}});
+    let tools = catalog::build_tools(&cfg, &doc, "nansen").unwrap();
+    let holdings = tools
+        .iter()
+        .find(|t| t.path == "/api/v1/smart-money/holdings")
+        .unwrap();
+    let args = json!({"chains":["ethereum"],"pagination":{"page":1,"per_page":10}});
+    let route = holdings
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(
+        route.url,
+        "https://api.nansen.ai/api/v1/smart-money/holdings"
+    );
+    assert_eq!(route.body.unwrap(), args);
+    assert!(route.headers.is_empty());
+    assert!(holdings.description.contains("$0.05"));
+    assert!(tools.iter().any(|t| t.path == "/api/v1/perp-screener"));
+    assert!(
+        tools
+            .iter()
+            .any(|t| t.path == "/api/v1/search/synthetic-keyless")
+    );
+    let holders = tools
+        .iter()
+        .find(|t| t.path == "/api/v1/tgm/holders")
+        .unwrap();
+    assert!(
+        holders.input_schema["properties"]["premium_labels"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("paid plan")
+    );
+    for path in [
+        "/api/v1/account",
+        "/api/v1/feedback",
+        "/api/v1/smart-alert",
+        "/api/v1/trade/execute",
+        "/api/v1/perp/order",
+        "/api/v1/agent/fast",
+        "/api/v1/profiler/address/labels",
+        "/api/v1/portfolio/defi-holdings",
+        "/api/v1/search/general",
+    ] {
+        assert!(doc["paths"][path].is_object());
+        assert!(!tools.iter().any(|t| t.path == path), "{path}");
+    }
+}
+
+#[tokio::test]
+async fn blockrun_adds_completed_model_gateways_without_transaction_broadcasts() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/blockrun.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("fixtures/catalogs/blockrun-gateways.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "blockrun").unwrap();
+    for (name, args) in [
+        (
+            "blockrun_messages",
+            json!({"model":"anthropic/claude-haiku-4.5", "max_tokens":16,
+            "messages":[{"role":"user","content":"Hello"}], "stream":false}),
+        ),
+        (
+            "blockrun_responses",
+            json!({"model":"openai/gpt-4.1-mini", "input":"Hello", "stream":false}),
+        ),
+    ] {
+        let tool = tools.iter().find(|t| t.name == name).unwrap();
+        assert!(
+            tool.input_schema["properties"]["stream"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("false")
+        );
+        let route = tool
+            .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.body.unwrap(), args);
+        assert_eq!(route.url, format!("https://blockrun.ai{}", tool.path));
+    }
+    assert!(doc["paths"]["/api/v1/rpc/ethereum"].is_object());
+    assert!(!tools.iter().any(|t| t.path.starts_with("/api/v1/rpc/")));
+}
+
+#[tokio::test]
+async fn new_intelligence_providers_preserve_paid_and_public_workflows() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (provider, captured) in [
+        (
+            "agdata",
+            include_str!("fixtures/catalogs/agdata-contracts.json"),
+        ),
+        (
+            "degenscan",
+            include_str!("fixtures/catalogs/degenscan-contracts.json"),
+        ),
+        (
+            "marketintelligence",
+            include_str!("fixtures/catalogs/marketintelligence-contracts.json"),
+        ),
+    ] {
+        let cfg = config::load(&root.join(format!("providers/{provider}.toml")))
+            .await
+            .unwrap()
+            .settings;
+        let doc: Value = serde_json::from_str(captured).unwrap();
+        let tools = catalog::build_tools(&cfg, &doc, provider).unwrap();
+        let by_name = |name: &str| tools.iter().find(|tool| tool.name == name).unwrap();
+        match provider {
+            "agdata" => {
+                for name in ["agdata_screenshot", "agdata_mpp_screenshot"] {
+                    let tool = by_name(name);
+                    assert!(
+                        tool.input_schema["properties"]["format"]["enum"]
+                            .as_array()
+                            .unwrap()
+                            .contains(&json!("pdf"))
+                    );
+                    assert!(
+                        tool.input_schema["properties"]["format"]["description"]
+                            .as_str()
+                            .unwrap()
+                            .contains("imageBase64")
+                    );
+                    assert!(tool.response_mapping.is_none());
+                    let route = tool
+                        .route(
+                            cfg.base_url.as_ref().unwrap(),
+                            json!({"url":"https://example.com", "format":"pdf"})
+                                .as_object()
+                                .unwrap(),
+                        )
+                        .unwrap();
+                    assert_eq!(route.url, format!("https://agdata.shveik.dev{}", tool.path));
+                    assert_eq!(route.body.unwrap()["format"], "pdf");
+                    assert!(route.headers.contains_key("idempotency-key"));
+                }
+                assert_eq!(by_name("agdata_endpoints").path, "/endpoints");
+            }
+            "degenscan" => {
+                for (suffix, price) in [
+                    ("funding_matrix", "$0.03"),
+                    ("xdex", "$0.05"),
+                    ("spot_perp", "$0.03"),
+                    ("history_coin", "$0.02"),
+                    ("naked", "$0.01"),
+                    ("watchdog", "$0.01"),
+                ] {
+                    let tool = by_name(&format!("degenscan_carry_{suffix}"));
+                    assert!(tool.description.contains(price));
+                    assert!(tool.input_schema["properties"].get("X-API-KEY").is_none());
+                }
+                assert_eq!(by_name("degenscan_oracle_forecast").method, "POST");
+                let poll = by_name("degenscan_oracle_forecast_id");
+                let route = poll
+                    .route(
+                        cfg.base_url.as_ref().unwrap(),
+                        json!({"id":"forecast/123"}).as_object().unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    route.url,
+                    "https://intel.degenscan.io/v1/oracle/forecast/forecast%2F123"
+                );
+                assert!(
+                    !tools
+                        .iter()
+                        .any(|tool| tool.path.starts_with("/v1/keys") || tool.path == "/mcp")
+                );
+            }
+            "marketintelligence" => {
+                let scan = by_name("marketintelligence_intelligence_opportunities");
+                assert_eq!(scan.method, "POST");
+                assert!(scan.description.contains("$0.03"));
+                let args = json!({"objective":"unusual_buying", "universe":["ETHUSD"],
+                    "constraints":{"window":"15m", "minIndependentSources":2}});
+                let route = scan
+                    .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+                    .unwrap();
+                assert_eq!(route.body.unwrap(), args);
+                assert!(route.query.is_empty());
+                assert_eq!(by_name("marketintelligence_feedback").method, "GET");
+                assert_eq!(by_name("marketintelligence_alerts").method, "GET");
+                assert_eq!(by_name("marketintelligence_gifts_config").method, "GET");
+                assert!(!tools.iter().any(|tool| {
+                    tool.path.starts_with("/api/v1/alerts/subscriptions")
+                        || tool.path.starts_with("/api/v1/credits/buy")
+                        || tool.path.starts_with("/mcp")
+                }));
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[tokio::test]
 async fn voipstore_routes_purchases_with_managed_keys_and_excludes_prepaid_topups() {
     use serde_json::json;
     use x402_treazury::{catalog, config};

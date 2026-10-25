@@ -1,0 +1,17 @@
+description = "Web unblocking, search, social and commerce data, reviews, jobs, contacts, screenshots and YouTube transcripts."
+spec = "https://agdata.shveik.dev/openapi.json"
+name = "AgData"
+# Use the documented unversioned compatibility base, not the schema's first /v1 server.
+base_url = "https://agdata.shveik.dev"
+prefix = "agdata"
+include = ["/x402", ""]
+# Both /x402 and /mpp aliases explicitly accept x402 payments.
+pricing_key = "x-payment-info"
+help_url = "https://agdata.shveik.dev/llms.txt"
+instructions_text = "Quotes reflect the requested result count; preserve delivered counts, partial results and truncation indicators. Validate request bodies before calling: an invalid unpaid body can still receive a quote."
+
+[overrides.agdata_screenshot.params]
+format = "jpeg (default), png, webp or pdf. Returns ordinary JSON with imageBase64 and contentType, not an inline MCP image; decode the base64 to obtain the image or PDF."
+
+[overrides.agdata_mpp_screenshot.params]
+format = "jpeg (default), png, webp or pdf. Returns ordinary JSON with imageBase64 and contentType, not an inline MCP image; decode the base64 to obtain the image or PDF."

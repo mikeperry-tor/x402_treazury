@@ -1,0 +1,222 @@
+{
+  "standard": {
+    "openapi": "3.1.1",
+    "info": {
+      "title": "CoinMarketCap Cryptocurrency API Documentation",
+      "version": "3.0.3",
+      "description": "Modern API for cryptocurrency data. Get real-time prices, market data, listings, and historical information through powerful developer endpoints.",
+      "contact": {
+        "email": "api@coinmarketcap.com"
+      },
+      "termsOfService": "https://coinmarketcap.com/terms/"
+    },
+    "paths": {
+      "/v1/dex/search": {
+        "get": {
+          "tags": [
+            "Token"
+          ],
+          "summary": "Search tokens",
+          "description": "Search for tokens by keyword\n\n<Callout type=\"tip\" title=\"Available with no API key\">Call this endpoint keyless - no API key, no signup. Prefix the path with `/public-api`: `https://pro-api.coinmarketcap.com/public-api/v1/dex/search`. See the [Keyless Public API](https://coinmarketcap.com/api/documentation/pro-api-reference/keyless-public-api) for the full list, rate limits, and examples.</Callout>",
+          "operationId": "search",
+          "x-keyless": true,
+          "parameters": [
+            {
+              "name": "q",
+              "in": "query",
+              "description": "Search keyword",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "platform",
+              "in": "query",
+              "description": "Platform filter",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "sort",
+              "in": "query",
+              "description": "Sort field",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "limit",
+              "in": "query",
+              "description": "Result limit",
+              "required": false,
+              "schema": {
+                "type": "integer",
+                "format": "int32"
+              }
+            },
+            {
+              "name": "code",
+              "in": "query",
+              "description": "Code filter",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      },
+      "/v4/dex/pairs/quotes/latest": {
+        "get": {
+          "tags": [
+            "Token"
+          ],
+          "summary": "Quotes Latest",
+          "description": "Returns the latest market quote for 1 or more spot pairs. Use the \"convert\" option to return market values in multiple fiat and cryptocurrency conversions in the same call.\n\n<Callout type=\"tip\" title=\"Available with no API key\">Call this endpoint keyless - no API key, no signup. Prefix the path with `/public-api`: `https://pro-api.coinmarketcap.com/public-api/v4/dex/pairs/quotes/latest`. See the [Keyless Public API](https://coinmarketcap.com/api/documentation/pro-api-reference/keyless-public-api) for the full list, rate limits, and examples.</Callout>",
+          "operationId": "getLatestPairsQuotes",
+          "x-keyless": true,
+          "parameters": [
+            {
+              "name": "contract_address",
+              "in": "query",
+              "description": "One or more comma-separated contract addresses.",
+              "required": false,
+              "example": "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640,0xc2e9f25be6257c210d7adf0d4cd6e3e881ba25f8",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "network_id",
+              "in": "query",
+              "description": "One or more CoinMarketCap cryptocurrency network ids",
+              "required": false,
+              "example": "1",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "network_slug",
+              "in": "query",
+              "description": "Alternatively, one network names in URL friendly shorthand \"slug\" format (all lowercase, spaces replaced with hyphens).",
+              "required": false,
+              "example": "ethereum",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "aux",
+              "in": "query",
+              "description": "Default:`\"\"`\nValid values: `\"pool_created\"` `\"percent_pooled_base_asset\"` `\"num_transactions_24h\"` `\"pool_base_asset\"` `\"pool_quote_asset\"` `\"24h_volume_quote_asset\"` `\"total_supply_quote_asset\"` `\"total_supply_base_asset\"` `\"holders\"` `\"buy_tax\"` `\"sell_tax\"` `\"security_scan\"` `\"24h_no_of_buys\"` `\"24h_no_of_sells\"` `\"24h_buy_volume\"` `\"24h_sell_volume\"`\nOptionally specify a comma-separated list of supplemental data fields to return.",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "convert_id",
+              "in": "query",
+              "description": "Optionally calculate market quotes by CoinMarketCap ID instead of symbol. This option is identical to convert outside of ID format. Ex: convert_id=1,2781 would replace convert=BTC,USD in your query. This parameter cannot be used when convert is used.",
+              "required": false,
+              "example": "1,2781",
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "skip_invalid",
+              "in": "query",
+              "description": "Pass true to relax request validation rules. When requesting records on multiple spot pairs an error is returned if no match is found for 1 or more requested spot pairs. If set to true, invalid lookups will be skipped allowing valid spot pairs to still be returned.",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "reverse_order",
+              "in": "query",
+              "description": "Pass true to invert the order of a spot pair. For example, a trading pair is set up as Token B/Token A in the contract and is commonly referred to as Token A/Token B. Using reverse_order would change the order to reflect the true Token B/Token A pairing as it exists in the pool.",
+              "required": false,
+              "schema": {
+                "type": "string"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "x-treazury-fixture-scope": "Reduced primary request/authentication contracts for named provider regressions; not a complete inventory.",
+    "security": [
+      {
+        "ApiKeyAuth": []
+      }
+    ]
+  },
+  "public": {
+    "openapi": "3.1.1",
+    "info": {
+      "title": "CoinMarketCap Keyless Public API",
+      "version": "3.0.3",
+      "description": "The CoinMarketCap endpoints you can call with no API key. Send requests to https://pro-api.coinmarketcap.com/public-api and do not send the X-CMC_PRO_API_KEY header. Keyless requests share an IP-based rate limit. For higher limits and the full Pro and DEX catalog, use the full spec with a free API key: https://coinmarketcap.com/api/documentation/openapi.json. Guide: https://coinmarketcap.com/api/documentation/pro-api-reference/keyless-public-api",
+      "contact": {
+        "email": "api@coinmarketcap.com"
+      },
+      "termsOfService": "https://coinmarketcap.com/terms/"
+    },
+    "paths": {
+      "/v1/dex/holders/list": {
+        "post": {
+          "tags": [
+            "Holder"
+          ],
+          "summary": "Get holders list",
+          "description": "Get detailed information for holders list\n\n<Callout type=\"tip\" title=\"Available with no API key\">Call this endpoint keyless - no API key, no signup. Prefix the path with `/public-api`: `https://pro-api.coinmarketcap.com/public-api/v1/dex/holders/list`. See the [Keyless Public API](https://coinmarketcap.com/api/documentation/pro-api-reference/keyless-public-api) for the full list, rate limits, and examples.</Callout>",
+          "operationId": "getHolders",
+          "x-keyless": true,
+          "requestBody": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DqueryHoldersRequestDTO"
+                }
+              }
+            },
+            "required": true
+          }
+        }
+      }
+    },
+    "x-treazury-fixture-scope": "Reduced primary request/authentication contracts for named provider regressions; not a complete inventory.",
+    "components": {
+      "schemas": {
+        "DqueryHoldersRequestDTO": {
+          "type": "object",
+          "properties": {
+            "tokenAddress": {
+              "type": "string",
+              "description": "Token contract address",
+              "example": "0x1234567890abcdef1234567890abcdef12345678"
+            },
+            "platform": {
+              "type": "string",
+              "description": "Blockchain platform",
+              "example": "ethereum"
+            },
+            "tag": {
+              "type": "string",
+              "description": "tag enum [tag_all, tag_kol, tag_smart_money, tag_whale, tag_bot, tag_sniper, tag_dev]",
+              "example": "tag_all"
+            }
+          },
+          "description": "holders request"
+        }
+      }
+    }
+  }
+}

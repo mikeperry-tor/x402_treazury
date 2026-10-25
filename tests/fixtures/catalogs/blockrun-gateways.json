@@ -1,0 +1,381 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "BlockRun AI Gateway",
+    "version": "1.0.0",
+    "description": "Agent-native AI gateway. Pay-per-request with USDC on Base. No accounts or API keys required.",
+    "x-logo": {
+      "url": "https://blockrun.ai/brand/logo-256.png",
+      "altText": "BlockRun"
+    }
+  },
+  "paths": {
+    "/api/v1/messages": {
+      "post": {
+        "operationId": "anthropicMessages",
+        "summary": "Anthropic Messages",
+        "description": "Anthropic-shaped Messages API. Send Claude-style requests (system + messages array, tools, tool_choice) and BlockRun routes them through the right upstream provider. Token-priced like /chat/completions.",
+        "x-agentcash-auth": {
+          "mode": "paid"
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": "0.0001",
+            "max": "5.000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "model",
+                  "messages",
+                  "max_tokens"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Anthropic model id (or any BlockRun-routable Anthropic alias).",
+                    "enum": [
+                      "anthropic/claude-haiku-4.5",
+                      "anthropic/claude-sonnet-5.5",
+                      "anthropic/claude-sonnet-5",
+                      "anthropic/claude-sonnet-4.6",
+                      "anthropic/claude-sonnet-4.5",
+                      "anthropic/claude-opus-4.5",
+                      "anthropic/claude-opus-4.7",
+                      "anthropic/claude-fable-5.1",
+                      "anthropic/claude-fable-5",
+                      "anthropic/claude-opus-4.8",
+                      "anthropic/claude-opus-5",
+                      "anthropic/claude-opus-5.5"
+                    ]
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "role",
+                        "content"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "user",
+                            "assistant"
+                          ]
+                        },
+                        "content": {
+                          "description": "String, or array of Anthropic content blocks (text/image/tool_use/tool_result).",
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "system": {
+                    "description": "System prompt — string, or array of { type: 'text', text }.",
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      }
+                    ]
+                  },
+                  "max_tokens": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum tokens to generate."
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "top_p": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "top_k": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "stop_sequences": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean",
+                    "description": "Server-Sent Events stream of Anthropic-style deltas."
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Anthropic tool definitions."
+                  },
+                  "tool_choice": {
+                    "type": "object",
+                    "description": "Anthropic tool_choice spec."
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "properties": {
+                      "user_id": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "x402": []
+          }
+        ]
+      }
+    },
+    "/api/v1/responses": {
+      "post": {
+        "operationId": "openaiResponses",
+        "summary": "OpenAI Responses API",
+        "description": "OpenAI-shaped Responses API — the native protocol for Codex CLI and agents that need tools + reasoning on gpt-5.x. Same body shape as api.openai.com/v1/responses; token-priced like /chat/completions. Stateless gateway: store:false is enforced and previous_response_id / conversation / background are rejected — resend full context per call and use include: [\"reasoning.encrypted_content\"] for reasoning continuity.",
+        "x-agentcash-auth": {
+          "mode": "paid"
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "dynamic",
+            "currency": "USD",
+            "min": "0.0001",
+            "max": "5.000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "model",
+                  "input"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "OpenAI model id (gpt-5.x, o-series, codex; with or without the openai/ prefix).",
+                    "enum": [
+                      "openai/gpt-6-astra",
+                      "openai/gpt-6.1-sol",
+                      "openai/gpt-6-sol",
+                      "openai/gpt-6-luna",
+                      "openai/gpt-5.6-sol",
+                      "openai/gpt-5.6-terra",
+                      "openai/gpt-5.6-luna",
+                      "openai/gpt-5.6-sol-pro",
+                      "openai/gpt-5.6-terra-pro",
+                      "openai/gpt-5.6-luna-pro",
+                      "openai/gpt-5.5",
+                      "openai/gpt-5.5-pro",
+                      "openai/chat-latest",
+                      "openai/gpt-5.4",
+                      "openai/gpt-5.4-pro",
+                      "openai/gpt-5.1",
+                      "openai/gpt-5.2",
+                      "openai/gpt-5.4-mini",
+                      "openai/gpt-5-mini",
+                      "openai/gpt-5.4-nano",
+                      "openai/gpt-5.2-pro",
+                      "openai/gpt-5.3-codex",
+                      "openai/gpt-4.1",
+                      "openai/gpt-4.1-mini",
+                      "openai/gpt-4.1-nano",
+                      "openai/gpt-4o",
+                      "openai/gpt-4o-mini",
+                      "openai/o1",
+                      "openai/o3",
+                      "openai/o3-mini",
+                      "openai/o4-mini"
+                    ]
+                  },
+                  "input": {
+                    "description": "String, or array of Responses input items (messages, function_call_output, reasoning replays, …).",
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      }
+                    ]
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "description": "System/developer instructions."
+                  },
+                  "max_output_tokens": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum tokens to generate (bounds the x402 quote)."
+                  },
+                  "stream": {
+                    "type": "boolean",
+                    "description": "Server-Sent Events stream of native Responses events."
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Responses tool definitions (function, web_search, …)."
+                  },
+                  "tool_choice": {
+                    "description": "Responses tool_choice spec."
+                  },
+                  "reasoning": {
+                    "type": "object",
+                    "description": "Reasoning config, e.g. { effort: \"high\" }."
+                  },
+                  "include": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Extra output fields, e.g. reasoning.encrypted_content."
+                  },
+                  "text": {
+                    "type": "object",
+                    "description": "Text/format options (json_object, json_schema, verbosity)."
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 2
+                  },
+                  "top_p": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "x402": []
+          }
+        ]
+      }
+    },
+    "/api/v1/rpc/ethereum": {
+      "post": {
+        "operationId": "multichainRpc",
+        "summary": "Multi-chain RPC",
+        "description": "JSON-RPC 2.0 passthrough across 40 chains (powered by Tatum). Swap `ethereum` in the path for any network — base, solana, polygon, bsc, arbitrum, optimism, avalanche, bitcoin, sui, and more: POST /api/v1/rpc/{network}. One endpoint, every chain, no API key. $0.003 per call; a JSON-RPC batch is priced per element.",
+        "x-agentcash-auth": {
+          "mode": "paid"
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.003"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ]
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "jsonrpc",
+                  "method",
+                  "id"
+                ],
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": [
+                      "2.0"
+                    ],
+                    "description": "\"2.0\""
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "Chain RPC method — e.g. eth_blockNumber, eth_call, eth_getBalance (EVM) or getSlot, getAccountInfo (Solana)."
+                  },
+                  "params": {
+                    "type": "array",
+                    "items": {},
+                    "description": "Method-specific params."
+                  },
+                  "id": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "JSON-RPC id."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "x402": []
+          }
+        ]
+      }
+    }
+  },
+  "x-treazury-fixture-scope": "Reduced primary request/authentication contracts for named provider regressions. Response declarations deliberately omitted; not a complete inventory."
+}

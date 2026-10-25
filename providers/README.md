@@ -37,6 +37,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Provider | Definition | Catalog |
 | --- | --- | --- |
 | Agent402 | `agent402.toml` | Full supported catalog; advisory web research recommendations and lowercase tags |
+| AgData | `agdata.toml` | Web/social data; both x402-capable aliases; screenshot/PDF JSON |
 | AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
 | AGProxy | `agproxy.toml` | Complete pinned `agproxy-openapi.json`; residential fetch and proxy packs |
 | Datakoot | `datakoot.toml` | Public-data gateway; apex-domain help |
@@ -48,13 +49,16 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | AgentFund | `agentfund.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | AgentUtility | `agentutility/provider.toml` | Full supported aliases/catalog; advisory research recommendations; enriched provenance |
 | Arkham | `arkham.toml` | Vendor OpenAPI |
+| AX1 Verdict | `ax1/provider.toml` | External request projection; token Verdict submission and free public receipt |
 | BlockRun | `blockrun.toml` | Synchronous catalog with fixed-symbol reads; async jobs/ownership excluded |
 | Claw402 | `claw402.toml` | Full catalog, advisory market reads, sparse RootData JSON bodies |
+| CoinMarketCap | `coinmarketcap/provider.toml` | Authored union of all public keyless routes and four x402 counterparts |
 | botsmith | `botsmith.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | Brazilayer | `brazilayer.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | Curl HTTP Request | `curl/provider.toml` | Local schema; POST `/curl` returns status, headers and body text; advertised $0.01 |
 | Concordance | `concordance/provider.toml` | Local `concordance/openapi.json` |
 | Deepline | `deepline.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
+| Degenscan Intel | `degenscan.toml` | Event intelligence, keyless Carry reads and public forecast submit/poll |
 | Exa | `exa.toml` | Vendor OpenAPI; Search, Contents and lazy help only |
 | Genuine Good Grants | `genuinegood.toml` | POST grant research; search/detail recommendations; bearer pass excluded |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
@@ -63,6 +67,8 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Kronos | `kronos.toml` | Market data plus public status/methodology; existing names preserved |
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |
 | LoneStarOracle | `lonestar.toml` | Full supported gateway, including public previews/feeds; research recommendations |
+| Market Intelligence API | `marketintelligence.toml` | Market research and analytics; POST opportunity scans; prepaid/webhook workflows excluded |
+| Nansen | `nansen.toml` | Keyless paid analytics; API-key account/trading and SSE agents excluded |
 | News Gurus | `newsgurus/provider.toml` | Vendor x402 catalog projection, including agent-status; lazy help |
 | OneShot | `oneshot.toml` | Synchronous search and public discovery; authenticated jobs excluded |
 | Otto | `otto.toml` | Vendor OpenAPI |
@@ -71,6 +77,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | RegimeShift | `regimeshift.toml` | Vendor OpenAPI |
 | SocialFetch | `socialfetch.toml` | Vendor tagged OpenAPI |
 | StableEnrich | `stableenrich.toml` | Synchronous JSON/image catalog; specific lifecycle paths excluded |
+| StableTravel | `stabletravel/provider.toml` | Full flight-data catalog with authored path-parameter repairs; cash fares, cached awards and operational reads |
 | Straits | `straits/provider.toml` | Authored free/premium JSON, CSV, RSS and HTML contracts |
 | Vaaya | `vaaya.toml` | Supported x402 JSON/image catalog; specific MPP/lifecycle boundaries |
 | VoIPStore | `voipstore.toml` | Virtual-number catalog, quotes, purchases and SMS status; prepaid top-ups excluded |

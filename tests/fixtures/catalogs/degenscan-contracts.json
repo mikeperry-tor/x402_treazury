@@ -1,0 +1,389 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Degenscan Intel",
+    "version": "0.10.41",
+    "description": "Cross-asset market event intelligence for AI trading agents. Priced routes return HTTP 402 with x402 v2 payment requirements (USDC on Base) unless X-API-KEY is sent or the free trial header X-Free-Trial: 1 is present (100 calls/day/IP). Information and analytics only — not investment advice.",
+    "contact": {
+      "name": "Marbella Collins LLC",
+      "email": "contact@degenscan.io"
+    },
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://intel.degenscan.io"
+    }
+  ],
+  "paths": {
+    "/v1/carry/funding-matrix": {
+      "get": {
+        "summary": "Carry Oracle: annualised funding for every perp on every Hyperliquid dex (subscription: X-API-KEY dsi_carry_, US$100/month)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dex",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "min_vol",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items[] {coin, dex, base, funding_1h, funding_apr, mark, oi_usd, vol24_usd, spot}"
+          },
+          "402": {
+            "description": "subscription required — how to pay"
+          }
+        }
+      }
+    },
+    "/v1/carry/xdex": {
+      "get": {
+        "summary": "Carry Oracle: same ticker on 2+ HIP-3 dexes — funding spread now/14d, % positive hours, basis, liquidity (subscription)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "min_vol",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items[] {base, legs[], spread_apr_now, spread_apr_14d, basis_pct, min_leg_vol24_usd}"
+          },
+          "402": {
+            "description": "subscription required"
+          }
+        }
+      }
+    },
+    "/v1/carry/spot-perp": {
+      "get": {
+        "summary": "Carry Oracle: main-dex perp vs spot — funding now/14d, % positive hours, basis (subscription)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items[] {base, perp, funding_apr, funding_apr_14d, hours_positive_14d, perp_mark, spot_mark, basis_pct}"
+          },
+          "402": {
+            "description": "subscription required"
+          }
+        }
+      }
+    },
+    "/v1/carry/history/{coin}": {
+      "get": {
+        "summary": "Carry Oracle: hourly funding/premium/mark/OI/volume for one coin, beyond Hyperliquid's 500 h (subscription)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "coin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "xyz:NBIS"
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items[] hourly"
+          },
+          "402": {
+            "description": "subscription required"
+          }
+        }
+      }
+    },
+    "/v1/carry/naked": {
+      "get": {
+        "summary": "Carry Oracle: funding extremes with no hedge leg on Hyperliquid — raw data (subscription)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "min_abs_apr",
+            "in": "query",
+            "schema": {
+              "type": "number",
+              "default": 0.5
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "items[] {coin, dex, funding_apr_now, funding_apr_14d, hours_above_threshold_14d, why_no_hedge}"
+          },
+          "402": {
+            "description": "subscription required"
+          }
+        }
+      }
+    },
+    "/v1/carry/watchdog": {
+      "get": {
+        "summary": "Carry Oracle: health of every market and dex (subscription)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "dexes[], markets[] {status, oi_usd, oi_change_7d_pct, vol24h_usd, growth_mode, risk_flags}"
+          },
+          "402": {
+            "description": "subscription required"
+          }
+        }
+      }
+    },
+    "/v1/oracle/forecast": {
+      "post": {
+        "summary": "Oracle: calibrated YES-probability for a binary question (async job). Monte Carlo of LLM agent societies + base-rate-anchored expert panel, grounded in live Intel data. Returns 202 + forecast_id; poll GET /v1/oracle/forecast/{id} (free).",
+        "x-price-usd": 0.25,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "question"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "example": "Will Bitcoin close above 120,000 USD on 2026-10-31?"
+                  },
+                  "resolves_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "context": {
+                    "type": "string"
+                  },
+                  "runs": {
+                    "type": "integer",
+                    "default": 8,
+                    "maximum": 12
+                  },
+                  "population": {
+                    "type": "integer",
+                    "default": 24,
+                    "maximum": 48
+                  },
+                  "rounds": {
+                    "type": "integer",
+                    "default": 3,
+                    "maximum": 6
+                  },
+                  "interventions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "round": {
+                          "type": "integer"
+                        },
+                        "news": {
+                          "type": "string"
+                        },
+                        "audience": {
+                          "type": "string",
+                          "enum": [
+                            "all",
+                            "half",
+                            "influencers",
+                            "skeptics"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "social_sim",
+                      "expert_panel",
+                      "hybrid"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "{ forecast_id, status: queued, eta_s, poll }"
+          },
+          "402": {
+            "description": "payment required ($0.25)"
+          }
+        }
+      }
+    },
+    "/v1/oracle/forecast/{id}": {
+      "get": {
+        "summary": "Oracle: poll a forecast job (free). done → probability, ci80, disagreement, base_rate, market_odds, edge, drivers, failure_modes, runs[], panel[], commitment_hash",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "status queued|running|failed|done (+Forecast)"
+          },
+          "404": {
+            "description": "unknown id"
+          }
+        }
+      }
+    },
+    "/v1/keys/trial": {
+      "post": {
+        "summary": "FREE TRIAL KEY — e-mail → 200 calls, 7 days, no card (Carry Data + event feed; not the oracle). One per e-mail, one per IP per 24 h.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              },
+              "example": {
+                "email": "you@example.com"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "{ api_key: dsi_trial_…, calls: 200, expires_at }"
+          },
+          "429": {
+            "description": "already issued for this e-mail / network"
+          }
+        }
+      }
+    },
+    "/v1/keys/x402/{pack}": {
+      "post": {
+        "summary": "Buy a prepaid API key with USDC (x402) — no human, no card",
+        "parameters": [
+          {
+            "name": "pack",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pack_1k",
+                "pack_10k",
+                "pack_100k"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ api_key, calls }"
+          },
+          "402": {
+            "description": "x402 payment required: $5 / $40 / $300"
+          }
+        }
+      }
+    },
+    "/v1/keys/me": {
+      "get": {
+        "summary": "Remaining budget for X-API-KEY (free)",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "budget, used, remaining"
+          }
+        }
+      }
+    },
+    "/mcp": {
+      "post": {
+        "summary": "MCP streamable HTTP endpoint (22 tools incl. oracle_forecast, oracle_get, oracle_board, oracle_track_record)",
+        "responses": {
+          "200": {
+            "description": "JSON-RPC / SSE"
+          },
+          "402": {
+            "description": "payment required for priced tools after quota"
+          }
+        }
+      }
+    }
+  },
+  "x-treazury-fixture-scope": "Reduced primary OpenAPI capture for provider compatibility, method and output regressions; not a complete catalog."
+}

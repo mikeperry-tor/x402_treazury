@@ -888,7 +888,12 @@ Speech and sound-effects return synchronous JSON containing hosted audio URLs;
 they remain available without fetching those links. Phone/sandbox ownership, voice
 calls and trade submission have distinct lifecycle/authority boundaries. Valid
 fixed BTC-USD, XAU-USD, EUR-USD and Binance BTCUSDT paths remain usable with their
-literal targets and generated names. Do not invent symbol parameters or rewrite
+literal targets and generated names. The generic `/api/v1/rpc` gateway accepts
+arbitrary JSON-RPC methods, including transaction broadcasts, without a read-only
+method contract; it is excluded alongside trade submission. The newer Messages
+and Responses gateways remain available with `stream` omitted or false. Responses
+is stateless: resend context, because stateful response/conversation/background
+parameters are rejected by the vendor. Do not invent symbol parameters or rewrite
 wire paths. Zero-address/token placeholders retain an unverified intended-target
 contract, not a general claim that every fixed target is invalid. Published
 vendor prices remain advisory.
@@ -1351,3 +1356,186 @@ before bootstrap can remain offline. Run the focused `relay_policy` asset tests
 and affected provider/adapter regressions, and review any request limits, encoding,
 redirect, header or billing changes before accepting the new contracts. Merely
 downloading a new schema does not qualify paid delivery, refunds or Tor.
+
+## AgData, Degenscan and Market Intelligence API
+
+These definitions use each host's public `/openapi.json` and `/llms.txt`.
+Their reduced `tests/fixtures/catalogs/*-contracts.json` captures exercise the
+specific compatibility and request contracts below, not a full inventory or
+funded qualification.
+
+AgData explicitly supports x402 on both `/x402/*` and `/mpp/*`, even though
+the aliases' structured protocol annotations differ. Both remain available;
+`/x402` anchors names with an empty fallback for other paths. The explicit root
+base uses documented compatibility routes instead of the schema's first `/v1`
+server. Screenshot responses remain ordinary JSON arrays with `imageBase64` and
+`contentType`, preserving JPEG, PNG, WebP and PDF. No inline-image mapping is
+installed because it would reject the documented PDF option. Large encoded
+results remain subject to ordinary visible text truncation. Quotes depend on
+requested counts; the vendor documents partial-result refunds and invalid-body
+quotes, which are not evidence that invalid inputs can be delivered.
+
+Degenscan's six Carry reads support keyless per-call x402 despite the schema's
+subscription/API-key descriptions. Their guide prices are retained in overrides;
+an unsigned funding-matrix probe returned an x402 Base USDC offer for $0.03.
+Other `x-price-usd` values are numeric USD/call hints, displayed as raw pricing
+metadata. The public oracle workflow returns a forecast ID from submission and
+provides a free status/result read; both operations remain available. Poll until
+done or failed rather than interpreting acceptance as completion. Credential
+issuance, prepaid key purchases/balance and MCP transport are excluded; public
+plans and diagnostics remain available.
+
+Market Intelligence's GET/POST opportunity scans share results and billing;
+POST uses arrays and nested `constraints` and is the default method. Public
+credit/alert documentation, gift configuration/status and diagnostics remain
+available. Credit purchases exceed ordinary per-call authority; webhook
+subscription ownership requires retained secrets and continuing delivery
+management. The subscription namespace, including the GET event catch-up that
+consumes delivery credits, is excluded. Free feedback POST persists a message
+without an x402 execution gate and is excluded by exact method/path; its
+informational GET remains. MCP transport endpoints are excluded in favor of
+their ordinary REST operations. Optional SIWX credit authentication does not
+prevent ordinary x402 calls.
+
+## CoinMarketCap
+
+`coinmarketcap/provider.toml` uses an authored union of the official
+[keyless OpenAPI](https://coinmarketcap.com/api/documentation/openapi-keyless.json),
+[standard OpenAPI](https://coinmarketcap.com/api/documentation/openapi.json) and
+[x402 route guide](https://coinmarketcap.com/api/documentation/ai-agent-hub/x402.md).
+The API host itself does not publish `/openapi.json` or `/llms.txt`.
+All public-schema paths receive the `/public-api` prefix from their declared
+server URL. The four documented paid counterparts copy complete standard
+parameter/response contracts to `/x402/v3/cryptocurrency/quotes/latest`,
+`/x402/v3/cryptocurrency/listings/latest`, `/x402/v1/dex/search` and
+`/x402/v4/dex/pairs/quotes/latest`. API-key security is removed only for these
+documented keyless access modes; free and $0.01 hints are authored from the guides.
+The local catalog retains transitive component references and both public holder
+POST methods. Standard authenticated routes are not copied into this keyless
+catalog. Public and paid counterparts have distinct names and wire paths.
+Paid-tool description overrides remove the inherited public-path setup and
+subscription-credit/plan prose while retaining substantive data, sorting and
+update guidance; they name the separately exposed free counterparts.
+
+DEX search uses `q`; the pair quote uses `contract_address` with `network_id`
+or `network_slug`. The x402 guide's example `pair_address` is inconsistent with
+the actual parameter reference. Many numeric selectors are vendor-declared strings;
+comma-separated IDs/symbols remain strings. Public endpoints have separate quotas
+and response coverage; prefer them when adequate, preserving vendor status errors,
+limits and timestamps. An unsigned cryptocurrency quote and pair quote each
+advertised a Base USDC $0.01 offer alongside other-network offers. Additional
+networks do not change Treazury's Base USDC signing contract.
+
+Update the authored union deliberately from both source schemas and the x402 route
+guide: preserve original request/response contracts, apply only the documented
+path/security/price projection, and retain referenced components. The focused
+projection regressions and bundled local-catalog checks cover this responsibility;
+the catalog is a runtime asset, not a settings or inventory snapshot.
+
+## Nansen
+
+`nansen.toml` uses the [public schema](https://api.nansen.ai/openapi.json) and
+[keyless x402 guide](https://docs.nansen.ai/getting-started/agentic-payments/x402-payments.md).
+Nansen supports x402 v2; its root API-key security does not override the explicit
+x402 alternatives on paid analytics. API-key-only account, feedback, alerts,
+search helpers, trading/perp execution and the labels/premium-labels/DeFi-holdings
+operations are excluded. Ordinary perp analytics remain available. Search helpers are excluded by exact
+operation rather than suppressing a future keyless search namespace. The guide lists DeFi holdings in both its basic table and its
+excluded list; the schema confirms API-key-only authentication. Feedback's custom
+Idempotency-Key constraints also do not admit Treazury's generated UUIDs, but that
+route already lies outside this keyless provider.
+
+Agent fast/expert return only SSE, with failures encoded inside HTTP 200 and
+account-owned conversation continuation. There is no completed JSON response mode;
+these operations are excluded. On supported holder/leaderboard reads, omit
+`premium_labels` or set false: true requires a paid API-key plan. Deprecated
+`/api/v1beta1` analytics aliases remain visible with their vendor deprecation and
+sunset guidance; prefer their current `/api/v1` counterparts.
+
+Prices use a string-shaped `x-payment-info.price` (for example `$0.05`), preserved
+as raw pricing metadata rather than normalized dollar hints. The optional first-call
+promotion needs `X-Payer-Address` on the unpaid request; Treazury does not inject
+this header, so ordinary calls receive standard quotes. An unsigned holdings
+request advertised Base USDC $0.05 alongside other-network offers. No discount,
+paid delivery or historical-data completeness is established by catalog inspection.
+
+## AX1 Verdict
+
+`ax1/provider.toml` uses an authored external request projection of
+[the vendor schema](https://www.ax1.vc/openapi.json), with
+[external usage guidance](https://www.ax1.vc/agents.md). Use the canonical `www`
+origin directly; paid requests do not follow redirects. The resource is POST;
+GET returns 405. Only Verdict is currently advertised for external callers.
+
+The upstream request body combines external and Privy Console schemas in a
+full-object `anyOf`. Generic conversion loses its request fields. The local
+runtime schema selects the original first (external) branch, preserving its
+required tokenAddress, optional chain/requestKey and original constraints, plus
+all original response contracts. The authenticated Console run read is excluded;
+public `/api/q-verdict/operations/{operationId}` remains available. The
+resource description override must retain only external usage and recovery
+actions available through these tools; the vendor description also covers
+Console-only authentication and manual signature replay. The upstream prose is
+retained in the local source document, not exposed as the tool description.
+On schema updates,
+verify that the selected branch is still the external contract; do not pick a
+branch solely by position. The request-branch witness regression verifies the
+projection and the absence of Console-only inputs.
+
+The unsigned probe reported `availability=ready`, token chains Base/Solana and a
+Base USDC $0.02 offer. Readiness is deployment-specific; a quote alone does not
+qualify execution. Analysis of a Solana mint still pays on Base. No account or
+Privy session is sent and external calls earn no Console rewards. Preserve the
+returned disclaimer and public verdict link; image URLs remain hosted links.
+
+A POST can return 202 for pending/unknown preparation or settlement. Preserve
+operation_id and use its free GET receipt; inspect status even on HTTP 200.
+Unknown or missing results never authorize another purchase. Vendor exact-signature
+POST recovery is distinct from another tool invocation: Treazury does not expose
+stored signed bytes for a recovery replay, and callers must not invoke the paid
+tool again as recovery. Free status reads work once the operation ID is known;
+a lost initial response without that ID remains an uncertain outcome. This is not
+an owned-session polling workflow or permission to re-sign after a failure.
+
+## StableTravel
+
+`stabletravel/provider.toml` uses an authored repair of the
+[vendor OpenAPI](https://stabletravel.dev/openapi.json), following the
+[flight-data guide](https://stabletravel.dev/llms.txt). The vendor document writes
+33 variable paths with literal `id`, `dest_id`, `registration` or `entity_type`
+segments and supplies no path arguments. Loading that document directly would
+create tools unable to select the intended flight, airport or award-trip ID.
+The local runtime schema templates these slots and adds required string path
+parameters with guide-based descriptions. Flight-number lookups use `ident`;
+instance-level track/position/map reads use the returned `fa_flight_id` as `id`.
+Every original operation ID, query/body field, response and price remains intact.
+The provenance table in the local schema records each original/repaired path.
+
+All documented operations remain available. Google Flights search/booking return
+cash prices and booking links, not ticket purchases or reservations. Round-trip
+searches default to string type `1` and require return_date; one-way type is `2`.
+Seats.aero is cached mileage-award inventory; use search then trips with the
+returned availability ID. Its routes operation lists covered airport pairs, not
+API endpoints. The vendor explicitly omits commercial-only live award search.
+Maps have opaque JSON response schemas, so no image extraction mapping is guessed.
+
+The advertised paid flight-intent POST remains available as a write operation.
+StableTravel calls it push notifications, whereas the
+[upstream FlightAware operation table](https://www.flightaware.com/commercial/aeroapi/)
+separates submitting flight intent from alert creation and callback endpoints.
+StableTravel exposes no callback/subscription management contract, so neither
+notification delivery nor an owned alert lifecycle is inferred. The preserved
+body ident collides with the repaired path ident: supply the same flight in
+`ident` and `ident_body`. The wrapper's intent semantics remain unqualified.
+
+Unsigned GET probes for Google Flights search, a UAL123 lookup and a KJFK/KLAX
+route returned x402 Base USDC offers of $0.02, $0.01 and $0.04 respectively,
+alongside Solana offers. These confirm concrete route/challenge discovery, not
+paid data delivery. No new timeout, payment rail or response transformation is
+introduced.
+
+Update the local schema deliberately from the vendor document and guide. Retain
+all request/response/pricing metadata, repair only documented placeholder slots,
+and stop applying a repair if upstream fixes its path. The focused original-path
+witness checks distinct routing shapes and unchanged operation contracts; bundled
+catalog checks validate the full runtime asset without freezing a tool inventory.
