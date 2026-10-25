@@ -361,7 +361,7 @@ not removed by API filters.
 | `x402_treazury_providers_search_remote` | Remote management and nonempty directory list: optional `q`, `limit`, `max_price_usd`; query every configured directory. |
 | `x402_treazury_providers_add_remote` | Remote management: required public HTTPS OpenAPI 3 JSON `spec_url`, optional registration `name`. |
 | `x402_treazury_provider_details_remote` | Remote management: exactly one `x402_list_id`, public HTTPS `base_url`, or `documentation_url`. ID mode is available only with `x402-list` selected. |
-| `x402_treazury_raw_call` | Raw URL permission: required `method`, public HTTPS `url`; optional `query` and JSON `body`. |
+| `x402_treazury_raw_call` | Raw URL permission: required `method`, public HTTPS `url`; optional `query`, `headers` and JSON `body`. |
 | `x402_treazury_tools_search` | Either management capability or on-demand discovery: optional `query`, `source_name`, `cursor`, `limit`. |
 | `x402_treazury_tool_call` | Same exposure as tool search: required readable `tool_id` and `arguments`. |
 
@@ -472,7 +472,7 @@ The tool requires `raw_url_calls` and uses the endpoint's existing wallet, ordin
 admission, configured direct/Tor transport and response limits. It creates no
 registration or wallet. API tool-name filters do not restrict it. Existing public
 HTTPS, no-URL-credentials, origin and redirect checks remain server responsibilities;
-headers, wallet selectors and payment settings are not agent arguments. Binary
+wallet selectors and payment settings are not agent arguments. Binary
 PNG/JPEG/WebP output uses the normal bounded image path; JSON image mappings require
 a configured provider and are not inferred by raw calls.
 
@@ -482,6 +482,40 @@ a request schema or guarantee useful output. Unsigned requests retain the
 [accepted retry semantics](architecture.md#unsigned-x402-requests-and-post-retries).
 A signed, timed-out or ambiguous call may already have charged or acted; a new
 invocation is a new logical call and may authorize another payment.
+
+#### Manual raw headers
+
+Optional `headers` is an object of HTTP header names and string values. Supply
+only headers documented by the API, including custom `X-*` and a caller-owned
+`Idempotency-Key`. Omitted or empty headers retain ordinary raw-call behavior.
+Authorization is currently reserved, as are Accept, Content-Type, cookies,
+HTTP transport/proxy/framing and x402 protocol headers. Names and values are
+validated before I/O; case-insensitive duplicates and nonstring values fail.
+MCP supplies an already parsed JSON object: exact duplicate JSON keys have already
+collapsed and cannot be detected here. Case variants remain detectable.
+
+Every nonempty manual set is caller-private: arbitrary names can hold credentials,
+including innocuous business names. The call never uses a paid relay and stays on
+its initially selected existing payer. A price handoff or recognized insufficient
+funds stops the operation before another wallet's I/O, retaining any possible-charge
+evidence; it allocates no wallet and waits for no funding. Eligible same-payer
+GET/HEAD retries preserve exact values. Manual state-changing requests can execute
+without payment, so they retain only ordinary TLS recovery before signing, with
+no status/body-driven unsigned replay. An actual 402 can still be signed once.
+
+A supplied idempotency key is sent unchanged, never generated, replaced or remembered.
+It grants no replay authority, vendor deduplication guarantee or protection against
+multiple x402 debits. Reusing a key in a new invocation is a separate caller decision.
+Accepted work retains its exact request after waiter disconnect until processing
+finishes; no host credential store, cross-call deduplication or recovery journal is added.
+
+Manual secrets appear in agent-authored arguments and may remain in client history.
+They do not satisfy a provider's host-only credential contract. Server diagnostics
+and route previews omit manual values, but arbitrary raw responses are not redacted:
+an upstream can echo a credential into ordinary output. This feature cannot clear
+secrets held by an agent; resending them after rotation can link wallet identities.
+Automatic OpenAPI credential lookup/capture remains a separate, unimplemented
+mechanism; manual calls have no access to host-managed credentials.
 
 ### Registration and tool invocation
 

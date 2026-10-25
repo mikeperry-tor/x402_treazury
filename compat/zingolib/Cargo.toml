@@ -19,6 +19,7 @@ zingolib = { git = "https://github.com/zingolabs/zingolib", rev = "bfb0a2156819e
 reqwest = { path = "../../vendor/reqwest" }
 h2 = { path = "../../vendor/h2" }
 hyper = { path = "../../vendor/hyper" }
+rmcp = { path = "../../vendor/rmcp" }
 
 [dev-dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

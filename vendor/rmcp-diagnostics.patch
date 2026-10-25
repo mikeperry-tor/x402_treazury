@@ -1,0 +1,459 @@
+--- a/src/service/server.rs
++++ b/src/service/server.rs
+@@ -498,7 +498,6 @@
+     };
+     let Some(negotiated) = fallback else {
+         tracing::warn!(
+-            client_requested = %client_requested,
+             "server supports no protocol version with an initialize handshake; rejecting"
+         );
+         return Err(ErrorData::unsupported_protocol_version(
+@@ -509,7 +508,6 @@
+     // Falling back is the designed answer for a pinned client, and stateless
+     // HTTP re-runs it on every request, so this is not a warning.
+     tracing::debug!(
+-        client_requested = %client_requested,
+         negotiated = %negotiated,
+         "client requested a protocol version unavailable over initialize; falling back to a supported version"
+     );
+--- a/src/service.rs
++++ b/src/service.rs
+@@ -1360,11 +1360,10 @@
+     const SINK_PROXY_BUFFER_SIZE: usize = 64;
+     let (sink_proxy_tx, mut sink_proxy_rx) =
+         tokio::sync::mpsc::channel::<TxJsonRpcMessage<R>>(SINK_PROXY_BUFFER_SIZE);
+-    let peer_info = peer.peer_info();
+     if R::IS_CLIENT {
+-        tracing::info!(?peer_info, "Service initialized as client");
++        tracing::debug!("Service initialized as client");
+     } else {
+-        tracing::info!(?peer_info, "Service initialized as server");
++        tracing::debug!("Service initialized as server");
+     }
+ 
+     let mut local_responder_pool =
+@@ -1422,7 +1421,7 @@
+                             Event::PeerMessage(m)
+                         } else {
+                             // input stream closed
+-                            tracing::info!("input stream terminated");
++                            tracing::debug!("input stream terminated");
+                             break QuitReason::Closed
+                         }
+                     }
+@@ -1454,13 +1453,13 @@
+                         )
+                     }
+                     _ = serve_loop_ct.cancelled() => {
+-                        tracing::info!("task cancelled");
++                        tracing::debug!("task cancelled");
+                         break QuitReason::Cancelled
+                     }
+                 }
+             };
+ 
+-            tracing::trace!(?evt, "new event");
++            tracing::trace!("new MCP service event");
+             match evt {
+                 Event::SendTaskResult(SendTaskResult::Request { id, result }) => {
+                     if let Err(e) = result
+@@ -1482,7 +1481,7 @@
+                     if let Some(param) = cancellation_param
+                         && let Some(request_id) = &param.request_id
+                             && let Some(responder) = local_responder_pool.remove(request_id) {
+-                                tracing::info!(id = %request_id, reason = param.reason, "cancelled");
++                                tracing::debug!(id = %request_id, "request cancelled");
+                                 let _response_result = responder.responder.send(Err(ServiceError::Cancelled {
+                                     reason: param.reason.clone(),
+                                 }));
+@@ -1509,8 +1508,8 @@
+                         let current_span = tracing::Span::current();
+                         response_send_tasks.spawn(async move {
+                             let send_result = send.await;
+-                            if let Err(error) = send_result {
+-                                tracing::error!(%error, "fail to response message");
++                            if let Err(_error) = send_result {
++                                tracing::error!("MCP response could not be sent; transport delivery failed");
+                             }
+                         }.instrument(current_span));
+                     }
+@@ -1560,21 +1559,21 @@
+                     mut request,
+                     ..
+                 })) => {
+-                    tracing::debug!(%id, ?request, "received request");
++                    tracing::debug!(%id, "received request");
+                     if let Err(error) = R::enforce_peer_request_association(
+                         &request,
+                         peer.peer_info().as_deref(),
+                         peer_request_association(&request, &local_responder_pool),
+                     ) {
+-                        tracing::warn!(%id, message = %error.message, "rejected peer request");
++                        tracing::warn!(%id, "MCP peer request rejected by protocol association policy");
+                         // send directly: the sink proxy path would drop the
+                         // error since the request was never registered in
+                         // local_ct_pool
+                         let send = transport.send(JsonRpcMessage::error(error, Some(id)));
+                         let current_span = tracing::Span::current();
+                         response_send_tasks.spawn(async move {
+-                            if let Err(error) = send.await {
+-                                tracing::error!(%error, "fail to send rejection error");
++                            if let Err(_error) = send.await {
++                                tracing::error!("MCP protocol rejection could not be sent; transport delivery failed");
+                             }
+                         }.instrument(current_span));
+                         continue;
+@@ -1606,11 +1605,11 @@
+                                 .await;
+                             let response = match result {
+                                 Ok(result) => {
+-                                    tracing::debug!(%id, ?result, "response message");
++                                    tracing::debug!(%id, "response message");
+                                     JsonRpcMessage::response(result, id)
+                                 }
+                                 Err(error) => {
+-                                    tracing::warn!(%id, ?error, "response error");
++                                    tracing::warn!(%id, code = error.code.0, "MCP handler returned a protocol error");
+                                     JsonRpcMessage::error(error, Some(id))
+                                 }
+                             };
+@@ -1622,7 +1621,7 @@
+                     notification,
+                     ..
+                 })) => {
+-                    tracing::info!(?notification, "received notification");
++                    tracing::debug!("received notification");
+                     R::invalidate_response_cache(&peer, &notification).await;
+                     let subscription_id =
+                         if let Some(cancelled) = R::peer_cancelled_params(&notification) {
+@@ -1648,7 +1647,7 @@
+                                 if let Some(request_id) = request_id.as_ref()
+                                     && let Some(ct) = local_ct_pool.remove(request_id)
+                                 {
+-                                    tracing::info!(id = %request_id, reason = cancelled.reason, "cancelled");
++                                    tracing::debug!(id = %request_id, "request cancelled");
+                                     ct.cancel();
+                                 }
+                                 None
+@@ -1711,7 +1710,7 @@
+                         spawn_service_task(async move {
+                             let result = service.handle_notification(notification, context).await;
+                             if let Err(error) = result {
+-                                tracing::warn!(%error, "Error sending notification");
++                                tracing::warn!(code = error.code.0, "MCP notification handler returned a protocol error");
+                             }
+                         }.instrument(current_span));
+                     }
+@@ -1734,7 +1733,7 @@
+                     let Some(id) = id else {
+                         // MCP error responses without an id (e.g. Parse error / Invalid Request)
+                         // can't be routed back to a pending request — log and drop.
+-                        tracing::debug!(?error, "received id-less peer error");
++                        tracing::debug!(code = error.code.0, "received id-less peer error");
+                         continue;
+                     };
+                     if let Some(responder) =
+@@ -1790,8 +1789,8 @@
+                         };
+                         ct.cancel();
+                     }
+-                    if let Err(error) = transport.send(m).await {
+-                        tracing::error!(%error, "failed to send pending response during drain");
++                    if let Err(_error) = transport.send(m).await {
++                        tracing::error!("Pending MCP response could not be sent during drain; transport delivery failed");
+                         break;
+                     }
+                 }
+@@ -1803,10 +1802,10 @@
+         }
+ 
+         let sink_close_result = transport.close().await;
+-        if let Err(e) = sink_close_result {
+-            tracing::error!(%e, "fail to close sink");
+-        }
+-        tracing::info!(?quit_reason, "serve finished");
++        if let Err(_error) = sink_close_result {
++            tracing::error!("MCP transport could not be closed");
++        }
++        tracing::debug!("MCP service finished");
+         quit_reason
+     }.instrument(current_span));
+     RunningService {
+--- a/src/transport/async_rw.rs
++++ b/src/transport/async_rw.rs
+@@ -140,7 +140,7 @@
+                 Ok(0) => return None,
+                 Ok(_) => {}
+                 Err(e) => {
+-                    tracing::error!("Error reading from stream: {}", e);
++                    tracing::error!(kind = ?e.kind(), "MCP input stream could not be read");
+                     return None;
+                 }
+             }
+@@ -169,13 +169,13 @@
+                             // if the peer echoes the response back as more invalid data. This
+                             // matches the other official MCP SDKs, which ignore unparsable input.
+                             // See https://github.com/modelcontextprotocol/rust-sdk/issues/938
+-                            tracing::debug!("Ignoring unparsable incoming message: {e}");
++                            tracing::debug!("Ignoring unparsable incoming MCP message");
+                         }
+                         serde_json::error::Category::Data | serde_json::error::Category::Io => {
+                             // Well-formed JSON that doesn't match the expected message shape is a
+                             // real protocol error rather than unparsable input, so surface it with
+                             // an Invalid Request response instead of silently dropping it.
+-                            tracing::debug!("Protocol error on incoming message: {e}");
++                            tracing::debug!("Incoming MCP message has an invalid protocol shape");
+                             let mut write = self.write.lock().await;
+                             let framed = write.as_mut()?;
+                             let response = TxJsonRpcMessage::<Role>::error(
+@@ -188,8 +188,8 @@
+                         }
+                     }
+                 }
+-                Err(e) => {
+-                    tracing::error!("Error reading from stream: {}", e);
++                Err(_error) => {
++                    tracing::error!("MCP input stream framing failed");
+                     return None;
+                 }
+             }
+@@ -296,10 +296,7 @@
+ 
+     // Ignore non-MCP notifications (like LSP messages) for compatibility
+     if is_notification && !is_standard_method(method) {
+-        tracing::trace!(
+-            "Ignoring non-MCP notification '{}' for compatibility",
+-            method
+-        );
++        tracing::trace!("Ignoring non-MCP notification for compatibility");
+         return true;
+     }
+ 
+@@ -332,12 +329,7 @@
+                     return Ok(None);
+                 }
+ 
+-                tracing::debug!(
+-                    "Failed to parse message {}: {} | Error: {}",
+-                    context,
+-                    line_str,
+-                    e
+-                );
++                tracing::debug!(context, category = ?e.classify(), line = e.line(), column = e.column(), "MCP message parsing failed");
+                 Err(JsonRpcMessageCodecError::Serde(e))
+             }
+         }
+--- a/src/transport/common/server_side_http.rs
++++ b/src/transport/common/server_side_http.rs
+@@ -181,13 +181,13 @@
+ pub(crate) const fn internal_error_response<E: Display>(
+     context: &str,
+ ) -> impl FnOnce(E) -> Response<BoxBody<Bytes, Infallible>> {
+-    move |error| {
+-        tracing::error!("Internal server error when {context}: {error}");
++    move |_error| {
++        tracing::error!(context, "MCP HTTP request failed during transport handling");
+         Response::builder()
+             .status(http::StatusCode::INTERNAL_SERVER_ERROR)
+             .body(
+                 Full::new(Bytes::from(format!(
+-                    "Encounter an error when {context}: {error}"
++                    "MCP transport failed when {context}"
+                 )))
+                 .boxed(),
+             )
+@@ -239,11 +239,11 @@
+                     data.advance(chunk_len);
+                 }
+             }
+-            Some(Err(e)) => {
++            Some(Err(_error)) => {
+                 let response = Response::builder()
+                     .status(http::StatusCode::INTERNAL_SERVER_ERROR)
+                     .body(
+-                        Full::new(Bytes::from(format!("Failed to read request body: {e}"))).boxed(),
++                        Full::new(Bytes::from_static(b"Failed to read MCP request body")).boxed(),
+                     )
+                     .expect("valid response");
+                 return Err(response);
+@@ -257,7 +257,7 @@
+             let response = Response::builder()
+                 .status(http::StatusCode::UNSUPPORTED_MEDIA_TYPE)
+                 .body(
+-                    Full::new(Bytes::from(format!("fail to deserialize request body {e}"))).boxed(),
++                    Full::new(Bytes::from(format!("Invalid MCP request JSON: {:?} at line {}, column {}", e.classify(), e.line(), e.column()))).boxed(),
+                 )
+                 .expect("valid response");
+             Err(response)
+--- a/src/transport/streamable_http_server/session/local.rs
++++ b/src/transport/streamable_http_server/session/local.rs
+@@ -1148,8 +1148,8 @@
+                         .handle_server_message(message)
+                         .await
+                         .map_err(LocalSessionWorkerError::FailToHandleMessage);
+-                    let _ = responder.send(handle_result).inspect_err(|error| {
+-                        tracing::warn!(?error, "failed to send message to http service handler");
++                    let _ = responder.send(handle_result).inspect_err(|_error| {
++                        tracing::warn!("MCP message could not be delivered to the HTTP handler");
+                     });
+                     if let Some(to_unregister) = to_unregister {
+                         self.unregister_resource(&to_unregister);
+--- a/src/transport/streamable_http_server/tower.rs
++++ b/src/transport/streamable_http_server/tower.rs
+@@ -512,8 +512,6 @@
+     })?;
+     if header_str != body_version {
+         tracing::warn!(
+-            header = header_str,
+-            body = body_version,
+             "rejecting initialize: MCP-Protocol-Version header does not match params.protocolVersion"
+         );
+         return Err(invalid_request_jsonrpc_response(
+@@ -1437,7 +1435,7 @@
+         tokio::spawn(async move {
+             let mut sender = Some(sender);
+             if let Some(retry) = retry
+-                && let Err(error) = persist_and_forward_event(
++                && let Err(_error) = persist_and_forward_event(
+                     event_store.as_ref(),
+                     &stream_id,
+                     ServerSseMessage::retry(retry),
+@@ -1445,7 +1443,7 @@
+                 )
+                 .await
+             {
+-                tracing::error!(%stream_id, %error, "failed to persist SSE priming event");
++                tracing::error!(%stream_id, "MCP SSE priming event could not be persisted");
+                 request_ct.cancel();
+                 return;
+             }
+@@ -1466,8 +1464,8 @@
+                 let Some(message) = message else {
+                     break;
+                 };
+-                tracing::trace!(?message);
+-                if let Err(error) = persist_and_forward_event(
++                tracing::trace!("Sending MCP message");
++                if let Err(_error) = persist_and_forward_event(
+                     event_store.as_ref(),
+                     &stream_id,
+                     ServerSseMessage::from_message(message),
+@@ -1475,7 +1473,7 @@
+                 )
+                 .await
+                 {
+-                    tracing::error!(%stream_id, %error, "failed to persist SSE event");
++                    tracing::error!(%stream_id, "MCP SSE event could not be persisted");
+                     request_ct.cancel();
+                     break;
+                 }
+@@ -1502,7 +1500,7 @@
+             let stream = futures::stream::iter(first)
+                 .chain(ReceiverStream::new(receiver))
+                 .map(|message| {
+-                    tracing::trace!(?message);
++                    tracing::trace!("Sending MCP message");
+                     ServerSseMessage::from_message(message)
+                 });
+             sse_stream_response(
+@@ -1628,16 +1626,16 @@
+                     }
+                     let _ = svc.waiting().await;
+                 }
+-                Err(e) => {
+-                    tracing::error!("Failed to serve session: {e}");
++                Err(_error) => {
++                    tracing::error!("MCP session initialization failed");
+                     // Dropping init_done_tx (if Some) signals failure to the caller.
+                 }
+             }
+             let _ = session_manager
+                 .close_session(&session_id)
+                 .await
+-                .inspect_err(|e| {
+-                    tracing::error!("Failed to close session {session_id}: {e}");
++                .inspect_err(|_error| {
++                    tracing::error!(%session_id, "MCP session could not be closed");
+                 });
+         });
+     }
+@@ -1705,7 +1703,6 @@
+             Err(e) => {
+                 tracing::error!(
+                     session_id = session_id.as_ref(),
+-                    error = %e,
+                     "session store load failed during restore"
+                 );
+                 return Err(std::io::Error::other(e));
+@@ -1877,8 +1874,8 @@
+             };
+             let stream = match event_store.replay_events_after(last_event_id).await {
+                 Ok(stream) => stream,
+-                Err(error) => {
+-                    tracing::warn!(%error, "stateless SSE resume failed, returning empty stream");
++                Err(_error) => {
++                    tracing::warn!("MCP stateless SSE resume failed; returning an empty stream");
+                     Box::pin(futures::stream::empty())
+                 }
+             };
+@@ -1943,13 +1940,13 @@
+                         self.config.cancellation_token.child_token(),
+                     ));
+                 }
+-                Err(e) => {
++                Err(_error) => {
+                     // Return 200 with an immediately-closed empty stream.
+                     // Returning an HTTP error would cause EventSource to retry
+                     // with the same Last-Event-ID in an infinite loop. An empty
+                     // 200 cleanly terminates the EventSource without delivering
+                     // events from a different stream.
+-                    tracing::warn!("Resume failed ({e}), returning empty stream");
++                    tracing::warn!("MCP SSE resume failed; returning an empty stream");
+                     return Ok(sse_stream_response(
+                         futures::stream::empty(),
+                         None,
+@@ -2193,9 +2190,9 @@
+                     let _ = store
+                         .store(session_id.as_ref(), &state)
+                         .await
+-                        .inspect_err(|e| {
++                        .inspect_err(|_error| {
+                             tracing::warn!(
+-                                "Failed to persist session {} to store: {e}",
++                                "MCP session {} could not be persisted to the session store",
+                                 session_id
+                             );
+                         });
+@@ -2318,7 +2315,7 @@
+                             )
+                             .into());
+                         };
+-                        tracing::trace!(?message);
++                        tracing::trace!("Sending MCP message");
+                         if matches!(
+                             message,
+                             ServerJsonRpcMessage::Response(_) | ServerJsonRpcMessage::Error(_)
+@@ -2379,8 +2376,8 @@
+         // Remove from external store: a DELETE means the client intentionally
+         // ends the session, so the store entry is no longer needed.
+         if let Some(store) = &self.config.session_store {
+-            let _ = store.delete(session_id.as_ref()).await.inspect_err(|e| {
+-                tracing::warn!("Failed to delete session {} from store: {e}", session_id);
++            let _ = store.delete(session_id.as_ref()).await.inspect_err(|_error| {
++                tracing::warn!(%session_id, "MCP session could not be deleted from the session store");
+             });
+         }
+         Ok(accepted_response())
+--- a/src/transport/worker.rs
++++ b/src/transport/worker.rs
+@@ -245,8 +245,8 @@
+                     WorkerQuitReason::Join(e) => {
+                         tracing::error!("worker quit with join error: {:?}", e);
+                     }
+-                    WorkerQuitReason::Fatal { error, context } => {
+-                        tracing::error!("worker quit with fatal: {error}, when {context}");
++                    WorkerQuitReason::Fatal { context, .. } => {
++                        tracing::error!(%context, "MCP transport worker stopped after a fatal transport failure");
+                     }
+                 })
+                 .inspect(|_| {

@@ -667,7 +667,12 @@ Tor uses authenticated `socks5h` with the same discovery/payer identities and ne
 resolves the destination locally. Hostname answers hidden behind Tor rely on Tor's
 `ClientRejectInternalAddresses` protection. Keep it enabled; a generic SOCKS server
 may not provide it. Raw calls use the endpoint's wallet and
-existing response/read limits; redirects are not followed.
+existing response/read limits; redirects are not followed. Nonempty
+[manual raw headers](agent-sources.md#manual-raw-headers) never reach paid relay
+preparation or payment, regardless of their names. They pin the initial payer;
+same-payer GET/HEAD isolation retries retain their bytes. Manual state-changing
+calls retain ordinary TLS-only unsigned recovery, with no status/body replay.
+Header-free raw calls retain configured relay and x402 POST retry behavior.
 Tests exercise the production resolver wrapper with injected DNS answers, including
 mixed/rebound rejection, plus actual direct-client rejection before connecting to
 private targets. A subprocess executes the production import and guarded x402
@@ -748,6 +753,7 @@ financial or qualification authority.
 
 | Timer or bound | Purpose and behavior |
 | --- | --- |
+| Manual raw HTTP header representation | No additional local count quota. The HTTP library's inherent map capacity is checked fallibly, including space for concrete runtime headers, before inventory or network activity. An unrepresentable set returns an error and emits a value-free WARN. |
 | Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote provider search requests 1–20 results per selected directory, default 5; the ordinary x402 List provider retains its native browse maximum 100. Follow continuations for complete inventories. |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. gRPC factory failure WARNs immediately; HTTP terminal timeout WARNs at the retained application workflow; exhausted Base endpoints and Coinbase origins remain DEBUG while fallback is possible. |
 | Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog discovery, runtime imports/help/documents/probes, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static/runtime relay-service unsigned stages and Base read-only RPC also participate). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |

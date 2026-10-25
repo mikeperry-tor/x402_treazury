@@ -86,6 +86,7 @@ pub(crate) fn response(response: &reqwest::Response) {
 
 pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress, relay_call: bool) {
     let kind = match result {
+        Err(error) if error.is::<super::PrivatePayerHandoff>() => "private_payer_handoff",
         Err(error) if error.is::<super::HttpFailure>() => "http_status",
         Err(error) if error.is::<crate::rotation::error::AdmissionError>() => {
             "payment_admission_or_dispatch"
@@ -166,6 +167,9 @@ fn failure_reason(kind: &str, transport: Option<&str>) -> &'static str {
         (_, Some("request_construction")) => "The HTTP request could not be constructed",
         (_, Some(_)) => "The HTTP request or response failed during transport",
         ("http_status", None) => "The server returned an unsuccessful HTTP status",
+        ("private_payer_handoff", None) => {
+            "Private request headers cannot be sent under another wallet; this call has stopped"
+        }
         _ => "The operation failed; no further cause information is available",
     }
 }

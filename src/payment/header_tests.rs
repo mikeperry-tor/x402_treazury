@@ -230,3 +230,58 @@ async fn canceled_waiter_keeps_generated_key_and_quote_for_accepted_purchase() {
     assert_exchange(&seller.seen.lock().unwrap());
     server.abort();
 }
+
+fn manual_request(base: &str) -> (RoutedRequest, crate::discovery::raw::ManualRawHeaders) {
+    let mut route = route(base);
+    route.headers.clear();
+    let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(
+        &json!({"X-Quote-Id":"quote-from-prior-call", "Idempotency-Key":"caller-owned-key"}),
+    ))
+    .unwrap();
+    (route, headers)
+}
+
+#[tokio::test]
+async fn manual_key_survives_signing_and_reuse_is_a_separate_call() {
+    let (seller, base, server) = fixture(Outcome::Success, false).await;
+    let client = client();
+    for _ in 0..2 {
+        let (route, headers) = manual_request(&base);
+        client.execute_manual_raw(route, headers).await.unwrap();
+    }
+    client.drain().await;
+    let seen = seller.seen.lock().unwrap();
+    assert_eq!(seen.len(), 4);
+    for pair in seen.chunks(2) {
+        assert!(!pair[0].0 && pair[1].0);
+        assert_eq!(pair[0].1, "caller-owned-key");
+        assert_eq!(pair[0].1, pair[1].1);
+        assert_eq!(pair[0].2, pair[1].2);
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn manual_headers_do_not_replay_signed_failures_or_uncertainty() {
+    for outcome in [Outcome::Rejected, Outcome::BrokenBody] {
+        let (seller, base, server) = fixture(outcome, false).await;
+        let client = client();
+        let (route, headers) = manual_request(&base);
+        let progress = SubmissionProgress::default();
+        let (result, logs) = crate::limits::tests::capture(client.execute_finished(
+            route,
+            headers,
+            &progress,
+            None,
+            |output| Ok((output, true)),
+        ))
+        .await;
+        assert!(result.is_err());
+        assert!(progress.possible());
+        assert!(!logs.contains("caller-owned-key"));
+        assert!(!logs.contains("quote-from-prior-call"));
+        client.drain().await;
+        assert_eq!(seller.seen.lock().unwrap().len(), 2);
+        server.abort();
+    }
+}

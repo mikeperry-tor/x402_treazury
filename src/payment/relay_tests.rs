@@ -133,6 +133,7 @@ async fn origin(
         signer: signed.clone(),
     });
     let kind = scenario(&case);
+    let kind = kind.strip_prefix("manual-").unwrap_or(kind);
     if kind.starts_with("origin-paid") || kind.starts_with("origin-signed") {
         if signed.is_none() {
             return challenge(&target);
@@ -445,6 +446,62 @@ async fn fixture(mode: &str) {
         server.abort();
         return;
     }
+
+    // Any nonempty manual set is private, even an innocuous name or only a key.
+    for header in ["X-Label", "X-Api-Key", "Idempotency-Key"] {
+        for method in ["GET", "POST"] {
+            let kind = "manual-status403";
+            let case = format!("{method}-{kind}");
+            let before = fixture.events(&case).len();
+            let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(
+                &json!({header:"manual-secret"}),
+            ))
+            .unwrap();
+            let (result, logs) = crate::limits::tests::capture(
+                client.execute_manual_raw(route(method, kind), headers),
+            )
+            .await;
+            assert!(result.is_err());
+            assert!(!logs.contains("manual-secret"));
+            let all_events = fixture.events(&case);
+            let events = &all_events[before..];
+            assert_eq!(events.len(), if method == "GET" { attempts } else { 1 });
+            assert!(
+                events
+                    .iter()
+                    .all(|e| e.provider.is_none() && e.signer.is_none())
+            );
+            assert!(events.iter().all(|e| e.headers[header] == "manual-secret"));
+        }
+    }
+    for kind in ["manual-healthy", "manual-body-reset"] {
+        let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(
+            &json!({"X-Label":"manual-secret"}),
+        ))
+        .unwrap();
+        let result = client
+            .execute_manual_raw(route("POST", kind), headers)
+            .await;
+        assert_eq!(result.is_ok(), kind == "manual-healthy");
+        assert_eq!(
+            fixture.events(&format!("POST-{kind}")).len(),
+            1,
+            "manual state-changing unsigned calls gain no status/body replay authority"
+        );
+    }
+    let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(
+        &json!({"X-Label":"manual-secret", "Idempotency-Key":"caller-key"}),
+    ))
+    .unwrap();
+    let result = client
+        .execute_manual_raw(route("GET", "manual-recover"), headers)
+        .await;
+    assert_eq!(result.is_ok(), tor && attempts > 1);
+    let events = fixture.events("GET-manual-recover");
+    assert_eq!(events.len(), if tor && attempts > 1 { 2 } else { 1 });
+    assert!(events.iter().all(|e| e.provider.is_none()
+        && e.headers["x-label"] == "manual-secret"
+        && e.headers["idempotency-key"] == "caller-key"));
 
     for method in ["GET", "HEAD", "POST"] {
         for status in [400, 403, 408, 429, 500, 502, 503, 504, 501, 505, 520] {

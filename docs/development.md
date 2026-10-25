@@ -190,6 +190,17 @@ All application logs go to stderr; stdout carries the MCP wire or requested CLI
 JSON. Process `RUST_LOG` overrides the default `warn,x402_treazury=info` filter for
 every command.
 
+Manual raw-call headers use sensitive HTTP values outside the serializable routed
+business-header map. Never log, serialize into previews, cache or persist their
+values, including arbitrary innocuous-looking names; validation errors must be
+value-free. This diagnostic rule does not redact generic upstream response bodies.
+See [manual raw headers](agent-sources.md#manual-raw-headers). The reviewed
+[MCP diagnostics patch](../vendor/README.md#mcp-diagnostics-patch) also removes
+pre-handler argument/frame and outgoing result logging from the SDK, protecting
+stdio/HTTP and embedded subscribers at TRACE. Host transport errors and executable
+initialization failures use safe categories without retaining payload-bearing
+error chains.
+
 ### Log severity
 
 Choose the level from the outcome and scope of the owning capability or logical

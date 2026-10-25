@@ -319,6 +319,14 @@ async fn run(
     wire: Wire,
     rejects: usize,
 ) -> (bool, Vec<(String, String)>, Vec<CapturedRequest>, String) {
+    run_private(method, wire, rejects, false).await
+}
+async fn run_private(
+    method: &str,
+    wire: Wire,
+    rejects: usize,
+    private: bool,
+) -> (bool, Vec<(String, String)>, Vec<CapturedRequest>, String) {
     let dir = tempfile::tempdir().unwrap();
     let mut state = Store::create(
         &dir.path().join("state"),
@@ -431,7 +439,7 @@ async fn run(
         },
         16384,
     );
-    let route = RoutedRequest {
+    let mut route = RoutedRequest {
         headers: BTreeMap::from([
             ("idempotency-key".into(), "same-logical-call-key".into()),
             ("x-quote-id".into(), "same-quote".into()),
@@ -441,7 +449,18 @@ async fn run(
         query: BTreeMap::from([("original".into(), json!("same & bytes"))]),
         body: (method == "POST").then(|| json!({"original":[1,true,"same"]})),
     };
-    let result = if matches!(wire, Wire::HeldSuccess) {
+    let result = if private {
+        let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(
+            &serde_json::to_value(&route.headers).unwrap(),
+        ))
+        .unwrap();
+        route.headers.clear();
+        let (result, logs) =
+            crate::limits::tests::capture(client.execute_manual_raw(route, headers)).await;
+        assert!(logs.contains("Private request headers cannot be sent under another wallet"));
+        assert!(!logs.contains("same-logical-call-key"));
+        Some(result.map(|_| String::new()))
+    } else if matches!(wire, Wire::HeldSuccess) {
         let owned = client.clone();
         let waiter = tokio::spawn(async move { owned.execute(route).await });
         tokio::time::timeout(
@@ -2219,4 +2238,18 @@ async fn prior_wallet_liability_relay_child() {
     drop(handle);
     worker.await.unwrap();
     server.abort();
+}
+
+#[tokio::test]
+async fn manual_headers_stop_insufficiency_with_original_liability_and_no_second_wallet_io() {
+    for method in ["GET", "POST"] {
+        for wire in [Wire::Verification, Wire::Settlement] {
+            let (success, signed, requests, error) = run_private(method, wire, 1, true).await;
+            assert!(!success);
+            assert_eq!(signed.len(), 1);
+            assert_eq!(requests.len(), 2);
+            assert!(error.contains("private headers cannot follow another wallet"));
+            assert!(error.contains("may still charge"));
+        }
+    }
 }

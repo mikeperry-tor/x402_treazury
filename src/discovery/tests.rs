@@ -1411,6 +1411,7 @@ fn automatic_directory_uses_endpoint_wallet_caps_and_tor() {
 }
 
 async fn directory_payment_fixture() {
+    let diagnostics = raw_privacy_tests::trace_log();
     use crate::{
         network::{IsolationId, Mode, NetworkContext, NetworkPolicy},
         test_socks::{Fault, Socks},
@@ -1476,7 +1477,7 @@ async fn directory_payment_fixture() {
                     }
                     _ => {}
                 }
-                return axum::Json(json!({"services":[], "method":method.as_str(), "query":uri.query(), "body":if body.is_empty() { Value::Null } else { serde_json::from_slice::<Value>(&body).unwrap() }, "content_type":headers.get("content-type").map(|v| v.to_str().unwrap())})).into_response();
+                return axum::Json(json!({"services":[], "method":method.as_str(), "query":uri.query(), "body":if body.is_empty() { Value::Null } else { serde_json::from_slice::<Value>(&body).unwrap() }, "content_type":headers.get("content-type").map(|v| v.to_str().unwrap()), "manual_label":headers.get("x-label").map(|v| v.to_str().unwrap()), "manual_key":headers.get("idempotency-key").map(|v| v.to_str().unwrap())})).into_response();
             }
             let challenge = json!({"x402Version":2,"resource":{"url":format!("https://api.example.com{}", uri.path()),"description":"search","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"5000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
             (
@@ -1552,6 +1553,14 @@ async fn directory_payment_fixture() {
         "initialization fetched a catalog or probed prices"
     );
     let calls = [
+        (
+            raw::NAME,
+            json!({"method":"POST","url":"https://api.example.com/api/v1/services","headers":{"X-Label":"caller-private-label","Idempotency-Key":"caller-key"},"body":null}),
+        ),
+        (
+            raw::NAME,
+            json!({"method":"GET","url":"https://api.example.com/api/v1/services","headers":{}}),
+        ),
         (directory::SEARCH, json!({})),
         (directory::SEARCH, json!({"q":"weather","limit":3})),
         (directory::DETAILS, json!({"x402_list_id":"weather"})),
@@ -1593,8 +1602,10 @@ async fn directory_payment_fixture() {
         ),
     ];
     for owner in ["writer", "reader"] {
-        for (name, args) in &calls {
-            let result = server(&manager, owner)
+        for (index, (name, args)) in calls.iter().enumerate() {
+            let mut endpoint = server(&manager, owner);
+            endpoint.discover_on_demand = index % 2 == 0;
+            let result = endpoint
                 .invoke_output(name, args.as_object().unwrap())
                 .await
                 .unwrap()
@@ -1603,6 +1614,8 @@ async fn directory_payment_fixture() {
             let response: Value = serde_json::from_str(&result).unwrap();
             if *name == raw::NAME {
                 assert_eq!(response["method"], args["method"]);
+                assert_eq!(response["manual_label"], args["headers"]["X-Label"]);
+                assert_eq!(response["manual_key"], args["headers"]["Idempotency-Key"]);
                 assert_eq!(
                     response["body"],
                     args.get("body").cloned().unwrap_or(Value::Null)
@@ -1828,6 +1841,8 @@ async fn directory_payment_fixture() {
     assert!(raw_manager.inner.lock().unwrap().state.records.is_empty());
     assert!(raw_manager.fetches.lock().unwrap().is_empty());
 
+    raw_privacy_tests::exercise(&manager, &local, &base).await;
+    raw_privacy_tests::assert_private(&diagnostics);
     http_task.abort();
     vendor_task.abort();
 }
@@ -2222,6 +2237,22 @@ async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
         enabled.discover_on_demand = on_demand;
         assert!(disabled.get_tool(raw::NAME).is_none());
         assert!(enabled.get_tool(raw::NAME).is_some());
+        for headers in [
+            json!(null),
+            json!({"x-label":false}),
+            json!({"x-label":{"nested":"secret"}}),
+            json!({"X-Label":"secret", "x-label":"other"}),
+            json!({"Cookie":"secret"}),
+            json!({"x-label":"secret\r\nextra: yes"}),
+        ] {
+            let args =
+                json!({"method":"POST","url":"https://api.example.com/read","headers":headers});
+            let error = enabled
+                .invoke_output(raw::NAME, args.as_object().unwrap())
+                .await
+                .unwrap_err();
+            assert!(!format!("{error:#}").contains("secret"));
+        }
         let args = json!({"method":"GET","url":"https://api.example.com/read","body":{}});
         assert!(
             disabled
@@ -2314,7 +2345,8 @@ async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
                 "query values",
                 "missing field",
                 "unknown field",
-                "method"
+                "method",
+                "header"
             ]
             .iter()
             .any(|category| message.contains(category)),
@@ -3574,3 +3606,6 @@ mod import_read_tests;
 
 #[path = "directory_relay_tests.rs"]
 mod directory_relay_tests;
+
+#[path = "raw_privacy_tests.rs"]
+mod raw_privacy_tests;

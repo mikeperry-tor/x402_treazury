@@ -744,6 +744,13 @@ estimate; an unsuccessful read retains the previous estimate and reports
 `observation_unavailable`. Low balance is a selection classification, not permanent
 retirement. It survives restart until an ordinary successful observation clears it.
 
+A nonempty [manual raw header set](agent-sources.md#manual-raw-headers) stays on
+its initially selected payer. Price-based handoff stops before another wallet's
+unsigned request. Recognized signed insufficient funds still queues advisory
+reconciliation and preserves liability, then stops before another payer is selected.
+These calls never allocate wallets or wait for funding. Concurrent active/static
+payer replacement affects later calls; accepted work retains its captured identity.
+
 Every captured eligible identity is visited at most once per logical call. New
 wallets do not extend that call. Exhaustion warns that earlier authorizations may
 still charge or execute. No interrupted logical call is automatically replayed on

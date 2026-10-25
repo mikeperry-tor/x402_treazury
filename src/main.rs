@@ -354,9 +354,33 @@ async fn prepare_standalone_server(
     Ok(server)
 }
 
+// SDK initialization errors can contain the entire untrusted first message.
+fn mcp_initialization_error(error: rmcp::service::ServerInitializeError) -> anyhow::Error {
+    use rmcp::service::ServerInitializeError;
+    let reason = match error {
+        ServerInitializeError::ExpectedInitializeRequest(_) => {
+            "the client did not send the expected initialize request"
+        }
+        ServerInitializeError::ConnectionClosed(_) => {
+            "the connection closed before initialization completed"
+        }
+        ServerInitializeError::UnexpectedInitializeResponse(_) => {
+            "the handler returned an unexpected initialization response"
+        }
+        ServerInitializeError::InitializeFailed(_) => "the initialization request was rejected",
+        ServerInitializeError::TransportError { .. } => "the initialization transport failed",
+        ServerInitializeError::Cancelled => "initialization was cancelled",
+        _ => "the initialization protocol failed",
+    };
+    anyhow::anyhow!("MCP initialization failed: {reason}")
+}
+
 async fn serve_standalone_stdio(server: Server) -> Result<()> {
     let work = server.work.clone();
-    let service = server.serve(stdio::transport()?).await?;
+    let service = server
+        .serve(stdio::transport()?)
+        .await
+        .map_err(mcp_initialization_error)?;
     let cancel = service.cancellation_token();
     let waiting = service.waiting();
     tokio::pin!(waiting);
@@ -726,4 +750,17 @@ async fn shutdown_signal() -> std::io::Result<()> {
     #[cfg(not(unix))]
     tokio::signal::ctrl_c().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod mcp_diagnostic_tests {
+    #[test]
+    fn initialization_failure_does_not_format_original_request() {
+        let message = serde_json::from_value(serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x402_treazury_raw_call","arguments":{"headers":{"Authorization":"initialization-secret"}}}})).unwrap();
+        let error = super::mcp_initialization_error(
+            rmcp::service::ServerInitializeError::ExpectedInitializeRequest(Some(message)),
+        );
+        assert!(!format!("{error:#?}").contains("initialization-secret"));
+        assert!(error.to_string().contains("expected initialize request"));
+    }
 }

@@ -38,6 +38,16 @@ impl std::fmt::Display for IncompleteRelayResponse {
     }
 }
 impl std::error::Error for IncompleteRelayResponse {}
+/// Operation-scoped refusal, with a fixed safe diagnostic reason.
+#[derive(Debug)]
+struct PrivatePayerHandoff;
+impl std::fmt::Display for PrivatePayerHandoff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("private headers cannot follow another wallet")
+    }
+}
+impl std::error::Error for PrivatePayerHandoff {}
+
 fn complete_relay_response(response: &reqwest::Response, relay: bool) -> Result<()> {
     ensure!(
         !relay
@@ -508,10 +518,16 @@ impl PaidClient {
             .expect("payer lock poisoned") = Arc::new(payer);
     }
     pub async fn execute(&self, route: RoutedRequest) -> Result<String> {
-        self.execute_finished(route, &SubmissionProgress::default(), None, |output| {
-            let text = output.render(None, &Default::default())?.into_text()?;
-            Ok((text, true))
-        })
+        self.execute_finished(
+            route,
+            Default::default(),
+            &SubmissionProgress::default(),
+            None,
+            |output| {
+                let text = output.render(None, &Default::default())?.into_text()?;
+                Ok((text, true))
+            },
+        )
         .await
     }
     pub async fn execute_response(
@@ -552,6 +568,7 @@ impl PaidClient {
         let limits = limits.clone();
         self.execute_finished(
             route,
+            Default::default(),
             &SubmissionProgress::default(),
             operation,
             move |output| Ok((output.render(mapping.as_ref(), &limits)?, true)),
@@ -564,15 +581,36 @@ impl PaidClient {
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
     ) -> Result<crate::output::HttpOutput> {
-        self.execute_finished(route, progress, operation, |output| {
+        self.execute_finished(route, Default::default(), progress, operation, |output| {
             let valid = output.is_valid_unmapped();
             Ok((output, valid))
         })
         .await
     }
+    /// Manual raw input has no registered operation or managed-auth reference.
+    pub(crate) async fn execute_manual_raw(
+        &self,
+        route: RoutedRequest,
+        headers: crate::discovery::raw::ManualRawHeaders,
+    ) -> Result<crate::output::ToolOutput> {
+        ensure!(
+            route.headers.is_empty(),
+            "manual and routed headers cannot be combined"
+        );
+        self.execute_finished(
+            route,
+            headers,
+            &SubmissionProgress::default(),
+            None,
+            |output| Ok((output.render(None, &Default::default())?, true)),
+        )
+        .await
+    }
+
     async fn execute_finished<T: Send + 'static>(
         &self,
         route: RoutedRequest,
+        headers: crate::discovery::raw::ManualRawHeaders,
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
         finish: impl FnOnce(crate::output::HttpOutput) -> Result<(T, bool)> + Send + 'static,
@@ -583,7 +621,7 @@ impl PaidClient {
         self.run_owned(
             diagnostics::scope(async move {
                 let result = client
-                    .execute_response_owned(route, &progress, operation)
+                    .execute_response_owned(route, headers, &progress, operation)
                     .await
                     .and_then(|(output, unsigned_promotion)| {
                         diagnostics::stage("output_conversion");
@@ -603,6 +641,7 @@ impl PaidClient {
     async fn execute_response_owned(
         &self,
         route: RoutedRequest,
+        headers: crate::discovery::raw::ManualRawHeaders,
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
     ) -> Result<(
@@ -618,7 +657,16 @@ impl PaidClient {
             .payer
             .as_ref()
             .map(|p| p.read().expect("payer lock poisoned").clone());
-        let request = build_request(route)?;
+        let private = headers.is_private();
+        let mut request = build_request(route)?;
+        let padding = self.cover.as_ref().and_then(|(config, _)| {
+            config
+                .padding
+                .as_ref()
+                .filter(|padding| padding.on_api_requests)
+                .map(|padding| padding.header_name.as_str())
+        });
+        headers.apply(&mut request, padding)?;
         let unsigned_only = self.unsigned_only || crate::qualification::unsigned_case();
         let through = match &self.managed {
             Some(pool) if !unsigned_only => pool.inventory_boundary().await?,
@@ -651,6 +699,7 @@ impl PaidClient {
             let stage = self
                 .unsigned_stage(
                     &request,
+                    private,
                     unsigned_only,
                     candidate.as_ref(),
                     payer.as_deref(),
@@ -667,6 +716,9 @@ impl PaidClient {
             } = match stage {
                 Ok(stage) => stage,
                 Err(failure) => {
+                    if private {
+                        return Err(failure.error);
+                    }
                     return self
                         .relay_after_unsigned_failure(
                             failure,
@@ -748,6 +800,7 @@ impl PaidClient {
                                     .wallet
                                     .clone();
                                 pool.note_insufficient(failed.clone()).await?;
+                                ensure!(!private, PrivatePayerHandoff);
                                 attempted.push(failed);
                                 candidate=Some(pool.next_candidate(cost,through,&attempted).await?
                                     .context("insufficient_funds: captured eligible wallets exhausted; earlier authorizations may still charge or execute")?);
@@ -756,6 +809,7 @@ impl PaidClient {
                             response = paid;
                         }
                         Err(error) if error.is::<crate::rotation::manager::PayerHandoff>() => {
+                            ensure!(!private, PrivatePayerHandoff);
                             attempted.push(
                                 candidate
                                     .as_ref()
@@ -864,6 +918,7 @@ impl PaidClient {
     async fn unsigned_stage(
         &self,
         request: &reqwest::Request,
+        private: bool,
         unsigned_only: bool,
         candidate: Option<&crate::rotation::manager::PaymentCandidateHandle>,
         payer: Option<&Payer>,
@@ -894,11 +949,14 @@ impl PaidClient {
             .map_err(Failure::local)?;
         let participating_tor = self.selection == crate::network::SelectionPolicy::Participating
             && factory.policy.mode == crate::network::Mode::Tor;
-        let enrolled_method = matches!(request.method().as_str(), "GET" | "HEAD" | "POST");
-        let runtime_relay = enrolled_method && self.request_relay().is_some();
+        let enrolled_method = matches!(request.method().as_str(), "GET" | "HEAD")
+            || (!private && request.method() == reqwest::Method::POST);
+        let runtime_relay = !private && enrolled_method && self.request_relay().is_some();
         let common_transport = self.relay_call || enrolled_method;
         let collect_unsigned = (runtime_relay
-            || (participating_tor && (common_transport || request.url().scheme() == "https")))
+            || (participating_tor
+                && (!private || enrolled_method)
+                && (common_transport || request.url().scheme() == "https")))
             .then_some((self.max_response_bytes, unsigned_only));
         let acquired = acquisition::run(
             factory,
@@ -949,7 +1007,9 @@ impl PaidClient {
                     && !status.is_success()
                     && status != reqwest::StatusCode::PAYMENT_REQUIRED;
                 if relay_rejected
-                    || (participating_tor && crate::network::eligible_retry_status(status))
+                    || (participating_tor
+                        && (!private || enrolled_method)
+                        && crate::network::eligible_retry_status(status))
                     || (runtime_relay && acquisition::blocking_status(status.as_u16()))
                 {
                     let error = HttpFailure {

@@ -84,6 +84,15 @@ separate network/filesystem requirements; see [build tooling](../scripts/README.
 Keep real wire, SOCKS, gRPC and lifecycle coverage intact rather than replacing or
 skipping it to avoid a permission request.
 
+Manual raw-header regressions live in `discovery::raw::tests`, discovery endpoint
+fixtures and payment header/handoff/best-effort/relay tests. They exercise sensitive
+values, strict validation, exact key delivery, private relay exclusion, initial-payer
+continuity and absence of new replay authority. The isolated directory fixture also
+captures real MCP stdio/HTTP SDK logs at TRACE, including malformed frames, invalid inputs, body-reader errors and upstream
+credential echoes; initialization errors have a socket-free executable unit test.
+These are synthetic local contracts;
+they establish neither vendor deduplication nor live payment/authentication qualification.
+
 ## Test boundaries
 
 | Area | Principal tests / contract |

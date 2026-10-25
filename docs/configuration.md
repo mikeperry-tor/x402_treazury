@@ -797,7 +797,10 @@ calls are not automatically replayed after restart. A key neither proves vendor
 deduplication nor prevents a second x402 debit, and ambiguous signed outcomes
 still grant no automatic replay authority. This behavior applies to static and
 registered OpenAPI tools, including on-demand calls. The separate `raw_call`
-interface has no declared headers and does not generate keys.
+interface accepts caller-owned headers and keys without generating or remembering
+them; see [manual raw headers](agent-sources.md#manual-raw-headers). Every nonempty
+manual set disables paid relays and cross-payer handoff. It does not change
+generated-tool idempotency or provide automatic credential lookup.
 
 ## Optional agent API discovery
 
@@ -923,10 +926,12 @@ types and HTML rejection. Reading help grants no execution or payment authority.
 
 With `raw_url_calls = true`, `x402_treazury_raw_call` calls a documented public HTTPS x402 API URL without
 registering an OpenAPI catalog. It takes a required HTTP `method`, `url`, optional
-`query` and optional JSON `body`; omitted body and explicit JSON null are distinct.
+`query`, string-valued `headers` and optional JSON `body`; omitted body and explicit JSON null are distinct.
 It uses the endpoint's wallet, ordinary payment admission, public-destination
 policy, shared response-byte default, network timeout and network factory. It is independent of API
-tool-name filters and accepts no agent headers, wallet or payment settings.
+tool-name filters and accepts no agent wallet or payment settings. Nonempty
+[manual headers](agent-sources.md#manual-raw-headers) disable relay forwarding and
+cross-payer handoff; header-free calls retain ordinary behavior.
 
 Registration returns a readable name, prefix, visible tool count, status and next step.
 Disabled registrations direct operator repair/refresh; enabled registrations with

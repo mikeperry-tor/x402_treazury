@@ -187,6 +187,15 @@ async fn run_case(
     second: Second,
     signed: Signed,
 ) -> (bool, Vec<Seen>, usize, usize) {
+    run_case_private(method, first, second, signed, false).await
+}
+async fn run_case_private(
+    method: &str,
+    first: Option<Value>,
+    second: Second,
+    signed: Signed,
+    private: bool,
+) -> (bool, Vec<Seen>, usize, usize) {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::create(
         &dir.path().join("state"),
@@ -282,15 +291,27 @@ async fn run_case(
         .await
         .unwrap();
     let client = PaidClient::managed(manager.clone());
-    let result = client
-        .execute(RoutedRequest {
-            headers: Default::default(),
-            method: method.into(),
-            url: format!("{origin}/protected"),
-            query: BTreeMap::from([("business".into(), json!("unchanged & exact"))]),
-            body: Some(json!({"business":"unchanged","nested":[1,true,"bytes"]})),
-        })
-        .await;
+    let request = RoutedRequest {
+        headers: Default::default(),
+        method: method.into(),
+        url: format!("{origin}/protected"),
+        query: BTreeMap::from([("business".into(), json!("unchanged & exact"))]),
+        body: Some(json!({"business":"unchanged","nested":[1,true,"bytes"]})),
+    };
+    let result = if private {
+        client
+            .execute_manual_raw(
+                request,
+                crate::discovery::raw::ManualRawHeaders::parse(Some(
+                    &json!({"X-Label":"private-value"}),
+                ))
+                .unwrap(),
+            )
+            .await
+            .map(|_| String::new())
+    } else {
+        client.execute(request).await
+    };
     client.drain().await;
     let requests = f.requests.lock().unwrap().clone();
     let db = rusqlite::Connection::open(&f.db).unwrap();
@@ -402,5 +423,17 @@ async fn invalid_first_challenge_never_hands_off_or_executes_handler() {
         assert!(!ok);
         assert_eq!((requests.len(), handlers, signed), (1, 0, 0));
         assert!(!requests[0].signed);
+    }
+}
+
+#[tokio::test]
+async fn manual_headers_block_price_handoff_before_second_wallet_io() {
+    for method in ["GET", "POST"] {
+        let (success, seen, handlers, signatures) =
+            run_case_private(method, None, Second::Free, Signed::Paid, true).await;
+        assert!(!success);
+        assert_eq!(seen.len(), 1);
+        assert_eq!(handlers, 0);
+        assert_eq!(signatures, 0);
     }
 }
