@@ -89,7 +89,7 @@ skipping it to avoid a permission request.
 | Area | Principal tests / contract |
 | --- | --- |
 | Catalog/config/providers | Generated schemas, selected operations, routing, pricing descriptions, composition and pinned local catalogs. |
-| MCP/deployment/discovery | Auth, scope and grants, immutable invocation snapshots, update/remove races, persistent idempotency, cancellation, pagination, shutdown and ownership release. |
+| MCP/deployment/discovery | Independent local/remote/raw authority, directory subsets and native grouped responses, failure-before-I/O checks, immutable invocation snapshots, update/remove races, persistent idempotency, cancellation, pagination, shutdown and accepted paid-child ownership. |
 | Payments/managed rotation | Real local signing, cap/asset validation, journal-before-disclosure, captured-wallet traversal only after typed insufficient funds, retained chargeable attempts, concurrent admission, exact reserve promotion, independent initial funding, and separately requested canonical resolution. |
 | Treasury/store/funding | Encrypted persistence, legacy-state rejection/preflight, snapshot ordering, reservations and qualification limits, uncertain source sends, refund/expiry rules, backups and filesystem protections. |
 | Network | Production HTTP/gRPC through authenticated fixture SOCKS, remote hostnames, identity/pool boundaries, participating Tor discovery/API/Base retries, `Retry-After` handling, conditional promotion, proxy failure, TLS, redirects and public-destination enforcement. |

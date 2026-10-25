@@ -148,7 +148,7 @@ async fn scope_child() {
         let added = m
             .invoke(
                 owner,
-                "x402_treazury_source_add",
+                "x402_treazury_providers_add_remote",
                 json!({"spec_url":"https://api.example.com/openapi.json","name":"scoped"}),
             )
             .await

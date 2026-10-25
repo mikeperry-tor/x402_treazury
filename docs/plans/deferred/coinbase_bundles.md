@@ -1,6 +1,6 @@
 # Coinbase bundle discovery
 
-Bundle listing and ordered bundle details remain outside the implemented curated
+Bundle listing and ordered bundle details remain outside the implemented Coinbase
 resource-search interface. Agent search exposes no bundle filters, enumeration or
 membership/order/completeness claims.
 

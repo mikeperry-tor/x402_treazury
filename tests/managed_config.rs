@@ -560,7 +560,7 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
 }
 
 #[tokio::test]
-async fn managed_starter_exposes_exa_and_source_management_without_financial_state() {
+async fn managed_starter_exposes_exa_and_provider_capabilities_without_financial_state() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let dir = tempfile::tempdir().unwrap();
     let mut config: toml::Value =
@@ -585,10 +585,21 @@ async fn managed_starter_exposes_exa_and_source_management_without_financial_sta
         shown["sources"]["exa"]["settings"]["spec"],
         "https://api.exa.ai/openapi.json"
     );
-    assert_eq!(shown["servers"]["research"]["source_management"], true);
+    for capability in [
+        "provider_management_local",
+        "provider_management_remote",
+        "raw_url_calls",
+    ] {
+        assert_eq!(shown["servers"]["research"][capability], true);
+    }
+    assert_eq!(
+        shown["servers"]["research"]["remote_provider_directories"],
+        serde_json::json!(["coinbase", "x402-list"])
+    );
+    assert!(include_str!("../examples/deployments/managed.toml").contains("coinbase_curated"));
     assert_eq!(shown["servers"]["research"]["wallet"], "research");
     assert!(shown["servers"]["research"]["source_registry_file"].is_null());
-    assert!(shown.get("source_management").is_none());
+    assert!(shown.get("provider_management_remote").is_none());
     assert!(!dir.path().join("state").exists());
 
     // Exercise deployment composition offline; provider-specific schema contracts
@@ -637,18 +648,18 @@ async fn managed_starter_exposes_exa_and_source_management_without_financial_sta
             .filter(|entry| entry.tool.name != "exa_help")
             .all(|entry| entry.tool.method == "POST")
     );
-    assert_eq!(inventory[0].management_tools.len(), 7);
+    assert_eq!(inventory[0].management_tools.len(), 8);
     assert!(
         inventory[0]
             .management_tools
             .iter()
-            .any(|tool| tool.name == "x402_treazury_providers_list")
+            .any(|tool| tool.name == "x402_treazury_providers_list_local")
     );
     assert!(
         inventory[0]
             .management_tools
             .iter()
-            .any(|tool| tool.name == "x402_treazury_source_add")
+            .any(|tool| tool.name == "x402_treazury_providers_add_remote")
     );
     assert!(!dir.path().join("state").exists());
 }

@@ -52,7 +52,7 @@ fn request(args: &Map<String, Value>) -> Result<RoutedRequest> {
 
 impl Manager {
     pub async fn invoke_raw(&self, owner: &str, args: &Map<String, Value>) -> Result<ToolOutput> {
-        ensure!(self.enabled(owner), "source_management_disabled");
+        ensure!(self.policy(owner).raw, "raw_url_calls_disabled");
         let route = request(args)?;
         self.source_client(owner)?
             .with_source_identity("builtin:raw")

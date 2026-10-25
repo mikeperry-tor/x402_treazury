@@ -6,9 +6,12 @@ fn args(value: Value) -> Map<String, Value> {
 
 #[test]
 fn exact_translation_preserves_shared_query_and_server_payment_filters() {
-    let url = request(&args(json!({
-        "q":" Weather & clouds ","limit":2,"max_price_usd":0.05
-    })))
+    let url = request(
+        &args(json!({
+            "q":" Weather & clouds ","limit":2,"max_price_usd":0.05
+        })),
+        true,
+    )
     .unwrap();
     let pairs: Vec<_> = url
         .query_pairs()
@@ -37,20 +40,20 @@ fn exact_translation_preserves_shared_query_and_server_payment_filters() {
         7,
         "only shared arguments and fixed payment/curation filters are sent"
     );
-    let defaults = request(&Map::new()).unwrap();
+    let defaults = request(&Map::new(), true).unwrap();
     let query: std::collections::BTreeMap<_, _> = defaults.query_pairs().collect();
     assert_eq!(query["curatedOnly"], "true");
     assert_eq!(query["limit"], "5");
     assert!(!query.contains_key("query"));
     assert!(!query.contains_key("maxUsdPrice"));
-    let empty = request(&args(json!({"q":""}))).unwrap();
+    let empty = request(&args(json!({"q":""})), true).unwrap();
     assert!(
         empty
             .query_pairs()
             .any(|(k, v)| k == "query" && v.is_empty())
     );
     let unicode = "é🌧".repeat(200);
-    let encoded = request(&args(json!({"q":unicode}))).unwrap();
+    let encoded = request(&args(json!({"q":unicode})), true).unwrap();
     assert_eq!(
         encoded
             .query_pairs()
@@ -70,7 +73,7 @@ fn numeric_price_uses_json_number_without_a_float_roundtrip() {
         json!(9_007_199_254_740_993_u64),
         json!(u64::MAX),
     ] {
-        let url = request(&args(json!({"max_price_usd":price}))).unwrap();
+        let url = request(&args(json!({"max_price_usd":price})), true).unwrap();
         let translated = url
             .query_pairs()
             .find(|(key, _)| key == "maxUsdPrice")
@@ -84,6 +87,9 @@ fn numeric_price_uses_json_number_without_a_float_roundtrip() {
 #[test]
 fn branch_validation_rejects_removed_fields_and_respects_shared_bounds() {
     for invalid in [
+        json!({"mode":"best"}),
+        json!({"directory":"coinbase"}),
+        json!({"local_only":false}),
         json!({"mode":"browse"}),
         json!({"mode":null}),
         json!({"local_only":null}),
@@ -110,7 +116,7 @@ fn branch_validation_rejects_removed_fields_and_respects_shared_bounds() {
         json!({"category":"Weather"}),
     ] {
         assert!(
-            request(&args(invalid.clone())).is_err(),
+            request(&args(invalid.clone()), true).is_err(),
             "accepted {invalid}"
         );
     }
@@ -121,10 +127,11 @@ fn branch_validation_rejects_removed_fields_and_respects_shared_bounds() {
         json!({"limit":20}),
         json!({"max_price_usd":0}),
         json!({"max_price_usd":0.05}),
-        json!({"mode":"best"}),
-        json!({"directory":"coinbase","mode":"best","local_only":false}),
     ] {
-        assert!(request(&args(valid.clone())).is_ok(), "rejected {valid}");
+        assert!(
+            request(&args(valid.clone()), true).is_ok(),
+            "rejected {valid}"
+        );
     }
 }
 
@@ -138,11 +145,12 @@ fn complete_unknown_partial_resource_contracts_are_preserved() {
     let bytes = serde_json::to_vec(&upstream).unwrap();
     assert_eq!(parse_response(&bytes).unwrap(), upstream);
     for via in ["origin", "curl"] {
-        let text = output(upstream.clone(), via).unwrap().into_text().unwrap();
+        let output = output(upstream.clone(), via, true).unwrap();
+        assert!(output.payment_may_have_occurred);
+        assert_eq!(output.advisories.is_empty(), via == "origin");
+        let text = output.text;
         let result: Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(result["response"], upstream);
-        assert_eq!(result["acquisition"]["via"], via);
-        assert_eq!(result["directory"], "coinbase");
+        assert_eq!(result, upstream);
         assert!(result.get("total").is_none());
         assert!(result.get("next_cursor").is_none());
     }
@@ -155,13 +163,7 @@ fn complete_unknown_partial_resource_contracts_are_preserved() {
 
 #[test]
 fn malformed_top_level_is_failure_without_invented_empty_results() {
-    for invalid in [
-        json!([]),
-        json!({}),
-        json!({"resources":[],"partialResults":null}),
-        json!({"resources":[null],"partialResults":false}),
-        json!({"resources":{},"partialResults":false}),
-    ] {
+    for invalid in [json!([]), json!(null), json!("not an object")] {
         let error = parse_response(&serde_json::to_vec(&invalid).unwrap()).unwrap_err();
         assert_eq!(
             crate::discovery_relay::RelayFailure::from_error(&error).explanation(),
@@ -176,75 +178,52 @@ fn malformed_top_level_is_failure_without_invented_empty_results() {
 }
 
 #[test]
-fn flat_schema_keeps_shared_types_and_coinbase_only_query_bound() {
-    let schema = super::super::directory::search_schema();
-    let properties = schema["properties"].as_object().unwrap();
-    for (name, field) in properties {
-        assert!(
-            name == "local_only" || field.get("default").is_none(),
-            "unsafe root default for {name}"
+fn flat_schema_uses_only_shared_arguments_and_endpoint_specific_query_bound() {
+    for coinbase in [false, true] {
+        let schema = super::super::directory::search_schema(coinbase);
+        let properties = schema["properties"].as_object().unwrap();
+        assert_eq!(
+            properties
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from(["q", "limit", "max_price_usd"])
+        );
+        assert!(schema.get("oneOf").is_none());
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(
+            properties["q"].get("maxLength").cloned(),
+            coinbase.then(|| json!(400))
+        );
+        assert_eq!(properties["max_price_usd"]["type"], "number");
+        assert_eq!(properties["max_price_usd"]["minimum"], 0);
+        assert_eq!(properties["limit"]["default"], 5);
+        assert_eq!(properties["limit"]["minimum"], 1);
+        assert_eq!(properties["limit"]["maximum"], 20);
+        let long_query = args(json!({"q":"é".repeat(401)}));
+        assert_eq!(
+            super::super::directory::validate_search(&long_query, coinbase).is_err(),
+            coinbase
         );
     }
-    let branches = schema["oneOf"].as_array().unwrap();
-    assert_eq!(branches.len(), 4);
-    let coinbase = &branches[3];
-    assert!(branches[2]["properties"].get("directory").is_none());
-    assert_eq!(coinbase["required"], json!(["directory"]));
-    assert_eq!(coinbase["properties"]["q"]["maxLength"], 400);
-    assert!(properties["q"].get("maxLength").is_none());
-    for other in &branches[..3] {
-        assert!(
-            other["properties"]["q"].get("maxLength").is_none(),
-            "Coinbase query bound leaked into another branch"
+    for curated in [false, true] {
+        let url = request(&Map::new(), curated).unwrap();
+        assert_eq!(
+            url.query_pairs()
+                .find(|(key, _)| key == "curatedOnly")
+                .unwrap()
+                .1,
+            curated.to_string()
         );
     }
-    assert_eq!(properties["max_price_usd"]["type"], "number");
-    for ranked in [&branches[1], coinbase] {
-        assert_eq!(ranked["properties"]["max_price_usd"]["type"], "number");
-        assert_eq!(ranked["properties"]["max_price_usd"]["minimum"], 0);
-        assert_eq!(ranked["properties"]["limit"]["default"], 5);
-        assert_eq!(ranked["properties"]["limit"]["minimum"], 1);
-        assert_eq!(ranked["properties"]["limit"]["maximum"], 20);
-    }
-    let names: std::collections::BTreeSet<_> = coinbase["properties"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(
-        names,
-        std::collections::BTreeSet::from([
-            "directory",
-            "mode",
-            "local_only",
-            "q",
-            "limit",
-            "max_price_usd"
-        ])
-    );
-    for removed in [
-        "curated_only",
-        "tags",
-        "bundle_slugs",
-        "extensions",
-        "pay_to",
-        "url_substring",
+    for native in [
+        json!({}),
+        json!({"resources":[],"partialResults":null}),
+        json!({"newNativeField":[null,1]}),
     ] {
-        assert!(
-            !properties.contains_key(removed),
-            "removed field {removed} is still advertised"
-        );
-        assert!(coinbase["properties"].get(removed).is_none());
-    }
-    for mode in ["browse", "best"] {
-        assert!(
-            super::super::directory::request(
-                super::super::directory::SEARCH,
-                &args(json!({"mode":mode,"q":"é".repeat(401)}))
-            )
-            .is_ok(),
-            "Coinbase query bound leaked into x402 List {mode}"
+        assert_eq!(
+            parse_response(&serde_json::to_vec(&native).unwrap()).unwrap(),
+            native
         );
     }
 }

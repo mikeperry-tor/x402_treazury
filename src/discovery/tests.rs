@@ -1,5 +1,9 @@
+#[path = "capability_tests.rs"]
+mod capability_tests;
 #[path = "registry_tests.rs"]
 mod registry_tests;
+#[path = "remote_tests.rs"]
+mod remote_tests;
 use super::*;
 #[path = "coinbase_network_tests.rs"]
 mod coinbase_network_tests;
@@ -14,7 +18,7 @@ mod curated_network_tests;
 #[path = "curated_tests.rs"]
 mod curated_tests;
 fn listeners(_persistent: bool) -> BTreeMap<String, ListenerConfig> {
-    ["writer", "reader", "hidden"].into_iter().map(|id| (id.into(), serde_json::from_value(json!({"listen":"127.0.0.1:0","bearer_token_env":"TEST_TOKEN","sources":[],"wallet":"shared","source_management":id != "hidden"})).unwrap())).collect()
+    ["writer", "reader", "hidden"].into_iter().map(|id| (id.into(), serde_json::from_value(json!({"listen":"127.0.0.1:0","bearer_token_env":"TEST_TOKEN","sources":[],"wallet":"shared","provider_management_local":id != "hidden","provider_management_remote":id != "hidden","raw_url_calls":id != "hidden","remote_provider_directories":["x402-list"]})).unwrap())).collect()
 }
 fn with_registry(
     mut listeners: BTreeMap<String, ListenerConfig>,
@@ -164,7 +168,7 @@ async fn add(m: &Arc<Manager>, name: &str, _lifetime: &str, _visibility: &str) -
     seed(m).await;
     m.invoke(
         "writer",
-        "x402_treazury_source_add",
+        "x402_treazury_providers_add_remote",
         json!({"spec_url":"https://api.example.com/openapi.json","name":name}),
     )
     .await
@@ -351,7 +355,7 @@ fn registry_crash_child() {
         let _ = m
             .invoke(
                 "writer",
-                "x402_treazury_source_add",
+                "x402_treazury_providers_add_remote",
                 json!({"spec_url":"https://api.example.com/openapi.json","name":"crash"}),
             )
             .await;
@@ -385,7 +389,7 @@ async fn process_exit_between_sqlite_commit_and_catalog_publication_recovers() {
     let r = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":"https://api.example.com/openapi.json","name":"crash"}),
         )
         .await
@@ -696,7 +700,7 @@ async fn endpoint_local_add_is_duplicate_safe_and_tools_are_minimal() {
     let args = json!({"spec_url":"https://api.example.com/openapi.json"});
     seed(&m).await;
     let results = futures_util::future::join_all(
-        (0..8).map(|_| m.invoke("writer", "x402_treazury_source_add", args.clone())),
+        (0..8).map(|_| m.invoke("writer", "x402_treazury_providers_add_remote", args.clone())),
     )
     .await;
     let first = results[0].as_ref().unwrap();
@@ -705,22 +709,23 @@ async fn endpoint_local_add_is_duplicate_safe_and_tools_are_minimal() {
     assert_eq!(m.catalog.read().views["writer"].len(), 2);
     assert!(m.catalog.read().views["reader"].is_empty());
     let other = m
-        .invoke("reader", "x402_treazury_source_add", args.clone())
+        .invoke("reader", "x402_treazury_providers_add_remote", args.clone())
         .await
         .unwrap();
     assert_eq!(first["name"], other["name"]);
     assert_eq!(m.inner.lock().unwrap().state.records.len(), 2);
     assert!(
-        m.invoke("hidden", "x402_treazury_source_add", args)
+        m.invoke("hidden", "x402_treazury_providers_add_remote", args)
             .await
             .is_err()
     );
     let s = server(&m, "writer");
     for name in [
-        "providers_list",
-        "sources_search",
+        "providers_list_local",
+        "providers_search_remote",
         "provider_details_remote",
-        "source_add",
+        "providers_add_local",
+        "providers_add_remote",
         "raw_call",
         "tools_search",
         "tool_call",
@@ -729,6 +734,9 @@ async fn endpoint_local_add_is_duplicate_safe_and_tools_are_minimal() {
     }
     for name in [
         "source_url_info",
+        "source_add",
+        "sources_search",
+        "providers_list",
         "raw_get",
         "raw_post",
         "source_preview",
@@ -755,7 +763,7 @@ async fn endpoint_local_add_is_duplicate_safe_and_tools_are_minimal() {
         let mut args = json!({"spec_url":"https://api.example.com/openapi.json"});
         args[extra] = json!("forbidden");
         assert!(
-            m.invoke("writer", "x402_treazury_source_add", args)
+            m.invoke("writer", "x402_treazury_providers_add_remote", args)
                 .await
                 .is_err(),
             "{extra}"
@@ -819,7 +827,7 @@ async fn registry_persistence_is_operator_controlled_and_revocation_is_local() {
     let again = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":"https://api.example.com/openapi.json"}),
         )
         .await
@@ -828,7 +836,8 @@ async fn registry_persistence_is_operator_controlled_and_revocation_is_local() {
     assert!(m.find_tool("writer", &tool_id).is_ok());
     drop(m);
     let mut ls = listeners(true);
-    ls.get_mut("writer").unwrap().source_management = false;
+    ls.get_mut("writer").unwrap().provider_management_local = false;
+    ls.get_mut("writer").unwrap().provider_management_remote = false;
     let m = manager_with(with_registry(ls, Some(file))).await;
     assert!(m.catalog.read().views.values().all(Vec::is_empty));
     assert!(
@@ -860,7 +869,7 @@ async fn failed_persistence_never_publishes_and_committed_add_recovers() {
         .store(true, std::sync::atomic::Ordering::SeqCst);
     let args = json!({"spec_url":"https://api.example.com/openapi.json"});
     assert!(
-        m.invoke("writer", "x402_treazury_source_add", args.clone())
+        m.invoke("writer", "x402_treazury_providers_add_remote", args.clone())
             .await
             .is_err()
     );
@@ -868,7 +877,7 @@ async fn failed_persistence_never_publishes_and_committed_add_recovers() {
     drop(m);
     let m = manager(Some(file.clone())).await;
     assert_eq!(
-        m.invoke("writer", "x402_treazury_source_add", args)
+        m.invoke("writer", "x402_treazury_providers_add_remote", args)
             .await
             .unwrap()["status"],
         "available"
@@ -892,7 +901,7 @@ async fn failed_persistence_never_publishes_and_committed_add_recovers() {
     assert!(
         m.invoke(
             "reader",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":"https://api.example.com/openapi.json"})
         )
         .await
@@ -937,7 +946,7 @@ async fn endpoint_wallet_override_and_filters_preserve_boundaries() {
     );
     m.invoke(
         "reader",
-        "x402_treazury_source_add",
+        "x402_treazury_providers_add_remote",
         json!({"spec_url":"https://api.example.com/openapi.json"}),
     )
     .await
@@ -955,7 +964,7 @@ async fn real_http_directory_search_and_cached_client_workflow() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let requests = Arc::new(AtomicUsize::new(0));
     let count = requests.clone();
-    let (vendor, vendor_task)=listen(axum::Router::new().route("/services",axum::routing::get(move |axum::extract::Query(query):axum::extract::Query<BTreeMap<String,String>>| {
+    let (vendor, vendor_task)=listen(axum::Router::new().route("/best",axum::routing::get(move |axum::extract::Query(query):axum::extract::Query<BTreeMap<String,String>>| {
         count.fetch_add(1,Ordering::SeqCst);
         async move { axum::Json(json!({"query":query,"services":[{"spec_url":"https://api.example.com/openapi.json"}]})) }
     }))).await;
@@ -969,13 +978,13 @@ async fn real_http_directory_search_and_cached_client_workflow() {
     .await;
     let denied = crate::network::discovery(&base,Duration::from_secs(5)).unwrap()
         .post(format!("{base}/mcp")).bearer_auth("wrong-token")
-        .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x402_treazury_sources_search","arguments":{"q":"weather"}}}))
+        .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x402_treazury_providers_search_remote","arguments":{"q":"weather"}}}))
         .send().await.unwrap();
     assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
     assert_eq!(requests.load(Ordering::SeqCst), 0);
     let found = call(
         &base,
-        "x402_treazury_sources_search",
+        "x402_treazury_providers_search_remote",
         json!({"q":"weather"}),
     )
     .await;
@@ -984,7 +993,7 @@ async fn real_http_directory_search_and_cached_client_workflow() {
     seed(&m).await;
     let added = call(
         &base,
-        "x402_treazury_source_add",
+        "x402_treazury_providers_add_remote",
         json!({"spec_url":"https://api.example.com/openapi.json","name":"demo"}),
     )
     .await;
@@ -1069,7 +1078,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
     let curated = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_local",
             json!({"provider_id":"relayshield-phone-reputation"}),
         )
         .await
@@ -1077,7 +1086,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
     assert_eq!(curated["schema"]["kind"], "bundled");
     m.invoke(
         "reader",
-        "x402_treazury_source_add",
+        "x402_treazury_providers_add_remote",
         json!({"spec_url":"https://api.example.com/openapi.json"}),
     )
     .await
@@ -1128,7 +1137,7 @@ async fn shared_managed_registration_does_not_allocate_or_fund() {
 fn operator_config(dir: &std::path::Path, file: &std::path::Path) -> PathBuf {
     let path = dir.join("deployment.toml");
     let config = json!({"version":1,"wallets":{"shared":{"mode":"static","private_key_env":"UNUSED_KEY"}},
-        "servers":{"writer":{"listen":"127.0.0.1:8000","bearer_token_env":"UNUSED_TOKEN","source_management":true,"wallet":"shared","source_registry_file":file}}});
+        "servers":{"writer":{"listen":"127.0.0.1:8000","bearer_token_env":"UNUSED_TOKEN","provider_management_local":true,"provider_management_remote":true,"raw_url_calls":true,"remote_provider_directories":["x402-list"],"wallet":"shared","source_registry_file":file}}});
     std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     path
 }
@@ -1206,13 +1215,19 @@ confidentiality='public'
 [servers.research]
 listen='127.0.0.1:0'
 bearer_token_env='UNSET_RESEARCH_TOKEN'
-source_management=true
+provider_management_local=true
+provider_management_remote=true
+raw_url_calls=true
+remote_provider_directories=["x402-list"]
 wallet="agent_shared"
 source_registry_file="registry.sqlite"
 [servers.analysis]
 listen='127.0.0.1:0'
 bearer_token_env='UNSET_ANALYSIS_TOKEN'
-source_management=true
+provider_management_local=true
+provider_management_remote=true
+raw_url_calls=true
+remote_provider_directories=["x402-list"]
 wallet="agent_shared"
 source_registry_file="registry.sqlite"
 "#
@@ -1223,7 +1238,10 @@ source_registry_file="registry.sqlite"
             .await
             .unwrap();
         for endpoint in ["research", "analysis"] {
-            assert_eq!(shown["servers"][endpoint]["source_management"], true);
+            assert_eq!(
+                shown["servers"][endpoint]["provider_management_remote"],
+                true
+            );
             assert_eq!(shown["servers"][endpoint]["wallet"], "agent_shared");
         }
         assert!(!dir.path().join("registry.sqlite").exists());
@@ -1280,7 +1298,7 @@ async fn saved_nonlocal_bindings_stay_disabled_and_duplicate_add_is_readable() {
     let result = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":"https://api.example.com/openapi.json"}),
         )
         .await
@@ -1309,7 +1327,7 @@ fn embedded_directory_matches_reviewed_search_contract() {
 }
 
 #[tokio::test]
-async fn management_only_deployment_starts_and_lists_exactly_seven_tools() {
+async fn management_only_deployment_starts_and_lists_exactly_eight_tools() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("config.toml");
     std::fs::write(
@@ -1322,7 +1340,10 @@ private_key_env = "TEST_KEY"
 [servers.research]
 listen = "127.0.0.1:0"
 bearer_token_env = "TEST_TOKEN"
-source_management = true
+provider_management_local = true
+provider_management_remote = true
+raw_url_calls = true
+remote_provider_directories = ["x402-list"]
 wallet = "shared"
 # API filters must not hide management tools.
 exclude_tools = ["*"]
@@ -1331,7 +1352,7 @@ exclude_tools = ["*"]
     .unwrap();
     let deployment = crate::deployment::Deployment::load(&path).await.unwrap();
     let inventory = deployment.inventory();
-    assert_eq!(inventory[0].management_tools.len(), 7);
+    assert_eq!(inventory[0].management_tools.len(), 8);
     assert!(inventory[0].tools.is_empty());
     let running = deployment
         .bind(&BTreeMap::from([
@@ -1351,7 +1372,7 @@ exclude_tools = ["*"]
     )
     .await;
     let actual = listed["tools"].as_array().unwrap();
-    assert_eq!(actual.len(), 7);
+    assert_eq!(actual.len(), 8);
     for expected in &inventory[0].management_tools {
         assert!(actual.contains(&serde_json::to_value(expected).unwrap()));
     }
@@ -1521,7 +1542,10 @@ async fn directory_payment_fixture() {
     // Use the public hostname on the fixture certificate; retain public-destination checks.
     *manager.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
     assert!(manager.directory("hidden").is_err());
-    assert_eq!(tools::definitions(true).len(), 7);
+    assert_eq!(
+        tools::listener_definitions(manager.policy("writer"), false, None, None).len(),
+        8
+    );
     assert_eq!(
         requests.load(Ordering::SeqCst),
         0,
@@ -1529,10 +1553,7 @@ async fn directory_payment_fixture() {
     );
     let calls = [
         (directory::SEARCH, json!({})),
-        (
-            directory::SEARCH,
-            json!({"mode":"best","q":"weather","limit":3}),
-        ),
+        (directory::SEARCH, json!({"q":"weather","limit":3})),
         (directory::DETAILS, json!({"x402_list_id":"weather"})),
         (
             raw::NAME,
@@ -1574,9 +1595,10 @@ async fn directory_payment_fixture() {
     for owner in ["writer", "reader"] {
         for (name, args) in &calls {
             let result = server(&manager, owner)
-                .invoke(name, args.as_object().unwrap())
+                .invoke_output(name, args.as_object().unwrap())
                 .await
-                .unwrap();
+                .unwrap()
+                .text;
             assert!(result.contains("services"));
             let response: Value = serde_json::from_str(&result).unwrap();
             if *name == raw::NAME {
@@ -1600,12 +1622,15 @@ async fn directory_payment_fixture() {
         }
     }
     for (name, args) in &calls {
-        assert!(
-            server(&manager, "blocked")
-                .invoke(name, args.as_object().unwrap())
-                .await
-                .is_err()
-        );
+        let result = server(&manager, "blocked")
+            .invoke_output(name, args.as_object().unwrap())
+            .await;
+        if *name == directory::SEARCH {
+            let value: Value = serde_json::from_str(&result.unwrap().text).unwrap();
+            assert!(value["x402-list"]["local_error"].is_object());
+        } else {
+            assert!(result.is_err());
+        }
     }
     assert_eq!(
         requests.load(Ordering::SeqCst),
@@ -1778,6 +1803,31 @@ async fn directory_payment_fixture() {
     );
     assert_eq!(signatures.lock().unwrap().len(), signed_before + 3 + 2);
 
+    let mut raw_config = listeners(false);
+    let raw_listener = raw_config.get_mut("writer").unwrap();
+    raw_listener.provider_management_local = false;
+    raw_listener.provider_management_remote = false;
+    raw_listener.remote_provider_directories.clear();
+    let raw_manager = manager_with(raw_config).await;
+    let before_raw = requests.load(Ordering::SeqCst);
+    let result = server(&raw_manager, "writer")
+        .invoke_output(
+            raw::NAME,
+            json!({"method":"GET","url":"https://api.example.com/api/v1/services"})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(result.payment_may_have_occurred);
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        before_raw + 2,
+        "raw-only endpoint uses its existing signer without management permission"
+    );
+    assert!(raw_manager.inner.lock().unwrap().state.records.is_empty());
+    assert!(raw_manager.fetches.lock().unwrap().is_empty());
+
     http_task.abort();
     vendor_task.abort();
 }
@@ -1828,24 +1878,16 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
     let invoke = |name, args| call(&base, name, args);
     let result = invoke(
         directory::SEARCH,
-        json!({"q":"weather","page":2,"per_page":7}),
+        json!({"q":"weather","limit":3,"max_price_usd":0.02}),
     )
     .await;
     let parsed: Value =
         serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(parsed["route"], "browse");
+    assert_eq!(parsed["x402-list"]["route"], "best");
+    assert_eq!(parsed["x402-list"]["ranking_version"], 3);
     assert_eq!(
-        parsed["args"],
-        json!({"q":"weather","page":"2","per_page":"7","network":"BSE"})
-    );
-    let result = invoke(directory::SEARCH, json!({"mode":"best","q":"weather","prefer":"cheapest","max_price_usd":0.02,"require_verified":true,"limit":3})).await;
-    let parsed: Value =
-        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(parsed["route"], "best");
-    assert_eq!(parsed["ranking_version"], 3);
-    assert_eq!(
-        parsed["args"],
-        json!({"q":"weather","network":"BSE","prefer":"cheapest","max_price_usd":"0.02","require_verified":"true","limit":"3"})
+        parsed["x402-list"]["args"],
+        json!({"q":"weather","network":"BSE","prefer":"balanced","max_price_usd":"0.02","require_verified":"false","limit":"3"})
     );
     let result = invoke(
         directory::DETAILS,
@@ -1856,108 +1898,39 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
         serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(parsed["listing"]["slug"], "vendor/weather?region=UK");
     assert_eq!(parsed["listing"]["endpoints"][0]["path"], "/read");
-    assert_eq!(requests.load(Ordering::SeqCst), 3);
+    for args in [
+        json!({"mode":"best"}),
+        json!({"directory":"coinbase"}),
+        json!({"local_only":false}),
+        json!({"page":1}),
+        json!({"prefer":"balanced"}),
+        json!({"network":"BSE"}),
+        json!({"require_verified":false}),
+        json!({"limit":21}),
+        json!({"max_price_usd":-1}),
+        json!({"q":null}),
+    ] {
+        assert_eq!(invoke(directory::SEARCH, args).await["isError"], true);
+    }
     for (name, args) in [
-        (directory::SEARCH, json!({"network":"BSE"})),
-        (directory::SEARCH, json!({"mode":"best","network":"SOL"})),
-        (directory::SEARCH, json!({"mode":"best","page":1})),
-        (
-            directory::SEARCH,
-            json!({"mode":"browse","prefer":"cheapest"}),
-        ),
-        (directory::SEARCH, json!({"max_price_usd":0.01})),
-        (directory::SEARCH, json!({"mode":"best","limit":21})),
-        (directory::SEARCH, json!({"mode":"best","max_price_usd":-1})),
-        (
-            directory::SEARCH,
-            json!({"mode":"best","require_verified":"true"}),
-        ),
-        (directory::SEARCH, json!({"mode":"best","prefer":"invalid"})),
-        (directory::SEARCH, json!({"mode":"invalid"})),
-        (directory::SEARCH, json!({"q":null})),
-        (directory::SEARCH, json!({"per_page":101})),
         ("x402_treazury_source_details", json!({"slug":"weather"})),
         (directory::DETAILS, json!({"slug":"weather"})),
-        (directory::DETAILS, json!({"slug":""})),
-        (directory::DETAILS, json!({"slug":".."})),
-        (directory::DETAILS, json!({"slug":"."})),
+        (directory::DETAILS, json!({"x402_list_id":".."})),
         (
             directory::DETAILS,
-            json!({"source_id":"not-a-directory-slug"}),
+            json!({"x402_list_id":"weather","mode":"best"}),
         ),
-        (directory::DETAILS, json!({"slug":"weather","mode":"best"})),
     ] {
-        let result = invoke(name, args.clone()).await;
-        assert_eq!(result["isError"], true, "{name} {args}: {result}");
+        assert_eq!(invoke(name, args).await["isError"], true);
     }
     assert_eq!(
         requests.load(Ordering::SeqCst),
-        3,
-        "invalid input made a provider request"
+        2,
+        "invalid arguments made upstream requests"
     );
-    assert!(
-        directory::request(
-            directory::SEARCH,
-            json!({"mode":"browse","q":"x"}).as_object().unwrap()
-        )
-        .unwrap()
-        .1
-        .get("mode")
-        .is_none()
-    );
-    assert!(tools::definitions(false).is_empty());
-    let schema = directory::search_schema();
-    assert!(schema["properties"].get("network").is_none());
-    for branch in schema["oneOf"].as_array().unwrap() {
-        assert!(branch["properties"].get("network").is_none());
-    }
-    assert!(schema["properties"]["mode"].get("default").is_none());
-    assert_eq!(schema["oneOf"][0]["properties"]["mode"]["const"], "browse");
-    assert!(schema["oneOf"][0]["properties"].get("limit").is_none());
-    assert_eq!(schema["oneOf"][1]["required"], json!(["mode"]));
-    assert!(schema["oneOf"][1]["properties"].get("page").is_none());
-    for path in ["/services", "/best"] {
-        for (name, field) in directory::tool(path).input_schema["properties"]
-            .as_object()
-            .unwrap()
-        {
-            if name == "network" {
-                continue;
-            }
-            let branch = if path == "/services" { 0 } else { 1 };
-            let mut authored = schema["oneOf"][branch]["properties"][name].clone();
-            assert!(
-                authored["description"]
-                    .as_str()
-                    .is_some_and(|help| !help.is_empty())
-            );
-            authored["description"] = field["description"].clone();
-            assert_eq!(authored, *field, "{path} {name}: branch constraint changed");
-            let mut merged = schema["properties"][name].clone();
-            if name == "per_page" {
-                assert!(merged.get("maximum").is_none());
-                assert_eq!(schema["oneOf"][2]["properties"]["per_page"]["default"], 25);
-                assert!(
-                    schema["oneOf"][2]["properties"]["per_page"]
-                        .get("maximum")
-                        .is_none()
-                );
-                continue;
-            }
-            assert!(
-                merged["description"]
-                    .as_str()
-                    .is_some_and(|help| !help.is_empty())
-            );
-            merged["description"] = field["description"].clone();
-            let mut expected = field.clone();
-            expected.as_object_mut().unwrap().remove("default");
-            if name == "max_price_usd" {
-                assert_eq!(merged["type"], "number");
-            }
-            assert_eq!(merged, expected, "{path} {name}: schema constraint changed");
-        }
-    }
+    let schema = directory::search_schema(false);
+    assert_eq!(schema["properties"].as_object().unwrap().len(), 3);
+    assert!(schema["properties"]["q"].get("maxLength").is_none());
     task.abort();
     vendor_task.abort();
 }
@@ -2075,7 +2048,7 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
     let calls = Arc::new(AtomicUsize::new(0));
     let (seen, gate, count) = (arrived.clone(), release.clone(), calls.clone());
     let app = axum::Router::new().route(
-        "/services",
+        "/best",
         get(move || {
             let (seen, gate, count) = (seen.clone(), gate.clone(), count.clone());
             async move {
@@ -2135,7 +2108,10 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
                 .unwrap()
                 .unwrap();
             assert_ne!(result["isError"], true);
-            assert_eq!(result["structuredContent"]["services"], json!([]));
+            assert_eq!(
+                result["structuredContent"]["x402-list"]["services"],
+                json!([])
+            );
             assert!(
                 !std::fs::read_to_string(log.path())
                     .unwrap()
@@ -2159,7 +2135,7 @@ async fn directory_http_calls_outlive_rmcp_drain_and_disconnected_waiters() {
 }
 
 #[tokio::test]
-async fn on_demand_management_keeps_seven_wrappers_and_scoped_dynamic_search() {
+async fn on_demand_management_keeps_eight_wrappers_and_scoped_dynamic_search() {
     let m = manager(None).await;
     add(&m, "demo", "", "").await;
     let mut writer = server(&m, "writer");
@@ -2169,7 +2145,7 @@ async fn on_demand_management_keeps_seven_wrappers_and_scoped_dynamic_search() {
     let (base, task) = listen(crate::server::http_app(writer, "test-token".into())).await;
     let (other, other_task) = listen(crate::server::http_app(reader, "test-token".into())).await;
     let listed = rpc(&base, "test-token", "tools/list", json!({})).await;
-    assert_eq!(listed["tools"].as_array().unwrap().len(), 7);
+    assert_eq!(listed["tools"].as_array().unwrap().len(), 8);
     assert!(
         listed["tools"]
             .as_array()
@@ -2259,7 +2235,7 @@ async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("source_management_disabled")
+                .contains("raw_url_calls_disabled")
         );
     }
     let standalone = Server::new(vec![], payer(), "https://api.example.com".into(), None);
@@ -2384,7 +2360,7 @@ async fn static_publication_composes_with_dynamic_commits_and_fences_stale_prici
     let (registered, published) = tokio::join!(
         m.invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":second_url,"name":"second"})
         ),
         m.replace_static(1, priced.clone()),
@@ -2443,7 +2419,7 @@ async fn static_publication_composes_with_dynamic_commits_and_fences_stale_prici
     let duplicate = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":second_url,"name":"second"}),
         )
         .await
@@ -2606,7 +2582,7 @@ async fn more_than_sixteen_sources_and_one_hundred_tools_are_accepted() {
             .insert(fetch_key(&m, url.as_str()), Arc::new(cell));
         m.invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":url,"name":format!("source-{index}")}),
         )
         .await
@@ -2676,7 +2652,7 @@ async fn register_spec(
         .insert(fetch_key_for(m, owner, url.as_str()), Arc::new(cell));
     m.invoke(
         owner,
-        "x402_treazury_source_add",
+        "x402_treazury_providers_add_remote",
         json!({"name":name,"spec_url":url}),
     )
     .await
@@ -3315,7 +3291,7 @@ async fn automatic_source_names_are_readable_collision_safe_and_duplicate_safe()
             "second.json"
         });
         async move {
-            m.invoke("writer", "x402_treazury_source_add", args)
+            m.invoke("writer", "x402_treazury_providers_add_remote", args)
                 .await
                 .unwrap()
         }
@@ -3506,7 +3482,7 @@ async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
             }).collect());
             m.catalog.publish(snapshot);
             let mut expected: Vec<Value> =
-                tools::listener_definitions(owner == "writer", false, None, None)
+                tools::listener_definitions(m.policy(owner), false, None, None)
                     .into_iter()
                     .map(|t| serde_json::to_value(t).unwrap())
                     .collect();

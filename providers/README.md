@@ -134,14 +134,23 @@ lists determine selection and order; an adapter still checks whether it can
 preserve the actual request. This metadata does not enter agent tool descriptions
 or input schemas.
 
-With `source_management = true`, `x402_treazury_providers_list` enumerates this
-catalog, and `sources_search(local_only=true)` filters it without vendor requests
-or wallet work. Both return selectable `provider_id` values for `source_add`;
-`provider_details_remote` resolves exact declared API bases into the same candidates.
-Registering by ID uses the reviewed configuration and embedded or remote schema.
-A unique exact current remote specification URL also resolves that definition,
-while existing generic URL registrations retain their accepted behavior. Unknown
-or ambiguous selectors require correction rather than arbitrary selection.
+With `provider_management_local = true`, `x402_treazury_providers_list_local`
+enumerates or searches this catalog without vendor requests or payer selection.
+Its `provider_id` values select prepared definitions through `providers_add_local`.
+With remote management enabled, `provider_details_remote` resolves exact declared
+API bases into the same candidates; registration by ID still needs local permission.
+Registering a bundled definition preserves reviewed filters, repairs, configuration
+and its embedded or remote schema.
+
+`providers_add_remote` first reuses an accepted generic registration for the full
+canonical specification URL. Otherwise a unique exact current bundled remote
+specification URL selects that definition even when local management is disabled.
+Query components remain significant; API bases, hostnames and guessed resource
+paths never substitute for a specification URL. Ambiguous matches return available
+local choices only when local management permits them, otherwise operator-resolution
+guidance. Remote registration has no provider-ID override. Repeated ID registration
+reuses accepted state before current bundle lookup. Restoration retains accepted
+bytes/settings and does not re-resolve the current bundle.
 
 Every shipped definition has a concise root `description` of supported
 capabilities for offline search. This metadata is separate from operation

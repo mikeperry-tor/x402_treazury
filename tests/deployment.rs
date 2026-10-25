@@ -1002,7 +1002,7 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
         listed["result"]["tools"][0]["inputSchema"]["properties"]["query"]["description"]
             .as_str()
             .unwrap();
-    assert!(query_help.contains("BM25"));
+    assert!(query_help.contains("Capability keywords"));
     assert!(query_help.contains("enumerate"));
     let names: Vec<_> = listed["result"]["tools"]
         .as_array()
@@ -1045,7 +1045,7 @@ async fn on_demand_listing_preserves_filters_caps_wallets_and_reference_scope() 
     }
     assert_eq!(state.unsigned.load(Ordering::SeqCst), 0);
     let pay = items.iter().find(|t| t["tool_id"] == "alpha_pay").unwrap();
-    let bad = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_source_add","arguments":{"spec_url":"https://example.com/spec"}})).await;
+    let bad = rpc(&http,lazy,"research-secret","tools/call",json!({"name":"x402_treazury_providers_add_remote","arguments":{"spec_url":"https://example.com/spec"}})).await;
     assert_eq!(bad["result"]["isError"], true);
     let cross = rpc(&http,ordinary,"beta-secret","tools/call",json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":pay["tool_id"],"arguments":{}}})).await;
     assert_eq!(cross["result"]["isError"], true);
@@ -1296,8 +1296,8 @@ async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() 
                 .replace("[sources.alpha]", "[sources.alpha]\ninstructions_text='Alpha source guidance'")
                 .replace("[sources.beta]", "[sources.beta]\ninstructions_text='Beta source guidance'")
                 .replace("[servers.research]", &format!(
-                    "[servers.research]\ndiscover_on_demand={on_demand}\nsource_management={management}\ndiscovery_search_tool_instructions_text='Research tool guidance'\nsources_search_tool_instructions_text='Research directory guidance'"))
-                .replace("[servers.beta_only]", "[servers.beta_only]\ndiscovery_search_tool_instructions_text='Other tool guidance'\nsources_search_tool_instructions_text='Other directory guidance'");
+                    "[servers.research]\ndiscover_on_demand={on_demand}\nprovider_management_local={management}\nprovider_management_remote={management}\nremote_provider_directories=[\"coinbase\",\"x402-list\"]\nraw_url_calls={management}\ndiscovery_search_tool_instructions_text='Research tool guidance'\nproviders_search_remote_tool_instructions_text='Research directory guidance'"))
+                .replace("[servers.beta_only]", "[servers.beta_only]\ndiscovery_search_tool_instructions_text='Other tool guidance'\nproviders_search_remote_tool_instructions_text='Other directory guidance'");
             if let Some(authored) = authored {
                 text = text.replace(
                     "[servers.research]",
@@ -1315,7 +1315,7 @@ async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() 
             assert_eq!(
                 expected_tools.len(),
                 if management {
-                    7
+                    8
                 } else if on_demand {
                     2
                 } else {
@@ -1380,7 +1380,7 @@ async fn endpoint_instruction_placement_preserves_defaults_and_tool_authority() 
                 );
                 assert_eq!(
                     description.matches("Research directory guidance").count(),
-                    usize::from(expected.name == "x402_treazury_sources_search")
+                    usize::from(expected.name == "x402_treazury_providers_search_remote")
                 );
             }
             assert!(!listed.to_string().contains("Other tool guidance"));

@@ -365,10 +365,13 @@ async fn shutdown_while_waiting_releases_sockets_without_readiness_errors() {
 }
 
 #[tokio::test]
-async fn local_only_and_management_only_endpoints_start_without_pending_catalogs() {
+async fn independent_capability_endpoints_start_without_pending_catalogs() {
     let fixtures = Fixture::new(
         &(listener("local", "['local']", "")
-            + &listener("management", "[]", "source_management=true")),
+            + &listener("management", "[]", "provider_management_remote=true")
+            + &listener("bundled", "[]", "provider_management_local=true")
+            + &listener("raw", "[]", "raw_url_calls=true")
+            + &listener("discovery", "[]", "discover_on_demand=true")),
         false,
     )
     .await;
@@ -384,7 +387,13 @@ async fn local_only_and_management_only_endpoints_start_without_pending_catalogs
             assert_eq!(tools.len(), 1);
             assert_eq!(tools[0]["name"], "local_read");
         } else {
-            assert_eq!(tools.len(), 7);
+            let expected = match name.as_str() {
+                "management" | "bundled" => 4,
+                "raw" => 1,
+                "discovery" => 2,
+                _ => panic!("unexpected fixture listener"),
+            };
+            assert_eq!(tools.len(), expected);
             assert!(
                 tools
                     .iter()

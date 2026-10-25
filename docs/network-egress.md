@@ -145,6 +145,11 @@ relay-service unsigned requests, Base, and unsigned API GET/HEAD and x402 POST.
 Other API methods retain their existing TLS-only transport recovery. Startup's local SOCKS
 reachability prerequisite remains separate from per-operation attempts.
 
+Remote provider search uses `discovery/remote.rs` to retain one encompassing work
+owner while concurrently collecting each configured directory workflow. Child
+responses retain their own inactivity policy; sibling progress cannot renew it.
+A directory failure preserves sibling results, advisories and typed liabilities.
+
 ## Relay fallback
 
 Static catalog acquisition and Coinbase resource search share
@@ -627,8 +632,8 @@ purchase another read. Only consumer-validated complete content promotes an orig
 transport. Relay content cannot promote it.
 
 `provider_details_remote(documentation_url=...)` returns complete accepted usage text.
-Base/slug discovery validates one GET per fixed, deduplicated candidate, keeping
-four candidates in flight. It uses the available source-management documentation
+Base/x402-list-ID discovery validates one GET per fixed, deduplicated candidate, keeping
+four candidates in flight. It uses the available endpoint documentation
 identity, pinned for a batch; absent identity leaves origin retrieval available
 under the URL's discovery identity. Imports and help use the URL discovery identity.
 Public destinations, spec/help byte bounds and response-read
@@ -647,7 +652,7 @@ new cache/readiness queue. Operator refresh prepares a representable relay reque
 before opening only the saved owner's existing payer and closes that owner on all
 outcomes; it starts no SDK or funding scheduler.
 
-Dynamic imports, lazy help and paid API calls, including source-management
+Dynamic imports, lazy help and paid API calls, including independently authorized
 `raw_call`, use the same factory with a `public_only` pool key. Dynamic help uses
 the help URL's discovery-origin identity and validates public destinations at
 execution, as well as during catalog validation. Generic help origins must match
@@ -681,7 +686,7 @@ without weakening trust, redirect, retry or proxy policy. Catalog, help
 and paid requests carry the same source policy. Accepted curated dynamic sources
 preserve their reviewed compatibility permissions through remote schema
 acquisition, explicit refresh, bound API execution and lazy help. Their
-source-management public-destination policy still applies. Generic specification
+provider-management public-destination policy still applies. Generic specification
 imports, their dynamic bindings and raw calls use strict defaults. No vendor
 transport bypass is introduced. Infrastructure adapters retain their existing
 policy; explicit cleartext HTTP remains unchanged. See the
@@ -743,10 +748,10 @@ financial or qualification authority.
 
 | Timer or bound | Purpose and behavior |
 | --- | --- |
-| Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote directory browse retains upstream maximum 100. Follow continuations for complete inventories. |
+| Public inventory pagination: default 25 | Page selection only. All listeners paginate tool lists; search/local browse accept positive explicit sizes. Remote provider search requests 1–20 results per selected directory, default 5; the ordinary x402 List provider retains its native browse maximum 100. Follow continuations for complete inventories. |
 | Connection establishment: 15 seconds direct, 120 Tor by default | Bounds connection/TLS/SOCKS establishment, configurable 1..300 seconds. gRPC factory failure WARNs immediately; HTTP terminal timeout WARNs at the retained application workflow; exhausted Base endpoints and Coinbase origins remain DEBUG while fallback is possible. |
 | Participating Tor HTTP scope retries: `1 + network.tor_isolation_retries` attempts (default 3); `Retry-After` on `429`/`503` | Enrolled for static catalog discovery, runtime imports/help/documents/probes, unsigned Coinbase search and `PaidClient` unsigned API/directory/raw/runtime-search-relay stages (static/runtime relay-service unsigned stages and Base read-only RPC also participate). Honours valid `Retry-After` delays on HTTP `429` and `503` without a local cap; an unrepresentable deadline remains pending without early origin or relay dispatch. Conditionally promotes a winning candidate against the exact starting handle. Signed requests never retry on new scopes. |
-| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Curated dynamic HTTP preserves the accepted provider value, then inherits the network default; generic imports and raw calls use the network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. Guard expiry emits WARN with a fixed dispatch/header/body stage; owning HTTP workflows likewise WARN on terminal timeouts. |
+| HTTP/gRPC read inactivity: 60 seconds by default | Each response renews on its own data; no whole-download/RPC deadline. Concurrent remote-provider directory workflows retain separate timers; sibling traffic and keepalives cannot renew one another. No whole-search deadline or automatic federation replay is added. Curated dynamic HTTP preserves the accepted provider value, then inherits the network default; generic imports and raw calls use the network default. gRPC header inactivity starts at request-body dispatch and can abort a progressing upload (accepted limitation); initial connections and reconnects retain the connector's establishment limit. Guard expiry emits WARN with a fixed dispatch/header/body stage; owning HTTP workflows likewise WARN on terminal timeouts. |
 | gRPC dispatch readiness: read-inactivity setting | Bounds waiting for channel-buffer/HTTP/2 stream capacity before body dispatch (`grpc_dispatch_inactivity`). A connector attempt reserves its full connection allowance plus one readiness window until the first dispatch proves establishment. Sibling responses/keepalives do not renew readiness. This guard ends at dispatch and never caps a progressing response. Expiry emits WARN `grpc_dispatch_inactivity`. |
 | Legacy indexer duration arguments | Required by the public indexer API; injected transport strips total `grpc-timeout`. Unused vendor online/quick-send constructors retain upstream policy. |
 | Pepper drain ten-second messages, sync 30-second checkpoints | Observability/persistence cadence, never an abort deadline. One independently polled engine task preserves progress during checkpoint lock waits; runtime teardown owns cancellation and worker joins. Scan retirement drains without a cutoff. |

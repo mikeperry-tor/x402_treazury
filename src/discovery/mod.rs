@@ -8,6 +8,7 @@ pub mod policy;
 mod publication;
 pub(crate) mod raw;
 mod relevance;
+mod remote;
 pub(crate) mod source_details;
 mod store;
 pub mod tools;
@@ -134,13 +135,27 @@ pub struct Call {
     pub arguments: serde_json::Map<String, Value>,
 }
 impl Manager {
-    pub fn enabled(&self, owner: &str) -> bool {
+    pub fn policy(&self, owner: &str) -> policy::EndpointPolicy {
         self.listeners
             .get(owner)
-            .is_some_and(|l| l.source_management)
+            .map(policy::EndpointPolicy::from)
+            .unwrap_or_default()
+    }
+    pub fn enabled(&self, owner: &str) -> bool {
+        self.policy(owner).management()
+    }
+    pub fn capabilities_enabled(&self, owner: &str) -> bool {
+        self.policy(owner).any()
+    }
+    pub(crate) fn validate_client(&self, owner: &str) -> Result<()> {
+        ensure!(
+            self.capabilities_enabled(owner),
+            "provider_capabilities_disabled"
+        );
+        self.source_client(owner).map(drop)
     }
     fn targets(&self, owner: &str, c: &Candidate) -> Result<Vec<String>> {
-        ensure!(self.enabled(owner), "source_management_disabled");
+        ensure!(self.enabled(owner), "provider_management_disabled");
         import::validate_source_name(&c.name)?;
         ensure!(
             c.visibility == Visibility::Server && c.targets.is_empty(),
@@ -158,12 +173,15 @@ impl Manager {
         Ok(vec![owner.into()])
     }
     pub fn find_tool(&self, owner: &str, tool_id: &str) -> Result<BoundTool> {
-        ensure!(self.enabled(owner), "source_management_disabled");
+        ensure!(self.enabled(owner), "provider_management_disabled");
         find_catalog_tool(&self.catalog, owner, tool_id)
     }
 
     fn source_client(&self, owner: &str) -> Result<PaidClient> {
-        ensure!(self.enabled(owner), "source_management_disabled");
+        ensure!(
+            self.capabilities_enabled(owner),
+            "provider_management_disabled"
+        );
         let wallet = self.listeners[owner]
             .wallet
             .as_deref()
@@ -177,7 +195,10 @@ impl Manager {
     }
 
     fn document_client(&self, owner: &str) -> Result<PaidClient> {
-        ensure!(self.enabled(owner), "source_management_disabled");
+        ensure!(
+            self.capabilities_enabled(owner),
+            "provider_management_disabled"
+        );
         let wallet = self.listeners[owner]
             .wallet
             .as_deref()
@@ -190,6 +211,10 @@ impl Manager {
     }
 
     pub fn directory(&self, owner: &str) -> Result<BoundTool> {
+        ensure!(
+            self.policy(owner).remote && self.policy(owner).has_x402_list(),
+            "remote_directory_disabled"
+        );
         let client = self
             .source_client(owner)?
             .with_relay_purpose(crate::discovery_relay::Purpose::SourceDiscovery)
@@ -224,6 +249,10 @@ impl Manager {
         name: &str,
         args: &serde_json::Map<String, Value>,
     ) -> Result<crate::output::ToolOutput> {
+        ensure!(
+            self.policy(owner).remote && self.policy(owner).has_x402_list(),
+            "remote_directory_disabled"
+        );
         let (tool, args) = directory::request(name, args)?;
         let mut bound = self.directory(owner)?;
         bound.tool = tool.clone();
@@ -454,7 +483,7 @@ impl Manager {
             .filter(|t| t.source.as_ref().is_some_and(|s| s.0 == r.id))
             .count();
         let next = if r.disabled.is_some() {
-            "This registration is disabled. Ask the operator to inspect its reason, repair its configuration and refresh the source where applicable. Repeating source_add returns the same disabled registration. Use tools_search without source_name to look for other available tools on this MCP endpoint."
+            "This registration is disabled. Ask the operator to inspect its reason, repair its configuration and refresh the source where applicable. Repeating registration returns the same disabled registration. Use tools_search without source_name to look for other available tools on this MCP endpoint."
         } else if tool_count == 0 {
             "This registration has no visible tools on this MCP endpoint. Ask the operator to inspect source selections and listener tool filters. Use tools_search without source_name to look for other available endpoint tools; removing that search filter does not change operator filters."
         } else {
@@ -595,14 +624,43 @@ impl Manager {
             "management_request_too_large",
             "hardcoded_management_request_bytes",
         )?;
-        ensure!(self.enabled(owner), "source_management_disabled");
+        let policy = self.policy(owner);
         match name {
-            "x402_treazury_source_add" => self.add_source(owner, args).await,
-            local::NAME => local::list(args.as_object().context("arguments must be an object")?),
-            "x402_treazury_tools_search" => self.search_tools(owner, name, args),
+            "x402_treazury_providers_add_local" => {
+                ensure!(policy.local, "local_provider_management_disabled");
+                ensure!(
+                    args.get("provider_id").is_some() && args.get("spec_url").is_none(),
+                    "provide provider_id for local registration"
+                );
+                self.add_source(owner, args).await
+            }
+            "x402_treazury_providers_add_remote" => {
+                ensure!(policy.remote, "remote_provider_management_disabled");
+                ensure!(
+                    args.get("spec_url").is_some() && args.get("provider_id").is_none(),
+                    "provide spec_url for remote registration"
+                );
+                self.add_source(owner, args).await
+            }
+            local::NAME => {
+                ensure!(policy.local, "local_provider_management_disabled");
+                local::list(args.as_object().context("arguments must be an object")?)
+            }
+            "x402_treazury_tools_search" => {
+                ensure!(
+                    policy.management()
+                        || self
+                            .listeners
+                            .get(owner)
+                            .is_some_and(|l| l.discover_on_demand),
+                    "tool_search_disabled"
+                );
+                self.search_tools(owner, name, args)
+            }
             _ => anyhow::bail!("unknown management tool"),
         }
     }
+
     fn existing_registration(
         &self,
         owner: &str,
@@ -630,7 +688,7 @@ impl Manager {
             .await?
     }
     async fn add_source_owned(self: &Arc<Self>, owner: &str, args: Value) -> Result<Value> {
-        ensure!(self.enabled(owner), "source_management_disabled");
+        ensure!(self.enabled(owner), "provider_management_disabled");
         match (args.get("provider_id"), args.get("spec_url")) {
             (Some(Value::String(_)), None) | (None, Some(Value::String(_))) => {}
             _ => anyhow::bail!("provide exactly one string provider_id or spec_url"),
@@ -654,14 +712,7 @@ impl Manager {
             Some(id) => Some(curated::AcceptedProvider::current(id)?),
             None => {
                 let matches = crate::providers::matching_spec(spec_url.as_deref().unwrap())?;
-                match matches.as_slice() {
-                    [] => None,
-                    [provider] => Some(curated::AcceptedProvider::current(provider.id)?),
-                    _ => anyhow::bail!(
-                        "ambiguous specification; select provider_id from: {}",
-                        matches.iter().map(|p| p.id).collect::<Vec<_>>().join(", ")
-                    ),
-                }
+                curated::select_spec_match(&matches, self.policy(owner).local)?
             }
         };
         let generated_name = a.name.is_none();
@@ -1079,7 +1130,9 @@ async fn maintain_cli_owned(
     operation: Maintenance,
     network_override: Option<&crate::network::NetworkConfig>,
 ) -> Result<()> {
-    crate::deployment::Deployment::show_config_with_network(path, network_override).await?;
+    if matches!(operation, Maintenance::Refresh(_)) {
+        crate::deployment::Deployment::show_config_with_network(path, network_override).await?;
+    }
     let mut cfg = crate::deployment::MetaConfig::parse_with_network(
         &std::fs::read_to_string(path).with_context(|| {
             format!("failed to read deployment config file '{}'", path.display())
@@ -1115,8 +1168,10 @@ async fn maintain_cli_owned(
                 let source_id = resolve_source(&state, &source)?;
                 let record = state.records.get_mut(&source_id).unwrap();
                 ensure!(
-                    cfg.servers.get(owner).is_some_and(|s| s.source_management),
-                    "source_management_disabled"
+                    cfg.servers
+                        .get(owner)
+                        .is_some_and(|s| policy::EndpointPolicy::from(s).management()),
+                    "provider_management_disabled"
                 );
                 ensure!(
                     record.targets == [owner] && record.candidate.visibility == Visibility::Server,

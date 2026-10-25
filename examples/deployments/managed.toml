@@ -28,6 +28,10 @@ listen = "127.0.0.1:8000"
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "research"
 sources = ["exa"]
-source_management = true
+provider_management_local = true
+provider_management_remote = true
+# coinbase_curated is the curated-only alternative; coinbase includes both scopes.
+remote_provider_directories = ["coinbase", "x402-list"]
+raw_url_calls = true
 # Registrations last until exit; optionally persist them:
 # source_registry_file = "../../state/managed-sources.sqlite"

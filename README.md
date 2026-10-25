@@ -56,7 +56,7 @@ shows help. See the [command reference](docs/configuration.md).
 ## Quickstart: Z-Cash Wallet with Dynamically Managed Tools
 
 The [managed starter](examples/deployments/managed.toml) exposes Exa web search,
-page contents and source-management tools on `http://127.0.0.1:8000/mcp`, backed
+page contents and provider-management tools on `http://127.0.0.1:8000/mcp`, backed
 by one rotating wallet pool. Agents can [add public APIs](#agent-api-auto-discovery-and-tool-addition) that use that same pool;
 API registrations last until the process exits. Exa's catalog loads from its public
 OpenAPI specification; no Exa API key is required.
@@ -417,14 +417,15 @@ See [on-demand discovery](docs/agent-sources.md) for more details.
 
 ### Agent API Auto-Discovery and Tool Addition
 
-Source management lets agents find bundled providers or APIs through
-[x402 List](https://x402-list.com) and Coinbase curated search, then add tools to an
+Provider management lets agents find bundled providers or APIs through
+[x402 List](https://x402-list.com) and Coinbase resource search, then add tools to an
 MCP endpoint themselves. Known provider IDs and specification URLs can be registered
 directly; discovery and usage-help inspection are optional.
 
 The feature is disabled by default.
 
-Set `source_management = true` inside a `[servers.NAME]` section and name its
+Enable local management, remote management and raw URL calls independently inside
+a `[servers.NAME]` section, and name its
 existing `[wallets.NAME]` profile with `wallet`. Optional `source_registry_file`
 on that endpoint enables persistence.
 
@@ -442,7 +443,11 @@ Here is an example excerpt:
 listen = "127.0.0.1:8000"
 bearer_token_env = "RESEARCH_MCP_TOKEN"
 wallet = "agent_shared" # defined elsewhere as [wallets.agent_shared]
-source_management = true
+provider_management_local = true
+provider_management_remote = true
+remote_provider_directories = ["coinbase", "x402-list"]
+# coinbase_curated is the curated-only alternative; coinbase includes both scopes.
+raw_url_calls = true
 source_registry_file = "../../state/agent-sources.sqlite" # optional; relative to this file
 # discover_on_demand = true # keep API definitions out of the advertised tool list
 ```
@@ -454,36 +459,47 @@ Registrations are
 shared by agents using the same MCP server endpoint, but are not visible on other MCP server endpoints.
 Agent tools cannot change your configured API sources, wallet settings, or spending limits.
 
-An enabled endpoint advertises these seven tools to the agent:
+The endpoint advertises tools according to its enabled capabilities:
 
-| Tool | How the agent uses it | Main inputs |
+| Tool | How the agent uses it | Permission and main inputs |
 | --- | --- | --- |
-| `x402_treazury_sources_search` | Searches bundled providers offline, x402 List, or Coinbase resources. | `local_only=true` with query/pagination; otherwise `directory` defaults to `x402_list`, or select `coinbase` for ranked curated search. |
-| `x402_treazury_provider_details_remote` | Resolves bundled matches, locates specifications/help, or reads exact usage text. | Exactly one x402 List `x402_list_id`, public HTTPS API `base_url`, or `documentation_url`. |
-| `x402_treazury_source_add` | Registers an API on this endpoint so its tools become available. | Exactly one bundled `provider_id` or public OpenAPI `spec_url`, plus optional `name`. |
-| `x402_treazury_providers_list` | Enumerates bundled provider metadata offline. | Optional `page` and `per_page`. |
-| `x402_treazury_tools_search` | Retrieves relevant tool descriptions, argument schemas and readable IDs. | Optional query, registered `source_name` and pagination. |
-| `x402_treazury_tool_call` | Invokes a currently available tool with normal wallet payment checks. | Readable `tool_id` and arguments matching its schema. |
-| `x402_treazury_raw_call` | Calls any documented public HTTPS x402 API URL with automatic payment handling. | HTTP `method`, `url`, optional query parameters and JSON body. |
+| `x402_treazury_providers_list_local` | Finds reviewed bundled definitions with compatibility filters and repairs, offline. | Local management; optional `q`, `page`, `per_page`. |
+| `x402_treazury_providers_add_local` | Registers a prepared bundled definition. | Local management; exact `provider_id`, optional `name`. |
+| `x402_treazury_providers_search_remote` | Queries every configured directory concurrently. | Remote management and nonempty directory list; optional `q`, `limit`, `max_price_usd`. |
+| `x402_treazury_providers_add_remote` | Registers a public OpenAPI 3 JSON specification. | Remote management; `spec_url`, optional `name`. |
+| `x402_treazury_provider_details_remote` | Locates specifications/help or reads exact usage text. | Remote management; exactly one `base_url`, `documentation_url`, or `x402_list_id` (only with `x402-list` selected). |
+| `x402_treazury_tools_search` | Retrieves tool descriptions, schemas and readable IDs. | Either management capability or on-demand discovery; optional query, `source_name`, pagination. |
+| `x402_treazury_tool_call` | Invokes a current tool with normal payment checks. | Same as tool search; readable `tool_id` and matching `arguments`. |
+| `x402_treazury_raw_call` | Calls a documented public HTTPS API URL. | Raw URL permission; `method`, `url`, optional query parameters and JSON body. |
 
-For offline discovery, call `x402_treazury_sources_search` with
-`{"local_only":true,"q":"web search"}`, or use `x402_treazury_providers_list`.
-Pass a selected ID directly to `source_add`, for example `{"provider_id":"exa"}`.
-Bundled sources preserve reviewed compatibility settings and default to short names
-such as `dyn_exa__search`. Bundled metadata does not establish current reachability
-or live qualification. Remote directory search remains the default.
+For offline discovery, call `providers_list_local` with `{"q":"web search"}`,
+then `providers_add_local` with `{"provider_id":"exa"}`. Bundled sources preserve
+reviewed compatibility settings and default to short names such as `dyn_exa__search`.
+Bundled metadata does not establish current reachability or live qualification.
 
-For Coinbase resources, use `{"directory":"coinbase","q":"weather","limit":3}`.
-Results preserve complete upstream metadata and partial-result indicators, with no
-pagination. Sufficient documented HTTP metadata can go directly to `raw_call`;
-an OpenAPI URL can go directly to `source_add`. A published usage link can optionally
-be read with `provider_details_remote(documentation_url=...)`. Configured relay fallback
-can charge for that read. Missing contracts remain missing: do not guess paid arguments.
+For remote search, use `providers_search_remote` with `{"q":"weather","limit":3}`.
+The operator selects directories: `coinbase` includes curated and non-curated
+resources, `coinbase_curated` searches only the curated subset, and `x402-list`
+uses balanced ranked search. Each configured directory receives the requested
+limit (default 5, range 1–20). Results are grouped by those identifiers, preserving
+complete native JSON, unknown fields and partial-result indicators. A directory
+failure appears as an explicit `local_error` value while successful siblings remain
+intact. One search can authorize multiple directory or relay charges; failed,
+empty or partial results do not trigger automatic federation replay.
+
+A documented HTTP request can use `raw_call` when enabled; a published OpenAPI URL
+can use `providers_add_remote`. Optional
+`provider_details_remote(documentation_url=...)` reads a published usage link.
+Configured relay fallback can charge for that read. If only a resource URL is
+known, try its origin root as `base_url`; this probes documentation locations,
+not the business operation, and can miss docs under another path or host.
+Prefer an explicitly documented API base. Missing contracts remain missing:
+do not guess paid arguments.
 
 Coinbase origin search needs no API key. Tor uses one origin attempt plus
 `network.tor_isolation_retries` fresh attempts (default two). Configured
-`[relay_fallback.relays]` method lists enable runtime fallback using the endpoint’s
-source-management payer. `source_discovery` defaults true for built-in directories,
+`[relay_fallback.relays]` method lists enable runtime fallback using the
+endpoint’s payer. `source_discovery` defaults true for built-in directories,
 `provider_metadata` defaults true for schemas/help, and `api_requests` defaults false
 for actual API data. Set the applicable preference false to disable its fallback.
 With no relay section, requests use only the origin.
@@ -504,9 +520,9 @@ must be updated explicitly; they are not rewritten.
 
 By default, registered API tools also appear in the endpoint's tool list; clients may cache that list. Tool IDs remain usable across turns and restarts while available.
 
-Set `discover_on_demand = true` to advertise only the seven management tools and
-let clients retrieve API schemas as needed, rather than fill the tool list
-with all added APIs. Tool arguments and the API discovery
+Set `discover_on_demand = true` to keep API definitions out of the advertised
+tool list and let clients retrieve schemas as needed. Search/call wrappers and
+independently enabled management/raw tools remain advertised. Tool arguments and the API discovery
 workflow are documented in [agent source management](docs/agent-sources.md#agent-tools).
 
 With `source_registry_file` set, accepted specifications are saved and restored on restart;

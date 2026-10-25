@@ -22,7 +22,7 @@ async fn register(manager: &Arc<Manager>, owner: &str) {
     manager
         .invoke(
             owner,
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({
                 "spec_url":"https://api.example.com/openapi.json", "name":"saved"
             }),
@@ -37,7 +37,15 @@ async fn endpoint_files_restore_independently_and_ephemeral_sibling_disappears()
     let writer = dir.path().join("writer.sqlite");
     let reader = dir.path().join("reader-registry.sqlite");
     let mut configured = with_registry(listeners(true), Some(writer.clone()));
-    configured.get_mut("hidden").unwrap().source_management = true;
+    configured
+        .get_mut("hidden")
+        .unwrap()
+        .provider_management_local = true;
+    configured
+        .get_mut("hidden")
+        .unwrap()
+        .provider_management_remote = true;
+    configured.get_mut("hidden").unwrap().raw_url_calls = true;
     let manager = open(configured.clone()).await.unwrap();
     for owner in ["writer", "reader", "hidden"] {
         register(&manager, owner).await;
@@ -137,6 +145,13 @@ async fn operator_removal_updates_only_the_selected_endpoints_file() {
         "reader".into(),
         toml::Value::try_from(&configured["reader"]).unwrap(),
     );
+    for capability in [
+        "provider_management_local",
+        "provider_management_remote",
+        "raw_url_calls",
+    ] {
+        config["servers"]["writer"][capability] = toml::Value::Boolean(false);
+    }
     std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
     maintain_cli(&path, "writer", &id, false).await.unwrap();
     assert_eq!(std::fs::read(&reader).unwrap(), before);
@@ -219,46 +234,70 @@ async fn removal_by_saved_name_handles_disabled_registration_and_preserves_ident
 
 #[tokio::test]
 async fn refresh_by_saved_name_keeps_id_and_replaces_accepted_bundled_contract() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("writer.sqlite");
-    let config = operator_config(dir.path(), &file);
-    let provider = crate::providers::all()
-        .iter()
-        .find(|provider| provider.local_schema.is_some())
-        .unwrap();
-    let mut record = saved_record(1, "saved_local");
-    let mut accepted = AcceptedProvider::current(provider.id).unwrap();
-    accepted.settings.instructions_text = Some("Previously accepted instructions".into());
-    record.candidate.provider = Some(accepted);
-    record.candidate.spec_url.clear();
-    record.disabled = Some("explicit_refresh_required".into());
-    let id = record.id.clone();
-    write_records(&file, vec![record]);
-    maintain_cli(&config, "writer", "saved_local", true)
-        .await
-        .unwrap();
-    let state = read_records(&file);
-    assert_eq!(state.records.len(), 1);
-    let refreshed = &state.records[&id];
-    assert_eq!(refreshed.candidate.name, "saved_local");
-    assert_eq!(refreshed.revision, 2);
-    assert!(refreshed.disabled.is_none());
-    assert!(!refreshed.removed);
-    assert_eq!(refreshed.document, provider.local_schema.unwrap());
-    assert_eq!(refreshed.hash, hash(refreshed.document.as_bytes()));
-    assert_eq!(
-        refreshed
-            .candidate
-            .provider
-            .as_ref()
-            .unwrap()
-            .settings
-            .instructions_text,
-        AcceptedProvider::current(provider.id)
-            .unwrap()
-            .settings
-            .instructions_text
-    );
+    for (local, remote, raw) in [
+        (true, false, false),
+        (false, true, false),
+        (false, false, true),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("writer.sqlite");
+        let config = operator_config(dir.path(), &file);
+        let mut preferences: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        preferences["servers"]["writer"]["provider_management_local"] = toml::Value::Boolean(local);
+        preferences["servers"]["writer"]["provider_management_remote"] =
+            toml::Value::Boolean(remote);
+        preferences["servers"]["writer"]["raw_url_calls"] = toml::Value::Boolean(raw);
+        std::fs::write(&config, toml::to_string(&preferences).unwrap()).unwrap();
+        let provider = crate::providers::all()
+            .iter()
+            .find(|provider| provider.local_schema.is_some())
+            .unwrap();
+        let mut record = saved_record(1, "saved_local");
+        let mut accepted = AcceptedProvider::current(provider.id).unwrap();
+        accepted.settings.instructions_text = Some("Previously accepted instructions".into());
+        record.candidate.provider = Some(accepted);
+        record.candidate.spec_url.clear();
+        record.disabled = Some("explicit_refresh_required".into());
+        let id = record.id.clone();
+        write_records(&file, vec![record]);
+        if !local && !remote {
+            let before = serde_json::to_value(read_records(&file)).unwrap();
+            let before_file = std::fs::read(&file).unwrap();
+            let error = maintain_cli(&config, "writer", "saved_local", true)
+                .await
+                .unwrap_err();
+            assert!(format!("{error:#}").contains("provider_management_disabled"));
+            assert_eq!(serde_json::to_value(read_records(&file)).unwrap(), before);
+            assert_eq!(std::fs::read(&file).unwrap(), before_file);
+            continue;
+        }
+        maintain_cli(&config, "writer", "saved_local", true)
+            .await
+            .unwrap();
+        let state = read_records(&file);
+        assert_eq!(state.records.len(), 1);
+        let refreshed = &state.records[&id];
+        assert_eq!(refreshed.candidate.name, "saved_local");
+        assert_eq!(refreshed.revision, 2);
+        assert!(refreshed.disabled.is_none());
+        assert!(!refreshed.removed);
+        assert_eq!(refreshed.document, provider.local_schema.unwrap());
+        assert_eq!(refreshed.hash, hash(refreshed.document.as_bytes()));
+        assert_eq!(
+            refreshed
+                .candidate
+                .provider
+                .as_ref()
+                .unwrap()
+                .settings
+                .instructions_text,
+            AcceptedProvider::current(provider.id)
+                .unwrap()
+                .settings
+                .instructions_text
+        );
+    }
 }
 
 #[tokio::test]

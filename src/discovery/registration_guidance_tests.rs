@@ -25,7 +25,7 @@ async fn registration_guidance_tracks_visible_tools_without_changing_registratio
     let repeated = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":"https://api.example.com/hidden.json"}),
         )
         .await
@@ -79,7 +79,7 @@ async fn disabled_registration_guidance_requires_operator_repair() {
     let m = manager(Some(registry)).await;
     let args = json!({"spec_url":"https://api.example.com/openapi.json"});
     let disabled = m
-        .invoke("writer", "x402_treazury_source_add", args.clone())
+        .invoke("writer", "x402_treazury_providers_add_remote", args.clone())
         .await
         .unwrap();
     assert_eq!(disabled["name"], original["name"]);
@@ -93,7 +93,7 @@ async fn disabled_registration_guidance_requires_operator_repair() {
     assert!(next.contains("same disabled registration"));
     assert!(!next.contains("then invoke"));
     assert_eq!(
-        m.invoke("writer", "x402_treazury_source_add", args)
+        m.invoke("writer", "x402_treazury_providers_add_remote", args)
             .await
             .unwrap(),
         disabled

@@ -30,7 +30,7 @@ async fn concurrent_imports_outlive_waiters_and_completed_cache_churn() {
         adds.push(tokio::spawn(async move {
             m.invoke(
                 "writer",
-                "x402_treazury_source_add",
+                "x402_treazury_providers_add_remote",
                 json!({"spec_url":format!("https://api.example.com/import{n}"),"name":format!("import{n}")}),
             )
             .await
@@ -57,7 +57,7 @@ async fn concurrent_imports_outlive_waiters_and_completed_cache_churn() {
     for n in 0..12 {
         m.invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":format!("https://api.example.com/churn{n}"),"name":format!("churn{n}")}),
         )
         .await
@@ -75,7 +75,7 @@ async fn concurrent_imports_outlive_waiters_and_completed_cache_churn() {
         async move {
             m.invoke(
                 "writer",
-                "x402_treazury_source_add",
+                "x402_treazury_providers_add_remote",
                 json!({"spec_url":"https://api.example.com/import0","name":"import0"}),
             )
             .await
@@ -135,7 +135,7 @@ async fn accepted_import_retains_fetch_validation_and_publication_after_disconne
             manager
                 .invoke(
                     "writer",
-                    "x402_treazury_source_add",
+                    "x402_treazury_providers_add_remote",
                     json!({"spec_url":"https://api.example.com/retained.json"}),
                 )
                 .await
@@ -159,7 +159,7 @@ async fn accepted_import_retains_fetch_validation_and_publication_after_disconne
     manager
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":"https://api.example.com/retained.json"}),
         )
         .await
@@ -234,7 +234,7 @@ async fn imports_reject_partial_documents_and_complete_invalid_json_without_publ
         let error = m
             .invoke(
                 "writer",
-                "x402_treazury_source_add",
+                "x402_treazury_providers_add_remote",
                 json!({"spec_url":"https://api.example.com/partial.json"}),
             )
             .await
@@ -262,7 +262,7 @@ async fn imports_reject_partial_documents_and_complete_invalid_json_without_publ
         assert!(
             m.invoke(
                 owner,
-                "x402_treazury_source_add",
+                "x402_treazury_providers_add_remote",
                 json!({"spec_url":"https://api.example.com/invalid.json"})
             )
             .await
@@ -446,7 +446,7 @@ async fn paid_import_fixture() {
         async move {
             m.invoke(
                 "writer",
-                "x402_treazury_source_add",
+                "x402_treazury_providers_add_remote",
                 json!({"spec_url":"https://api.example.com/imports/held","name":"retained"}),
             )
             .await
@@ -460,7 +460,7 @@ async fn paid_import_fixture() {
     // The held paid response cannot block an independent complete origin import.
     m.invoke(
         "reader",
-        "x402_treazury_source_add",
+        "x402_treazury_providers_add_remote",
         json!({"spec_url":"https://api.example.com/imports/healthy","name":"healthy"}),
     )
     .await
@@ -486,12 +486,12 @@ async fn paid_import_fixture() {
         let (writer, reader) = tokio::join!(
             m.invoke(
                 "writer",
-                "x402_treazury_source_add",
+                "x402_treazury_providers_add_remote",
                 json!({"spec_url":url,"name":kind})
             ),
             m.invoke(
                 "reader",
-                "x402_treazury_source_add",
+                "x402_treazury_providers_add_remote",
                 json!({"spec_url":url,"name":kind})
             )
         );
@@ -510,7 +510,7 @@ async fn paid_import_fixture() {
     let error = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":"https://api.example.com/imports/publication","name":"publication"}),
         )
         .await
@@ -583,7 +583,7 @@ async fn all_unsupported_refresh_avoids_authority() {
     let added = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":url,"name":"unsupported"}),
         )
         .await
@@ -598,7 +598,7 @@ async fn all_unsupported_refresh_avoids_authority() {
         "wallets":{"shared":{"mode":"static","private_key_env":"IMPORT_UNSUPPORTED_MISSING_KEY"}},
         "relay_fallback":{"relays":{"GET":[provider]},"provider_metadata":true},
         "treasury":{"state_dir":dir.path().join("untouched-state"),"key_file":dir.path().join("untouched-key")},
-        "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true,"wallet":"shared","source_registry_file":registry}}
+        "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"provider_management_local":true,"provider_management_remote":true,"raw_url_calls":true,"remote_provider_directories":["x402-list"],"wallet":"shared","source_registry_file":registry}}
     });
     std::fs::write(&config, toml::to_string(&value).unwrap()).unwrap();
     let (result, logs) = refresh_with_logs(&config, &id).await;
@@ -676,7 +676,7 @@ async fn supported_paid_cli_refresh(state: &PaidImport) {
     let added = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":url,"name":"cli-paid"}),
         )
         .await
@@ -691,9 +691,26 @@ async fn supported_paid_cli_refresh(state: &PaidImport) {
             "unrelated":{"mode":"static","private_key_env":"TREAZURY_IMPORT_CLI_UNUSED_KEY"}},
         "relay_fallback":{"relays":{"GET":[provider]},"provider_metadata":true},
         "treasury":{"state_dir":dir.path().join("untouched-state"),"key_file":dir.path().join("untouched-key")},
-        "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"source_management":true,"wallet":"selected","source_registry_file":registry}}
+        "servers":{"writer":{"listen":"127.0.0.1:0","auth":false,"provider_management_local":true,"provider_management_remote":false,"raw_url_calls":false,"remote_provider_directories":["x402-list"],"wallet":"selected","source_registry_file":registry}}
     });
     std::fs::write(&config, toml::to_string(&value).unwrap()).unwrap();
+    // Raw-call permission cannot refresh accepted registrations or read a signing key.
+    let mut raw_only = value.clone();
+    raw_only["servers"]["writer"]["provider_management_local"] = json!(false);
+    raw_only["servers"]["writer"]["raw_url_calls"] = json!(true);
+    raw_only["wallets"]["selected"]["private_key_env"] = json!("TREAZURY_IMPORT_CLI_UNUSED_KEY");
+    std::fs::write(&config, toml::to_string(&raw_only).unwrap()).unwrap();
+    let before_file = std::fs::read(&registry).unwrap();
+    let before_signers = state.signers.lock().unwrap().len();
+    let (result, _) = refresh_with_logs(&config, &id).await;
+    let error = format!("{:#}", result.unwrap_err());
+    assert!(error.contains("provider_management_disabled"), "{error}");
+    assert!(!error.contains("selected signing key unavailable"));
+    assert!(!state.calls.lock().unwrap().contains_key("cli-paid"));
+    assert_eq!(state.signers.lock().unwrap().len(), before_signers);
+    assert_eq!(std::fs::read(&registry).unwrap(), before_file);
+    assert!(!dir.path().join("untouched-state").exists());
+    assert!(!dir.path().join("untouched-key").exists());
     // An unavailable selected key is terminal before any relay HTTP or mutation.
     let mut missing_key = value.clone();
     missing_key["wallets"]["selected"]["private_key_env"] = json!("TREAZURY_IMPORT_CLI_UNUSED_KEY");

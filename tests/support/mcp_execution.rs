@@ -70,7 +70,7 @@ async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
     assert!(server(&m, "hidden").get_tool(&name).is_none());
     assert!(
         server(&m, "hidden")
-            .get_tool("x402_treazury_source_add")
+            .get_tool("x402_treazury_providers_add_remote")
             .is_none()
     );
     let reference = m.catalog.read().views["writer"][0].tool.name.clone();
@@ -142,7 +142,7 @@ async fn direct_and_fallback_wire_routing_errors_and_complete_output() {
         (name.as_str(), json!({})),
         ("missing", json!({})),
         ("x402_treazury_tool_call", json!({})),
-        ("x402_treazury_source_add", json!({})),
+        ("x402_treazury_providers_add_remote", json!({})),
     ] {
         assert_eq!(call(&base, tool, args).await["isError"], true);
     }

@@ -20,16 +20,16 @@ impl ExistingRead {
         let listener = config
             .servers
             .get(listener)
-            .filter(|server| server.source_management)
-            .context("source_management_disabled")?;
+            .filter(|server| crate::discovery::policy::EndpointPolicy::from(*server).management())
+            .context("provider_management_disabled")?;
         let name = listener
             .wallet
             .as_deref()
-            .context("source management wallet unavailable")?;
+            .context("provider management wallet unavailable")?;
         let wallet = config
             .wallets
             .get(name)
-            .context("source management wallet unavailable")?;
+            .context("provider management wallet unavailable")?;
         match wallet {
             WalletConfig::Static {
                 private_key_env,
@@ -123,8 +123,8 @@ mod tests {
                 "shared":{"mode":"static","private_key_env":"MISSING_SHARED"},
                 "selected":{"mode":"static","private_key_env":"SELECTED_KEY"},
                 "unused":{"mode":"static","private_key_env":"MISSING_UNUSED"}},
-            "servers":{"owner":{"listen":"127.0.0.1:0","source_management":true,"wallet":"selected"},
-                "disabled":{"listen":"127.0.0.1:0","source_management":false,"wallet":"unused"}}
+            "servers":{"owner":{"listen":"127.0.0.1:0","provider_management_remote":true,"wallet":"selected"},
+                "disabled":{"listen":"127.0.0.1:0","provider_management_remote":false,"wallet":"unused"}}
         })).unwrap()
     }
     #[tokio::test]
@@ -148,6 +148,34 @@ mod tests {
             .await
             .is_err()
         );
+    }
+    #[tokio::test]
+    async fn either_management_capability_can_refresh_but_raw_alone_cannot() {
+        for (local, remote, raw, allowed) in [
+            (true, false, false, true),
+            (false, true, false, true),
+            (true, true, true, true),
+            (false, false, true, false),
+            (false, false, false, false),
+        ] {
+            let mut cfg = config();
+            let endpoint = cfg.servers.get_mut("owner").unwrap();
+            endpoint.provider_management_local = local;
+            endpoint.provider_management_remote = remote;
+            endpoint.raw_url_calls = raw;
+            let calls = Mutex::new(Vec::new());
+            let result = ExistingRead::load_from(&cfg, "owner", |name| {
+                calls.lock().unwrap().push(name.to_owned());
+                assert!(allowed, "unauthorized refresh read a signing key");
+                (name == "SELECTED_KEY").then(|| format!("{:064x}", 1))
+            })
+            .await;
+            assert_eq!(result.is_ok(), allowed);
+            if let Ok(owner) = result {
+                owner.close().await.unwrap();
+            }
+            assert_eq!(calls.lock().unwrap().len(), usize::from(allowed));
+        }
     }
     #[tokio::test]
     async fn existing_managed_pool_needs_no_sdk_funding_credentials_or_allocation() {

@@ -5,6 +5,65 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Operator-selected directory workflows; the two Coinbase scopes are independent.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub enum RemoteDirectory {
+    #[serde(rename = "coinbase")]
+    Coinbase,
+    #[serde(rename = "coinbase_curated")]
+    CoinbaseCurated,
+    #[serde(rename = "x402-list")]
+    X402List,
+}
+impl RemoteDirectory {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Coinbase => "coinbase",
+            Self::CoinbaseCurated => "coinbase_curated",
+            Self::X402List => "x402-list",
+        }
+    }
+}
+#[derive(Clone, Debug, Default)]
+pub struct EndpointPolicy {
+    pub local: bool,
+    pub remote: bool,
+    pub raw: bool,
+    pub directories: Vec<RemoteDirectory>,
+}
+impl From<&crate::deployment::ListenerConfig> for EndpointPolicy {
+    fn from(listener: &crate::deployment::ListenerConfig) -> Self {
+        let mut directories = Vec::new();
+        for directory in &listener.remote_provider_directories {
+            if !directories.contains(directory) {
+                directories.push(*directory);
+            }
+        }
+        Self {
+            local: listener.provider_management_local,
+            remote: listener.provider_management_remote,
+            raw: listener.raw_url_calls,
+            directories,
+        }
+    }
+}
+impl EndpointPolicy {
+    pub fn any(&self) -> bool {
+        self.management() || self.raw
+    }
+    pub fn management(&self) -> bool {
+        self.local || self.remote
+    }
+    pub fn remote_search(&self) -> bool {
+        self.remote && !self.directories.is_empty()
+    }
+    pub fn has_x402_list(&self) -> bool {
+        self.directories.contains(&RemoteDirectory::X402List)
+    }
+}
+
 pub fn resolve(config: &mut MetaConfig, path: &Path) {
     for listener in config.servers.values_mut() {
         if let Some(file) = &mut listener.source_registry_file
@@ -18,15 +77,14 @@ pub fn enabled(config: &MetaConfig) -> bool {
     config
         .servers
         .values()
-        .any(|listener| listener.source_management)
+        .any(|listener| EndpointPolicy::from(listener).any())
 }
 pub fn validate(config: &MetaConfig) -> Result<()> {
     for (id, listener) in &config.servers {
-        if listener.source_management {
-            let wallet = listener
-                .wallet
-                .as_ref()
-                .with_context(|| format!("server {id}: source_management requires wallet"))?;
+        if EndpointPolicy::from(listener).any() {
+            let wallet = listener.wallet.as_ref().with_context(|| {
+                format!("server {id}: provider management or raw URL calls require wallet")
+            })?;
             ensure!(
                 config.wallets.contains_key(wallet),
                 "server {id}: unknown dynamic wallet"
@@ -39,7 +97,7 @@ pub fn wallets(config: &MetaConfig) -> BTreeSet<String> {
     config
         .servers
         .values()
-        .filter(|listener| listener.source_management)
+        .filter(|listener| EndpointPolicy::from(*listener).any())
         .filter_map(|listener| listener.wallet.clone())
         .collect()
 }

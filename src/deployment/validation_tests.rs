@@ -196,12 +196,15 @@ fn auth_whitespace_and_host_settings_remain_independent() {
 fn dynamic_only_listener_is_valid_but_does_not_bypass_policy() {
     let mut v = fixture();
     v["servers"]["one"]["sources"] = json!([]);
-    v["servers"]["one"]["source_management"] = json!(true);
+    v["servers"]["one"]["provider_management_remote"] = json!(true);
     v["servers"]["one"]
         .as_object_mut()
         .unwrap()
         .remove("wallet");
-    error(&v, "server one: source_management requires wallet");
+    error(
+        &v,
+        "server one: provider management or raw URL calls require wallet",
+    );
     v["servers"]["one"]["wallet"] = json!("payer");
     v["version"] = json!(2);
     error(&v, "unsupported meta-config version 2");
@@ -323,4 +326,79 @@ fn canonical_listener_token_is_optional_only_when_absent() {
     assert!(custom.token(&env).is_err());
     custom.auth = false;
     assert_eq!(custom.token(&env).unwrap(), None);
+}
+
+#[test]
+fn capability_preferences_parse_strictly_and_display_defaults() {
+    let original = fixture();
+    let shown = serde_json::to_value(config(&original)).unwrap();
+    let endpoint = &shown["servers"]["one"];
+    for field in [
+        "provider_management_local",
+        "provider_management_remote",
+        "raw_url_calls",
+    ] {
+        assert_eq!(endpoint[field], false);
+    }
+    assert_eq!(endpoint["remote_provider_directories"], json!([]));
+    for retired in ["source_management", "sources_search_tool_instructions_text"] {
+        let mut value = original.clone();
+        value["servers"]["one"][retired] = if retired == "source_management" {
+            json!(true)
+        } else {
+            json!("old help")
+        };
+        assert!(serde_json::from_value::<MetaConfig>(value).is_err());
+    }
+    let keys = ["coinbase", "coinbase_curated", "x402-list"];
+    for mask in 0..8 {
+        let mut value = original.clone();
+        let selected: Vec<_> = keys
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| mask & (1 << index) != 0)
+            .map(|(_, key)| *key)
+            .collect();
+        value["servers"]["one"]["remote_provider_directories"] = json!(selected);
+        let cfg = config(&value);
+        cfg.validate().unwrap();
+        let policy = crate::discovery::policy::EndpointPolicy::from(&cfg.servers["one"]);
+        assert_eq!(policy.directories.len(), selected.len());
+        assert!(
+            !policy.remote_search(),
+            "directories alone grant no authority"
+        );
+        assert_eq!(
+            serde_json::to_value(&cfg).unwrap()["servers"]["one"]["remote_provider_directories"],
+            json!(selected)
+        );
+    }
+    let mut value = original;
+    value["servers"]["one"]["remote_provider_directories"] = json!(["unknown"]);
+    assert!(serde_json::from_value::<MetaConfig>(value).is_err());
+}
+
+#[test]
+fn empty_source_capabilities_and_on_demand_are_independent() {
+    for field in [
+        "provider_management_local",
+        "provider_management_remote",
+        "raw_url_calls",
+        "discover_on_demand",
+    ] {
+        let mut value = fixture();
+        value["servers"]["one"]["sources"] = json!([]);
+        value["servers"]["one"][field] = json!(true);
+        config(&value).validate().unwrap();
+        if field != "discover_on_demand" {
+            value["servers"]["one"]
+                .as_object_mut()
+                .unwrap()
+                .remove("wallet");
+            assert!(config(&value).validate().is_err());
+        }
+    }
+    let mut value = fixture();
+    value["servers"]["one"]["sources"] = json!([]);
+    error(&value, "server one: sources cannot be empty");
 }

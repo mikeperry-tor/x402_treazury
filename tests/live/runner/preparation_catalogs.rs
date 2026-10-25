@@ -121,8 +121,8 @@ fn execution_contract(m: &Manifest, config: &Value, confined: bool) -> Result<()
             .as_object()
             .context("missing servers")?
             .values()
-            .all(|server| server["source_management"] != true),
-        "qualification refuses source management"
+            .all(|server| ["provider_management_local", "provider_management_remote", "raw_url_calls"].iter().all(|field| server[*field] != true)),
+        "qualification refuses provider management and raw URL calls"
     );
     if managed {
         ensure!(
@@ -321,8 +321,8 @@ pub async fn collect_catalogs_confined(
     validate_cases(m, &snapshot)?;
     let mut config: MetaConfig = serde_json::from_value(snapshot["deployment"].clone())?;
     ensure!(
-        config.servers.values().all(|s| !s.source_management),
-        "qualification refuses source management"
+        config.servers.values().all(|s| !x402_treazury::discovery::policy::EndpointPolicy::from(s).any()),
+        "qualification refuses provider management and raw URL calls"
     );
     for listener in config.servers.values() {
         ensure!(

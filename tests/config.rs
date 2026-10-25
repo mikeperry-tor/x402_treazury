@@ -266,7 +266,7 @@ async fn discovery_relay_policy_is_offline_explicit_and_validates_bindings() {
     assert!(shown["relay_fallback"].get("provider").is_none());
     let text_with_registry = text.replace(
         "[servers.a]",
-        "[servers.a]\nsource_management=true\nsource_registry_file='missing-local-provider.toml'",
+        "[servers.a]\nprovider_management_remote=true\nsource_registry_file='missing-local-provider.toml'",
     );
     std::fs::write(&path, format!("{text_with_registry}{relay}")).unwrap();
     let error = x402_treazury::deployment::Deployment::show_config(&path)
@@ -315,7 +315,7 @@ async fn relay_method_lists_are_inspected_offline_and_every_provider_path_is_pro
                 text.replace(
                     "[servers.a]",
                     &format!(
-                        "[servers.a]\nsource_management=true\nsource_registry_file='{provider}'"
+                        "[servers.a]\nprovider_management_remote=true\nsource_registry_file='{provider}'"
                     )
                 )
             ),
@@ -422,6 +422,21 @@ async fn comprehensive_example_enables_source_wallet_discovery_offline() {
     )
     .await
     .unwrap();
+    let toolbox = &shown["servers"]["toolbox"];
+    for capability in [
+        "provider_management_local",
+        "provider_management_remote",
+        "raw_url_calls",
+    ] {
+        assert_eq!(toolbox[capability], true);
+    }
+    assert_eq!(
+        toolbox["remote_provider_directories"],
+        json!(["coinbase", "x402-list"])
+    );
+    assert!(
+        include_str!("../examples/deployments/comprehensive.toml").contains("coinbase_curated")
+    );
     assert_eq!(shown["relay_fallback"]["provider_metadata"], true);
     assert_eq!(shown["relay_fallback"]["source_discovery"], true);
     assert!(shown["relay_fallback"]["wallet"].is_null());
@@ -477,7 +492,7 @@ async fn comprehensive_example_enables_source_wallet_discovery_offline() {
             "missing social search keyword: {keyword}"
         );
     }
-    assert!(social["sources_search_tool_instructions_text"].is_null());
+    assert!(social["providers_search_remote_tool_instructions_text"].is_null());
 }
 
 #[tokio::test]
@@ -691,7 +706,7 @@ private_key_env="UNUSED_PUBLIC_TEST_KEY"
 wallet="payer"
 listen="127.0.0.1:0"
 bearer_token_env="UNUSED_TEST_TOKEN"
-source_management=true
+provider_management_remote=true
 sources=[]
 [relay_fallback]
 relays.GET=["missing-local-provider.toml"]

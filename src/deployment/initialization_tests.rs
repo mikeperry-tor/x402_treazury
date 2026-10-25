@@ -158,7 +158,7 @@ sources=['api']
 [servers.dynamic]
 listen='127.0.0.1:0'
 bearer_token_env='TOKEN'
-source_management=true
+provider_management_remote=true
 wallet='dynamic'
 sources=[]
 "#,

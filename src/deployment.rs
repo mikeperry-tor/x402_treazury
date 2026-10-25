@@ -85,14 +85,20 @@ pub struct ListenerConfig {
     pub bearer_token_env: String,
     pub wallet: Option<String>,
     #[serde(default)]
-    pub source_management: bool,
+    pub provider_management_local: bool,
+    #[serde(default)]
+    pub provider_management_remote: bool,
+    #[serde(default)]
+    pub remote_provider_directories: Vec<crate::discovery::policy::RemoteDirectory>,
+    #[serde(default)]
+    pub raw_url_calls: bool,
     pub source_registry_file: Option<PathBuf>,
     /// Advertise discovery wrappers instead of every API schema.
     #[serde(default)]
     pub discover_on_demand: bool,
     pub instructions_text: Option<String>,
     pub discovery_search_tool_instructions_text: Option<String>,
-    pub sources_search_tool_instructions_text: Option<String>,
+    pub providers_search_remote_tool_instructions_text: Option<String>,
     #[serde(default)]
     pub sources: Vec<String>,
     #[serde(default)]
@@ -272,7 +278,9 @@ impl MetaConfig {
                 );
             }
             ensure!(
-                !server.sources.is_empty() || server.source_management,
+                !server.sources.is_empty()
+                    || crate::discovery::policy::EndpointPolicy::from(server).any()
+                    || server.discover_on_demand,
                 "server {name}: sources cannot be empty"
             );
             let mut seen = BTreeSet::new();
@@ -742,10 +750,10 @@ impl Deployment {
                 default_wallet: s.wallet.clone(),
                 wallet_bindings: self.wallet_resolution.bindings[name].clone(),
                 management_tools: crate::discovery::tools::listener_definitions(
-                    s.source_management,
+                    crate::discovery::policy::EndpointPolicy::from(s),
                     s.discover_on_demand,
                     s.discovery_search_tool_instructions_text.as_deref(),
-                    s.sources_search_tool_instructions_text.as_deref(),
+                    s.providers_search_remote_tool_instructions_text.as_deref(),
                 ),
                 tools: self.selected[name]
                     .iter()
@@ -1205,8 +1213,8 @@ impl Deployment {
             server.discover_on_demand = cfg.discover_on_demand;
             server.discovery_search_tool_instructions_text =
                 cfg.discovery_search_tool_instructions_text.clone();
-            server.sources_search_tool_instructions_text =
-                cfg.sources_search_tool_instructions_text.clone();
+            server.providers_search_remote_tool_instructions_text =
+                cfg.providers_search_remote_tool_instructions_text.clone();
             servers.insert(name.clone(), server);
         }
         servers
@@ -1269,7 +1277,7 @@ impl Deployment {
     fn unsigned_wallets(&self) -> Result<InitializedWallets> {
         ensure!(
             !crate::discovery::policy::enabled(&self.config),
-            "unsigned qualification forbids agent source management"
+            "unsigned qualification forbids provider management and raw URL calls"
         );
         ensure!(
             !self
@@ -1407,13 +1415,13 @@ impl Deployment {
                 cfg.allowed_hosts.clone(),
                 cfg.disable_host_check,
             )?;
-            if cfg.source_management {
+            if crate::discovery::policy::EndpointPolicy::from(cfg).any() {
                 manager
                     .as_ref()
-                    .context("source management unavailable")?
-                    .directory(name)
+                    .context("provider capabilities unavailable")?
+                    .validate_client(name)
                     .with_context(|| {
-                        format!("server {name}: directory search wallet unavailable")
+                        format!("server {name}: provider capability wallet unavailable")
                     })?;
             }
             server.discovery = manager.clone();
@@ -1597,7 +1605,11 @@ fn listener_tool_inventory(
         .filter_map(|(_, t)| t)
         .collect();
     ensure!(
-        !tools.is_empty() || server.source_management || incomplete || !conflicts.is_empty(),
+        !tools.is_empty()
+            || crate::discovery::policy::EndpointPolicy::from(server).any()
+            || server.discover_on_demand
+            || incomplete
+            || !conflicts.is_empty(),
         "server {name}: no tools selected"
     );
     Ok(ListenerInventory { tools, conflicts })
@@ -2225,7 +2237,7 @@ base_url = "https://example.com"
 mode = "static"
 private_key_env = "KEY"
 [servers.one]
-source_management = true
+provider_management_remote = true
 source_registry_file = "registry.sqlite"
 listen = "127.0.0.1:0"
 sources = ["test"]

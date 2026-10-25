@@ -225,7 +225,7 @@ async fn oversized_management_request_warns_without_logging_arguments() {
     let result = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({
                 "spec_url":"https://api.example.com/openapi.json",
                 "name":"PRIVATE_ARGUMENT".repeat(5_000)
@@ -337,7 +337,7 @@ async fn saturated_mutation_capacity_warns_before_publication() {
     let _held = m.mutations.clone().try_acquire_many_owned(16).unwrap();
     let (result, logs) = capture_future_logs(m.invoke(
         "writer",
-        "x402_treazury_source_add",
+        "x402_treazury_providers_add_remote",
         json!({"spec_url":"https://api.example.com/openapi.json"}),
     ))
     .await;
@@ -432,7 +432,7 @@ async fn reserved_source_delimiter_warns_for_add_inspection_and_restore() {
     let m = manager(None).await;
     let (result, logs) = capture_future_logs(m.invoke(
         "writer",
-        "x402_treazury_source_add",
+        "x402_treazury_providers_add_remote",
         json!({"spec_url":"https://private.example.com/openapi.json","name":"PRIVATE__LABEL"}),
     ))
     .await;
@@ -489,8 +489,8 @@ async fn advertised_inventory_warning_is_first_page_only_and_observational() {
     for (owner, on_demand, api_count, expected_warnings) in [
         ("hidden", false, 250, 0),
         ("hidden", false, 251, 2),
-        ("writer", false, 243, 0),
-        ("writer", false, 244, 2),
+        ("writer", false, 242, 0),
+        ("writer", false, 243, 2),
         ("writer", true, 513, 0),
     ] {
         let mut snapshot = (*m.catalog.read()).clone();
@@ -536,9 +536,9 @@ async fn advertised_inventory_warning_is_first_page_only_and_observational() {
             .await
             .unwrap();
         let count = if on_demand {
-            7
+            8
         } else {
-            api_count + if owner == "writer" { 7 } else { 0 }
+            api_count + if owner == "writer" { 8 } else { 0 }
         };
         assert_eq!(first.tools.len(), count.min(25));
         let after_first = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();

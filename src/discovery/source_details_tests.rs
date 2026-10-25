@@ -327,7 +327,7 @@ async fn fixture() {
 
 #[test]
 fn details_schema_and_root_candidates_preserve_public_contract() {
-    let schema = source_details::schema();
+    let schema = source_details::schema(true);
     assert!(schema["properties"].get("slug").is_none());
     assert!(schema["properties"].get("x402_list_id").is_some());
     assert_ne!(source_details::NAME, "x402_treazury_source_details");

@@ -399,9 +399,15 @@ fn orphan_parent_helper() {
 }
 
 #[tokio::test]
-async fn unsigned_mode_rejects_managed_funding_and_source_management_configs() {
+async fn unsigned_mode_rejects_managed_funding_and_provider_capability_configs() {
     let (base, _v, server) = vendor().await;
-    for kind in ["managed", "auto_fund", "source_management"] {
+    for kind in [
+        "managed",
+        "auto_fund",
+        "provider_management_local",
+        "provider_management_remote",
+        "raw_url_calls",
+    ] {
         let dir = tempfile::tempdir().unwrap();
         config(dir.path(), &base, false);
         let path = dir.path().join("config.toml");
@@ -426,7 +432,7 @@ async fn unsigned_mode_rejects_managed_funding_and_source_management_configs() {
             }
             _ => {
                 let endpoint = document["servers"]["one"].as_table_mut().unwrap();
-                endpoint.insert("source_management".into(), toml::Value::Boolean(true));
+                endpoint.insert(kind.into(), toml::Value::Boolean(true));
                 endpoint.insert(
                     "source_registry_file".into(),
                     toml::Value::String("must-not-be-created.sqlite".into()),

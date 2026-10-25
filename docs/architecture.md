@@ -187,7 +187,7 @@ publication/reconstruction retries remain separate local work. Shutdown drops de
 closing the matching owner. Reused initialization receives binding-time funding
 restrictions before use. Setup and listener failures release relay-held store
 handles before waiting for treasury shutdown. Static signers are loaded only for effective selected bindings,
-including source management and relay wallets. If discovery fails after wallets
+including enabled provider-management/raw-call capabilities and relay wallets. If discovery fails after wallets
 are initialized, loading shuts down the retained owner before returning an error.
 
 `src/catalog_state.rs` publishes immutable snapshots. A tool invocation captures
@@ -206,15 +206,26 @@ records retain their existing default configuration. Restart and saved inventory
 inspection use accepted settings without re-resolving the shipped bundle. Explicit
 curated refresh validates current bundled settings and newly acquired schema bytes
 before replacing the accepted revision atomically. Listener filters constrain
-invocation as well as listing. Dynamic source-management byte limits and current
-operator destination/wallet
-authority govern binding and execution. Source-management read inactivity takes
-precedence over an accepted provider value, then the network default; reviewed
+invocation as well as listing. Independent local/remote provider management and
+raw-call preferences authorize new operations before identity selection or I/O;
+accepted registrations retain existing filters and payer bindings. Restoration
+retains the requirement for either management capability; disabling both disables
+saved dynamic registrations, including raw-only endpoints. Either
+management capability permits operator refresh, while inspection/removal remains
+available regardless of preferences. Dynamic document byte limits and current
+operator destination/wallet authority govern binding and execution. Bundled dynamic
+sources preserve accepted provider read inactivity, then inherit the network default;
+generic imports and raw calls use the network default. Reviewed
 provider HTTP/TLS permissions reach schema acquisition, refresh, API and help via
 the network factory. Generic imports and raw calls remain strict. Accepted catalog
 settings do not activate static caches, warming, relays, cover configuration
 or recommendation selection. Agent-added sources use the same execution path; see
 [agent source management](agent-sources.md) for endpoint-local registration, persistence and refresh.
+Remote provider search concurrently owns one workflow per operator-selected
+directory and preserves each complete native JSON object under its directory key.
+Local failures preserve sibling results and aggregate typed possible-payment
+evidence. Accepted paid children outlive waiter cancellation; sibling traffic does
+not renew response inactivity. There is no outer replay or whole-search deadline.
 Ordinary serving builds the local snapshot before running remote catalog
 discovery and retained relay continuations; each endpoint's `wait_for_catalogs`
 setting controls when HTTP service exposes it. Late sources publish complete listener

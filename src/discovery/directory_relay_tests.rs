@@ -51,7 +51,8 @@ async fn directory_relay_fixture() {
                 );
                 captured.lock().unwrap().push(uri.path().to_owned());
                 match uri.path() {
-                    "/api/v1/services"
+                    "/api/v1/best"
+                    | "/api/v1/services"
                     | "/api/v1/services/relayed"
                     | "/api/v1/services/invalid"
                     | "/api/v1/services/mixed"
@@ -108,7 +109,7 @@ async fn directory_relay_fixture() {
                 json!({"openapi":"3.0.0","info":{"title":"Category fixture","version":"1"},"paths":{}}).to_string()
             } else if url.ends_with("/llms.txt") {
                 "# Provider usage\nExact usage instructions.".to_owned()
-            } else if reqwest::Url::parse(&url).unwrap().path() == "/api/v1/services" {
+            } else if reqwest::Url::parse(&url).unwrap().path() == "/api/v1/services" || reqwest::Url::parse(&url).unwrap().path() == "/api/v1/best" {
                 json!({"services":[{"name":"Relayed search result"}]}).to_string()
             } else {
                 json!({"service":{"name":"Relayed listing"}}).to_string()
@@ -215,7 +216,7 @@ async fn directory_relay_fixture() {
         assert!(signed.1);
     }
     for (path, count) in [
-        ("/api/v1/services", 3),
+        ("/api/v1/best", 3),
         ("/api/v1/services/relayed", 3),
         ("/api/v1/services/invalid", 3),
         ("/api/v1/services/positive", 1),
@@ -367,7 +368,7 @@ async fn directory_relay_fixture() {
             assert!(m.inner.lock().unwrap().state.records.is_empty());
             // Registering a schema at the built-in directory path grants only ordinary API purpose.
             let before = paid_calls.lock().unwrap().len();
-            m.invoke("writer", "x402_treazury_source_add", json!({
+            m.invoke("writer", "x402_treazury_providers_add_remote", json!({
                 "name":"ordinary_directory", "spec_url":"https://api.example.com/registered-openapi.json"
             })).await.unwrap();
             assert_eq!(

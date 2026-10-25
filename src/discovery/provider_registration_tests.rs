@@ -18,8 +18,8 @@ async fn public_local_tools_dispatch_offline_with_complete_json() {
     let s = server(&m, "writer");
     let search = s
         .invoke(
-            "x402_treazury_sources_search",
-            json!({"local_only":true,"q":"xqzunmatchedcapabilitysentinel"})
+            local::NAME,
+            json!({"q":"xqzunmatchedcapabilitysentinel"})
                 .as_object()
                 .unwrap(),
         )
@@ -38,10 +38,7 @@ async fn public_local_tools_dispatch_offline_with_complete_json() {
     let query = "retrieval contents";
     let expected = crate::providers::browse(Some(query), 1, 25).unwrap();
     let ranked = s
-        .invoke(
-            "x402_treazury_sources_search",
-            json!({"local_only":true,"q":query}).as_object().unwrap(),
-        )
+        .invoke(local::NAME, json!({"q":query}).as_object().unwrap())
         .await
         .unwrap();
     let ranked: Value = serde_json::from_str(&ranked).unwrap();
@@ -73,7 +70,7 @@ async fn public_provider_repeat_retains_accepted_configuration_after_bundle_remo
     let result = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_local",
             json!({"provider_id":"retired-provider-not-in-bundle","name":"ignored"}),
         )
         .await
@@ -92,11 +89,10 @@ async fn local_search_and_list_work_without_any_wallet_or_network_client() {
     let m = without_wallets().await;
     let list = m.invoke("writer", local::NAME, json!({})).await.unwrap();
     let search: Value = serde_json::from_str(
-        &m.invoke_sources_search("writer", json!({"local_only":true}).as_object().unwrap())
+        &m.invoke("writer", local::NAME, json!({}))
             .await
             .unwrap()
-            .into_text()
-            .unwrap(),
+            .to_string(),
     )
     .unwrap();
     assert_eq!(list, search);
@@ -107,16 +103,10 @@ async fn local_search_and_list_work_without_any_wallet_or_network_client() {
         assert!(item.get("tools").is_none());
     }
     let found: Value = serde_json::from_str(
-        &m.invoke_sources_search(
-            "writer",
-            json!({"local_only":true,"q":"EXA","mode":"browse"})
-                .as_object()
-                .unwrap(),
-        )
-        .await
-        .unwrap()
-        .into_text()
-        .unwrap(),
+        &m.invoke("writer", local::NAME, json!({"q":"EXA"}))
+            .await
+            .unwrap()
+            .to_string(),
     )
     .unwrap();
     assert!(
@@ -163,50 +153,25 @@ async fn local_search_and_list_work_without_any_wallet_or_network_client() {
 async fn local_arguments_and_authority_reject_before_wallet_lookup() {
     let m = without_wallets().await;
     for args in [
-        json!({"local_only":"true"}),
-        json!({"local_only":null}),
-        json!({"local_only":true,"mode":"best"}),
-        json!({"local_only":true,"category":"finance"}),
-        json!({"local_only":true,"max_price_usd":1}),
-        json!({"local_only":true,"q":null}),
-        json!({"local_only":true,"page":0}),
-        json!({"local_only":true,"per_page":0}),
-    ] {
-        let error = m
-            .invoke_sources_search("writer", args.as_object().unwrap())
-            .await
-            .unwrap_err();
-        assert!(
-            !error.to_string().contains("wallet unavailable"),
-            "{args}: {error}"
-        );
-    }
-    for args in [
-        json!({"q":"exa"}),
+        json!({"local_only":true}),
         json!({"mode":"browse"}),
-        json!({"page":null}),
+        json!({"q":null}),
+        json!({"page":0}),
+        json!({"per_page":0}),
+        json!({"category":"finance"}),
     ] {
-        assert!(m.invoke("writer", local::NAME, args).await.is_err());
+        let error = m.invoke("writer", local::NAME, args).await.unwrap_err();
+        assert!(!error.to_string().contains("wallet unavailable"));
     }
     assert!(m.invoke("hidden", local::NAME, json!({})).await.is_err());
-    assert!(
-        m.invoke_sources_search("hidden", json!({"local_only":true}).as_object().unwrap())
-            .await
-            .is_err()
+    assert_eq!(
+        tools::listener_definitions(policy::EndpointPolicy::default(), true, None, None).len(),
+        2
     );
-    // A false selector must be stripped before remote schema validation; with
-    // no wallet, valid remote dispatch reaches the normal wallet availability error.
-    for args in [json!({"local_only":false}), json!({})] {
-        let error = m
-            .invoke_sources_search("writer", args.as_object().unwrap())
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("wallet unavailable"), "{error}");
-    }
-    let listed = tools::listener_definitions(false, true, None, None);
-    assert_eq!(listed.len(), 2);
-    assert!(!listed.iter().any(|t| t.name == local::NAME));
-    assert_eq!(tools::listener_definitions(true, true, None, None).len(), 7);
+    assert_eq!(
+        tools::listener_definitions(m.policy("writer"), true, None, None).len(),
+        8
+    );
     assert!(m.fetches.lock().unwrap().is_empty());
     assert!(m.inner.lock().unwrap().state.records.is_empty());
 }
@@ -273,7 +238,7 @@ async fn local_provider_add_uses_bundled_schema_and_stable_short_registration_na
     let m = manager(None).await;
     let args = json!({"provider_id":"relayshield-phone-reputation"});
     let first = m
-        .invoke("writer", "x402_treazury_source_add", args.clone())
+        .invoke("writer", "x402_treazury_providers_add_local", args.clone())
         .await
         .unwrap();
     assert_eq!(first["name"], "relayshield-phone-reputation");
@@ -283,7 +248,7 @@ async fn local_provider_add_uses_bundled_schema_and_stable_short_registration_na
     let repeated = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_local",
             json!({"provider_id":"relayshield-phone-reputation","name":"ignored"}),
         )
         .await
@@ -344,12 +309,12 @@ async fn known_spec_and_provider_selectors_share_registration_under_racing_adds(
     let (by_id, by_url) = tokio::join!(
         m.invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_local",
             json!({"provider_id":"netintel","name":"net"})
         ),
         m.invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":spec,"name":"net"})
         ),
     );
@@ -407,7 +372,7 @@ async fn legacy_generic_url_repeat_wins_even_when_curated_source_coexists() {
     .unwrap();
     m.invoke(
         "writer",
-        "x402_treazury_source_add",
+        "x402_treazury_providers_add_local",
         json!({"provider_id":"netintel","name":"curated"}),
     )
     .await
@@ -415,7 +380,7 @@ async fn legacy_generic_url_repeat_wins_even_when_curated_source_coexists() {
     let repeat = m
         .invoke(
             "writer",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_remote",
             json!({"spec_url":url,"name":"ignored"}),
         )
         .await
@@ -438,7 +403,7 @@ async fn provider_add_rejects_unknown_null_mixed_and_unauthorized_inputs_before_
         json!({"provider_id":"relayshield-phone-reputation","name":"bad__name"}),
     ] {
         assert!(
-            m.invoke("writer", "x402_treazury_source_add", args)
+            m.invoke("writer", "x402_treazury_providers_add_local", args)
                 .await
                 .is_err()
         );
@@ -446,7 +411,7 @@ async fn provider_add_rejects_unknown_null_mixed_and_unauthorized_inputs_before_
     assert!(
         m.invoke(
             "hidden",
-            "x402_treazury_source_add",
+            "x402_treazury_providers_add_local",
             json!({"provider_id":"relayshield-phone-reputation"})
         )
         .await
@@ -454,4 +419,33 @@ async fn provider_add_rejects_unknown_null_mixed_and_unauthorized_inputs_before_
     );
     assert!(m.fetches.lock().unwrap().is_empty());
     assert!(m.inner.lock().unwrap().state.records.is_empty());
+}
+
+#[test]
+fn ambiguous_spec_choices_only_recommend_available_local_registration() {
+    let first = crate::providers::get("exa").unwrap();
+    let second = crate::providers::get("netintel").unwrap();
+    assert!(curated::select_spec_match(&[], false).unwrap().is_none());
+    let selected = curated::select_spec_match(&[first], false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(selected.id, first.id);
+    assert_eq!(selected.settings.spec, first.config.spec);
+    let local = curated::select_spec_match(&[first, second], true)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        local.contains("providers_add_local")
+            && local.contains("exa")
+            && local.contains("netintel")
+    );
+    let remote = curated::select_spec_match(&[first, second], false)
+        .unwrap_err()
+        .to_string();
+    assert!(remote.contains("operator"));
+    assert!(
+        !remote.contains("providers_add_local")
+            && !remote.contains("exa")
+            && !remote.contains("netintel")
+    );
 }

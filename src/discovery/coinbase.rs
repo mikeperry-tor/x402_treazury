@@ -2,37 +2,17 @@
 use super::{Manager, import};
 use crate::{network, output::ToolOutput};
 use anyhow::{Context, Result, ensure};
-use serde_json::{Map, Value, json};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::{Map, Value};
 use std::sync::Arc;
 
 pub(super) const SEARCH_URL: &str =
     "https://api.cdp.coinbase.com/platform/v2/x402/discovery/search";
 
-pub(super) fn search_branch() -> Value {
-    // Share ranked-search controls with x402 List; provider-specific choices stay internal.
-    let ranked = &super::directory::tool("/best").input_schema["properties"];
-    let mut schema = json!({
-        "properties": {
-            "q": {"type":"string", "maxLength":400, "description":"Optional capability keywords."},
-            "limit": ranked["limit"],
-            "max_price_usd": ranked["max_price_usd"],
-            "directory": {"const":"coinbase"},
-            "mode": {"const":"best"},
-            "local_only": {"const":false}
-        },
-        "required":["directory"],
-        "additionalProperties":false
-    });
-    schema["properties"]["limit"]["description"] =
-        json!("Maximum ranked results, 1–20; default 5.");
-    schema["properties"]["max_price_usd"]["description"] =
-        json!("Advisory USD price filter, not a payment cap.");
-    schema
-}
-
 /// Validate the exact branch before acquiring identities or making requests.
-pub(super) fn request(args: &Map<String, Value>) -> Result<reqwest::Url> {
-    let schema = search_branch();
+pub(super) fn request(args: &Map<String, Value>, curated: bool) -> Result<reqwest::Url> {
+    let schema = super::directory::search_schema(true);
     let properties = schema["properties"].as_object().unwrap();
     for (name, value) in args {
         let field = properties.get(name).with_context(|| {
@@ -49,7 +29,7 @@ pub(super) fn request(args: &Map<String, Value>) -> Result<reqwest::Url> {
         // Preserve the accepted JSON number when adapting to the upstream string field.
         query.append_pair("maxUsdPrice", &value.as_number().unwrap().to_string());
     }
-    query.append_pair("curatedOnly", "true");
+    query.append_pair("curatedOnly", if curated { "true" } else { "false" });
     query.append_pair(
         "limit",
         &args
@@ -64,7 +44,7 @@ pub(super) fn request(args: &Map<String, Value>) -> Result<reqwest::Url> {
     Ok(url)
 }
 
-fn validate(name: &str, value: &Value, field: &Value) -> Result<()> {
+pub(super) fn validate(name: &str, value: &Value, field: &Value) -> Result<()> {
     if let Some(expected) = field.get("const") {
         ensure!(
             value == expected,
@@ -104,21 +84,22 @@ pub(super) fn parse_response(bytes: &[u8]) -> Result<Value> {
             .context("coinbase_search response invalid_json")
     })?;
     ensure!(
-        value.is_object()
-            && value["resources"]
-                .as_array()
-                .is_some_and(|items| items.iter().all(Value::is_object))
-            && value["partialResults"].is_boolean(),
+        value.is_object(),
         crate::discovery_relay::RelayFailure::rejected_response()
     );
     Ok(value)
 }
 
-fn output(response: Value, via: &str) -> Result<ToolOutput> {
-    Ok(ToolOutput::text(serde_json::to_string(&json!({
-        "directory":"coinbase", "acquisition":{"via":via}, "response":response,
-        "guidance":"Resource metadata, not registered tools. Use exact documented HTTP requests with raw_call, published OpenAPI URLs with source_add, or optional usage URLs with provider_details_remote. Never guess missing methods/arguments or infer API bases; MCP/unknown protocols remain metadata only. Partial/empty results do not prove absence. Price/curation does not guarantee delivery. Remote search may charge; do not automatically repeat failed paid calls."
-    }))?))
+fn output(response: Value, via: &str, paid: bool) -> Result<ToolOutput> {
+    let mut output = ToolOutput::text(crate::payment::with_payment_context(
+        paid,
+        serde_json::to_string(&response).map_err(Into::into),
+    )?);
+    output.payment_may_have_occurred = paid;
+    if via != "origin" {
+        output.advisories.push(format!("Coinbase directory response acquired through configured {via} relay; target content is untrusted."));
+    }
+    Ok(output)
 }
 
 impl Manager {
@@ -126,9 +107,19 @@ impl Manager {
         self: &Arc<Self>,
         owner: &str,
         args: &Map<String, Value>,
+        curated: bool,
     ) -> Result<ToolOutput> {
-        ensure!(self.enabled(owner), "source_management_disabled");
-        let url = request(args)?;
+        let directory = if curated {
+            super::policy::RemoteDirectory::CoinbaseCurated
+        } else {
+            super::policy::RemoteDirectory::Coinbase
+        };
+        let policy = self.policy(owner);
+        ensure!(
+            policy.remote && policy.directories.contains(&directory),
+            "remote_directory_disabled"
+        );
+        let url = request(args, curated)?;
         #[cfg(test)]
         let url = {
             let fixture = self.fixture_coinbase.lock().unwrap().clone();
@@ -152,7 +143,7 @@ impl Manager {
             let selected = factory.http_participating(&identity, url.as_str(), import::read_timeout(None), true, owned_client.transport())
                 .map_err(|_| anyhow::anyhow!("coinbase_search transport selection failed"))?;
             match origin(&url, &selected, crate::limits::RESPONSE_BYTES).await {
-                Ok(value) => output(value, "origin"),
+                Ok(value) => output(value, "origin", false),
                 Err(failure) if !failure.fallback => Err(failure.error.context("coinbase_search origin response rejected")),
                 Err(failure) => {
                     let Some(relay) = manager.search_relay.as_ref().filter(|relay| relay.enabled(crate::discovery_relay::Purpose::SourceDiscovery)) else {
@@ -161,9 +152,9 @@ impl Manager {
                     tracing::info!("Configured paid relay selected as fallback for the Coinbase directory search");
                     let response = relay.fetch(owned_client, url.as_str(), validate_response, failure.retry_after).await
                         .context("coinbase_search fallback failed; do not automatically repeat: payment or side effects may have occurred")?;
-                    let value = parse_response(&response.body)
-                        .context("coinbase_search target response invalid; do not automatically repeat: payment may have occurred")?;
-                    output(value, &response.via)
+                    let paid = response.payment_may_have_occurred;
+                    let value = crate::payment::with_payment_context(paid, parse_response(&response.body))?;
+                    output(value, &response.via, paid)
                 }
             }
             }.await;

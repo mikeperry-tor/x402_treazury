@@ -52,7 +52,7 @@ async fn source_inspection_lists_saved_tools_without_tokens_catalog_fetches_or_r
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();
     // Inspection must not load wallet credentials or connect to saved URLs.
-    std::fs::write(dir.join("registry.toml"), "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.toolbox]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='payer'\nsource_management=true\nsource_registry_file='registry.sqlite'\n").unwrap();
+    std::fs::write(dir.join("registry.toml"), "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.toolbox]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='payer'\nprovider_management_remote=true\nsource_registry_file='registry.sqlite'\n").unwrap();
     let id = "00000000-0000-0000-0000-000000000001";
     let document = json!({"openapi":"3.0.3","servers":[{"url":"https://offline.invalid"}],"paths":{"/read":{"get":{"description":"PRIVATE_SCHEMA_SENTINEL"}},"/write":{"post":{}}}}).to_string();
     let record = json!({"id":id,"owner":"toolbox","candidate":{"name":"demo","spec_url":"https://offline.invalid/openapi.json","lifetime":"persistent"},"targets":["toolbox"],"revision":2,"document":document,"hash":format!("{:x}",Sha256::digest(document.as_bytes())),"format":1,"accepted_at":1,"updated_at":2,"removed":false,"disabled":null});
@@ -96,7 +96,7 @@ async fn source_removal_selects_saved_names_and_empty_bulk_removal_preserves_reg
     use sha2::{Digest, Sha256};
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();
-    std::fs::write(dir.join("registry.toml"), "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.toolbox]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='payer'\nsource_management=true\nsource_registry_file='registry.sqlite'\n").unwrap();
+    std::fs::write(dir.join("registry.toml"), "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.toolbox]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='payer'\nprovider_management_remote=true\nsource_registry_file='registry.sqlite'\n").unwrap();
     let document = json!({"openapi":"3.0.3","servers":[{"url":"https://offline.invalid"}],"paths":{"/read":{"get":{}}}}).to_string();
     let selected_id = "00000000-0000-0000-0000-000000000001";
     let remaining_id = "00000000-0000-0000-0000-000000000002";
@@ -285,7 +285,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     assert!(!dir.join("missing").exists());
     std::fs::write(
         dir.join("registry.toml"),
-        "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.toolbox]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='payer'\nsource_management=true\nsource_registry_file='registry.sqlite'\n",
+        "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.toolbox]\nlisten='127.0.0.1:0'\nbearer_token_env='UNREAD_TOKEN'\nwallet='payer'\nprovider_management_remote=true\nsource_registry_file='registry.sqlite'\n",
     )
     .unwrap();
     let inspect = ["sources", "inspect", "--config", "registry.toml"];
@@ -748,7 +748,7 @@ async fn payment_and_wallet_funding_help_use_explicit_usdc_names() {
 #[tokio::test]
 async fn source_maintenance_has_explicit_operator_commands() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("maintenance.toml"), "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.research]\nlisten='127.0.0.1:0'\nauth=false\nwallet='payer'\nsource_management=true\n").unwrap();
+    std::fs::write(dir.path().join("maintenance.toml"), "version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='UNREAD_KEY'\n[servers.research]\nlisten='127.0.0.1:0'\nauth=false\nwallet='payer'\nprovider_management_remote=true\n").unwrap();
     for command in ["refresh", "remove"] {
         let output = run(dir.path(), &["sources", command, "--help"], &[]).await;
         assert!(output.status.success());

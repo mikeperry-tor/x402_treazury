@@ -30,6 +30,27 @@ impl AcceptedProvider {
     }
 }
 
+/// Select only an unambiguous full-specification match; guidance follows exposed routes.
+pub(super) fn select_spec_match(
+    matches: &[&crate::providers::Provider],
+    local_available: bool,
+) -> Result<Option<AcceptedProvider>> {
+    match matches {
+        [] => Ok(None),
+        [provider] => Ok(Some(AcceptedProvider::new(
+            provider.id,
+            provider.config.clone(),
+        ))),
+        _ if local_available => anyhow::bail!(
+            "ambiguous specification; use providers_add_local with provider_id from: {}",
+            matches.iter().map(|p| p.id).collect::<Vec<_>>().join(", ")
+        ),
+        _ => anyhow::bail!(
+            "ambiguous specification; ask the operator to resolve the bundled definition selection"
+        ),
+    }
+}
+
 pub(super) fn local_document(provider: &AcceptedProvider) -> Result<Vec<u8>> {
     let shipped = crate::providers::get(&provider.id).context("unknown_provider_id")?;
     anyhow::ensure!(

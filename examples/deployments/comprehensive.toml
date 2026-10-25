@@ -358,10 +358,14 @@ sources = ["genuinegood", "pdl_company", "company_otto", "company_claw402", "com
 
 # Start with discovery tools; persist agent-added APIs separately from the treasury.
 [servers.toolbox]
-instructions_text = "" # Discovery wrappers carry the source-management workflow.
+instructions_text = "" # Discovery wrappers carry the provider-management workflow.
 listen = "127.0.0.1:6340"
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "company"
-source_management = true
+provider_management_local = true
+provider_management_remote = true
+# coinbase_curated is the curated-only alternative; coinbase includes both scopes.
+remote_provider_directories = ["coinbase", "x402-list"]
+raw_url_calls = true
 source_registry_file = "../../state/privacy-sources.sqlite" # Toolbox-local registrations.
 sources = []

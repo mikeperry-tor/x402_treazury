@@ -25,7 +25,7 @@ pub struct Server {
     pub discovery: Option<Arc<crate::discovery::Manager>>,
     pub discover_on_demand: bool,
     pub discovery_search_tool_instructions_text: Option<String>,
-    pub sources_search_tool_instructions_text: Option<String>,
+    pub providers_search_remote_tool_instructions_text: Option<String>,
     pub catalog_server: String,
     pub name: String,
     pub host_policy: host::HostPolicy,
@@ -56,7 +56,7 @@ impl Server {
             discovery: None,
             discover_on_demand: false,
             discovery_search_tool_instructions_text: None,
-            sources_search_tool_instructions_text: None,
+            providers_search_remote_tool_instructions_text: None,
             catalog: Arc::new(CatalogState::new(CatalogSnapshot {
                 instructions: Default::default(),
                 generation: 0,
@@ -127,9 +127,9 @@ impl Server {
                 self.management_tools().iter().any(|t| t.name == name),
                 "unknown tool"
             );
-            if name == "x402_treazury_sources_search" {
+            if name == "x402_treazury_providers_search_remote" {
                 return manager
-                    .invoke_sources_search(&self.catalog_server, args)
+                    .invoke_search_remote(&self.catalog_server, args)
                     .await;
             }
             if name == crate::discovery::source_details::NAME {
@@ -168,10 +168,12 @@ impl Server {
         crate::discovery::tools::listener_definitions(
             self.discovery
                 .as_ref()
-                .is_some_and(|m| m.enabled(&self.catalog_server)),
+                .map(|m| m.policy(&self.catalog_server))
+                .unwrap_or_default(),
             self.discover_on_demand,
             self.discovery_search_tool_instructions_text.as_deref(),
-            self.sources_search_tool_instructions_text.as_deref(),
+            self.providers_search_remote_tool_instructions_text
+                .as_deref(),
         )
     }
 }

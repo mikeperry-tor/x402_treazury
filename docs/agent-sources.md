@@ -1,11 +1,10 @@
 # Agent API discovery and source management
 
 For a smaller initial MCP tool list, set `discover_on_demand = true` in a
-`[servers.NAME]` table. This is independent of `source_management` and defaults to
-`false`. Static listeners advertise just `x402_treazury_tools_search` and
-`x402_treazury_tool_call`; listeners with source management enabled advertise all
-seven management tools. API tools, including subsequently registered tools, stay
-out of `tools/list`.
+`[servers.NAME]` table (default `false`). This is independent of provider management.
+On-demand listeners advertise `x402_treazury_tools_search` and
+`x402_treazury_tool_call`, plus any independently enabled provider-management or raw-call
+tools. API tools, including subsequently registered tools, stay out of `tools/list`.
 
 Agents search the listener's catalog with `x402_treazury_tools_search`, receive
 complete descriptions and input schemas, and invoke a result through
@@ -18,7 +17,7 @@ This setting changes tool advertising, not loading or access: all configured
 catalogs still load, with remote catalogs published after listeners bind during
 ordinary deployment serving. Filters and wallet bindings still apply, and existing direct
 tool calls remain supported. It grants no source registration permissions and
-requires no source-management wallet or registry for static listeners. Imported OpenAPI catalogs share default same-path POST preference before naming;
+requires no provider-management wallet or registry for static listeners. Imported OpenAPI catalogs share default same-path POST preference before naming;
 registration exposes no preference argument and raw calls retain their explicit method.
 Tool IDs are exact endpoint-local names, reusable across turns, reconnects and restarts while
 the tool remains available. Calls resolve the current definition and wallet binding,
@@ -42,7 +41,7 @@ See [catalog selection](configuration.md) for composition and stale-advice behav
 
 Both local search surfaces use the same lexical BM25 ranker: `tools_search.query`
 searches visible tool names, descriptions and top-level input parameter names;
-`sources_search(local_only=true).q` searches bundled provider IDs, display names,
+`providers_list_local.q` searches bundled provider IDs, display names,
 capability descriptions and declared API bases. For example,
 `yelp reviews` finds a description such as "List public reviews for a Yelp business"
 without requiring those words to be adjacent. Query terms have OR semantics:
@@ -95,108 +94,104 @@ Ranking preserves complete descriptions, schemas and payment bindings.
 
 ## External directory matching
 
-`x402_treazury_sources_search(local_only=true)` searches only bundled provider
-metadata using the same BM25 and literal-match priority as callable tool search.
-Multiword queries match any of their terms and rank by relevance across IDs,
-display names, capability descriptions and declared API bases. Omitted or blank
-`q` enumerates the bundle in stable provider-ID order. Nonblank results rank before
-pagination and use provider ID to break ties. `page` defaults to 1;
-`per_page` defaults to 25
-and accepts any positive integer. Only omitted or `browse` mode is allowed; directory filters,
-ranking arguments and `best` fail before I/O. `x402_treazury_providers_list` accepts
-only the same pagination fields and shares this projection with blank local search.
-Both return `items`, `total`, `page`, `per_page` and `next_page`; each item includes
-`provider_id`, name, description, optional API base and schema provenance. Results
-are metadata leads, independent of installed tools, with no wallet identity lookup,
-network requests, registration or automatic remote fallback. Bundled means shipped
-configuration knowledge, not current reachability, funding or live qualification.
-Pass a known `provider_id` or specification URL directly to `source_add`.
-`provider_details_remote` is optional assistance for an unknown API base, x402 List slug or
-published usage-document URL.
-An absent `api_base` means no configured base override; import resolves the API
-server from the schema, which need not share the specification URL's origin.
-Unknown cost means missing price information, not a free call. After import,
-optional advertised provider help may explain prices and request contracts before
-calling; neither registration nor help establishes paid-delivery qualification.
+`x402_treazury_providers_list_local` enumerates and searches locally bundled,
+reviewed provider definitions, including compatibility filters and repairs for
+supported API operations. Optional capability keywords in `q` use the same BM25
+and literal-match priority as callable tool search across IDs, names, descriptions
+and declared API bases. Omitted or blank `q` enumerates in stable provider-ID order;
+nonblank results rank before pagination, with provider ID breaking ties. `page`
+defaults to 1; `per_page` defaults to 25 and accepts any positive integer.
+The response contains `items`, `total`, `page`, `per_page` and `next_page`; items
+include `provider_id`, name, description, optional API base and schema provenance.
+Listing makes no network requests, selects no payer and never falls back remotely.
+Use the exact ID with `providers_add_local` to register its prepared definition.
+An absent `api_base` means import resolves the API server from the schema, which
+need not share the specification URL's origin. Bundled metadata is independent of
+installed tools and does not establish current availability or live qualification.
 
-With `local_only` false or omitted and `directory` omitted or `x402_list`,
-`x402_treazury_sources_search` searches x402 List
-rather than the endpoint's loaded tools. The local selector is stripped before
-remote dispatch. Matching is performed upstream: `mode=browse` (default) uses
-case-insensitive
-substring matching across service name, description, category and base URL, with
-pagination (default 25, upstream maximum 100 per page). `mode=best` uses x402 List's relevance and quality ranking, matching
-service metadata plus AI-derived capability tags and summaries. Neither mode uses
-the local tool catalog's BM25 ranking or literal-match priority. A nonadjacent
-multiword query that works in `tools_search` may therefore need fewer keywords in
-directory browse mode. Each invocation dispatches one selected directory request;
-it does not crawl the directory or build a local index. Directory reads share an
-IP-level free quota and can require payment through normal payment admission.
+`x402_treazury_providers_search_remote` starts one workflow for every directory
+in the endpoint's `remote_provider_directories`, concurrently. It is exposed only
+with remote management enabled and a nonempty directory list. Agents cannot
+select directories. Shared inputs are optional capability keywords `q`, `limit`
+(default 5, range 1–20 requested from each directory), and numeric `max_price_usd`.
+When either Coinbase directory is selected, `q` accepts at most 400 Unicode
+characters; x402-list-only endpoints have no Coinbase query bound. Invalid or
+retired branch, ranking, pagination and directory-selector arguments fail before I/O.
 
-### Coinbase curated resource search
+| Directory key | Native search |
+| --- | --- |
+| `coinbase` | Coinbase resource search with `curatedOnly=false`, including curated and non-curated resources. |
+| `coinbase_curated` | The same Coinbase resource search with `curatedOnly=true`. |
+| `x402-list` | x402 List `GET /best`, with `prefer=balanced`, `require_verified=false` and `network=BSE`. |
 
-The tool description leads with collection choices; parameter help carries branch
-constraints. Transport and relay mechanics belong in this guide and the operator
-configuration, rather than repeated agent-facing descriptions.
+Coinbase requests retain server-selected Base mainnet USDC/exact constraints.
+Price filters concern advertised prices, not spending authority: Coinbase filters
+resources, while x402 List filters each service's minimum listed price. These
+are different coverage contracts. Advanced x402 List browse/filter operations
+remain available through its ordinary provider definition when configured or registered.
+Neither remote directory uses the local catalog's BM25 ranking.
 
-Select `directory="coinbase"` for ranked resource search, optionally using `q`.
-Omitted mode or `mode="best"` selects this search; `browse`, page/per-page/cursor
-arguments and x402 List-only filters reject before I/O. Mode defaults are
-branch-specific: local and x402 List omission still means browse. There is no
-search federation or automatic directory fallback. Search always uses curated
-resources. Its shared inputs are `q`, `limit` and numeric `max_price_usd`, just as
-for x402 List ranked search. `limit` defaults to 5 and accepts 1–20; Coinbase
-queries accept at most 400 Unicode characters. Price filters are advisory, not
-payment caps or evidence of useful delivery. Provider-specific filters and a
-non-curated mode are not exposed. The server supplies Base mainnet USDC/exact
-payment constraints; all returned offers remain intact.
+Each search returns one JSON dictionary keyed by the configured directory names.
+Every successful value is the complete native upstream JSON object, preserving
+array order, duplicate resources across directories, unknown fields, missing
+metadata, counts, verification/provenance and partial-result indicators. Both
+Coinbase selections produce separate responses when enabled together. There is
+no merged list, synthetic pagination or total, acquisition wrapper, provider-match
+enrichment or invented schema. Empty or limited results do not prove absence.
 
-The response contains `directory="coinbase"`, `acquisition.via` (`origin`, `curl`, `agproxy` or `horizonpulse`), `response` (the complete upstream object) and guidance. It preserves
-exact URLs, methods, Bazaar metadata, offers, skill links, unknown fields and
-missing contracts without normalizing resources into services. `partialResults`
-remains upstream metadata, with no invented totals or continuations. Empty or
-partial results do not prove absence and never trigger a paid fallback. HTTP
-206 responses and responses marked with Content-Range fail the complete-response
-contract on both origin and relay paths, without fallback or automatic paid replay. HTTP
-examples and a Bazaar envelope schema are not invented request argument schemas.
-Documented HTTP requests may go straight to `raw_call`; known OpenAPI URLs go to
-`source_add`. MCP/unknown protocols remain metadata only.
+A failed directory returns a locally generated value such as
+`{"local_error":{"kind":"directory_request_failed","payment_may_have_occurred":false}}`.
+`local_error` identifies a local failure, never a fabricated empty upstream result;
+an available safe HTTP status can accompany it. Non-JSON or invalid
+responses fail that directory explicitly. Successful siblings remain complete,
+even if every other directory fails. Required x402 List attribution and relay
+advisories accompany the output separately, without changing successful JSON.
+Cite x402-list.com for its CC BY 4.0 directory data.
 
-Public Coinbase reads are unsigned, using an existing endpoint wallet's
+One search can authorize more than one directory or relay charge. Each workflow
+retains its own origin, Tor, response-inactivity, relay and payment rules. There
+is no federation replay after a failure, empty result or partial result, and no
+whole-search deadline, combined truncation, discovery cache or background index.
+A failing sibling cannot cancel progressing work; accepted paid child work
+remains owned through waiter cancellation and shutdown. Typed possible-payment
+evidence survives aggregation, parsing and later output errors.
+
+### Coinbase resource search and relay behavior
+
+Coinbase output retains exact URLs, methods, Bazaar metadata, offers, skill links
+and missing request contracts. HTTP examples and Bazaar envelope schemas are not
+request argument schemas. Documented HTTP requests can use `raw_call` when enabled;
+known OpenAPI URLs can use `providers_add_remote` when remote management is enabled.
+MCP/unknown protocols remain metadata only. A published usage-document URL can be
+read with `provider_details_remote(documentation_url=...)` when available.
+
+Public Coinbase reads are unsigned and use an existing endpoint wallet's
 documentation identity without allocation, funding or observation. Missing
-identity fails that request. Under Tor they use one origin attempt plus
-`network.tor_isolation_retries` eligible fresh-isolation retries (default 2), with the shared eligibility and `Retry-After`
-policy, including the terminal delay before fallback. Direct mode uses one
-origin attempt. Only complete valid search JSON may promote an origin scope.
-
-When its category is enabled, runtime fallback also applies to API/directory/raw GET and HEAD, and
-otherwise-authorized unsigned x402 POST when a listed adapter represents the exact
-request. The original method selects its list. Origin challenges retain ordinary
-payment handling; relay-supplied target challenges are terminal. Any earlier target
-signature suppresses generic fallback. Complete invalid directory JSON/output and
-terminal HTTP statuses do not buy another read. API ranges remain legitimate;
-raw HEAD succeeds with empty text. Typed possible-charge facts survive directory
-processing and output conversion, separately from relay advisories and JSON text.
+identity fails that workflow. Direct mode uses one origin attempt; Tor adds
+`network.tor_isolation_retries` eligible fresh-isolation retries (default 2), with
+the shared eligibility and `Retry-After` policy, including terminal delay before
+fallback. Only complete valid search JSON may promote an origin scope. HTTP 206,
+Content-Range and complete invalid JSON fail without paid fallback or replay.
+No Coinbase challenge is signed.
 
 With `[relay_fallback]` configured, `source_discovery=true` enables built-in
 Coinbase and x402 List fallback by default. `provider_metadata=true` independently
-enables schemas, imports/refresh, help, explicit usage documents and URL/spec probes.
-Actual API and raw calls require explicit `api_requests=true`; an ordinary call to
-a directory URL remains API work. In mixed `provider_details_remote` workflows, the directory
-lookup is discovery and each later provider document/probe is metadata. Categories
-are selected by trusted code, never agent arguments, method or hostname. With no
-relay section all requests remain origin-only. Each search fetches fresh results;
-it inherits no catalog URL cache,
-sticky failure, readiness queue or shared breaker. The relay uses this listener's
-source-management payer, regardless of the static relay wallet override; ordinary
-payment admission, journaling and insufficient-funds traversal still apply.
-Each authorization may charge, and uncertain paid failure grants no automatic
-replay. The relay connection retains configured direct/Tor policy. The selected service
-sees the query URL, reaches Coinbase from its own network and supplies target
-content/status/headers. Origin failures and relay failures remain request-scoped.
-See [relay configuration](configuration.md#relay-fallback) for settings,
-precedence and trust. Local input/origin/identity/download-limit failures
-never authorize relay spending. No Coinbase challenge is signed.
+enables schemas, imports/refresh, help, usage documents and URL/spec probes. Actual
+API and raw calls require explicit `api_requests=true`; an ordinary call to a
+directory URL remains API work. In mixed `provider_details_remote` workflows,
+the directory lookup is discovery and later documents/probes are metadata.
+Trusted code selects categories; agent arguments, method or hostname cannot.
+With no relay section all requests remain origin-only.
+
+Relays use the endpoint's existing wallet regardless of a static relay wallet
+override, with ordinary payment admission, journaling and insufficient-funds
+traversal. Each authorization may charge; uncertain paid failure grants no replay.
+The selected relay sees the query URL and supplies target content/status/headers
+under the configured direct/Tor policy and relay trust boundary. Origin challenges
+retain ordinary handling for paid directory workflows; relay-supplied target
+challenges are terminal. Earlier target signatures suppress generic fallback.
+Local input, origin, identity and download-limit failures authorize no relay spending.
+See [relay configuration](configuration.md#relay-fallback) for settings and trust.
 
 ## Tool documentation
 
@@ -229,8 +224,8 @@ Each `[servers.NAME]` can customize three instruction surfaces:
 | Setting | Placement and semantics |
 | --- | --- |
 | `instructions_text` | Replaces the composed source guidance in `initialize.result.instructions` and current catalog metadata. Omit to retain source composition; `""` suppresses inherited source guidance. Generated pricing, discovery and availability/conflict notices remain. |
-| `discovery_search_tool_instructions_text` | Appends to the standard description of `x402_treazury_tools_search`, exposed by either `discover_on_demand` or `source_management`. |
-| `sources_search_tool_instructions_text` | Appends to the standard description of `x402_treazury_sources_search`, exposed by `source_management`. |
+| `discovery_search_tool_instructions_text` | Appends to the standard description of `x402_treazury_tools_search`, exposed by `discover_on_demand` or either provider-management capability. |
+| `providers_search_remote_tool_instructions_text` | Appends to `x402_treazury_providers_search_remote`, exposed by remote management with a nonempty directory list. |
 
 These are endpoint settings, not provider/source settings. They do not enable tools
 or grant permissions. Absent or empty search text leaves the standard description
@@ -241,7 +236,7 @@ remote catalogs are pending; it describes intended coverage, not current readine
 
 Put platform/capability summaries and useful search terms in the tool-search field
 when a client does not forward MCP server instructions to its model. Use the
-source-search field for guidance about finding new APIs locally or in the external directory;
+remote-search field for guidance about finding new APIs in configured directories;
 `tools_search` searches APIs already available on the listener. To avoid repeating
 source guidance, override initialization with concise endpoint instructions.
 Keep essential operation requirements in the relevant tool descriptions or include
@@ -259,8 +254,8 @@ of initialization text.
 discover_on_demand = true
 instructions_text = "Research endpoint. Discover schemas before invoking tools."
 discovery_search_tool_instructions_text = "Search this listener for its configured social platforms; use Twitter for X."
-# When source_management=true, this customizes external directory search:
-sources_search_tool_instructions_text = "Prefer documented research APIs with published OpenAPI specifications."
+# With remote management and directories enabled, customize remote search:
+providers_search_remote_tool_instructions_text = "Prefer documented research APIs with published OpenAPI specifications."
 ```
 
 Dynamic source guidance is recomposed from the immutable static instruction base
@@ -280,29 +275,56 @@ it. Use live tool search/enumeration for current endpoint-local availability and
 `source_name` to narrow to a registration.
 
 
-Enable `source_management = true` on an HTTP deployment endpoint to let its agents
-search bundled providers, x402 List or Coinbase resources, register bundled or
-public OpenAPI APIs, inspect tool signatures and
-invoke them. It defaults to false. Standalone provider serving remains static.
-See the [README workflow](../README.md#agent-api-auto-discovery-and-tool-addition)
-and the [comprehensive example's toolbox endpoint](../examples/deployments/comprehensive.toml).
-
 ## Configuration and authority
 
-The [managed starter](../examples/deployments/managed.toml) already enables source
-management using its research pool. Its settings are:
+Provider management and direct URL calls are independent endpoint capabilities,
+disabled by default. Standalone provider serving remains static. The
+[managed starter](../examples/deployments/managed.toml) and
+[comprehensive toolbox](../examples/deployments/comprehensive.toml) enable all three:
 
 ```toml
 [servers.research]
 wallet = "research" # Existing [wallets.research]; no new pool required.
-source_management = true
+provider_management_local = true
+provider_management_remote = true
+remote_provider_directories = ["coinbase", "x402-list"]
+# coinbase_curated is the curated-only alternative; coinbase includes both scopes.
+raw_url_calls = true
 # source_registry_file = "../../state/managed-sources.sqlite" # Optional persistence.
-# Retain its existing listen, bearer_token_env and sources settings.
+# Retain existing listen, bearer_token_env and sources settings.
 ```
+
+| Setting | Default | Permitted new operations |
+| --- | --- | --- |
+| `provider_management_local` | `false` | Offline bundled listing/search and registration by exact bundled ID. |
+| `provider_management_remote` | `false` | Configured directory search, remote details and public HTTPS OpenAPI registration. |
+| `remote_provider_directories` | `[]` | `coinbase`, `coinbase_curated`, `x402-list`, in any subset. |
+| `raw_url_calls` | `false` | Documented public HTTPS calls through `raw_call`. |
+
+Unknown directory identifiers fail configuration parsing; identical repeats select
+a directory once, while both Coinbase choices remain distinct. The list grants
+no authority when remote management is disabled. An empty list still permits
+remote registration and URL-based details, but omits remote search. Directory
+selection is not a destination allowlist for APIs or permitted raw calls.
+The retired `source_management` and `sources_search_tool_instructions_text`
+settings reject rather than alias the new preferences.
+
+Requested operations are checked before identity lookup, upstream I/O or
+registration side effects. Tool hiding alone is not authorization. Local-only and
+raw-only endpoints do not require remote permission. Either management capability
+exposes `tools_search` and `tool_call`; `discover_on_demand` can independently expose
+them, while raw permission alone grants no registration authority. Existing accepted
+registrations retain their filters and payer bindings when switching between local
+and remote management. As before, disabling both management capabilities disables
+saved dynamic registrations during restoration; raw permission alone does not
+reactivate them. Preferences do not add per-origin or per-registration invocation
+rules. Inspection and removal remain available regardless of preferences.
+Operator refresh requires either management capability before loading the selected
+existing wallet, regardless of whether the saved definition is generic or bundled.
 
 Omit `source_registry_file` for registrations that last only until exit. Static sources
 are optional: set `sources = []` for a discovery-only listener. A second listener
-can enable source management with the same shared wallet and its own authenticated
+can enable provider management with the same shared wallet and its own authenticated
 identity; registrations remain separate even when both listeners use one pool.
 Static profiles also work here when the operator defines the referenced wallet
 with `mode = "static"` and `private_key_env`.
@@ -327,39 +349,30 @@ constrain imported API tools. Include `dyn_*` when an endpoint has an explicit
 `include_tools` allowlist, or use `dyn_netintel__*` to select a named registration.
 Filters use source names, not registry IDs; existing ID-based filters are not rewritten.
 The `x402_treazury_` and `dyn_` namespaces are reserved in
-participating deployments. Management tools have their own enable switch and are
+participating deployments. Management tools follow their respective capability preferences and are
 not removed by API filters.
 
 ## Agent tools
 
 | Tool | Arguments |
 | --- | --- |
-| `x402_treazury_sources_search` | `local_only=true`: optional `q`, `page`, `per_page` and `mode=browse`. Otherwise `directory=x402_list` (default) selects browse/best; `directory=coinbase` selects ranked resource search. Each branch has its own arguments and defaults. |
-| `x402_treazury_provider_details_remote` | Exactly one x402 List `x402_list_id`, public HTTPS API `base_url` or `documentation_url`. Returns listing/base discovery outcomes, or complete accepted usage text. |
-| `x402_treazury_source_add` | Exactly one bundled `provider_id` or public OpenAPI 3 JSON `spec_url`, plus optional readable `name`. |
-| `x402_treazury_providers_list` | Optional `page` and `per_page`; enumerates bundled provider metadata offline. |
-| `x402_treazury_raw_call` | Required `method` and public HTTPS `url`; optional `query` object and JSON `body`. |
-| `x402_treazury_tools_search` | Optional `query`, registered `source_name`, `cursor`, `limit`. |
-| `x402_treazury_tool_call` | Required readable `tool_id` and `arguments`. |
+| `x402_treazury_providers_list_local` | Local management: optional capability keywords `q`, `page`, `per_page`; list bundled definitions offline. |
+| `x402_treazury_providers_add_local` | Local management: required exact `provider_id`, optional registration `name`. |
+| `x402_treazury_providers_search_remote` | Remote management and nonempty directory list: optional `q`, `limit`, `max_price_usd`; query every configured directory. |
+| `x402_treazury_providers_add_remote` | Remote management: required public HTTPS OpenAPI 3 JSON `spec_url`, optional registration `name`. |
+| `x402_treazury_provider_details_remote` | Remote management: exactly one `x402_list_id`, public HTTPS `base_url`, or `documentation_url`. ID mode is available only with `x402-list` selected. |
+| `x402_treazury_raw_call` | Raw URL permission: required `method`, public HTTPS `url`; optional `query` and JSON `body`. |
+| `x402_treazury_tools_search` | Either management capability or on-demand discovery: optional `query`, `source_name`, `cursor`, `limit`. |
+| `x402_treazury_tool_call` | Same exposure as tool search: required readable `tool_id` and `arguments`. |
 
-With `directory` omitted or `x402_list`, remote search uses embedded reviewed schemas
-and the live x402 List API; the server sets `network=BSE`. It
-requires no static directory source or startup catalog fetch. Browse dispatches to
-`GET /services`, with `page`, `per_page` and directory filters. Best dispatches to
-`GET /best`, with `prefer` (`balanced`, `cheapest`, `fastest`, `most_reliable`),
-`max_price_usd`, `require_verified`, `limit` (1–20) and
-`include_facilitator_context`. For example:
-`{"mode":"best","q":"weather","prefer":"cheapest","limit":3}`.
-The price filter controls recommendations, not payment admission. The local mode
-selector is stripped; invalid or mixed-mode fields fail before I/O. Each x402 List search
-makes one directory workflow. Reads share an IP-level free quota and may charge
-through the endpoint's source-management wallet and ordinary payment checks.
-Cite x402-list.com for its CC BY 4.0 directory data. Results are discovery leads,
-not registered tools or delivery/payment guarantees. Coinbase has a separate
-[resource-search contract](#coinbase-curated-resource-search), including unsigned
-origin attempts and optional paid fallback.
+Only enabled tools and permitted follow-ups are advertised. Neither authored
+endpoint instruction text nor API tool filters grant management authority.
 
 ### Listing and URL discovery
+
+All details modes require remote management. `x402_list_id` is hidden and rejected
+before identity lookup or I/O unless `x402-list` is configured; URL modes work with
+Coinbase-only or empty directory selections.
 
 Given a resource URL such as `https://api.example.com/weather/v2/forecast?city=London`,
 try `provider_details_remote(base_url="https://api.example.com/")` when no API base
@@ -374,7 +387,7 @@ as `documentation_url`.
 With `documentation_url`, `provider_details_remote` reads an exact caller-supplied public
 HTTPS usage-document URL, including its query when present. This is optional;
 sufficient documented method, URL and arguments already permit `raw_call`, and a
-known OpenAPI URL can go directly to `source_add`. A Coinbase `skillUrl` is a lead,
+known OpenAPI URL can go directly to `providers_add_remote`. A Coinbase `skillUrl` is a lead,
 not a verified instruction source. The response labels provenance
 `caller_supplied` and returns `documentation` with the requested URL, content type
 when available, and visible status. `ok` and `empty` include complete `text`;
@@ -421,18 +434,18 @@ invalid content and partial-document rejection do not buy another read. Results
 include URL, candidate kind, GET status, content type and outcome; no synthetic HEAD
 status is reported. Document contents stay server-side. Existing spec/help byte
 and response-read-inactivity limits apply. `verified_openapi` means structural OpenAPI 3 JSON checks passed;
-`source_add` still performs full import validation. `documentation_found` points to
+`providers_add_remote` still performs full import validation. `documentation_found` points to
 concise documentation; `directory_json_unverified` is only an unverified lead.
 Other statuses expose missing, redirected, blocked, invalid, oversized or unavailable
 candidates. Nothing found does not prove the API is unusable.
 
-Probes use a pinned available source-management wallet isolation identity, including
+Probes use a pinned available provider-management wallet isolation identity, including
 listener overrides and Tor remote DNS. Without one, the URL's discovery identity
 keeps unsigned origin retrieval available. Identity selection does not allocate, fund or
 promote a wallet. Directory and probe work remain owned through caller cancellation.
 No new discovery cache or registration is created.
 
-If you already know a published OpenAPI URL, pass it directly to `source_add`;
+If you already know a published OpenAPI URL, pass it directly to `providers_add_remote`;
 `provider_details_remote` is optional. Otherwise it can locate a specification or concise
 provider documentation with a published link. Do not download large OpenAPI
 specifications or full API directories into agent context: import them server-side,
@@ -455,7 +468,7 @@ the key. They are URL-encoded and appended to any existing URL query. A supplied
 body is sent exactly as JSON with `Content-Type: application/json`, including
 explicit `null`; omission sends no body. The wrapper adds no method/body policy.
 
-The tool requires source management and uses its resolved wallet, ordinary payment
+The tool requires `raw_url_calls` and uses the endpoint's existing wallet, ordinary payment
 admission, configured direct/Tor transport and response limits. It creates no
 registration or wallet. API tool-name filters do not restrict it. Existing public
 HTTPS, no-URL-credentials, origin and redirect checks remain server responsibilities;
@@ -472,8 +485,10 @@ invocation is a new logical call and may authorize another payment.
 
 ### Registration and tool invocation
 
-`source_add` accepts exactly one `provider_id` or `spec_url`, plus optional `name`.
-For example, `{"provider_id":"exa"}` registers the bundled Exa definition. A bundled
+`providers_add_local` accepts an exact `provider_id`; `providers_add_remote` accepts
+a public HTTPS OpenAPI 3 JSON `spec_url`. Both accept optional `name` and share
+the same import/commit path under their respective operation permissions.
+For example, `providers_add_local({"provider_id":"exa"})` registers the bundled Exa definition. A bundled
 registration uses its reviewed catalog configuration and acquires its remote or
 embedded schema server-side; it preserves base repair, selections, overrides,
 help, guidance and response mappings without activating provider recommendations.
@@ -482,13 +497,17 @@ No agent-selectable local path or data installation is needed.
 A specification URL first returns any existing generic registration for that
 endpoint and canonical URL unchanged. Otherwise a unique exact match against
 current bundled remote specification URLs selects the bundled definition; multiple
-matches require an explicit provider ID. Other URLs retain generic OpenAPI 3 JSON
+matches require operator resolution, or an available local choice through
+`providers_add_local` when local management is enabled. Remote import does not
+accept a provider-ID escape hatch. Full canonical specification URL matching
+includes significant query components and works even with local management disabled;
+API bases, hostnames and inferred resource paths are not specification matches. Other URLs retain generic OpenAPI 3 JSON
 import, with the API base from the first root server resolved against the spec URL.
 An arbitrary document's `servers` claim never selects a bundled provider.
 It returns `name`, `tool_prefix`, filtered `tool_count`, `status` and `next`; disabled registrations also include `reason`. Bundled results and operator inspection also report the accepted `provider_id` and schema provenance.
 `next` suggests search then invocation only when tools are visible. A disabled
-registration needs operator repair/refresh; repeating `source_add` returns that
-same registration. An enabled registration with zero visible tools retains
+registration needs operator repair/refresh; repeating its accepted selector with
+the corresponding add tool returns that same registration. An enabled registration with zero visible tools retains
 `status="available"` and points to source selections and listener filters. Searching
 without `source_name` can find other endpoint tools, but does not alter operator
 filters or guarantee a callable result.
@@ -533,7 +552,7 @@ their captured binding even during publication/removal. Existing direct MCP tool
 calls use the same name-based semantics. API responses and payment admission remain
 unchanged.
 
-Source management contributes seven definitions. Eager endpoints also advertise
+Enabled capabilities determine the management definitions advertised. Eager endpoints also advertise
 registered API tools, including restored registrations; `discover_on_demand` keeps
 those API definitions out of `tools/list`. HTTP is stateless and does not advertise
 list-change notifications, so clients may cache their inventory. Search/call remains
@@ -578,7 +597,7 @@ the same response and help defaults. Bundled imports preserve the provider's
 configured byte limits and read-inactivity timeout; an omitted provider timeout
 inherits the network default (60 seconds in either transport). Generic imports,
 raw calls and exact usage-document reads inherit the network timeout. There are no
-source-management overrides. Spec, help and API responses have no total HTTP
+provider-management overrides. Spec, help and API responses have no total HTTP
 download deadline.
 
 Management requests have a 64 KiB limit; forwarded API calls retain normal API behavior.

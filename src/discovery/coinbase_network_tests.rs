@@ -19,6 +19,7 @@ struct Fixture {
     // Sequence records distinguish complete workflow replay from signing retries.
     calls: Arc<Mutex<Vec<(String, String)>>>,
     payers: Arc<Mutex<Vec<(String, String)>>>,
+    curation: Arc<Mutex<Vec<(String, String)>>>,
     held: CancellationToken,
     release: CancellationToken,
     terminal_retry: Arc<Mutex<Option<Instant>>>,
@@ -58,7 +59,7 @@ async fn origin(
     assert!(
         fields
             .iter()
-            .any(|(k, v)| k == "curatedOnly" && v == "true")
+            .any(|(k, v)| k == "curatedOnly" && (v == "true" || v == "false"))
     );
     assert!(
         fields
@@ -66,6 +67,15 @@ async fn origin(
             .any(|(k, v)| k == "network" && v == "eip155:8453")
     );
     assert!(fields.iter().any(|(k, v)| k == "scheme" && v == "exact"));
+    f.curation.lock().unwrap().push((
+        q.clone(),
+        fields
+            .iter()
+            .find(|(key, _)| key == "curatedOnly")
+            .unwrap()
+            .1
+            .to_string(),
+    ));
     f.calls.lock().unwrap().push(("origin".into(), q.clone()));
     if let Some(status) = q.strip_prefix("status-") {
         return StatusCode::from_u16(status.parse().unwrap())
@@ -230,13 +240,21 @@ async fn capture_warnings<T>(work: impl std::future::Future<Output = T>) -> (T, 
 }
 
 async fn invoke(m: &Arc<Manager>, owner: &str, q: &str) -> anyhow::Result<Value> {
-    let output = server(m, owner)
-        .invoke(
-            directory::SEARCH,
-            json!({"directory":"coinbase","q":q}).as_object().unwrap(),
-        )
+    let output = m
+        .invoke_coinbase_search(owner, json!({"q":q}).as_object().unwrap(), false)
         .await?;
-    Ok(serde_json::from_str(&output)?)
+    Ok(serde_json::from_str(&output.text)?)
+}
+
+fn coinbase_listeners() -> BTreeMap<String, crate::deployment::ListenerConfig> {
+    let mut configured = listeners(false);
+    for listener in configured.values_mut() {
+        listener.remote_provider_directories = vec![
+            policy::RemoteDirectory::Coinbase,
+            policy::RemoteDirectory::CoinbaseCurated,
+        ];
+    }
+    configured
 }
 
 fn sequence(f: &Fixture, q: &str) -> Vec<String> {
@@ -286,7 +304,7 @@ async fn fixture() {
         Ok(())
     })
     .unwrap();
-    let mut ls = listeners(false);
+    let mut ls = coinbase_listeners();
     ls.get_mut("reader").unwrap().wallet = Some("split".into());
     let payers = [(1, "shared"), (2, "split")]
         .into_iter()
@@ -320,21 +338,21 @@ async fn fixture() {
     // Invalid selectors, listener permission and origin policy cannot spend or connect.
     let before = proxy.accepted.load(Ordering::SeqCst);
     for args in [
-        json!({"directory":"coinbase","mode":"browse"}),
-        json!({"directory":"coinbase","local_only":true}),
-        json!({"directory":"coinbase","page":1}),
-        json!({"directory":"coinbase","wallet":"split"}),
-        json!({"directory":"coinbase","limit":21}),
-        json!({"directory":"coinbase","curated_only":true}),
-        json!({"directory":"coinbase","curated_only":false}),
-        json!({"directory":"coinbase","tags":["Weather"]}),
-        json!({"directory":"coinbase","bundle_slugs":["weather-kit"]}),
-        json!({"directory":"coinbase","extensions":["bazaar"]}),
-        json!({"directory":"coinbase","pay_to":"merchant"}),
-        json!({"directory":"coinbase","url_substring":"api/weather"}),
-        json!({"directory":"coinbase","max_price_usd":-0.05}),
-        json!({"directory":"coinbase","max_price_usd":"0.05"}),
-        json!({"directory":"coinbase","q":"é".repeat(401)}),
+        json!({"mode":"browse"}),
+        json!({"local_only":true}),
+        json!({"page":1}),
+        json!({"wallet":"split"}),
+        json!({"limit":21}),
+        json!({"curated_only":true}),
+        json!({"curated_only":false}),
+        json!({"tags":["Weather"]}),
+        json!({"bundle_slugs":["weather-kit"]}),
+        json!({"extensions":["bazaar"]}),
+        json!({"pay_to":"merchant"}),
+        json!({"url_substring":"api/weather"}),
+        json!({"max_price_usd":-0.05}),
+        json!({"max_price_usd":"0.05"}),
+        json!({"q":"é".repeat(401)}),
     ] {
         assert!(
             server(&m, "writer")
@@ -363,7 +381,7 @@ async fn fixture() {
     );
 
     let unsigned = Manager::new(
-        listeners(false),
+        coinbase_listeners(),
         BTreeMap::from([("shared".into(), PaidClient::unsigned())]),
         Arc::new(CatalogState::default()),
         vec![],
@@ -386,10 +404,7 @@ async fn fixture() {
     let (first, logs) = crate::limits::tests::capture(invoke(&m, "writer", "retry")).await;
     let first = first.unwrap();
     assert!(!logs.contains("WARN"), "successful relay fallback: {logs}");
-    assert_eq!(first["directory"], "coinbase");
-    assert_eq!(first["acquisition"]["via"], "curl");
-    assert_eq!(first["response"], search_response("retry"));
-    eprintln!("Actual Coinbase fixture output: {first}");
+    assert_eq!(first, search_response("retry"));
     assert_eq!(
         sequence(&f, "retry"),
         ["origin", "origin", "origin", "challenge", "signed"]
@@ -499,8 +514,8 @@ async fn fixture() {
         );
         if !enabled {
             assert_eq!(
-                invoke(&configured, "writer", "healthy").await.unwrap()["acquisition"]["via"],
-                "origin"
+                invoke(&configured, "writer", "healthy").await.unwrap(),
+                search_response("healthy")
             );
             assert_eq!(sequence(&f, "healthy"), ["origin"]);
         }
@@ -508,7 +523,7 @@ async fn fixture() {
     // The same directory URL used by a raw API call remains API work.
     let mut raw_url = reqwest::Url::parse(ORIGIN).unwrap();
     raw_url.set_query(
-        super::super::coinbase::request(json!({"q":"raw-directory"}).as_object().unwrap())
+        super::super::coinbase::request(json!({"q":"raw-directory"}).as_object().unwrap(), false)
             .unwrap()
             .query(),
     );
@@ -555,7 +570,7 @@ async fn fixture() {
     };
     let original = selected();
     let promoted = invoke(&m, "writer", "promotion").await.unwrap();
-    assert_eq!(promoted["acquisition"]["via"], "origin");
+    assert_eq!(promoted, search_response("promotion"));
     assert_eq!(sequence(&f, "promotion"), ["origin", "origin"]);
     let winner = selected();
     assert!(
@@ -609,8 +624,7 @@ async fn fixture() {
 
     for q in ["empty", "partial"] {
         let result = invoke(&m, "writer", q).await.unwrap();
-        assert_eq!(result["acquisition"]["via"], "origin");
-        assert_eq!(result["response"], search_response(q));
+        assert_eq!(result, search_response(q));
         assert_eq!(
             sequence(&f, q),
             ["origin"],
@@ -619,7 +633,7 @@ async fn fixture() {
     }
     for q in ["malformed", "nonretry"] {
         let result = invoke(&m, "writer", q).await.unwrap();
-        assert_eq!(result["acquisition"]["via"], "curl");
+        assert_eq!(result, search_response(q));
         assert_eq!(
             sequence(&f, q),
             ["origin", "challenge", "signed"],
@@ -631,7 +645,7 @@ async fn fixture() {
     ] {
         let q = format!("status-{status}");
         let result = invoke(&m, "writer", &q).await.unwrap();
-        assert_eq!(result["acquisition"]["via"], "curl");
+        assert_eq!(result, search_response(&q));
         let attempts = if [400, 403, 408, 429, 500, 502, 503, 504].contains(&status) {
             3
         } else {
@@ -724,9 +738,38 @@ async fn fixture() {
         "runtime failures cannot poison later searches"
     );
 
+    let grouped_start = f.curation.lock().unwrap().len();
+    let grouped: Value = serde_json::from_str(
+        &server(&m, "writer")
+            .invoke(
+                directory::SEARCH,
+                json!({"q":"healthy"}).as_object().unwrap(),
+            )
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        grouped,
+        json!({"coinbase": search_response("healthy"), "coinbase_curated": search_response("healthy")})
+    );
+    let mut scopes: Vec<_> = f.curation.lock().unwrap()[grouped_start..]
+        .iter()
+        .map(|(_, scope)| scope.clone())
+        .collect();
+    scopes.sort();
+    assert_eq!(
+        scopes,
+        ["false", "true"],
+        "each configured scope starts exactly once"
+    );
+
     let held = tokio::spawn({
         let m = m.clone();
-        async move { invoke(&m, "writer", "held").await }
+        async move {
+            m.invoke_search_remote("writer", json!({"q":"held"}).as_object().unwrap())
+                .await
+        }
     });
     tokio::time::timeout(Duration::from_secs(10), f.held.cancelled())
         .await
@@ -759,8 +802,12 @@ async fn fixture() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        sequence(&f, "held"),
-        ["origin", "origin", "origin", "challenge", "signed"]
+        sequence(&f, "held")
+            .iter()
+            .filter(|stage| stage.as_str() == "signed")
+            .count(),
+        2,
+        "both paid directory scopes finish exactly once despite outer cancellation"
     );
 
     let address = |key| {
