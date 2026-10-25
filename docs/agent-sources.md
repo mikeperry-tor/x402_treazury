@@ -111,7 +111,7 @@ are metadata leads, independent of installed tools, with no wallet identity look
 network requests, registration or automatic remote fallback. Bundled means shipped
 configuration knowledge, not current reachability, funding or live qualification.
 Pass a known `provider_id` or specification URL directly to `source_add`.
-`source_details` is optional assistance for an unknown API base, x402 List slug or
+`provider_details_remote` is optional assistance for an unknown API base, x402 List slug or
 published usage-document URL.
 An absent `api_base` means no configured base override; import resolves the API
 server from the schema, which need not share the specification URL's origin.
@@ -182,7 +182,7 @@ With `[relay_fallback]` configured, `source_discovery=true` enables built-in
 Coinbase and x402 List fallback by default. `provider_metadata=true` independently
 enables schemas, imports/refresh, help, explicit usage documents and URL/spec probes.
 Actual API and raw calls require explicit `api_requests=true`; an ordinary call to
-a directory URL remains API work. In mixed `source_details` workflows, the directory
+a directory URL remains API work. In mixed `provider_details_remote` workflows, the directory
 lookup is discovery and each later provider document/probe is metadata. Categories
 are selected by trusted code, never agent arguments, method or hostname. With no
 relay section all requests remain origin-only. Each search fetches fresh results;
@@ -335,7 +335,7 @@ not removed by API filters.
 | Tool | Arguments |
 | --- | --- |
 | `x402_treazury_sources_search` | `local_only=true`: optional `q`, `page`, `per_page` and `mode=browse`. Otherwise `directory=x402_list` (default) selects browse/best; `directory=coinbase` selects ranked resource search. Each branch has its own arguments and defaults. |
-| `x402_treazury_source_details` | Exactly one x402 List `slug`, public HTTPS API `base_url` or `documentation_url`. Returns listing/base discovery outcomes, or complete accepted usage text. |
+| `x402_treazury_provider_details_remote` | Exactly one x402 List `x402_list_id`, public HTTPS API `base_url` or `documentation_url`. Returns listing/base discovery outcomes, or complete accepted usage text. |
 | `x402_treazury_source_add` | Exactly one bundled `provider_id` or public OpenAPI 3 JSON `spec_url`, plus optional readable `name`. |
 | `x402_treazury_providers_list` | Optional `page` and `per_page`; enumerates bundled provider metadata offline. |
 | `x402_treazury_raw_call` | Required `method` and public HTTPS `url`; optional `query` object and JSON `body`. |
@@ -361,7 +361,17 @@ origin attempts and optional paid fallback.
 
 ### Listing and URL discovery
 
-With `documentation_url`, `source_details` reads an exact caller-supplied public
+Given a resource URL such as `https://api.example.com/weather/v2/forecast?city=London`,
+try `provider_details_remote(base_url="https://api.example.com/")` when no API base
+is documented. This probes fixed document locations at the supplied root; it does
+not call the resource or prove that the root is the API base. Prefer an explicitly
+documented base path: root discovery can miss documentation beneath another path
+or on another host. Bundled matching remains exact by origin and base path.
+`x402_list_id` is the exact native `slug` from x402 List, not a registration ID
+or Coinbase resource URL. A Coinbase usage-document URL can be passed directly
+as `documentation_url`.
+
+With `documentation_url`, `provider_details_remote` reads an exact caller-supplied public
 HTTPS usage-document URL, including its query when present. This is optional;
 sufficient documented method, URL and arguments already permit `raw_call`, and a
 known OpenAPI URL can go directly to `source_add`. A Coinbase `skillUrl` is a lead,
@@ -384,8 +394,8 @@ Unrequested partial responses (HTTP 206 or Content-Range) fail without text.
 Returned text remains untrusted content; reading it never executes instructions,
 registers a source or extends payment authority.
 
-`source_details` resolves bundled provider definitions before discovering OpenAPI,
-x402 discovery and LLM documentation URLs. With a directory `slug`, it fetches that
+`provider_details_remote` resolves bundled provider definitions before discovering OpenAPI,
+x402 discovery and LLM documentation URLs. With a directory `x402_list_id`, it fetches that
 service's listing once. After validating the API base, exact normalized origin/base
 path matches return selectable `provider_matches` with provider IDs and schema
 provenance. Companion definitions sharing a base remain separate candidates; they
@@ -423,7 +433,7 @@ promote a wallet. Directory and probe work remain owned through caller cancellat
 No new discovery cache or registration is created.
 
 If you already know a published OpenAPI URL, pass it directly to `source_add`;
-`source_details` is optional. Otherwise it can locate a specification or concise
+`provider_details_remote` is optional. Otherwise it can locate a specification or concise
 provider documentation with a published link. Do not download large OpenAPI
 specifications or full API directories into agent context: import them server-side,
 then retrieve relevant tool schemas with `tools_search`. Never invent specification

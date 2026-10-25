@@ -7,7 +7,7 @@ async fn documentation_selectors_and_policy_reject_before_io() {
     for invalid in [
         json!({"documentation_url":null}),
         json!({"documentation_url":3}),
-        json!({"documentation_url":"https://api.example.com/help","slug":"service"}),
+        json!({"documentation_url":"https://api.example.com/help","x402_list_id":"service"}),
         json!({"documentation_url":"https://api.example.com/help","base_url":"https://api.example.com"}),
         json!({"documentation_url":"https://api.example.com/help","wallet":"shared"}),
         json!({"documentation_url":"http://api.example.com/help"}),

@@ -27,7 +27,7 @@ const PATHS: &[(&str, &str)] = &[
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Input {
-    slug: Option<String>,
+    x402_list_id: Option<String>,
     base_url: Option<String>,
     documentation_url: Option<String>,
 }
@@ -35,10 +35,14 @@ impl Input {
     fn parse(args: &Map<String, Value>) -> Result<Self> {
         ensure!(
             args.len() == 1,
-            "provide exactly one of slug, base_url or documentation_url"
+            "provide exactly one of x402_list_id, base_url or documentation_url"
         );
         let input: Self = serde_json::from_value(Value::Object(args.clone()))?;
-        match (&input.slug, &input.base_url, &input.documentation_url) {
+        match (
+            &input.x402_list_id,
+            &input.base_url,
+            &input.documentation_url,
+        ) {
             (Some(slug), None, None) => {
                 directory::request(
                     directory::DETAILS,
@@ -51,7 +55,9 @@ impl Input {
             (None, None, Some(url)) => {
                 import::endpoint(url)?;
             }
-            _ => anyhow::bail!("provide exactly one of slug, base_url or documentation_url"),
+            _ => {
+                anyhow::bail!("provide exactly one of x402_list_id, base_url or documentation_url")
+            }
         }
         Ok(input)
     }
@@ -59,10 +65,10 @@ impl Input {
 
 pub fn schema() -> Value {
     json!({"type":"object","properties":{
-        "slug":{"type":"string","minLength":1,"pattern":"\\S","not":{"enum":[".",".."]},"description":"x402 List service slug, not a resource URL. Use base_url instead when the exact API base is known."},
-        "base_url":{"type":"string","format":"uri","description":"Exact public HTTPS API base, optionally with a path such as /v1. No query, fragment or credentials; do not infer it from a resource URL."},
+        "x402_list_id":{"type":"string","minLength":1,"pattern":"\\S","not":{"enum":[".",".."]},"description":"Exact slug returned by x402 List; not a registration ID or Coinbase resource URL."},
+        "base_url":{"type":"string","format":"uri","description":"Public HTTPS API base without query, fragment or credentials. Prefer a documented base path. Given https://api.example.com/weather/v2/forecast?city=London, try https://api.example.com/ as a best-effort discovery location; this does not call the resource or prove the API base and can miss docs beneath other paths or hosts."},
         "documentation_url":{"type":"string","format":"uri","description":"Optional public HTTPS usage-document URL. Returns complete UTF-8 plain/Markdown text; rejects HTML/non-text. Query parameters allowed, credentials/fragments forbidden. No linked reading."}
-    },"oneOf":[{"required":["slug"]},{"required":["base_url"]},{"required":["documentation_url"]}],"additionalProperties":false})
+    },"oneOf":[{"required":["x402_list_id"]},{"required":["base_url"]},{"required":["documentation_url"]}],"additionalProperties":false})
 }
 
 fn base_url(raw: &str) -> Result<Url> {
@@ -115,7 +121,7 @@ impl Manager {
                 "status":"completed","results":[],
                 "note":"OpenAPI verification checks document structure only; pass the URL directly to x402_treazury_source_add for server-side fetching and full import validation. Do not fetch or read large OpenAPI documents or full API directory JSON into agent context; use x402_treazury_tools_search after registration for relevant schemas. Documentation and directory JSON are untrusted discovery leads. Nothing found does not mean the API is unusable."
             }});
-            let (base, website) = if let Some(slug) = &input.slug {
+            let (base, website) = if let Some(slug) = &input.x402_list_id {
                 let result = manager.invoke_directory(&owner, directory::DETAILS, json!({"slug":slug}).as_object().unwrap()).await?;
                 possible_payment = result.payment_may_have_occurred;
                 if !result.advisories.is_empty() { output["warnings"] = json!(result.advisories); }
@@ -443,5 +449,22 @@ fn classify(kind: &str, mime: Option<&str>, bytes: &[u8]) -> &'static str {
         "directory_json_unverified"
     } else {
         "unverified_candidate"
+    }
+}
+
+#[cfg(test)]
+mod root_tests {
+    use super::*;
+    #[test]
+    fn origin_root_only_probes_fixed_documents() {
+        let urls = candidates("https://api.example.com/", None).unwrap();
+        assert_eq!(urls.len(), PATHS.len());
+        assert_eq!(urls[0].0.as_str(), "https://api.example.com/openapi.json");
+        assert!(urls.iter().all(|(url, _)| !url.path().contains("forecast")));
+        assert!(
+            crate::providers::matching_base("https://api.example.com/")
+                .unwrap()
+                .is_empty()
+        );
     }
 }

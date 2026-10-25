@@ -626,7 +626,7 @@ unsolicited `206`/`Content-Range`, local byte bounds and destination rejection n
 purchase another read. Only consumer-validated complete content promotes an origin
 transport. Relay content cannot promote it.
 
-`source_details(documentation_url=...)` returns complete accepted usage text.
+`provider_details_remote(documentation_url=...)` returns complete accepted usage text.
 Base/slug discovery validates one GET per fixed, deduplicated candidate, keeping
 four candidates in flight. It uses the available source-management documentation
 identity, pinned for a batch; absent identity leaves origin retrieval available

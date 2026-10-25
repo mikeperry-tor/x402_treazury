@@ -137,7 +137,7 @@ or input schemas.
 With `source_management = true`, `x402_treazury_providers_list` enumerates this
 catalog, and `sources_search(local_only=true)` filters it without vendor requests
 or wallet work. Both return selectable `provider_id` values for `source_add`;
-`source_details` resolves exact declared API bases into the same candidates.
+`provider_details_remote` resolves exact declared API bases into the same candidates.
 Registering by ID uses the reviewed configuration and embedded or remote schema.
 A unique exact current remote specification URL also resolves that definition,
 while existing generic URL registrations retain their accepted behavior. Unknown

@@ -117,7 +117,7 @@ pub(super) fn parse_response(bytes: &[u8]) -> Result<Value> {
 fn output(response: Value, via: &str) -> Result<ToolOutput> {
     Ok(ToolOutput::text(serde_json::to_string(&json!({
         "directory":"coinbase", "acquisition":{"via":via}, "response":response,
-        "guidance":"Resource metadata, not registered tools. Use exact documented HTTP requests with raw_call, published OpenAPI URLs with source_add, or optional usage URLs with source_details. Never guess missing methods/arguments or infer API bases; MCP/unknown protocols remain metadata only. Partial/empty results do not prove absence. Price/curation does not guarantee delivery. Remote search may charge; do not automatically repeat failed paid calls."
+        "guidance":"Resource metadata, not registered tools. Use exact documented HTTP requests with raw_call, published OpenAPI URLs with source_add, or optional usage URLs with provider_details_remote. Never guess missing methods/arguments or infer API bases; MCP/unknown protocols remain metadata only. Partial/empty results do not prove absence. Price/curation does not guarantee delivery. Remote search may charge; do not automatically repeat failed paid calls."
     }))?))
 }
 

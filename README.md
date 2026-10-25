@@ -459,7 +459,7 @@ An enabled endpoint advertises these seven tools to the agent:
 | Tool | How the agent uses it | Main inputs |
 | --- | --- | --- |
 | `x402_treazury_sources_search` | Searches bundled providers offline, x402 List, or Coinbase resources. | `local_only=true` with query/pagination; otherwise `directory` defaults to `x402_list`, or select `coinbase` for ranked curated search. |
-| `x402_treazury_source_details` | Resolves bundled matches, locates specifications/help, or reads exact usage text. | Exactly one x402 List `slug`, public HTTPS API `base_url`, or `documentation_url`. |
+| `x402_treazury_provider_details_remote` | Resolves bundled matches, locates specifications/help, or reads exact usage text. | Exactly one x402 List `x402_list_id`, public HTTPS API `base_url`, or `documentation_url`. |
 | `x402_treazury_source_add` | Registers an API on this endpoint so its tools become available. | Exactly one bundled `provider_id` or public OpenAPI `spec_url`, plus optional `name`. |
 | `x402_treazury_providers_list` | Enumerates bundled provider metadata offline. | Optional `page` and `per_page`. |
 | `x402_treazury_tools_search` | Retrieves relevant tool descriptions, argument schemas and readable IDs. | Optional query, registered `source_name` and pagination. |
@@ -477,7 +477,7 @@ For Coinbase resources, use `{"directory":"coinbase","q":"weather","limit":3}`.
 Results preserve complete upstream metadata and partial-result indicators, with no
 pagination. Sufficient documented HTTP metadata can go directly to `raw_call`;
 an OpenAPI URL can go directly to `source_add`. A published usage link can optionally
-be read with `source_details(documentation_url=...)`. Configured relay fallback
+be read with `provider_details_remote(documentation_url=...)`. Configured relay fallback
 can charge for that read. Missing contracts remain missing: do not guess paid arguments.
 
 Coinbase origin search needs no API key. Tor uses one origin attempt plus

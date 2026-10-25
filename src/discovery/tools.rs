@@ -24,7 +24,7 @@ pub fn definitions(enabled: bool) -> Vec<Tool> {
     let directory_schema = super::directory::search_schema();
     let mut add_schema = object(
         json!({
-            "provider_id":{"type":"string","minLength":1,"description":"Bundled ID from providers_list, local_only search or source_details. Supply this or spec_url."},
+            "provider_id":{"type":"string","minLength":1,"description":"Bundled ID from providers_list, local_only search or provider_details_remote. Supply this or spec_url."},
             "spec_url":{"type":"string","description":"Public HTTPS OpenAPI 3 JSON URL, not an API base or usage document. Known URLs may use bundled settings; existing registrations are reused. Ambiguous matches require provider_id. Supply this or provider_id."},
             "name":{"type":"string","description":"Optional case-sensitive registration name: up to 64 ASCII letters/digits/underscores/hyphens; no double underscores. Used by source_name and dyn_<name>__ tools. Defaults to provider ID or hostname, with a suffix on collision."}
         }),
@@ -33,7 +33,7 @@ pub fn definitions(enabled: bool) -> Vec<Tool> {
     add_schema["oneOf"] = json!([{"required":["provider_id"]},{"required":["spec_url"]}]);
     [
         (super::directory::SEARCH, "Find APIs in three collections:\n- Curated: directory=\"coinbase\" (no pagination).\n- Broader directory: x402 List, directory=\"x402_list\" (default); mode=browse pages results, mode=best ranks recommendations.\n- Local: local_only=true searches bundled providers offline with the same BM25 matching as tools_search.\nRegister a known provider_id/spec_url with source_add, or use raw_call for documented requests. Use tools_search for already callable tools. Remote searches may charge; do not automatically repeat failed paid calls. Cite x402-list.com for its CC BY 4.0 data.".into(), directory_schema),
-        (super::source_details::NAME, "Optional assistance: use an x402 List slug or exact API base_url to locate bundled providers, specifications and help. Use documentation_url to read complete plain/Markdown usage text; HTML/non-text is rejected. Known provider_id/spec_url goes directly to source_add. Returns locations or text, not registered tools or proof of reachability. Missing information does not make an API unusable. Lookups may charge; do not automatically repeat failed paid lookups.".into(), super::source_details::schema()),
+        (super::source_details::NAME, "Optional assistance: use an exact x402 List ID or exact API base_url to locate bundled providers, specifications and help. Use documentation_url to read complete plain/Markdown usage text; HTML/non-text is rejected. Known provider_id/spec_url goes directly to source_add. Returns locations or text, not registered tools or proof of reachability. Missing information does not make an API unusable. Lookups may charge; do not automatically repeat failed paid lookups.".into(), super::source_details::schema()),
         ("x402_treazury_source_add", "Register directly with one bundled provider_id or public HTTPS OpenAPI 3 JSON spec_url, plus optional name. Pass specification URLs here instead of downloading large OpenAPI documents into context. Repeated registrations reuse the existing source. When visible tools are returned, inspect them with tools_search(source_name=returned name), then use tool_call on this same MCP endpoint. Help is optional. Unknown cost is not free; registration does not prove paid delivery.".into(), add_schema),
 
         (super::local::NAME, "List bundled providers offline; pass a provider_id directly to source_add. Returns addable metadata and pagination, independently of registered tools. Use tools_search for currently callable APIs. An absent api_base means no configured base override: import uses the schema server, not the specification URL origin. Listing makes no network requests and does not establish reachability or paid delivery.".into(), super::local::list_schema()),
@@ -180,7 +180,7 @@ mod guidance_tests {
         assert!(local.contains("schema server, not the specification URL origin"));
         let details = description(super::super::source_details::NAME);
         assert!(details.starts_with("Optional assistance"));
-        assert!(details.contains("x402 List slug"));
+        assert!(details.contains("x402 List ID"));
         assert!(details.contains("documentation_url"));
         assert!(details.contains("HTML/non-text"));
         assert!(description("x402_treazury_source_add").starts_with("Register directly"));

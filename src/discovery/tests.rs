@@ -719,7 +719,7 @@ async fn endpoint_local_add_is_duplicate_safe_and_tools_are_minimal() {
     for name in [
         "providers_list",
         "sources_search",
-        "source_details",
+        "provider_details_remote",
         "source_add",
         "raw_call",
         "tools_search",
@@ -1533,7 +1533,7 @@ async fn directory_payment_fixture() {
             directory::SEARCH,
             json!({"mode":"best","q":"weather","limit":3}),
         ),
-        (directory::DETAILS, json!({"slug":"weather"})),
+        (directory::DETAILS, json!({"x402_list_id":"weather"})),
         (
             raw::NAME,
             json!({"method":"GET","url":"https://api.example.com/api/v1/services?existing=yes","query":{"q":"a & b","tags":["one","two"],"enabled":true,"limit":2}}),
@@ -1849,7 +1849,7 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
     );
     let result = invoke(
         directory::DETAILS,
-        json!({"slug":"vendor/weather?region=UK"}),
+        json!({"x402_list_id":"vendor/weather?region=UK"}),
     )
     .await;
     let parsed: Value =
@@ -1876,6 +1876,8 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
         (directory::SEARCH, json!({"mode":"invalid"})),
         (directory::SEARCH, json!({"q":null})),
         (directory::SEARCH, json!({"per_page":101})),
+        ("x402_treazury_source_details", json!({"slug":"weather"})),
+        (directory::DETAILS, json!({"slug":"weather"})),
         (directory::DETAILS, json!({"slug":""})),
         (directory::DETAILS, json!({"slug":".."})),
         (directory::DETAILS, json!({"slug":"."})),

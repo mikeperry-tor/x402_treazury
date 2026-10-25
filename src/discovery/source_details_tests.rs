@@ -27,10 +27,11 @@ async fn input_and_listener_authority_precede_io() {
     }
     for args in [
         json!({}),
-        json!({"slug":null}),
-        json!({"slug":""}),
-        json!({"slug":".."}),
-        json!({"slug":"vendor","base_url":"https://api.example.com"}),
+        json!({"slug":"vendor"}),
+        json!({"x402_list_id":null}),
+        json!({"x402_list_id":""}),
+        json!({"x402_list_id":".."}),
+        json!({"x402_list_id":"vendor","base_url":"https://api.example.com"}),
         json!({"base_url":"https://api.example.com","wallet":"other"}),
         json!({"base_url":"https://api.example.com?secret=1"}),
         json!({"base_url":"http://api.example.com"}),
@@ -96,7 +97,7 @@ async fn directory_listing_survives_unavailable_url_discovery() {
         ),
     ] {
         let result = m
-            .invoke_source_details("writer", json!({"slug":slug}).as_object().unwrap())
+            .invoke_source_details("writer", json!({"x402_list_id":slug}).as_object().unwrap())
             .await
             .unwrap();
         assert_eq!(result["listing"], listing);
@@ -203,7 +204,7 @@ async fn fixture() {
     *m.fixture_directory.lock().unwrap() = Some("https://api.example.com/directory".into());
     for (owner, args) in [
         ("writer", json!({"base_url":"https://api.example.com/v1"})),
-        ("reader", json!({"slug":"vendor"})),
+        ("reader", json!({"x402_list_id":"vendor"})),
     ] {
         let output = server(&m, owner)
             .invoke(source_details::NAME, args.as_object().unwrap())
@@ -211,7 +212,7 @@ async fn fixture() {
             .unwrap();
         let doc: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(doc["url_discovery"]["status"], "completed");
-        if args.get("slug").is_some() {
+        if args.get("x402_list_id").is_some() {
             assert_eq!(
                 doc["listing"]["data"]["base_url"],
                 "https://api.example.com/v1"
@@ -221,7 +222,7 @@ async fn fixture() {
         }
         assert_eq!(
             doc["url_discovery"]["website_status"],
-            if args.get("slug").is_some() {
+            if args.get("x402_list_id").is_some() {
                 "rejected_by_url_or_origin_policy"
             } else {
                 "not_provided"
@@ -322,4 +323,12 @@ async fn fixture() {
     }
     assert!(m.inner.lock().unwrap().state.records.is_empty());
     task.abort();
+}
+
+#[test]
+fn details_schema_and_root_candidates_preserve_public_contract() {
+    let schema = source_details::schema();
+    assert!(schema["properties"].get("slug").is_none());
+    assert!(schema["properties"].get("x402_list_id").is_some());
+    assert_ne!(source_details::NAME, "x402_treazury_source_details");
 }

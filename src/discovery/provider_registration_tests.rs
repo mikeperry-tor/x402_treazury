@@ -256,7 +256,10 @@ async fn curated_details_preserve_the_single_directory_listing() {
     let m = manager(None).await;
     *m.fixture_directory.lock().unwrap() = Some(format!("http://{address}"));
     let output = m
-        .invoke_source_details("writer", json!({"slug":"vendor"}).as_object().unwrap())
+        .invoke_source_details(
+            "writer",
+            json!({"x402_list_id":"vendor"}).as_object().unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(output["listing"], listing);

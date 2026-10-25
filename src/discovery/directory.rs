@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 pub const BASE: &str = "https://x402-list.com/api/v1";
 pub const SEARCH: &str = "x402_treazury_sources_search";
-pub const DETAILS: &str = "x402_treazury_source_details";
+pub const DETAILS: &str = "x402_treazury_provider_details_remote";
 
 pub fn tool(path: &str) -> &'static ToolSpec {
     static TOOLS: OnceLock<Vec<ToolSpec>> = OnceLock::new();

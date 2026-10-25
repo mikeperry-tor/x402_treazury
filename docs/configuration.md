@@ -842,7 +842,7 @@ before pagination. Both support `page`
 those pagination fields and omitted or `browse` mode; directory filters/ranking are
 rejected before I/O. These tools perform no wallet or network work and never fall
 back to the remote directory. Omitted or false `local_only` retains remote search.
-Known IDs or specification URLs go directly to `source_add`; `source_details` is
+Known IDs or specification URLs go directly to `source_add`; `provider_details_remote` is
 optional assistance for unknown providers. An absent `api_base` means no configured
 base override: import uses the schema's API server, not the specification URL's
 origin. Metadata lists addable providers; live `tools_search` enumerates callable
@@ -859,7 +859,17 @@ preserves provider compatibility settings and embedded schemas, defaults its nam
 to the short ID (`exa` produces `dyn_exa__search`), and grants no funding or extra
 payment authority. Operator destination policy still applies.
 
-`x402_treazury_source_details` resolves exact bundled provider matches before
+Given a resource URL such as `https://api.example.com/weather/v2/forecast?city=London`,
+try `provider_details_remote(base_url="https://api.example.com/")` when no API base
+is documented. This probes fixed document locations at the supplied root; it does
+not call the resource or prove that the root is the API base. Prefer an explicitly
+documented base path: root discovery can miss documentation beneath another path
+or on another host. Bundled matching remains exact by origin and base path.
+`x402_list_id` is the exact native `slug` from x402 List, not a registration ID
+or Coinbase resource URL. A Coinbase usage-document URL can be passed directly
+as `documentation_url`.
+
+`x402_treazury_provider_details_remote` resolves exact bundled provider matches before
 probing specification/documentation URLs, from exactly one directory slug or HTTPS
 API base URL. Matches return IDs and schema provenance, skip speculative provider
 requests and make no live reachability/qualification claim. A slug causes one
@@ -870,7 +880,7 @@ identity is pinned; without it the URL's discovery identity keeps origin retriev
 available. No wallet is allocated or funded for probes. Configured on-demand
 fallback can charge for blocked document retrieval.
 
-Alternatively, `source_details(documentation_url=...)` reads one exact public HTTPS
+Alternatively, `provider_details_remote(documentation_url=...)` reads one exact public HTTPS
 usage-document URL, allowing a query. This selector is exclusive with slug/base.
 It uses the shared unsigned origin sequence with source-management identity,
 transport, public-destination policy, shared help-byte default and network response inactivity. Configured
@@ -1375,7 +1385,7 @@ payer. Enabling metadata permits paid catalog fallback during ordinary serving a
 explicit non-direct warming. Inspection remains unsigned, `--direct` warming
 bypasses relays, and no warming starts automatically.
 
-A mixed `source_details` call applies discovery permission to its directory lookup
+A mixed `provider_details_remote` call applies discovery permission to its directory lookup
 and metadata permission to each later provider document/probe. Help remains
 metadata when invoked through a tool wrapper. No agent argument can override a
 category, and an application search API remains API work. Metadata contains no API

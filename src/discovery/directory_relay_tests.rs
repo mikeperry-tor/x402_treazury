@@ -169,7 +169,7 @@ async fn directory_relay_fixture() {
     ] {
         let before = paid_calls.lock().unwrap().len();
         let value = manager
-            .invoke_source_details("writer", json!({"slug":slug}).as_object().unwrap())
+            .invoke_source_details("writer", json!({"x402_list_id":slug}).as_object().unwrap())
             .await
             .unwrap();
         assert_eq!(value["url_discovery"]["status"], status, "{value}");
@@ -191,7 +191,7 @@ async fn directory_relay_fixture() {
     let before = paid_calls.lock().unwrap().len();
     for slug in ["positive", "empty", "metadata"] {
         let value = manager
-            .invoke_source_details("writer", json!({"slug":slug}).as_object().unwrap())
+            .invoke_source_details("writer", json!({"x402_list_id":slug}).as_object().unwrap())
             .await
             .unwrap();
         assert_eq!(value["url_discovery"]["status"], "missing_api_base_url");
@@ -286,7 +286,10 @@ async fn directory_relay_fixture() {
             *m.fixture_directory.lock().unwrap() = Some("https://api.example.com/api/v1".into());
             let before = paid_calls.lock().unwrap().len();
             let details = m
-                .invoke_source_details("writer", json!({"slug":"mixed"}).as_object().unwrap())
+                .invoke_source_details(
+                    "writer",
+                    json!({"x402_list_id":"mixed"}).as_object().unwrap(),
+                )
                 .await;
             if discovery {
                 let details = details.unwrap();
@@ -354,7 +357,10 @@ async fn directory_relay_fixture() {
             );
             // Healthy origin results are usable even when their relay category is disabled.
             let healthy = m
-                .invoke_source_details("writer", json!({"slug":"positive"}).as_object().unwrap())
+                .invoke_source_details(
+                    "writer",
+                    json!({"x402_list_id":"positive"}).as_object().unwrap(),
+                )
                 .await
                 .unwrap();
             assert_eq!(healthy["listing"]["service"]["name"], "Origin listing");
