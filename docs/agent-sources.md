@@ -198,6 +198,30 @@ See [relay configuration](configuration.md#relay-fallback) for settings,
 precedence and trust. Local input/origin/identity/download-limit failures
 never authorize relay spending. No Coinbase challenge is signed.
 
+## Tool documentation
+
+Agent-facing tool descriptions should briefly explain what the tool does, when
+to use it and how to use its results. Include request, payment or retry constraints
+when they affect the caller's decision or correct use. Describe only available
+actions and inputs. Keep implementation details, maintainer rationale and repeated
+workflow explanations in the owning guides rather than tool context.
+
+Document every parameter in the same concise, task-focused style: its meaning,
+expected value or format, and omission/default behavior and interactions where
+they matter. Use schema types, required fields, enums and bounds for structural
+constraints; avoid restating those mechanically in prose. Prefer one useful
+example over a long explanation when a value would otherwise be ambiguous.
+
+Local-provider help should identify locally bundled definitions and their
+compatibility filters and repairs for supported API contracts. This describes
+reviewed compatibility work; it does not establish current upstream availability
+or universal paid-delivery qualification. Keep claims within the evidence and avoid
+repeating generic caveats in each tool and parameter.
+
+Review new and changed help together with its parameter descriptions. Prune
+unnecessary internal details and repetition before delivery; preserve information
+needed for valid requests and correct interpretation of results.
+
 ## Endpoint instruction placement
 
 Each `[servers.NAME]` can customize three instruction surfaces:

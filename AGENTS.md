@@ -48,6 +48,12 @@ USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
   failure or authored transformation; use small faithful inputs and shared
   synthetic tests instead of universal inventory/settings snapshots in
   fixtures and tests.
+- Keep agent-facing tool descriptions and every parameter description concise,
+  consistent and focused on selecting and using the API successfully. Explain
+  purpose, inputs, useful results and constraints that affect the caller's next
+  action; omit internal implementation details and repeated boilerplate. Keep
+  maintainer rationale in owning guides. Follow the
+  [tool documentation policy](docs/agent-sources.md#tool-documentation).
 
 Follow the [provider policy](providers/README.md#provider-policy),
 [selection semantics](docs/configuration.md) and
