@@ -949,14 +949,13 @@ impl PaidClient {
             .map_err(Failure::local)?;
         let participating_tor = self.selection == crate::network::SelectionPolicy::Participating
             && factory.policy.mode == crate::network::Mode::Tor;
-        let enrolled_method = matches!(request.method().as_str(), "GET" | "HEAD")
+        // Manual writes can act without a payment gate. Only their TLS setup
+        // failures retain ordinary recovery; never retry their status/body.
+        let response_replay = matches!(request.method().as_str(), "GET" | "HEAD")
             || (!private && request.method() == reqwest::Method::POST);
-        let runtime_relay = !private && enrolled_method && self.request_relay().is_some();
-        let common_transport = self.relay_call || enrolled_method;
-        let collect_unsigned = (runtime_relay
-            || (participating_tor
-                && (!private || enrolled_method)
-                && (common_transport || request.url().scheme() == "https")))
+        let runtime_relay = !private && response_replay && self.request_relay().is_some();
+        let common_transport = self.relay_call || response_replay;
+        let collect_unsigned = (runtime_relay || (participating_tor && common_transport))
             .then_some((self.max_response_bytes, unsigned_only));
         let acquired = acquisition::run(
             factory,
@@ -985,11 +984,13 @@ impl PaidClient {
                 )
                 .await
                 .map_err(|error| {
-                    // Preserve other methods' existing TLS-only recovery. Public
-                    // GET/HEAD and authorized unsigned x402 POST share the classifier.
-                    let ordinary_retry = error
-                        .downcast_ref::<reqwest::Error>()
-                        .is_some_and(crate::network::tls_failure);
+                    // TLS can fail after a write executes, even before response
+                    // headers arrive. Only connection setup proves this attempt
+                    // could not have delivered the request.
+                    let ordinary_retry =
+                        error.downcast_ref::<reqwest::Error>().is_some_and(|error| {
+                            error.is_connect() && crate::network::tls_failure(error)
+                        });
                     let mut failure = if error.is::<IncompleteRelayResponse>() {
                         Failure::validation(error)
                     } else {
@@ -1008,7 +1009,7 @@ impl PaidClient {
                     && status != reqwest::StatusCode::PAYMENT_REQUIRED;
                 if relay_rejected
                     || (participating_tor
-                        && (!private || enrolled_method)
+                        && response_replay
                         && crate::network::eligible_retry_status(status))
                     || (runtime_relay && acquisition::blocking_status(status.as_u16()))
                 {

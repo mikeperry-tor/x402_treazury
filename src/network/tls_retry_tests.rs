@@ -2,9 +2,9 @@
 use super::*;
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode, Uri},
+    http::{HeaderMap, Method, StatusCode, Uri},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{any, get, post},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
@@ -43,6 +43,7 @@ struct Listener {
     body: Arc<BodyFault>,
     http1: bool,
     handshake_eofs: Arc<AtomicUsize>,
+    header_faults: Arc<AtomicUsize>,
 }
 struct BodyFault {
     connections: AtomicUsize,
@@ -142,12 +143,14 @@ impl axum::serve::Listener for Listener {
                 continue;
             }
             let handshake = Arc::new(AtomicBool::new(false));
-            let corrupt = self.http1 && !take(&self.body.skip) && take(&self.body.connections);
+            let corrupt_headers = self.http1 && take(&self.header_faults);
+            let corrupt = corrupt_headers
+                || (self.http1 && !take(&self.body.skip) && take(&self.body.connections));
             let socket = Socket {
                 tcp: socket,
                 handshake: handshake.clone(),
                 corrupt,
-                first_write: false,
+                first_write: corrupt_headers,
                 body: self.body.clone(),
             };
             let bad = take(&self.remaining);
@@ -193,6 +196,22 @@ struct StateData {
     signed_tls_failure: Arc<AtomicUsize>,
     body: Arc<BodyFault>,
     handshake_eofs: Arc<AtomicUsize>,
+    header_faults: Arc<AtomicUsize>,
+}
+async fn write(
+    State(s): State<StateData>,
+    method: Method,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response {
+    assert_eq!(body, json!({"action":"execute"}));
+    assert!(!headers.contains_key("payment-signature"));
+    if let Some(value) = headers.get("authorization") {
+        assert_eq!(value, "Bearer write-secret");
+        assert_eq!(headers["idempotency-key"], "caller-write-key");
+    }
+    s.calls.lock().unwrap().push(format!("write:{method}"));
+    "write executed".into_response()
 }
 async fn catalog(State(s): State<StateData>) -> Response {
     s.calls.lock().unwrap().push("catalog".into());
@@ -297,9 +316,11 @@ async fn serve(
     let address = tcp.local_addr().unwrap();
     let body = s.body.clone();
     let handshake_eofs = s.handshake_eofs.clone();
+    let header_faults = s.header_faults.clone();
     let app = axum::Router::new()
         .route("/catalog", get(catalog))
         .route("/api", get(api))
+        .route("/write", any(write))
         .route("/base", post(base))
         .route("/signed", get(signed))
         .route("/body-free", get(body_response))
@@ -319,6 +340,7 @@ async fn serve(
         body,
         http1,
         handshake_eofs,
+        header_faults,
     };
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -578,8 +600,92 @@ async fn fixture() {
         signed_address.port(),
     )
     .await;
+    write_cases(&state, &signed_connections, tor, signed_address.port()).await;
     server.abort();
     signed_server.abort();
+}
+
+async fn write_cases(state: &StateData, connections: &AtomicUsize, tor: bool, direct_port: u16) {
+    for (index, (method, private)) in [
+        ("POST", true),
+        ("PUT", true),
+        ("PATCH", true),
+        ("DELETE", true),
+        ("PUT", false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for handshake in [true, false] {
+            state.calls.lock().unwrap().clear();
+            state.body.connections.store(0, Ordering::SeqCst);
+            state.body.responses.store(0, Ordering::SeqCst);
+            state
+                .handshake_eofs
+                .store(usize::from(handshake), Ordering::SeqCst);
+            state
+                .header_faults
+                .store(usize::from(!handshake), Ordering::SeqCst);
+            let before = connections.load(Ordering::SeqCst);
+            let flipped = state.body.flipped.load(Ordering::SeqCst);
+            // Separate origins prevent an earlier pooled connection from hiding
+            // the deliberate handshake or first-response-record failure.
+            let port = if tor {
+                21000 + index as u16 * 2 + u16::from(handshake)
+            } else {
+                direct_port
+            };
+            let route = crate::catalog::RoutedRequest {
+                headers: Default::default(),
+                method: method.into(),
+                url: format!("https://spec.example.com:{port}/write"),
+                query: Default::default(),
+                body: Some(json!({"action":"execute"})),
+            };
+            let client = crate::payment::PaidClient::new(
+                crate::payment::Payer::new(
+                    &format!("{:064x}", 173 + index),
+                    crate::payment::SpendPolicy::dollars("1").unwrap(),
+                )
+                .unwrap(),
+            )
+            .with_transport(HttpPolicy::COMPATIBLE);
+            let result = if private {
+                client.execute_manual_raw(
+                    route,
+                    crate::discovery::raw::ManualRawHeaders::parse(Some(&json!({
+                        "Authorization":"Bearer write-secret", "Idempotency-Key":"caller-write-key"
+                    }))).unwrap(),
+                ).await.map(|_| ())
+            } else {
+                client.execute_response(route).await.map(|_| ())
+            };
+            client.drain().await;
+            let recovered = handshake && tor && global().max_http_attempts(false) > 1;
+            assert_eq!(
+                result.is_ok(),
+                recovered,
+                "{method} private={private} handshake={handshake}"
+            );
+            assert_eq!(
+                connections.load(Ordering::SeqCst) - before,
+                1 + usize::from(recovered)
+            );
+            assert_eq!(
+                state.body.flipped.load(Ordering::SeqCst) - flipped,
+                usize::from(!handshake),
+                "actual first response TLS record was corrupted"
+            );
+            let calls = state.calls.lock().unwrap();
+            let expected_calls = usize::from(!handshake || recovered);
+            assert_eq!(
+                calls.len(),
+                expected_calls,
+                "an executed write cannot replay after a TLS response failure"
+            );
+            assert!(calls.iter().all(|call| call == &format!("write:{method}")));
+        }
+    }
 }
 
 async fn body_cases(

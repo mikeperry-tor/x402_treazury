@@ -486,11 +486,12 @@ invocation is a new logical call and may authorize another payment.
 #### Manual raw headers
 
 Optional `headers` is an object of HTTP header names and string values. Supply
-only headers documented by the API, including custom `X-*` and a caller-owned
-`Idempotency-Key`. Omitted or empty headers retain ordinary raw-call behavior.
-Authorization is currently reserved, as are Accept, Content-Type, cookies,
-HTTP transport/proxy/framing and x402 protocol headers. Names and values are
-validated before I/O; case-insensitive duplicates and nonstring values fail.
+only headers documented by the API, including custom `X-*`, explicit
+`Authorization` (for example `Bearer example-token`) and a caller-owned
+`Idempotency-Key`. No OpenAPI registration is required. Omitted or empty headers
+retain ordinary raw-call behavior. Accept, Content-Type, cookies, HTTP
+transport/proxy/framing and x402 protocol headers remain reserved. Names and values
+are validated before I/O; case-insensitive duplicates and nonstring values fail.
 MCP supplies an already parsed JSON object: exact duplicate JSON keys have already
 collapsed and cannot be detected here. Case variants remain detectable.
 
@@ -500,8 +501,10 @@ its initially selected existing payer. A price handoff or recognized insufficien
 funds stops the operation before another wallet's I/O, retaining any possible-charge
 evidence; it allocates no wallet and waits for no funding. Eligible same-payer
 GET/HEAD retries preserve exact values. Manual state-changing requests can execute
-without payment, so they retain only ordinary TLS recovery before signing, with
-no status/body-driven unsigned replay. An actual 402 can still be signed once.
+without payment, so they recover only from TLS connection-establishment failures,
+with no status/body-driven or post-dispatch TLS replay. A failure before response
+headers arrive does not prove the write was undelivered. An actual 402 can still
+be signed once.
 
 A supplied idempotency key is sent unchanged, never generated, replaced or remembered.
 It grants no replay authority, vendor deduplication guarantee or protection against
@@ -511,11 +514,16 @@ finishes; no host credential store, cross-call deduplication or recovery journal
 
 Manual secrets appear in agent-authored arguments and may remain in client history.
 They do not satisfy a provider's host-only credential contract. Server diagnostics
-and route previews omit manual values, but arbitrary raw responses are not redacted:
+and route previews omit manual values. Host-authored validation/transport errors
+do not include them, but upstream raw responses and HTTP error bodies are not redacted:
 an upstream can echo a credential into ordinary output. This feature cannot clear
 secrets held by an agent; resending them after rotation can link wallet identities.
-Automatic OpenAPI credential lookup/capture remains a separate, unimplemented
-mechanism; manual calls have no access to host-managed credentials.
+Authorization is an invocation-local raw-call exception. Generated tools and
+public Rust routed business headers still cannot inject it. Automatic OpenAPI
+credential lookup/capture remains a separate, unimplemented mechanism; manual calls
+have no access to host-managed credentials. When managed auth is implemented, reject
+mixed manual/managed modes before credential lookup or I/O; raw permission cannot
+authorize automatic credential access or a cross-payer continuity override.
 
 ### Registration and tool invocation
 

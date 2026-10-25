@@ -48,7 +48,6 @@ impl Fixture {
     }
 }
 fn signer(headers: &HeaderMap) -> Option<String> {
-    assert!(!headers.contains_key("authorization"));
     assert!(!headers.contains_key("x-payment"));
     headers.get("payment-signature").map(|encoded| {
         let payload: Value =
@@ -194,6 +193,10 @@ async fn relay(
     body: axum::body::Bytes,
 ) -> Response {
     assert_eq!(method, Method::POST);
+    assert!(
+        !headers.contains_key("authorization"),
+        "manual auth must never reach a relay"
+    );
     let endpoint = request_url(&uri, "https://spec.example.com");
     let request: Value = serde_json::from_slice(&body).unwrap();
     let target = request["url"].as_str().unwrap();
@@ -447,8 +450,28 @@ async fn fixture(mode: &str) {
         return;
     }
 
+    // Empty manual input is the same origin/paid-relay policy as omitted input.
+    let empty_case = "manual-empty-headers";
+    let output = client
+        .execute_manual_raw(route("GET", empty_case), Default::default())
+        .await
+        .unwrap();
+    assert!(output.text.contains("relay result"));
+    let events = fixture.events("GET-manual-empty-headers");
+    assert_eq!(
+        events.iter().filter(|e| e.provider.is_none()).count(),
+        attempts
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.provider.is_some() && e.signer.is_some())
+            .count(),
+        1
+    );
+
     // Any nonempty manual set is private, even an innocuous name or only a key.
-    for header in ["X-Label", "X-Api-Key", "Idempotency-Key"] {
+    for header in ["X-Label", "X-Api-Key", "Idempotency-Key", "Authorization"] {
         for method in ["GET", "POST"] {
             let kind = "manual-status403";
             let case = format!("{method}-{kind}");
@@ -476,7 +499,7 @@ async fn fixture(mode: &str) {
     }
     for kind in ["manual-healthy", "manual-body-reset"] {
         let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(
-            &json!({"X-Label":"manual-secret"}),
+            &json!({"Authorization":"Bearer manual-secret"}),
         ))
         .unwrap();
         let result = client

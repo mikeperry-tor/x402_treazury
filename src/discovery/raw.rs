@@ -27,7 +27,7 @@ pub fn schema() -> Value {
         "method":{"type":"string","description":"Documented HTTP method, such as GET, POST, PUT, PATCH, DELETE, HEAD or OPTIONS. Use the provider's exact method."},
         "url":{"type":"string","format":"uri","description":"Any documented public HTTPS x402 API URL. No URL credentials or fragments. Existing query parameters are preserved."},
         "query":{"type":"object","description":"Optional query parameters, appended to the URL and URL-encoded. Scalars become strings; arrays repeat the parameter name. Do not repeat parameters already in the URL unless the API requires it.","additionalProperties":{"oneOf":[scalar.clone(),{"type":"array","items":scalar}]}},
-        "headers":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional documented business headers or Idempotency-Key. Values are private: no paid relay or wallet handoff. Keys are sent unchanged and grant no replay guarantee. Secrets can remain in client history and may be echoed in responses."},
+        "headers":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional documented business headers, Authorization or Idempotency-Key. Values are private: no paid relay or wallet handoff. Idempotency-Key is caller-owned and grants no replay guarantee. Secrets can remain in client history and may be echoed in responses."},
         "body":{"description":"Optional JSON request body, sent as application/json exactly as supplied. Omit when the documented request has no body; explicit null sends JSON null."}
     },"required":["method","url"],"additionalProperties":false})
 }
@@ -69,7 +69,11 @@ impl ManualRawHeaders {
                 .as_object()
                 .context("headers must be an object of strings")?;
             for (name, value) in values {
-                let name = crate::catalog::headers::business_name(name)?;
+                let name = if name.eq_ignore_ascii_case("authorization") {
+                    reqwest::header::AUTHORIZATION
+                } else {
+                    crate::catalog::headers::business_name(name)?
+                };
                 ensure!(!headers.contains_key(&name), "duplicate manual HTTP header");
                 let value = value
                     .as_str()
@@ -153,12 +157,14 @@ mod tests {
             json!({"x-label":"secret\r\ninjected: yes"}),
             json!({"bad name":"secret"}),
             json!({"X-Label":"secret","x-label":"other"}),
+            json!({"Authorization":"secret", "AUTHORIZATION":"other"}),
+            json!({"Authorization":"secret\r\nextra: yes"}),
+            json!({"Authorization": ["secret"]}),
         ] {
             let error = ManualRawHeaders::parse(Some(&input)).unwrap_err();
             assert!(!format!("{error:#?}").contains("secret"));
         }
         for name in [
-            "Authorization",
             "Accept",
             "Content-Type",
             "Host",
@@ -187,14 +193,19 @@ mod tests {
 
     #[test]
     fn manual_headers_stay_sensitive_outside_serializable_routes() {
-        let input = json!({"method":"POST","url":"https://api.example.com/action","headers":{"X-Label":"private-label", "X-Api-Key":"private-token", "Idempotency-Key":"private-key"}});
+        let input = json!({"method":"POST","url":"https://api.example.com/action","headers":{"X-Label":"private-label", "X-Api-Key":"private-token", "Idempotency-Key":"private-key", "Authorization":"private-auth"}});
         let (route, headers) = request(input.as_object().unwrap()).unwrap();
         assert!(headers.is_private());
         let debug = format!("{route:?} {headers:?}");
         let serialized = serde_json::to_string(&route).unwrap();
         let mut request = reqwest::Request::new(reqwest::Method::POST, route.url.parse().unwrap());
         headers.apply(&mut request, None).unwrap();
-        for value in ["private-label", "private-token", "private-key"] {
+        for value in [
+            "private-label",
+            "private-token",
+            "private-key",
+            "private-auth",
+        ] {
             assert!(!debug.contains(value));
             assert!(!serialized.contains(value));
             assert!(!format!("{request:?}").contains(value));

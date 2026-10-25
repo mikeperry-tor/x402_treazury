@@ -450,6 +450,9 @@ async fn run_private(
         body: (method == "POST").then(|| json!({"original":[1,true,"same"]})),
     };
     let result = if private {
+        route
+            .headers
+            .insert("Authorization".into(), "Bearer manual-secret".into());
         let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(
             &serde_json::to_value(&route.headers).unwrap(),
         ))

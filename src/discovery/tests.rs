@@ -1477,7 +1477,7 @@ async fn directory_payment_fixture() {
                     }
                     _ => {}
                 }
-                return axum::Json(json!({"services":[], "method":method.as_str(), "query":uri.query(), "body":if body.is_empty() { Value::Null } else { serde_json::from_slice::<Value>(&body).unwrap() }, "content_type":headers.get("content-type").map(|v| v.to_str().unwrap()), "manual_label":headers.get("x-label").map(|v| v.to_str().unwrap()), "manual_key":headers.get("idempotency-key").map(|v| v.to_str().unwrap())})).into_response();
+                return axum::Json(json!({"services":[], "method":method.as_str(), "query":uri.query(), "body":if body.is_empty() { Value::Null } else { serde_json::from_slice::<Value>(&body).unwrap() }, "content_type":headers.get("content-type").map(|v| v.to_str().unwrap()), "manual_label":headers.get("x-label").map(|v| v.to_str().unwrap()), "manual_key":headers.get("idempotency-key").map(|v| v.to_str().unwrap()), "manual_authorization":headers.get("authorization").map(|v| v.to_str().unwrap())})).into_response();
             }
             let challenge = json!({"x402Version":2,"resource":{"url":format!("https://api.example.com{}", uri.path()),"description":"search","mimeType":"application/json"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":crate::payment::USDC,"amount":"5000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
             (
@@ -1555,7 +1555,7 @@ async fn directory_payment_fixture() {
     let calls = [
         (
             raw::NAME,
-            json!({"method":"POST","url":"https://api.example.com/api/v1/services","headers":{"X-Label":"caller-private-label","Idempotency-Key":"caller-key"},"body":null}),
+            json!({"method":"POST","url":"https://api.example.com/api/v1/services","headers":{"X-Label":"caller-private-label","Idempotency-Key":"caller-key","Authorization":"Bearer caller-token"},"body":null}),
         ),
         (
             raw::NAME,
@@ -1616,6 +1616,10 @@ async fn directory_payment_fixture() {
                 assert_eq!(response["method"], args["method"]);
                 assert_eq!(response["manual_label"], args["headers"]["X-Label"]);
                 assert_eq!(response["manual_key"], args["headers"]["Idempotency-Key"]);
+                assert_eq!(
+                    response["manual_authorization"], args["headers"]["Authorization"],
+                    "generic raw output does not redact upstream echoes"
+                );
                 assert_eq!(
                     response["body"],
                     args.get("body").cloned().unwrap_or(Value::Null)
@@ -2320,7 +2324,7 @@ async fn raw_calls_require_endpoint_authority_and_validate_before_io() {
         (raw::NAME, json!({"url":"https://api.example.com/read"})),
         (
             raw::NAME,
-            json!({"method":"POST","url":"https://api.example.com/read","body":{},"headers":{"Authorization":"secret"}}),
+            json!({"method":"POST","url":"https://api.example.com/read","body":{},"headers":{"Payment-Signature":"secret"}}),
         ),
         (
             raw::NAME,

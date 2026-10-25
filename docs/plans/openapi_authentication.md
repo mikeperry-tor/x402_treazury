@@ -4,7 +4,7 @@
 
 Implement generic host-managed authentication only where an operation's effective
 OpenAPI security requirements declare it. The separate
-[manual raw-call headers plan](raw_call_headers.md) permits explicit caller headers
+[manual raw-header contract](../agent-sources.md#manual-raw-headers) permits explicit caller headers
 without automatic credential lookup; it is not a prerequisite for this mechanism.
 Clear reusable authentication on wallet
 rotation by default. Allow a provider/source option to preserve authentication
@@ -21,8 +21,11 @@ Current behavior:
   rejects authentication/payment headers supplied as routed business headers.
   Catalog generation does not compile OpenAPI security requirements into a
   runtime authentication policy.
-- `src/discovery/raw.rs` accepts method, URL, query and JSON body, rejects unknown
-  arguments, and builds an empty business-header map. It cannot supply bearer auth.
+- `src/discovery/raw.rs` accepts method, URL, query, JSON body and explicit manual
+  headers, including Authorization, without registration. Validated manual headers
+  are separate from routed business headers, caller-private, excluded from paid
+  relays and pinned to the initial payer. They provide no host credential lookup,
+  storage, automatic injection, agent-held-secret clearing or response redaction.
 - `src/payment.rs` owns identity-bound challenge/sign/retry, response collection
   and accepted-work completion. `src/output.rs` normally returns JSON text as
   received; private response credentials currently have no capture/redaction path.

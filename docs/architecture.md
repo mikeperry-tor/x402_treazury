@@ -386,8 +386,11 @@ conditionally promote a winning candidate after valid `402` challenge validation
 or completed valid unsigned output. Relay-service unsigned requests use that same
 sequence and the broader common transport classifier, without recursive fallback.
 Unsigned API GET/HEAD and otherwise-authorized x402 POST use the common transport
-classifier for dispatch and successful-response body acquisition. Other methods
-retain TLS-only transport recovery. Configured runtime relay handoff uses the
+classifier for dispatch and successful-response body acquisition. Other methods,
+including manual-header writes, recover only from TLS connection-establishment
+failures. A TLS failure after dispatch cannot authorize their replay, even before
+response headers arrive; their bodies are read only by the final output consumer.
+Configured runtime relay handoff uses the
 original method's list after one origin sequence, before target signing, and is
 suppressed after any earlier target signature. Relay results return directly to
 output conversion, never challenge handling, and never promote origin scopes.

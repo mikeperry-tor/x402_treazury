@@ -142,7 +142,9 @@ request construction and redirect failures remain excluded. Other 5xx outside
 the explicit status set (for example 501/505/520) do not earn fresh origin scopes.
 The common classifier applies to catalog, Coinbase, document reads,
 relay-service unsigned requests, Base, and unsigned API GET/HEAD and x402 POST.
-Other API methods retain their existing TLS-only transport recovery. Startup's local SOCKS
+Other API methods recover only from TLS connection-establishment failures;
+post-dispatch TLS failures grant no replay, including failures before response
+headers arrive. Startup's local SOCKS
 reachability prerequisite remains separate from per-operation attempts.
 
 Remote provider search uses `discovery/remote.rs` to retain one encompassing work
@@ -399,7 +401,8 @@ completed valid unsigned output. Unsigned GET/HEAD and otherwise-authorized x402
 POST dispatch and successful-response body transport failures use the common
 classifier and the same finite sequence; body recovery never restarts payer
 selection. Local destination, authority and byte-bound failures are terminal.
-Other methods retain their existing TLS-only transport recovery. Known terminal
+Other methods recover only from TLS connection-establishment failures and leave
+body acquisition to the final output consumer. Known terminal
 non-success statuses keep their status semantics even if their unused error body
 stalls or resets. Complete malformed content and output conversion failures never
 retry or buy another response. Eligible blocking statuses are classified from
@@ -669,9 +672,10 @@ resolves the destination locally. Hostname answers hidden behind Tor rely on Tor
 may not provide it. Raw calls use the endpoint's wallet and
 existing response/read limits; redirects are not followed. Nonempty
 [manual raw headers](agent-sources.md#manual-raw-headers) never reach paid relay
-preparation or payment, regardless of their names. They pin the initial payer;
+preparation or payment, including explicit Authorization and arbitrary custom names. They pin the initial payer;
 same-payer GET/HEAD isolation retries retain their bytes. Manual state-changing
-calls retain ordinary TLS-only unsigned recovery, with no status/body replay.
+calls recover only from TLS connection-establishment failures, with no unsigned
+status/body or post-dispatch TLS replay.
 Header-free raw calls retain configured relay and x402 POST retry behavior.
 Tests exercise the production resolver wrapper with injected DNS answers, including
 mixed/rebound rejection, plus actual direct-client rejection before connecting to

@@ -303,7 +303,7 @@ async fn run_case_private(
             .execute_manual_raw(
                 request,
                 crate::discovery::raw::ManualRawHeaders::parse(Some(
-                    &json!({"X-Label":"private-value"}),
+                    &json!({"X-Label":"private-value", "Authorization":"Bearer manual-secret"}),
                 ))
                 .unwrap(),
             )

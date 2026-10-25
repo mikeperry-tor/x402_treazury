@@ -800,7 +800,11 @@ registered OpenAPI tools, including on-demand calls. The separate `raw_call`
 interface accepts caller-owned headers and keys without generating or remembering
 them; see [manual raw headers](agent-sources.md#manual-raw-headers). Every nonempty
 manual set disables paid relays and cross-payer handoff. It does not change
-generated-tool idempotency or provide automatic credential lookup.
+generated-tool idempotency or provide automatic credential lookup. Manual raw
+Authorization is explicitly caller-supplied, without OpenAPI registration, storage
+or automatic injection; generated tools and public routed business headers retain
+their Authorization restriction. A future managed OpenAPI-auth mode must reject
+mixed manual/managed input before credential lookup or I/O.
 
 ## Optional agent API discovery
 

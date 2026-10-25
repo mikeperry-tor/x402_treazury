@@ -56,6 +56,9 @@ fresh whole-view fallback, retained owners, cancellation and absent financial si
 effects. Direct transport fixtures remain in `rotation::base::transport::tests`.
 `network::tls_retry_tests` verifies TLS recovery and exhaustion in catalog,
 unsigned API and Base while retaining certificate checks and signed no-replay.
+Manual POST/PUT/PATCH/DELETE and ordinary PUT cases distinguish failed-handshake
+recovery from an executed write whose first response TLS record is corrupted:
+the latter must fail after exactly one execution, without signing or replay.
 These prove routing and credential boundaries, not live Tor circuits or settlement.
 
 ### Sandbox permissions
@@ -85,9 +88,12 @@ Keep real wire, SOCKS, gRPC and lifecycle coverage intact rather than replacing 
 skipping it to avoid a permission request.
 
 Manual raw-header regressions live in `discovery::raw::tests`, discovery endpoint
-fixtures and payment header/handoff/best-effort/relay tests. They exercise sensitive
+fixtures and payment header/handoff/best-effort/hint/relay tests. They exercise sensitive
 values, strict validation, exact key delivery, private relay exclusion, initial-payer
-continuity and absence of new replay authority. The isolated directory fixture also
+continuity and absence of new replay authority. A barrier-controlled payment regression overlaps two
+manual calls before challenge delivery and checks their distinct credentials,
+quotes and keys in unsigned and signed dispatch, verifying values never cross
+calls. The isolated directory fixture
 captures real MCP stdio/HTTP SDK logs at TRACE, including malformed frames, invalid inputs, body-reader errors and upstream
 credential echoes; initialization errors have a socket-free executable unit test.
 These are synthetic local contracts;

@@ -16,6 +16,7 @@ enum Outcome {
     Success,
     Rejected,
     BrokenBody,
+    UnsignedSuccess,
 }
 
 #[derive(Clone)]
@@ -25,6 +26,9 @@ struct Seller {
     challenged: Arc<Notify>,
     release: Arc<Notify>,
     seen: Arc<Mutex<Vec<(bool, String, String)>>>,
+    authorization: Arc<Mutex<Vec<Option<String>>>>,
+    signers: Arc<Mutex<Vec<String>>>,
+    nonces: Arc<Mutex<Vec<String>>>,
 }
 
 async fn respond(State(seller): State<Seller>, headers: HeaderMap) -> axum::response::Response {
@@ -34,9 +38,36 @@ async fn respond(State(seller): State<Seller>, headers: HeaderMap) -> axum::resp
         headers["idempotency-key"].to_str().unwrap().to_owned(),
         headers["x-quote-id"].to_str().unwrap().to_owned(),
     ));
+    seller.authorization.lock().unwrap().push(
+        headers
+            .get("authorization")
+            .map(|v| v.to_str().unwrap().to_owned()),
+    );
+    if matches!(seller.outcome, Outcome::UnsignedSuccess) {
+        assert!(!signed);
+        return "authenticated unsigned success".into_response();
+    }
     if signed {
+        let payload: Value = serde_json::from_slice(
+            &STANDARD
+                .decode(headers["payment-signature"].as_bytes())
+                .unwrap(),
+        )
+        .unwrap();
+        seller.nonces.lock().unwrap().push(
+            payload["payload"]["authorization"]["nonce"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        );
+        seller
+            .signers
+            .lock()
+            .unwrap()
+            .push(crate::test_signatures::recover_exact(&payload).to_string());
         return match seller.outcome {
             Outcome::Success => "order accepted".into_response(),
+            Outcome::UnsignedSuccess => unreachable!(),
             Outcome::Rejected => (StatusCode::SERVICE_UNAVAILABLE, "unavailable").into_response(),
             Outcome::BrokenBody => axum::response::Response::new(axum::body::Body::from_stream(
                 futures_util::stream::once(async {
@@ -64,13 +95,7 @@ async fn fixture(
     outcome: Outcome,
     hold_challenge: bool,
 ) -> (Seller, String, tokio::task::JoinHandle<()>) {
-    let seller = Seller {
-        outcome,
-        hold_challenge,
-        challenged: Default::default(),
-        release: Default::default(),
-        seen: Default::default(),
-    };
+    let seller = seller(outcome, hold_challenge);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let app = Router::new()
@@ -78,6 +103,19 @@ async fn fixture(
         .with_state(seller.clone());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (seller, base, server)
+}
+
+fn seller(outcome: Outcome, hold_challenge: bool) -> Seller {
+    Seller {
+        outcome,
+        hold_challenge,
+        challenged: Default::default(),
+        release: Default::default(),
+        seen: Default::default(),
+        authorization: Default::default(),
+        signers: Default::default(),
+        nonces: Default::default(),
+    }
 }
 
 fn client() -> PaidClient {
@@ -235,7 +273,7 @@ fn manual_request(base: &str) -> (RoutedRequest, crate::discovery::raw::ManualRa
     let mut route = route(base);
     route.headers.clear();
     let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(
-        &json!({"X-Quote-Id":"quote-from-prior-call", "Idempotency-Key":"caller-owned-key"}),
+        &json!({"X-Quote-Id":"quote-from-prior-call", "Idempotency-Key":"caller-owned-key", "Authorization":"Bearer manual-secret"}),
     ))
     .unwrap();
     (route, headers)
@@ -250,6 +288,16 @@ async fn manual_key_survives_signing_and_reuse_is_a_separate_call() {
         client.execute_manual_raw(route, headers).await.unwrap();
     }
     client.drain().await;
+    assert_eq!(
+        *seller.authorization.lock().unwrap(),
+        vec![Some("Bearer manual-secret".into()); 4]
+    );
+    let nonces = seller.nonces.lock().unwrap();
+    assert_eq!(nonces.len(), 2);
+    assert_ne!(
+        nonces[0], nonces[1],
+        "key reuse is a separately chargeable authorization"
+    );
     let seen = seller.seen.lock().unwrap();
     assert_eq!(seen.len(), 4);
     for pair in seen.chunks(2) {
@@ -278,10 +326,158 @@ async fn manual_headers_do_not_replay_signed_failures_or_uncertainty() {
         .await;
         assert!(result.is_err());
         assert!(progress.possible());
+        assert!(!logs.contains("manual-secret"));
+        assert!(!format!("{:#}", result.as_ref().unwrap_err()).contains("manual-secret"));
         assert!(!logs.contains("caller-owned-key"));
         assert!(!logs.contains("quote-from-prior-call"));
         client.drain().await;
         assert_eq!(seller.seen.lock().unwrap().len(), 2);
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn manual_authorization_unsigned_success_has_no_signature_or_automatic_injection() {
+    let (seller, base, server) = fixture(Outcome::UnsignedSuccess, false).await;
+    let client = client();
+    let (request, headers) = manual_request(&base);
+    let (result, logs) =
+        crate::limits::tests::capture(client.execute_manual_raw(request, headers)).await;
+    assert!(
+        result
+            .unwrap()
+            .text
+            .contains("authenticated unsigned success")
+    );
+    assert!(!logs.contains("manual-secret"));
+    client.execute(route(&base)).await.unwrap();
+    client.drain().await;
+    assert_eq!(
+        *seller.authorization.lock().unwrap(),
+        vec![Some("Bearer manual-secret".into()), None]
+    );
+    assert!(seller.signers.lock().unwrap().is_empty());
+    assert_eq!(seller.seen.lock().unwrap().len(), 2);
+    server.abort();
+}
+
+#[tokio::test]
+async fn manual_authorization_survives_cancellation_and_static_payer_replacement() {
+    let (seller, base, server) = fixture(Outcome::Success, true).await;
+    let client = client();
+    let original = Payer::new(&format!("{:064x}", 109), SpendPolicy::dollars("1").unwrap())
+        .unwrap()
+        .address;
+    let replacement =
+        Payer::new(&format!("{:064x}", 110), SpendPolicy::dollars("1").unwrap()).unwrap();
+    let replacement_address = replacement.address.clone();
+    let (request, headers) = manual_request(&base);
+    let waiter = tokio::spawn({
+        let client = client.clone();
+        async move { client.execute_manual_raw(request, headers).await }
+    });
+    tokio::time::timeout(Duration::from_secs(10), seller.challenged.notified())
+        .await
+        .unwrap();
+    client.replace_payer(replacement);
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    seller.release.notify_one();
+    // Completion of the retained owner must include the original signed send.
+    tokio::time::timeout(Duration::from_secs(10), client.drain())
+        .await
+        .unwrap();
+    assert_eq!(*seller.signers.lock().unwrap(), vec![original]);
+    assert_eq!(
+        *seller.authorization.lock().unwrap(),
+        vec![Some("Bearer manual-secret".into()); 2]
+    );
+    assert_ne!(seller.signers.lock().unwrap()[0], replacement_address);
+    assert_eq!(seller.seen.lock().unwrap().len(), 2);
+    server.abort();
+}
+
+#[tokio::test]
+async fn concurrent_manual_credentials_and_keys_stay_with_each_signed_request() {
+    let seller = seller(Outcome::Success, false);
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let barrier = Arc::new(tokio::sync::Barrier::new(3));
+    let app = Router::new().route(
+        "/orders",
+        post({
+            let seller = seller.clone();
+            let observed = observed.clone();
+            let barrier = barrier.clone();
+            move |headers: HeaderMap| {
+                let seller = seller.clone();
+                let observed = observed.clone();
+                let barrier = barrier.clone();
+                async move {
+                    let signed = headers.contains_key("payment-signature");
+                    observed.lock().unwrap().push((
+                        headers["authorization"].to_str().unwrap().to_owned(),
+                        headers["idempotency-key"].to_str().unwrap().to_owned(),
+                        headers["x-quote-id"].to_str().unwrap().to_owned(),
+                        signed,
+                    ));
+                    if !signed {
+                        barrier.wait().await;
+                    }
+                    respond(State(seller), headers).await
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let client = client();
+    let cases = [
+        ("Bearer caller-a", "key-a", "quote-a"),
+        ("Bearer caller-b", "key-b", "quote-b"),
+    ];
+    let mut calls = Vec::new();
+    for (auth, key, quote) in cases {
+        let mut request = route(&base);
+        request.headers.clear();
+        let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(&json!({
+            "Authorization":auth, "Idempotency-Key":key, "X-Quote-Id":quote
+        })))
+        .unwrap();
+        let client = client.clone();
+        calls.push(tokio::spawn(async move {
+            client.execute_manual_raw(request, headers).await
+        }));
+    }
+    tokio::time::timeout(Duration::from_secs(10), async {
+        // Both calls have disclosed their distinct unsigned headers before either
+        // receives a challenge, ensuring overlapping retained operations.
+        barrier.wait().await;
+        for call in calls {
+            assert_eq!(call.await.unwrap().unwrap().text, "order accepted");
+        }
+        client.drain().await;
+    })
+    .await
+    .expect("concurrent manual calls stalled");
+    let observed = observed.lock().unwrap();
+    assert_eq!(observed.len(), 4);
+    for (auth, key, quote) in cases {
+        for signed in [false, true] {
+            assert_eq!(
+                observed
+                    .iter()
+                    .filter(|entry| **entry == (auth.into(), key.into(), quote.into(), signed))
+                    .count(),
+                1
+            );
+        }
+    }
+    let nonces = seller.nonces.lock().unwrap();
+    assert_eq!(nonces.len(), 2);
+    assert_ne!(
+        nonces[0], nonces[1],
+        "concurrent calls own separate payment authorizations"
+    );
+    server.abort();
 }

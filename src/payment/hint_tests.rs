@@ -373,3 +373,110 @@ async fn earlier_headers_with_late_body_cannot_overwrite_a_newer_lower_price() {
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
     f.close().await;
 }
+
+#[tokio::test]
+async fn manual_authorization_keeps_captured_managed_payer_after_active_rotation_and_cancel() {
+    let f = fixture().await;
+    // Publish the first ACTIVE through a real authorization transaction.
+    assert!(
+        f.call(
+            f.key("/rotation/bootstrap"),
+            Reply::Challenge(challenge(&[100]))
+        )
+        .await
+        .is_err()
+    );
+    let db = rusqlite::Connection::open(f._dir.path().join("state/state.sqlite")).unwrap();
+    let original: String = db
+        .query_row("SELECT id FROM wallets WHERE role='ACTIVE'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    // Synthetic advisory observations make a larger concurrent call prefer the
+    // other existing reserve, while the small accepted call remains affordable.
+    db.execute(
+        "UPDATE wallets SET balance=CASE WHEN id=?1 THEN '1000' ELSE '10000' END",
+        [&original],
+    )
+    .unwrap();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    f.replies.lock().unwrap().push_back(Reply::Held(
+        challenge(&[100]),
+        started.clone(),
+        release.clone(),
+    ));
+    let (client, route) = (f.client.clone(), f.route());
+    let headers = crate::discovery::raw::ManualRawHeaders::parse(Some(
+        &json!({"Authorization":"Bearer manual-secret"}),
+    ))
+    .unwrap();
+    let waiter = tokio::spawn(async move { client.execute_manual_raw(route, headers).await });
+    tokio::time::timeout(std::time::Duration::from_secs(10), started.notified())
+        .await
+        .unwrap();
+    let key = f.key("/rotation/sibling");
+    process_hints().learn(
+        key,
+        U256::from(9000),
+        crate::pricing::runtime::received().unwrap(),
+    );
+    assert!(
+        f.call(key, Reply::Challenge(challenge(&[9000])))
+            .await
+            .is_err()
+    );
+    let replacement: String = db
+        .query_row("SELECT id FROM wallets WHERE role='ACTIVE'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_ne!(replacement, original);
+    assert_eq!(
+        db.query_row("SELECT role FROM wallets WHERE id=?1", [&original], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap(),
+        "RETAINED"
+    );
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    release.add_permits(1);
+    tokio::time::timeout(std::time::Duration::from_secs(10), f.client.drain())
+        .await
+        .unwrap();
+    assert_eq!(
+        f.unsigned.load(Ordering::SeqCst),
+        3,
+        "no second-payer probe for the private call"
+    );
+    assert_eq!(f.signed.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM payment_attempts WHERE wallet_id=?1",
+            [&original],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM payment_attempts WHERE wallet_id=?1",
+            [&replacement],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM funding_jobs", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2,
+        "accepted work cannot allocate or fund"
+    );
+    assert_eq!(f.rpc.load(Ordering::SeqCst), 0);
+    drop(db);
+    f.close().await;
+}
