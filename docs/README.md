@@ -19,7 +19,6 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
 [Plans](plans/) describe unfinished work, including artifact storage,
-[provider management and remote directory search](plans/provider_management.md),
 [OpenAPI authentication](plans/openapi_authentication.md),
 [manual raw-call headers](plans/raw_call_headers.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md). The maintained
