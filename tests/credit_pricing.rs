@@ -203,15 +203,15 @@ fn unsupported_metadata_has_visible_fallback_and_warning() {
     assert_eq!(logs.matches("affected_operations=5").count(), 2, "{logs}");
 }
 #[tokio::test]
-async fn comprehensive_subsets_inherit_conversion_despite_source_and_endpoint_instruction_overrides()
- {
+async fn comprehensive_subsets_inherit_conversion_despite_endpoint_instruction_overrides() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let path = root.join("examples/deployments/comprehensive.toml");
     let deployment = config::read_table(&path).await.unwrap();
     let document: Value =
         serde_json::from_str(include_str!("fixtures/socialfetch_openapi.json")).unwrap();
-    for (id, witnesses) in [
+    for (id, endpoint, witnesses) in [
         (
+            "social",
             "social",
             &[
                 "socialfetch_twitter_profiles_handle",
@@ -220,6 +220,7 @@ async fn comprehensive_subsets_inherit_conversion_despite_source_and_endpoint_in
         ),
         (
             "webinfo",
+            "web",
             &["socialfetch_web_search", "socialfetch_web_ask"][..],
         ),
     ] {
@@ -229,15 +230,11 @@ async fn comprehensive_subsets_inherit_conversion_despite_source_and_endpoint_in
             cfg.credit_pricing.as_ref().unwrap().usdc_per_credit,
             "0.014"
         );
-        // Social now places its tailored guidance on the endpoint; webinfo still
-        // overrides provider instructions at the source. Neither controls pricing.
-        let instructions = if id == "social" {
-            deployment["servers"]["social"]["instructions_text"]
-                .as_str()
-                .unwrap()
-        } else {
-            cfg.instructions_text.as_deref().unwrap()
-        };
+        // Both contexts place tailored guidance on their endpoint. Replacing
+        // inherited provider instructions does not change tool pricing.
+        let instructions = deployment["servers"][endpoint]["instructions_text"]
+            .as_str()
+            .unwrap();
         assert!(!instructions.contains("0.014"));
         let selected = catalog::build_tools(&cfg, &document, "socialfetch").unwrap();
         assert!(!selected.is_empty());
