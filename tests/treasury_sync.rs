@@ -557,8 +557,8 @@ spec="nonexistent.json"
     for stage in [
         "loading configuration and opening encrypted wallet",
         "wallet opened; starting synchronization",
-        "synchronizing wallet with indexer",
-        "synchronization completed; wallet checkpoint saved",
+        "Synchronizing Zcash treasury wallet",
+        "Zcash treasury wallet synchronized; progress saved",
     ] {
         assert!(logs.contains(stage), "missing {stage}: {logs}");
     }
@@ -1340,10 +1340,16 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
     );
     assert_eq!(reported["observations"]["usdc"]["status"], "inapplicable");
     let logs = String::from_utf8_lossy(&output.stderr);
-    assert!(logs.contains("synchronizing wallet with indexer"), "{logs}");
+    assert!(
+        logs.contains("Synchronizing Zcash treasury wallet"),
+        "{logs}"
+    );
     assert!(logs.contains("indexer_network_mismatch"), "{logs}");
     assert!(!logs.contains("saving final wallet checkpoint"), "{logs}");
-    assert!(!logs.contains("synchronization completed"), "{logs}");
+    assert!(
+        !logs.contains("Zcash treasury wallet synchronized; progress saved"),
+        "{logs}"
+    );
     assert!(!logs.contains("scanning wallet history"), "{logs}");
     assert!(!logs.contains(SEED));
     assert!(!logs.contains(&endpoint));
