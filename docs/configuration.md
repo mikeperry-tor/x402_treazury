@@ -775,6 +775,10 @@ even when marked required: they describe the payment protocol, which Treazury
 handles automatically. They never become tool arguments or business headers.
 Direct or persisted routing metadata cannot supply these runtime-owned headers.
 Cookies and HTTP framing/connection/proxy header declarations are rejected.
+Generated and manual raw requests share fallible HTTP header construction and
+runtime-header headroom checks before inventory or network activity. Sets that
+exceed the HTTP library's representation capacity fail visibly rather than panic;
+there is no additional local header-count quota.
 Explicit custom API-key headers are ordinary declared arguments; existing
 relay policy still forbids credential forwarding and skips adapters unable to
 preserve all business headers.

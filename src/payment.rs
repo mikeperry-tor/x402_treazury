@@ -666,7 +666,8 @@ impl PaidClient {
                 .filter(|padding| padding.on_api_requests)
                 .map(|padding| padding.header_name.as_str())
         });
-        headers.apply(&mut request, padding)?;
+        headers.apply(&mut request)?;
+        reserve_runtime_headers(&mut request, padding)?;
         let unsigned_only = self.unsigned_only || crate::qualification::unsigned_case();
         let through = match &self.managed {
             Some(pool) if !unsigned_only => pool.inventory_boundary().await?,
@@ -1276,7 +1277,8 @@ fn build_request(route: RoutedRequest) -> Result<reqwest::Request> {
         );
         request
             .headers_mut()
-            .insert(name, value.parse().context("invalid API header value")?);
+            .try_insert(name, value.parse().context("invalid API header value")?)
+            .map_err(crate::catalog::headers::capacity_error)?;
     }
     for (key, value) in route.query {
         if let Some(values) = value.as_array() {
@@ -1292,12 +1294,29 @@ fn build_request(route: RoutedRequest) -> Result<reqwest::Request> {
     }
     if let Some(body) = route.body {
         *request.body_mut() = Some(serde_json::to_vec(&body)?.into());
-        request.headers_mut().insert(
-            reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_static("application/json"),
-        );
+        request
+            .headers_mut()
+            .try_insert(
+                reqwest::header::CONTENT_TYPE,
+                reqwest::header::HeaderValue::from_static("application/json"),
+            )
+            .map_err(crate::catalog::headers::capacity_error)?;
     }
     Ok(request)
+}
+
+fn reserve_runtime_headers(request: &mut reqwest::Request, padding: Option<&str>) -> Result<()> {
+    // Reqwest/Hyper defaults, framing, optional cover padding and one x402
+    // signature slot. The v1/v2 payment headers are mutually exclusive.
+    let missing = ["accept", "host", "content-length", "payment-signature"]
+        .into_iter()
+        .chain(padding)
+        .filter(|name| !request.headers().contains_key(*name))
+        .count();
+    request
+        .headers_mut()
+        .try_reserve(missing)
+        .map_err(crate::catalog::headers::capacity_error)
 }
 
 fn sanitize_challenge(response: &mut reqwest::Response) -> Result<()> {
@@ -1374,6 +1393,9 @@ fn insufficient_funds(headers: &reqwest::header::HeaderMap) -> bool {
 #[path = "payment/relay_retry_tests.rs"]
 mod relay_retry_tests;
 
+#[cfg(test)]
+#[path = "payment/header_capacity_tests.rs"]
+mod header_capacity_tests;
 #[cfg(test)]
 #[path = "payment/header_tests.rs"]
 mod header_tests;

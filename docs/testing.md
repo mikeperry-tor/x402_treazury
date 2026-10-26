@@ -146,6 +146,10 @@ quotes and keys in unsigned and signed dispatch, verifying values never cross
 calls. The isolated directory fixture
 captures real MCP stdio/HTTP SDK logs at TRACE, including malformed frames, invalid inputs, body-reader errors and upstream
 credential echoes; initialization errors have a socket-free executable unit test.
+`payment::header_capacity_tests` checks shared routed/manual overflow handling,
+JSON and runtime-header headroom, and real HTTP/2 challenge/signing exchanges near
+the map capacity. Cover padding skips those oversized header lists under its
+existing byte policy; normal-sized exchanges verify actual padding delivery.
 These are synthetic local contracts;
 they establish neither vendor deduplication nor live payment/authentication qualification.
 

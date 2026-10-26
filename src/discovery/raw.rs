@@ -83,7 +83,7 @@ impl ManualRawHeaders {
                 value.set_sensitive(true);
                 headers
                     .try_insert(name, value)
-                    .map_err(header_capacity_error)?;
+                    .map_err(crate::catalog::headers::capacity_error)?;
             }
         }
         Ok(Self(headers))
@@ -93,41 +93,15 @@ impl ManualRawHeaders {
         !self.0.is_empty()
     }
 
-    pub(crate) fn apply(self, request: &mut reqwest::Request, padding: Option<&str>) -> Result<()> {
-        if self.0.is_empty() {
-            return Ok(());
-        }
-        // Reserve the concrete additions made by reqwest/Hyper and x402. The
-        // two x402 protocol versions add mutually exclusive signature headers.
-        let runtime = [
-            reqwest::header::ACCEPT,
-            reqwest::header::HOST,
-            reqwest::header::CONTENT_LENGTH,
-            reqwest::header::HeaderName::from_static("payment-signature"),
-        ];
-        let missing = runtime
-            .iter()
-            .map(reqwest::header::HeaderName::as_str)
-            .chain(padding)
-            .filter(|name| !request.headers().contains_key(*name) && !self.0.contains_key(*name))
-            .count();
-        request
-            .headers_mut()
-            .try_reserve(self.0.len() + missing)
-            .map_err(header_capacity_error)?;
+    pub(crate) fn apply(self, request: &mut reqwest::Request) -> Result<()> {
         for (name, value) in &self.0 {
             request
                 .headers_mut()
                 .try_insert(name.clone(), value.clone())
-                .map_err(header_capacity_error)?;
+                .map_err(crate::catalog::headers::capacity_error)?;
         }
         Ok(())
     }
-}
-
-fn header_capacity_error(_: reqwest::header::MaxSizeReached) -> anyhow::Error {
-    tracing::warn!("Manual HTTP headers exceed the HTTP library's representation capacity");
-    anyhow::anyhow!("manual HTTP headers exceed HTTP representation capacity")
 }
 
 impl Manager {
@@ -199,7 +173,7 @@ mod tests {
         let debug = format!("{route:?} {headers:?}");
         let serialized = serde_json::to_string(&route).unwrap();
         let mut request = reqwest::Request::new(reqwest::Method::POST, route.url.parse().unwrap());
-        headers.apply(&mut request, None).unwrap();
+        headers.apply(&mut request).unwrap();
         for value in [
             "private-label",
             "private-token",
@@ -215,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn manual_header_capacity_is_rejected_before_dispatch() {
+    fn manual_header_parsing_rejects_unrepresentable_sets() {
         let mut represented = reqwest::header::HeaderMap::new();
         let mut values = Map::new();
         let mut index = 0;
@@ -231,11 +205,7 @@ mod tests {
             values.insert(name, json!("secret"));
             index += 1;
         }
-        let headers = ManualRawHeaders::parse(Some(&Value::Object(values.clone()))).unwrap();
-        let mut request =
-            reqwest::Request::new(reqwest::Method::GET, "https://example.com".parse().unwrap());
-        let error = headers.apply(&mut request, None).unwrap_err();
-        assert!(!format!("{error:#?}").contains("secret"));
+        ManualRawHeaders::parse(Some(&Value::Object(values.clone()))).unwrap();
         values.insert(format!("x-field-{index}"), json!("secret"));
         let error = ManualRawHeaders::parse(Some(&Value::Object(values))).unwrap_err();
         assert!(!format!("{error:#?}").contains("secret"));
