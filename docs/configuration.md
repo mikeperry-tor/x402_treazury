@@ -251,10 +251,6 @@ recommended_tools = ["otto_equity_intel", "otto_financial_statements", "otto_hel
 use_recommended_tools = true
 ```
 
-The [comprehensive deployment](../examples/deployments/comprehensive.toml) explicitly adopts
-TeleSINT's stateless research recommendations and excludes its broad help. Its
-company and person sources retain their narrower purpose-specific selections.
-
 Recommendation, inclusion and exclusion selectors all validate against the same
 compatible inventory after names and help are generated. Opt-in intersects advice
 with the ordinary source filters; exclusions win, and listener filters narrow the

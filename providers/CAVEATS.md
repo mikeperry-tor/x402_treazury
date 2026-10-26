@@ -28,7 +28,6 @@ alone do not establish incompatibility.
 | GenuineGood | Bearer-token pass purchase unusable here; ordinary grant reads include expensive calls subject to payment caps. |
 | Kronos | Path name anchor; vendor prices remain prose, not a tool gate. |
 | LoneStarOracle, x402stock | Public previews, feeds and overlapping data remain available; compact research advice requires explicit opt-in. |
-| TeleSINT | `/watch` owns persistent wallet state and remains excluded. Public status and new stateless operations remain visible. |
 | Agent402 | Preserve wallet-owned and actual execution boundaries. JSON/base64 media, PNG/JPEG modes, planning and human onramp links are usable; raw speech and multipart transcription are unsupported. Compact tags/inventory are editorial. |
 | BlockRun | Restrict async jobs, hybrid/async result retrieval, wallet-owned lifecycle and fund submission. Valid fixed-symbol paths are usable literally; zero placeholders retain an unverified intended-target limitation. |
 | Claw402 | Market-read subset is editorial. Sparse RootData schemas allow JSON body passthrough; see contracts below. Image result envelope remains unverified. |
@@ -1165,22 +1164,6 @@ US-only location coverage and operation-level estimates that differ from the
 top-level summary. No recommendation list is needed for its coherent supported
 catalog. Current document retrieval was unavailable and no full offline capture
 is bundled; definitions are not evidence of funded delivery.
-
-## telesint.toml — TeleSINT
-
-Wallet-owned `/watch` state is excluded because managed payer rotation cannot
-preserve its ownership. Public `/status` and new stateless intelligence routes
-remain available. Recommendations select the established stateless intelligence
-queries and their artifact/result flow plus help; opt-in deliberately omits status
-without hiding it in the reusable default. `preparation` and `velocity` need a
-scope parameter; `claim-check` needs id or text. Their documented HTTP 200 guidance
-errors can still consume payment, so retained overrides explain the actual inputs.
-
-Help uses [SKILL.md](https://telesint-api.onrender.com/SKILL.md) because the captured
-`llms.txt` was truncated. Follow OpenAPI names/enums where guide prose differs.
-The [schema](https://telesint-api.onrender.com/openapi.json) and guide were
-unavailable to fresh inspection, and no complete provider capture is bundled.
-Synthetic selection tests establish local policy only, not vendor delivery.
 
 ## hirescrape.toml — HireScrape
 

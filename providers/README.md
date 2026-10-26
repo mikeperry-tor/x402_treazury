@@ -44,7 +44,6 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | HireScrape | `hirescrape.toml` | Synchronous paid scraper namespace; SIWX lifecycle omitted |
 | Horizon Pulse | `horizonpulse.toml` | Complete pinned `horizonpulse-openapi.json`; screenshot mapping and atomic-price caveat |
 | NetIntel | `netintel.toml` | Canonical POST/body contracts and image data-URI mapping |
-| TeleSINT | `telesint.toml` | Stateless Telegram intelligence; watch ownership unsupported |
 | RelayShield phone | `relayshield/phone-reputation.toml` | Authored vendor-omitted request contract |
 | AgentFund | `agentfund.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | AgentUtility | `agentutility/provider.toml` | Full supported aliases/catalog; advisory research recommendations; enriched provenance |

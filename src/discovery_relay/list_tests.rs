@@ -1164,7 +1164,7 @@ async fn catalog_relay_diagnostics_identify_each_failure_and_fallback_outcome() 
             assert!(error.is::<document::PossiblePayment>());
             log_failure(
                 &Config {
-                    discovery_source: Some("telesint".into()),
+                    discovery_source: Some("fixture_source".into()),
                     ..Default::default()
                 },
                 "catalog",
@@ -1202,7 +1202,7 @@ async fn catalog_relay_diagnostics_identify_each_failure_and_fallback_outcome() 
                 format!("relay_position={position}"),
                 format!("failure_location=\"{}\"", expected_location.unwrap()),
                 format!("fallback_outcome=\"{outcome}\""),
-                "source=\"telesint\"".into(),
+                "source=\"fixture_source\"".into(),
                 "possible_submission=true".into(),
                 "catalog is unavailable".into(),
                 "do not automatically repeat".into(),

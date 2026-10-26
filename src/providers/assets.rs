@@ -44,7 +44,6 @@ macro_rules! provider_manifest {
             ("stableenrich", "providers/stableenrich.toml", None),
             ("stabletravel", "providers/stabletravel/provider.toml", Some("providers/stabletravel/openapi.json")),
             ("straits", "providers/straits/provider.toml", Some("providers/straits/openapi.json")),
-            ("telesint", "providers/telesint.toml", None),
             ("vaaya", "providers/vaaya.toml", None),
             ("voipstore", "providers/voipstore.toml", None),
             ("x402-list", "providers/x402-list.toml", None),

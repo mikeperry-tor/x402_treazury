@@ -109,14 +109,6 @@ extends = "../../providers/socialfetch.toml"
 tags = ["Bluesky", "Facebook", "GitHub", "Hacker News", "Instagram", "LinkedIn", "Reddit", "Rumble", "Snapchat", "Telegram", "Threads", "TikTok", "Truth Social", "Twitter", "Twitch", "Yelp", "YouTube"]
 exclude_tools = ["socialfetch_help"]
 
-# Select TeleSINT's stateless Telegram CTI and OSINT recommendations explicitly.
-# Advertised estimates are $0.01-$0.10; the challenge and shared $0.50 cap govern.
-# Discover operations via x402_treazury_tools_search using telesint or category names.
-[sources.telesint]
-extends = "../../providers/telesint.toml"
-use_recommended_tools = true
-exclude_tools = ["telesint_help"]
-
 [sources.webinfo]
 extends = "../../providers/socialfetch.toml"
 tags = ["Web", "Reddit"]
@@ -337,8 +329,6 @@ Social tool keywords to search for:
   `LinkedIn`, `Reddit`, `Rumble`, `Snapchat`, `Telegram`,
   `Threads`, `TikTok`, `truthsocial` (Truth Social), `Twitter` (X), `Twitch`,
   `Yelp`, `YouTube`.
-- TeleSINT (Telegram OSINT): `telesint`, actors, indicators, breaches, malware,
-  vulnerabilities, ransomware, dark web, sources and claim checks.
 - People Data Labs: `pdl_person` (person enrichment and search).
 - StableEnrich: `stableenrich_reddit` (Reddit searches and comments),
   `stableenrich_minerva` (person resolution, enrichment, and email checks),
@@ -347,7 +337,7 @@ Social tool keywords to search for:
 listen = "127.0.0.1:6338"
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "company"
-sources = ["social", "telesint", "pdl_people", "social_stableenrich"]
+sources = ["social", "pdl_people", "social_stableenrich"]
 
 [servers.company]
 instructions_text = "Company and public-record research. Verify entity identity; preserve source links, dates and partial results. Missing findings do not prove absence."

@@ -19,7 +19,6 @@ async fn ordinary_providers_admit_new_reads_inside_and_outside_naming_anchors() 
         "kronos",
         "lonestar",
         "pdl",
-        "telesint",
         "x402stock",
     ] {
         let cfg = config::load(&root.join(format!("providers/{provider}.toml")))
@@ -65,15 +64,6 @@ async fn namespace_and_identity_restrictions_leave_public_research_available() {
             }}),
             "/x402/new-registry",
             vec!["/mpp/company"],
-        ),
-        (
-            "telesint",
-            json!({"paths":{
-                "/status":{"get":{}}, "/search":{"get":{}},
-                "/watch":{"post":{}}, "/watch/items":{"get":{}}
-            }}),
-            "/status",
-            vec!["/watch", "/watch/items"],
         ),
         (
             "arkham",
