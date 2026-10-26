@@ -44,6 +44,7 @@ pub struct WalletSummary {
     pub initial_inventory_target_usdc: String,
 }
 pub struct Resolution {
+    pub source_bindings: crate::deployment::routing::EffectiveBindings,
     pub wallets: BTreeMap<String, WalletConfig>,
     pub bindings: WalletBindings,
     pub generated: BTreeMap<String, GeneratedWallet>,
@@ -77,8 +78,10 @@ pub(crate) fn managed_names(config: &MetaConfig) -> Vec<String> {
             .get(&assignment.template)
             .is_some_and(WalletConfig::managed)
     {
-        for (server_name, server) in &config.servers {
-            for source_name in &server.sources {
+        let graph = crate::deployment::routing::EffectiveBindings::project(config);
+        for (server_name, sources) in &graph.0 {
+            let server = &config.servers[server_name];
+            for source_name in sources.keys() {
                 let Some(source) = config.sources.get(source_name) else {
                     continue;
                 };
@@ -92,6 +95,16 @@ pub(crate) fn managed_names(config: &MetaConfig) -> Vec<String> {
 }
 
 pub fn resolve(config: &MetaConfig) -> Result<Resolution> {
+    resolve_with_bindings(
+        config,
+        crate::deployment::routing::EffectiveBindings::resolve(config)?,
+    )
+}
+
+pub(crate) fn resolve_with_bindings(
+    config: &MetaConfig,
+    source_bindings: crate::deployment::routing::EffectiveBindings,
+) -> Result<Resolution> {
     for name in config.wallets.keys() {
         ensure!(
             !name.starts_with(AUTO_PREFIX),
@@ -119,7 +132,7 @@ pub fn resolve(config: &MetaConfig) -> Result<Resolution> {
     let mut bindings = BTreeMap::new();
     for (server_name, server) in &config.servers {
         let mut server_bindings = BTreeMap::new();
-        for source_name in &server.sources {
+        for source_name in source_bindings.0[server_name].keys() {
             let source = config.sources.get(source_name).context("unknown source")?;
             let explicit = source
                 .wallet
@@ -187,6 +200,7 @@ pub fn resolve(config: &MetaConfig) -> Result<Resolution> {
         ),
     };
     Ok(Resolution {
+        source_bindings,
         wallets,
         bindings,
         generated,

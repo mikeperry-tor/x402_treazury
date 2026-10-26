@@ -28,6 +28,12 @@ extend other files. Unknown keys fail validation. All generic catalog fields
 can be overridden at the source, including `spec`, `base_url`, `prefix`,
 `include`, `exclude`, `tags`, `exclude_tags`, descriptions and HTTP policy.
 Use listener tag/tool filters for multiple views of one shared source catalog.
+Deployment sources may instead use ordered
+[`send_tools` rules](../docs/configuration.md#source-tool-distribution) to distribute
+generated tool families and exclusions across endpoints, with an explicit final
+fallback. Distribution belongs to deployment configuration; reusable providers
+and dynamic imports cannot supply it. Providers continue to expose supported APIs,
+and listener filters can further narrow assigned tools.
 
 `--provider providers/pdl.toml` runs a single provider. `--config` loads
 sources, wallets and listeners. Add `config show` to either to inspect file

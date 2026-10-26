@@ -226,6 +226,13 @@ pub struct Show {
 pub struct Check {
     #[command(flatten)]
     input: Input,
+    /// Explain deployment source routing and published wallet bindings as JSON.
+    #[arg(
+        long,
+        requires = "meta_config",
+        conflicts_with = "qualification_snapshot"
+    )]
+    explain_routing: bool,
     #[arg(long, hide = true, requires = "meta_config")]
     qualification_snapshot: bool,
 }
@@ -341,6 +348,7 @@ impl From<Configuration> for Args {
             },
             Configuration::Check(check) => Self {
                 check: true,
+                explain_routing: check.explain_routing,
                 qualification_snapshot: check.qualification_snapshot,
                 ..check.input.into()
             },

@@ -27,6 +27,7 @@ struct Args {
     qualification_parent_stdin: bool,
     network_config: Option<std::path::PathBuf>,
     check: bool,
+    explain_routing: bool,
     qualification_snapshot: bool,
     qualification_binding: Option<std::path::PathBuf>,
     show_config: bool,
@@ -433,6 +434,7 @@ fn validate_meta_arguments(
                         "meta_config",
                         "network_config",
                         "all_tools",
+                        "explain_routing",
                         "env_file",
                         "qualification_no_new_funding",
                         "qualification_unsigned",
@@ -603,6 +605,15 @@ async fn print_deployment_inspection(
     }
     if args.check {
         let summary = deployment.wallet_summary();
+        if args.explain_routing {
+            let result = serde_json::json!({
+                "wallet_summary": summary,
+                "servers": deployment.inventory(),
+                "routing": deployment.explain_routing()?,
+            });
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            return Ok(true);
+        }
         println!(
             "{} managed pools ({} automatic); initial inventory target: {} USDC",
             summary.managed_pool_count,

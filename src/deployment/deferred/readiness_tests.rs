@@ -18,6 +18,7 @@ async fn selector_warnings_wait_for_own_catalogs_and_do_not_repeat_on_unrelated_
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
         .with_writer(log.reopen().unwrap())
         .finish();
     let _logging = tracing::subscriber::set_default(subscriber);
@@ -123,6 +124,15 @@ impl Fixture {
     }
 
     async fn with_failure_document(listeners: &str, remote: bool, document: Option<Value>) -> Self {
+        Self::with_distribution(listeners, remote, document, &BTreeMap::new()).await
+    }
+
+    async fn with_distribution(
+        listeners: &str,
+        remote: bool,
+        document: Option<Value>,
+        distribution: &BTreeMap<&str, &str>,
+    ) -> Self {
         let slow = Arc::new(Semaphore::new(0));
         let failure = Arc::new(Semaphore::new(0));
         let arrived = Arc::new(Semaphore::new(0));
@@ -167,6 +177,9 @@ impl Fixture {
         let mut config = format!(
             "version=1\n[wallets.w]\nmode='static'\nprivate_key_env='KEY'\n[sources.local]\nspec='local.json'\nbase_url='{base}'\n"
         );
+        if let Some(send_tools) = distribution.get("local") {
+            config.push_str(&format!("send_tools={send_tools}\n"));
+        }
         if remote {
             for (id, path, optional) in [
                 ("slow", "slow", false),
@@ -176,6 +189,9 @@ impl Fixture {
                 config.push_str(&format!(
                     "[sources.{id}]\nspec='{base}/{path}'\nbase_url='{base}'\noptional_startup={optional}\n"
                 ));
+                if let Some(send_tools) = distribution.get(id) {
+                    config.push_str(&format!("send_tools={send_tools}\n"));
+                }
             }
         }
         config.push_str(listeners);
@@ -204,12 +220,16 @@ fn listener(name: &str, sources: &str, settings: &str) -> String {
 }
 
 async fn rpc(address: SocketAddr, method: &str) -> Value {
-    let url = format!("http://{address}/mcp");
     let params = if method == "initialize" {
         json!({"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"fixture","version":"1"}})
     } else {
         json!({})
     };
+    rpc_params(address, method, params).await
+}
+
+async fn rpc_params(address: SocketAddr, method: &str, params: Value) -> Value {
+    let url = format!("http://{address}/mcp");
     let response = crate::network::global()
         .http(&crate::network::IsolationId::bootstrap(), &url, None)
         .unwrap()
@@ -221,6 +241,322 @@ async fn rpc(address: SocketAddr, method: &str) -> Value {
         .unwrap();
     assert!(response.status().is_success(), "{}", response.status());
     response.mcp_json().await.unwrap()
+}
+
+#[tokio::test]
+async fn routed_shadowed_destination_waits_without_blocking_unrelated_listener() {
+    let fixtures = Fixture::with_distribution(
+        &(listener("waiting", "['local']", "")
+            + &listener("eager", "['local']", "wait_for_catalogs=false")
+            + &listener("healthy", "['local']", "")),
+        true,
+        None,
+        &BTreeMap::from([(
+            "slow",
+            "[{to='eager',tools=['*']},{to='waiting',tools=['future_*']},{to='exclude'}]",
+        )]),
+    )
+    .await;
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    tokio::time::timeout(Duration::from_secs(5), fixtures.arrived.acquire_many(2))
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    for name in ["eager", "healthy"] {
+        let listed =
+            tokio::time::timeout(Duration::from_secs(5), rpc(addresses[name], "tools/list"))
+                .await
+                .unwrap();
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 1);
+    }
+    let mut waiting = tokio::spawn(rpc(addresses["waiting"], "tools/list"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(75), &mut waiting)
+            .await
+            .is_err()
+    );
+    fixtures.slow.add_permits(1);
+    let listed = tokio::time::timeout(Duration::from_secs(5), waiting)
+        .await
+        .unwrap()
+        .unwrap();
+    let names = |value: &Value| {
+        value["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&listed), ["local_read"]);
+    assert_eq!(
+        names(&rpc(addresses["eager"], "tools/list").await),
+        ["local_read", "slow_read"]
+    );
+    for name in ["waiting", "healthy"] {
+        let rejected = rpc_params(
+            addresses[name],
+            "tools/call",
+            json!({"name":"slow_read","arguments":{}}),
+        )
+        .await;
+        assert!(
+            rejected.get("error").is_some() || rejected["result"]["isError"] == true,
+            "{rejected}"
+        );
+    }
+    finish(stop, serving).await;
+    fixtures.origin.abort();
+}
+
+#[tokio::test]
+async fn empty_routed_destinations_do_not_discard_a_siblings_catalog() {
+    for remote in [false, true] {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+        let source = if remote { "slow" } else { "local" };
+        let fixtures = Fixture::with_distribution(
+            &(listener("broken", "[]", "")
+                + &listener("eager", "[]", "wait_for_catalogs=false")
+                + &listener("healthy", "[]", "")),
+            remote,
+            None,
+            &BTreeMap::from([(
+                source,
+                "[{to=['broken','eager'],tools=['future_*']},{to='healthy'}]",
+            )]),
+        )
+        .await;
+        if !remote {
+            let strict_error = Deployment::load(&fixtures._dir.path().join("deployment.toml"))
+                .await
+                .err()
+                .unwrap();
+            assert!(format!("{strict_error:#}").contains("no tools selected"));
+        }
+        let catalog = fixtures.running.deferred.as_ref().unwrap().catalog.clone();
+        let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+        let stop = CancellationToken::new();
+        let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+        if remote {
+            fixtures.slow.add_permits(1);
+        }
+        let listed = tokio::time::timeout(
+            Duration::from_secs(5),
+            rpc(addresses["healthy"], "tools/list"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            listed["result"]["tools"][0]["name"],
+            format!("{source}_read")
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let initialized = rpc(addresses["eager"], "initialize").await;
+                if initialized["result"]["instructions"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("The endpoint has no selected tools or discovery capabilities")
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(catalog.read().views["eager"].is_empty());
+        assert_eq!(catalog.read().views["healthy"].len(), 1);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(socket) = TcpListener::bind(addresses["broken"]).await {
+                    drop(socket);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // A different pending source's failure must not repeat the eager failure.
+        if remote {
+            let generation = catalog.read().generation;
+            fixtures.failure.add_permits(1);
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while catalog.read().generation == generation {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+        finish(stop, serving).await;
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(
+            logs.lines()
+                .filter(|line| line.contains("MCP endpoint tools are unavailable")
+                    && line.contains("server=\"eager\""))
+                .count(),
+            1,
+            "{logs}"
+        );
+        assert!(
+            !logs.contains("required catalog unavailable: slow"),
+            "{logs}"
+        );
+        fixtures.origin.abort();
+    }
+}
+
+#[tokio::test]
+async fn legacy_listener_typo_does_not_reject_a_shared_catalog() {
+    let fixtures = Fixture::with_failure_document(
+        &(listener("broken", "['failure']", "include_tools=['failure_missing']")
+            + &listener("healthy", "['failure']", "")),
+        true,
+        Some(json!({"operations":[{"method":"GET","path":"/read"}]})),
+    )
+    .await;
+    let catalog = fixtures.running.deferred.as_ref().unwrap().catalog.clone();
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    fixtures.failure.add_permits(1);
+    let listed = tokio::time::timeout(
+        Duration::from_secs(5),
+        rpc(addresses["healthy"], "tools/list"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(listed["result"]["tools"][0]["name"], "failure_read");
+    assert_eq!(catalog.read().views["healthy"].len(), 1);
+    assert!(catalog.read().views["broken"].is_empty());
+    finish(stop, serving).await;
+    fixtures.origin.abort();
+}
+
+#[tokio::test]
+async fn deferred_send_typo_reports_selection_failure_without_upstream_prose() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _logging = tracing::subscriber::set_default(subscriber);
+    let fixtures = Fixture::with_distribution(
+        &(listener("broken", "[]", "") + &listener("healthy", "['local']", "")),
+        true,
+        Some(json!({"operations":[{"method":"GET","path":"/read",
+            "description":"private upstream credential text"}]})),
+        &BTreeMap::from([(
+            "failure",
+            "[{to='broken',tools=['private_typo']},{to='exclude'}]",
+        )]),
+    )
+    .await;
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    fixtures.failure.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            if logs
+                .lines()
+                .any(|line| line.contains("ERROR") && line.contains("server=\"broken\""))
+            {
+                assert!(logs.contains("failure_stage=\"selection\""), "{logs}");
+                assert!(
+                    logs.contains("Source distribution tool selectors are invalid"),
+                    "{logs}"
+                );
+                assert!(
+                    !logs.contains("Could not obtain the catalog document"),
+                    "{logs}"
+                );
+                assert!(
+                    !logs.contains("private upstream credential text")
+                        && !logs.contains("private_typo"),
+                    "{logs}"
+                );
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        rpc(addresses["healthy"], "tools/list").await["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    finish(stop, serving).await;
+    fixtures.origin.abort();
+}
+
+#[tokio::test]
+async fn routed_catalog_failures_disable_only_required_potential_destinations() {
+    let fixtures = Fixture::with_distribution(
+        &(listener("broken", "['local']", "")
+            + &listener("optional", "['local']", "")
+            + &listener("eager", "['local']", "wait_for_catalogs=false")
+            + &listener("healthy", "['local']", "")),
+        true,
+        None,
+        &BTreeMap::from([
+            ("failure", "[{to='eager',tools=['*']},{to='broken'}]"),
+            ("optional", "[{to='optional'}]"),
+        ]),
+    )
+    .await;
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    fixtures.failure.add_permits(1);
+    let optional = tokio::time::timeout(
+        Duration::from_secs(5),
+        rpc(addresses["optional"], "initialize"),
+    )
+    .await
+    .unwrap();
+    assert!(
+        optional["result"]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("Source optional: UNAVAILABLE")
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(released) = TcpListener::bind(addresses["broken"]).await {
+                drop(released);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    for name in ["healthy", "eager", "optional"] {
+        let listed =
+            tokio::time::timeout(Duration::from_secs(5), rpc(addresses[name], "tools/list"))
+                .await
+                .unwrap();
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 1);
+    }
+    assert!(!serving.is_finished());
+    finish(stop, serving).await;
+    fixtures.origin.abort();
 }
 
 async fn finish(stop: CancellationToken, serving: tokio::task::JoinHandle<Result<()>>) {
@@ -395,7 +731,7 @@ async fn generation_and_listener_failures_explain_why_a_readable_catalog_is_unav
             json!({"operations":[{"path":"/read","method":"GET"}]}),
             "include_tools=['failure_missing']",
             "selection",
-            "configured listeners",
+            "A listener tool selector matches no assigned tools",
         ),
     ] {
         let log = tempfile::NamedTempFile::new().unwrap();
@@ -520,7 +856,13 @@ async fn worker_or_publication_failure_closes_waiters_and_keeps_ready_peers() {
             .finish();
         let _logging = tracing::subscriber::set_default(subscriber);
         let mut fixtures = Fixture::new(
-            &(listener("wait", "['slow']", "") + &listener("healthy", "['local']", "")),
+            &(listener("wait", "['slow']", "")
+                + &listener("healthy", "['local']", "")
+                + &listener(
+                    "eager",
+                    "['slow']",
+                    "wait_for_catalogs=false\ninclude_tools=['slow_missing']",
+                )),
             true,
         )
         .await;
@@ -566,6 +908,12 @@ async fn worker_or_publication_failure_closes_waiters_and_keeps_ready_peers() {
         .await
         .unwrap();
         assert!(failed_catalog.publication_failed());
+        assert!(
+            !std::fs::read_to_string(log.path())
+                .unwrap()
+                .contains("MCP endpoint tools are unavailable"),
+            "an unpublished selection must not announce tool withdrawal"
+        );
         drop(TcpListener::bind(addresses["wait"]).await.unwrap());
         let listed = tokio::time::timeout(
             Duration::from_secs(5),

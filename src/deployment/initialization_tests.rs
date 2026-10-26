@@ -462,8 +462,8 @@ async fn binding_completes_only_effective_static_payers_from_reused_relay_initia
 }
 
 #[tokio::test]
-async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_it() {
-    for reserved_namespace in [false, true] {
+async fn binding_restricts_reused_managed_owner_and_socket_failure_releases_it() {
+    for fail_bind in [false, true] {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let key = dir.path().join("key");
@@ -479,12 +479,7 @@ async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_i
         owner.close().await.unwrap();
         write_spec(dir.path());
         let path = dir.path().join("deployment.toml");
-        let mut config = managed_config().replace("auto_fund=false", "auto_fund=true");
-        if reserved_namespace {
-            config = config
-                .replace("[sources.api]", "[sources.api]\nprefix='dyn'")
-                .replace("[servers.one]", "[servers.one]\ndiscover_on_demand=true");
-        }
+        let config = managed_config().replace("auto_fund=false", "auto_fund=true");
         std::fs::write(&path, config).unwrap();
         let mut deployment = Deployment::load(&path).await.unwrap();
         let initialized = deployment
@@ -508,12 +503,21 @@ async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_i
             .await
             .unwrap();
         deployment.initialized = Some(initialized);
+        // Fail after owner reuse/restriction, rather than relying on a namespace
+        // error that strict loading now rejects before wallet initialization.
+        let occupied = if fail_bind {
+            let socket = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            deployment.listeners.get_mut("one").unwrap().listen = socket.local_addr().unwrap();
+            Some(socket)
+        } else {
+            None
+        };
         match deployment
             .bind_restricted(&env(), FundingRestriction::DenyNewFunding)
             .await
         {
             Ok(mut running) => {
-                assert!(!reserved_namespace);
+                assert!(!fail_bind);
                 let ManagedRuntime::Treasury(treasury) =
                     std::mem::replace(&mut running.runtime, ManagedRuntime::None)
                 else {
@@ -541,10 +545,14 @@ async fn binding_restricts_reused_managed_owner_and_namespace_failure_releases_i
                 TcpListener::bind(address).await.unwrap();
             }
             Err(error) => {
-                assert!(reserved_namespace, "{error:#}");
-                assert_eq!(error.to_string(), "static tool uses reserved namespace");
+                assert!(fail_bind, "{error:#}");
+                assert!(
+                    format!("{error:#}").contains("server one: cannot bind"),
+                    "{error:#}"
+                );
             }
         }
+        drop(occupied);
         let owner = reopen(&state, &key, &id).await;
         let current = owner.status().await.unwrap();
         assert!(current.funding_jobs.is_empty());

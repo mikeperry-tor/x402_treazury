@@ -8,6 +8,10 @@ use crate::{
 };
 use anyhow::{Context, Result, bail, ensure};
 pub mod catalog_evidence;
+pub mod routing;
+#[cfg(test)]
+mod routing_tests;
+use routing::{EffectiveBindings, SendToolsRule};
 mod selection_diagnostics;
 mod startup;
 pub use startup::StartupConfig;
@@ -54,6 +58,8 @@ pub struct MetaConfig {
 }
 #[derive(Deserialize, Serialize)]
 pub struct SourceConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_tools: Option<Vec<SendToolsRule>>,
     #[serde(default)]
     pub optional_startup: bool,
     pub wallet: Option<String>,
@@ -125,6 +131,7 @@ impl ListenerConfig {
 
 #[derive(Clone)]
 struct Source {
+    send_tools: Option<Vec<SendToolsRule>>,
     config: Config,
     document: std::sync::Arc<serde_json::Value>,
     tools: Vec<ToolSpec>,
@@ -152,6 +159,7 @@ pub struct InventoryTool {
     pub tool: ToolSpec,
 }
 pub struct Deployment {
+    listeners: BTreeMap<String, ListenerConfig>,
     prebound: BTreeMap<String, TcpListener>,
     search_relay: Option<std::sync::Arc<crate::discovery_relay::SearchRelay>>,
     unavailable_sources: BTreeMap<String, String>,
@@ -162,6 +170,7 @@ pub struct Deployment {
     sources: BTreeMap<String, Source>,
     selected: BTreeMap<String, Vec<(String, ToolSpec)>>,
     conflicting_tools: BTreeMap<String, Vec<String>>,
+    selection_errors: BTreeMap<String, &'static str>,
     wallet_resolution: Resolution,
     config_path: std::path::PathBuf,
 }
@@ -211,8 +220,9 @@ impl MetaConfig {
         );
         ensure!(!self.servers.is_empty(), "at least one server is required");
         self.validate_declarations()?;
-        self.validate_listeners()?;
-        let resolution = assignment::resolve(self)?;
+        let bindings = EffectiveBindings::resolve(self)?;
+        self.validate_listeners(&bindings.listeners(self))?;
+        let resolution = assignment::resolve_with_bindings(self, bindings)?;
         self.validate_resolved_funding(&resolution, shared_only)?;
         Ok(resolution)
     }
@@ -247,9 +257,9 @@ impl MetaConfig {
         Ok(())
     }
 
-    fn validate_listeners(&self) -> Result<()> {
+    fn validate_listeners(&self, listeners: &BTreeMap<String, ListenerConfig>) -> Result<()> {
         let mut addresses = BTreeSet::new();
-        for (name, server) in &self.servers {
+        for (name, server) in listeners {
             crate::server::host::HostPolicy::new(
                 server.allowed_hosts.clone(),
                 server.disable_host_check,
@@ -284,17 +294,6 @@ impl MetaConfig {
                     || server.discover_on_demand,
                 "server {name}: sources cannot be empty"
             );
-            let mut seen = BTreeSet::new();
-            for source in &server.sources {
-                ensure!(
-                    self.sources.contains_key(source),
-                    "server {name}: unknown source {source}"
-                );
-                ensure!(
-                    seen.insert(source),
-                    "server {name}: duplicate source {source}"
-                );
-            }
             for selector in server.include_tools.iter().chain(&server.exclude_tools) {
                 pattern(selector)?;
             }
@@ -457,11 +456,12 @@ impl Deployment {
             }
             let mut resolved_source = serde_json::to_value(provider)?;
             resolved_source["optional_startup"] = serde_json::json!(source.optional_startup);
+            resolved_source["send_tools"] = serde_json::to_value(&source.send_tools)?;
             resolved_source["wallet"] = serde_json::to_value(&source.wallet)?;
             resolved.insert(id, resolved_source);
         }
         Ok(
-            serde_json::json!({"discovery_wallets":discovery_wallets,"relay_fallback":config.relay_fallback,"startup":config.startup,"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
+            serde_json::json!({"source_bindings":wallet_resolution.source_bindings,"discovery_wallets":discovery_wallets,"relay_fallback":config.relay_fallback,"startup":config.startup,"network":config.network.inspection(),"version":config.version,"treasury":config.treasury,"treasury_identity":config.treasury.as_ref().map(|t| if t.id.is_empty() { "from_wallet_state_at_runtime" } else { "explicit_expected_id" }),"funding":config.funding,"base_rpc_policy":config.funding.as_ref().map(|f| f.base_rpc_policy()),"sources":resolved,"wallets":config.wallets,"servers":config.servers,"wallet_bindings":wallet_resolution.bindings,"wallet_templates":config.wallet_templates,"wallet_assignment":config.wallet_assignment,"resolved_wallets":wallet_resolution.wallets,"generated_wallets":wallet_resolution.generated,"wallet_summary":wallet_resolution.summary}),
         )
     }
     pub async fn load(path: &Path) -> Result<Self> {
@@ -510,7 +510,7 @@ impl Deployment {
         .await
     }
     fn validate_listener_credentials(&self, env: &BTreeMap<String, String>) -> Result<()> {
-        for server in self.config.servers.values().filter(|s| s.auth) {
+        for server in self.listeners.values().filter(|s| s.auth) {
             server.token(env)?;
         }
         Ok(())
@@ -531,7 +531,7 @@ impl Deployment {
 
     async fn prebind_listeners(&mut self) -> Result<()> {
         let mut sockets = BTreeMap::new();
-        for (name, cfg) in &self.config.servers {
+        for (name, cfg) in &self.listeners {
             let socket = TcpListener::bind(cfg.listen)
                 .await
                 .with_context(|| format!("server {name}: cannot bind {}", cfg.listen))?;
@@ -628,6 +628,7 @@ impl Deployment {
             None => None,
         };
         let mut deployment = Self {
+            listeners: wallet_resolution.source_bindings.listeners(&config),
             prebound: BTreeMap::new(),
             search_relay,
             unavailable_sources: BTreeMap::new(),
@@ -641,6 +642,7 @@ impl Deployment {
             sources: BTreeMap::new(),
             selected: BTreeMap::new(),
             conflicting_tools: BTreeMap::new(),
+            selection_errors: BTreeMap::new(),
             config_path: path.to_owned(),
         };
         if let Some((env, _)) = relay_env
@@ -670,6 +672,7 @@ impl Deployment {
             let wallet_resolution = &deployment.wallet_resolution;
             let (sources, unavailable_sources, pending_sources) = startup::load(
                 config,
+                &wallet_resolution.source_bindings,
                 path,
                 warn,
                 relay,
@@ -677,27 +680,16 @@ impl Deployment {
                 all_tools,
             )
             .await?;
-            let mut selected = BTreeMap::new();
-            let mut conflicts = BTreeMap::new();
-            for (name, server) in &config.servers {
-                let inventory = if deployment.defer_discovery {
-                    listener_tool_inventory(name, server, &sources, &unavailable_sources, true)?
-                } else {
-                    ListenerInventory {
-                        tools: select_listener_tools(name, server, &sources, &unavailable_sources)?,
-                        conflicts: Vec::new(),
-                    }
-                };
-                selected.insert(name.clone(), inventory.tools);
-                conflicts.insert(name.clone(), inventory.conflicts);
-            }
-            validate_selected_cover(wallet_resolution, &sources, &selected)?;
-            selection_diagnostics::report_completed(config, &sources, &pending_sources, None);
             deployment.unavailable_sources = unavailable_sources;
             deployment.pending_sources = pending_sources;
             deployment.sources = sources;
-            deployment.selected = selected;
-            deployment.conflicting_tools = conflicts;
+            deployment.refresh_selection(deployment.defer_discovery)?;
+            selection_diagnostics::report_completed(
+                &deployment.listeners,
+                &deployment.sources,
+                &deployment.pending_sources,
+                None,
+            );
             Ok(())
         }
         .await;
@@ -736,8 +728,7 @@ impl Deployment {
                 )
             })
             .collect();
-        self.config
-            .servers
+        self.listeners
             .iter()
             .map(|(name, s)| Inventory {
                 discover_on_demand: s.discover_on_demand,
@@ -805,8 +796,7 @@ impl Deployment {
     }
 
     fn pending_wallets(&self) -> BTreeSet<String> {
-        self.config
-            .servers
+        self.listeners
             .iter()
             .flat_map(|(name, listener)| {
                 listener
@@ -1139,9 +1129,59 @@ impl Deployment {
         })
     }
 
+    // Catalogs belong to sources; selection failures belong to endpoints. Keep
+    // successful acquisition even when one destination has invalid narrowing.
+    fn refresh_selection(&mut self, serving: bool) -> Result<()> {
+        let mut selected = BTreeMap::new();
+        let mut conflicts = BTreeMap::new();
+        let mut errors = BTreeMap::new();
+        for (name, listener) in &self.listeners {
+            let inventory = listener_tool_inventory(
+                name,
+                listener,
+                &self.sources,
+                &self.unavailable_sources,
+                serving,
+            );
+            let inventory = match inventory {
+                Ok(inventory) => inventory,
+                Err(error) if serving => {
+                    let failure = startup::catalog_failure(&error, "selection");
+                    errors.insert(name.clone(), failure.reason);
+                    ListenerInventory {
+                        tools: Vec::new(),
+                        conflicts: Vec::new(),
+                    }
+                }
+                Err(error) => return Err(error),
+            };
+            // Reserved identities invalidate source admission, rather than the
+            // endpoint's narrowing. A late invalid source must not withdraw
+            // healthy tools already published on this listener.
+            if (crate::discovery::policy::enabled(&self.config) || listener.discover_on_demand)
+                && inventory.tools.iter().any(|(_, tool)| {
+                    tool.name.starts_with("dyn_") || tool.name.starts_with("x402_treazury_")
+                })
+            {
+                return Err(anyhow::anyhow!("server {name}: static tool uses reserved namespace")
+                    .context(catalog::diagnostics::Problem("Static tools use a reserved management namespace; configure a distinct source prefix or listener selection")));
+            }
+            selected.insert(name.clone(), inventory.tools);
+            conflicts.insert(name.clone(), inventory.conflicts);
+        }
+        // This validation intentionally spans endpoints sharing one payer/origin.
+        // Unlike endpoint filters, a conflicting cover policy is a shared resource
+        // failure; preserve the existing source admission boundary for that case.
+        validate_selected_cover(&self.wallet_resolution, &self.sources, &selected)?;
+        self.selected = selected;
+        self.conflicting_tools = conflicts;
+        self.selection_errors = errors;
+        Ok(())
+    }
+
     fn build_servers(&self, wallets: &BTreeMap<String, PaidClient>) -> BTreeMap<String, Server> {
         let mut servers = BTreeMap::new();
-        for (name, cfg) in &self.config.servers {
+        for (name, cfg) in &self.listeners {
             let selected = &self.selected[name];
             let bindings = selected
                 .iter()
@@ -1187,6 +1227,9 @@ impl Deployment {
                 .collect::<Vec<_>>()
                 .join("\n\n");
             let mut instructions = cfg.instructions_text.clone().unwrap_or(source_instructions);
+            if let Some(reason) = self.selection_errors.get(name) {
+                instructions.push_str(&format!("\n\nUNAVAILABLE endpoint tool selection: {reason}. Correct the endpoint/source selections and restart."));
+            }
             for id in &cfg.sources {
                 if self.unavailable_sources.contains_key(id) {
                     if self
@@ -1253,7 +1296,7 @@ impl Deployment {
     ) -> Result<(BTreeMap<String, Option<String>>, InitializedWallets)> {
         // Validate every credential before opening any port.
         let mut tokens = BTreeMap::new();
-        for (name, cfg) in &self.config.servers {
+        for (name, cfg) in &self.listeners {
             tokens.insert(name.clone(), cfg.token(env)?);
         }
         let initialized = if unsigned {
@@ -1369,17 +1412,6 @@ impl Deployment {
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
         for (name, server) in &servers {
             let tools = server.catalog.read().views["default"].clone();
-            if crate::discovery::policy::enabled(&self.config)
-                || self.config.servers[name].discover_on_demand
-            {
-                ensure!(
-                    tools
-                        .iter()
-                        .all(|t| !t.tool.name.starts_with("x402_treazury_")
-                            && !t.tool.name.starts_with("dyn_")),
-                    "static tool uses reserved namespace"
-                );
-            }
             snapshot
                 .instructions
                 .insert(name.clone(), server.instructions.clone());
@@ -1390,7 +1422,7 @@ impl Deployment {
         let manager = if crate::discovery::policy::enabled(&self.config) {
             Some(
                 crate::discovery::Manager::new_with_search(
-                    self.config.servers.clone(),
+                    self.listeners.clone(),
                     wallets,
                     catalog.clone(),
                     protected,
@@ -1404,12 +1436,12 @@ impl Deployment {
         let mut prebound = std::mem::take(&mut self.prebound);
         let reuse_sockets = !prebound.is_empty();
         ensure!(
-            !reuse_sockets || prebound.keys().eq(self.config.servers.keys()),
+            !reuse_sockets || prebound.keys().eq(self.listeners.keys()),
             "prebound listener inventory changed"
         );
         let mut listeners = Vec::new();
         let mut accepted_work = Vec::new();
-        for (name, cfg) in &self.config.servers {
+        for (name, cfg) in &self.listeners {
             let mut server = servers.remove(name).unwrap();
             server.catalog = catalog.clone();
             server.catalog_server = name.clone();
@@ -1513,6 +1545,7 @@ impl Deployment {
     }
 }
 
+#[cfg(test)]
 fn select_listener_tools(
     name: &str,
     server: &ListenerConfig,
@@ -1526,6 +1559,36 @@ fn select_listener_tools(
 struct ListenerInventory {
     tools: Vec<(String, ToolSpec)>,
     conflicts: Vec<String>,
+}
+
+impl Source {
+    // One transient assignment/tag view feeds publication and selector diagnostics.
+    fn listener_tools(&self, name: &str, listener: &ListenerConfig) -> Result<Vec<&ToolSpec>> {
+        let operations = catalog::operations(&self.document, None)?;
+        let routing = self
+            .send_tools
+            .as_ref()
+            .map(|rules| routing::CompiledRules::new(rules, self.config.prefix.as_deref().unwrap()))
+            .transpose()?;
+        Ok(self
+            .tools
+            .iter()
+            .filter(|tool| {
+                routing.as_ref().is_none_or(|rules| {
+                    rules
+                        .decision(&tool.name)
+                        .targets
+                        .iter()
+                        .any(|target| target == name)
+                }) && catalog::matches_operation_tags(
+                    &operations,
+                    tool,
+                    &listener.tags,
+                    &listener.exclude_tags,
+                )
+            })
+            .collect())
+    }
 }
 
 // Keep ambiguous names in the inventory until selectors have been validated.
@@ -1543,17 +1606,7 @@ fn listener_tool_inventory(
         if unavailable.contains_key(source) {
             continue;
         }
-        let operations = catalog::operations(&sources[source].document, None)?;
-        for tool in &sources[source].tools {
-            if !catalog::matches_operation_tags(
-                &operations,
-                tool,
-                &server.tags,
-                &server.exclude_tags,
-            ) {
-                continue;
-            }
-
+        for tool in sources[source].listener_tools(name, server)? {
             match available.entry(tool.name.clone()) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert(Some((source.clone(), tool.clone())));
@@ -1578,7 +1631,19 @@ fn listener_tool_inventory(
                     && !text.contains(['*', '?'])
                     && !selector_has_unavailable_owner(text, server, sources, unavailable)
                 {
-                    bail!("server {name}: unknown tool selector {text}");
+                    let removals =
+                        selection_diagnostics::selection_removals(name, server, sources)?;
+                    let causes = selection_diagnostics::removal_causes(&removals, &re);
+                    let detail = if causes.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            "; matching tools were removed before listener name filtering: {}",
+                            causes.join("; ")
+                        )
+                    };
+                    return Err(anyhow::anyhow!("server {name}: unknown tool selector {text}{detail}")
+                        .context(catalog::diagnostics::Problem("A listener tool selector matches no assigned tools; inspect source send_tools rules and listener filters")));
                 }
                 Ok(re)
             })
@@ -1599,14 +1664,15 @@ fn listener_tool_inventory(
         })
         .filter_map(|(_, t)| t)
         .collect();
-    ensure!(
-        !tools.is_empty()
-            || crate::discovery::policy::EndpointPolicy::from(server).any()
-            || server.discover_on_demand
-            || incomplete
-            || !conflicts.is_empty(),
-        "server {name}: no tools selected"
-    );
+    if tools.is_empty()
+        && !crate::discovery::policy::EndpointPolicy::from(server).any()
+        && !server.discover_on_demand
+        && !incomplete
+        && conflicts.is_empty()
+    {
+        return Err(anyhow::anyhow!("server {name}: no tools selected")
+            .context(catalog::diagnostics::Problem("The endpoint has no selected tools or discovery capabilities; review source assignments and listener filters")));
+    }
     Ok(ListenerInventory { tools, conflicts })
 }
 
@@ -1853,8 +1919,10 @@ impl RunningDeployment {
                     if let Err(error) = ready {
                         // Only fixed diagnostics and authored identities cross this
                         // boundary; upstream errors/content must never be included.
-                        tracing::error!(server = name, reason = %error,
-                            "MCP endpoint unavailable; catalog startup failed; see the catalog failure warning for the cause; correct it and restart");
+                        tracing::error!(server = name,
+                            failure_stage = error.downcast_ref::<catalog::LoadStage>().map(|stage| stage.label()),
+                            reason = %format_args!("{error:#}"),
+                            "MCP endpoint unavailable; catalog startup failed; correct the reported cause and restart");
                         drop(listener);
                         drop(app);
                         stopped.cancelled().await;

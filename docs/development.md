@@ -332,6 +332,20 @@ individual unsigned relay failures remain DEBUG.
 A successful relay HTTP call does not establish usable target documentation or
 settlement; consumers still validate the document.
 
+Source distribution selector failures retain the selection stage and a safe reason
+identifying the source's `send_tools` rules in both immediate and deferred catalog loads.
+A readable catalog with invalid distribution is not a network acquisition failure;
+detailed selectors remain in the inspection error chain, outside serving logs.
+Endpoint selection diagnostics distinguish a missing exact listener selector from
+an empty inventory without discovery capabilities. A reserved static namespace has
+a distinct source-admission reason. Serving logs and endpoint status use fixed
+reasons with repair guidance; detailed selector/routing evidence stays in inspection
+errors.
+Deployment `send_tools` wildcards, shadowed distribution rules and final listener
+wildcards use advisory DEBUG diagnostics. They do not indicate a failed operation
+or endpoint and must not emit INFO/WARN merely because they match no current
+tools. Missing exact selectors remain selection errors.
+
 A `tools/list` request with more than 500 advertised definitions emits an advisory
 WARN whose message states the endpoint name and current tool count and suggests
 `discover_on_demand = true`, without URLs, descriptions or credentials. It observes

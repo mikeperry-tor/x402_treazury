@@ -33,6 +33,14 @@ pub(crate) fn resolve_wallets(
     }
     let mut result = BTreeMap::new();
     for source in selected {
+        if config.sources[&source].send_tools.is_some()
+            && !resolution
+                .bindings
+                .values()
+                .any(|bindings| bindings.contains_key(&source))
+        {
+            continue;
+        }
         if !policy.sources.is_empty() && !policy.sources.contains(&source) {
             continue;
         }

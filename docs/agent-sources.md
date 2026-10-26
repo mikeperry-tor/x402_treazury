@@ -562,9 +562,18 @@ without `source_name` can find other endpoint tools, but does not alter operator
 filters or guarantee a callable result.
 Registration never funds wallets or probes prices.
 
+Static deployment [source distribution](configuration.md#source-tool-distribution)
+does not extend registration authority. Dynamic imports cannot supply `send_tools` and
+remain owned by the authenticated endpoint; they cannot target sibling listeners.
+Raw-call permissions remain independent of static routing and are not constrained
+by its tool selectors.
+
 Names preserve case and allow at most 64 ASCII letters/digits/underscores/hyphens;
 `__` is reserved as the source/operation separator. Explicit names must be unique
 within the endpoint, including disabled registrations and configured source names.
+Configured names are reserved for every effective static binding, including
+declared `send_tools` destinations whose catalogs are pending or currently contribute no
+tools. Exclusion-only sources reserve no endpoint name.
 When omitted, bundled sources use their short stable provider ID and generic
 sources use a readable hostname-derived name (for example `api-example-com`), with a numeric suffix such as `-2` if occupied. Name allocation
 and duplicate-URL checks share the existing publication lock. Choose `netintel` to

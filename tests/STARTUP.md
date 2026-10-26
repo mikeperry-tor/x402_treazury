@@ -40,15 +40,39 @@ panic fixtures also run with default waiting and verify drain/Store ownership.
 The waiting-endpoint regression also checks that the INFO startup summary
 identifies catalogs still loading instead of announcing discovery completion.
 Publication preserves authored prices, tool order and existing callable snapshots.
-Listener selector diagnostics are covered by `deployment::selection_diagnostics`
-and the deferred readiness fixtures: pending catalogs do not produce missing-tool
-warnings, terminal source outcomes trigger one report per affected listener, and
+Advisory listener/distribution selectors emit DEBUG diagnostics; missing exact
+selectors retain terminal failure diagnostics. Listener selector diagnostics are
+covered by `deployment::selection_diagnostics` and the deferred readiness fixtures:
+pending catalogs do not produce missing-tool diagnostics, terminal source outcomes trigger one report per affected listener, and
 unrelated completions do not repeat it. Synthetic catalogs verify source name-filter
 causes, opt-in recommendations, listener tags and unchanged exact-selector errors.
 Deferred collision
-regressions cover opposite completion orders, three owners, exact selectors,
-unique tools, listener isolation and captured bindings; strict loading still rejects
-duplicate names.
+regressions cover both legacy attachments and authored distribution rules in
+opposite completion orders: three owners, exact selectors, unique tools, exclusion,
+fanout, listener isolation and captured bindings. Synthetic prefix reconstruction
+retains and validates `send_tools`; excluded operations remain in source inventory but
+never publish. Strict loading still rejects duplicate names.
+Source distribution uses potential bindings declared before catalog acquisition.
+Routing regressions must preserve pending/optional/required source isolation and
+`wait_for_catalogs` behavior for every declared target, including targets with no
+current tools or shadowed rules. Static-only empty routed destinations and invalid
+legacy listener selectors must not discard a shared catalog's valid tools on peers.
+Immediate local and deferred remote catalogs use the same selection path; eager
+endpoints publish safe failure instructions and unchanged failures do not repeatedly
+log on unrelated completion. Shared-payer cover ownership still validates across
+listeners: conflicting profiles reject admission, while matching profiles preserve
+both endpoints. Late namespace rejection omits only the invalid source, retaining
+healthy aliases and captured calls; both completion orders verify a safe selection
+reason and a single paid catalog exchange. Strict namespace rejection happens
+before wallet initialization;
+reused managed-owner cleanup is exercised by an actual occupied-listener failure
+after initialization and funding restriction. Both outcomes reopen the owner and
+assert no funding jobs or wallet addresses were created.
+Exclusion-only sources add no readiness dependency.
+Strict inspection and frozen reload must agree with publication and wallet
+bindings; routing explanations include exclusions without adding catalog reads or
+funding work. See the maintained
+[distribution contract](../docs/configuration.md#source-tool-distribution).
 The catalog capacity subprocess saturates both slots with indefinite server delays
 and verifies a queued healthy source publishes a callable tool. It also exercises
 strict loading and warming, which download the healthy source while remaining

@@ -92,6 +92,7 @@ pub async fn bootstrap_wallets_with_network(
     }
     crate::discovery::policy::validate_registry_path(&config, path)?;
     let deployment = Deployment {
+        listeners: wallet_resolution.source_bindings.listeners(&config),
         search_relay: None,
         prebound: BTreeMap::new(),
         pending_sources: BTreeMap::new(),
@@ -103,6 +104,7 @@ pub async fn bootstrap_wallets_with_network(
         sources: BTreeMap::new(),
         selected: BTreeMap::new(),
         conflicting_tools: BTreeMap::new(),
+        selection_errors: BTreeMap::new(),
         config_path: path.to_owned(),
     };
     deployment.bootstrap(&std::env::vars().collect()).await

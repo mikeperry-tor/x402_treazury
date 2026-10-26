@@ -3296,6 +3296,55 @@ async fn bm25_search_scopes_counts_ranked_pages_and_cursor_generation() {
 }
 
 #[tokio::test]
+async fn routed_static_names_reserve_explicit_and_generated_imports_before_tools_arrive() {
+    let config: crate::deployment::MetaConfig = serde_json::from_value(json!({
+        "version":1,
+        "sources":{"horizonpulse":{"send_tools":[
+            {"to":"writer","tools":["future_*"]},{"to":"hidden"}
+        ]}},
+        "servers":listeners(false)
+    }))
+    .unwrap();
+    let graph = crate::deployment::routing::EffectiveBindings::resolve(&config).unwrap();
+    let m = manager_with(graph.listeners(&config)).await;
+    // There is no published static inventory: reservation follows potential
+    // bindings while the source is pending or routes no current tools here.
+    assert!(m.catalog.read().views["writer"].is_empty());
+    assert!(config.servers["writer"].sources.is_empty());
+    let error = m
+        .invoke(
+            "writer",
+            "x402_treazury_providers_add_remote",
+            json!({"name":"horizonpulse","spec_url":"https://api.example.com/openapi.json"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), "source_name_reserved");
+    assert!(m.fetches.lock().unwrap().is_empty());
+    assert!(m.inner.lock().unwrap().state.records.is_empty());
+
+    // Bundled metadata exercises generated-name collision handling without I/O.
+    let generated = m
+        .invoke(
+            "writer",
+            "x402_treazury_providers_add_local",
+            json!({"provider_id":"horizonpulse"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(generated["name"], "horizonpulse-2");
+    let sibling = m
+        .invoke(
+            "reader",
+            "x402_treazury_providers_add_local",
+            json!({"provider_id":"horizonpulse"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(sibling["name"], "horizonpulse");
+}
+
+#[tokio::test]
 async fn automatic_source_names_are_readable_collision_safe_and_duplicate_safe() {
     let mut configured = listeners(false);
     configured

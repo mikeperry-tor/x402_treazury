@@ -76,8 +76,7 @@ impl Runtime {
         &mut self,
     ) -> BTreeMap<String, tokio::sync::oneshot::Receiver<Result<()>>> {
         self.deployment
-            .config
-            .servers
+            .listeners
             .iter()
             .filter(|(_, config)| config.wait_for_catalogs)
             .map(|(name, _)| {
@@ -91,13 +90,18 @@ impl Runtime {
     // source ledger. Call only after the corresponding snapshot is published.
     fn signal_readiness(&mut self) {
         for name in self.readiness.keys().cloned().collect::<Vec<_>>() {
-            let sources = &self.deployment.config.servers[&name].sources;
+            let sources = &self.deployment.listeners[&name].sources;
             let failed = sources.iter().find(|id| {
                 !self.deployment.pending_sources.contains_key(*id)
                     && !self.deployment.sources.contains_key(*id)
                     && !self.deployment.config.sources[*id].optional_startup
             });
-            let result = if let Some(id) = failed {
+            let result = if let Some(reason) = self.deployment.selection_errors.get(&name) {
+                Some(Err(anyhow::anyhow!(
+                    "endpoint tool selection failed: {reason}"
+                )
+                .context(catalog::LoadStage::Selection)))
+            } else if let Some(id) = failed {
                 Some(Err(anyhow::anyhow!("required catalog unavailable: {id}")))
             } else if sources
                 .iter()
@@ -133,15 +137,6 @@ impl Runtime {
                     tool.help = previous.help.clone();
                 }
             }
-            if crate::discovery::policy::enabled(&self.deployment.config)
-                || self.deployment.config.servers[&name].discover_on_demand
-            {
-                ensure!(
-                    tools.iter().all(|tool| !tool.tool.name.starts_with("dyn_")
-                        && !tool.tool.name.starts_with("x402_treazury_")),
-                    "static tool uses reserved namespace"
-                );
-            }
             snapshot.views.insert(name.clone(), tools);
             snapshot.instructions.insert(name, server.instructions);
         }
@@ -162,61 +157,30 @@ impl Runtime {
             .unavailable_sources
             .remove(id)
             .expect("pending source prefix");
-        let selected: Result<BTreeMap<_, _>> = self
-            .deployment
-            .config
-            .servers
-            .iter()
-            .map(|(name, server)| {
-                Ok((
-                    name.clone(),
-                    listener_tool_inventory(
-                        name,
-                        server,
-                        &self.deployment.sources,
-                        &self.deployment.unavailable_sources,
-                        true,
-                    )?,
-                ))
-            })
-            .collect();
-        let selected = selected.and_then(|inventories| {
-            let (selected, conflicts): (BTreeMap<_, _>, BTreeMap<_, _>) = inventories
-                .into_iter()
-                .map(|(name, inventory)| {
-                    ((name.clone(), inventory.tools), (name, inventory.conflicts))
-                })
-                .unzip();
-            for (name, tools) in &selected {
-                if crate::discovery::policy::enabled(&self.deployment.config)
-                    || self.deployment.config.servers[name].discover_on_demand
-                {
-                    ensure!(
-                        tools.iter().all(|(_, tool)| !tool.name.starts_with("dyn_")
-                            && !tool.name.starts_with("x402_treazury_")),
-                        "static tool uses reserved namespace"
-                    );
-                }
-            }
-            validate_selected_cover(
-                &self.deployment.wallet_resolution,
-                &self.deployment.sources,
-                &selected,
-            )?;
-            Ok((selected, conflicts))
-        });
-        match selected {
-            Ok((selected, conflicts)) => {
-                self.deployment.selected = selected;
-                self.deployment.conflicting_tools = conflicts;
-                Ok(())
-            }
+        match self.deployment.refresh_selection(true) {
+            Ok(()) => Ok(()),
             Err(error) => {
                 self.deployment.sources.remove(id);
                 self.deployment
                     .unavailable_sources
                     .insert(id.into(), prefix);
                 Err(error)
+            }
+        }
+    }
+    // Report only published transitions. Failed publication retains old tools,
+    // so selection preparation cannot announce their withdrawal.
+    fn report_selection_failures(&self, previous: &BTreeMap<String, &'static str>) {
+        for (name, reason) in &self.deployment.selection_errors {
+            if !self.deployment.listeners[name].wait_for_catalogs
+                && previous.get(name) != Some(reason)
+            {
+                tracing::error!(
+                    server = name,
+                    failure_stage = "selection",
+                    reason,
+                    "MCP endpoint tools are unavailable because its tool selection is invalid; correct the configuration and restart"
+                );
             }
         }
     }
@@ -230,6 +194,7 @@ impl Runtime {
             }
         }
         let mut failure_guard = FailureGuard(self.catalog.clone(), true);
+        self.report_selection_failures(&BTreeMap::new());
         self.signal_readiness();
         #[cfg(test)]
         let failure_receiver = self.failure.take();
@@ -276,6 +241,7 @@ impl Runtime {
                 _ = &mut failure => panic!("injected deferred worker failure"),
             };
             let Some(event) = event else { continue };
+            let previous_selection_errors = self.deployment.selection_errors.clone();
             match event {
                 Event::OperatorStatus(id, required, receiver) => {
                     let Some(required) = required else {
@@ -310,7 +276,7 @@ impl Runtime {
                         }
                     }
                     selection_diagnostics::report_completed(
-                        &self.deployment.config,
+                        &self.deployment.listeners,
                         &self.deployment.sources,
                         &self.deployment.pending_sources,
                         Some(&id),
@@ -332,6 +298,7 @@ impl Runtime {
                 self.catalog.mark_publication_failed();
                 break;
             }
+            self.report_selection_failures(&previous_selection_errors);
             self.signal_readiness();
         }
         drop(work);
@@ -365,40 +332,79 @@ mod tests {
             .unwrap();
         });
         let mut final_views = Vec::new();
-        for order in [["a", "b", "c"], ["c", "b", "a"]] {
+        for (routed, order) in [
+            (false, ["a", "b", "c"]),
+            (false, ["c", "b", "a"]),
+            (true, ["a", "b", "c"]),
+            (true, ["c", "b", "a"]),
+        ] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("deployment.toml");
             let mut config =
                 String::from("version=1\n[wallets.payer]\nmode='static'\nprivate_key_env='KEY'\n");
             for id in ["a", "b", "c"] {
+                let mut operations = vec![
+                    json!({"method":"GET","path":"/shared"}),
+                    json!({"method":"GET","path":format!("/unique_{id}")}),
+                ];
+                if routed {
+                    operations.push(json!({"method":"GET","path":"/not_here"}));
+                }
                 std::fs::write(
                     dir.path().join(format!("{id}.json")),
-                    json!({"operations":[
-                        {"method":"GET","path":"/shared"},
-                        {"method":"GET","path":format!("/unique_{id}")}
-                    ]})
-                    .to_string(),
+                    json!({"operations":operations}).to_string(),
                 )
                 .unwrap();
                 config.push_str(&format!(
                     "[sources.{id}]\nspec='{id}.json'\nbase_url='{base}/{id}'\n"
                 ));
+                if routed {
+                    let targets = if id == "a" {
+                        "['combined','exact','isolated']"
+                    } else {
+                        "['combined','exact']"
+                    };
+                    config.push_str(&format!(
+                        "send_tools=[{{to='exclude',tools=['not_here']}},{{to={targets}}}]\n"
+                    ));
+                }
             }
             for (name, sources) in [
                 ("combined", "['a','b','c']"),
                 ("isolated", "['a']"),
                 ("exact", "['a','b','c']"),
             ] {
+                let sources = if routed { "[]" } else { sources };
                 config.push_str(&format!("[servers.{name}]\nlisten='127.0.0.1:0'\nbearer_token_env='TOKEN'\nwallet='payer'\nsources={sources}\n"));
             }
             std::fs::write(&path, config).unwrap();
             let mut deployment = Deployment::load(&path).await.unwrap();
+            if routed {
+                assert!(
+                    deployment
+                        .config
+                        .servers
+                        .values()
+                        .all(|server| server.sources.is_empty())
+                );
+                assert_eq!(deployment.listeners["combined"].sources, ["a", "b", "c"]);
+                assert_eq!(deployment.listeners["isolated"].sources, ["a"]);
+            }
             let completed: BTreeMap<_, _> = std::mem::take(&mut deployment.sources)
                 .into_iter()
                 .map(|(id, source)| {
                     let mut cfg = source.config;
+                    // Start with valid distinct prefixes, then introduce a collision
+                    // while retaining the authored distribution through validation.
                     cfg.prefix = Some("common".into());
-                    let source = Source::from_document(&id, cfg, source.document).unwrap();
+                    let source = Source::from_document(&id, cfg, source.document)
+                        .unwrap()
+                        .with_send_tools(&id, deployment.config.sources[&id].send_tools.clone())
+                        .unwrap();
+                    if routed {
+                        assert!(source.send_tools.is_some());
+                        assert!(source.tools.iter().any(|tool| tool.path == "/not_here"));
+                    }
                     (id, source)
                 })
                 .collect();
@@ -409,16 +415,11 @@ mod tests {
                 .unwrap()
                 .name
                 .clone();
-            deployment
-                .config
-                .servers
-                .get_mut("exact")
-                .unwrap()
-                .include_tools = vec![shared.clone()];
+            deployment.listeners.get_mut("exact").unwrap().include_tools = vec![shared.clone()];
             assert!(
                 select_listener_tools(
                     "combined",
-                    &deployment.config.servers["combined"],
+                    &deployment.listeners["combined"],
                     &completed,
                     &BTreeMap::new()
                 )
@@ -428,7 +429,7 @@ mod tests {
                 .keys()
                 .map(|id| (id.clone(), "common".into()))
                 .collect();
-            for (name, server) in &deployment.config.servers {
+            for (name, server) in &deployment.listeners {
                 deployment.selected.insert(
                     name.clone(),
                     select_listener_tools(
@@ -443,8 +444,7 @@ mod tests {
             let catalog = Arc::new(crate::catalog_state::CatalogState::new(
                 crate::catalog_state::CatalogSnapshot {
                     views: deployment
-                        .config
-                        .servers
+                        .listeners
                         .keys()
                         .map(|name| (name.clone(), Vec::new()))
                         .collect(),
@@ -481,6 +481,13 @@ mod tests {
             }
             let snapshot = catalog.read();
             assert_eq!(snapshot.views["combined"].len(), 3);
+            assert_eq!(snapshot.views["isolated"].len(), 2);
+            assert!(
+                snapshot
+                    .views
+                    .values()
+                    .all(|tools| { tools.iter().all(|bound| bound.tool.path != "/not_here") })
+            );
             assert!(snapshot.views["exact"].is_empty());
             assert!(
                 snapshot.views["isolated"]
@@ -525,7 +532,7 @@ mod tests {
                     .collect::<BTreeMap<_, _>>(),
             );
         }
-        assert_eq!(final_views[0], final_views[1]);
+        assert!(final_views.windows(2).all(|pair| pair[0] == pair[1]));
         task.abort();
     }
 
@@ -625,11 +632,11 @@ spec='spec.json'
 base_url='{base}'
 [sources.a]
 spec='spec.json'
-prefix='{first}'
+prefix='initial_a'
 base_url='{base}'
 [sources.b]
 spec='spec.json'
-prefix='{second}'
+prefix='initial_b'
 base_url='{base}'
 [servers.one]
 listen='127.0.0.1:0'
@@ -659,17 +666,16 @@ discover_on_demand=true
             // Only the existing response-inactivity policy ends accepted paid work.
             crate::discovery_relay::tests::set_timeout(&mut relay, Duration::from_millis(200));
         }
-        for id in ["a", "b"] {
-            deployment
-                .config
-                .sources
-                .get_mut(id)
-                .unwrap()
-                .provider
-                .insert("spec".into(), toml::Value::String(target.clone()));
+        for (id, prefix) in [("a", first), ("b", second)] {
+            // Introduce the invalid identity at deferred admission, after the
+            // valid initial inspection; both aliases still share one download.
+            let provider = &mut deployment.config.sources.get_mut(id).unwrap().provider;
+            provider.insert("spec".into(), toml::Value::String(target.clone()));
+            provider.insert("prefix".into(), toml::Value::String(prefix.into()));
         }
         let (sources, unavailable, pending) = startup::load(
             &deployment.config,
+            &deployment.wallet_resolution.source_bindings,
             &path,
             true,
             BTreeMap::from([("a".into(), relay.clone()), ("b".into(), relay)]),
@@ -682,7 +688,7 @@ discover_on_demand=true
         deployment.unavailable_sources = unavailable;
         deployment.pending_sources = pending;
         deployment.defer_discovery = true;
-        for (name, server) in &deployment.config.servers {
+        for (name, server) in &deployment.listeners {
             deployment.selected.insert(
                 name.clone(),
                 select_listener_tools(
@@ -1220,6 +1226,12 @@ wait_for_catalogs=false
             return;
         }
         for invalid_first in [false, true] {
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .with_ansi(false)
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            let _logging = tracing::subscriber::set_default(subscriber);
             let (_dir, running, catalog, fixture, relay, api) =
                 prepared(false, invalid_first, None).await;
             let captured = catalog.read();
@@ -1271,6 +1283,12 @@ wait_for_catalogs=false
                 .unwrap()
                 .unwrap()
                 .unwrap();
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            assert!(logs.contains("failure_stage=\"selection\""), "{logs}");
+            assert!(
+                logs.contains("Static tools use a reserved management namespace"),
+                "{logs}"
+            );
             relay.abort();
             api.abort();
         }
@@ -1389,7 +1407,7 @@ wait_for_catalogs=false
             .insert("healthy".into(), authored);
         let inventory = listener_tool_inventory(
             "one",
-            &runtime.deployment.config.servers["one"],
+            &runtime.deployment.listeners["one"],
             &runtime.deployment.sources,
             &runtime.deployment.unavailable_sources,
             true,

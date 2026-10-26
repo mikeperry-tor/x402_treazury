@@ -1,6 +1,6 @@
 //! Bounded initial catalog loading and retained relay continuations for serving.
 use super::catalog_evidence::{self, State};
-use super::{MetaConfig, Source, SourceConfig};
+use super::{EffectiveBindings, MetaConfig, SendToolsRule, Source, SourceConfig};
 use crate::catalog;
 use anyhow::{Context, Result, ensure};
 use futures_util::{StreamExt, stream};
@@ -81,6 +81,7 @@ impl std::fmt::Debug for DeferredDocument {
 }
 #[derive(Clone, Debug)]
 pub(super) struct PendingSource {
+    send_tools: Option<Vec<SendToolsRule>>,
     pub config: catalog::Config,
     pub operator_required: bool,
     document: DeferredDocument,
@@ -97,7 +98,8 @@ impl PendingSource {
             .document
             .resume(gate, can_allocate, Some(status))
             .await?;
-        Source::from_document(id, self.config.clone(), document)
+        Source::from_document(id, self.config.clone(), document)?
+            .with_send_tools(id, self.send_tools.clone())
     }
 }
 
@@ -257,6 +259,7 @@ impl std::error::Error for RemoteCatalogUnavailable {}
 
 pub(super) async fn load(
     config: &MetaConfig,
+    bindings: &EffectiveBindings,
     path: &Path,
     warn: bool,
     relay: crate::discovery_relay::Relays,
@@ -291,7 +294,7 @@ pub(super) async fn load(
     };
     let mut loads = Vec::with_capacity(total);
     for (id, source) in &config.sources {
-        let used = config.servers.values().any(|s| s.sources.contains(id));
+        let used = bindings.0.values().any(|sources| sources.contains_key(id));
         let downloads = &downloads;
         loads.push(async move {
             (
@@ -449,6 +452,7 @@ impl Source {
             Download::Ready(document) => document,
             Download::Deferred(document) => {
                 return Ok(SourceLoad::Pending(PendingSource {
+                    send_tools: source.send_tools.clone(),
                     config: cfg,
                     operator_required: false,
                     document,
@@ -458,7 +462,9 @@ impl Source {
         tracing::debug!(target: "x402_treazury::startup", source = id,
             elapsed_ms = fetch_started.elapsed().as_millis() as u64, "Catalog fetch/parse finished");
         progress.phase = "generation";
-        Self::from_document(id, cfg, document).map(SourceLoad::Ready)
+        Self::from_document(id, cfg, document)?
+            .with_send_tools(id, source.send_tools.clone())
+            .map(SourceLoad::Ready)
     }
     pub(super) fn from_document(
         id: &str,
@@ -516,6 +522,7 @@ impl Source {
         tracing::debug!(target: "x402_treazury::startup", source = id, tools = tools.len(),
             elapsed_ms = generation_started.elapsed().as_millis() as u64, "Catalog generation finished");
         Ok(Self {
+            send_tools: None,
             tools,
             base_url,
             instructions: cfg.instructions_text.clone(),
@@ -644,6 +651,7 @@ mod deferred_tests {
             panic!("expected deferred document");
         };
         let pending = PendingSource {
+            send_tools: None,
             config: cfg,
             operator_required: false,
             document,

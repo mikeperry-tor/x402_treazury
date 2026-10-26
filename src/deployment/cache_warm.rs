@@ -106,6 +106,7 @@ pub async fn warm_cache_with_network(
             funding.auto_fund = false;
         }
         let deployment = Deployment {
+            listeners: EffectiveBindings::resolve(&config)?.listeners(&config),
             search_relay: None,
             prebound: BTreeMap::new(),
             pending_sources: BTreeMap::new(),
@@ -117,6 +118,7 @@ pub async fn warm_cache_with_network(
             sources: BTreeMap::new(),
             selected: BTreeMap::new(),
             conflicting_tools: BTreeMap::new(),
+            selection_errors: BTreeMap::new(),
             config_path: path.to_owned(),
         };
         let bindings = crate::discovery_relay::resolve_wallets(

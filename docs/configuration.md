@@ -16,6 +16,7 @@ subcommand; running it without arguments displays help and never starts serving.
 | `catalog route TOOL --provider FILE --args '{...}'` | Preview an HTTP request without executing it; standalone providers only |
 | `config show --config FILE` or `--provider FILE` | Resolve file settings offline, including wallet bindings for deployments |
 | `config check --config FILE` or `--provider FILE` | Fetch catalogs and validate selected tools without signing, probing prices or funding |
+| `config check --config FILE --explain-routing` | Print JSON validation results and per-tool source distribution decisions |
 | `wallet bootstrap --config FILE` | Fund captured managed reserve claims, without listeners; requires `auto_fund=true` |
 | `wallet sync --config FILE` | Discover ZEC and existing configured managed-USDC balances once, including outstanding funding recipients |
 | `wallet ...` | Administer the treasury |
@@ -92,7 +93,7 @@ checks and releases it before retry delays. Accepted ownership retains publicati
 only deferred serving waits for discovery readiness. Ordinary deployment serving loads
 local catalogs and binds every listener socket before funding and background remote
 catalog discovery start. Each endpoint defaults to `wait_for_catalogs = true`:
-it accepts MCP HTTP requests only after its configured `sources` have loaded and
+it accepts MCP HTTP requests only after its effectively bound sources have loaded and
 their tools have been published. Unrelated sources and other endpoints do not
 gate it. Set the endpoint's setting to `false` to serve available tools immediately
 and publish remote tools as they arrive:
@@ -121,12 +122,21 @@ start after that source's failure, with its tools omitted as a complete unit.
 This includes failures discovered during remote parsing, tool generation or filter
 selection. For `wait_for_catalogs = false`, any failed remote source is omitted,
 regardless of `optional_startup`. Stderr and MCP instructions identify pending or
-unavailable sources. Local configuration errors remain fatal.
+unavailable sources. Errors preparing source configuration or loading local catalogs remain fatal.
+Listener selector and empty-inventory errors disable only that
+endpoint's static selection, including for local catalogs; valid assignments to
+other endpoints remain available. `optional_startup` does not waive invalid
+endpoint selection. Waiting endpoints close after publishing the failure; eager
+endpoints retain their capabilities and show the failure in MCP instructions.
+Reserved static tool namespaces invalidate source admission: a late invalid source
+is omitted as a unit while healthy aliases, published tools and captured calls
+remain usable. Strict catalog inspection rejects reserved namespaces without
+opening wallets or listeners.
 An unresolved exact listener selector is deferred only if its name falls
 exclusively under pending or unavailable sources' resolved prefixes (including inherited
 prefixes). Unknown namespaces and names also attributable to a ready source
 remain errors; an unavailable source cannot hide a ready-source typo.
-Listener wildcard warnings wait until all of that listener's source loads have
+Listener wildcard DEBUG diagnostics wait until all of that listener's source loads have
 finished, including failures. They are reported once at that point, independently
 of `wait_for_catalogs`; unrelated catalog completions do not repeat them. Exact
 selectors owned exclusively by pending or unavailable sources remain deferred
@@ -183,8 +193,8 @@ optional wallet templates and an automatic assignment policy:
   available here, including `spec`, `name`, `description`, `base_url`, `prefix`, `read_timeout_seconds` (inherits the network default of 60),
   path/tag filters, `include_tools`, `exclude_tools`, pricing options, overrides
   and guidance. A deployment source
-  can also set `wallet` to override the server default; this field is forbidden
-  in reusable provider files.
+  can also set `wallet` to override the server default and `send_tools` to distribute
+  its tools to endpoints. Both fields are forbidden in reusable provider files.
 - `wallets`: `mode = "static"`, `private_key_env`, and `max_api_payment_usdc`
   (decimal string, default `"1.00"`), or a managed `zcash_rotation` profile
   described below. Bindings referencing the same profile share payer state.
@@ -635,15 +645,20 @@ its source identifier; otherwise the source ID becomes the prefix. Two aliases
 with overlapping names cannot be mounted in the same listener.
 
 Source path/tag filters and description overrides run first. Each listener then
-filters the generated catalog by tags and tool names. Tag inclusion matches any
+filters its assigned generated tools by tags and tool names. Source `send_tools` rules,
+when present, assign tools before this final listener narrowing. Tag inclusion matches any
 listed tag, exclusions win, and matching is case-sensitive; untagged tools
 (including help) do not match a positive tag filter. Tool-name patterns support
-`*` and `?`; unmatched exact selectors are errors and unmatched wildcards warn.
-Listener pattern warnings identify `include_tools` or `exclude_tools`. When a
-generated name proves that a source tool-name filter removed a matching tool,
-the warning names the resolved `sources.NAME` setting and a matching tool as
+`*` and `?`; unmatched exact selectors are errors and unmatched wildcards produce
+advisory diagnostics. Listener pattern diagnostics are DEBUG and identify
+`include_tools` or `exclude_tools`. When a generated name proves that a source
+tool-name filter removed a matching tool, the diagnostic names the resolved `sources.NAME` setting and a matching tool as
 evidence. This includes source allowlists, exclusions and explicitly enabled
-recommendations. Listener filters cannot restore tools removed by source filters;
+recommendations. For bound sources, diagnostics identify the winning
+`sources.NAME.send_tools[index]` rule when distribution removes matching tools, stating
+whether it excluded the tool or assigned it to other endpoints. Missing exact listener selectors include this evidence in the
+inspection error; wildcard diagnostics use the same assignment/tag candidate view
+as publication. Listener filters cannot restore tools removed by source filters;
 an exclusion for an already removed tool can simply be redundant. Other unmatched
 patterns report source availability and suggest checking source/listener filters,
 without inferring a conflict from tool prefixes alone.
@@ -652,17 +667,88 @@ the same selection as listing. Sources referenced by multiple listeners are
 loaded once and retain one catalog; selected instructions are combined without
 hidden truncation.
 
+### Source tool distribution
+
+Deployment version 1 supports optional ordered `sources.NAME.send_tools` rules. Omit
+`send_tools` to retain listener `sources` attachments. Routed and legacy sources may
+coexist, but a routed source cannot also appear in any listener's `sources` list.
+Reusable provider files, dynamic imports and raw-call arguments do not accept `send_tools`.
+
+```toml
+[sources.vaaya]
+extends = "../../providers/vaaya.toml"
+send_tools = [
+  { to = "exclude", tools = ["supersearch", "consult", "root"] },
+  { to = ["company", "research"], tools = ["edgar_*"] },
+  { to = "web" },
+]
+```
+
+`send_tools` must be nonempty. Each rule accepts only required `to` and optional `tools`.
+`to` names an existing endpoint, a nonempty array of distinct existing endpoints,
+or scalar `"exclude"`. Exclusion cannot appear in an array. The endpoint name
+`exclude` is reserved when any source uses `send_tools`; legacy deployments retain their
+existing identifier behavior. Exactly one rule must omit `tools`, and it must be
+last. This catch-all may assign or exclude. Present `tools` must be nonempty.
+
+Selectors use case-sensitive `*` and `?`, matching generated names after removing
+exactly the resolved provider prefix plus `_` once. For prefix `locus`,
+`locus_locus_zoning` matches `locus_zoning`, `locus_list` matches `list`, and
+`locus_help` matches `help`. A source ID is stripped only when it supplies the
+resolved prefix. Method/collision suffixes and callable names remain unchanged.
+
+Provider compatibility, ordinary source filters and recommendation opt-in run
+first. The first matching rule consumes each surviving tool: assignment sends it
+to every named endpoint, while exclusion publishes it nowhere. Later rules cannot
+restore or redistribute it. Explicit destination arrays express sharing. Exact
+selectors validate against the full surviving source inventory before consumption;
+a known tool consumed earlier is still known. Missing exact selectors fail;
+unmatched wildcards and fully shadowed rules emit DEBUG diagnostics because future
+families and explicit fallback rules can legitimately have no current matches.
+Inventory-dependent diagnostics
+wait while their source is pending or unavailable. Listener filters can only
+narrow assignments. Existing duplicate-name handling still applies across sources.
+During ordinary serving, invalid listener selectors or an empty static-only
+destination disable that endpoint's static selection, without discarding the source
+catalog or its valid assignments elsewhere. Waiting endpoints fail startup; eager
+endpoints show the failure in their instructions. Strict inspection rejects these
+errors. Shared-payer cover-policy conflicts retain their cross-listener validation.
+
+Every non-exclude target mentioned in any rule establishes a potential binding,
+including a shadowed or currently unmatched target. These catalog-free bindings
+determine wallet resolution, startup dependencies and reserved static source names.
+An exclusion-only source adds none of those demands; existing metadata loading of
+unused sources remains. Wallet precedence stays source override, listener wallet,
+then configured automatic assignment. Rule order and catalog contents do not enter
+automatic wallet identities. Raw-call and source-management permissions remain
+independent of distribution.
+
 `config show` prints the composed file settings and per-source field origins,
 including defaults, without reading secrets or loading specs. It accepts
 `--provider` or `--config`, plus optional `--network-config` to inspect the selected network policy; CLI/environment runtime overrides are outside
 this file inspection command. Wallet/token fields show environment variable
 names, never their values.
 
+For routed deployments it retains authored rules and reports effective source
+bindings with rule origins such as `sources.vaaya.send_tools[1].to`, separately from
+wallet origins. It does not predict catalog-dependent matches.
+
 `config check` validates and reports inventories; `catalog tools` prints per-server
 JSON including source attribution. `catalog tags` reports unfiltered source tag
 counts. These commands do not create signers, bind ports, or fetch help documents.
 Remote specs still require network access. Deployment operations accept `--env-file`
 except offline `config show`.
+
+Deployment-only `config check --explain-routing` prints one JSON object containing
+`wallet_summary`, `servers` and `routing`; ordinary check output remains unchanged.
+The explanation includes each surviving source tool's full name, suffix, original
+method/path, zero-based winning rule, matching selector or catch-all, assignment or
+exclusion, routed targets, targets remaining after listener filters and published
+wallet bindings. Excluded tools remain visible here. Earlier source-filtered tools
+retain existing selection diagnostics; explanation does not rebuild an unrestricted
+catalog or fetch additional pricing. Diagnostics go to stderr. Neither inspection
+mode reads secrets, creates signers, allocates wallets or starts funding workers.
+
 Standalone CLI overrides cannot accompany a deployment `--config`; configure
 those values in its TOML instead. Serving/authentication flags belong only to
 `serve`.
@@ -1521,7 +1607,10 @@ A shared source chooses the highest SHA-256 score of the JSON tuple
 This remains stable across restarts/listener ordering; balances, keys and rotating
 addresses do not select it. A failed wallet does not select another profile to
 repeat relay spending. An unbound source needs its own wallet or the explicit
-relay override. `config show` reports `discovery_wallets`; distinct payer scopes
+relay override. An exclusion-only routed source has no relay payer demand: its
+metadata still loads under the configured network policy, with no paid relay
+fallback. Separately declared wallet profiles retain their existing authority.
+`config show` reports `discovery_wallets`; distinct payer scopes
 keep separate requests/caches even for the same URL.
 
 Every relay connection uses the configured network factory and existing payer.

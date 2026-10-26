@@ -68,13 +68,35 @@ Schema conversion is not a general-purpose OpenAPI implementation;
 for example, file uploads and asynchronous job orchestration are unsupported.
 
 `src/deployment.rs` validates listeners, filters and wallet references and resolves
-source overrides, listener defaults and optional automatic assignment. Local
-catalogs load before ordinary deployment serving. Remote catalogs share capacity
+source overrides, listener defaults and optional automatic assignment. Source
+distribution uses a pure catalog-free graph of effective bindings: legacy
+listener lists contribute edges, and every non-exclude `send_tools` target contributes
+an edge with its authored rule origin. Authored configuration remains available
+for inspection and frozen snapshots. The same graph feeds wallet assignment,
+bootstrap, relay ownership, catalog dependencies, warming and static name
+reservations. Empty current inventories and shadowed rules retain declared edges;
+exclusion-only sources have no binding or wallet demand. Wallet identities use
+the existing source/listener/profile inputs, never rule positions or catalog data.
+Best-effort wallet observation still collects valid known groups when unrelated
+bindings are invalid; it does not require strict serving validation.
+
+After ordinary source selection, one ordered `send_tools` decision assigns or excludes
+each tool by its generated suffix. Existing listener selection narrows assignments
+and feeds publication, listing/search and invocation together. On-demand
+`config check --explain-routing` reuses that decision and reports exclusions and
+published wallet bindings without retaining explanation state in the runtime.
+Frozen qualification snapshots preserve authored rules and effective topology;
+reload must not reinterpret derived bindings as legacy attachments. Snapshots
+without `send_tools` retain legacy behavior. See
+[source tool distribution](configuration.md#source-tool-distribution) for syntax
+and diagnostic contracts.
+
+Local catalogs load before ordinary deployment serving. Remote catalogs share capacity
 for 2 active downloads by default (`startup.catalog_concurrency`, 1..64), after
 listeners bind. Server-directed retry waits release download capacity while their
 logical loads remain pending. Each listener defaults to `wait_for_catalogs = true`:
 after socket binding, funding/reconciliation and deferred discovery run while HTTP
-serving waits for that listener's configured sources. The catalog owner signals
+serving waits for that listener's effectively bound sources. The catalog owner signals
 readiness only after publication; no duplicate source-outcome ledger or overall
 startup deadline is needed. A required failure logs ERROR and closes only the
 dependent waiting endpoints; their tasks await shutdown without stopping peers or
@@ -86,6 +108,19 @@ wait for complete catalogs. The
 synchronous unsigned-serving loader cancels unfinished loads on required failure
 and can omit an explicitly `optional_startup` remote failure. Source
 completion order cannot change the final sorted inventory for valid configurations.
+Ordinary serving retains successfully generated source catalogs when one endpoint's
+selection fails. Initial and deferred selection use the same endpoint-local path:
+the failed endpoint publishes no static tools and explains the selection failure;
+other destinations retain their valid tools and payers. A waiting endpoint fails
+readiness after that snapshot is published. An eager endpoint continues serving
+its capabilities and current failure instructions; later catalog publication
+recomputes selection. Strict inspection still rejects invalid selection. Reserved
+static tool identities reject the newly arriving source while retaining healthy
+aliases and existing bindings. Strict inspection rejects these identities without
+opening wallets; serving retains the existing discovery-relay preparation and
+cleanup order.
+Conflicting cover settings for a shared payer/origin remain a shared resource failure and
+retain source admission rejection across listeners.
 Ordinary deferred
 serving retains completed catalogs and omits all owners of a tool name that collides
 on a listener after tag selection, before tool-name filters. MCP instructions list

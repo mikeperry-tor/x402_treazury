@@ -47,6 +47,115 @@ fn bad(output: Output) -> String {
 }
 
 #[tokio::test]
+async fn deployment_routing_explanation_is_json_and_requires_deployment_input() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    std::fs::write(
+        dir.join("api.json"),
+        json!({"paths":{
+            "/read":{"get":{}},"/hidden":{"get":{}},"/future":{"post":{}}
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("provider.toml"),
+        "spec='api.json'\nbase_url='https://offline.invalid'\nprefix='vendor'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("deployment.toml"),
+        r#"
+version=1
+[sources.alias]
+extends='provider.toml'
+send_tools=[
+    {to='exclude',tools=['hidden']},
+    {to=['one','two'],tools=['read']},
+    {to='two'},
+]
+[wallets.w]
+mode='static'
+private_key_env='UNREAD_ROUTING_KEY'
+max_api_payment_usdc='1'
+[servers.one]
+listen='127.0.0.1:0'
+bearer_token_env='UNREAD_ROUTING_TOKEN'
+wallet='w'
+discover_on_demand=true
+[servers.two]
+listen='127.0.0.1:0'
+bearer_token_env='UNREAD_ROUTING_TOKEN'
+wallet='w'
+discover_on_demand=true
+exclude_tools=['vendor_read']
+"#,
+    )
+    .unwrap();
+    let shown = good(run(dir, &["config", "show", "--config", "deployment.toml"], &[]).await);
+    assert_eq!(shown["sources"]["alias"]["send_tools"][0]["to"], "exclude");
+    assert_eq!(shown["servers"]["one"]["sources"], json!([]));
+    let explained = good(
+        run(
+            dir,
+            &[
+                "config",
+                "check",
+                "--config",
+                "deployment.toml",
+                "--explain-routing",
+            ],
+            &[],
+        )
+        .await,
+    );
+    let inventory = good(
+        run(
+            dir,
+            &["catalog", "tools", "--config", "deployment.toml"],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(explained["servers"], inventory);
+    assert_eq!(explained["wallet_summary"]["managed_pool_count"], 0);
+    let decision = |name: &str| {
+        explained["routing"]["alias"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap()
+    };
+    assert_eq!(decision("vendor_hidden")["action"], "exclude");
+    assert_eq!(decision("vendor_hidden")["effective_targets"], json!([]));
+    assert_eq!(
+        decision("vendor_read")["routed_targets"],
+        json!(["one", "two"])
+    );
+    assert_eq!(decision("vendor_read")["effective_targets"], json!(["one"]));
+    assert_eq!(
+        decision("vendor_read")["wallet_bindings"]["one"]["wallet"],
+        "w"
+    );
+    assert_eq!(decision("vendor_future")["catch_all"], true);
+    let rejected = bad(run(
+        dir,
+        &[
+            "config",
+            "check",
+            "--provider",
+            "provider.toml",
+            "--explain-routing",
+        ],
+        &[],
+    )
+    .await);
+    assert!(rejected.contains("--config"), "{rejected}");
+    assert!(!dir.join("state").exists());
+}
+
+#[tokio::test]
 async fn source_inspection_lists_saved_tools_without_tokens_catalog_fetches_or_registry_writes() {
     use sha2::{Digest, Sha256};
     let tmp = tempfile::tempdir().unwrap();
