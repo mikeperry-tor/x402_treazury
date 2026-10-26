@@ -6559,6 +6559,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "uuid",
  "x402_treazury",
  "zingolib",
  "zip32",
