@@ -13,6 +13,16 @@ persistent endpoint for agent-added APIs. Its relationship map explains sharing.
 It retains the `state/privacy` treasury, registry and operational identities of
 the original privacy template; renaming the template does not migrate state.
 
+[deployments/research_desk.toml](deployments/research_desk.toml) distributes
+its research sources across eight task-oriented endpoints using four topical
+wallet profiles: web; social; financials for business, finance, property and security;
+and global for world and the toolbox. Ordered source `send_tools` rules group
+tool families, exclude editorial choices and express sharing with destination arrays. Each source has one primary
+catch-all for future unmatched tools; listeners retain endpoint properties,
+instructions, capabilities and wallet references. See
+[source tool distribution](../docs/configuration.md#source-tool-distribution) for
+matching, potential bindings and `config check --explain-routing` inspection.
+
 Copy a deployment beside its tracked template as `NAME.local.toml` before
 customizing it. Relative paths resolve from the file declaring them. Existing
 local configurations remain operator-owned; keep using their original state and

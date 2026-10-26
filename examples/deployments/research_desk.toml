@@ -1,0 +1,957 @@
+# Research APIs grouped into task-oriented MCP endpoints.
+#
+# Endpoint   Scope                                             Wallet
+# web        Search, retrieval, archives, academic research     web
+# social     People, contacts and platform content             social
+# business   Organizations, filings, jobs, funding, reviews     financials
+# finance    Equities, macro, crypto and derivatives            financials
+# property   Parcels, local records, zoning and site context    financials
+# security   Threats, breaches and infrastructure checks        financials
+# world      Geopolitics, weather, shipping, regional conditions global
+# toolbox    Dynamic provider management and raw calls          global
+#
+# Wallets share payer identities within each topical group. Separate groups
+# reduce payer reuse across topics; they do not guarantee unlinkability.
+# Payment caps apply to each challenge, including dynamically priced requests;
+# selected tools can offer request sizes or services above these caps.
+#
+# Copy to research_desk.local.toml before editing. Ensure Tor is running
+# at the configured SOCKS endpoint and X402_TREAZURY_MCP_TOKEN is available.
+
+version = 1
+
+[network]
+mode = "tor"
+socks_endpoint = "127.0.0.1:9150"
+isolation_namespace = "x402_treazury"
+socks_auth = "tor_extended"
+connect_timeout_seconds = 120
+request_timeout_seconds = 240
+
+# Paid fallback for blocked catalog/help GETs. Paid API calls retain their
+# listener bindings.
+[relay_fallback]
+source_discovery = true
+api_requests = false
+provider_metadata = true
+
+[relay_fallback.relays]
+GET = ["../../providers/curl/provider.toml", "../../providers/agproxy.toml"]
+POST = ["../../providers/agproxy.toml"]
+HEAD = ["../../providers/agproxy.toml"]
+
+[treasury]
+state_dir = "../../state/research_desk"
+indexer_url = "https://na.zec.rocks:443"
+
+[funding]
+confidentiality = "public"
+base_rpc_url_env = "BASE_RPC_URL"
+
+# Web search and content retrieval share this payer pool.
+[wallets.web]
+mode = "zcash_rotation"
+max_api_payment_usdc = "0.50"
+max_conversion_overhead_percent = 5
+
+[wallets.web.reserves.small]
+funding_amount_usdc = "2.00"
+max_funding_amount_usdc = "3.00"
+
+# People, contacts and social-platform research share this payer pool.
+[wallets.social]
+mode = "zcash_rotation"
+max_api_payment_usdc = "0.50"
+max_conversion_overhead_percent = 5
+
+[wallets.social.reserves.small]
+funding_amount_usdc = "2.00"
+max_funding_amount_usdc = "3.00"
+
+# Business, finance, property and security research share this payer pool.
+# Arkham lookups, TheirStack company search and x402stock research can exceed $0.50.
+[wallets.financials]
+mode = "zcash_rotation"
+max_api_payment_usdc = "1.00"
+max_conversion_overhead_percent = 5
+
+[wallets.financials.reserves.small]
+funding_amount_usdc = "2.00"
+max_funding_amount_usdc = "3.00"
+
+# World research and dynamic toolbox calls share this payer pool.
+# LoneStar CrownBlock region/report calls advertise $1.00 pricing.
+[wallets.global]
+mode = "zcash_rotation"
+max_api_payment_usdc = "1.00"
+max_conversion_overhead_percent = 5
+
+[wallets.global.reserves.small]
+funding_amount_usdc = "2.00"
+max_funding_amount_usdc = "3.00"
+
+# Each source owns its ordered exclusions and endpoint assignments. The first
+# matching send_tools rule consumes a tool; destination arrays preserve explicit sharing.
+# Family rules keep future tools with their research category. Each final catch-all
+# sends unmatched future tools to one primary endpoint. Provider compatibility
+# restrictions still apply before these deployment choices.
+# Coverage and price comparisons are noted beside the affected selections.
+#
+# --- Sources -----------------------------------------------------------------
+# One source per provider. Ordered send_tools rules assign generated tool families to endpoints.
+# A provider shared across categories is still downloaded only once.
+
+[sources.exa]
+extends = "../../providers/exa.toml"
+send_tools = [
+  { to = "web" },
+]
+
+[sources.google_trends]
+extends = "../../providers/google-trends.toml"
+send_tools = [
+  { to = "web" },
+]
+
+# Reddit, GitHub trends/profiles/repositories and web fetchers provide
+# complementary platform research and retrieval. Exa supplies canonical web search.
+[sources.socialfetch]
+extends = "../../providers/socialfetch.toml"
+send_tools = [
+  { to = "exclude", tools = ["web_search"] }, # Prefer direct Exa search; comparative coverage remains unverified.
+  # Route web research families before the primary fallback.
+  { to = "web", tools = ["web_*"] },
+  { to = "social" },
+]
+
+[sources.pdl]
+extends = "../../providers/pdl.toml"
+send_tools = [
+  # Route business research families before the primary fallback.
+  { to = "business", tools = ["company_*"] },
+  { to = "social" },
+]
+
+[sources.arkham]
+extends = "../../providers/arkham.toml"
+send_tools = [
+  { to = "finance" },
+]
+
+# filing_search and financials_ticker provide distinct filing-search and statement coverage.
+[sources.x402stock]
+extends = "../../providers/x402stock.toml"
+send_tools = [
+  # Route business research families before the primary fallback.
+  { to = "business", tools = [
+    "beneficial_ownership_ticker",
+    "clinical_trials",
+    "concept_ticker",
+    "congress_trades",
+    "dossier_ticker",
+    "fda",
+    "fda_shortages",
+    "filing_*",
+    "financials_ticker",
+    "form_144",
+    "form_144_ticker",
+    "fund_*",
+    "gov_*",
+    "overview_ticker",
+    "patent_*",
+    "patents",
+    "private_stocks",
+    "regulatory",
+    "research_ticker",
+    "score_factors_ticker",
+    "tickers",
+  ] },
+  # Share guidance or research across the relevant endpoints.
+  { to = ["business", "finance"], tools = ["company_facts_ticker", "private_stocks_symbol"] },
+  { to = "finance" },
+]
+
+# x_user and x_watchlist provide account and watchlist research.
+[sources.botsmith]
+extends = "../../providers/botsmith.toml"
+send_tools = [
+  # Keep probabilistic model questions outside this research deployment; inline schemas replace help.
+  { to = "exclude", tools = ["help", "jev"] },
+  # Route financial research families before the primary fallback.
+  { to = "finance", tools = ["polymarket_*"] },
+  { to = "social" },
+]
+
+# Asset digests, sentiment, OHLC, signals, stablecoins and trade preflight
+# complement market research. Both alerts_btc and alerts_asset are selected;
+# their asset-alert coverage overlaps.
+[sources.kronos]
+extends = "../../providers/kronos.toml"
+send_tools = [
+  { to = "finance" },
+]
+
+[sources.regimeshift]
+extends = "../../providers/regimeshift.toml"
+send_tools = [
+  { to = "finance" },
+]
+
+# Retain full financial, corporate, property and regional research; omit
+# duplicate previews and the model/document workflows listed below.
+[sources.lonestar]
+extends = "../../providers/lonestar.toml"
+send_tools = [
+  { to = "exclude", tools = [               # These are expensive LLM calls/doc handling
+    "content_repurpose",
+    "doc_*",
+    "floyd_*",
+    "copperhead_*",
+    "cottonmouth_*",
+    "rattler_*"
+  ] },
+  # Omit duplicate signal/preview/demo variants and provider feedback; retain the selected full research tools.
+  { to = "exclude", tools = [
+    "agri_feed",
+    "agri_preview",
+    "capitol_signal",
+    "content_preview",
+    "feedback",
+    "gap_*",
+    "help",
+    "latam_feed",
+    "lease_auctions",
+    "lease_expiring",
+    "lease_portfolio",
+    "lease_preview",
+    "oi_extremes",
+    "oi_signal",
+    "read_demo",
+    "realestate_feed",
+    "realestate_preview",
+    "stake_preview",
+    "ta_preview",
+    "ta_scan",
+    "token_demo",
+  ] },
+  # Route business research families before the primary fallback.
+  { to = "business", tools = [
+    "bundle_*",
+    "earnings_calendar",
+    "funds_funds",
+    "insider_trades",
+    "pharma_catalysts",
+  ] },
+  # Route security research families before the primary fallback.
+  { to = "security", tools = ["contract_verify", "kya_*", "sanctions_screen"] },
+  # Route web research families before the primary fallback.
+  { to = "web", tools = ["read_read"] },
+  # Route world research families before the primary fallback.
+  { to = "world", tools = [
+    "africa_pulse",
+    "agri_report",
+    "asia_pulse",
+    "capitol_trades",
+    "conflict_conflict",
+    "consumer_consumer",
+    "crownblock_*",
+    "energy_energy",
+    "europe_pulse",
+    "geo_risk",
+    "govedge_*",
+    "grid_*",
+    "hazard_hazard",
+    "labor_labor",
+    "latam_report",
+    "lease_report", # Offshore Gulf oil/gas lease-sale and block data.
+    "mena_pulse",
+    "minerals_minerals",
+    "news_news",
+    "sovereign_sovereign",
+    "spark_power",
+    "supply_report",
+    "weather_forecast",
+  ] },
+  # Unmatched tools include realestate_report: national housing/mortgage macro data.
+  { to = "finance" },
+]
+
+# Retain equity, macro, on-chain, news, social, network and weather research.
+# Omit generative and model workflows, aggregate mega reports and video generation.
+[sources.otto]
+extends = "../../providers/otto.toml"
+send_tools = [
+  { to = "exclude", tools = [        # Expensive low-value LLM calls
+    "generate_meme",
+    "llm_research",
+    "mega_report",
+    "meta_intelligence",
+    "tx_explainer",
+    "video_gen",
+  ] },
+  # Keep provider feedback/refund workflows outside endpoint research; inline schemas replace help.
+  { to = "exclude", tools = ["feedback", "help"] },
+  # Route business research families before the primary fallback.
+  { to = "business", tools = [
+    "13d_activist_watch",
+    "8k_material_events",
+    "analyst_ratings",
+    "earnings_calendar",
+    "equity_*",
+    "financial_statements",
+    "form_*",
+    "insider_trades",
+    "institutional_holdings",
+  ] },
+  # Route security research families before the primary fallback.
+  { to = "security", tools = ["dns_lookup", "domain_*", "whois_lookup"] },
+  # Route social research families before the primary fallback.
+  { to = "social", tools = ["kol_sentiment", "tweet_search", "twitter_summary"] },
+  # Route web research families before the primary fallback.
+  { to = "web", tools = ["filtered_news", "news_recaps", "web_*"] },
+  # Route world research families before the primary fallback.
+  { to = "world", tools = ["weather"] },
+  { to = "finance" },
+]
+
+# company_brief provides distinct company-brief coverage.
+[sources.concordance]
+extends = "../../providers/concordance/provider.toml"
+send_tools = [
+  # MCP discovery supplies the inventory; root and health checks add no research results.
+  { to = "exclude", tools = ["catalog", "healthz", "root"] },
+  # Route business research families before the primary fallback.
+  { to = "business", tools = ["company_brief"] },
+  # Route financial research families before the primary fallback.
+  { to = "finance", tools = ["series"] },
+  { to = "web" },
+]
+
+# Macro, EDGAR, on-chain and deterministic text utilities provide complementary coverage.
+[sources.agentfund]
+extends = "../../providers/agentfund.toml"
+send_tools = [
+  # Route business research families before the primary fallback.
+  { to = "business", tools = ["edgar_*", "structured_json_repair", "tabular_to_json"] },
+  { to = "finance" },
+]
+
+# Retain flags, risk premiums and compact observations; brief/export/history_feed
+# duplicate available feeds.
+[sources.straits]
+extends = "../../providers/straits/provider.toml"
+send_tools = [
+  { to = "exclude", tools = [
+    "brief",
+    "export",
+    "history_feed",
+  ] },
+  { to = "world" },
+]
+
+# Retain full research tools; omit samples, health checks and the free-tool index.
+[sources.brazilayer]
+extends = "../../providers/brazilayer.toml"
+send_tools = [
+  { to = "exclude", tools = [  # Demo/free endpoints excluded
+    "*_amostra",
+    "ferramenta*",
+    "health",
+  ] },
+  # Inline schemas replace the tool guide.
+  { to = "exclude", tools = ["help"] },
+  # Route business research families before the primary fallback.
+  { to = "business", tools = [
+    "bcb_instituicao_cnpj",
+    "cnpj_*",
+    "empresa_enriquecer_cnpj",
+    "licitacoes_*",
+    "tributos_*",
+  ] },
+  # Route security research families before the primary fallback.
+  { to = "security", tools = ["integridade_consulta_cnpj"] },
+  # Route world research families before the primary fallback.
+  { to = "world", tools = ["cadeias_*", "commodities_*", "desmatamento_*"] },
+  { to = "finance" },
+]
+
+# Use canonical POST tools for same-path GET/POST twins. Preflight exceeds
+# the financials per-payment cap.
+[sources.genuinegood]
+extends = "../../providers/genuinegood.toml"
+send_tools = [
+  { to = "exclude", tools = ["preflight"] },
+  { to = "business" },
+]
+
+# Search/image tools are routed to web; people, business and property searches
+# are routed below. Keep help available for each selected subset.
+[sources.stableenrich]
+extends = "../../providers/stableenrich.toml"
+send_tools = [
+  { to = "exclude", tools = [
+    "exa_*",               # Use exa directly instead
+    "pdl_people_enrich",   # Use PDL directly instead
+    # Prefer solar_building_insights for directly usable structured results.
+    # These imagery layers require extra asset retrieval and processing or viewing.
+    "google_maps_solar_data_layers",
+    "google_maps_solar_rgb_image",
+  ] },
+  # Match site-specific tools before general Google business-location tools.
+  { to = "property", tools = ["google_maps_solar_*", "whitepages_property_search"] },
+  # Route business research families before the primary fallback.
+  { to = "business", tools = [
+    "companyenrich_*",
+    "fullenrich_company_search",
+    "google_*",
+  ] },
+  # Share guidance or research across the relevant endpoints.
+  { to = ["business", "property", "social", "web"], tools = ["help"] },
+  # Route social research families before the primary fallback.
+  { to = "social", tools = [
+    "fullenrich_people_search",
+    "minerva_*",
+    "reddit_*",
+    "serper_people_image_search",
+    "whitepages_person_search",
+  ] },
+  { to = "web" },
+]
+
+# Market families and project trend feeds are available on the finance endpoint.
+# Entity, funding and ecosystem/category research is available on business.
+[sources.claw402]
+extends = "../../providers/claw402.toml"
+# Comparison guidance from one live sample; retain complementary coverage.
+# For funding rates, prefer otto_funding_rates for compact per-symbol funding/OI summaries.
+# Other CoinAnk tools retain broader exchange and market coverage.
+# NOFX adds ranking screens; Vergex adds detailed order-flow rankings.
+# kronos_funding_arb_asset adds normalized, fee-adjusted funding spreads;
+# x402stock_perps_coin provides detailed Hyperliquid market state.
+send_tools = [
+  { to = "exclude", tools = [
+    # Prefer otto_funding_rates for compact per-symbol summaries. The sampled
+    # CoinAnk response was ~1.3 MB and contained stale/conflicting funding fields.
+    "coinank_funding_rate_current",
+    "ai_*",                       # Model workflows are outside this research deployment.
+    # Incremental synchronization is omitted; use fresh search/profile calls for ad hoc research.
+    "crypto_rootdata_changes",
+    "crypto_rootdata_credits",     # Provider credit diagnostic, not research data.
+    "crypto_rootdata_id_map",      # Search supplies IDs for targeted lookups; omit the bulk map.
+    "crypto_rootdata_twitter_map", # Use project/org/people for individual entities; omit bulk X export.
+  ] },
+  # Route business research families before the primary fallback.
+  { to = "business", tools = [
+    "crypto_rootdata_ecosystem_map",
+    "crypto_rootdata_funding",
+    "crypto_rootdata_investors",
+    "crypto_rootdata_job_changes",
+    "crypto_rootdata_org",
+    "crypto_rootdata_people",
+    "crypto_rootdata_project",
+    "crypto_rootdata_projects_*",
+    "crypto_rootdata_search",
+    "crypto_rootdata_tag_map",
+  ] },
+  # Share guidance or research across the relevant endpoints.
+  { to = ["business", "finance"], tools = ["help"] },
+  { to = "finance" },
+]
+
+# Company research and decision-maker discovery are available on business.
+# Targeted email and mobile-phone lookups are available on social.
+[sources.deepline]
+extends = "../../providers/deepline.toml"
+# Retain targeted business-contact tools; keep general identity enrichment with Minerva/PDL.
+send_tools = [
+  { to = "exclude", tools = [
+    "email_personal",
+    "linkedin_find",
+    "person_from_email",
+  ] },
+  # Route social research families before the primary fallback.
+  { to = "social", tools = ["email_*", "phone_find"] },
+  { to = "business" },
+]
+
+# Job-board research is available on business.
+# TikTok scraping and trend charts are available on social.
+[sources.hirescrape]
+extends = "../../providers/hirescrape.toml"
+send_tools = [
+  { to = "exclude", tools = [
+    "help",
+    # These are redundant to socialfetch and have SIWX async
+    # options that we currently do not support
+    "instagram",
+    "linkedin",
+    "tiktok_shop",
+    "youtube",
+  ] },
+  # Route business research families before the primary fallback.
+  { to = "business", tools = ["jobs"] },
+  { to = "social" },
+]
+
+# Network ownership and routing checks are available on security.
+[sources.agosint]
+extends = "../../providers/agosint.toml"
+send_tools = [
+  { to = "exclude", tools = [
+    "endpoints", # MCP discovery already exposes the available tool inventory.
+    "help", # Inline tool guidance covers lookups without manual payment instructions.
+  ] },
+  # Route security research families before the primary fallback.
+  { to = "security", tools = ["domain", "network", "sanctions"] },
+  { to = "business" },
+]
+
+[sources.relayshield]
+extends = "../../providers/relayshield.toml"
+send_tools = [
+  { to = "exclude", tools = [
+    "intent_*", # External payment bindings/attestations; outside our research workflow.
+    "scamkit_*", # Specialist fingerprinting/matching; deliberately omitted for focus.
+    # URL scan lacks VirusTotal result polling; EVM wallet scan overlaps broader wallet_risk at twice the price.
+    "scan_*",
+    "v1_*", # Keep public checks and passport/TAP workflows excluded by operator choice.
+    "bulk_identity_risk", # $2 exceeds the $1.00 financials payment cap; use targeted checks.
+    "campaign_scan", # $5.50 exceeds the cap; use targeted checks instead of campaign aggregation.
+    "cert_expiry", # Narrow CT-based expiry check; AgOSINT domain already includes TLS details.
+    "help", # Inline schemas cover selected tools; guide includes metered/account workflows.
+    "llm_credential_exposure", # Possible overlap with nhi_exposure; distinct coverage unverified.
+    "nft_security", # Specialist NFT screening deliberately omitted for focus.
+    "phone_reputation", # Same tool name is supplied by the phone companion source below.
+    "prompt_injection_breach", # Account exposure overlaps session_risk/infostealer; not prompt-content analysis.
+    "secret_scan_text", # Paid upload of text/diffs for pattern matching; prefer local secret scanning.
+    "target_risk", # Same six signal families as identity_risk_score, at $0.50 versus $0.35.
+    "token_security", # Finance offers Otto GoPlus screening at $0.001 versus $0.05; no proven added coverage.
+    "wallet_screen_batch", # $0.50 equals ten wallet_risk calls; singles cost less for smaller sets.
+  ] },
+  { to = "security" },
+]
+
+[sources.relayshield_phone]
+extends = "../../providers/relayshield/phone-reputation.toml"
+send_tools = [
+  { to = "security" },
+]
+
+[sources.netintel]
+extends = "../../providers/netintel.toml"
+send_tools = [
+  { to = "exclude", tools = [
+    # Model gateways and text processing: outside the selected infrastructure research scope.
+    "api_*",
+    "extract_*",
+    "openai_*",
+    "schema_*",
+    "text_*",
+    "translate_*",
+    "v1_*",
+    # Financial and weather tools are covered by the dedicated endpoints/providers.
+    "crypto_*",
+    "currency_*",
+    "prediction_*",
+    "wallet_*",
+    "weather_*",
+    # Domain bundles/acquisition/watch tools add overlapping summaries or separate monitoring workflows.
+    # Otto supplies DNS/registration; AgOSINT supplies domain/company enrichment; targeted checks remain enabled.
+    "domain_*",
+    "dns_lookup", # Otto DNS costs $0.001 versus $0.002 and includes parsed email-auth posture.
+    "whois_rdap_lookup", # Otto supplies core RDAP fields for $0.001 versus $0.003; extra grading is lower priority.
+    "ip_geo_locate", # Prefer IPIntel's $0.003 enrichment with PTR and proxy/mobile/hosting flags over $0.002 geo alone.
+    "asn_lookup_analyze", # IPIntel covers basic ASN; AgOSINT adds prefixes/RPKI for $0.015 versus $0.03 here.
+    "ssl_cert", # Prefer richer ssl_analyze ($0.007); AgOSINT domain also includes basic TLS facts.
+    "url_safety_full", # $0.15 bundle overlaps enabled targeted URL, TLS and header checks.
+    "ip_risk_score", # Overlaps retained full IP report; narrower IPIntel/reputation/blacklist checks also available.
+    # Email checks overlap Otto email-auth DNS and social's email-validation tools; skip additional bundles.
+    "email_*",
+    # Calendar/event extraction and general web/search tools are outside this security selection.
+    "event_*",
+    "exa_*",
+    "web_*",
+    "calendar_ics",
+    "og_scraper_extract",
+    "page_extract_read",
+    "pdf_parse",
+    "robots_txt_analyze",
+    "rss_parser_fetch",
+    "sitemap_parser_fetch",
+    "wayback_lookup",
+    # Remote model/compute helpers are redundant with agent or local tooling.
+    "ai_image_generate",
+    "classify",
+    "content_moderate",
+    "convert",
+    "cron_parser_explain",
+    "embeddings",
+    "entity_extract",
+    "iban_validate",
+    "json_repair",
+    "jwt_inspector_decode",
+    "lang_detect_analyze",
+    "markdown_clean",
+    "messages",
+    "money_parse",
+    "normalize_json",
+    "semantic_rank",
+    "sentiment_analyze",
+    "subnet_calc",
+    # Lower-priority standalone utilities and metadata; omit to keep discovery focused.
+    "breach_check_password", # Uploads a password to this vendor; local HIBP prefix checks are preferable.
+    "bulk_domain_check", # Domain-acquisition workflow; availability can be wrong when RDAP/DNS are unreachable.
+    "github_intel_analyze", # Public repo metadata overlaps social's GitHub coverage; not a code/security audit.
+    "npm_intel_analyze", # Package metadata/activity scoring, not a vulnerability or malware scan.
+    "redirect_trace", # Narrow redirect-chain utility; lower priority than selected threat checks.
+    "health", # Provider diagnostic, not research data.
+    "help", # Inline schemas cover the selected tools; guide spans many excluded capabilities.
+    "gas_price",
+    "holidays_check",
+    "lead_check",
+    "market_snapshot",
+    "name_gen_suggest",
+    "tld_price_compare",
+    "token_info",
+    "username_check_lookup",
+  ] },
+  { to = "security" },
+]
+
+[sources.ipintel]
+extends = "../../providers/ipintel.toml"
+send_tools = [
+  { to = "exclude", tools = [
+    "base64_*", # Prefer local encoding/decoding over paid remote computation.
+    "domain_*", # Health overlaps Otto DNS; availability deliberately omitted from this deployment.
+    "dns_lookup", # Otto costs the same $0.001 and adds CNAME/parsed email-auth; CAA/types alone do not justify duplication.
+    "email_validate", # Social already exposes email validation; this is DNS-level, not mailbox confirmation.
+    "help", # Inline schemas cover the selected IP and satellite tools.
+    "http_latency", # Cloudflare-edge HTTP timing, not caller latency; lower-priority diagnostic.
+    "json_schema_validator", # Prefer local validation over paid remote computation.
+    "jwt_decode", # Prefer local decoding; remote decoding exposes token contents and does not verify signatures.
+    "reverse_dns", # PTR is already included in ipintel_ip_lookup.
+    "whois_lookup", # Otto supplies core registration fields for $0.001 versus $0.005; redaction/server fields are lower priority.
+  ] },
+  # Geographic scene observations belong with physical-world conditions.
+  { to = "world", tools = ["satellite"] },
+  { to = "security" },
+]
+
+# Vaaya web research, company evidence and contact lookups follow endpoint categories.
+[sources.vaaya]
+extends = "../../providers/vaaya.toml"
+send_tools = [
+  { to = "exclude", tools = [
+    # Selected research sources and price-comparison candidates are routed below.
+    "apex_*",
+    "aviationstack_*",
+    "brave_*",
+    "cloro_*",
+    "contactout_*",
+    "crw_*",
+    # Crawl/extract completion remains unqualified; map is redundant with existing discovery.
+    "firecrawl_crawl",
+    "firecrawl_extract",
+    "firecrawl_map",
+    # Keep focused timeline enrichment; ordinary news search has selected alternatives.
+    "gdelt_news",
+    "govlaws_*",
+    "jina_*",
+    "kicksdb_*",
+    "linkup_*",
+    "mapquest_*",
+    "olostep_*",
+    "openai_*",
+    "openfunnel_*",
+    # Other OpenWebNinja finance, commerce, maps and image tools overlap existing endpoints or remain out of scope.
+    "openwebninja_balance_sheet",
+    "openwebninja_cash_flow",
+    "openwebninja_currency_exchange_rate",
+    "openwebninja_event_details",
+    "openwebninja_events_search",
+    "openwebninja_finance_search",
+    "openwebninja_image_objects",
+    "openwebninja_image_ocr",
+    "openwebninja_image_search",
+    "openwebninja_income_statement",
+    "openwebninja_market_trends",
+    "openwebninja_play_store_app",
+    "openwebninja_play_store_reviews",
+    "openwebninja_play_store_search",
+    "openwebninja_product_details",
+    "openwebninja_product_offers",
+    "openwebninja_product_price_history",
+    "openwebninja_product_reviews",
+    "openwebninja_product_search",
+    "openwebninja_reverse_image",
+    "openwebninja_social_links",
+    "openwebninja_stock_news",
+    "openwebninja_stock_overview",
+    "openwebninja_stock_quote",
+    "openwebninja_stock_time_series",
+    "openwebninja_website_contacts",
+    "openwebninja_yelp_business",
+    "openwebninja_yelp_reviews",
+    "openwebninja_yelp_search",
+    "openwebninja_zillow_agent_search",
+    "openwebninja_zillow_property",
+    "openwebninja_zillow_property_details",
+    "openwebninja_zillow_search",
+    "openwebninja_zillow_search_coordinates",
+    "openwebninja_zillow_zestimate",
+    "realestateapi_*",
+    "rentcast_*",
+    "rxatlas_*",
+    "sarvam_*",
+    "scrapedo_*",
+    "scrapingant_*",
+    "serper_search",
+    "tavily_*",
+    # Other contact APIs remain excluded pending a distinct coverage or quality benefit.
+    "tomba_author_finder",
+    "tomba_domain_search",
+    "tomba_email_finder",
+    "tomba_email_verifier",
+    "tomba_enrich",
+    "trialbase_*",
+    # General web search overlaps selected engines; academic excerpts are the distinct addition.
+    "valyu_search",
+    "wikidata_*",
+    "wikipedia_*",
+    "akta_job_posts",
+    "akta_social_posts",
+    "anthropic_messages",
+    "autoexchange_search",
+    "consult",
+    "cueframe_validate",
+    "dripstack_post",
+    "exa_search",
+    "fundable_deal_investors",
+    "fundable_industry_search",
+    "fundable_investor_search",
+    "fundable_location_search",
+    "fundable_person_search",
+    "help",
+    "martin_estate_catalog",
+    "onefind",
+    "onesearch",
+    "openrouter_chat",
+    "oxylabs_scrape",
+    "papercut_github_profile",
+    "parallel_search",
+    "perplexity_search",
+    "postalform_validate",
+    "root",
+    "sayer_and_stone_catalog",
+    "signalbase_companies",
+    "signalbase_hiring",
+    "signalbase_investors",
+    "signalbase_job_changes",
+    "signalbase_people",
+    "supersearch",
+    "tako_thinviz_create",
+    "tako_visualize",
+  ] },
+  # Route business research families before the primary fallback.
+  { to = "business", tools = [
+    "akta_*",
+    "courtlistener_*",
+    "edgar_*",
+    "fedreg_*",
+    "fundable_*",
+    "openwebninja_*",
+    "propublica_*",
+    "recallradar_*",
+    "signalbase_*",
+    "tako_*",
+    "theirstack_*",
+    "uspto_*",
+  ] },
+  # Route social research families before the primary fallback.
+  { to = "social", tools = ["tomba_*"] },
+  { to = "web" },
+]
+
+[sources.locus]
+extends = "../../providers/locus/provider.toml"
+send_tools = [
+  { to = "exclude", tools = [
+    # Free equivalents use locus_call; retain complementary paid records and reports below.
+    "well_known_locus_agent_endpoints_json", # Large discovery manifest duplicates the selected compact list/call workflow.
+    "well_known_locus_tools_json", # Large discovery manifest duplicates the selected compact list/call workflow.
+    "locus_appeal_window", # Use free locus_appeal_window through locus_call.
+    "locus_area_crime_report", # Use free locus_area_incidents through locus_call.
+    "locus_assessment_position", # Specialist assessment-uniformity bundle; free appeal guidance and selected parcel_value cover initial research.
+    "locus_before_you_sign", # Convenience bundle overlaps selected place_report and local_policy_brief.
+    "locus_capital_projects", # Use free locus_capital_projects through locus_call.
+    "locus_cleanup_sites", # Use free locus_cleanup_sites through locus_call.
+    "locus_coastal_overlays", # Use free locus_coastal_county_overlays through locus_call.
+    "locus_drinking_water_violations", # Use free locus_drinking_water_violations through locus_call.
+    "locus_electricity_context", # Specialist transmission/price context deferred; free utility resolver is available.
+    "locus_environmental_context", # Aggregate overlaps free TRI/RCRA/water reads; compose targeted evidence first.
+    "locus_environmental_history_lookup", # Use free locus_environmental_history through locus_call.
+    "locus_environmental_records_screen", # Full environmental rows deferred; free gateway offers the bounded screen.
+    "locus_evaluation_packet", # Lender evaluation workflow conflicts with provider no-lending guidance.
+    "locus_fair_market_rents", # Use free locus_fair_market_rents through locus_call.
+    "locus_fema_events", # Use free locus_fema_events through locus_call.
+    "locus_flood_gauges", # Use free locus_flood_gauges through locus_call.
+    "locus_flood_premium_context", # Use free locus_flood_premium_context through locus_call.
+    "locus_flood_zone", # Use free locus_flood_zone through locus_call.
+    "locus_fraud_alert_pointer", # Use free locus_fraud_alert_pointer through locus_call.
+    "locus_governing_districts", # Use free locus_governing_districts through locus_call.
+    "locus_groundwater_context", # Use free locus_groundwater_context through locus_call.
+    "locus_homeowners_insurance_context", # Use free locus_homeowners_insurance_context through locus_call.
+    "locus_house_price_index", # Use free locus_house_price_index through locus_call.
+    "locus_housing_stock", # Use free locus_housing_stock through locus_call.
+    "locus_housing_supply_balance", # Use free locus_housing_supply_balance through locus_call.
+    "locus_insurance_context", # Specialist insurance-cost bundle deferred; free flood and area-cost context is available.
+    "locus_landslide_diligence", # Adds susceptibility evidence to free landslide history; specialist comparison deferred.
+    "locus_large_site_satellite_change", # Specialist dated-image comparison; base64 imagery has no display mapping.
+    "locus_legistar_property_meetings", # Specialist agenda-lead API omitted; free government_meetings provides meeting dates/links.
+    "locus_listing_claim_batch", # Prefer single-subject listing_claim_check; the batch contract remains unqualified.
+    "locus_local_legislation", # Use free locus_local_legislation through locus_call.
+    "locus_market_context", # Use free locus_market_context through locus_call.
+    "locus_metro_permits", # Use free locus_metro_permits through locus_call.
+    "locus_mitigation_incentives", # Use free locus_mitigation_incentives through locus_call.
+    "locus_nearby_places", # Use free locus_nearby_places through locus_call.
+    "locus_nfip_claims", # Use free locus_nfip_claims through locus_call.
+    "locus_noise_proximity", # Use free locus_noise_proximity through locus_call.
+    "locus_nyc_recording_history", # Use free locus_nyc_recording_history through locus_call.
+    "locus_opportunity_zone", # Use free locus_opportunity_zone through locus_call.
+    "locus_owner_action_brief", # Overlapping owner-program/deadline bundle; use free program and appeal reads first.
+    "locus_owner_cost_review", # Overlapping tax/program bundle; selected property_tax plus free program reads are available.
+    "locus_owner_programs", # Use free locus_owner_programs through locus_call.
+    "locus_ownership_loop", # Use free locus_ownership_loop through locus_call.
+    "locus_parcel_lookup", # Use free locus_parcel_lookup through locus_call.
+    "locus_parcel_set", # Use free locus_parcel_set through locus_call.
+    "locus_parcel_transfers", # Use free locus_parcel_transfers through locus_call.
+    "locus_pfas_occurrence", # Specialist entry-point PFAS sampling deferred; free PFAS context has different coverage.
+    "locus_piti_transfer_tax_calculator", # Use free locus_property_math_calculator through locus_call.
+    "locus_place_facts", # Use free locus_place_facts through locus_call.
+    "locus_plan_research", # Agent can plan with free coverage, lane and workflow tools.
+    "locus_power_water_evidence_pack", # Specialist site-evidence bundle deferred; free utility/water/broadband context is available.
+    "locus_practitioner_read", # Paid prose synthesis duplicates agent work; vendor replay instructions do not grant replay authority.
+    "locus_program_windows", # Use free locus_program_windows through locus_call.
+    "locus_property_flyer", # Marketing image generation, outside this research selection.
+    "locus_property_tax_context", # Use free locus_property_tax_context through locus_call.
+    "locus_property_tax_estimate", # Use free locus_property_tax_estimate through locus_call.
+    "locus_property_tax_rates", # Use free locus_property_tax_rates through locus_call.
+    "locus_public_utilities", # Use free locus_public_utilities through locus_call.
+    "locus_radon_zone", # Use free locus_radon_zone through locus_call.
+    "locus_rcra_handlers", # Use free locus_rcra_handlers through locus_call.
+    "locus_rebuild_cost_context", # Use free locus_rebuild_cost_context through locus_call.
+    "locus_regulated_facility_compliance", # Use free locus_regulated_facility_compliance through locus_call.
+    "locus_renovation_site_context", # Specialist renovation bundle deferred; use selected reports and free parcel/soil/terrain reads first.
+    "locus_rental_operations_brief", # Overlapping rental bundle; selected rent/tax checks and free registration reads are available.
+    "locus_rental_registration_check", # Use free locus_rental_registration_check through locus_call.
+    "locus_report_compose", # Paid composition of already-held evidence can be performed by the agent.
+    "locus_representatives", # Use free locus_representatives through locus_call.
+    "locus_road_access", # Specialist mapped-road proximity deferred; does not establish legal access.
+    "locus_seismic_design", # Use free locus_seismic_design through locus_call.
+    "locus_soil_context", # Use free locus_soil_context through locus_call.
+    "locus_solar_property_comparison", # $1.09 exceeds the shared $1.00 per-payment cap.
+    "locus_solar_property_screen", # Compare against enabled StableEnrich Solar building insights before adding another roof workflow.
+    "locus_sole_source_aquifer", # Use free locus_sole_source_aquifer through locus_call.
+    "locus_special_district_debt_brief", # Use free locus_muni_bond_disclosures through locus_call.
+    "locus_special_district_levy", # Use free locus_special_district_levy through locus_call.
+    "locus_special_valuation_screen", # Use free locus_special_valuation_screen through locus_call.
+    "locus_storm_events", # Use free locus_storm_events through locus_call.
+    "locus_tax_liens", # Itemized liens deferred; free tax_distress supplies counts and categories.
+    "locus_tenant_statute_pointers", # Use free locus_tenant_statute_pointers through locus_call.
+    "locus_three_property_buyer_comparison", # $2.49 exceeds the shared $1.00 per-payment cap.
+    "locus_toxic_releases", # Use free locus_toxic_releases through locus_call.
+    "locus_traffic_crash_context", # Use free locus_traffic_crash_context through locus_call.
+    "locus_transaction_follow_up", # Additional profile bundles overlap selected reports and free evidence reads.
+    "locus_transit_context", # Use free locus_transit_context through locus_call.
+    "locus_transportation_context", # Use free locus_transportation_context through locus_call.
+    "locus_underground_storage_tanks", # Use free locus_underground_storage_tanks through locus_call.
+    "locus_unemployment", # Use free locus_unemployment through locus_call.
+    "locus_utility_credits", # Use free locus_utility_credits through locus_call.
+    "locus_valuation_challenge", # Specialist price/assessment challenge deferred; selected sale/assessment records support initial research.
+    "locus_water_systems", # Use free locus_water_systems through locus_call.
+    "locus_wikimedia_commons_area_context", # Nearby media links add context rather than property evidence; general web tools remain available.
+    "locus_wikipedia_place_context", # Nearby encyclopedia context overlaps general web research and is not official property evidence.
+    "locus_wildfire_history", # Use free locus_wildfire_history through locus_call.
+    "locus_wildfire_risk", # Use free locus_wildfire_risk through locus_call.
+    "locus_workplace_employment_context", # Specialist workplace-location aggregates deferred; free county industry context is available.
+    "help", # Inline guidance and locus_list supply the selected workflow and exact input schemas.
+  ] },
+  { to = "property" },
+]
+
+# --- Listeners ---------------------------------------------------------------
+
+[servers.web]
+listen = "127.0.0.1:3010"
+allowed_hosts = ["host.docker.internal"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "web"
+instructions_text = "Web search, page retrieval and scraping, news and coverage timelines, academic papers and researcher profiles, structured page extraction, blocked-page retrieval, web archives and historical snapshots, keyword trends, image search, reverse-image search and shopping. Use this endpoint for source discovery and web content; use social or business for profiles. Academic sources include OpenAlex and Valyu; news timelines use GDELT. Bright Data and Diffbot support blocked-page retrieval and typed extraction; Firecrawl and Serper offer comparison sources; Wayback supplies archived pages and snapshot discovery."
+
+[servers.social]
+listen = "127.0.0.1:3011"
+allowed_hosts = ["host.docker.internal"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "social"
+discover_on_demand = true
+instructions_text = "Social-platform, person, public-profile and business-contact research, including email lookup and validation. Search by platform or person. Preserve platform, date and partial-result markers; missing posts do not prove absence."
+discovery_search_tool_instructions_text = "Social keywords: reddit, github, bluesky, facebook, hackernews, instagram, linkedin, tiktok, trend charts, popular creators, popular songs, popular videos, popular hashtags, HireScrape, twitter, x, youtube, telegram, person, profile, headshot, enrichment, employer, title, seniority, location, phone, mobile phone, address, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, Tomba, LinkedIn email, contact phone, company phone, Threads, Pinterest, Snapchat, Twitch, Rumble, Truth Social, SoundCloud, Spotify, Apple Music, Linktree, Yelp, Amazon Shop, Google Ad Transparency, LinkedIn jobs and organizations."
+
+[servers.business]
+listen = "127.0.0.1:3012"
+allowed_hosts = ["host.docker.internal"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "financials"
+discover_on_demand = true
+instructions_text = "Business, public-record, funding, jobs, grants and filing research, including decision-makers, employment changes, employee/customer reviews, compensation, litigation, procurement, clinical trials, drug shortages, product recalls, nonprofit filings and federal rulemaking. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research."
+discovery_search_tool_instructions_text = "Business keywords: registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, headcount, technographics, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, Glassdoor, Trustpilot, employee reviews, customer reviews, salaries, interviews, compensation, JSearch, Google Jobs, TheirStack, buying intent, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, clinical trials, FDA, drug shortages, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion."
+
+[servers.finance]
+listen = "127.0.0.1:3013"
+allowed_hosts = ["host.docker.internal"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "financials"
+discover_on_demand = true
+instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, DeFi, derivatives and prediction markets. Use business for organizations and filings; use property for parcel and site records."
+discovery_search_tool_instructions_text = "Finance keywords: ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators."
+
+[servers.property]
+listen = "127.0.0.1:3014"
+allowed_hosts = ["host.docker.internal"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "financials"
+discover_on_demand = true
+instructions_text = "Property, parcel, local-government, zoning, lease, environmental and site research. For Locus, use the free list/call gateway for coverage and record checks before paid reports. Preserve record dates, coverage and uncertainty; estimates are not appraisals."
+discovery_search_tool_instructions_text = "Property keywords: Locus, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, Whitepages, property ownership, residents."
+
+[servers.security]
+listen = "127.0.0.1:3015"
+allowed_hosts = ["host.docker.internal"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "financials"
+discover_on_demand = true
+instructions_text = "Threat, breach, network and compliance intelligence. Preserve coverage, timestamps and degraded/unknown markers; a clean result is not proof of safety."
+discovery_search_tool_instructions_text = "Security keywords: breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting."
+
+[servers.world]
+listen = "127.0.0.1:3016"
+allowed_hosts = ["host.docker.internal"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "global"
+discover_on_demand = true
+instructions_text = "Geopolitical, shipping, energy, agricultural and physical-world research, including offshore oil/gas leases and satellite observations. Preserve observed-at and scene timestamps and distinguish current observations from historical baselines."
+discovery_search_tool_instructions_text = "World keywords: Hormuz, strait, shipping, vessel, oil, Brent, energy, grid, power, weather, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades."
+
+[servers.toolbox]
+listen = "127.0.0.1:3017"
+allowed_hosts = ["host.docker.internal"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "global"
+discover_on_demand = true
+provider_management_local = true
+provider_management_remote = true
+remote_provider_directories = ["coinbase", "x402-list"]
+raw_url_calls = true
+instructions_text = "Dynamic provider management and documented-URL raw calls. Use this endpoint to discover and add APIs not already present on the categorized research endpoints."
+discovery_search_tool_instructions_text = "Search APIs registered on this endpoint. Use provider-management tools to find and add providers, or raw-call tools for documented URLs; this search covers currently loaded APIs."
