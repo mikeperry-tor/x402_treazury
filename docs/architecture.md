@@ -490,6 +490,10 @@ when the generic path can express them. Put general catalog, payment, output and
 transport behavior in their shared modules, with regression tests for direct and
 fallback MCP invocation where applicable. Do not introduce a second network
 constructor or bypass financial checks to accommodate a vendor.
+Opted-in [operation URL extensions](configuration.md#operation-url-extensions)
+change the execution target while retaining the original OpenAPI path for catalog
+identity and output mappings. Bound calls enforce public destinations for these
+targets, including static sources, through the existing network factory.
 
 The [testing guide](testing.md) distinguishes offline regressions, coverage,
 consensus qualification and explicitly funded live work. Dependency/toolchain

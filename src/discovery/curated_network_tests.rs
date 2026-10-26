@@ -50,7 +50,7 @@ async fn fixture() {
             captured.lock().unwrap().push((method.to_string(), uri.to_string(), headers.get("host").unwrap().to_str().unwrap().to_owned(), body.to_vec()));
             match uri.path() {
                 "/openapi.json" => axum::Json(json!({"openapi":"3.0.3","servers":[{"url":"https://api.example.com"}],"paths":{"/read":{"get":{}}}})).into_response(),
-                "/v1/image" => {
+                "/direct-image" => {
                     assert_eq!(method, Method::POST);
                     assert_eq!(uri.query(), Some("format=png"));
                     assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!({"prompt":"a map"}));
@@ -102,6 +102,7 @@ async fn fixture() {
         spec: "accepted-schema.json".into(),
         prefix: Some("original".into()),
         base_url: Some("https://api.example.com".into()),
+        operation_url_extension: Some("x-direct-url".into()),
         include: vec!["/v1".into()],
         help_url: Some("https://spec.example.com/help".into()),
         max_response_bytes: 512,
@@ -112,7 +113,7 @@ async fn fixture() {
         ..Default::default()
     });
     let document = json!({"openapi":"3.0.3","servers":[{"url":"https://broken.example.com/wrong"}],"paths":{
-        "/v1/image":{"post":{"description":"Generate fixture image","parameters":[{"name":"format","in":"query","schema":{"type":"string"}}],"requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}}}}
+        "/v1/image":{"post":{"x-direct-url":"https://spec.example.com/direct-image","description":"Generate fixture image","parameters":[{"name":"format","in":"query","schema":{"type":"string"}}],"requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"prompt":{"type":"string"}},"required":["prompt"]}}}}}}
     }}).to_string();
     let candidate: Candidate =
         serde_json::from_value(json!({"name":"custom","provider":provider})).unwrap();
@@ -156,6 +157,7 @@ async fn fixture() {
         .clone();
     assert_eq!(image.source, Some((id, 1)));
     assert_eq!(image.base, "https://api.example.com");
+    assert_eq!(image.tool.path, "/v1/image");
     let output = image
         .invoke_output(
             json!({"prompt":"a map","format":"png"})
@@ -182,8 +184,8 @@ async fn fixture() {
         let seen = requests.lock().unwrap();
         assert_eq!(seen.len(), 2, "successful help is cached");
         assert_eq!(seen[0].0, "POST");
-        assert_eq!(seen[0].1, "/v1/image?format=png");
-        assert_eq!(seen[0].2, "api.example.com");
+        assert_eq!(seen[0].1, "/direct-image?format=png");
+        assert_eq!(seen[0].2, "spec.example.com");
         assert_eq!(seen[1].0, "GET");
         assert_eq!(seen[1].1, "/help");
         assert_eq!(seen[1].2, "spec.example.com");
@@ -214,7 +216,17 @@ async fn fixture() {
         assert_eq!(proxy.accepted.load(Ordering::SeqCst), accepted);
     }
     let mut private_api = image.clone();
-    private_api.base = "https://127.0.0.1".into();
+    // A static-style client must acquire public enforcement from the URL target,
+    // independently of dynamic registration's already restricted client.
+    private_api.client = crate::payment::PaidClient::new(
+        crate::payment::Payer::new(
+            &format!("{:064x}", 1),
+            crate::payment::SpendPolicy::dollars("0.01").unwrap(),
+        )
+        .unwrap(),
+    );
+    private_api.source = None;
+    private_api.tool.request_url = Some("https://127.0.0.1/private".into());
     assert!(
         private_api
             .invoke_output(
@@ -235,7 +247,7 @@ async fn fixture() {
         let seen = observations.lock().unwrap();
         let api = seen
             .iter()
-            .find(|record| record.origin == "https://api.example.com")
+            .find(|record| record.origin == "https://spec.example.com" && record.canonical == owner)
             .unwrap();
         assert_eq!(api.canonical, owner);
         let help_credentials = crate::network::global()
@@ -251,15 +263,17 @@ async fn fixture() {
             "participating documentation uses a fresh owner-bound scope"
         );
         let socks = proxy.records.lock().unwrap();
-        assert!(socks.iter().any(|record| record.host == "api.example.com"
+        assert!(socks.iter().any(|record| record.host == "spec.example.com"
             && (record.user.clone(), record.password.clone()) == api.scope));
         assert!(socks.iter().any(|record| record.host == "spec.example.com"
             && (record.user.clone(), record.password.clone()) == help.scope));
         assert!(socks.iter().all(|record| record.address_type == 3));
+        assert!(socks.iter().all(|record| record.host != "api.example.com"));
     }
     // Authored byte settings must reach API and help consumers after publication.
     let mut oversized_api = image.clone();
     oversized_api.tool.path = "/large".into();
+    oversized_api.tool.request_url = None;
     let error = oversized_api
         .invoke_output(
             json!({"prompt":"a map","format":"png"})

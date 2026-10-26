@@ -145,6 +145,9 @@ pub struct Config {
     /// Searchable provider capabilities, separate from agent instructions.
     pub description: Option<String>,
     pub base_url: Option<String>,
+    /// Opt into absolute request URLs carried by an OpenAPI operation extension.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_url_extension: Option<String>,
     pub prefix: Option<String>,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
@@ -219,6 +222,7 @@ impl Default for Config {
             name: None,
             description: None,
             base_url: None,
+            operation_url_extension: None,
             prefix: None,
             include: vec![],
             exclude: vec![],
@@ -272,6 +276,8 @@ pub struct ToolSpec {
     pub description: String,
     pub method: String,
     pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_url: Option<String>,
     pub input_schema: Value,
     pub param_routes: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -295,7 +301,7 @@ pub struct RoutedRequest {
 
 impl ToolSpec {
     pub fn route(&self, base_url: &str, args: &Map<String, Value>) -> Result<RoutedRequest> {
-        let mut path = self.path.clone();
+        let mut path = self.request_url.as_ref().unwrap_or(&self.path).clone();
         let mut query = BTreeMap::new();
         let mut body = Map::new();
         let headers = headers::route(&self.header_params, args)?;
@@ -355,7 +361,10 @@ impl ToolSpec {
             "dot path segment rejected"
         );
         // httpx appends relative paths to base_url, including a gateway prefix.
-        let url = if path.starts_with("https://") || path.starts_with("http://") {
+        let url = if self.request_url.is_some()
+            || path.starts_with("https://")
+            || path.starts_with("http://")
+        {
             path
         } else {
             format!(
@@ -1294,12 +1303,12 @@ pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolS
     let mut credit_diagnostics = credit_pricing::Diagnostics::default();
     let mut tools = selected
         .into_iter()
-        .map(|(op, name)| operation_tool(cfg, &op, name, &mut credit_diagnostics))
+        .map(|(op, name)| operation_tool(cfg, root, &op, name, &mut credit_diagnostics))
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
         tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description: format!(
             "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
-            method:"GET".into(), path:url.clone(), input_schema:json!({"type":"object","properties":{}}),
+            method:"GET".into(), path:url.clone(), request_url:None, input_schema:json!({"type":"object","properties":{}}),
             param_routes:BTreeMap::new(), header_params:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), body_names:BTreeMap::new() });
     }
     // Authored overrides also apply to help and always follow generated text/schema.
@@ -1664,6 +1673,7 @@ fn operation_description(cfg: &Config, op: &Value, credit_estimate: Option<Strin
 
 fn operation_tool(
     cfg: &Config,
+    root: &Value,
     op: &Value,
     name: String,
     credit_diagnostics: &mut credit_pricing::Diagnostics,
@@ -1690,6 +1700,7 @@ fn operation_tool(
         description,
         method: method.to_uppercase(),
         path: op["path"].as_str().unwrap().into(),
+        request_url: operation_request_url(cfg, root, op)?,
         input_schema: input.schema,
         param_routes: input.routes,
         header_params: input.header_params,
@@ -1699,6 +1710,31 @@ fn operation_tool(
     })
 }
 
+fn operation_request_url(cfg: &Config, root: &Value, op: &Value) -> Result<Option<String>> {
+    let Some(key) = &cfg.operation_url_extension else {
+        return Ok(None);
+    };
+    let source = if root.get("paths").is_some() {
+        &root["paths"][op["path"].as_str().unwrap()][op["method"].as_str().unwrap()]
+    } else {
+        op
+    };
+    let Some(value) = source.get(key) else {
+        return Ok(None);
+    };
+    let template = value
+        .as_str()
+        .context("operation URL extension must contain a URL string")?;
+    let url = crate::network::public_url(template)?;
+    ensure!(
+        !url.host_str().unwrap_or_default().contains(['{', '}']),
+        "operation URL authority must not contain parameters"
+    );
+    Ok(Some(template.into()))
+}
+
+#[cfg(test)]
+mod operation_url_tests;
 #[cfg(test)]
 mod selection_tests;
 

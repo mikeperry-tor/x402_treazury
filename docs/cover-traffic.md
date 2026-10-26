@@ -34,6 +34,12 @@ Candidate selection does not prove range support: runtime qualification is still
 mandatory. Inspection/listing does not send cover requests. Agent-added sources
 remain outside automatic cover; remote document contents never authorize it.
 
+[Operation URL extensions](configuration.md#operation-url-extensions) can route
+calls to another origin, while the source's cover profile remains bound to its
+configured `base_url` origin. Such calls emit a warning and continue without
+optional cover. Disable cover for sources whose operations span origins; a cover
+resource on the base origin cannot cover calls to another origin.
+
 The built-in range-only profile uses one stream, at most eight requests / 16 KiB
 per episode, a ten-second deadline, a 1 KiB qualification and a 16 MiB resource
 limit. Additional body targets follow bounded log-normal (median 8 KiB, sigma .65,

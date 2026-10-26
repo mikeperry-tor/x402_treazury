@@ -43,6 +43,12 @@ pub async fn read_table(path: &Path) -> Result<toml::Table> {
 }
 pub fn validate(settings: &Config) -> Result<()> {
     ensure!(!settings.spec.trim().is_empty(), "spec is required");
+    if let Some(key) = &settings.operation_url_extension {
+        ensure!(
+            key.starts_with("x-") && key.len() > 2 && key.trim() == key,
+            "operation_url_extension must name an x- extension"
+        );
+    }
     ensure!(
         settings
             .read_timeout_seconds

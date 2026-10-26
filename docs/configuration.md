@@ -755,6 +755,29 @@ snapshot; publication requires restarting search enumeration. Remote directory
 browse defaults to 25 and retains its upstream maximum of 100. Pagination selects
 pages and does not reject or trim the full inventory.
 
+## Operation URL extensions
+
+`operation_url_extension = "x-direct-url"` opts a provider or deployment source
+into absolute request URLs from that operation-level OpenAPI extension. Each URL
+must use public HTTPS without credentials or a fragment, with a fixed authority.
+Declared path parameters are substituted using the normal escaping rules; query,
+header and body arguments retain their OpenAPI routing. Fixed query strings are
+preserved. An absent extension retains ordinary `base_url` plus path routing;
+a present invalid value fails catalog construction for that operation.
+
+The original OpenAPI path still controls tool names, method selection, path/tag
+filters and response mappings. URL validation follows path/method/tag selection
+and POST-twin preference, before tool-name and recommendation filters. Generic
+imports ignore vendor URL extensions. Accepted bundled definitions preserve their
+explicit opt-in across registration, refresh and restart, permitting declared
+cross-origin targets through the existing public-destination network policy.
+This setting does not enable HTTP redirects.
+
+Optional cover profiles remain bound to the configured `base_url` origin. A call
+to a different operation URL origin emits a warning and continues without cover;
+see [cover configuration](cover-traffic.md#enable-and-inspect). Disable cover for
+sources whose operations span origins, as the bundled Lonestar provider does.
+
 ## OpenAPI header parameters and idempotency
 
 OpenAPI `in: header` business parameters become ordinary tool arguments. Header

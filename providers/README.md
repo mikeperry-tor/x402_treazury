@@ -66,7 +66,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | IPIntel.ai | `ipintel.toml` | Domain/DNS/IP, satellite and developer tools; core lookup recommendations |
 | Kronos | `kronos.toml` | Market data plus public status/methodology; existing names preserved |
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |
-| LoneStarOracle | `lonestar.toml` | Full supported gateway, including public previews/feeds; research recommendations |
+| LoneStarOracle | `lonestar.toml` | Unified catalog with direct service URLs, including public previews/feeds; research recommendations |
 | Market Intelligence API | `marketintelligence.toml` | Market research and analytics; POST opportunity scans; prepaid/webhook workflows excluded |
 | Nansen | `nansen.toml` | Keyless paid analytics; API-key account/trading and SSE agents excluded |
 | News Gurus | `newsgurus/provider.toml` | Vendor x402 catalog projection, including agent-status; lazy help |

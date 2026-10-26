@@ -12,6 +12,7 @@ fn binding(h: &Harness, method: &str) -> BoundTool {
             description: "draining fixture".into(),
             method: method.into(),
             path: "/pay".into(),
+            request_url: None,
             input_schema: json!({"type":"object"}),
             param_routes: Default::default(),
             header_params: Default::default(),

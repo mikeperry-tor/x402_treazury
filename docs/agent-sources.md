@@ -673,7 +673,10 @@ submitted names, URLs, schemas or upstream prose.
 Agent destinations require public HTTPS without userinfo or fragments. Local/special
 addresses, private names, redirects and local files are rejected. Direct connections
 validate DNS answers at dial time. Undeclared cross-origin API routes and generic cross-origin help URLs are rejected.
-Bundled providers retain their reviewed, authored help origin. All production traffic uses the network factory. Dynamic API
+Bundled providers retain their reviewed, authored help origin. An accepted provider's
+explicit [operation URL extension](configuration.md#operation-url-extensions) also
+permits the public HTTPS targets declared by that extension, including other
+origins; generic imports retain same-origin API routing. All production traffic uses the network factory. Dynamic API
 clients and lazy help retain public-destination restrictions at execution, including
 after binding, while help uses its own discovery-origin isolation identity. Accepted
 bundled protocol compatibility applies to schema acquisition, refresh, API and help

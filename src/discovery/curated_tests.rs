@@ -121,6 +121,68 @@ fn canonical_curated_configuration_applies_before_dynamic_renaming() {
 }
 
 #[test]
+fn curated_operation_urls_survive_restore_and_validate_actual_public_destinations() {
+    let mut candidate = curated_candidate("direct");
+    candidate
+        .provider
+        .as_mut()
+        .unwrap()
+        .settings
+        .operation_url_extension = Some("x-direct-url".into());
+    let mut document = document();
+    document["paths"]["/v1/read"]["post"]["x-direct-url"] = json!("https://read.example.com/read");
+    let bytes = serde_json::to_vec(&document).unwrap();
+    let restored: Candidate =
+        serde_json::from_slice(&serde_json::to_vec(&candidate).unwrap()).unwrap();
+    for candidate in [&candidate, &restored] {
+        let built = import::build(candidate, &bytes).unwrap();
+        let tool = built
+            .tools
+            .iter()
+            .find(|t| t.name == "dyn_direct__read")
+            .unwrap();
+        assert_eq!(tool.path, "/v1/read");
+        assert!(tool.response_mapping.is_some());
+        assert_eq!(
+            tool.route(&built.base, &Default::default()).unwrap().url,
+            "https://read.example.com/read"
+        );
+    }
+    // A generic import cannot acquire cross-origin routing from vendor metadata.
+    let generic: Candidate = serde_json::from_value(json!({
+        "name":"generic", "spec_url":"https://api.example.com/openapi.json",
+        "base_url":"https://api.example.com"
+    }))
+    .unwrap();
+    let built = import::build(&generic, &bytes).unwrap();
+    assert!(built.tools.iter().all(|t| t.request_url.is_none()));
+    let mut unrelated = document.clone();
+    unrelated["paths"]["https://other.example.com/unrelated"] = json!({"get":{}});
+    let mut unfiltered = candidate.clone();
+    unfiltered
+        .provider
+        .as_mut()
+        .unwrap()
+        .settings
+        .include
+        .clear();
+    assert!(
+        import::build(&unfiltered, &serde_json::to_vec(&unrelated).unwrap())
+            .unwrap_err()
+            .to_string()
+            .contains("cross_origin_operation_rejected")
+    );
+    for url in [
+        "https://127.0.0.1/private",
+        "http://read.example.com/read",
+        "https://user:secret@read.example.com/read",
+    ] {
+        document["paths"]["/v1/read"]["post"]["x-direct-url"] = json!(url);
+        assert!(import::build(&candidate, &serde_json::to_vec(&document).unwrap()).is_err());
+    }
+}
+
+#[test]
 fn listener_projection_preserves_selection_and_validates_hidden_operations() {
     let candidate = curated_candidate("custom");
     let mut document = document();

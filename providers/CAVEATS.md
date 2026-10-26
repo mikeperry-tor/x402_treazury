@@ -466,19 +466,22 @@ normalization remains necessary for premium routes with long descriptions.
 
 ## lonestar.toml — LoneStarOracle catalog (lonestaroracle.xyz)
 
-The unified [OpenAPI](https://lonestaroracle.xyz/openapi.json) uses the
-`https://lonestaroracle.xyz/api` gateway. Original service paths stay on the wire;
-`x-direct-url` is informational. The captured gateway metadata classifies prices
-and free hints, while live challenges remain authoritative. Authored overrides
-and local-reference request conversion remain unchanged.
+The unified [OpenAPI](https://lonestaroracle.xyz/openapi.json) retains
+`https://lonestaroracle.xyz/api` as its server, but gateway requests now return
+HTTP 307 to service-specific hosts. The provider opts into
+`operation_url_extension = "x-direct-url"` so requests use each operation's direct
+URL, matching the resource named by its payment challenge. Original service paths
+still determine tool names, selection and response mappings. Schema metadata
+classifies prices and free hints, while live challenges remain authoritative.
+Unsigned checks confirmed `/api/rates/rates` redirects to
+`https://rates.lonestaroracle.xyz/rates`, which returns HTTP 402; this does not
+qualify paid delivery or settlement.
 
 Public demos, previews, feed pages, refinery data, lease-auction/portfolio reads
 and audit-target listings are included. No subscription-management or wallet-owned
 contract appears in those captured
 requests. Recommendations suggest macro/rates, news and token research plus help,
-without hiding other supported tools. The guide remains lazy. Current public
-schema/help retrieval was unavailable during this audit; saved request contracts
-and historical unsigned observations do not qualify present service behavior.
+without hiding other supported tools. The guide remains lazy.
 
 ## glassnode/ — Glassnode x402 gateway (x402.glassnode.com)
 

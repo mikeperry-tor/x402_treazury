@@ -125,7 +125,7 @@
     "provider": "lonestar",
     "config": "providers/lonestar.toml",
     "method": "GET",
-    "url": "https://lonestaroracle.xyz/api/aero/pool",
+    "url": "https://aero.lonestaroracle.xyz/pool",
     "body": null
   },
   {

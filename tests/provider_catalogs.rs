@@ -3,6 +3,36 @@ use serde_json::Value;
 use std::path::Path;
 
 #[tokio::test]
+async fn lonestar_routes_to_the_direct_challenge_resource_instead_of_the_redirecting_gateway() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/lonestar.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let document: Value =
+        serde_json::from_str(include_str!("fixtures/lonestar_unified_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &document, "lonestar").unwrap();
+    let rates = tools
+        .iter()
+        .find(|t| t.name == "lonestar_rates_rates")
+        .unwrap();
+    assert_eq!(rates.path, "/rates/rates");
+    let request = rates
+        .route(
+            cfg.base_url.as_deref().unwrap(),
+            json!({}).as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(request.url, "https://rates.lonestaroracle.xyz/rates");
+    assert_eq!(request.method, "GET");
+    assert!(request.query.is_empty());
+    assert!(request.body.is_none());
+    assert!(rates.description.contains("$0.05"));
+}
+
+#[tokio::test]
 async fn stabletravel_repairs_literal_path_slots_without_changing_vendor_operations() {
     use serde_json::json;
     use x402_treazury::{catalog, config};

@@ -471,7 +471,9 @@ fn validate_tools(
             "schema_size_limit",
             "hardcoded_schema_bytes",
         )?;
-        let url = if tool.path.starts_with("https://") || tool.path.starts_with("http://") {
+        let url = if let Some(url) = &tool.request_url {
+            url.clone()
+        } else if tool.path.starts_with("https://") || tool.path.starts_with("http://") {
             tool.path.clone()
         } else {
             format!(
@@ -483,6 +485,7 @@ fn validate_tools(
         let url = endpoint(&url)?;
         require(
             url.origin() == base_url.origin()
+                || tool.request_url.is_some()
                 || (tool.help_url.is_some()
                     && help_origins.contains(&url.origin().ascii_serialization())),
             "cross_origin_operation_rejected",

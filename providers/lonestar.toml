@@ -6,6 +6,7 @@ cover_traffic_enabled = false
 spec = "https://lonestaroracle.xyz/openapi.json"
 name = "LoneStarOracle"
 base_url = "https://lonestaroracle.xyz/api"
+operation_url_extension = "x-direct-url"
 prefix = "lonestar"
 recommended_tools = ["lonestar_macro_macro", "lonestar_rates_rates", "lonestar_read_read", "lonestar_token_report", "lonestar_help"]
 pricing_key = "x-payment-info"

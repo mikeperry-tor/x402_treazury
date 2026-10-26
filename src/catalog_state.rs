@@ -1,4 +1,7 @@
 //! One immutable generation binds definitions, routes and payers for every listener.
+#[cfg(test)]
+mod operation_url_tests;
+
 use crate::discovery_relay::document::{self, SharedFailure};
 use crate::{
     catalog::ToolSpec,
@@ -198,16 +201,21 @@ impl BoundTool {
                 Some((source, _)) => self.client.clone().with_source_identity(source),
                 None => self.client.clone(),
             };
+            let client = if self.tool.request_url.is_some() {
+                client.public_destinations()
+            } else {
+                client
+            };
             client
                 .execute_rendered_scoped(
                     self.tool.route(&self.base, args)?,
-                    self.client.operation_key(
+                    client.operation_key(
                         self.source
                             .as_ref()
                             .map(|(id, revision)| (id.as_str(), *revision)),
                         &self.tool.method,
                         &self.tool.path,
-                        &self.base,
+                        self.tool.request_url.as_deref().unwrap_or(&self.base),
                     ),
                     self.tool.response_mapping.as_ref(),
                     &self.tool.image_limits,
