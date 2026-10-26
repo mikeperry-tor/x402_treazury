@@ -37,6 +37,21 @@ struct Fake {
     minimum: Option<String>,
     timeout: u64,
 }
+fn confirmation_fixture(
+    error: &str,
+) -> Option<x402_treazury::rotation::transaction::ConfirmationObservation> {
+    use x402_treazury::rotation::transaction::ConfirmationObservation;
+    let wallet_height = match error {
+        "wallet_unconfirmed" => None,
+        "wallet_height_differs" => Some(98),
+        _ => return None,
+    };
+    Some(ConfirmationObservation {
+        lookup_height: 100,
+        wallet_height,
+        scanned_height: Some(101),
+    })
+}
 impl FundingObservations for Fake {
     type QuoteRequest = (Quote, bool);
     async fn quote(&self, (quote, outage): Self::QuoteRequest) -> Result<Quote> {
@@ -89,6 +104,11 @@ impl FundingBackend for Fake {
         self.recovery_calls += 1;
         Ok(self.recovery.clone().map(|outcome| RecoveryObservation {
             source_observed: self.recovery_observed,
+            confirmation: if self.recovery_observed {
+                self.reconcile_error.and_then(confirmation_fixture)
+            } else {
+                None
+            },
             outcome,
         }))
     }
@@ -175,6 +195,11 @@ impl FundingBackend for Fake {
             return Ok(false);
         }
         if let Some(error) = self.reconcile_error {
+            if let Some(observation) = confirmation_fixture(error) {
+                return Err(anyhow::Error::new(
+                    x402_treazury::rotation::transaction::RecoveryEvidenceError::ConfirmationMismatch
+                ).context(observation));
+            }
             if error == "treasury_confirmation_pending" {
                 return Err(x402_treazury::rotation::transaction::RecoveryEvidenceError::ConfirmationPending.into());
             }
@@ -1255,7 +1280,7 @@ async fn qualification_pause_preserves_quote_without_starting_new_work() {
 }
 
 #[tokio::test]
-async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn() {
+async fn confirmation_wait_and_retrying_reconciliation_errors_do_not_warn() {
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -1290,7 +1315,7 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
     let output = std::fs::read_to_string(log.path()).unwrap();
     let waiting = output[baseline..]
         .lines()
-        // This fixture's focused job is a/small. WARN uses that readable
+        // This fixture's focused job is a/small. The observation uses that readable
         // scope; raw job correlation is deliberately a separate DEBUG event.
         .filter(|line| {
             line.contains(&focus)
@@ -1315,7 +1340,7 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
     let output = std::fs::read_to_string(log.path()).unwrap();
     let failed = output[baseline..]
         .lines()
-        // This fixture's focused job is a/small. WARN uses that readable
+        // This fixture's focused job is a/small. The observation uses that readable
         // scope; raw job correlation is deliberately a separate DEBUG event.
         .filter(|line| {
             line.contains(&focus)
@@ -1324,7 +1349,8 @@ async fn confirmation_wait_is_not_failure_but_reconciliation_errors_still_warn()
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(failed.contains("WARN"), "{output}");
+    assert!(!failed.contains("WARN"), "{output}");
+    assert!(failed.contains("DEBUG"), "{output}");
     assert!(
         failed.contains("Wallet funding observation unavailable"),
         "{output}"
@@ -1583,4 +1609,90 @@ async fn recovery_wait_before_source_observation_preserves_ordinary_reconciliati
     use x402_treazury::treasury::recovery::RecoveryOutcome;
     assert_timed_out_source_observations(Some(RecoveryOutcome::Waiting("funding_in_progress")), 1)
         .await;
+}
+
+#[tokio::test]
+async fn confirmation_conflicts_preserve_facts_and_ownership_in_ordinary_and_recovery_paths() {
+    use x402_treazury::{
+        rotation::store::funding::FundingPhase, treasury::recovery::RecoveryOutcome,
+    };
+    for via_recovery in [false, true] {
+        for reason in ["wallet_unconfirmed", "wallet_height_differs"] {
+            let (_dir, worker, task) = fixture().await;
+            let now = x402_treazury::rotation::base::now().unwrap();
+            worker.backend.lock().await.reconcile_error = Some(reason);
+            worker.backend.lock().await.swap_status = || SwapStatus::Processing;
+            // Quote, preparation and the original submission; no source confirmation.
+            for i in 0..3 {
+                worker.tick(now + i * 1000).await.unwrap();
+            }
+            let before = worker.store.call(|s| s.status()).await.unwrap();
+            assert_eq!(before.treasury_operations[0].attempts, 1);
+            assert_eq!(worker.backend.lock().await.sends, 1);
+            if via_recovery {
+                let mut backend = worker.backend.lock().await;
+                backend.recovery_observed = true;
+                backend.recovery = Some(RecoveryOutcome::OperatorRequired(
+                    "conflicting_transaction_or_input_evidence",
+                ));
+                drop(backend);
+                let job = before.funding_jobs[0].id.clone();
+                worker
+                    .store
+                    .call(move |s| s.mark_funding_timeout(&job))
+                    .await
+                    .unwrap();
+            }
+            for i in 3..5 {
+                let calls = worker.backend.lock().await.reconcile_calls;
+                let recoveries = worker.backend.lock().await.recovery_calls;
+                worker.tick(now + i * 1000).await.unwrap();
+                let status = worker.store.call(|s| s.status()).await.unwrap();
+                let job = &status.funding_jobs[0];
+                assert_eq!(job.phase, FundingPhase::DepositPending);
+                assert_eq!(job.operation_id, before.funding_jobs[0].operation_id);
+                let error = job.last_error.as_deref().unwrap();
+                assert!(error.contains("funding_recovery_requires_operator; conflicting_transaction_or_input_evidence"), "{error}");
+                let observation = confirmation_fixture(reason).unwrap();
+                assert!(error.contains(&observation.to_string()), "{error}");
+                assert!(status.outgoing_pending);
+                assert_eq!(status.treasury_operations[0].attempts, 1);
+                assert_eq!(
+                    status.treasury_operations[0].submission,
+                    before.treasury_operations[0].submission
+                );
+                assert_eq!(worker.backend.lock().await.sends, 1);
+                if via_recovery {
+                    assert_eq!(worker.backend.lock().await.recovery_calls, recoveries + 1);
+                    assert_eq!(worker.backend.lock().await.reconcile_calls, calls);
+                } else {
+                    assert_eq!(worker.backend.lock().await.recovery_calls, recoveries);
+                    assert_eq!(worker.backend.lock().await.reconcile_calls, calls + 1);
+                }
+            }
+            {
+                let mut backend = worker.backend.lock().await;
+                backend.recovery = None;
+                backend.recovery_observed = false;
+                backend.reconcile_error = None;
+            }
+            worker.tick(now + 6000).await.unwrap();
+            let after = worker.store.call(|s| s.status()).await.unwrap();
+            assert_eq!(after.funding_jobs[0].phase, FundingPhase::Swapping);
+            assert_eq!(
+                after.funding_jobs[0].last_error.as_deref(),
+                if via_recovery {
+                    Some(
+                        "swap_timeout; slower reconciliation continues; inspect source and refund status",
+                    )
+                } else {
+                    None
+                }
+            );
+            assert!(!after.outgoing_pending);
+            assert_eq!(worker.backend.lock().await.sends, 1);
+            drop(worker);
+            task.await.unwrap();
+        }
+    }
 }

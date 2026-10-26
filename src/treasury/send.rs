@@ -507,14 +507,24 @@ impl Treasury {
                 .wallet_transactions
                 .get(&transaction.txid())
                 .context("transaction not seen by wallet sync")?;
-            ensure!(
-                record
+            let confirmation = crate::rotation::transaction::ConfirmationObservation {
+                lookup_height: height,
+                wallet_height: record
                     .status()
                     .get_confirmed_height()
-                    .map(|h| u64::from(u32::from(h)))
-                    == Some(height),
-                crate::rotation::transaction::RecoveryEvidenceError::ConfirmationMismatch
-            );
+                    .map(|h| u64::from(u32::from(h))),
+                scanned_height: wallet
+                    .wallet_blocks
+                    .keys()
+                    .next_back()
+                    .map(|h| u64::from(u32::from(*h))),
+            };
+            if confirmation.wallet_height != Some(height) {
+                return Err(anyhow::Error::new(
+                    crate::rotation::transaction::RecoveryEvidenceError::ConfirmationMismatch,
+                )
+                .context(confirmation));
+            }
             let mut bytes = zeroize::Zeroizing::new(Vec::new());
             record.transaction().write(&mut *bytes)?;
             ensure!(

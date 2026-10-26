@@ -281,6 +281,11 @@ pub(crate) fn warn_sync_failure(error: &anyhow::Error, retry_after: Option<std::
 }
 
 pub(crate) fn sync_detail(error: &anyhow::Error) -> Option<String> {
+    if let Some(observation) =
+        error.downcast_ref::<crate::rotation::transaction::ConfirmationObservation>()
+    {
+        return Some(observation.to_string());
+    }
     if let Some(diagnostic) = error.downcast_ref::<SyncDiagnostic>() {
         return Some(diagnostic.to_string());
     }

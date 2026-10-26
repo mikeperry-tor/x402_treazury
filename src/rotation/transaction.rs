@@ -42,6 +42,29 @@ impl std::fmt::Display for RecoveryEvidenceError {
 }
 impl std::error::Error for RecoveryEvidenceError {}
 
+/// Safe facts from the same wallet read that rejected source confirmation.
+/// Diagnostic only: neither these heights nor their persisted prose grant authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfirmationObservation {
+    pub lookup_height: u64,
+    pub wallet_height: Option<u64>,
+    pub scanned_height: Option<u64>,
+}
+impl std::fmt::Display for ConfirmationObservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "confirmation_height_mismatch: lookup_height={} wallet_height={} scanned_height={}",
+            self.lookup_height,
+            self.wallet_height
+                .map_or_else(|| "unconfirmed".into(), |h| h.to_string()),
+            self.scanned_height
+                .map_or_else(|| "unknown".into(), |h| h.to_string())
+        )
+    }
+}
+impl std::error::Error for ConfirmationObservation {}
+
 /// Issued only through a proven read-only path before accepting input ownership
 /// or starting calculation. SDK proposal selection can fail on this path.
 /// It is not evidence that an interrupted calculation is safe to repeat.

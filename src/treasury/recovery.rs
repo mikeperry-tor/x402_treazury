@@ -19,6 +19,8 @@ pub enum RecoveryOutcome {
 pub struct RecoveryObservation {
     pub outcome: RecoveryOutcome,
     pub source_observed: bool,
+    /// Safe rejection facts retained when the typed error becomes an outcome.
+    pub confirmation: Option<crate::rotation::transaction::ConfirmationObservation>,
 }
 struct ObservationContext {
     scheduled: bool,
@@ -35,7 +37,7 @@ pub(crate) fn needs_recovery(job: &FundingJob) -> bool {
             ))
 }
 
-fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {
+pub(crate) fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {
     use crate::rotation::transaction::RecoveryEvidenceError as Evidence;
     Some(match error.downcast_ref::<Evidence>()? {
         Evidence::ConfirmationPending => RecoveryOutcome::Waiting("zcash_confirmations_pending"),
@@ -101,6 +103,11 @@ impl Treasury {
                 &mut observation,
             )
             .await;
+        let confirmation = result.as_ref().err().and_then(|error| {
+            error
+                .downcast_ref::<crate::rotation::transaction::ConfirmationObservation>()
+                .copied()
+        });
         let outcome = match result {
             Err(error) => match evidence_outcome(&error) {
                 Some(outcome) => outcome,
@@ -111,6 +118,7 @@ impl Treasury {
         Ok(RecoveryObservation {
             outcome,
             source_observed: observation.source_observed,
+            confirmation,
         })
     }
     async fn recover_funding_job_inner(
@@ -368,6 +376,31 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn confirmation_facts_preserve_operator_classification_through_context() {
+        use crate::rotation::transaction::{ConfirmationObservation, RecoveryEvidenceError};
+        for wallet_height in [None, Some(98)] {
+            let observation = ConfirmationObservation {
+                lookup_height: 100,
+                wallet_height,
+                scanned_height: Some(101),
+            };
+            let error = anyhow::Error::new(RecoveryEvidenceError::ConfirmationMismatch)
+                .context(observation)
+                .context("private upstream detail");
+            assert_eq!(
+                evidence_outcome(&error),
+                Some(RecoveryOutcome::OperatorRequired(
+                    "conflicting_transaction_or_input_evidence"
+                ))
+            );
+            assert_eq!(
+                crate::treasury::diagnostics::sync_detail(&error),
+                Some(observation.to_string())
+            );
+        }
+    }
+
     #[test]
     fn diagnostic_text_cannot_select_a_recovery_disposition() {
         use crate::rotation::transaction::RecoveryEvidenceError as Evidence;

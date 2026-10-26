@@ -446,10 +446,23 @@ they do not exhaust all possible async interleavings.
 Funding logs distinguish progress from failed checks. Entering deposit confirmation
 emits an informational message; ordinary confirmation-depth and pending Base-credit
 polls log at debug level, clear stale error status and use the normal polling interval.
-They do not release reservations or authorize another deposit. Sync, RPC, validation
-and storage failures remain warnings with error backoff. Swap timeout, failed/refunded
-status and incomplete deposits emit explicit warnings describing continued
-reconciliation or required recovery.
+They do not release reservations or authorize another deposit. Retained retryable
+observation failures (including sync, RPC and storage failures) and retained-owner
+reacquisition attempts log at DEBUG with existing retry behavior. Meaningful transitions into delayed or degraded funding
+belong at INFO; operator-required outcomes belong at WARN and explain the required
+review while observation continues. Repeated observations of the same operator
+requirement log at DEBUG even when height details change; successful observation
+clears that diagnostic episode. Repetition alone does not raise severity; see
+[log severity](development.md#log-severity).
+
+Source confirmation disagreement has the same operator-required classification in
+ordinary reconciliation and recovery. Diagnostics retain the lookup confirmation
+height, wallet confirmation height (or `unconfirmed`), and highest scanned wallet
+block (or `unknown`). Both an unconfirmed wallet record and unequal confirmed
+heights retain the existing conservative conflicting-evidence classification;
+these facts do not establish a root cause. Existing work, inputs and reservations
+remain owned, and observations continue on their existing schedule. No diagnostic
+or operator-review status authorizes a replacement deposit.
 
 Bootstrap and the serving funding worker recover eligible jobs automatically.
 The operator can run `wallet recover --config FILE` with serving stopped for one

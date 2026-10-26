@@ -306,6 +306,7 @@ impl TreasuryCommands {
                         "waiting_for_transaction_expiry",
                     ),
                     source_observed: true,
+                    confirmation: None,
                 }));
                 ObservedCommand::RecoverFunding(id, limit, allow_new_attempt)
             }

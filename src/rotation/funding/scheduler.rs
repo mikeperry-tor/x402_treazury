@@ -102,25 +102,43 @@ fn report_decode_failure(fault: &MalformedFunding) {
     tracing::debug!(job=%fault.id, operation=%fault.operation, "malformed funding ownership");
 }
 
-/// Log expected waiting without changing its persisted condition or retry backoff.
+/// Report a new operator requirement once; polling details never change backoff.
 fn report_observation_failure(
     job: &FundingJob,
     wallet_type: &str,
     kind: Kind,
     phase: &FundingPhase,
     error: &anyhow::Error,
+    previous_error: Option<&str>,
 ) -> String {
     let category = safe_error(error, phase);
-    if funding_condition(error) == Some(super::super::error::FundingCondition::InsufficientFunds) {
-        tracing::info!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,category,
+    // Presentation only: changing height details do not create a new disposition.
+    let new_requirement = previous_error.and_then(|s| s.split("; treasury:").next())
+        != category.split("; treasury:").next();
+    if error.is::<RecoveryBlocked>() && new_requirement {
+        let message = if error.is::<super::super::transaction::ConfirmationObservation>() {
+            "Zcash deposit confirmation disagrees with the treasury wallet and requires operator review; existing work and reservations retained; observation checks continue"
+        } else {
+            "Wallet funding requires operator review; existing work and reservations retained; observation checks continue"
+        };
+        tracing::warn!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,
+            operation=%job.operation_id,category,
+            "{message}");
+    } else if new_requirement
+        && funding_condition(error)
+            == Some(super::super::error::FundingCondition::InsufficientFunds)
+    {
+        tracing::info!(wallet=%job.pool_name,size=wallet_type,category,
             "Wallet funding is waiting for confirmed spendable ZEC");
-    } else if error.is::<super::super::transaction::PreparationDeferred>()
+    } else if new_requirement
+        && error.is::<super::super::transaction::PreparationDeferred>()
         && crate::treasury::diagnostics::sync_detail(error).is_some()
     {
-        tracing::info!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,category,
+        tracing::info!(wallet=%job.pool_name,size=wallet_type,category,
             "Wallet funding deferred until treasury synchronization succeeds");
     } else {
-        tracing::warn!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,category,
+        tracing::debug!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,
+            operation=%job.operation_id,category,
             "Wallet funding observation unavailable; existing work retained and checks will retry");
     }
     tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,kind=?kind,category,
@@ -793,12 +811,20 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             Some(error) => {
                 let id = job.id.clone();
                 let wallet_type = self.store.call(move |s| s.funding_wallet_type(&id)).await?;
+                let previous_error = lease.state.lock().expect("funding schedule lock").records
+                    [&Key {
+                        operation: job.operation_id.clone(),
+                        kind,
+                    }]
+                    .error
+                    .clone();
                 Some(report_observation_failure(
                     &job,
                     &wallet_type,
                     kind,
                     &phase,
                     &error,
+                    previous_error.as_deref(),
                 ))
             }
             None => None,

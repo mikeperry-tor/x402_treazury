@@ -4,7 +4,7 @@ use crate::rotation::{error::FundingCondition, transaction::PreparationDeferred}
 use tracing::instrument::WithSubscriber;
 
 #[tokio::test]
-async fn expected_waits_are_info_but_retain_error_backoff_and_other_failures_warn() {
+async fn retrying_observations_are_debug_and_operator_requirements_warn_without_changing_backoff() {
     let cases = [
         (
             anyhow::Error::new(FundingCondition::InsufficientFunds)
@@ -21,13 +21,33 @@ async fn expected_waits_are_info_but_retain_error_backoff_and_other_failures_war
         ),
         (
             anyhow::anyhow!("private unclassified proposal").context(PreparationDeferred),
-            "WARN",
+            "DEBUG",
             "funding observation unavailable",
         ),
         (
             anyhow::Error::new(FundingCondition::CostLimit).context(PreparationDeferred),
-            "WARN",
+            "DEBUG",
             "funding observation unavailable",
+        ),
+        (
+            anyhow::Error::new(crate::rotation::transaction::ConfirmationObservation {
+                lookup_height: 100,
+                wallet_height: None,
+                scanned_height: Some(99),
+            })
+            .context(RecoveryBlocked("conflicting_transaction_or_input_evidence")),
+            "WARN",
+            "requires operator review",
+        ),
+        (
+            anyhow::Error::new(crate::rotation::transaction::ConfirmationObservation {
+                lookup_height: 100,
+                wallet_height: Some(98),
+                scanned_height: Some(101),
+            })
+            .context(RecoveryBlocked("conflicting_transaction_or_input_evidence")),
+            "WARN",
+            "requires operator review",
         ),
     ];
     for (error, level, message) in cases {
@@ -53,6 +73,7 @@ async fn expected_waits_are_info_but_retain_error_backoff_and_other_failures_war
         let job = raw.funding_job(&job.id).unwrap().unwrap();
         let condition = funding_condition(&error);
         let category = safe_error(&error, &job.phase);
+
         let (store, owner) = StoreHandle::spawn(raw);
         let (started, _source_events) = mpsc::unbounded_channel();
         let (statuses, _status_events) = mpsc::unbounded_channel();
@@ -91,9 +112,10 @@ async fn expected_waits_are_info_but_retain_error_backoff_and_other_failures_war
         let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_ansi(false)
-            .with_max_level(tracing::Level::INFO)
+            .with_max_level(tracing::Level::DEBUG)
             .with_writer(log.reopen().unwrap())
             .finish();
+        let subscriber = tracing::Dispatch::new(subscriber);
         worker
             .publish_observation(
                 &lease,
@@ -107,7 +129,7 @@ async fn expected_waits_are_info_but_retain_error_backoff_and_other_failures_war
                     started: tokio::time::Instant::now(),
                 },
             )
-            .with_subscriber(subscriber)
+            .with_subscriber(subscriber.clone())
             .await
             .unwrap();
         let logged = std::fs::read_to_string(log.path()).unwrap();
@@ -115,13 +137,63 @@ async fn expected_waits_are_info_but_retain_error_backoff_and_other_failures_war
             logged.contains(level) && logged.contains(message),
             "{logged}"
         );
-        if level == "INFO" {
+        if level != "WARN" {
             assert!(!logged.contains("WARN"), "{logged}");
         }
-        assert!(
-            logged.contains("observation=Source") && logged.contains("phase=Quoted"),
-            "{logged}"
-        );
+        if level == "WARN" {
+            assert!(logged.contains("lookup_height=100"), "{logged}");
+            assert!(logged.contains("wallet_height="), "{logged}");
+            assert!(logged.contains("scanned_height="), "{logged}");
+            assert!(logged.contains(&job.operation_id), "{logged}");
+            assert!(logged.contains("reservations retained"), "{logged}");
+            let repeated =
+                anyhow::Error::new(crate::rotation::transaction::ConfirmationObservation {
+                    lookup_height: 100,
+                    wallet_height: None,
+                    scanned_height: Some(102),
+                })
+                .context(RecoveryBlocked("conflicting_transaction_or_input_evidence"));
+            let refreshed = tracing::dispatcher::with_default(&subscriber, || {
+                report_observation_failure(
+                    &job,
+                    "small",
+                    Kind::Source,
+                    &job.phase,
+                    &repeated,
+                    Some(&category),
+                )
+            });
+            let repeated_logs = std::fs::read_to_string(log.path()).unwrap();
+            let repeated_logs = &repeated_logs[logged.len()..];
+            assert!(repeated_logs.contains("DEBUG"), "{repeated_logs}");
+            assert!(!repeated_logs.contains("WARN"), "{repeated_logs}");
+            assert!(
+                repeated_logs.contains("scanned_height=102"),
+                "{repeated_logs}"
+            );
+            assert!(refreshed.contains("scanned_height=102"));
+            // A successful observation clears Record.error; recurrence must warn.
+            tracing::dispatcher::with_default(&subscriber, || {
+                report_observation_failure(&job, "small", Kind::Source, &job.phase, &repeated, None)
+            });
+            let recurrence_logs = std::fs::read_to_string(log.path()).unwrap();
+            assert_eq!(
+                recurrence_logs.matches("WARN").count(),
+                2,
+                "{recurrence_logs}"
+            );
+            assert_eq!(
+                recurrence_logs.matches("requires operator review").count(),
+                2,
+                "{recurrence_logs}"
+            );
+        }
+        if level != "INFO" {
+            assert!(
+                logged.contains("observation=Source") && logged.contains("phase=Quoted"),
+                "{logged}"
+            );
+        }
         assert!(!logged.contains("private"), "{logged}");
         {
             let state = lease.state.lock().unwrap();

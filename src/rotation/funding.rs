@@ -155,7 +155,7 @@ impl<B: FundingBackend> FundingWorker<B> {
                 {
                     // schedule joins its owner. Accepted source tasks retain the
                     // existing lease and backoff state until their own completion.
-                    tracing::warn!(
+                    tracing::debug!(
                         category = "funding_owner_restart_pending",
                         "funding owner exited or remains retained; retrying existing ownership without replay"
                     );
@@ -233,12 +233,15 @@ impl<B: FundingBackend> FundingWorker<B> {
         let source_observed = recovery
             .as_ref()
             .is_some_and(|result| result.source_observed);
-        let recovery = recovery.map(|result| result.outcome);
+        let mut observation_error = recovery
+            .as_ref()
+            .and_then(|result| result.confirmation)
+            .map(anyhow::Error::new);
+        let mut recovery = recovery.map(|result| result.outcome);
         if matches!(recovery, Some(RecoveryOutcome::Recovered)) {
             return Ok(Observation::None);
         }
         let facts = self.facts(job).await?;
-        let mut observation_error = None;
         let mut phase_reconciliation_due = source_observed;
         // An operator disposition can precede source observation (for example,
         // conflicting evidence or qualification). Retain that liability's normal
@@ -247,6 +250,11 @@ impl<B: FundingBackend> FundingWorker<B> {
             match self.backend.lock().await.reconcile(job).await {
                 Ok(_) => phase_reconciliation_due = true,
                 Err(error) => {
+                    if let Some(outcome @ RecoveryOutcome::OperatorRequired(_)) =
+                        crate::treasury::recovery::evidence_outcome(&error)
+                    {
+                        recovery = Some(outcome);
+                    }
                     observation_error.get_or_insert(error.context("source_reconciliation_failed"));
                 }
             }
@@ -261,7 +269,10 @@ impl<B: FundingBackend> FundingWorker<B> {
         };
         match recovery {
             Some(RecoveryOutcome::OperatorRequired(reason)) => {
-                let error = anyhow::anyhow!(RecoveryBlocked(reason));
+                let error = observation_error.map_or_else(
+                    || anyhow::anyhow!(RecoveryBlocked(reason)),
+                    |error| error.context(RecoveryBlocked(reason)),
+                );
                 let diagnostic = safe_error(&error, &current.phase);
                 let (id, operation) = (current.id.clone(), current.operation_id.clone());
                 self.store
@@ -869,7 +880,11 @@ fn safe_error(error: &anyhow::Error, phase: &FundingPhase) -> String {
         return "funding_integrity_conflict; malformed_durable_evidence_support; inspect this wallet's readiness evidence; original work remains owned".into();
     }
     if let Some(blocked) = error.downcast_ref::<RecoveryBlocked>() {
-        return format!("funding_recovery_requires_operator; {}", blocked.0);
+        let mut diagnostic = format!("funding_recovery_requires_operator; {}", blocked.0);
+        if let Some(detail) = crate::treasury::diagnostics::sync_detail(error) {
+            diagnostic.push_str(&format!("; treasury: {detail}"));
+        }
+        return diagnostic;
     }
 
     if error
