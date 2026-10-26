@@ -274,7 +274,7 @@ impl Fixture {
             closed.not_after = now().unwrap() as u64 - 1;
             m.windows.push(closed);
         }
-        let resolved = json!({"sources":{},"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_api_payment_usdc":"0.02"}},"wallet_bindings":{"main":{"api":{"wallet":"pool"}}},"treasury":{"id":treasury},"funding":{"confidentiality":"public","auto_fund":true},"network":{"mode":"direct"}});
+        let resolved = json!({"servers":{"main":{"provider_management_local":false,"provider_management_remote":false,"raw_url_calls":false}},"sources":{},"resolved_wallets":{"pool":{"mode":"zcash_rotation","max_api_payment_usdc":"0.02"}},"wallet_bindings":{"main":{"api":{"wallet":"pool"}}},"treasury":{"id":treasury},"funding":{"confidentiality":"public","auto_fund":true},"network":{"mode":"direct"}});
         files::create_dir(&m.evidence_dir).unwrap();
         let directory = m.evidence_dir.join(&m.run_id);
         files::create_dir(&directory).unwrap();

@@ -426,3 +426,33 @@ mod help_contract_tests {
         validate_cases(&m, &snapshot).unwrap();
     }
 }
+
+#[cfg(test)]
+mod execution_contract_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn qualification_requires_servers_and_rejects_each_execution_capability() {
+        let m = crate::tests::manifest();
+        let disabled = json!({"provider_management_local":false,"provider_management_remote":false,"raw_url_calls":false});
+        let config = json!({
+            "resolved_wallets":{"pool":{"mode":"zcash_rotation"}},
+            "treasury":{"id":m.treasury_id},
+            "funding":{"confidentiality":"public"},
+            "servers":{"main":disabled,"other":disabled}
+        });
+        execution_contract(&m, &config, false).unwrap();
+        for listener in ["main", "other"] {
+            for permission in ["provider_management_local", "provider_management_remote", "raw_url_calls"] {
+                let mut changed = config.clone();
+                changed["servers"][listener][permission] = json!(true);
+                assert_eq!(execution_contract(&m, &changed, false).unwrap_err().to_string(),
+                    "qualification refuses provider management and raw URL calls");
+            }
+        }
+        let mut missing = config;
+        missing.as_object_mut().unwrap().remove("servers");
+        assert_eq!(execution_contract(&m, &missing, false).unwrap_err().to_string(), "missing servers");
+    }
+}
