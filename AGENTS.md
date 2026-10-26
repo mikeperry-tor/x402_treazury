@@ -219,6 +219,10 @@ make fmt-check
   unfinished named `check-*` stages. Repeat passed stages only when their evidence
   is invalidated, and record the scope and results carried forward. `make check`
   remains the full application check, including the synthetic-chain treasury lifecycle.
+- Follow [compiler diagnostics and review](docs/testing.md#compiler-diagnostics-and-review):
+  run the production compiler and all-target Clippy warning gate; inspect diagnostics
+  alongside exit status. Selected-target `-D warnings` does not cover dependency
+  warnings, and vendoring can expose previously suppressed upstream diagnostics.
 - Coordinate editor-triggered Cargo checks and separate builds before validation;
   Make's serialization does not cover other processes. Keep source, executable,
   feature and profile evidence consistent with the testing guide.

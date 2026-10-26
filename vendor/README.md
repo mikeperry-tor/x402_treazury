@@ -158,6 +158,16 @@ hash; source verification reverses the patch before checking all files. Both roo
 and independent compatibility graphs select the same path patch. No network
 constructor, timeout, retry, credential store or financial authority is added.
 
+The patch also gates three client-only helpers (`matches_response_id`,
+`set_client_request_metadata`, `is_authorization_required`) on the existing
+`client` feature. Their only callers already require that feature; the application
+uses server transports. This prevents unused-method compiler warnings in the
+production graph without enabling unnecessary features or suppressing lints.
+Server-only and client-enabled library compilation must remain valid. These
+annotations can be dropped when an upstream source has equivalent feature gating
+or no longer needs those helpers; they add no independent reason to retain the
+checkout after the diagnostic protections can be retired.
+
 ## Source verification boundaries
 
 Run from the repository root:

@@ -18,7 +18,15 @@
      );
 --- a/src/service.rs
 +++ b/src/service.rs
-@@ -1360,11 +1360,10 @@
+@@ -1035,6 +1035,7 @@
+         *self.info.write().expect("peer info lock poisoned") = Some(Arc::new(info));
+     }
+ 
++    #[cfg(feature = "client")]
+     pub(crate) fn set_client_request_metadata(&self, metadata: ClientRequestMetadata) {
+         let result = self.client_request_metadata.set(metadata);
+         debug_assert!(result.is_ok(), "client request metadata set more than once");
+@@ -1360,11 +1361,10 @@
      const SINK_PROXY_BUFFER_SIZE: usize = 64;
      let (sink_proxy_tx, mut sink_proxy_rx) =
          tokio::sync::mpsc::channel::<TxJsonRpcMessage<R>>(SINK_PROXY_BUFFER_SIZE);
@@ -32,7 +40,7 @@
      }
  
      let mut local_responder_pool =
-@@ -1422,7 +1421,7 @@
+@@ -1422,7 +1422,7 @@
                              Event::PeerMessage(m)
                          } else {
                              // input stream closed
@@ -41,7 +49,7 @@
                              break QuitReason::Closed
                          }
                      }
-@@ -1454,13 +1453,13 @@
+@@ -1454,13 +1454,13 @@
                          )
                      }
                      _ = serve_loop_ct.cancelled() => {
@@ -57,7 +65,7 @@
              match evt {
                  Event::SendTaskResult(SendTaskResult::Request { id, result }) => {
                      if let Err(e) = result
-@@ -1482,7 +1481,7 @@
+@@ -1482,7 +1482,7 @@
                      if let Some(param) = cancellation_param
                          && let Some(request_id) = &param.request_id
                              && let Some(responder) = local_responder_pool.remove(request_id) {
@@ -66,7 +74,7 @@
                                  let _response_result = responder.responder.send(Err(ServiceError::Cancelled {
                                      reason: param.reason.clone(),
                                  }));
-@@ -1509,8 +1508,8 @@
+@@ -1509,8 +1509,8 @@
                          let current_span = tracing::Span::current();
                          response_send_tasks.spawn(async move {
                              let send_result = send.await;
@@ -77,7 +85,7 @@
                              }
                          }.instrument(current_span));
                      }
-@@ -1560,21 +1559,21 @@
+@@ -1560,21 +1560,21 @@
                      mut request,
                      ..
                  })) => {
@@ -103,7 +111,7 @@
                              }
                          }.instrument(current_span));
                          continue;
-@@ -1606,11 +1605,11 @@
+@@ -1606,11 +1606,11 @@
                                  .await;
                              let response = match result {
                                  Ok(result) => {
@@ -117,7 +125,7 @@
                                      JsonRpcMessage::error(error, Some(id))
                                  }
                              };
-@@ -1622,7 +1621,7 @@
+@@ -1622,7 +1622,7 @@
                      notification,
                      ..
                  })) => {
@@ -126,7 +134,7 @@
                      R::invalidate_response_cache(&peer, &notification).await;
                      let subscription_id =
                          if let Some(cancelled) = R::peer_cancelled_params(&notification) {
-@@ -1648,7 +1647,7 @@
+@@ -1648,7 +1648,7 @@
                                  if let Some(request_id) = request_id.as_ref()
                                      && let Some(ct) = local_ct_pool.remove(request_id)
                                  {
@@ -135,7 +143,7 @@
                                      ct.cancel();
                                  }
                                  None
-@@ -1711,7 +1710,7 @@
+@@ -1711,7 +1711,7 @@
                          spawn_service_task(async move {
                              let result = service.handle_notification(notification, context).await;
                              if let Err(error) = result {
@@ -144,7 +152,7 @@
                              }
                          }.instrument(current_span));
                      }
-@@ -1734,7 +1733,7 @@
+@@ -1734,7 +1734,7 @@
                      let Some(id) = id else {
                          // MCP error responses without an id (e.g. Parse error / Invalid Request)
                          // can't be routed back to a pending request — log and drop.
@@ -153,7 +161,7 @@
                          continue;
                      };
                      if let Some(responder) =
-@@ -1790,8 +1789,8 @@
+@@ -1790,8 +1790,8 @@
                          };
                          ct.cancel();
                      }
@@ -164,7 +172,7 @@
                          break;
                      }
                  }
-@@ -1803,10 +1802,10 @@
+@@ -1803,10 +1803,10 @@
          }
  
          let sink_close_result = transport.close().await;
@@ -457,3 +465,23 @@
                      }
                  })
                  .inspect(|_| {
+--- a/src/model.rs
++++ b/src/model.rs
+@@ -326,6 +326,7 @@
+         }
+     }
+ 
++    #[cfg(feature = "client")]
+     pub(crate) fn matches_response_id(&self, response_id: &Self) -> bool {
+         self == response_id
+             || matches!(
+--- a/src/transport.rs
++++ b/src/transport.rs
+@@ -272,6 +272,7 @@
+         }
+     }
+ 
++    #[cfg(feature = "client")]
+     pub(crate) fn is_authorization_required(&self) -> bool {
+         let mut error = Some(self.error.as_ref() as &(dyn std::error::Error + 'static));
+         while let Some(current) = error {

@@ -126,6 +126,12 @@ make clippy
 make fmt-check
 ```
 
+The fixed `make check-clippy` stage checks production library/binary compilation
+before all-target test-feature Clippy and rejects emitted compiler warnings from
+dependencies too. Ordinary `make clippy` only denies warnings in selected targets.
+Review successful command output as well as status under
+[compiler diagnostics and review](testing.md#compiler-diagnostics-and-review).
+
 Tests cover local x402 handshakes and signatures, spend limits, managed admission
 and rotation, HTTP authentication, actual stdio process framing, tool generation,
 configuration, catalog/help caching, passive runtime price hints, Tor isolation, encrypted persistence and

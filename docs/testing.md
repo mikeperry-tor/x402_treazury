@@ -41,12 +41,41 @@ not implicitly rerun earlier stages. `CARGO_ARGS` and `TEST_ARGS` customize
 | Stage | Selection |
 | --- | --- |
 | `check-static` | Formatting, tooling regressions, analyzer tests and CogC/CycC report, vendor provenance |
-| `check-clippy` | All-target Clippy with `zcash-regtest`, warnings denied; includes binary test targets |
+| `check-clippy` | Production library/binary compiler check, then all-target Clippy with `zcash-regtest`; emitted compiler warnings from both application and dependencies fail the stage |
 | `check-compat` | Complete combined dependency compatibility suite |
 | `check-default` | SDK scan-merge diagnostic regression and all default application targets, including examples |
 | `check-proving` | `zcash-testutils` treasury proving tests |
 | `check-lifecycle` | `zcash-testutils` synthetic-chain treasury lifecycle |
 | `check-codec` | `zcash-testutils` address-codec isolation regression |
+
+### Compiler diagnostics and review
+
+`check-clippy` first checks the production library and binaries without test
+features or development targets, then runs Clippy over all targets with
+`zcash-regtest`, including binary test targets. These selections are separate:
+test/example feature unification can hide unused production code. Both commands
+stream Cargo JSON through `scripts/check_warnings.py`, which displays compiler
+diagnostics and fails on emitted warnings, including local dependency warnings
+and diagnostics replayed from cached builds. Cargo failures retain their nonzero
+status. Unexpected non-JSON stdout is displayed and fails the diagnostic check.
+
+Clippy's `-- -D warnings` remains enabled for selected application targets; it
+does not enforce dependency warning cleanliness. Registry dependencies can have
+their lints suppressed by Cargo, so this check covers emitted diagnostics rather
+than every possible upstream lint. Vendoring a dependency can expose warnings
+without changing its version. Ordinary `make build`, `make test`, `make clippy`
+and compatibility tests retain their normal warning/exit behavior; use the fixed
+`check-clippy` stage for this stronger warning check.
+
+Reviewers must inspect diagnostics as well as exit status before accepting
+validation evidence. Resolve compiler warnings in affected application or vendored
+code, and record the disposition of any remaining diagnostics from other checks;
+a successful command alone does not establish a warning-free run. For dependency
+or build-rule changes, verify the actual production and test feature selections,
+warning enforcement scope and source provenance. Keep compiler warnings separate
+from advisory complexity scores and runtime fixture logs: those need review under
+their owning policies, rather than blanket warning-text rejection. Do not silence
+lints or enable unused features merely to obtain a clean check.
 
 ### Validation order and continuation
 

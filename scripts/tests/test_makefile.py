@@ -140,6 +140,9 @@ else:
         script.chmod(0o755)
         def application(command, *args):
             return ('cargo', [command, '--locked', '--manifest-path', 'Cargo.toml', *args])
+        def checked(command, *args):
+            tool, arguments = application(command, *args)
+            return ('python3', ['scripts/check_warnings.py', tool, *arguments])
         return {
             'check-static': [
                 ('cargo', ['fmt', '--check']),
@@ -150,7 +153,10 @@ else:
                 ('python3', ['vendor/verify.py']),
                 ('python3', ['vendor/verify_zingo.py']),
             ],
-            'check-clippy': [application('clippy', '--all-targets', '--features', 'zcash-regtest', '--', '-D', 'warnings')],
+            'check-clippy': [
+                checked('check', '--lib', '--bins', '--message-format=json'),
+                checked('clippy', '--all-targets', '--features', 'zcash-regtest', '--message-format=json', '--', '-D', 'warnings'),
+            ],
             'check-compat': [('python3', ['scripts/check_compat.py'])],
             'check-default': [
                 application('test', '-p', 'pepper-sync', '--lib', 'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context', '--', '--exact'),
@@ -193,7 +199,7 @@ else:
     def test_check_stops_at_failed_stage_even_with_keep_going(self):
         expected = [command for stage in self.check_stages().values() for command in stage]
         for flags in ([], ['-j8'], ['-k']):
-            for failure in ('vendor/verify.py', 'clippy', 'scripts/check_compat.py',
+            for failure in ('vendor/verify.py', '--bins', 'clippy', 'scripts/check_compat.py',
                             'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context',
                             'treasury::send::proving_tests', 'treasury::lifecycle_tests',
                             'synthetic_address_codec_is_scoped_to_its_test_client'):

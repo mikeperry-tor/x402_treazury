@@ -15,7 +15,7 @@ define application_cargo
 set -eu; \
 PROTOC=$$(cargo run --quiet --locked --manifest-path compat/protoc/Cargo.toml); \
 export PROTOC; \
-exec cargo $(1) --locked --manifest-path Cargo.toml $(2)
+exec $(3) cargo $(1) --locked --manifest-path Cargo.toml $(2)
 endef
 
 # Make owns build profile selection. Do not allow extra flags to turn build-dev
@@ -101,7 +101,8 @@ check-static: toolchain
 	$(PYTHON) vendor/verify_zingo.py
 
 check-clippy: toolchain
-	@$(call application_cargo,clippy,--all-targets --features zcash-regtest -- -D warnings)
+	@$(call application_cargo,check,--lib --bins --message-format=json,$(PYTHON) scripts/check_warnings.py)
+	@$(call application_cargo,clippy,--all-targets --features zcash-regtest --message-format=json -- -D warnings,$(PYTHON) scripts/check_warnings.py)
 
 check-compat: toolchain
 	$(PYTHON) scripts/check_compat.py
@@ -141,7 +142,7 @@ help:
 	  'make test               All default test targets, one test thread' \
 	  'make check              All check stages in the order below' \
 	  'make check-static       Format, tooling, complexity and provenance' \
-	  'make check-clippy       All-target Clippy with zcash-regtest' \
+	  'make check-clippy       Production compiler warnings and all-target zcash-regtest Clippy' \
 	  'make check-compat       Combined dependency compatibility tests' \
 	  'make check-default      SDK diagnostic and all default test targets' \
 	  'make check-proving      Synthetic treasury proving tests' \

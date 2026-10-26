@@ -3,7 +3,7 @@
     "version": "3.5.0",
     "archive_sha256": "fae7019994ae0fe4ada40b732f798f3ff26f0f04facb1477f1bf37eb4f18a2d3",
     "patch": "rmcp-diagnostics.patch",
-    "patch_sha256": "10fecff407f6016f4358bf3973c6ddd48c2eaba4d6bcdb7861a4ed0b5dbbd537",
+    "patch_sha256": "18bc12bd5ee0e8bb11731214109bfe055c48bd0d9dc738c083e47ab5c22dfbf6",
     "original_files": {
       ".cargo_vcs_info.json": "b2f51ec38e76d73d7f5c64dab677b72a57639ac3969837a4d0ebd99dafb17184",
       "CHANGELOG.md": "e7950a1bd4814b34e21ea29b485f798b663fdf5f43cff1eb6727090845b7d931",

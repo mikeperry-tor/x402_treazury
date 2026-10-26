@@ -39,13 +39,21 @@ Build targets own profile selection: use `PROFILE=NAME` with `build` or
 `build-dev` for incremental dev; Cargo profile flags in `CARGO_ARGS` are rejected.
 `make check` and its named `check-*` stages use fixed selections regardless of
 `CARGO_ARGS` and `TEST_ARGS`. The full check runs static/tooling/complexity/provenance,
-full feature Clippy, compatibility, default tests, then proving/lifecycle/codec
+production compiler diagnostics and full feature Clippy, compatibility, default tests, then proving/lifecycle/codec
 stages. It stops on the first failing stage even with `make -k`. Individual stages
 run independently and always execute when requested. See
 [validation order and continuation](../docs/testing.md#validation-order-and-continuation)
 for the stage table, independent review and evidence needed to resume after a fix.
 Coordinate editor-triggered Cargo checks as well as separate Make invocations;
 `.NOTPARALLEL` only serializes one invocation.
+
+`make check-clippy` runs the production library/binary compiler check followed by
+all-target `zcash-regtest` Clippy. Both use `check_warnings.py` to display Cargo
+compiler diagnostics and reject emitted warnings, including dependency warnings
+and cached diagnostics. This fixed stage requires Python; ordinary `make clippy`
+keeps Cargo's selected-target `-D warnings` behavior and requires no Python.
+See [compiler diagnostics and review](../docs/testing.md#compiler-diagnostics-and-review)
+for enforcement boundaries and evidence requirements.
 
 Coverage keeps an internal shell helper for provenance, failure preservation and
 atomic report publication; invoke its public Make targets below. Specialized Python tools remain
