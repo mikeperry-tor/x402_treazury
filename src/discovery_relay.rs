@@ -271,6 +271,8 @@ struct TargetFailure {
     advance: bool,
     possible: bool,
     retry_after: Option<crate::network::RetryAfter>,
+    relay: Option<(&'static str, usize)>,
+    location: &'static str,
 }
 impl TargetFailure {
     fn new(reason: &'static str, status: Option<u16>, advance: bool) -> Self {
@@ -281,7 +283,14 @@ impl TargetFailure {
             advance,
             possible: false,
             retry_after: None,
+            relay: None,
+            location: "relay selection",
         }
+    }
+    fn at_relay(mut self, entry: &sequence::Entry, location: &'static str) -> Self {
+        self.relay = Some((sequence::label(entry.format), entry.position + 1));
+        self.location = location;
+        self
     }
     fn error(self, possible: bool) -> anyhow::Error {
         let error = match self.limit {
@@ -652,7 +661,16 @@ pub(crate) fn log_failure(cfg: &Config, stage: &str, error: &anyhow::Error) {
         || error
             .downcast_ref::<TargetFailure>()
             .is_some_and(|failure| failure.possible);
+    let target_failure = error.downcast_ref::<TargetFailure>();
     tracing::warn!(
+        relay_format = target_failure.and_then(|f| f.relay.map(|r| r.0)),
+        relay_position = target_failure.and_then(|f| f.relay.map(|r| r.1)),
+        failure_location = target_failure.map(|f| f.location),
+        fallback_outcome = target_failure.map(|f| if f.advance {
+            "relay list exhausted"
+        } else {
+            "fallback stopped"
+        }),
         source = cfg
             .discovery_source
             .as_deref()
@@ -1353,6 +1371,7 @@ pub(crate) mod tests {
         ] {
             let log = tempfile::NamedTempFile::new().unwrap();
             let subscriber = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::DEBUG)
                 .without_time()
                 .with_ansi(false)
                 .with_writer(log.reopen().unwrap())
@@ -1489,6 +1508,20 @@ pub(crate) mod tests {
             let logs = std::fs::read_to_string(log.path()).unwrap();
             assert!(logs.contains("source=\"test_provider\""), "{logs}");
             assert!(logs.contains("stage=\"catalog\""), "{logs}");
+            let acquisition = logs
+                .lines()
+                .find(|line| {
+                    line.contains("Requesting the target response from a configured paid relay")
+                })
+                .unwrap();
+            assert!(
+                acquisition.contains("catalog_relay{source=\"test_provider\"}"),
+                "{acquisition}"
+            );
+            assert!(
+                acquisition.contains("relay_format=\"curl\" relay_position=1"),
+                "{acquisition}"
+            );
             if !matches!(status, 200 | 302 | 307) {
                 assert!(logs.contains(&format!("http_status={status}")), "{logs}");
             } else {

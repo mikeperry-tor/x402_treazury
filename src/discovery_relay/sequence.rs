@@ -12,6 +12,7 @@ pub(super) struct Entry {
     pub endpoint: String,
     pub cfg: Config,
     pub format: Format,
+    pub position: usize,
     #[cfg(test)]
     fixture: bool,
 }
@@ -48,6 +49,7 @@ impl Entry {
             endpoint,
             cfg,
             format,
+            position,
             #[cfg(test)]
             fixture: false,
         })
@@ -81,7 +83,7 @@ fn operation(format: Format) -> &'static str {
         Format::Horizonpulse => "/api/http",
     }
 }
-fn label(format: Format) -> &'static str {
+pub(super) fn label(format: Format) -> &'static str {
     match format {
         Format::Curl => "curl",
         Format::Agproxy => "agproxy",
@@ -216,6 +218,7 @@ impl SearchRelay {
                     endpoint,
                     cfg,
                     format: Format::Curl,
+                    position: 0,
                     fixture: true,
                 }],
             )]),
@@ -235,6 +238,7 @@ impl SearchRelay {
                     endpoint,
                     cfg,
                     format: format.parse()?,
+                    position,
                     fixture: true,
                 });
             }
@@ -363,7 +367,7 @@ impl Prepared {
         for (entry, _) in &self.entries {
             match cache.admit(entry).await {
                 Admission::Cached(Ok(response)) => {
-                    return Some(checked_cached(response, limit, setting, any_payment));
+                    return Some(checked_cached(response, entry, limit, setting, any_payment));
                 }
                 Admission::Cached(Err(failure)) => {
                     any_payment |= failure.possible;
@@ -373,7 +377,10 @@ impl Prepared {
                     last = failure;
                 }
                 Admission::Unavailable => {
-                    last = TargetFailure::new("provider_unavailable", None, true);
+                    last = TargetFailure::new("provider_unavailable", None, true).at_relay(
+                        entry,
+                        "relay unavailable after an earlier uncertain payment",
+                    );
                 }
                 Admission::Ready(_) => return None,
             }
@@ -404,7 +411,7 @@ impl Prepared {
         let mut any_payment = false;
         let mut pending_delay = None;
         let mut last = TargetFailure::new("no_representable_relay", None, false);
-        for (entry, body) in &self.entries {
+        for (index, (entry, body)) in self.entries.iter().enumerate() {
             let admission = match &cache {
                 Some(cache) => cache.admit(entry).await,
                 None => Admission::Ready(None),
@@ -426,7 +433,10 @@ impl Prepared {
             let outcome = match admission {
                 Admission::Cached(outcome) => outcome,
                 Admission::Unavailable => {
-                    last = TargetFailure::new("provider_unavailable", None, true);
+                    last = TargetFailure::new("provider_unavailable", None, true).at_relay(
+                        entry,
+                        "relay unavailable after an earlier uncertain payment",
+                    );
                     continue;
                 }
                 Admission::Ready(guard) => {
@@ -487,11 +497,29 @@ impl Prepared {
                 }
             };
             match outcome {
-                Ok(response) => return checked_cached(response, limit, setting, any_payment),
+                Ok(response) => {
+                    return checked_cached(response, entry, limit, setting, any_payment);
+                }
                 Err(failure) => {
                     any_payment |= failure.possible;
                     if !failure.advance {
                         return Err(failure.error(any_payment));
+                    }
+                    if cache.is_some() && index + 1 < self.entries.len() {
+                        tracing::info!(
+                            relay_format = label(entry.format),
+                            relay_position = entry.position + 1,
+                            failure_location = failure.location,
+                            reason = failure.reason,
+                            cause = RelayFailure {
+                                reason: failure.reason,
+                                status: failure.status
+                            }
+                            .explanation(),
+                            http_status = failure.status,
+                            possible_submission = any_payment,
+                            "Configured paid relay could not provide a usable catalog; continuing through the remaining configured relays"
+                        );
                     }
                     pending_delay = later_delay(pending_delay, failure.retry_after);
                     last = failure;
@@ -521,12 +549,14 @@ fn later_delay(
 
 fn checked_cached(
     mut response: Arc<Response>,
+    entry: &Entry,
     limit: usize,
     setting: &'static str,
     possible: bool,
 ) -> Result<Arc<Response>> {
     if response.body.len() > limit {
-        let mut failure = TargetFailure::new("response_rejected", None, false);
+        let mut failure = TargetFailure::new("response_rejected", None, false)
+            .at_relay(entry, "local response policy");
         failure.limit = Some((setting, limit));
         return Err(failure.error(possible || response.payment_may_have_occurred));
     }
@@ -560,6 +590,7 @@ impl Entry {
         let started = Instant::now();
         tracing::debug!(
             relay_format = label(self.format),
+            relay_position = self.position + 1,
             "Requesting the target response from a configured paid relay"
         );
         let result = scoped
@@ -581,24 +612,15 @@ impl Entry {
             let cause = typed.map(|f| &f.error).unwrap_or(&error);
             let http = cause.downcast_ref::<crate::payment::HttpFailure>();
             let safe = RelayFailure::from_error(cause);
-            let mut failure = TargetFailure::new(safe.reason, safe.status, false);
+            let mut failure = TargetFailure::new(safe.reason, safe.status, false)
+                .at_relay(self, "relay service request");
             if cause.is::<crate::limits::DownloadLimit>() {
+                failure.location = "local response policy";
                 failure.limit = Some((
                     "max_response_bytes",
                     outer_limit.unwrap_or(self.cfg.max_response_bytes),
                 ));
             }
-            tracing::debug!(
-                reason = safe.reason,
-                http_status = safe.status,
-                possible_submission = possible,
-                elapsed_seconds = started.elapsed().as_secs_f64(),
-                max_response_bytes = outer_limit.unwrap_or(self.cfg.max_response_bytes),
-                read_timeout_seconds = crate::network::global()
-                    .read_timeout(scoped.timeout())
-                    .as_secs_f64(),
-                "Configured relay request failed"
-            );
             failure.possible = possible;
             failure.advance = !possible
                 && (typed.is_some_and(|f| f.fallback)
@@ -607,6 +629,21 @@ impl Entry {
                         .is_some_and(crate::network::eligible_retry_transport)
                     || http.is_some_and(|f| f.status != StatusCode::PAYMENT_REQUIRED));
             failure.retry_after = typed.and_then(|f| f.retry_after);
+            tracing::debug!(
+                relay_format = label(self.format),
+                relay_position = self.position + 1,
+                failure_location = failure.location,
+                reason = safe.reason,
+                http_status = safe.status,
+                possible_submission = possible,
+                advance_permitted = failure.advance,
+                elapsed_seconds = started.elapsed().as_secs_f64(),
+                max_response_bytes = outer_limit.unwrap_or(self.cfg.max_response_bytes),
+                read_timeout_seconds = crate::network::global()
+                    .read_timeout(scoped.timeout())
+                    .as_secs_f64(),
+                "Configured relay request failed"
+            );
             ExchangeFailure {
                 failure,
                 definitive: !possible,
@@ -619,21 +656,29 @@ impl Entry {
                 let attributable = error.is::<TargetDeliveryFailure>();
                 let local =
                     error.is::<PolicyViolation>() || error.is::<crate::limits::DownloadLimit>();
-                let mut failure = TargetFailure::new(
-                    if attributable {
-                        "origin_request"
-                    } else if local {
-                        "response_rejected"
-                    } else {
-                        "invalid_relay_envelope"
-                    },
-                    None,
-                    attributable || (!possible && !local),
-                );
+                let (reason, location) = if attributable {
+                    ("origin_request", "target delivery reported by relay")
+                } else if local {
+                    ("response_rejected", "local response policy")
+                } else {
+                    ("invalid_relay_envelope", "relay response validation")
+                };
+                let mut failure =
+                    TargetFailure::new(reason, None, attributable || (!possible && !local))
+                        .at_relay(self, location);
                 failure.possible = possible;
                 if error.is::<crate::limits::DownloadLimit>() {
                     failure.limit = Some((setting, limit));
                 }
+                tracing::debug!(
+                    relay_format = label(self.format),
+                    relay_position = self.position + 1,
+                    failure_location = failure.location,
+                    reason = failure.reason,
+                    possible_submission = possible,
+                    advance_permitted = failure.advance,
+                    "Configured paid relay response could not be used"
+                );
                 ExchangeFailure {
                     failure,
                     definitive: attributable || local || !possible,
@@ -661,20 +706,40 @@ impl Entry {
             decision => decision,
         };
         match decision {
-            Decision::Accept => Ok((response, started.elapsed(), possible)),
+            Decision::Accept => {
+                tracing::debug!(
+                    relay_format = label(self.format),
+                    relay_position = self.position + 1,
+                    target_http_status = response.status,
+                    possible_submission = possible,
+                    "Configured paid relay supplied a usable target response"
+                );
+                Ok((response, started.elapsed(), possible))
+            }
             decision => {
                 let (reason, advance) = match decision {
                     Decision::Next(reason) => (reason, true),
                     Decision::Terminal(reason) => (reason, false),
                     Decision::Accept => unreachable!(),
                 };
-                let mut failure = TargetFailure::new(reason, Some(response.status), advance);
+                let mut failure = TargetFailure::new(reason, Some(response.status), advance)
+                    .at_relay(self, "target response reported by relay");
                 failure.possible = possible;
                 failure.retry_after = crate::network::parse_retry_after(
                     StatusCode::from_u16(response.status).expect("adapter validated HTTP status"),
                     &response.headers,
                 )
                 .map(crate::network::RetryAfter::after);
+                tracing::debug!(
+                    relay_format = label(self.format),
+                    relay_position = self.position + 1,
+                    failure_location = failure.location,
+                    reason,
+                    target_http_status = response.status,
+                    possible_submission = possible,
+                    advance_permitted = advance,
+                    "Configured paid relay reported an unusable target response"
+                );
                 Err(ExchangeFailure {
                     failure,
                     definitive: true,
@@ -718,6 +783,11 @@ impl StaticRequest<'_> {
         if let Some(outcome) = state.outcomes.get(&self.key(entry)) {
             Admission::Cached(outcome.clone())
         } else if state.stopped.contains(&entry.provider_key) {
+            tracing::debug!(
+                relay_format = label(entry.format),
+                relay_position = entry.position + 1,
+                "Configured paid relay is unavailable after earlier uncertain work; no request was sent"
+            );
             Admission::Unavailable
         } else {
             Admission::Ready(Some(guard))

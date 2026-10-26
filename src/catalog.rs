@@ -476,6 +476,9 @@ impl RelayContinuation {
     ) -> Result<Value> {
         self.resume_mode(Some(gate), operator_status, true).await
     }
+    #[tracing::instrument(name = "catalog_relay", skip_all, fields(
+        source = self.config.discovery_source.as_deref().or(self.config.prefix.as_deref()).unwrap_or("standalone")
+    ))]
     async fn resume_mode(
         &self,
         gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,

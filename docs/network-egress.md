@@ -213,6 +213,22 @@ failure or invalid/unattributable paid envelope stops the sequence. Static
 uncertainty disables that provider for the run without disabling an independent
 provider. No signed pre-send or timeout exception permits replay.
 
+Catalog fallback diagnostics identify relays by format and their one-based
+position in the original configured method list, without endpoint URLs or
+upstream response text. INFO explains when a failed catalog acquisition can
+continue through remaining relays, retaining its safe cause, known HTTP status
+and possible payment liability. The final WARN identifies the last failed or
+unavailable relay and distinguishes an exhausted list from a stopped fallback.
+`failure_location` distinguishes the relay-service request, target response
+reported by the relay, target delivery failure, relay response validation, local
+response policy and a relay unavailable after earlier uncertain work. An HTTP
+status at the relay-service location is the outer service status; at the target
+response location it is the decoded target status. DEBUG records individual
+acquisitions and outcomes, including permitted advancement and successful
+responses. Catalog relay spans retain the source identity through accepted work,
+so concurrent catalogs can be distinguished. Diagnostics do not establish payment
+settlement or authorize another acquisition.
+
 A relay never supplies target challenge-signing authority. Relay results never
 promote an origin scope or supply origin validators.
 Static process outcomes share the first acquisition for the same wallet,
