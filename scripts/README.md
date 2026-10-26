@@ -37,8 +37,15 @@ make build PROFILE=dev CARGO_ARGS='--offline'
 
 Build targets own profile selection: use `PROFILE=NAME` with `build` or
 `build-dev` for incremental dev; Cargo profile flags in `CARGO_ARGS` are rejected.
-`make check` uses fixed selections and ordering regardless of `CARGO_ARGS` and
-`TEST_ARGS`. It stops on the first failing stage.
+`make check` and its named `check-*` stages use fixed selections regardless of
+`CARGO_ARGS` and `TEST_ARGS`. The full check runs static/tooling/complexity/provenance,
+full feature Clippy, compatibility, default tests, then proving/lifecycle/codec
+stages. It stops on the first failing stage even with `make -k`. Individual stages
+run independently and always execute when requested. See
+[validation order and continuation](../docs/testing.md#validation-order-and-continuation)
+for the stage table, independent review and evidence needed to resume after a fix.
+Coordinate editor-triggered Cargo checks as well as separate Make invocations;
+`.NOTPARALLEL` only serializes one invocation.
 
 Coverage keeps an internal shell helper for provenance, failure preservation and
 atomic report publication; invoke its public Make targets below. Specialized Python tools remain
@@ -48,7 +55,7 @@ available directly.
 | --- | --- |
 | `python3 scripts/reproducible.py` | Two clean, network-denied release builds with binary hash comparison; see [release qualification](../docs/reproducible-builds.md) |
 | `make toolchain` | Verify Rust/Cargo match `rust-toolchain.toml`, including Homebrew installations |
-| `make check` | Format, complexity review, vendor provenance, SDK merge diagnostics, application/treasury tests, Clippy and compatibility suite |
+| `make check` / `make check-*` | Ordered full check / individual stages; selections and continuation rules in the [testing guide](../docs/testing.md#validation-order-and-continuation) |
 | `python3 scripts/complexity.py` | Pinned complexity metrics and advisory regressions against merge-base with `main`; Markdown and complete JSON/CSV under `target/complexity` |
 | `make coverage` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
 | `make coverage-branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |

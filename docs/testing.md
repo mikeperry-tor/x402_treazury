@@ -33,20 +33,70 @@ The application always includes Zcash. The [Makefile](../Makefile) verifies pinn
 and supplies Cargo-managed protoc; do not append a second `--locked` flag.
 See the [entrypoint reference](../scripts/README.md) for focused test arguments.
 
+`make check` runs the fixed stages below in order and stops at the first failing
+stage, including with `make -k`. Every stage can also run independently; it does
+not implicitly rerun earlier stages. `CARGO_ARGS` and `TEST_ARGS` customize
+`make test` / `make clippy`, but never narrow a `check-*` stage.
+
+| Stage | Selection |
+| --- | --- |
+| `check-static` | Formatting, tooling regressions, analyzer tests and CogC/CycC report, vendor provenance |
+| `check-clippy` | All-target Clippy with `zcash-regtest`, warnings denied; includes binary test targets |
+| `check-compat` | Complete combined dependency compatibility suite |
+| `check-default` | SDK scan-merge diagnostic regression and all default application targets, including examples |
+| `check-proving` | `zcash-testutils` treasury proving tests |
+| `check-lifecycle` | `zcash-testutils` synthetic-chain treasury lifecycle |
+| `check-codec` | `zcash-testutils` address-codec isolation regression |
+
+### Validation order and continuation
+
+Start with design review and `make check-static`. Complete applicable independent
+[complexity review](../tests/COMPLEXITY.md#review-discipline), including disposition
+of findings that could require refactoring, before broad runtime suites. Generating
+a report does not complete that review; `make check` runs automatically without a
+human review pause. Reuse a verified source-matched report when its inputs have not
+changed.
+
+Run `make check-clippy check-compat` before long runtime suites to expose lint,
+shared-test compilation and dependency compatibility failures early. Run focused
+tests for the changed behavior and affected inexpensive configuration, authored
+example, schema or diagnostic contracts before their broader suites. Choose these
+from real consumers; a blanket compile-only pass cannot detect stale runtime
+assertions. Once sources are stable, finish the remaining stages:
+
 ```sh
-make test
-make fmt-check
-make clippy
+make check-default check-proving check-lifecycle check-codec
 ```
 
-Run requested test-feature configurations sequentially: subprocess tests use the
-built executable path. Prefer focused tests for a change, then the relevant
-broader suite.
-`make check` is the full development check, including compatibility and
-vendor verification. Building dependencies/proving parameters can require network
-access; normal runtime fixtures use localhost and deterministic unfunded keys,
-never a developer's `.env` or mainnet wallet. Ignored child-process helpers invoked
-by their parent tests differ from ignored optional live tests.
+After a failure, inspect its cause, fix it, and rerun the affected tests or stage.
+Continue with the unfinished named stages. Repeat a passed stage when changed code,
+fixtures, dependencies, features, profiles or build inputs invalidate its evidence;
+assess relevant consumers rather than treating every edit as a full restart.
+A fixture correction or test-module relocation can often use focused revalidation;
+a payment ownership or network-policy change may affect wider suites. Resolve
+material findings before building on the affected decision.
+
+Retain commands, source revision and relevant input changes, feature/profile
+selection, exit status and nonzero test counts in ignored `target/` logs or private
+external evidence. For results carried across a fix, record why the earlier
+selection remains applicable and what was revalidated. Account for every required
+stage before reporting the full check complete. Describe assembled stage results
+as a completed check with focused continuations, rather than claiming one
+successful `make check` invocation. Named targets always execute when requested;
+there is no persisted result cache or automatic skip decision.
+
+Keep sources fixed for the validation run and executables fixed while their tests
+execute. Run feature configurations sequentially: subprocess tests share the built
+executable path. Coordinate separate Make/Cargo invocations and editor-triggered
+Cargo checks before starting validation;
+`.NOTPARALLEL` serializes one Make invocation, not other processes. Keep profiles
+consistent when reusing evidence, and let active builds finish or arrange an
+explicit handoff. See the [entrypoint reference](../scripts/README.md) for arguments.
+
+Building dependencies/proving parameters can require network access; normal runtime
+fixtures use localhost and deterministic unfunded keys, never a developer's `.env`
+or mainnet wallet. Ignored child-process helpers invoked by their parent tests
+differ from ignored optional live tests.
 
 Base fixture modules `rotation::base::tor_tests` and
 `rotation::base::tor_ownership_tests` and `rotation::base::tor_inactivity_tests`

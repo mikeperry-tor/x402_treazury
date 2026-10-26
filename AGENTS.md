@@ -212,10 +212,16 @@ make clippy
 make fmt-check
 ```
 
-- Prefer focused tests for a change. Do not repeat full suites after a localized
-  fix unless new changes or unresolved concerns justify it. `make check` is
-  the full application check, including Clippy, vendor/compatibility verification,
-  complexity analysis and the synthetic-chain treasury lifecycle.
+- Follow [validation order and continuation](docs/testing.md#validation-order-and-continuation):
+  complete applicable design/complexity review and full all-target Clippy and
+  compatibility checks before broad runtime suites; run affected cheap contract
+  tests first. After a localized fix, revalidate affected consumers and resume
+  unfinished named `check-*` stages. Repeat passed stages only when their evidence
+  is invalidated, and record the scope and results carried forward. `make check`
+  remains the full application check, including the synthetic-chain treasury lifecycle.
+- Coordinate editor-triggered Cargo checks and separate builds before validation;
+  Make's serialization does not cover other processes. Keep source, executable,
+  feature and profile evidence consistent with the testing guide.
 - Choose sandbox permissions before running tests. Keep socket-free tests in the
   ordinary sandbox. When localhost sockets are known to be blocked, request
   socket-capable execution through the runner up front for socket fixtures and

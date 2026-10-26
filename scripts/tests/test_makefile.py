@@ -133,35 +133,82 @@ else:
         self.assertEqual([call[1][0] for call in calls], ['run', 'build', 'run', 'test'])
         self.assertEqual([call[2] for call in calls], ['1', '1', 'inherited', 'inherited'])
 
-    def test_check_keeps_all_stages_and_stops_on_failure(self):
+    def check_stages(self):
         script = self.root / 'scripts/tests/coverage.sh'
-        script.parent.mkdir(parents=True)
+        script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text('#!/bin/sh\nexec python3 coverage-regression\n')
         script.chmod(0o755)
+        def application(command, *args):
+            return ('cargo', [command, '--locked', '--manifest-path', 'Cargo.toml', *args])
+        return {
+            'check-static': [
+                ('cargo', ['fmt', '--check']),
+                ('python3', ['coverage-regression']),
+                ('python3', ['-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_*.py']),
+                ('cargo', ['test', '--locked', '--manifest-path', 'tools/complexity/Cargo.toml', '--target-dir', 'target/tools/complexity']),
+                ('python3', ['scripts/complexity.py', '--base', 'main']),
+                ('python3', ['vendor/verify.py']),
+                ('python3', ['vendor/verify_zingo.py']),
+            ],
+            'check-clippy': [application('clippy', '--all-targets', '--features', 'zcash-regtest', '--', '-D', 'warnings')],
+            'check-compat': [('python3', ['scripts/check_compat.py'])],
+            'check-default': [
+                application('test', '-p', 'pepper-sync', '--lib', 'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context', '--', '--exact'),
+                application('test', '--all-targets', '--', '--test-threads=1'),
+            ],
+            **{stage: [application('test', '--features', 'zcash-testutils', '--lib', case, '--', '--test-threads=1')]
+               for stage, case in (
+                   ('check-proving', 'treasury::send::proving_tests'),
+                   ('check-lifecycle', 'treasury::lifecycle_tests'),
+                   ('check-codec', 'synthetic_address_codec_is_scoped_to_its_test_client'))},
+        }
+
+    @staticmethod
+    def check_commands(calls):
+        return [(call[0], call[1]) for call in calls
+                if 'compat/protoc/Cargo.toml' not in call[1]]
+
+    def test_check_preserves_selections_and_orders_static_lints_compat_before_runtime(self):
+        stages = self.check_stages()
+        (self.root / 'check').touch()
         _, calls = self.make('-j8', 'check', 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong')
-        stages = [(call[0], call[1]) for call in calls
-                  if 'compat/protoc/Cargo.toml' not in call[1]]
-        self.assertEqual(stages, [
-            ('cargo', ['fmt', '--check']),
-            ('python3', ['coverage-regression']),
-            ('python3', ['-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_*.py']),
-            ('cargo', ['test', '--locked', '--manifest-path', 'tools/complexity/Cargo.toml', '--target-dir', 'target/tools/complexity']),
-            ('python3', ['scripts/complexity.py', '--base', 'main']),
-            ('python3', ['vendor/verify.py']),
-            ('python3', ['vendor/verify_zingo.py']),
-            *[('cargo', ['test', '--locked', '--manifest-path', 'Cargo.toml', *args]) for args in [
-                ['-p', 'pepper-sync', '--lib', 'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context', '--', '--exact'],
-                ['--all-targets', '--', '--test-threads=1'],
-                *[['--features', 'zcash-testutils', '--lib', case, '--', '--test-threads=1'] for case in (
-                    'treasury::send::proving_tests', 'treasury::lifecycle_tests',
-                    'synthetic_address_codec_is_scoped_to_its_test_client')],
-            ]],
-            ('cargo', ['clippy', '--locked', '--manifest-path', 'Cargo.toml', '--all-targets', '--features', 'zcash-regtest', '--', '-D', 'warnings']),
-            ('python3', ['scripts/check_compat.py']),
-        ])
-        _, calls = self.make('check', success=False, FAIL_ARGUMENT='vendor/verify.py')
-        self.assertEqual(calls[-1][1], ['vendor/verify.py'])
-        self.assertFalse(any('compat/protoc/Cargo.toml' in call[1] for call in calls))
+        self.assertEqual(self.check_commands(calls), [command for stage in stages.values() for command in stage])
+
+    def test_named_check_stages_are_independent_and_ignore_focused_run_overrides(self):
+        for stage, expected in self.check_stages().items():
+            with self.subTest(stage=stage):
+                # A same-named file must never turn validation into a cached pass.
+                (self.root / stage).touch()
+                _, calls = self.make('-j8', stage, 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong')
+                self.assertEqual(self.check_commands(calls), expected)
+                _, calls = self.make(stage, success=False, FAKE_CARGO_VERSION='0.0.0')
+                self.assertEqual(calls, [])
+
+    def test_resume_runs_only_requested_remaining_stages(self):
+        stages = self.check_stages()
+        for _ in range(2):
+            _, calls = self.make('-j8', 'check-lifecycle', 'check-codec')
+            self.assertEqual(self.check_commands(calls), stages['check-lifecycle'] + stages['check-codec'])
+
+    def test_check_stops_at_failed_stage_even_with_keep_going(self):
+        expected = [command for stage in self.check_stages().values() for command in stage]
+        for flags in ([], ['-j8'], ['-k']):
+            for failure in ('vendor/verify.py', 'clippy', 'scripts/check_compat.py',
+                            'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context',
+                            'treasury::send::proving_tests', 'treasury::lifecycle_tests',
+                            'synthetic_address_codec_is_scoped_to_its_test_client'):
+                with self.subTest(flags=flags, failure=failure):
+                    _, calls = self.make(*flags, 'check', success=False, FAIL_ARGUMENT=failure)
+                    stop = next(i for i, (_, args) in enumerate(expected) if failure in args) + 1
+                    self.assertEqual(self.check_commands(calls), expected[:stop])
+
+    def test_check_forwards_interpreter_and_complexity_baseline_to_stages(self):
+        self.check_stages()
+        shutil.copy(self.root / 'bin/python3', self.root / 'bin/analysis-python')
+        _, calls = self.make('check', 'PYTHON=analysis-python', 'COMPLEXITY_BASE_REF=review-base')
+        self.assertIn(('analysis-python', ['scripts/complexity.py', '--base', 'review-base']),
+                      self.check_commands(calls))
+        self.assertIn(('analysis-python', ['scripts/check_compat.py']), self.check_commands(calls))
 
     def test_coverage_modes_remain_explicit(self):
         script = self.root / 'scripts/coverage.sh'

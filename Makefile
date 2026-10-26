@@ -32,6 +32,8 @@ done;
 endef
 
 .PHONY: build build-dev test check cargo-check run clippy fmt fmt-check toolchain \
+        check-static check-clippy check-compat check-default check-proving \
+        check-lifecycle check-codec \
         coverage coverage-branch coverage-proving coverage-consensus help
 
 build: toolchain
@@ -77,9 +79,19 @@ toolchain:
 		esac; \
 	done
 
-# Keep the existing order and fixed selections, independent of focused-run args.
-# Each recipe line must succeed before the next feature configuration starts.
-check: toolchain
+# Each stage is independently callable for focused validation and continuation.
+# Separate recursive calls preserve fail-fast behavior even with make -k.
+# Fixed selections are independent of CARGO_ARGS and TEST_ARGS.
+check:
+	$(MAKE) check-static
+	$(MAKE) check-clippy
+	$(MAKE) check-compat
+	$(MAKE) check-default
+	$(MAKE) check-proving
+	$(MAKE) check-lifecycle
+	$(MAKE) check-codec
+
+check-static: toolchain
 	cargo fmt --check
 	scripts/tests/coverage.sh
 	$(PYTHON) -m unittest discover -s scripts/tests -p 'test_*.py'
@@ -87,13 +99,25 @@ check: toolchain
 	$(PYTHON) scripts/complexity.py --base '$(COMPLEXITY_BASE_REF)'
 	$(PYTHON) vendor/verify.py
 	$(PYTHON) vendor/verify_zingo.py
+
+check-clippy: toolchain
+	@$(call application_cargo,clippy,--all-targets --features zcash-regtest -- -D warnings)
+
+check-compat: toolchain
+	$(PYTHON) scripts/check_compat.py
+
+check-default: toolchain
 	@$(call application_cargo,test,-p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context -- --exact)
 	@$(call application_cargo,test,--all-targets -- --test-threads=1)
+
+check-proving: toolchain
 	@$(call application_cargo,test,--features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1)
+
+check-lifecycle: toolchain
 	@$(call application_cargo,test,--features zcash-testutils --lib treasury::lifecycle_tests -- --test-threads=1)
+
+check-codec: toolchain
 	@$(call application_cargo,test,--features zcash-testutils --lib synthetic_address_codec_is_scoped_to_its_test_client -- --test-threads=1)
-	@$(call application_cargo,clippy,--all-targets --features zcash-regtest -- -D warnings)
-	$(PYTHON) scripts/check_compat.py
 
 # Complex report publication remains in an internal helper. Nightly branch
 # coverage intentionally uses a different toolchain from the pinned application.
@@ -115,7 +139,14 @@ help:
 	  'make / make build       Release build, incremental disabled (PROFILE=NAME to change)' \
 	  'make build-dev          Incremental development build' \
 	  'make test               All default test targets, one test thread' \
-	  'make check              Full ordered development checks' \
+	  'make check              All check stages in the order below' \
+	  'make check-static       Format, tooling, complexity and provenance' \
+	  'make check-clippy       All-target Clippy with zcash-regtest' \
+	  'make check-compat       Combined dependency compatibility tests' \
+	  'make check-default      SDK diagnostic and all default test targets' \
+	  'make check-proving      Synthetic treasury proving tests' \
+	  'make check-lifecycle    Synthetic treasury lifecycle tests' \
+	  'make check-codec        Synthetic address-codec isolation test' \
 	  'make cargo-check        Fast Cargo compilation check' \
 	  'make run                Run the application or an example (CARGO_ARGS)' \
 	  'make clippy             Clippy, warnings denied' \
