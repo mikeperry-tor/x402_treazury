@@ -13,14 +13,13 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Network egress](network-egress.md) | Direct/Tor factory, isolation identities, timeout policy and SDK boundaries |
 | [Local resource limits](local-resource-limits.md) | Existing failure thresholds, cache lifetimes and maintenance cadence for troubleshooting |
 | [Cover traffic](cover-traffic.md) | Optional bounded HTTP/2 ranges, padding, sampling and evidence |
-| [Agent sources](agent-sources.md) | Endpoint-local APIs, wallet selection, dynamic tools and persistence |
+| [Agent sources](agent-sources.md) | Endpoint-local APIs, [manual raw headers](agent-sources.md#manual-raw-headers), wallet selection, dynamic tools and persistence |
 | [Testing](testing.md) | Offline checks, coverage, consensus, Tor and funded qualification boundaries |
 | [Public swap demo](public-swap-demo.md) | Bounded operator workflows for treasury or static-wallet demos |
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
 [Plans](plans/) describe unfinished work, including artifact storage,
-[OpenAPI authentication](plans/openapi_authentication.md),
-[manual raw-call headers](plans/raw_call_headers.md) and the
+[OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md). The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.
