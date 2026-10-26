@@ -54,6 +54,9 @@ USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
   action; omit internal implementation details and repeated boilerplate. Keep
   maintainer rationale in owning guides. Follow the
   [tool documentation policy](docs/agent-sources.md#tool-documentation).
+- Review endpoint summaries and discovery search keywords whenever capabilities or
+  routing change, including new tools; follow
+  [endpoint instruction placement](docs/agent-sources.md#endpoint-instruction-placement).
 
 Follow the [provider policy](providers/README.md#provider-policy),
 [selection semantics](docs/configuration.md) and

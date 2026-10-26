@@ -234,6 +234,13 @@ they do not alter search matching or routing. Inspection inventory and MCP tool
 lookup/listing use the same text. Configured search guidance is available even while
 remote catalogs are pending; it describes intended coverage, not current readiness.
 
+When adding or removing capabilities, or changing source/listener filters and
+routing, review the affected endpoint summaries and discovery search keywords in
+the same change. Cover the capabilities actually selected on that listener with
+concise task and domain terms, including useful aliases for newly available
+workflows. For endpoints without tool search, keep that coverage in
+`instructions_text`. Avoid duplicating the full tool inventory.
+
 Put platform/capability summaries and useful search terms in the tool-search field
 when a client does not forward MCP server instructions to its model. Use the
 remote-search field for guidance about finding new APIs in configured directories;
