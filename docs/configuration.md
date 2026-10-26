@@ -747,10 +747,11 @@ method, URL, query, declared headers and JSON body without making a request or
 loading a signer. Previewed idempotency keys belong only to that preview; an actual
 tool invocation generates its own key.
 
-All MCP listeners paginate `tools/list` at 25 definitions per page. Follow
-`nextCursor` until absent. Tool search also defaults to 25; explicit positive
-`limit` values are supported without a local ceiling. Cursors bind the listener
-and catalog snapshot; publication requires restarting enumeration. Remote directory
+All MCP listeners return their complete advertised inventory in one `tools/list`
+response, without `nextCursor`; supplied listing cursors are ignored.
+Tool search defaults to 25 results per page; explicit positive `limit` values are
+supported without a local ceiling. Search cursors bind the listener and catalog
+snapshot; publication requires restarting search enumeration. Remote directory
 browse defaults to 25 and retains its upstream maximum of 100. Pagination selects
 pages and does not reject or trim the full inventory.
 
@@ -835,12 +836,12 @@ its research pool. The [agent source guide](agent-sources.md#configuration-and-a
 explains persistence and wallet sharing. Registered APIs share their pool's
 existing reserve claims regardless of registration count.
 Registration does not create wallet pools or trigger funding.
-Tool counts do not gate
-registration, restoration, publication or refresh. On a valid first `tools/list`
-page, more than 250 advertised definitions produce an advisory WARN suggesting
-explicit `discover_on_demand = true`. Continuations and invalid cursors do not warn;
-each fresh first-page request may warn again. The advisory counts filtered API
-definitions plus wrappers (only wrappers in on-demand mode) and never changes access.
+Tool counts do not gate registration, restoration, publication or refresh.
+A `tools/list` request with more than 500 advertised definitions produces an advisory
+WARN whose message states the endpoint name and current tool count and suggests
+explicit `discover_on_demand = true`. Each listing may warn again. The advisory
+counts filtered API definitions plus wrappers (only wrappers in on-demand mode)
+and never changes access.
 
 | Arrangement | Configuration | Payment identity sharing |
 | --- | --- | --- |

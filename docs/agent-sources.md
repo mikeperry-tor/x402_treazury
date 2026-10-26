@@ -600,7 +600,8 @@ those API definitions out of `tools/list`. HTTP is stateless and does not advert
 list-change notifications, so clients may cache their inventory. Search/call remains
 usable with that cached inventory. Search cursors bind the running catalog,
 endpoint, query/filter and generation; stale cursors require restarting pagination.
-All listeners return at most 25 definitions per `tools/list` page. Follow `nextCursor` until absent; cursors bind the listener and snapshot, and catalog publication invalidates them. Descriptions and
+All listeners return the complete advertised inventory in one `tools/list` response,
+without `nextCursor`; supplied listing cursors are ignored. Descriptions and
 schemas and accepted tool outputs are returned complete. The removed listener
 `max_response_chars` field and CLI flag reject visibly; byte acquisition and image
 bounds still reject oversized content explicitly.
@@ -624,14 +625,13 @@ start no funding and create no new replay authority.
 
 ## Limits and network policy
 
-There is no tool-count admission quota. A valid first-page `tools/list` request
-with more than 250 advertised definitions emits one advisory WARN naming the
-listener and count and suggesting `discover_on_demand = true`. Counts include
+There is no tool-count admission quota. A `tools/list` request with more than 500
+advertised definitions emits one advisory WARN whose message states the endpoint
+name and current tool count and suggests `discover_on_demand = true`. Counts include
 filtered static/dynamic API definitions and advertised management wrappers;
-on-demand listeners count only wrappers. Continuations and invalid cursors do not
-warn; a fresh first-page request may warn again. This observes advertised inventory,
-not client/model context, and never rejects registration or changes access/mode.
-The operator must explicitly opt in to on-demand discovery.
+on-demand listeners count only wrappers. Each listing may warn again. This observes
+advertised inventory, not client/model context, and never rejects registration or
+changes access/mode. The operator must explicitly opt in to on-demand discovery.
 
 Generic imports use the shared specification default of 32 MiB, response default
 of 16 MiB and help default of 4 MiB. Raw calls and exact usage-document reads use

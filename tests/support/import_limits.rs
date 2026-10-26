@@ -480,17 +480,17 @@ async fn reserved_source_delimiter_warns_for_add_inspection_and_restore() {
     assert!(m.catalog.read().views["writer"].is_empty());
 }
 #[tokio::test]
-async fn advertised_inventory_warning_is_first_page_only_and_observational() {
+async fn advertised_inventory_warning_is_above_500_and_observational() {
     use rmcp::{ServerHandler, model::PaginatedRequestParams, service::RequestContext};
     use tracing::instrument::WithSubscriber;
     let m = manager(None).await;
     add(&m, "accepted", "", "").await;
     let template = m.catalog.read().views["writer"][0].clone();
     for (owner, on_demand, api_count, expected_warnings) in [
-        ("hidden", false, 250, 0),
-        ("hidden", false, 251, 2),
-        ("writer", false, 242, 0),
-        ("writer", false, 243, 2),
+        ("hidden", false, 500, 0),
+        ("hidden", false, 501, 5),
+        ("writer", false, 492, 0),
+        ("writer", false, 493, 5),
         ("writer", true, 513, 0),
     ] {
         let mut snapshot = (*m.catalog.read()).clone();
@@ -540,48 +540,31 @@ async fn advertised_inventory_warning_is_first_page_only_and_observational() {
         } else {
             api_count + if owner == "writer" { 8 } else { 0 }
         };
-        assert_eq!(first.tools.len(), count.min(25));
+        assert_eq!(first.tools.len(), count);
+        assert!(first.next_cursor.is_none());
         let after_first = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
         assert_eq!(
-            after_first
-                .matches("Large advertised tool inventory")
-                .count(),
+            after_first.matches("registered tools advertised").count(),
             usize::from(expected_warnings > 0)
         );
-        let prefix = format!(
-            "{}:{}:{}:",
-            m.catalog.instance(),
-            owner,
-            m.catalog.read().generation
-        );
-        for cursor in [
-            format!("{prefix}0"),
-            format!("{prefix}25"),
-            "invalid".into(),
-        ] {
-            let result = list(Some(cursor.clone()))
+        for cursor in ["old:0", "old:25", "invalid"] {
+            let result = list(Some(cursor.into()))
                 .with_subscriber(subscriber.clone())
-                .await;
-            if cursor == "invalid" || count < 25 && cursor.ends_with(":25") {
-                assert!(result.is_err());
-            } else {
-                assert!(result.is_ok());
-            }
+                .await
+                .unwrap();
+            assert_eq!(result.tools, first.tools);
+            assert!(result.next_cursor.is_none());
         }
-        assert_eq!(
-            String::from_utf8(logs.0.lock().unwrap().clone()).unwrap(),
-            after_first
-        );
         list(None).with_subscriber(subscriber).await.unwrap();
         let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
         assert_eq!(
-            logs.matches("Large advertised tool inventory").count(),
+            logs.matches("registered tools advertised").count(),
             expected_warnings
         );
         if expected_warnings > 0 {
             for expected in [
                 "WARN",
-                owner,
+                &format!("Endpoint '{owner}' currently has {count} registered tools advertised"),
                 &format!("advertised_tools={count}"),
                 "discover_on_demand = true",
             ] {

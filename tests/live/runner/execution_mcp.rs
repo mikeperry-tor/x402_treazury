@@ -85,7 +85,7 @@ impl Client {
         let mut cursor = Value::Null;
         let mut seen_cursors = BTreeSet::new();
         let mut complete = false;
-        // Preserve the 10,000-tool qualification allowance at 25 tools per page.
+        // Also support older endpoints that return 25 tools per page.
         for page in 0..400 {
             let (_, result) = self
                 .rpc(

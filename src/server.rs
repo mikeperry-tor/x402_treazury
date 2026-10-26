@@ -207,7 +207,7 @@ impl ServerHandler for Server {
     }
     async fn list_tools(
         &self,
-        request: Option<PaginatedRequestParams>,
+        _: Option<PaginatedRequestParams>,
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
         let snapshot = self.catalog.read();
@@ -223,37 +223,11 @@ impl ServerHandler for Server {
             api
         };
         let count = management.len() + api.len();
-        let prefix = format!(
-            "{}:{}:{}:",
-            self.catalog.instance(),
-            self.catalog_server,
-            snapshot.generation
-        );
-        let cursor = request.and_then(|r| r.cursor);
-        let first_page = cursor.is_none();
-        let offset = if let Some(cursor) = cursor {
-            match cursor
-                .strip_prefix(&prefix)
-                .and_then(|o| o.parse::<usize>().ok())
-            {
-                Some(o) if o <= count => o,
-                _ => {
-                    return Err(McpError::invalid_params(
-                        "stale or invalid cursor: restart listing",
-                        None,
-                    ));
-                }
-            }
-        } else {
-            0
-        };
-        if first_page && count > 250 {
+        if count > 500 {
             tracing::warn!(listener = %self.catalog_server, advertised_tools = count,
-                "Large advertised tool inventory; consider discover_on_demand = true");
+                "Endpoint '{}' currently has {} registered tools advertised; consider discover_on_demand = true",
+                self.catalog_server, count);
         }
-        let end = offset
-            .saturating_add(crate::limits::DEFAULT_PAGE_SIZE)
-            .min(count);
         let mut meta = MetaObject::new();
         meta.insert("x402_treazury/catalog".into(), serde_json::json!({
             "generation": snapshot.generation,
@@ -262,12 +236,9 @@ impl ServerHandler for Server {
         }));
         Ok(ListToolsResult {
             meta: Some(meta),
-            next_cursor: (end < count).then(|| format!("{prefix}{end}")),
-            tools: (offset..end)
-                .map(|index| match management.get(index) {
-                    Some(tool) => tool.clone(),
-                    None => Self::definition(&api[index - management.len()].tool),
-                })
+            tools: management
+                .into_iter()
+                .chain(api.iter().map(|bound| Self::definition(&bound.tool)))
                 .collect(),
             ..Default::default()
         })

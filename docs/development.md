@@ -326,12 +326,11 @@ individual unsigned relay failures remain DEBUG.
 A successful relay HTTP call does not establish usable target documentation or
 settlement; consumers still validate the document.
 
-A valid first-page `tools/list` with more than 250 advertised definitions emits
-an advisory diagnostic with listener ID, count and `discover_on_demand = true`
-suggestion, without URLs, descriptions or credentials. It observes inventory,
-not model context; continuations and invalid cursors do not emit it, and fresh
-first pages may repeat it.
-It does not reject work, change mode or perform network/wallet work.
+A `tools/list` request with more than 500 advertised definitions emits an advisory
+WARN whose message states the endpoint name and current tool count and suggests
+`discover_on_demand = true`, without URLs, descriptions or credentials. It observes
+advertised inventory, not model context; each listing may repeat it. It does not
+reject work, change mode or perform network/wallet work.
 
 An unreachable configured local Tor SOCKS endpoint during serving startup emits
 a shared startup-wait diagnostic with the local address, safe I/O kind, retry

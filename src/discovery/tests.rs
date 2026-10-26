@@ -3495,7 +3495,7 @@ async fn simplified_tool_wrappers_reject_old_fields_and_filtered_names() {
 mod provider_registration_tests;
 
 #[tokio::test]
-async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
+async fn complete_inventory_preserves_definitions_and_search_pagination() {
     let m = manager(None).await;
     add(&m, "demo", "", "").await;
     let template = m.catalog.read().views["writer"][0].clone();
@@ -3505,7 +3505,7 @@ async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
             "test-token".into(),
         ))
         .await;
-        for count in [0, 25, 50, 51] {
+        for count in [0, 25, 51, 501] {
             let mut snapshot = (*m.catalog.read()).clone();
             snapshot.generation += 1;
             snapshot.views.insert(owner.into(), (0..count).map(|i| {
@@ -3523,20 +3523,13 @@ async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
                     .map(|t| serde_json::to_value(t).unwrap())
                     .collect();
             expected.extend(m.catalog.read().views[owner].iter().map(|b| json!({"name":b.tool.name,"description":b.tool.description,"inputSchema":b.tool.input_schema})));
-            let mut actual = Vec::new();
-            let mut params = json!({});
-            loop {
-                let result = rpc(&base, "test-token", "tools/list", params).await;
-                let page = result["tools"].as_array().unwrap();
-                assert!(page.len() <= 25);
-                actual.extend(page.iter().cloned());
-                if result["nextCursor"].is_null() {
-                    break;
-                }
-                assert_eq!(page.len(), 25);
-                params = json!({"cursor":result["nextCursor"]});
-            }
-            assert_eq!(actual, expected);
+            let result = rpc(&base, "test-token", "tools/list", json!({})).await;
+            assert_eq!(result["tools"], json!(expected));
+            assert!(result.get("nextCursor").is_none());
+            assert_eq!(
+                result["_meta"]["x402_treazury/catalog"]["generation"],
+                m.catalog.read().generation
+            );
             let searched = if owner == "hidden" {
                 search_catalog(&m.catalog, owner, "x402_treazury_tools_search", json!({})).unwrap()
             } else {
@@ -3553,7 +3546,10 @@ async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
                     serde_json::from_value(json!({"limit":limit})).unwrap(),
                 )
                 .unwrap();
-                assert_eq!(result["items"].as_array().unwrap().len(), count);
+                assert_eq!(
+                    result["items"].as_array().unwrap().len(),
+                    limit.min(count as u64) as usize
+                );
             }
             for limit in [json!(0), json!(-1), json!(1.5)] {
                 assert!(
@@ -3568,37 +3564,29 @@ async fn uniform_inventory_pages_preserve_definitions_and_snapshot_scope() {
             }
         }
         let first = rpc(&base, "test-token", "tools/list", json!({})).await;
-        let cursor = first["nextCursor"].clone();
-        let other = if owner == "hidden" {
-            "writer"
-        } else {
-            "hidden"
-        };
-        let (other_base, other_task) = listen(crate::server::http_app(
-            server(&m, other),
-            "test-token".into(),
-        ))
-        .await;
-        let invalid = |url: String, cursor: Value| async move {
-            let response: Value = crate::network::discovery(&url, Duration::from_secs(5)).unwrap().post(format!("{url}/mcp"))
-                .bearer_auth("test-token").header("accept", "application/json, text/event-stream")
-                .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":cursor}}))
-                .send().await.unwrap().mcp_json().await.unwrap();
-            assert!(
-                response["error"]["message"]
-                    .as_str()
-                    .unwrap()
-                    .contains("stale or invalid cursor")
-            );
-        };
-        invalid(other_base, cursor.clone()).await;
-        invalid(base.clone(), json!("invalid")).await;
         let mut snapshot = (*m.catalog.read()).clone();
         snapshot.generation += 1;
         m.catalog.publish(snapshot);
-        invalid(base, cursor).await;
+        // Pagination parameters from an older server do not hide any definitions.
+        let repeated = rpc(
+            &base,
+            "test-token",
+            "tools/list",
+            json!({"cursor":"old-listing-cursor"}),
+        )
+        .await;
+        assert_eq!(repeated["tools"], first["tools"]);
+        assert!(repeated.get("nextCursor").is_none());
+        let mut on_demand = server(&m, owner);
+        on_demand.discover_on_demand = true;
+        let (on_demand_base, on_demand_task) =
+            listen(crate::server::http_app(on_demand, "test-token".into())).await;
+        let listed = rpc(&on_demand_base, "test-token", "tools/list", json!({})).await;
+        let expected = tools::listener_definitions(m.policy(owner), true, None, None);
+        assert_eq!(listed["tools"], serde_json::to_value(expected).unwrap());
+        assert!(listed.get("nextCursor").is_none());
+        on_demand_task.abort();
         task.abort();
-        other_task.abort();
     }
 }
 
