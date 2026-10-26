@@ -723,6 +723,11 @@ subtracts its maximum amount once from the current estimate, saturating at zero.
 Unknown or malformed estimates stay unknown. Unresolved exposure is not subtracted
 a second time. Chain observations may replace estimates even while signatures
 remain chargeable; estimates are not a replica of canonical available capacity.
+Managed signing constructs the actual version's payment header in the owned
+request before journal acceptance. An unrepresentable header map fails without
+recording liability or dispatching, including through the low-level Rust payment
+API. Low-level callers still own their supplied HTTP client's defaults and
+transport policy; use `PaidClient` for factory-managed request construction.
 
 A signed attempt's HTTP 402 can earn another wallet attempt only through the
 [pinned x402 seller encodings](../tests/fixtures/x402/insufficient-funds.json):

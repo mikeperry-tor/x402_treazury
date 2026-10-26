@@ -332,7 +332,7 @@ impl ManagedPool {
         #[cfg(test)]
         self.admission_test_stage(AdmissionTestStage::Acquired)
             .await;
-        let (headers, attempt_id) = {
+        let attempt_id = {
             let pool = self.pool.clone();
             let hash = requirements_hash.clone();
             let amount = offer.amount;
@@ -343,6 +343,18 @@ impl ManagedPool {
                 .await?;
             diagnostics::stage("signing");
             let (signature, auth) = sign_authorization(&prepared, &offer, &challenge).await?;
+            // Complete the owned request before accepting financial liability.
+            // Direct Rust callers can supply a full HTTP header map; inserting
+            // the actual version's signature is the only capacity check needed.
+            let header = if offer.version == 1 {
+                "x-payment"
+            } else {
+                "payment-signature"
+            };
+            retry
+                .headers_mut()
+                .try_insert(header, signature.parse()?)
+                .map_err(crate::catalog::headers::capacity_error)?;
             #[cfg(test)]
             self.admission_test_stage(AdmissionTestStage::Signed {
                 nonce: auth.nonce.clone(),
@@ -357,19 +369,11 @@ impl ManagedPool {
             self.store
                 .call(move |s| s.journal_authorization(&prepared, auth, context.as_ref()))
                 .await?;
-            let mut headers = reqwest::header::HeaderMap::new();
-            let header = if offer.version == 1 {
-                "x-payment"
-            } else {
-                "payment-signature"
-            };
-            headers.insert(header, signature.parse()?);
-            (headers, attempt_id)
+            attempt_id
         };
         #[cfg(test)]
         self.admission_test_stage(AdmissionTestStage::Journaled)
             .await;
-        retry.headers_mut().extend(headers);
         let mut padding = cover.and_then(|c| c.pad(&mut retry, true));
         if let Some(p) = &mut padding {
             p.dispatched();

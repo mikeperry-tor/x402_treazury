@@ -45,6 +45,61 @@ impl Fixture {
 async fn fixture() -> Fixture {
     fixture_with_held_response(false).await
 }
+
+#[tokio::test]
+async fn direct_payment_header_overflow_creates_no_liability_or_dispatch() {
+    let f = fixture().await;
+    let http = crate::network::NetworkContext::new(Default::default())
+        .unwrap()
+        .http(
+            &crate::network::IsolationId::evm(&f.payer.address).unwrap(),
+            &f.url,
+            None,
+        )
+        .unwrap();
+    let mut retry = http.get(&f.url).build().unwrap();
+    let challenge = http.execute(retry.try_clone().unwrap()).await.unwrap();
+    for index in 0.. {
+        let name =
+            reqwest::header::HeaderName::from_bytes(format!("x-field-{index}").as_bytes()).unwrap();
+        if retry
+            .headers_mut()
+            .try_insert(
+                name,
+                reqwest::header::HeaderValue::from_static("capacity-secret"),
+            )
+            .is_err()
+        {
+            break;
+        }
+    }
+    let error = f
+        .pool
+        .pay(&http, f.payer.clone(), retry, challenge)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("representation capacity"));
+    assert!(!format!("{error:#?}").contains("capacity-secret"));
+    assert_eq!(f.signed.load(Ordering::SeqCst), 0);
+    let db = f.db();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM payment_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT balance FROM wallets WHERE id=?1",
+            [&f.payer.wallet],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        "2"
+    );
+    drop(db);
+    f.close().await;
+}
 async fn fixture_with_held_response(hold: bool) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let mut store = super::super::store::Store::create(

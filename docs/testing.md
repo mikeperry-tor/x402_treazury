@@ -150,6 +150,8 @@ credential echoes; initialization errors have a socket-free executable unit test
 JSON and runtime-header headroom, and real HTTP/2 challenge/signing exchanges near
 the map capacity. Cover padding skips those oversized header lists under its
 existing byte policy; normal-sized exchanges verify actual padding delivery.
+Direct managed-payment admission tests also fill a caller-built request's header
+map and verify rejection without a journal entry, balance change or signed dispatch.
 These are synthetic local contracts;
 they establish neither vendor deduplication nor live payment/authentication qualification.
 
