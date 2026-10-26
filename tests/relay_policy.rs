@@ -112,10 +112,21 @@ fn shipped_examples_use_explicit_relay_lists() {
     );
     let comprehensive: x402_treazury::deployment::MetaConfig =
         toml::from_str(include_str!("../examples/deployments/comprehensive.toml")).unwrap();
+    let relay = comprehensive.relay_fallback.unwrap();
     assert_eq!(
-        comprehensive.relay_fallback.unwrap().relays()["GET"],
-        [PathBuf::from("../../providers/curl/provider.toml")]
+        relay.relays()["GET"],
+        [
+            "../../providers/curl/provider.toml",
+            "../../providers/agproxy.toml"
+        ]
+        .map(PathBuf::from)
     );
+    for method in ["POST", "HEAD"] {
+        assert_eq!(
+            relay.relays()[method],
+            [PathBuf::from("../../providers/agproxy.toml")]
+        );
+    }
 }
 
 #[test]
