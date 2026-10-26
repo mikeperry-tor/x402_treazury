@@ -20,7 +20,10 @@ and CLI usage. Maintained implementation and operational explanations live here:
 
 [Plans](plans/) describe unfinished work, including artifact storage,
 [OpenAPI authentication](plans/openapi_authentication.md) and the
-[remaining vendor retirement assessments](plans/vendor_retirement.md). The maintained
+[remaining vendor retirement assessments](plans/vendor_retirement.md).
+[Source tool distribution](plans/source_tool_distribution.md) covers ordered
+deployment source rules and migration away from repeated listener exclusions. The
+maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.
 The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
