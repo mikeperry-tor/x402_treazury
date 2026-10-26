@@ -43,6 +43,9 @@ description = "Combine official registry identity, LEI/parents, VAT validation, 
 [overrides.agosint_domain]
 description = "Retrieve domain registration, DNS/mail security, TLS, hosting and identifiable company information. These are phishing-risk signals, not a legitimacy guarantee. Cost: ~$0.015/call [spec]."
 
+[overrides.agosint_network]
+description = "Look up network ownership, announced prefixes, origin AS, country, RPKI status and abuse contact. Pass exactly one public IP address or ASN (autonomous system number). Cost: ~$0.015/call [spec]."
+
 [overrides.agosint_vat]
 description = "Validate EU VAT through VIES or Norwegian VAT through the national register. Returns registered name/address and, when caller VAT is supplied, a VIES consultation number. Cost: ~$0.015/call [spec]."
 

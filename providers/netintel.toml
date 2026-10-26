@@ -25,3 +25,27 @@ description = "Retrieve geolocation, ASN, DNSBL status, threat reputation and ag
 
 [overrides.netintel_ip_reputation_analyze]
 description = "Screen ip against AbuseIPDB and AlienVault OTX, returning threat categories, source data and risk_score (higher means more danger). Preserve unavailable signals and timestamps. Cost: ~$0.05/call [spec]."
+
+[overrides.netintel_ip_blacklist_check]
+description = "Check IPv4 ip against 15 DNS blacklists. Returns per-list findings and listing counts; unavailable checks do not establish a clean result. Cost: ~$0.05/call [spec]."
+
+[overrides.netintel_cert_transparency_lookup]
+description = "Search crt.sh certificate-transparency records for domain, optionally including subdomains. Returns indexed certificates, discovered names, issuers and validity dates up to limit; coverage is not exhaustive. Cost: ~$0.01/call [spec]."
+
+[overrides.netintel_ssl_analyze]
+description = "Inspect domain at optional port for TLS certificate-chain, protocol and weak-key issues. Returns certificate details, supported protocols, warnings and a grade. Cost: ~$0.007/call [spec]."
+
+[overrides.netintel_security_headers_analyze]
+description = "Fetch target URL or domain and assess ten HTTP security headers, including CSP, HSTS and framing policy. Returns observed headers, issues and a grade. Cost: ~$0.01/call [spec]."
+
+[overrides.netintel_url_safety_check]
+description = "Check url against URLhaus malware indicators and phishing heuristics. Returns threat classification, confidence and any known malware family; no findings do not prove safety. Cost: ~$0.01/call [spec]."
+
+[overrides.netintel_typosquat_scan]
+description = "Generate typo, homoglyph and alternate-TLD variants of domain and check registration, up to limit. Returns registered lookalikes; registration alone does not establish impersonation or malicious use. Cost: ~$0.05/call [spec]."
+
+[overrides.netintel_dnssec_validate]
+description = "Inspect domain DNSSEC records and validating-resolver evidence over DNS-over-HTTPS. Returns DS, DNSKEY, RRSIG and NSEC/NSEC3 findings, resolver validation and a chain assessment. Cost: ~$0.03/call [spec]."
+
+[overrides.netintel_dns_propagation_check]
+description = "Compare domain record_type across ten public DNS resolvers. Returns per-resolver answers, failures and consistency; this sample does not prove global propagation. Cost: ~$0.03/call [spec]."

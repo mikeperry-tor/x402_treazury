@@ -397,14 +397,14 @@ The authored `providers/locus/openapi.json` exposes paid POST resources, a
 free list/call gateway, public discovery manifests and lazy help. Prices are
 embedded from the spec's `x-payment-info.price` blocks ($0.01–$2.49 per call),
 with a **two-tool free gateway** mirroring the vendor's own remote-MCP shape: `locus_list`
-(catalog of the 114 free tools with `compact`/`category` query knobs) and
-`locus_call` (wrapped `{name, arguments}` body; the `name` enum pins the 114
-valid tools, and the spec's oneOf-of-114-wrappers body — which the flattener
+(catalog of the 123 captured free tools with `compact`/`category` query knobs) and
+`locus_call` (wrapped `{name, arguments}` body; the `name` enum pins the 123
+valid tools, and the spec's oneOf-of-123-wrappers body — which the flattener
 cannot expose — is rewritten into that flat form). Design notes:
 
 - The spec's `/api/locus_*` underscore routes are free REST duals of the same
   tools, but their slugs collide with the paid `/api/locus-*` hyphen twins
-  under path-derived naming, so the free tier rides the gateway instead. All 114
+  under path-derived naming, so the free tier rides the gateway instead. All 123
   captured free REST routes occur in the gateway enum: no functionality is lost
   by this representation. The public `/.well-known/locus-tools.json` unified
   free/paid schema directory and `/.well-known/locus-agent-endpoints.json` bundle
@@ -412,6 +412,20 @@ cannot expose — is rewritten into that flat form). Design notes:
   authored free-price hints. The empty naming fallback preserves their full names;
   `/api` and `/tools` anchors retain existing names. Bidirectional source/gateway
   name equality verifies coverage without discarding actual original schemas.
+- Refresh from the vendor `https://api.locus.report/openapi.json`, recording its
+  SHA-256 in the authored catalog and scoped fixture. Preserve complete paid
+  request schemas and body-required flags, removing only the root `$schema`
+  annotation and omitting content-level request examples; preserve method and price. Review new routes
+  for authentication, authority and unfinished lifecycles before adding them.
+  Rebuild the gateway enum from all free REST duals, retain the compact/category
+  list knobs, and copy both complete public manifest operations with only a free
+  price hint added. Refresh the independent fixture's complete free operations,
+  discovery operations, place-report request and four omitted job/result witnesses
+  from the vendor source, preserving local reference closure.
+- Many paid atoms explicitly duplicate free gateway records. Keep price/coverage
+  choices in deployment exclusions. The gateway also exposes feedback and
+  coverage-request writes; it is not exclusively read-only. Schema lookup through
+  `locus_list` is necessary because `arguments` remains a generic JSON object.
 - The vendor quotes four payment rails; the live 402 puts plain EIP-3009
   USDC-on-Base first in `accepts[]`, which is what our EVM wallet pays (the
   SDK filters the Solana/Tempo/Circle-Gateway entries out).
@@ -422,13 +436,17 @@ cannot expose — is rewritten into that flat form). Design notes:
   Treazury has no durable job/token lifecycle. Batch polling contracts need separate
   review. See the deferred polling plan. Response headers (X-Locus-Report-*) are
   not surfaced over MCP.
+- `permit-closeout-check` is usable through its direct response, but its optional
+  `delivery` object adds webhook secrets and status-token retrieval. Omit that
+  option: the integration has no delivery/polling ownership. Its presence in the
+  request schema is not a supported workflow or a prepayment enforcement guard.
 - Satellite `includeImagery=true` returns optional base64 fields without a configured
   image mapping. Encoded fields remain ordinary JSON; no automatic extraction
   or hosted-image fetch is implied.
 - Slow: place-report can take tens of seconds, environmental-context 60–90s.
 
 ```bash
-x402_treazury serve --provider providers/locus/provider.toml --timeout 120
+x402_treazury serve --provider providers/locus/provider.toml
 ```
 
 ## straits.toml — Straits.live Hormuz monitor (straits.live)
@@ -1177,8 +1195,29 @@ The overview advertises free skills discovery and synchronous marketplace runs
 without publishing their corresponding path schemas. Do not invent those tools
 or classify every future marketplace route as incompatible. Scraper modes that
 hand off SIWX snapshots remain unsupported even when small requests usually finish
-inline. Cached primary documentation and captured contracts do not qualify paid
-completion or current availability.
+inline. These are both endpoint and argument-level restrictions: the excluded
+snapshot/history/feedback routes require SIWX, while allowed scraper calls can
+switch to snapshots based on `mode` or requested record counts. The guide describes
+an approximate 200-record handoff threshold; small counts are not a completion
+guarantee. For jobs, count all selected sites together. The guide explicitly marks
+YouTube `videos_by_*`, `channels_by_keyword` and `comments` as async. It does not
+provide an equivalent current-mode classification for TikTok; do not invent a
+safe mode allowlist from its legacy examples.
+
+Current path/tool filters do not remove individual mode values or reject a
+challenge because it advertises `async: true`. Parameter descriptions warn callers;
+there is no mode/count-specific runtime prepayment guard. A paid snapshot response
+is an incomplete retrieval workflow, not a finished scrape or permission to replay.
+The guide says the challenge may announce `async` and `etaSeconds`, but that is
+vendor metadata, not enforced compatibility here.
+
+The generated schema's exact mode enum and parameter names take precedence over
+legacy examples in the guide. LinkedIn exposes `profile`, `company`,
+`company_posts` and `post`; its broader description does not add people/job search.
+YouTube has no standalone transcript mode. TikTok combines 21 modes and many
+optional mode-specific arguments; its smaller tool inventory does not imply a
+simpler request contract. Cached primary documentation and captured contracts do
+not qualify paid completion or current availability.
 
 ## netintel.toml — NetIntel
 

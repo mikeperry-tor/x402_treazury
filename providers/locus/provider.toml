@@ -6,5 +6,65 @@ base_url = "https://api.locus.report"
 prefix = "locus"
 include = ["/api", "/tools", ""]
 help_url = "https://api.locus.report/llms.txt"
-instructions_text = "Use locus_list(compact=true), then locus_call(name=..., arguments={...}) for free coverage_check, lane_availability, place_facts or suggest_workflow before paid reports. Unsupported places return a free diagnostic instead of a charge. Unified manifests include both free and paid schemas. X-Locus-Report-* response headers are unavailable over MCP. Do not use Locus for tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
+instructions_text = "For US public-record research, start with locus_list(compact=true), then obtain category schemas with compact=false before locus_call(name=..., arguments={...}). Use free coverage/lane checks before paid reports; many paid atoms duplicate free calls. Preserve dates, provenance and unknowns. Feedback/coverage requests are writes and require a requested purpose. Omit delivery webhook options; report headers are unavailable over MCP. Do not use Locus for tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
 pricing_key = "x-payment-info"
+
+[overrides.locus_list]
+description = "Discover free Locus tools. Start with compact=true for names/categories; use category with compact=false to retrieve exact input schemas before calling locus_call. No payment required."
+
+[overrides.locus_call]
+description = "Call a free Locus tool using its name and schema-valid inputs inside arguments. Covers coverage/lane preflight, parcel, policy, hazard and public-record reads. Feedback and coverage requests are writes; use only for an explicitly requested purpose. No payment required."
+
+[overrides.locus_locus_air_quality_history]
+description = "Retrieve EPA AQS monitor history, exact-point NOAA HMS smoke days and separately labeled modeled county PM2.5 for a US address or coordinates. Preserve years, source gaps and monitor distance; these are not property exposure or safety findings. Cost: ~$0.05/call [spec]."
+
+[overrides.locus_locus_cmbs_loan_context]
+description = "Find public CMBS loan records for a commercial address from SEC ABS-EE filings: maturity, servicing, coverage, occupancy and lease expirations. Registered CMBS only; no match does not establish absence of debt. Cost: ~$0.10/call [spec]."
+
+[overrides.locus_locus_cmbs_maturity_wall]
+description = "Summarize county CMBS maturities over 6/12/18/24 months and special-servicing exposure by property type. Windows start from the filing period; coverage excludes loans outside public CMBS filings. Cost: ~$0.25/call [spec]."
+
+[overrides.locus_locus_local_fiscal_context]
+description = "Read reviewed local-government finances and audits for place, with dated trends and peers. Parcel consequences require an explicit official action/geography link; nearby records alone do not establish an effect. Cost: ~$0.05/call [spec]."
+
+[overrides.locus_locus_local_policy_brief]
+description = "Retrieve cited legislation and ordinance context for place and intent after free policy preflight. Preserves provisions, status and affected property classes; verify current enactment and applicability at the source. Cost: ~$0.07/call [spec]."
+
+[overrides.locus_locus_local_trend_brief]
+description = "Retrieve dated official permit, service-request and code-violation counts and year-over-year trends for place. Supply intent, lookbackMonths and includeCrime; preserve source coverage and gaps. Cost: ~$0.05/call [spec]."
+
+[overrides.locus_locus_parcel_value]
+description = "Retrieve recorded sale and assessed-value fields from the official resolved parcel. Supply address or parcelId with state/county. These are dated public-record values, not an appraisal or current market valuation. Cost: ~$0.01/call [spec]."
+
+[overrides.locus_locus_property_tax]
+description = "Retrieve residential property tax, assessment and deed history through RentCast for a US address. Returns dated public-record context without owner contact details; not an official tax bill or valuation. Cost: ~$0.05/call [spec]."
+
+[overrides.locus_locus_rent_estimate]
+description = "Retrieve RentCast residential rental estimate/range and comparable count for address, with a HUD area anchor when available. Preserve dates and model/source distinctions; not a guaranteed achievable rent. Cost: ~$0.05/call [spec]."
+
+[overrides.locus_locus_comps_brief]
+description = "Retrieve county assessor/parcel sales within 1500m and 24 months of a US address or point, with cited prices and arithmetic summaries. Coverage may be thin; summaries are not a valuation. Cost: ~$0.05/call [spec]."
+
+[overrides.locus_locus_listing_claim_check]
+description = "Compare supplied listing, assessment-notice or inspection-excerpt claims with dated official records. Supply a subjects array containing one object with id, address, mode and its claims/text. Returns evidence and questions, not a property approval. Cost: ~$0.25/call [spec]."
+
+[overrides.locus_locus_permit_closeout_check]
+description = "Check official permit closeout for address or state/county-scoped parcelIds in covered jurisdictions. Optional permitId selects an exact permit; omit delivery because webhook/token retrieval is unsupported here. Preserve uncertain and unavailable states. Cost: ~$0.05/call [spec]."
+
+[overrides.locus_locus_place_report]
+description = "Retrieve a cited public-record report for address or zip after free coverage/lane checks. Preserve record dates, location precision, source gaps and verification links; the report is not a valuation or screening verdict. Cost: ~$0.05/call [spec]."
+
+[overrides.locus_locus_nei_emissions_nearby]
+description = "Retrieve EPA NEI facility/pollutant inventory near address or coordinates. detailLevel selects summary or full rows; preserve reporting year and omitted-row counts. Inventory estimates are not ambient measurements or exposure findings. Cost: ~$0.01/call [spec]."
+
+[overrides.locus_locus_data_center_watch]
+description = "Find cited official development, permit and capital-project records for data-center or crypto-mining activity near a US place. News/social leads remain unverified; preserve source dates and coverage. Cost: ~$0.07/call [spec]."
+
+[overrides.locus_locus_development_cases]
+description = "Read planning/zoning cases near an address with status and official links. Free locus_development_cases via locus_call returns the same records. Cost: ~$0.01/call [spec]."
+
+[overrides.locus_locus_zoning]
+description = "Read zoning districts and overlays for address from covered municipal/county layers. Free locus_zoning via locus_call returns the same records; verify current rules with the authority. Cost: ~$0.01/call [spec]."
+
+[overrides.locus_locus_permit_closeout_check.params]
+delivery = "Unsupported in this integration: omit this webhook/status-token delivery option; use the direct response."

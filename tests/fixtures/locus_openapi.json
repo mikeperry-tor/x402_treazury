@@ -210,7 +210,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 120,
-                    "description": "Canonical values: renter_due_diligence, homebuyer_due_diligence, small_business_siting, community_organizer_journalist, commercial_tenant_due_diligence, land_investor_due_diligence, developer_predevelopment, environmental_research, short_term_rental_operations, data_center_development, agricultural_land_due_diligence, hoa_board_governance, renovation_planning, property_owner_cost_relief, property_tax_appeal, utility_bill_relief, mortgage_servicing, disaster_recovery, permit_project_closeout, tax_delinquency_redemption. Natural-language phrases are also accepted and normalized, e.g. renting an apartment, buying a house, property-tax appeal, homeowner cost relief, utility bill credit, mortgage servicing, disaster recovery, permit closeout, tax-sale redemption, commercial lease, data-center development, agricultural land diligence, STR operations, HOA board review, or civic monitoring."
+                    "description": "Canonical values: renter_due_diligence, homebuyer_due_diligence, small_business_siting, community_organizer_journalist, commercial_tenant_due_diligence, land_investor_due_diligence, developer_predevelopment, environmental_research, short_term_rental_operations, data_center_development, agricultural_land_due_diligence, hoa_board_governance, renovation_planning, property_owner_cost_relief, property_tax_appeal, utility_bill_relief, mortgage_servicing, disaster_recovery, permit_project_closeout, tax_delinquency_redemption, government_meeting_monitoring, local_fiscal_research, county_data_research. Natural-language phrases are also accepted and normalized, e.g. renting an apartment, buying a house, property-tax appeal, homeowner cost relief, utility bill credit, mortgage servicing, disaster recovery, permit closeout, tax-sale redemption, commercial lease, data-center development, agricultural land diligence, STR operations, HOA board review, or civic monitoring, planning meetings/agendas, budgets/audits, or county data series."
                   }
                 },
                 "required": [
@@ -502,6 +502,10 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "Required ZIP, address, city, or county to resolve to state/county/city legal geographies."
+                  },
+                  "liveSearch": {
+                    "description": "Opt in to bounded Gov-Index pointer discovery when enabled by the operator; no ordinance bodies.",
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -7133,7 +7137,7 @@
       "post": {
         "operationId": "locus_groundwater_context",
         "summary": "Groundwater and monitoring-well context (USGS Water Data)",
-        "description": "Nearby USGS monitoring wells, aquifer codes, construction-depth distribution, and latest water level, from USGS Water Data. For well-water buyer diligence. Distance bands only. Not domestic-well or drilling-depth, water presence, yield, potability, contamination, or cost prediction. No wells is not no groundwater.\nUse this when you can call Locus free tools (REST tools/call or MCP).\nUse locus-groundwater-context instead when your client can only call paid x402 routes; it returns the same records. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "description": "Nearby USGS monitoring wells, aquifer codes, construction-depth distribution, and latest water level, from national USGS Water Data. For well-water buyer diligence. Distance bands only. Not domestic-well or drilling-depth, water presence, yield, potability, contamination, or cost prediction. No wells is not no groundwater.\nUse this when you can call Locus free tools (REST tools/call or MCP).\nUse locus-groundwater-context instead when your client can only call paid x402 routes; it returns the same records. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
         "tags": [
           "groundwater",
           "water",
@@ -7153,7 +7157,7 @@
           "sideEffect": "read"
         },
         "x-locus-category": "environmental",
-        "x-locus-coverage-scope": "local",
+        "x-locus-coverage-scope": "national",
         "x-locus-tier": "preview",
         "x-locus-call-pattern": {
           "method": "POST",
@@ -9190,7 +9194,7 @@
       "post": {
         "operationId": "locus_ordinance_leads",
         "summary": "Local ordinance lead-finder (jurisdiction-locked web-search prompt)",
-        "description": "Resolves a US address to the governing city or unincorporated county, not a same-named place, then returns a jurisdiction-locked search prompt, query pack, and official-source targets. Agent runs the search. Locus serves no ordinance text. Right jurisdiction when a place resolves; the section is not guaranteed. Not legal advice. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "description": "Resolves a US address to the governing city or unincorporated county, not a same-named place, then returns a jurisdiction-locked search prompt, query pack, and official-source targets. Agent runs the search, or opts in to an operator-enabled pointer-only Gov-Index search. Locus serves no ordinance text. Right jurisdiction when a place resolves; the section is not guaranteed. Not legal advice. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
         "tags": [
           "policy",
           "ordinances",
@@ -9287,6 +9291,10 @@
                         "tree_landscape"
                       ]
                     }
+                  },
+                  "liveSearch": {
+                    "description": "Opt in to one bounded Gov-Index pointer search when enabled by the operator. The base prompt pack remains unsearched.",
+                    "type": "boolean"
                   }
                 }
               }
@@ -10776,7 +10784,7 @@
       "post": {
         "operationId": "locus_zoning",
         "summary": "Zoning district + overlays at a point",
-        "description": "Official mapped zoning district and overlays at a point. Wired states: AZ, CA, CO, DC, FL, GA, IL, IN, MA, MD, MI, MN, NC, NJ, NV, NY, OH, OK, PA, SC, TN, TX, UT, WA, WI. Raleigh, Wake, and Morrisville add context; elsewhere not covered. For agents checking map CHANGE and NEIGHBOR context: pair locus_development_cases. Not permitted-use approval or a value prediction.\nUse this when you can call Locus free tools (REST tools/call or MCP).\nUse locus-zoning instead when your client can only call paid x402 routes; it returns the same records. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "description": "Official mapped zoning district and overlays at a point. Wired states: AZ, CA, CO, DC, FL, GA, IL, IN, MA, MD, MI, MN, NC, NJ, NV, NY, OH, OK, PA, SC, TN, TX, UT, WA, WI. Optional requestedUse returns reviewed NYC use-table evidence for a small fixed use set when enabled; always ask the remaining parcel-specific question. Raleigh, Wake, and Morrisville add context; elsewhere not covered. Pair locus_development_cases for change nearby. Never permitted-use approval, buildability, or value prediction.\nUse this when you can call Locus free tools (REST tools/call or MCP).\nUse locus-zoning instead when your client can only call paid x402 routes; it returns the same records. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
         "tags": [
           "zoning",
           "property",
@@ -10791,7 +10799,7 @@
           "sideEffect": "read"
         },
         "x-locus-category": "parcels",
-        "x-locus-coverage-scope": "local",
+        "x-locus-coverage-scope": "meta",
         "x-locus-tier": "preview",
         "x-locus-call-pattern": {
           "method": "POST",
@@ -10848,6 +10856,12 @@
                     "type": "number",
                     "minimum": -180,
                     "maximum": 180
+                  },
+                  "requestedUse": {
+                    "description": "Optional proposed use for narrow official NYC Zoning Resolution evidence. Current reviewed aliases: restaurant, cafe, detached single family home. No permission verdict.",
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 100
                   }
                 }
               }
@@ -16570,6 +16584,1029 @@
           }
         }
       }
+    },
+    "/api/locus_government_meetings": {
+      "post": {
+        "operationId": "locus_government_meetings",
+        "summary": "Official government planning meeting indexes",
+        "description": "Returns bounded official meeting dates and agenda pointers. Coverage: City of Modesto Planning Commission; Wake County Planning Board and Land Use Committee. No item extraction or parcel match. For property-topic Legistar events use paid locus-legistar-property-meetings. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "tags": [
+          "meetings",
+          "planning",
+          "agenda",
+          "read-only",
+          "free",
+          "free"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "exposure": "free",
+          "charged": false,
+          "sideEffect": "read"
+        },
+        "x-locus-category": "infrastructure",
+        "x-locus-coverage-scope": "county",
+        "x-locus-call-pattern": {
+          "method": "POST",
+          "path": "/api/locus_government_meetings",
+          "bodyStyle": "flat-json",
+          "note": "Flat JSON body: send this tool's fields at the top level; do not wrap them in {name, arguments}."
+        },
+        "x-agentcash-keywords": [
+          "utilities",
+          "road access",
+          "transit nearby",
+          "government meetings",
+          "property records",
+          "local government records",
+          "US address lookup",
+          "public records",
+          "property due diligence",
+          "official records"
+        ],
+        "x-agentcash-use-cases": [
+          "check utilities and road access for a property",
+          "see transit context near an address",
+          "find nearby civic infrastructure before buying",
+          "check government meetings for a property before buying",
+          "look up government meetings for a US address",
+          "verify government meetings before I make an offer",
+          "see government meetings before signing a contract",
+          "compare government meetings across two properties",
+          "get government meetings for due diligence on a house",
+          "check government meetings before touring a home"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "jurisdiction": {
+                    "type": "string",
+                    "enum": [
+                      "us-ca-modesto",
+                      "us-nc-wake"
+                    ],
+                    "description": "Explicit meeting jurisdiction. Coverage: City of Modesto Planning Commission; Wake County Planning Board and Land Use Committee. For property-topic Legistar items use paid locus-legistar-property-meetings."
+                  },
+                  "fromDate": {
+                    "description": "Optional inclusive YYYY-MM-DD meeting date.",
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  },
+                  "toDate": {
+                    "description": "Optional inclusive YYYY-MM-DD meeting date.",
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  }
+                },
+                "required": [
+                  "jurisdiction"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Free cited evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
+    },
+    "/api/locus_tenant_statute_pointers": {
+      "post": {
+        "operationId": "locus_tenant_statute_pointers",
+        "summary": "State Landlord-Tenant And Owner Tax-Relief Statutory Pointers",
+        "description": "Official chapter/title locators for residential security deposits, entry notice, repair duties, lease termination, and owner tax relief, plus local owner-program references and an unexecuted state-locked government search pack. No legal advice, screening, or eligibility determination. Coverage: Alabama (AL), Alaska (AK), Arizona (AZ), Arkansas (AR), California (CA), Colorado (CO), Connecticut (CT), Delaware (DE), District of Columbia (DC), Florida (FL), Georgia (GA), Hawaii (HI), Idaho (ID), Illinois (IL), Indiana (IN), Iowa (IA), Kansas (KS), Kentucky (KY), Louisiana (LA), Maine (ME), Maryland (MD), Massachusetts (MA), Michigan (MI), Minnesota (MN), Mississippi (MS), Missouri (MO), Montana (MT), Nebraska (NE), Nevada (NV), New Hampshire (NH), New Jersey (NJ), New Mexico (NM), New York (NY), North Carolina (NC), North Dakota (ND), Ohio (OH), Oklahoma (OK), Oregon (OR), Pennsylvania (PA), Rhode Island (RI), South Carolina (SC), South Dakota (SD), Tennessee (TN), Texas (TX), Utah (UT), Vermont (VT), Virginia (VA), Washington (WA), West Virginia (WV), Wisconsin (WI), Wyoming (WY).\nUse this when you can call Locus free tools (REST tools/call or MCP).\nUse locus-tenant-statute-pointers instead when your client can only call paid x402 routes; it returns the same records. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "tags": [
+          "policy",
+          "rental",
+          "property-tax",
+          "read-only",
+          "free",
+          "free"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "exposure": "free",
+          "charged": false,
+          "sideEffect": "read"
+        },
+        "x-locus-category": "parcels",
+        "x-locus-coverage-scope": "meta",
+        "x-locus-tier": "preview",
+        "x-locus-call-pattern": {
+          "method": "POST",
+          "path": "/api/locus_tenant_statute_pointers",
+          "bodyStyle": "flat-json",
+          "note": "Flat JSON body: send this tool's fields at the top level; do not wrap them in {name, arguments}."
+        },
+        "x-agentcash-keywords": [
+          "local bills",
+          "ordinances",
+          "legislation",
+          "rental registration",
+          "short-term rental",
+          "rental license",
+          "property records",
+          "local government records",
+          "US address lookup",
+          "public records"
+        ],
+        "x-agentcash-use-cases": [
+          "see local legislation that affects a property",
+          "check ordinances before buying a home",
+          "check rental registration for a property",
+          "see if a house needs a rental license",
+          "look up short-term rental rules for an address",
+          "check property tax for an address before buying",
+          "see the tax calendar and appeal window",
+          "look up assessed value and tax burden",
+          "look up the parcel ID for a US address",
+          "check assessor parcel facts before buying"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "description": "Specific US street address or ZIP.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "place": {
+                    "description": "US city/county plus state, or address; bare state names are too coarse here.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "state": {
+                    "description": "Two-letter state code; for example AL. Supported jurisdictions are listed in the tool description.",
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Free cited evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
+    },
+    "/api/locus_muni_bond_disclosures": {
+      "post": {
+        "operationId": "locus_muni_bond_disclosures",
+        "summary": "Municipal Bond And Special-District Disclosure Sources",
+        "description": "EMMA issuer search, official fiscal and single-audit pointers, county-scoped TX levy candidates, and jurisdiction-locked continuing-disclosure/ACFR search queries. National pointer research; state debt portals: CA, FL, NC, NY, TX. No issuer, parcel debt, or credit conclusion.\nUse this when you can call Locus free tools (REST tools/call or MCP).\nUse locus-special-district-debt-brief instead when your client can only call paid x402 routes; it returns the same records. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "tags": [
+          "bonds",
+          "special-districts",
+          "audits",
+          "read-only",
+          "free",
+          "free"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "exposure": "free",
+          "charged": false,
+          "sideEffect": "read"
+        },
+        "x-locus-category": "infrastructure",
+        "x-locus-coverage-scope": "national",
+        "x-locus-tier": "preview",
+        "x-locus-call-pattern": {
+          "method": "POST",
+          "path": "/api/locus_muni_bond_disclosures",
+          "bodyStyle": "flat-json",
+          "note": "Flat JSON body: send this tool's fields at the top level; do not wrap them in {name, arguments}."
+        },
+        "x-agentcash-keywords": [
+          "elected officials",
+          "governing districts",
+          "representatives",
+          "utilities",
+          "road access",
+          "transit nearby",
+          "property records",
+          "local government records",
+          "US address lookup",
+          "public records"
+        ],
+        "x-agentcash-use-cases": [
+          "see who represents a property in local government",
+          "look up governing districts for an address",
+          "check utilities and road access for a property",
+          "see transit context near an address",
+          "find nearby civic infrastructure before buying",
+          "check muni bond disclosures for a property before buying",
+          "look up muni bond disclosures for a US address",
+          "verify muni bond disclosures before I make an offer",
+          "see muni bond disclosures before signing a contract",
+          "compare muni bond disclosures across two properties"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "place": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "state": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z]{2}$"
+                  },
+                  "county": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Free cited evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
+    },
+    "/api/locus_property_math_calculator": {
+      "post": {
+        "operationId": "locus_property_math_calculator",
+        "summary": "Property Carrying-Cost Worksheet",
+        "description": "Fixed-rate principal, interest, taxes, insurance, HOA and simple break-even arithmetic. National caller-supplied assumptions; official property-tax context and state transfer/recording schedule pointers where registered. Unknown taxes stay unknown. Not a loan quote or affordability verdict.\nUse this when you can call Locus free tools (REST tools/call or MCP).\nUse locus-piti-transfer-tax-calculator instead when your client can only call paid x402 routes; it returns the same records. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "tags": [
+          "property",
+          "taxes",
+          "calculator",
+          "read-only",
+          "free",
+          "free"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "exposure": "free",
+          "charged": false,
+          "sideEffect": "read"
+        },
+        "x-locus-category": "infrastructure",
+        "x-locus-coverage-scope": "national",
+        "x-locus-tier": "preview",
+        "x-locus-call-pattern": {
+          "method": "POST",
+          "path": "/api/locus_property_math_calculator",
+          "bodyStyle": "flat-json",
+          "note": "Flat JSON body: send this tool's fields at the top level; do not wrap them in {name, arguments}."
+        },
+        "x-agentcash-keywords": [
+          "property tax",
+          "tax bill",
+          "assessed value",
+          "tax calendar",
+          "utilities",
+          "road access",
+          "property records",
+          "local government records",
+          "US address lookup",
+          "public records"
+        ],
+        "x-agentcash-use-cases": [
+          "check property tax for an address before buying",
+          "see the tax calendar and appeal window",
+          "look up assessed value and tax burden",
+          "check utilities and road access for a property",
+          "see transit context near an address",
+          "find nearby civic infrastructure before buying",
+          "check Property Carrying-Cost Worksheet for a property before buying",
+          "look up Property Carrying-Cost Worksheet for a US address",
+          "verify Property Carrying-Cost Worksheet before I make an offer",
+          "see Property Carrying-Cost Worksheet before signing a contract"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "purchasePrice": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "downPaymentPercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "loanAmount": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "interestRatePercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "termYears": {
+                    "default": 30,
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 50
+                  },
+                  "address": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "state": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z]{2}$"
+                  },
+                  "zip": {
+                    "type": "string",
+                    "pattern": "^\\d{5}$"
+                  },
+                  "annualPropertyTaxRatePercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "annualHomeownersInsurance": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "monthlyHoa": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "closingCostAmount": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "monthlySavings": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  }
+                },
+                "required": [
+                  "purchasePrice",
+                  "interestRatePercent"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Free cited evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
+    },
+    "/api/locus_acs_living_arrangements_series": {
+      "post": {
+        "operationId": "locus_acs_living_arrangements_series",
+        "summary": "County ACS living-arrangements observations by source year",
+        "description": "Source-year ACS five-year B09021 ages 18–34 counts and margins for all household members and children of householders. Caller-chosen county FIPS; observations and gaps, no affordability inference or place verdict. National. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "tags": [
+          "census",
+          "living-arrangements",
+          "time-series",
+          "read-only",
+          "free",
+          "free"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "exposure": "free",
+          "charged": false,
+          "sideEffect": "read"
+        },
+        "x-locus-category": "infrastructure",
+        "x-locus-coverage-scope": "national",
+        "x-locus-call-pattern": {
+          "method": "POST",
+          "path": "/api/locus_acs_living_arrangements_series",
+          "bodyStyle": "flat-json",
+          "note": "Flat JSON body: send this tool's fields at the top level; do not wrap them in {name, arguments}."
+        },
+        "x-agentcash-keywords": [
+          "utilities",
+          "road access",
+          "transit nearby",
+          "acs living arrangements series",
+          "property records",
+          "local government records",
+          "US address lookup",
+          "public records",
+          "property due diligence",
+          "official records"
+        ],
+        "x-agentcash-use-cases": [
+          "check utilities and road access for a property",
+          "see transit context near an address",
+          "find nearby civic infrastructure before buying",
+          "check acs living arrangements series for a property before buying",
+          "look up acs living arrangements series for a US address",
+          "verify acs living arrangements series before I make an offer",
+          "see acs living arrangements series before signing a contract",
+          "compare acs living arrangements series across two properties",
+          "get acs living arrangements series for due diligence on a house",
+          "check acs living arrangements series before touring a home"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "stateFips": {
+                    "type": "string",
+                    "pattern": "^\\d{2}$",
+                    "description": "Two-digit state FIPS."
+                  },
+                  "countyFips3": {
+                    "type": "string",
+                    "pattern": "^\\d{3}$",
+                    "description": "Three-digit county FIPS."
+                  },
+                  "fromYear": {
+                    "type": "integer",
+                    "minimum": 2021,
+                    "maximum": 2024,
+                    "description": "First source year, 2021–2024."
+                  },
+                  "toYear": {
+                    "type": "integer",
+                    "minimum": 2021,
+                    "maximum": 2024,
+                    "description": "Last source year, 2021–2024."
+                  }
+                },
+                "required": [
+                  "stateFips",
+                  "countyFips3",
+                  "fromYear",
+                  "toYear"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Free cited evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
+    },
+    "/api/locus_cbp_county_industry_series": {
+      "post": {
+        "operationId": "locus_cbp_county_industry_series",
+        "summary": "County CBP establishments for a caller-selected industry",
+        "description": "Source-year Census CBP employer-establishment counts for one caller-selected two-digit or grouped NAICS sector, its size bands and three-digit subsectors. County FIPS and industry are caller inputs. Suppressed and unpublished cells are explicit, not zero. National, no employment or demand verdict. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "tags": [
+          "census",
+          "industry",
+          "establishments",
+          "time-series",
+          "read-only",
+          "free",
+          "free"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "exposure": "free",
+          "charged": false,
+          "sideEffect": "read"
+        },
+        "x-locus-category": "infrastructure",
+        "x-locus-coverage-scope": "national",
+        "x-locus-call-pattern": {
+          "method": "POST",
+          "path": "/api/locus_cbp_county_industry_series",
+          "bodyStyle": "flat-json",
+          "note": "Flat JSON body: send this tool's fields at the top level; do not wrap them in {name, arguments}."
+        },
+        "x-agentcash-keywords": [
+          "utilities",
+          "road access",
+          "transit nearby",
+          "cbp county industry series",
+          "property records",
+          "local government records",
+          "US address lookup",
+          "public records",
+          "property due diligence",
+          "official records"
+        ],
+        "x-agentcash-use-cases": [
+          "check utilities and road access for a property",
+          "see transit context near an address",
+          "find nearby civic infrastructure before buying",
+          "check cbp county industry series for a property before buying",
+          "look up cbp county industry series for a US address",
+          "verify cbp county industry series before I make an offer",
+          "see cbp county industry series before signing a contract",
+          "compare cbp county industry series across two properties",
+          "get cbp county industry series for due diligence on a house",
+          "check cbp county industry series before touring a home"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "stateFips": {
+                    "type": "string",
+                    "pattern": "^\\d{2}$",
+                    "description": "Two-digit state FIPS."
+                  },
+                  "countyFips3": {
+                    "type": "string",
+                    "pattern": "^\\d{3}$",
+                    "description": "Three-digit county FIPS."
+                  },
+                  "fromYear": {
+                    "type": "integer",
+                    "minimum": 2021,
+                    "maximum": 2024,
+                    "description": "First source year, 2021–2024."
+                  },
+                  "toYear": {
+                    "type": "integer",
+                    "minimum": 2021,
+                    "maximum": 2024,
+                    "description": "Last source year, 2021–2024."
+                  },
+                  "industryCode": {
+                    "type": "string",
+                    "pattern": "^(?:\\d{2}|31-33|44-45|48-49)$",
+                    "description": "Two-digit NAICS 2017 sector or grouped sector: 31-33, 44-45, 48-49."
+                  }
+                },
+                "required": [
+                  "stateFips",
+                  "countyFips3",
+                  "fromYear",
+                  "toYear",
+                  "industryCode"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Free cited evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
+    },
+    "/api/locus_office_source_guide": {
+      "post": {
+        "operationId": "locus_office_source_guide",
+        "summary": "Office market source discovery and measurement limits",
+        "description": "For one county FIPS, list public employment and commercial office-report source leads with geography, methods, reuse cautions and explicit not-checked items. Does not fetch or fabricate office vacancy, occupancy, remote-work or a comparable time series. National discovery-only, read-only. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "tags": [
+          "office",
+          "employment",
+          "provenance",
+          "source-discovery",
+          "read-only",
+          "free",
+          "free"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "exposure": "free",
+          "charged": false,
+          "sideEffect": "read"
+        },
+        "x-locus-category": "infrastructure",
+        "x-locus-coverage-scope": "national",
+        "x-locus-call-pattern": {
+          "method": "POST",
+          "path": "/api/locus_office_source_guide",
+          "bodyStyle": "flat-json",
+          "note": "Flat JSON body: send this tool's fields at the top level; do not wrap them in {name, arguments}."
+        },
+        "x-agentcash-keywords": [
+          "coverage check",
+          "what works here",
+          "lane availability",
+          "housing market",
+          "days on market",
+          "listing price",
+          "property records",
+          "local government records",
+          "US address lookup",
+          "public records"
+        ],
+        "x-agentcash-use-cases": [
+          "check which records Locus has for an address",
+          "preflight coverage before paying for a report",
+          "see housing-market context for a county",
+          "check listing price and days on market nearby",
+          "check utilities and road access for a property",
+          "see transit context near an address",
+          "find nearby civic infrastructure before buying",
+          "check office source guide for a property before buying",
+          "look up office source guide for a US address",
+          "verify office source guide before I make an offer"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "stateFips": {
+                    "type": "string",
+                    "pattern": "^\\d{2}$",
+                    "description": "Two-digit state FIPS, e.g. 37 for NC."
+                  },
+                  "countyFips3": {
+                    "type": "string",
+                    "pattern": "^\\d{3}$",
+                    "description": "Three-digit county FIPS, e.g. 183 Wake, 105 Lee, 001 Alamance."
+                  }
+                },
+                "required": [
+                  "stateFips",
+                  "countyFips3"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Free cited evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
+    },
+    "/api/locus_fiscal_source_guide": {
+      "post": {
+        "operationId": "locus_fiscal_source_guide",
+        "summary": "Official local-government fiscal source leads and parsing guide",
+        "description": "Free official fiscal source pointers for a caller-selected US place plus reusable instructions for reading budgets, audits, tax bases, levies and collections. National leads are always available; state and local links require a resolved jurisdiction. Does not fetch documents, report figures, or activate the paid fiscal snapshot. A city spanning counties needs an exact address or confirmed county before local links can be assigned. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "tags": [
+          "fiscal",
+          "tax-base",
+          "audit",
+          "source-discovery",
+          "read-only",
+          "free",
+          "free"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "exposure": "free",
+          "charged": false,
+          "sideEffect": "read"
+        },
+        "x-locus-category": "infrastructure",
+        "x-locus-coverage-scope": "national",
+        "x-locus-call-pattern": {
+          "method": "POST",
+          "path": "/api/locus_fiscal_source_guide",
+          "bodyStyle": "flat-json",
+          "note": "Flat JSON body: send this tool's fields at the top level; do not wrap them in {name, arguments}."
+        },
+        "x-agentcash-keywords": [
+          "local budget",
+          "fiscal context",
+          "audit findings",
+          "property tax",
+          "tax bill",
+          "assessed value",
+          "property records",
+          "local government records",
+          "US address lookup",
+          "public records"
+        ],
+        "x-agentcash-use-cases": [
+          "see local fiscal context for a place",
+          "check county budget and audit facts",
+          "check property tax for an address before buying",
+          "see the tax calendar and appeal window",
+          "look up assessed value and tax burden",
+          "check which records Locus has for an address",
+          "preflight coverage before paying for a report",
+          "check utilities and road access for a property",
+          "see transit context near an address",
+          "find nearby civic infrastructure before buying"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "place": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200,
+                    "description": "US address, ZIP, city + state, or county + state; use an exact address for a cross-county city."
+                  }
+                },
+                "required": [
+                  "place"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Free cited evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
+    },
+    "/api/locus_parcel_code_cases": {
+      "post": {
+        "operationId": "locus_parcel_code_cases",
+        "summary": "Exact-parcel code complaint, case, and violation records",
+        "description": "Code-enforcement rows for one exact subject: an NYC BBL or address, a published parcelId plus jurisdiction, or an unincorporated Wake County address verified against the parcel site address. Coverage: New York City, San Francisco, Austin, unincorporated Wake County. Each source has its own scope; complaints and cases are not confirmed violations. Requires LOCUS_PARCEL_CODE_CASES_ENABLED. No owner, tenant, unit, narrative, or compliance verdict. Direct flat-body route for this one free resource; no API key, payment, or catalog wrapper. Return only the cited bounded evidence described here; this route never produces a paid brief or full report.",
+        "tags": [
+          "parcel",
+          "housing",
+          "code-cases",
+          "violations",
+          "read-only",
+          "free",
+          "free"
+        ],
+        "security": [],
+        "x-locus-access": {
+          "exposure": "free",
+          "charged": false,
+          "sideEffect": "read"
+        },
+        "x-locus-category": "parcels",
+        "x-locus-coverage-scope": "county",
+        "x-locus-call-pattern": {
+          "method": "POST",
+          "path": "/api/locus_parcel_code_cases",
+          "bodyStyle": "flat-json",
+          "note": "Flat JSON body: send this tool's fields at the top level; do not wrap them in {name, arguments}."
+        },
+        "x-agentcash-keywords": [
+          "parcel lookup",
+          "assessor parcel",
+          "APN",
+          "parcel ID",
+          "housing stock",
+          "house price index",
+          "New York County parcel",
+          "San Francisco County parcel",
+          "Wake County parcel",
+          "Ada County parcel"
+        ],
+        "x-agentcash-use-cases": [
+          "look up the parcel ID for a US address",
+          "check assessor parcel facts before buying",
+          "verify the parcel behind a listing",
+          "see housing-market context for an address",
+          "check house-price index before buying",
+          "look up the parcel for a US address",
+          "check assessor records before buying a home",
+          "verify the legal parcel behind a listing",
+          "check parcel code cases for a property before buying",
+          "look up parcel code cases for a US address"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "description": "Exact building street address. New York City resolves to a BBL; unincorporated Wake County, NC is matched by verified site address. Other places need parcelId plus jurisdiction.",
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 200
+                  },
+                  "bbl": {
+                    "description": "Exact 10-digit NYC Borough-Block-Lot parcel identifier.",
+                    "type": "string",
+                    "pattern": "^[1-5]\\d{9}$"
+                  },
+                  "jurisdiction": {
+                    "description": "Jurisdiction id that scopes parcelId, for example us-ca-san-francisco (block+lot, e.g. 6311024E) or us-tx-austin (Travis parcel id).",
+                    "type": "string",
+                    "enum": [
+                      "us-ny-new-york",
+                      "us-ca-san-francisco",
+                      "us-tx-austin",
+                      "us-nc-wake",
+                      "us-nc-charlotte"
+                    ]
+                  },
+                  "parcelId": {
+                    "description": "Exact published parcel id for the jurisdiction. Never guessed from an address.",
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 20,
+                    "pattern": "^[0-9A-Za-z][0-9A-Za-z/-]*$"
+                  },
+                  "limit": {
+                    "default": 25,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Free cited evidence response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
     }
   },
   "tags": [
@@ -17756,12 +18793,69 @@
             "additionalProperties": false
           }
         ]
+      },
+      "PropertyFlyerClaimRejectedError": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "const": "property_flyer_claim_rejected"
+          },
+          "details": {
+            "type": "object",
+            "properties": {
+              "rejectedField": {
+                "type": "string",
+                "enum": [
+                  "headline",
+                  "cta",
+                  "features",
+                  "address"
+                ]
+              },
+              "rejectedFeatureIndex": {
+                "description": "Zero-based index into features; present when rejectedField is features.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "safe-unsafe",
+                  "danger",
+                  "screening",
+                  "prediction",
+                  "gentrification",
+                  "valuation",
+                  "ranking",
+                  "investment",
+                  "superlative",
+                  "protected-class",
+                  "housing-audience",
+                  "targeting-qualifier",
+                  "steering"
+                ]
+              }
+            },
+            "required": [
+              "rejectedField",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error",
+          "details"
+        ],
+        "additionalProperties": false
       }
     }
   },
   "x-treazury-fixture-scope": {
-    "source": "Captured vendor OpenAPI catalog; original selected documentation preserved",
-    "baseline": "74602900924645b981976ea8c6fece11998df24a",
+    "source": "https://api.locus.report/openapi.json",
     "retained_paths": [
       "/api/locus_coverage_check",
       "/api/locus_suggest_workflow",
@@ -17769,7 +18863,9 @@
       "/api/locus_verify_citation",
       "/api/locus_policy_sources",
       "/api/locus_local_legislation",
+      "/api/locus_government_meetings",
       "/api/locus_owner_programs",
+      "/api/locus_tenant_statute_pointers",
       "/api/locus_mitigation_incentives",
       "/api/locus_utility_credits",
       "/api/locus_water_utility_leak_adjustment_rules",
@@ -17787,6 +18883,8 @@
       "/api/locus_area_incidents",
       "/api/locus_request_coverage",
       "/api/locus_agent_feedback",
+      "/api/locus_muni_bond_disclosures",
+      "/api/locus_property_math_calculator",
       "/api/locus_property_tax_rates",
       "/api/locus_property_tax_estimate",
       "/api/locus_flood_zone",
@@ -17797,6 +18895,10 @@
       "/api/locus_market_context",
       "/api/locus_address_sales_tax",
       "/api/locus_cbp_zip",
+      "/api/locus_acs_living_arrangements_series",
+      "/api/locus_cbp_county_industry_series",
+      "/api/locus_office_source_guide",
+      "/api/locus_fiscal_source_guide",
       "/api/locus_rebuild_cost_context",
       "/api/locus_tax_payment_status",
       "/api/locus_environmental_records_screen",
@@ -17870,6 +18972,7 @@
       "/api/locus_hmda_tract_context",
       "/api/locus_fair_market_rents",
       "/api/locus_rental_registration_check",
+      "/api/locus_parcel_code_cases",
       "/api/locus_nyc_recording_history",
       "/api/locus_metro_permits",
       "/api/locus_medicare_spending",
@@ -17880,12 +18983,13 @@
       "/.well-known/locus-tools.json",
       "/.well-known/locus-agent-endpoints.json",
       "/api/locus-place-report-batch",
-      "/api/locus-record-batch",
       "/api/locus-property-update",
+      "/api/locus-record-batch",
       "/api/property-update-jobs/{id}",
       "/api/locus-place-report"
     ],
-    "purpose": "Focused source transformation, independent discovery contracts and selected demo/qualification requests",
-    "complete_path_objects_and_local_ref_closure": true
+    "purpose": "Free gateway coverage, independent discovery objects, paid request transformation and omitted job lifecycle witnesses.",
+    "complete_path_objects_and_local_ref_closure": true,
+    "sha256": "60b1fc09b55f0454c47ce6cf65da2aff371e90b5464b73a2e48d239d32d7155b"
   }
 }

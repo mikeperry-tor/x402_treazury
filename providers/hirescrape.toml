@@ -15,27 +15,30 @@ instructions_text = "Keep total requested records well below 200 and avoid async
 description = "Read HireScrape's guide. Legacy modes and parameter names may differ from exposed schemas. Snapshot polling requires unsupported SIWX authentication; keep requests synchronous."
 
 [overrides.hirescrape_jobs.params]
-maxResults = "Max results per site (1-100, default 20). Total records across all selected boards is len(sites) * maxResults; keep that product below 200 (and small enough for the payment cap) so the call stays synchronous instead of returning an unpollable SIWX snapshot."
-sites = "Job boards to query (defaults to all 8 boards when omitted). Specify only needed boards so len(sites) * maxResults stays below the 200-record async snapshot threshold."
+maxResults = "Max results per site (1-100, default 20). Total requested records are len(sites) * maxResults. Keep that total well below 200 to reduce async handoffs; snapshot retrieval requires unsupported SIWX authentication."
+sites = "Job boards to query (defaults to all 8 boards when omitted). Select only needed boards to control the total requested records."
 
 [overrides.hirescrape_instagram.params]
 mode = "Use one of the schema enum values (profile, basic_profile, user_posts, post, transcript, search_reels, post_comments, user_reels, highlights, highlight_detail, song_reels, embed); ignore legacy mode names in vendor prose."
-limit = "Max records to collect (default 20). Keep well below 200 (and within the payment cap) so the call completes synchronously inline."
+limit = "Max records to collect (default 20). Keep well below 200 to reduce async handoffs; small requests do not guarantee inline results."
 
 [overrides.hirescrape_linkedin.params]
 mode = "Use one of the schema enum values (profile, company, company_posts, post); ignore legacy person/job search mode names in vendor prose that are absent from the request schema."
-limit = "Max items to collect (default 20, max 100). Keep small so the call stays synchronous and within the payment cap."
+limit = "Max items to collect (default 20). Keep well below 200 to reduce async handoffs; small requests do not guarantee inline results."
+
+[overrides.hirescrape_tiktok]
+description = "Read TikTok profiles, videos, comments and transcripts, or discover popular songs, creators, videos and hashtags with trend charts. Snapshot results cannot be retrieved through this integration."
 
 [overrides.hirescrape_tiktok.params]
-mode = "Use one of the schema enum values; ignore legacy mode names in vendor prose."
-limit = "Max records to collect (default 20). Keep well below 200 (and within the payment cap) so the call completes synchronously inline."
+mode = "Use schema enum values, not legacy names from the guide. Some modes may return snapshots that cannot be retrieved here."
+limit = "Max records to collect (default 20). Keep well below 200 to reduce async handoffs; small requests do not guarantee inline results."
 
 [overrides.hirescrape_tiktok_shop.params]
 mode = "Use one of the schema enum values (search, products, product, reviews, showcase); ignore legacy mode names in vendor prose."
-limit = "Max items to collect (default 20, max 200). Keep below 200 (and within the payment cap) so the call completes synchronously inline."
+limit = "Max items to collect (default 20). Keep below 200 to reduce async handoffs; small requests do not guarantee inline results."
 
 [overrides.hirescrape_youtube.params]
-mode = "Use one of the schema enum values. Prefer synchronous profile/video/transcript reads; discovery modes marked async in vendor guidance may return a running snapshot that requires unsupported SIWX polling."
-limit = "Max items to collect (default 20). Keep well below 200 (and within the payment cap) so the call completes synchronously inline."
-num_of_posts = "Max records to collect. Set an explicit small count well below 200 (avoid 0) so the scrape does not switch to an asynchronous SIWX snapshot."
+mode = "Use schema enum values. The guide marks videos_by_*, channels_by_keyword and comments as async; their snapshots require unsupported SIWX retrieval. Video/channel modes may also hand off, especially for large requests."
+limit = "Max items to collect (default 20). Keep well below 200 to reduce async handoffs; small counts do not make documented async modes synchronous."
+num_of_posts = "Max records to collect. Set a small explicit count well below 200; avoid 0 (all records). Small counts do not make documented async modes synchronous."
 

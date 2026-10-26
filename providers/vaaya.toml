@@ -40,3 +40,99 @@ description = "Search consumer-product safety notices from six public authoritie
 
 [overrides.vaaya_recallradar_get]
 description = "Retrieve a safety notice by id from a prior search. Preserve the record’s sources, dates and jurisdiction. Cost: ~$0.03/call [spec]."
+
+[overrides.vaaya_openalex_works]
+description = "Search scholarly works by search/filter, with optional sort and pagination. Returns metadata, abstracts, citations and open-access locations. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openalex_work]
+description = "Retrieve scholarly metadata by OpenAlex id or DOI: authorships, institutions, abstract, citation history and related works. Full paper text is not guaranteed. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openalex_authors]
+description = "Find researcher profiles by search/filter. Returns affiliations, publication counts and citation metrics for author disambiguation. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_valyu_academic]
+description = "Search arXiv and PubMed with query and optional date/relevance filters. Returns sourced paper-text excerpts; include_abstracts widens coverage to abstract-only records. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_brightdata_unblock]
+description = "Fetch url through Bright Data for pages blocked by ordinary scrapers. Optional country and render select location and JavaScript execution. Returns raw HTML or a JSON envelope; successful bypass is not guaranteed. Cost: ~$0.02/call [spec]."
+
+[overrides.vaaya_diffbot_analyze]
+description = "Extract typed article, product, discussion or image data from url. Optional paging follows multi-page articles. Returns structured fields and text; does not reliably bypass bot protection. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_diffbot_analyze_html]
+description = "Extract typed page fields from supplied html and its source url. The URL supplies extraction context and resolves relative links; both inputs are required. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_gdelt_timeline]
+description = "Retrieve news-coverage volume or average tone for query over time. Select mode and optional time bounds; preserve time windows and source coverage. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_serper_news]
+description = "Search Google News with q and optional country, language, location, pagination and freshness filters. Returns article links, sources, dates and thumbnails. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_firecrawl_scrape]
+description = "Scrape one url with Firecrawl and return clean Markdown/HTML. Use schema options for rendering and extraction; preserve partial-result markers. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_firecrawl_search]
+description = "Search the web with Firecrawl and return scraped search results. Supply query and optional limit. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_fedreg_search]
+description = "Search US Federal Register rules, proposed rules, notices and presidential documents by term, agency, type and dates. Returns document identifiers for fedreg_document. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_fedreg_document]
+description = "Retrieve a Federal Register document by document_number. Returns metadata, agencies, CFR references, comment dates and full-text/PDF links. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_propublica_nonprofit_search]
+description = "Find US nonprofits by q, optional state and pagination in ProPublica Nonprofit Explorer. Returns EINs for propublica_nonprofit. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_propublica_nonprofit]
+description = "Retrieve IRS 990 history by ein through ProPublica: revenue, expenses, assets, officer compensation and filing links. Preserve filing years and coverage. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_theirstack_buying_intents]
+description = "Find intent topics inferred from company job postings. Supply one company_domain, company_name or company_linkedin_url; resolve case-sensitive topic slugs with tech_catalog. Returns confidence, counts and dates; inferred intent is not a purchase commitment. Cost: ~$0.25/call [spec]."
+
+[overrides.vaaya_theirstack_companies]
+description = "Search companies by firmographics, technology and hiring filters. Required limit is 1-5; vendor bills per returned company. Resolve case-sensitive technology slugs with tech_catalog. Returns matching company and job/technology evidence. Cost: ~$0.60/call [spec]."
+
+[overrides.vaaya_theirstack_jobs]
+description = "Search jobs with required limit (1-10) and at least one posted_at date/age or company condition. Supports role, location, salary, seniority and technology filters; resolve case-sensitive slugs with tech_catalog. Vendor bills per returned job. Cost: ~$0.40/call [spec]."
+
+[overrides.vaaya_openwebninja_jsearch]
+description = "Search Google Jobs using query, with optional country, recency, remote and employment filters. Include location in query. Returns postings, apply links and published salary when available. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_salary_estimate]
+description = "Estimate compensation for job_title and location from Glassdoor data. Returns base/total pay ranges, median, confidence and sample size; optional experience filters. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_glassdoor_company_search]
+description = "Find Glassdoor employers by query. Returns company_id, profile details, ratings and review counts for follow-up company/review calls. Optional domain selects the Glassdoor regional site. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_glassdoor_company]
+description = "Retrieve a Glassdoor employer overview by company_id: rating breakdown, CEO approval, recommend-to-friend, size and company details. Optional domain selects the regional site. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_glassdoor_reviews]
+description = "Read Glassdoor employee reviews by company_id, with pagination, text, employment-status and language filters. Returns ratings, pros, cons and dates; reviews are reported experiences. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_glassdoor_interviews]
+description = "Read Glassdoor interview reports by company_id, with optional role, location and pagination filters. Returns questions, process, difficulty, outcomes and dates. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_glassdoor_salaries]
+description = "Read reported Glassdoor salaries by company_id, with optional job_title, location and pagination. Returns pay ranges, medians and sample sizes. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_trustpilot_category_search]
+description = "Resolve a category query to Trustpilot category identifiers, optionally by locale. Use the returned category_id with trustpilot_category. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_trustpilot_category]
+description = "List Trustpilot companies by category_id, with optional location, rating, verification and pagination filters. Returns company domains, TrustScores and review counts. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_trustpilot_company]
+description = "Retrieve a Trustpilot profile by company_domain: ratings, review counts, categories, contact details and business reply metrics. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_trustpilot_reviews]
+description = "Read Trustpilot reviews by company_domain, with rating, date, reply and pagination filters. Returns review text, dates and owner replies; preserve reported-experience context. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_openwebninja_trustpilot_search]
+description = "Find Trustpilot companies by query, optional locale, minimum rating/review count and pagination. Returns domains, ratings and category details. Cost: ~$0.01/call [spec]."
+
+[overrides.vaaya_tomba_linkedin_finder]
+description = "Find professional email addresses for a LinkedIn profile url. full=true requests all associated emails. Work-email precision may differ from verified-email providers; compare results before relying on them. Cost: ~$0.05/call [spec]."
+
+[overrides.vaaya_tomba_phone_finder]
+description = "Find phone numbers from one email, domain or linkedin URL; domain lookup returns company phones. full=true requests all associated numbers. Results are not guaranteed validated mobile numbers. Cost: ~$0.10/call [spec]."

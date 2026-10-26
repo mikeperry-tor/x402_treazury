@@ -2338,7 +2338,21 @@
                   },
                   "bbox": {
                     "description": "Requires bbox [west, south, east, north] in WGS84 longitude/latitude; no address input. Area 1-100 km², each side at least 500 m, aspect ratio at most 8:1. Surrounding-area context, not individual-building imagery.",
-                    "type": "array"
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
                   },
                   "beforeDate": {
                     "description": "Anchor date for the earlier composite.",
@@ -2375,7 +2389,20 @@
                   "beforeDate",
                   "afterDate"
                 ],
-                "type": "object"
+                "type": "object",
+                "examples": [
+                  {
+                    "bbox": [
+                      -78.68,
+                      35.75,
+                      -78.6,
+                      35.81
+                    ],
+                    "beforeDate": "2024-06-01",
+                    "afterDate": "2026-06-01",
+                    "areaLabel": "Raleigh NC site"
+                  }
+                ]
               }
             }
           }
@@ -8738,6 +8765,12 @@
                     "maximum": 180,
                     "minimum": -180,
                     "type": "number"
+                  },
+                  "requestedUse": {
+                    "description": "Optional proposed use for narrow official NYC Zoning Resolution evidence. Current reviewed aliases: restaurant, cafe, detached single family home. No permission verdict.",
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 100
                   }
                 },
                 "type": "object"
@@ -8760,7 +8793,7 @@
     "/tools/list": {
       "get": {
         "summary": "List free Locus tools",
-        "description": "Discovery endpoint for Locus free tools. Returns coverage, lane availability, source-card, citation, parcel, policy-source, and environmental read endpoints. Full briefs and full reports remain x402/MPP-paid. Use ?compact=1 for a small name/title/description/category/coverageScope catalog, and ?category=<cat> to filter by compact/full category. Free — no payment required ($0); this server never charges for it.",
+        "description": "Discovery endpoint for Locus free tools. Returns coverage, lane availability, source-card, citation, parcel, policy-source, and environmental read endpoints. Full briefs and full reports remain x402/MPP-paid. Use ?compact=1 for a small name/title/description/category/coverageScope catalog, and ?category=<cat> to filter by compact/full category.",
         "tags": [
           "free",
           "discovery",
@@ -8805,7 +8838,7 @@
     "/tools/call": {
       "post": {
         "summary": "Call a free Locus tool",
-        "description": "Call a free Locus tool by name with JSON arguments. Use this for no-charge coverage checks, lane availability, parcel facts, source-card provenance, citation verification, and other bounded local-context reads. This endpoint does not return paid briefs or full paid reports; buy the x402/MPP endpoints only after a free preflight says there is substance here. CALL FORMAT: The free /tools/call endpoint requires a WRAPPED body: {\"name\": \"<tool>\", \"arguments\": { ... }}. Tool inputs go inside `arguments`, NOT at the top level. Paid /api/<slug> routes are the opposite (flat body). Pick `name` from the locus_list catalog and pass that tool's input object as `arguments`. Free — no payment required ($0); this server never charges for it.",
+        "description": "Call a free Locus tool by name with JSON arguments. Use this for no-charge coverage checks, lane availability, parcel facts, source-card provenance, citation verification, and other bounded local-context reads. This endpoint does not return paid briefs or full paid reports; buy the x402/MPP endpoints only after a free preflight says there is substance here. CALL FORMAT: The free /tools/call endpoint requires a WRAPPED body: {\"name\": \"<tool>\", \"arguments\": { ... }}. Tool inputs go inside `arguments`, NOT at the top level. Paid /api/<slug> routes are the opposite (flat body).",
         "tags": [
           "free",
           "tools",
@@ -8829,6 +8862,7 @@
                     "description": "A free tool name from the locus_list catalog.",
                     "enum": [
                       "locus_3dep_availability",
+                      "locus_acs_living_arrangements_series",
                       "locus_address_sales_tax",
                       "locus_agent_feedback",
                       "locus_air_quality_current",
@@ -8838,6 +8872,7 @@
                       "locus_area_incidents",
                       "locus_broadband_check",
                       "locus_capital_projects",
+                      "locus_cbp_county_industry_series",
                       "locus_cbp_zip",
                       "locus_cleanup_sites",
                       "locus_coastal_county_catalog",
@@ -8858,12 +8893,14 @@
                       "locus_fair_market_rents",
                       "locus_fema_events",
                       "locus_fhfa_area_hpi",
+                      "locus_fiscal_source_guide",
                       "locus_flood_determination_inputs",
                       "locus_flood_gauges",
                       "locus_flood_premium_context",
                       "locus_flood_zone",
                       "locus_fraud_alert_pointer",
                       "locus_governing_districts",
+                      "locus_government_meetings",
                       "locus_groundwater_context",
                       "locus_hmda_tract_context",
                       "locus_homeowners_insurance_context",
@@ -8878,16 +8915,19 @@
                       "locus_medicare_spending",
                       "locus_metro_permits",
                       "locus_mitigation_incentives",
+                      "locus_muni_bond_disclosures",
                       "locus_nearby_places",
                       "locus_nfip_claims",
                       "locus_noise_proximity",
                       "locus_nyc_recording_history",
+                      "locus_office_source_guide",
                       "locus_open_disaster_assistance",
                       "locus_opportunity_zone",
                       "locus_ordinance_leads",
                       "locus_owner_mortgage_calendar",
                       "locus_owner_programs",
                       "locus_ownership_loop",
+                      "locus_parcel_code_cases",
                       "locus_parcel_lookup",
                       "locus_parcel_set",
                       "locus_parcel_transfers",
@@ -8897,6 +8937,7 @@
                       "locus_policy_sources",
                       "locus_predevelopment_feasibility",
                       "locus_program_windows",
+                      "locus_property_math_calculator",
                       "locus_property_tax_context",
                       "locus_property_tax_estimate",
                       "locus_property_tax_rates",
@@ -8926,6 +8967,7 @@
                       "locus_tax_payment_status",
                       "locus_tax_sale_calendar",
                       "locus_taxing_districts",
+                      "locus_tenant_statute_pointers",
                       "locus_terrain_profile",
                       "locus_toxic_releases",
                       "locus_traffic_crash_context",
@@ -8953,7 +8995,8 @@
                 "type": "object"
               }
             }
-          }
+          },
+          "description": "Wrapped tool call. The free /tools/call endpoint requires a WRAPPED body: {\"name\": \"<tool>\", \"arguments\": { ... }}. Tool inputs go inside `arguments`, NOT at the top level. Paid /api/<slug> routes are the opposite (flat body)."
         },
         "x-payment-info": {
           "price": {
@@ -9028,7 +9071,303 @@
           }
         }
       }
+    },
+    "/api/locus-legistar-property-meetings": {
+      "post": {
+        "summary": "Property-topic government agenda leads",
+        "description": "Official property-topic agenda leads from verified Legistar jurisdictions, with dated event and item identifiers and government meeting links. Explicit jurisdiction and bounded month only; generic topic labels, not raw agenda text, parcel matches, final actions, or a complete meeting history. Charge-free on no matching lead, capped miss, or source failure.",
+        "tags": [
+          "meetings",
+          "planning",
+          "agenda",
+          "read-only",
+          "paid",
+          "x402",
+          "category:policy"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jurisdiction": {
+                    "type": "string",
+                    "enum": [
+                      "us-nc-chatham",
+                      "us-nc-chapel-hill",
+                      "us-nc-mecklenburg",
+                      "us-co-denver",
+                      "us-wa-seattle"
+                    ],
+                    "description": "Explicit Legistar meeting jurisdiction. Coverage: Chatham County; Town of Chapel Hill; Mecklenburg County; Denver; Seattle. No address or parcel match."
+                  },
+                  "fromDate": {
+                    "description": "Optional inclusive YYYY-MM-DD meeting date; must fall within two months of the current month.",
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  },
+                  "toDate": {
+                    "description": "Optional inclusive YYYY-MM-DD meeting date in the same month as fromDate.",
+                    "type": "string",
+                    "format": "date",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                  }
+                },
+                "required": [
+                  "jurisdiction"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "amount": "0.05",
+          "currency": "USD",
+          "mode": "fixed"
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/locus-piti-transfer-tax-calculator": {
+      "post": {
+        "summary": "Property Carrying-Cost Worksheet",
+        "description": "Fixed-rate mortgage principal, interest, taxes, insurance, HOA and simple closing-cost break-even worksheet. Returns the same records as locus_property_math_calculator. Use this when your client can only call paid x402 routes. Use locus_property_math_calculator instead when you can call Locus free tools (REST tools/call or MCP).",
+        "tags": [
+          "property",
+          "taxes",
+          "calculator",
+          "read-only",
+          "paid",
+          "x402",
+          "category:economics"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "purchasePrice": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "downPaymentPercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "loanAmount": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "interestRatePercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "termYears": {
+                    "default": 30,
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 50
+                  },
+                  "address": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "state": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z]{2}$"
+                  },
+                  "zip": {
+                    "type": "string",
+                    "pattern": "^\\d{5}$"
+                  },
+                  "annualPropertyTaxRatePercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "annualHomeownersInsurance": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "monthlyHoa": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "closingCostAmount": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  },
+                  "monthlySavings": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000000
+                  }
+                },
+                "required": [
+                  "purchasePrice",
+                  "interestRatePercent",
+                  "termYears",
+                  "annualHomeownersInsurance",
+                  "monthlyHoa"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "amount": "0.01",
+          "currency": "USD",
+          "mode": "fixed"
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/locus-special-district-debt-brief": {
+      "post": {
+        "summary": "Municipal Bond And Special-District Disclosure Sources",
+        "description": "Jurisdiction-verified municipal bond and special-district disclosure source pack: MSRB EMMA, official debt and audit portals, Texas county levy candidates and continuing-disclosure queries. Returns the same records as locus_muni_bond_disclosures. Use this when your client can only call paid x402 routes. Use locus_muni_bond_disclosures instead when you can call Locus free tools (REST tools/call or MCP).",
+        "tags": [
+          "bonds",
+          "special-districts",
+          "audits",
+          "read-only",
+          "paid",
+          "x402",
+          "category:economics"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "place": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "state": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z]{2}$"
+                  },
+                  "county": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 100
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "amount": "0.01",
+          "currency": "USD",
+          "mode": "fixed"
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
+    },
+    "/api/locus-tenant-statute-pointers": {
+      "post": {
+        "summary": "State Landlord-Tenant And Owner Tax-Relief Statutory Pointers",
+        "description": "State landlord-tenant and owner tax-relief statute pointers for 51 US state/DC jurisdictions. Returns the same records as locus_tenant_statute_pointers. Use this when your client can only call paid x402 routes. Use locus_tenant_statute_pointers instead when you can call Locus free tools (REST tools/call or MCP).",
+        "tags": [
+          "policy",
+          "rental",
+          "property-tax",
+          "read-only",
+          "paid",
+          "x402",
+          "category:policy"
+        ],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "description": "Specific US street address or ZIP.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "place": {
+                    "description": "US city/county plus state, or address; bare state names are too coarse here.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "state": {
+                    "description": "Two-letter state code; for example AL. Supported jurisdictions are listed in the tool description.",
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-payment-info": {
+          "amount": "0.01",
+          "currency": "USD",
+          "mode": "fixed"
+        },
+        "responses": {
+          "default": {
+            "description": "Provider response; response schema is not modeled in this local catalog."
+          }
+        }
+      }
     }
   },
-  "x-catalog-source": "git:37494402c22f5897bf8660101a7a9784c621f6af:confs/locus/locus_digest.json"
+  "x-catalog-source": {
+    "url": "https://api.locus.report/openapi.json",
+    "sha256": "60b1fc09b55f0454c47ce6cf65da2aff371e90b5464b73a2e48d239d32d7155b",
+    "projection": "Supported paid flat requests; free duals through wrapped list/call gateway; unfinished job lifecycles omitted."
+  }
 }

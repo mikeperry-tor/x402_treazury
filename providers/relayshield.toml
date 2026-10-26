@@ -64,6 +64,24 @@ description = "Detect the chain from address and screen sanctions and abuse sour
 [overrides.relayshield_breach]
 description = "Check whether an email address appears in known data breaches. Returns breach count, source names, dates, and exposed data types (passwords, emails, etc). Call before trusting a new user identity or granting elevated access. Cost: ~$0.10/call [spec]. Vendor bills successful calls."
 
+[overrides.relayshield_agent_bait_scan]
+description = "Scan a GitHub repository URL or owner/repo for agent-facing instructions that request remote execution, instruction overrides or credential-file access. Checks referenced domains against criminal indicators and returns findings. Cost: ~$0.50/call [spec]."
+
+[overrides.relayshield_domain]
+description = "Find phishing lookalikes of domain, including typosquats, homoglyphs and suspicious registration patterns. Returns matched domains found in the wild. Cost: ~$0.50/call [spec]."
+
+[overrides.relayshield_mcp_registry_risk]
+description = "Assess server_url for MCP registry and supply-chain risk, including unverified publishers and known-malicious servers. Returns a verdict and findings. Cost: ~$0.35/call [spec]."
+
+[overrides.relayshield_nhi_exposure]
+description = "Check domain and/or vendor_domains for exposed machine, service-account and CI/CD credentials in criminal stealer logs. Returns findings and severity. Cost: ~$0.40/call [spec]."
+
+[overrides.relayshield_oauth_watchlist]
+description = "Check email for connected-app credential exposure associated with known SaaS breaches. Returns matched apps, breach details and revoke-access links. Cost: ~$0.30/call [spec]."
+
+[overrides.relayshield_session_risk]
+description = "Check email for stolen session cookies in criminal archives, including adversary-in-the-middle (AiTM) exposure. Returns session findings and severity. Cost: ~$0.30/call [spec]."
+
 [overrides.relayshield_identity_graph]
 description = "Correlate an email address against the criminal breach/stealer corpus to surface linked phone numbers, secondary domains, and other identifiers tied to the same compromised identity. Call to map the blast radius of a known compromise across an organization. Cost: ~$0.35/call [spec]. Vendor bills successful calls."
 
