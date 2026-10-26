@@ -12,6 +12,111 @@ struct Fixture {
     arrived: Arc<Semaphore>,
     origin: tokio::task::JoinHandle<()>,
 }
+
+#[tokio::test]
+async fn selector_warnings_wait_for_own_catalogs_and_do_not_repeat_on_unrelated_results() {
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    let _logging = tracing::subscriber::set_default(subscriber);
+    let fixtures = Fixture::new(
+        &(listener(
+            "waiting",
+            "['local','slow']",
+            "include_tools=['local_*','slow_*','slow_missing*']",
+        ) + &listener(
+            "eager",
+            "['local','slow']",
+            "wait_for_catalogs=false\ninclude_tools=['local_*','slow_*','slow_missing*']",
+        ) + &listener(
+            "failed",
+            "['local','optional']",
+            "include_tools=['local_*','optional_read','optional_missing*']",
+        ) + &listener(
+            "local",
+            "['local']",
+            "include_tools=['local_*','local_missing*']",
+        )),
+        true,
+    )
+    .await;
+    let initial = std::fs::read_to_string(log.path()).unwrap();
+    assert!(!initial.contains("selector=\"slow_missing*\""), "{initial}");
+    assert!(
+        !initial.contains("selector=\"optional_missing*\""),
+        "{initial}"
+    );
+    assert_eq!(
+        initial.matches("selector=\"local_missing*\"").count(),
+        1,
+        "{initial}"
+    );
+    let addresses: BTreeMap<_, _> = fixtures.running.addresses().into_iter().collect();
+    let stop = CancellationToken::new();
+    let serving = tokio::spawn(fixtures.running.serve(stop.clone()));
+    // failure/optional are aliases of one download; slow owns the other slot.
+    tokio::time::timeout(Duration::from_secs(5), fixtures.arrived.acquire_many(2))
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    fixtures.slow.add_permits(1);
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        rpc(addresses["waiting"], "initialize"),
+    )
+    .await
+    .unwrap();
+    let after_slow = std::fs::read_to_string(log.path()).unwrap();
+    assert_eq!(
+        after_slow.matches("selector=\"slow_missing*\"").count(),
+        2,
+        "{after_slow}"
+    );
+    assert!(!after_slow.contains("selector=\"optional_missing*\""));
+    fixtures.failure.add_permits(1);
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        rpc(addresses["failed"], "initialize"),
+    )
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            if logs.lines().any(|line| {
+                line.contains("catalog_unavailable") && line.contains("source=\"failure\"")
+            }) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    finish(stop, serving).await;
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert_eq!(
+        logs.matches("selector=\"slow_missing*\"").count(),
+        2,
+        "{logs}"
+    );
+    assert_eq!(
+        logs.matches("selector=\"optional_missing*\"").count(),
+        1,
+        "{logs}"
+    );
+    assert_eq!(
+        logs.matches("selector=\"local_missing*\"").count(),
+        1,
+        "{logs}"
+    );
+    assert!(!logs.contains("selector=\"optional_read\""), "{logs}");
+    assert!(!logs.contains("Tool pattern matches nothing"), "{logs}");
+    fixtures.origin.abort();
+}
 impl Fixture {
     async fn new(listeners: &str, remote: bool) -> Self {
         Self::with_failure_document(listeners, remote, None).await

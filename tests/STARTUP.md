@@ -39,7 +39,13 @@ safe acquisition stages and status. Existing accepted-relay-payment cancellation
 panic fixtures also run with default waiting and verify drain/Store ownership.
 The waiting-endpoint regression also checks that the INFO startup summary
 identifies catalogs still loading instead of announcing discovery completion.
-Publication preserves authored prices, tool order and existing callable snapshots. Deferred collision
+Publication preserves authored prices, tool order and existing callable snapshots.
+Listener selector diagnostics are covered by `deployment::selection_diagnostics`
+and the deferred readiness fixtures: pending catalogs do not produce missing-tool
+warnings, terminal source outcomes trigger one report per affected listener, and
+unrelated completions do not repeat it. Synthetic catalogs verify source name-filter
+causes, opt-in recommendations, listener tags and unchanged exact-selector errors.
+Deferred collision
 regressions cover opposite completion orders, three owners, exact selectors,
 unique tools, listener isolation and captured bindings; strict loading still rejects
 duplicate names.

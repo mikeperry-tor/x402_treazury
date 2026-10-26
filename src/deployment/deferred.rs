@@ -309,6 +309,12 @@ impl Runtime {
                             );
                         }
                     }
+                    selection_diagnostics::report_completed(
+                        &self.deployment.config,
+                        &self.deployment.sources,
+                        &self.deployment.pending_sources,
+                        Some(&id),
+                    );
                 }
             }
             // Do not abandon an accepted publication worker on cancellation.

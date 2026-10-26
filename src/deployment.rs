@@ -8,6 +8,7 @@ use crate::{
 };
 use anyhow::{Context, Result, bail, ensure};
 pub mod catalog_evidence;
+mod selection_diagnostics;
 mod startup;
 pub use startup::StartupConfig;
 mod bootstrap;
@@ -691,6 +692,7 @@ impl Deployment {
                 conflicts.insert(name.clone(), inventory.conflicts);
             }
             validate_selected_cover(wallet_resolution, &sources, &selected)?;
+            selection_diagnostics::report_completed(config, &sources, &pending_sources, None);
             deployment.unavailable_sources = unavailable_sources;
             deployment.pending_sources = pending_sources;
             deployment.sources = sources;
@@ -1572,18 +1574,11 @@ fn listener_tool_inventory(
             .iter()
             .map(|text| {
                 let re = pattern(text)?;
-                if !available.keys().any(|n| re.is_match(n)) {
-                    if text.contains(['*', '?']) {
-                        tracing::warn!(
-                            server = name,
-                            selector = text,
-                            "Tool pattern matches nothing"
-                        );
-                    } else if selector_has_unavailable_owner(text, server, sources, unavailable) {
-                        tracing::warn!(server = name, selector = text, "Tool selector belongs to an unavailable source; validate when its catalog becomes available");
-                    } else {
-                        bail!("server {name}: unknown tool selector {text}");
-                    }
+                if !available.keys().any(|n| re.is_match(n))
+                    && !text.contains(['*', '?'])
+                    && !selector_has_unavailable_owner(text, server, sources, unavailable)
+                {
+                    bail!("server {name}: unknown tool selector {text}");
                 }
                 Ok(re)
             })

@@ -126,6 +126,11 @@ An unresolved exact listener selector is deferred only if its name falls
 exclusively under pending or unavailable sources' resolved prefixes (including inherited
 prefixes). Unknown namespaces and names also attributable to a ready source
 remain errors; an unavailable source cannot hide a ready-source typo.
+Listener wildcard warnings wait until all of that listener's source loads have
+finished, including failures. They are reported once at that point, independently
+of `wait_for_catalogs`; unrelated catalog completions do not repeat them. Exact
+selectors owned exclusively by pending or unavailable sources remain deferred
+without a warning for each selector; source status reports explain availability.
 Inspection, frozen inventories and qualification wait for complete catalogs and
 remain strict. The synchronous unsigned-serving loader can omit remote failures
 only with `sources.NAME.optional_startup = true`; required failures cancel its
@@ -638,6 +643,14 @@ filters the generated catalog by tags and tool names. Tag inclusion matches any
 listed tag, exclusions win, and matching is case-sensitive; untagged tools
 (including help) do not match a positive tag filter. Tool-name patterns support
 `*` and `?`; unmatched exact selectors are errors and unmatched wildcards warn.
+Listener pattern warnings identify `include_tools` or `exclude_tools`. When a
+generated name proves that a source tool-name filter removed a matching tool,
+the warning names the resolved `sources.NAME` setting and a matching tool as
+evidence. This includes source allowlists, exclusions and explicitly enabled
+recommendations. Listener filters cannot restore tools removed by source filters;
+an exclusion for an already removed tool can simply be redundant. Other unmatched
+patterns report source availability and suggest checking source/listener filters,
+without inferring a conflict from tool prefixes alone.
 Duplicate tool names and empty server inventories are errors. Calls enforce
 the same selection as listing. Sources referenced by multiple listeners are
 loaded once and retain one catalog; selected instructions are combined without

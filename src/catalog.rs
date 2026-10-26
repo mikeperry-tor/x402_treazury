@@ -1367,6 +1367,23 @@ fn filter_tool_names(cfg: &Config, tools: &mut Vec<ToolSpec>) -> Result<()> {
     Ok(())
 }
 
+/// Names after operation selection and collision naming, before tool-name filters.
+/// Diagnostics use this without regenerating schemas, pricing or tool descriptions.
+pub(crate) fn tool_names_before_filtering(
+    cfg: &Config,
+    root: &Value,
+    prefix: &str,
+) -> Result<Vec<String>> {
+    let mut names: Vec<_> = selected_operations(cfg, root, prefix)?
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect();
+    if cfg.help_url.is_some() {
+        names.push(format!("{prefix}_help"));
+    }
+    Ok(names)
+}
+
 // Selection and collision naming depend on the entire sorted inventory.
 fn selected_operations(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<(Value, String)>> {
     let mut ops = operations_with_credits(
