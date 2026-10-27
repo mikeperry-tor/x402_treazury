@@ -1,0 +1,20 @@
+description = "Geocoding, routing, customs classification, web evidence and network checks."
+spec = "https://tools.halowerk.com/openapi.json"
+name = "HALOWERK Agent Tools"
+base_url = "https://tools.halowerk.com"
+prefix = "halowerk"
+include = ["/v1", ""]
+help_url = "https://tools.halowerk.com/llms.txt"
+instructions_text = "Preserve source availability, fallback methods and caveats. Screenshot results remain JSON with optional base64 and a short-lived image URL."
+
+[overrides.halowerk_geocode]
+description = "Geocode a query address, optionally restricted by country, or reverse-geocode lat/lon. Returns normalized address components, coordinates and confidence. Cost: ~$0.001/call [spec]."
+
+[overrides.halowerk_route_matrix]
+description = "Calculate distance and travel time between coordinate/address points for car, bike or walking routes. Returns a full or origin/destination matrix; preserve any disclosed straight-line fallback. Cost: ~$0.004/call [spec]."
+
+[overrides.halowerk_hs_classify]
+description = "Suggest six-digit HS customs codes from a product description, with optional chapter and limit. Returns ranked candidates, matched terms and confidence; preserve requests for a binding classification. Cost: ~$0.004/call [spec]."
+
+[overrides.halowerk_injection_scan]
+description = "Inspect supplied text for prompt-injection patterns. Returns findings and risk indicators; a clean scan does not prove content safe. Cost: ~$0.002/call [spec]."

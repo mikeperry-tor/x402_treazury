@@ -1623,3 +1623,90 @@ all request/response/pricing metadata, repair only documented placeholder slots,
 and stop applying a repair if upstream fixes its path. The focused original-path
 witness checks distinct routing shapes and unchanged operation contracts; bundled
 catalog checks validate the full runtime asset without freezing a tool inventory.
+
+## 2s (`2s.toml`)
+
+The vendor schema at `https://2s.io/api/openapi` supplies request contracts and
+`x-payment-info` pricing. `/api` is the naming anchor; `twos` is the tool prefix.
+Base USDC exact offers are available alongside optional metered offers. No funded
+settlement or comparative output quality is established by schema inspection.
+
+Storage, locks, queues, schedules, pub/sub and watchers retain payer-wallet ownership
+across calls. Rotating payment identities cannot preserve that workflow. Batch can
+embed these primitives without a schema-level eligibility boundary, so it is also
+excluded. `/api/countdown/gif` returns unsupported animated GIF bytes. Other model
+and utility calls remain reusable; research selections are editorial. Object-valued
+query filters are serialized as JSON, including OSHA initialPenalty bounds.
+
+## Strale (`strale.toml`)
+
+Use the actual `/x402/v2` paths in `https://api.strale.io/openapi.json`.
+The `/x402/catalog` directory advertises legacy `/x402` URLs; substituting that
+namespace changes the payment contract. An unsigned UK-company request advertised
+Base USDC exact under v2; this does not qualify delivery. Authenticated account,
+credit and transaction workflows are separate from wallet-paid capabilities.
+Public metadata remains available where the schema supports ordinary reads.
+
+Country-specific registry fields and availability differ. Beneficial ownership
+lookup is UK PSC coverage, not universal ownership. Dutch BAG/WOZ/energy-label
+capabilities advertised in prose are absent from the reviewed wallet-paid schema;
+the deployment does not select them. Composite solutions remain reusable but are
+not selected merely because their component tools are useful.
+
+## Maxwell International (`maxwell.toml`)
+
+The remote OpenAPI includes both GET data calls and POST model/payment-diagnostic
+calls; the guide's all-GET summary is incomplete. `/v1/domain/sale` purchases the
+business/domain and requires manual handover, so that lifecycle is excluded.
+Doctor test purchases remain supported as provider-mediated calls: the vendor
+charges each attempt, keeps unused price differences and may deliver no upstream
+result. Their nominal $0.01 metadata is not the total when a seller price is given.
+They are omitted from the research deployment.
+
+Most records come from a continuously refreshed cache. Preserve fetchedAt or
+generatedAt. A specific uncached item can return an uncharged 404 and queue retrieval;
+this is not a completed empty search. Completed searches with no matches can be
+charged. Vendor retry suggestions do not override the ordinary signed-request
+replay rules. Ski prices describe published seasons, not guaranteed bookable fares.
+
+## HALOWERK (`halowerk.toml`)
+
+The remote OpenAPI exposes POST JSON contracts. Prices are published in operation
+prose rather than a structured per-operation payment extension. Selected overrides
+retain those estimates. Screenshot JSON has optional image_base64 and a short-lived
+image_url; it remains JSON because a required image mapping would reject the valid
+include_base64=false result. No automatic URL fetch or image decoding is implied.
+Route matrices can fall back to straight-line distance with a detour factor;
+preserve that method. HS classification returns candidate codes and caveats,
+not a binding customs determination. Prompt-injection scans are advisory patterns,
+not proof that remote instructions are safe to follow.
+
+## Daedalus (`daedalus/provider.toml`)
+
+The local request snapshot originates at
+`https://agents.daedalusdevelopmentgroup.com/openapi.json`. Many operations declare
+AgentIdentity security without a corresponding X-Agent-Id header parameter.
+The importer does not turn security schemes into caller inputs. The snapshot
+materializes the vendor's existing site-audit header on those operations only,
+retains existing parameters and request schemas, and omits response documentation.
+`x-treazury-provenance.identity_header_operations` records the repaired operations.
+No identity is baked into the provider: callers supply their stable identifier.
+
+Refresh with `tools/providers/snapshot_daedalus.py` from a newly downloaded public
+OpenAPI file. Review changed request contracts and queue metadata, rebuild the
+catalog, and recheck deployment selectors. The focused header regression verifies
+wire placement and preservation of the body. This is a runtime request asset,
+not a universal inventory test fixture.
+
+Operator-queue routes are excluded, including audit routes whose automated prose
+contradicts operator_queue backend metadata and 202 artifact fulfillment. Mail,
+mailbox-key registration, watches, wake jobs and scoped queued-artifact retrieval require
+separate ownership/lifecycle support. This includes legacy order-status aliases,
+inbox-key authentication, instant messaging, heartbeat and reputation webhooks,
+mutual auditor handoffs and SLA monitoring/domain-ownership setup. The A2A task
+adapter can submit deferred work outside the reviewed HTTP operations and is
+excluded. Inline per-agent ledger data and public verification keys remain
+representable; persistence alone is not an exclusion. Public discovery and stateless verification
+remain reusable. Signed vendor reports attest the stated checks, not completeness
+or independent certification. Many request bodies are deliberately sparse in the
+vendor schema; use published route-specific inputs rather than inventing fields.

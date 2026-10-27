@@ -1,0 +1,57 @@
+description = "Agent-service audits, provenance verification, public-data lookups and developer research."
+# Request snapshot repairs missing AgentIdentity header parameters; see CAVEATS.md.
+spec = "openapi.json"
+name = "Daedalus"
+base_url = "https://agents.daedalusdevelopmentgroup.com"
+prefix = "daedalus"
+include = ["/v1", ""]
+# Remote mail/key/watch/wake ownership and queued artifact retrieval need a separate lifecycle.
+exclude = ["/a2a", "/v1/audit/mutual", "/v1/reputation/alert", "/v1/reputation/alerts", "/v1/sla/declare", "/v1/sla/report", "/v1/comms/proof", "/v1/inbox/register", "/v1/inbox/messages", "/v1/inbox/status", "/v1/inbox/settings", "/v1/im", "/v1/heartbeat/register", "/v1/heartbeat/status", "/v1/sla/monitor", "/v1/order-status", "/v1/mail/ack", "/v1/mail/fetch", "/v1/mail/inbox", "/v1/mail/keys/register", "/v1/mail/send", "/v1/mail/threads", "/v1/orders", "/v1/wake", "/v1/trust/watch", "/v1/tine-artifacts"]
+# Includes routes whose automated prose contradicts explicit operator-queue metadata.
+exclude_operations = [
+  "POST /v1/agent-checkout-conformance-audit",
+  "POST /v1/agent-discovery-pack",
+  "POST /v1/agent-marketplace-listing-pack",
+  "POST /v1/agent-payment-readiness-audit",
+  "POST /v1/agent-readiness-scorecard",
+  "POST /v1/agent-service-distribution-pack",
+  "POST /v1/agent-supply-chain-baseline",
+  "POST /v1/agent-tool-schema-repair",
+  "POST /v1/ai-agent-buyer-service-bundle",
+  "POST /v1/ai-agent-skill-port",
+  "POST /v1/artifact-receipt-console-pack",
+  "POST /v1/browser-proof",
+  "POST /v1/buyer-agent-smoke-probe",
+  "POST /v1/code-to-endpoint",
+  "POST /v1/ethereum/rpc",
+  "POST /v1/hermes-skill-workflow-dev",
+  "POST /v1/landing-page-conversion-diff",
+  "POST /v1/lead-pack",
+  "POST /v1/local-business-demo-pack",
+  "POST /v1/local-model-swarm-seat",
+  "POST /v1/malware-triage-scan",
+  "POST /v1/mcp-server-audit",
+  "POST /v1/mcp-tool-security-audit",
+  "POST /v1/mcp-tool-server-build",
+  "POST /v1/model/artifact-order",
+  "POST /v1/mpp-onboarding-path-activation",
+  "POST /v1/npm-dependency-risk-scan",
+  "POST /v1/ollama-model-request",
+  "POST /v1/order-intake",
+  "POST /v1/outreach-brief",
+  "POST /v1/production-security-audit",
+  "POST /v1/prompt-injection-red-team",
+  "POST /v1/prompt-injection-scan",
+  "POST /v1/python-dependency-risk-scan",
+  "POST /v1/repo-context-pack",
+  "POST /v1/research-pack",
+  "POST /v1/sandboxed-cli-agent-run",
+  "POST /v1/secret-leak-api-key-scan",
+  "POST /v1/site-audit/reviewed"
+]
+pricing_key = "x-payment-info"
+help_url = "https://agents.daedalusdevelopmentgroup.com/llms.txt"
+instructions_text = "Supply your stable X-Agent-Id when requested; use the same identity for related calls. Signed DDG verdicts attest the vendor's checks, not completeness or independent certification. Preserve unknowns and evidence scope."
+
+[overrides.daedalus_security_audit_deep]
+description = "Audit supplied code or files for static security findings. Returns evidence, remediation and a vendor-signed certificate; preserve detector coverage and unknowns. Cost: ~$0.01/call [spec]."

@@ -1,0 +1,21 @@
+description = "International company registries, ownership, insolvency, compliance and trade research."
+spec = "https://api.strale.io/openapi.json"
+name = "Strale"
+base_url = "https://api.strale.io"
+prefix = "strale"
+# Keep wallet-paid v2 names concise while retaining public discovery and integrity reads.
+include = ["/x402/v2", ""]
+exclude = ["/v1/signup", "/v1/auth", "/v1/api-keys", "/v1/wallet", "/v1/do", "/v1/audit"]
+# Exact operations preserve public /transactions/{id}/verify under the same namespace.
+exclude_operations = [
+  "POST /v1/solutions/{slug}/execute",
+  "GET /v1/transactions",
+  "DELETE /v1/transactions/{id}",
+  "GET /v1/transactions/{id}/dispute",
+  "POST /v1/web3-assurance",
+  "POST /v1/transactions/{id}/audit-token",
+  "POST /v1/transactions/{id}/dispute",
+]
+pricing_key = "x-payment-info"
+help_url = "https://api.strale.io/llms-full.txt"
+instructions_text = "Registry fields and coverage vary by country and source. Preserve source dates and unavailable fields; ownership and screening results are scoped evidence."

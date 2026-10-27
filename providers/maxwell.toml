@@ -1,0 +1,14 @@
+description = "International registries and legislation, public datasets, financial records and ski-travel data."
+spec = "https://api.maxwellinternational.ai/openapi.json"
+name = "Maxwell International"
+base_url = "https://api.maxwellinternational.ai"
+prefix = "maxwell"
+include = ["/v1", ""]
+# Domain/business purchase requires subsequent manual registrar and data handover.
+exclude_operations = ["GET /v1/domain/sale"]
+pricing_key = "x-payment-info"
+help_url = "https://api.maxwellinternational.ai/llms.txt"
+instructions_text = "Preserve fetchedAt/generatedAt and cached coverage. An uncached item may be queued after an uncharged 404; completed empty searches are charged. Missing cached data does not establish absence."
+
+[overrides.maxwell_doctor_buy]
+description = "Test-purchase an x402 URL through Maxwell. Supply url and optional seller price; cost is seller price + $0.01 + 10%. Each attempt is charged even without delivery; unused price differences are retained. Omit price for a $0.01 quote lookup."

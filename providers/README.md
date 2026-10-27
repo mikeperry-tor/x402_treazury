@@ -43,6 +43,11 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Provider | Definition | Catalog |
 | --- | --- | --- |
 | Agent402 | `agent402.toml` | Full supported catalog; advisory web research recommendations and lowercase tags |
+| 2s | `2s.toml` | Public-data catalog; wallet-owned infrastructure, nested batch and GIF output excluded |
+| Strale | `strale.toml` | Wallet-paid v2 capabilities plus supported public discovery |
+| Maxwell International | `maxwell.toml` | Public data and travel; manual domain transfer excluded |
+| HALOWERK | `halowerk.toml` | Full JSON tool catalog; optional screenshot base64 retained as JSON |
+| Daedalus | `daedalus/provider.toml` | Identity-header request repair; queued fulfillment and persistent ownership excluded |
 | AgData | `agdata.toml` | Web/social data; both x402-capable aliases; screenshot/PDF JSON |
 | AgOSINT | `agosint.toml` | x402 registry gateway; root server URL repair |
 | AGProxy | `agproxy.toml` | Complete pinned `agproxy-openapi.json`; residential fetch and proxy packs |

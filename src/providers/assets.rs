@@ -2,6 +2,7 @@
 macro_rules! provider_manifest {
     ($consumer:ident) => {
         $consumer! {
+            ("2s", "providers/2s.toml", None),
             ("agdata", "providers/agdata.toml", None),
             ("agent402", "providers/agent402.toml", None),
             ("agentfund", "providers/agentfund.toml", None),
@@ -17,6 +18,7 @@ macro_rules! provider_manifest {
             ("coinmarketcap", "providers/coinmarketcap/provider.toml", Some("providers/coinmarketcap/openapi.json")),
             ("concordance", "providers/concordance/provider.toml", Some("providers/concordance/openapi.json")),
             ("curl", "providers/curl/provider.toml", Some("providers/curl/openapi.json")),
+            ("daedalus", "providers/daedalus/provider.toml", Some("providers/daedalus/openapi.json")),
             ("datakoot", "providers/datakoot.toml", None),
             ("deepline", "providers/deepline.toml", None),
             ("degenscan", "providers/degenscan.toml", None),
@@ -24,6 +26,7 @@ macro_rules! provider_manifest {
             ("genuinegood", "providers/genuinegood.toml", None),
             ("glassnode", "providers/glassnode/provider.toml", Some("providers/glassnode/openapi.json")),
             ("google-trends", "providers/google-trends.toml", None),
+            ("halowerk", "providers/halowerk.toml", None),
             ("hirescrape", "providers/hirescrape.toml", None),
             ("horizonpulse", "providers/horizonpulse.toml", Some("providers/horizonpulse-openapi.json")),
             ("ipintel", "providers/ipintel.toml", None),
@@ -31,6 +34,7 @@ macro_rules! provider_manifest {
             ("locus", "providers/locus/provider.toml", Some("providers/locus/openapi.json")),
             ("lonestar", "providers/lonestar.toml", None),
             ("marketintelligence", "providers/marketintelligence.toml", None),
+            ("maxwell", "providers/maxwell.toml", None),
             ("nansen", "providers/nansen.toml", None),
             ("netintel", "providers/netintel.toml", None),
             ("newsgurus", "providers/newsgurus/provider.toml", Some("providers/newsgurus/openapi.json")),
@@ -43,6 +47,7 @@ macro_rules! provider_manifest {
             ("socialfetch", "providers/socialfetch.toml", None),
             ("stableenrich", "providers/stableenrich.toml", None),
             ("stabletravel", "providers/stabletravel/provider.toml", Some("providers/stabletravel/openapi.json")),
+            ("strale", "providers/strale.toml", None),
             ("straits", "providers/straits/provider.toml", Some("providers/straits/openapi.json")),
             ("vaaya", "providers/vaaya.toml", None),
             ("voipstore", "providers/voipstore.toml", None),

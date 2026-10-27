@@ -3,6 +3,96 @@ use serde_json::Value;
 use std::path::Path;
 
 #[tokio::test]
+async fn daedalus_materializes_identity_security_without_putting_identity_in_the_body() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/daedalus/provider.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("../providers/daedalus/openapi.json")).unwrap();
+    for operation in doc["x-treazury-provenance"]["identity_header_operations"]
+        .as_array()
+        .unwrap()
+    {
+        let (method, path) = operation.as_str().unwrap().split_once(' ').unwrap();
+        let op = &doc["paths"][path][method.to_lowercase()];
+        assert!(
+            op["security"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s.get("AgentIdentity").is_some())
+        );
+        assert_eq!(
+            op["parameters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|p| p["in"] == "header" && p["name"] == "X-Agent-Id")
+                .count(),
+            1
+        );
+    }
+    let tools = catalog::build_tools(&cfg, &doc, "daedalus").unwrap();
+    for name in ["daedalus_site_audit", "daedalus_security_audit_deep"] {
+        let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+        let payload = if name == "daedalus_site_audit" {
+            json!({"url":"https://example.com"})
+        } else {
+            json!({"code":"let answer = 42;", "focus":"injection"})
+        };
+        let mut arguments = payload.as_object().unwrap().clone();
+        arguments.insert("X-Agent-Id".into(), json!("fixture-agent"));
+        let route = tool
+            .route(cfg.base_url.as_ref().unwrap(), &arguments)
+            .unwrap();
+        assert_eq!(route.headers["x-agent-id"], "fixture-agent");
+        assert_eq!(route.body, Some(payload));
+        arguments.remove("X-Agent-Id");
+        assert!(
+            tool.route(cfg.base_url.as_ref().unwrap(), &arguments)
+                .is_err()
+        );
+    }
+    // These audits have automated prose but an operator-queue backend.
+    for path in ["/v1/prompt-injection-scan", "/v1/mcp-tool-security-audit"] {
+        assert_eq!(doc["paths"][path]["post"]["x-backend"], "operator_queue");
+        assert!(!tools.iter().any(|tool| tool.path == path));
+    }
+    for path in [
+        "/v1/order-status/{order_id}",
+        "/v1/inbox/register",
+        "/v1/im/send",
+        "/v1/heartbeat/register",
+        "/v1/reputation/alert",
+        "/v1/sla/monitor",
+        "/a2a",
+    ] {
+        assert!(
+            doc["paths"].get(path).is_some(),
+            "missing lifecycle witness {path}"
+        );
+        assert!(!tools.iter().any(|tool| tool.path == path));
+    }
+    for path in [
+        "/v1/inbox/lookup",
+        "/v1/mail/keys/lookup",
+        "/v1/heartbeat/leaderboard",
+        "/v1/tine/key-bind",
+        "/v1/pgp/keys/publish",
+    ] {
+        assert!(
+            tools.iter().any(|tool| tool.path == path),
+            "public or inline workflow hidden: {path}"
+        );
+    }
+    assert!(!tools.iter().any(|tool| tool.path.starts_with("/v1/wake/")));
+}
+
+#[tokio::test]
 async fn lonestar_routes_to_the_direct_challenge_resource_instead_of_the_redirecting_gateway() {
     use serde_json::json;
     use x402_treazury::{catalog, config};

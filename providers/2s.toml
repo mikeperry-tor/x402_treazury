@@ -1,0 +1,13 @@
+description = "Public records, scientific datasets, aviation, climate, vulnerability evidence and market research."
+spec = "https://2s.io/api/openapi"
+name = "2s"
+base_url = "https://2s.io"
+prefix = "twos"
+include = ["/api", ""]
+# These resources retain ownership under the paying wallet across calls.
+exclude = ["/api/store", "/api/lock", "/api/queue", "/api/schedule", "/api/pubsub", "/api/watchers"]
+# Batch can invoke wallet-owned primitives; animated GIF output is unsupported.
+exclude_operations = ["POST /api/batch/run", "GET /api/countdown/gif"]
+pricing_key = "x-payment-info"
+help_url = "https://2s.io/llms.txt"
+instructions_text = "Preserve original sources, observation dates and per-feed availability. Trial responses are marked; missing records and unavailable feeds do not establish absence."
