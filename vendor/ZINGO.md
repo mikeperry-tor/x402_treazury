@@ -9,14 +9,18 @@ selection; its merge regression runs through public traits in the application
 SDK integration target.
 
 `zingo-sources.json` records the upstream source archive hash, every retained
-Pepper snapshot file, its patches and the copied-code license notice.
+Pepper snapshot file, its ordered patches, original upstream file hashes and the
+copied-code license notice.
 `python3 vendor/verify_zingo.py` verifies those files and rejects unexpected Pepper
-files. `zingo-progress.patch` contains only Pepper's `client.rs` and `scan/task.rs`
+files. It reverses all patches in a temporary copy and compares the complete
+restored tree with the pinned upstream Git source.
+`pepper-sync-progress.patch` contains only Pepper's `client.rs` and `scan/task.rs`
 changes; `pepper-sync-diagnostics.patch` covers `client/fetch.rs`, `error.rs`,
 `sync.rs`, `wallet/traits.rs` and `witness.rs`. The payload accepted by the public
 sync trait has a public re-export and `from_parts` constructor; the witness module
-and payload fields remain private. Standalone manifest adaptations remain
-necessary for the path dependency; upstream unit-test dependencies are retained
+and payload fields remain private. `pepper-sync-manifest.patch` records the
+standalone manifest adaptations necessary for the path dependency; upstream
+unit-test dependencies are retained
 but are not selected by application checks. Never edit Cargo caches or
 reference checkouts to implement a dependency patch. The
 [checkout ledger](README.md#checkout-retirement-tracking) owns remaining blockers

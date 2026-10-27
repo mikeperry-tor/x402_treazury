@@ -1,0 +1,136 @@
+--- a/pepper-sync/Cargo.toml
++++ b/pepper-sync/Cargo.toml
+@@ -1,81 +1,57 @@
+ [package]
+-name = "pepper-sync"
+-description = "Pepper-sync is a crate providing a sync engine for the zcash network."
+-authors = ["<zingo@zingolabs.org>"]
+-version = "0.6.0"
+-edition = "2024"
+-repository = "https://github.com/zingolabs/zingolib"
+-homepage = "https://github.com/zingolabs/zingolib"
+-license = "MIT"
++"name" = "pepper-sync"
++"description" = "Pepper-sync is a crate providing a sync engine for the zcash network."
++"authors" = ["<zingo@zingolabs.org>"]
++"version" = "0.6.0"
++"edition" = "2024"
++"repository" = "https://github.com/zingolabs/zingolib"
++"homepage" = "https://github.com/zingolabs/zingolib"
++"license" = "MIT"
++"autotests" = false
++"autoexamples" = false
++"autobenches" = false
++
++[features]
++"default" = ["wallet_essentials"]
++"wallet_essentials" = ["dep:byteorder", "dep:zcash_encoding"]
++"test-features" = []
++
++[dependencies]
++"zingo-memo" = {"version" = "0.2.0", "git" = "https://github.com/zingolabs/zingolib", "rev" = "bfb0a2156819ea7f75a9b09b1724abfd06c8925e"}
++"zingo-status" = {"version" = "0.2.2", "git" = "https://github.com/zingolabs/zingolib", "rev" = "bfb0a2156819ea7f75a9b09b1724abfd06c8925e"}
++"zingo-netutils" = {"version" = "6.0.0", "features" = ["globally-public-transparent"], "git" = "https://github.com/zingolabs/zingolib", "rev" = "bfb0a2156819ea7f75a9b09b1724abfd06c8925e"}
++"incrementalmerkletree" = {"version" = "0.9.0"}
++"orchard" = {"version" = "0.16.0"}
++"sapling-crypto" = {"version" = "0.9.0"}
++"shardtree" = {"version" = "0.8.0"}
++"zcash_address" = {"version" = "=0.14.0-pre.1"}
++"zcash_client_backend" = {"version" = "=0.25.0-pre.1", "features" = ["orchard", "transparent-inputs", "unstable-serialization"]}
++"zcash_encoding" = {"version" = "0.5.0", "optional" = true}
++"zcash_keys" = {"version" = "=0.17.0-pre.1", "features" = ["orchard", "sapling", "transparent-inputs"]}
++"zcash_note_encryption" = {"version" = "0.5.1"}
++"zcash_primitives" = {"version" = "=0.31.0-pre.1", "features" = ["non-standard-fees"]}
++"zcash_protocol" = {"version" = "=0.11.0-pre.0"}
++"zcash_transparent" = {"version" = "=0.11.0-pre.1"}
++"zcash_script" = {"version" = "0.6.0"}
++"bip32" = {"version" = "0.6.0", "default-features" = false}
++"zip32" = {"version" = "0.3.0"}
++"jubjub" = {"version" = "0.11.1"}
++"subtle" = {"version" = "2.6.1"}
++"futures" = {"version" = "0.3"}
++"tokio" = {"version" = "1"}
++"tonic" = {"version" = "0.14", "features" = ["tls-aws-lc", "tls-webpki-roots"]}
++"tracing" = {"version" = "0.1"}
++"memuse" = {"version" = "0.2"}
++"crossbeam-channel" = {"version" = "0.5"}
++"rayon" = {"version" = "1"}
++"thiserror" = {"version" = "2"}
++"byteorder" = {"version" = "1", "optional" = true}
++"hex" = {"version" = "0.4"}
++"simple-mermaid" = {"version" = "0.2.0"}
+ 
+ [badges]
+-maintenance = { status = "actively-developed" }
+-
+-[features]
+-default = ["wallet_essentials"]
+-# utility not necessary for the sync engine but essential for wallets using pepper_sync::primitives for wallet functionality
+-wallet_essentials = ["dep:byteorder", "dep:zcash_encoding"]
+-# exposes test constructors for wallet types
+-test-features = []
+-
+-[dependencies]
+-# Zingo
+-zingo-memo.workspace = true
+-zingo-status.workspace = true
+-zingo-netutils.workspace = true
+-
+-# Zcash
+-incrementalmerkletree.workspace = true
+-orchard.workspace = true
+-sapling-crypto.workspace = true
+-shardtree.workspace = true
+-zcash_address.workspace = true
+-zcash_client_backend = { workspace = true, features = [
+-    "unstable-serialization",
+-] }
+-zcash_encoding = { workspace = true, optional = true }
+-zcash_keys.workspace = true
+-zcash_note_encryption.workspace = true
+-zcash_primitives.workspace = true
+-zcash_protocol.workspace = true
+-zcash_transparent.workspace = true
+-zcash_script.workspace = true
+-
+-# Protocol
+-bip32.workspace = true
+-zip32.workspace = true
+-
+-# Cryptography
+-jubjub.workspace = true
+-subtle.workspace = true
+-
+-# Async
+-futures.workspace = true
+-tokio.workspace = true
+-
+-# Client
+-tonic.workspace = true
+-
+-# Logging
+-tracing.workspace = true
+-
+-# Metrics
+-memuse.workspace = true
+-
+-# Parallel processing
+-crossbeam-channel.workspace = true
+-rayon.workspace = true
+-
+-# Error handling
+-thiserror.workspace = true
+-
+-# Serialization
+-byteorder = { workspace = true, optional = true }
+-hex.workspace = true
+-
+-# Documentation
+-simple-mermaid.workspace = true
++"maintenance" = {"status" = "actively-developed"}
+ 
+ [dev-dependencies]
+-proptest.workspace = true
+-zcash_protocol = { workspace = true, features = [ "local-consensus"] }
++"proptest" = {"version" = "1.6.0"}
++"zcash_protocol" = {"version" = "=0.11.0-pre.0", "features" = ["local-consensus"]}

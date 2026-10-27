@@ -121,8 +121,9 @@ sandbox and validates prefetched proving parameters. The release runner discover
 the resolved upstream SDK through frozen metadata in each isolated environment,
 records its observed Git inputs and actual generated descriptor, and retains that
 evidence on failure. Shared-cache comparison does not qualify independent caches.
-`vendor/verify_zingo.py` verifies only the retained Pepper snapshot/patches and
-copied-code notice; both graphs use ordinary pinned upstream SDK/netutils sources.
+`vendor/verify_zingo.py` verifies the retained Pepper snapshot/patches and
+copied-code notice, including an exact upstream-tree comparison after patch
+reversal; both graphs use ordinary pinned upstream SDK/netutils sources.
 
 `make build` (also bare `make`) produces `target/release/x402_treazury` with
 incremental caches disabled, including for the protoc helper. `make build-dev`

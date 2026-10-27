@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Verify the retained Pepper snapshot, patches and copied-code license."""
+"""Verify Pepper's snapshot and restore its exact upstream tree in temporary storage."""
 import hashlib
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 
 root = Path(__file__).resolve().parent
 manifest = json.loads((root / "zingo-sources.json").read_text())
@@ -18,4 +21,22 @@ for path in (root / "pepper-sync").rglob("*"):
         errors.append(str(path.relative_to(root)))
 if errors:
     raise SystemExit("Zingo vendor verification failed: " + ", ".join(errors))
-print(f"Verified {len(manifest['files'])} snapshot and patch files from {manifest['revision']}")
+
+source = root / "pepper-sync"
+expected = manifest["original_files"]
+actual = {path.relative_to(source).as_posix() for path in source.rglob("*") if path.is_file()}
+if actual != set(expected):
+    raise SystemExit(f"Pepper upstream inventory differs: {actual ^ set(expected)}")
+with tempfile.TemporaryDirectory() as directory:
+    restored = Path(directory) / "pepper-sync"
+    shutil.copytree(source, restored)
+    for name in reversed(manifest["patches"]):
+        subprocess.run(["patch", "--batch", "--fuzz=0", "-R", "-p2", "-d", str(restored),
+                        "-i", str(root / name)], check=True, capture_output=True)
+    actual = {path.relative_to(restored).as_posix() for path in restored.rglob("*") if path.is_file()}
+    if actual != set(expected):
+        raise SystemExit(f"Restored Pepper inventory differs: {actual ^ set(expected)}")
+    for name, digest in expected.items():
+        if hashlib.sha256((restored / name).read_bytes()).hexdigest() != digest:
+            raise SystemExit(f"pepper-sync/{name}: differs from upstream plus declared patches")
+print(f"Verified Pepper: {len(expected)} upstream files plus declared patches at {manifest['revision']}")

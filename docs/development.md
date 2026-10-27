@@ -583,7 +583,8 @@ same-height reorg truncation and synthetic branch hashes; the application keeps
 its lifecycle regressions. HTTP transport patches preserve the
 [network inactivity/cancellation contract](network-egress.md#timeout-budgets-and-concurrency).
 `vendor/verify.py` checks HTTP transport sources; `verify_zingo.py` checks the
-remaining Pepper snapshot, patches and copied-code notice. Upstream license
+remaining Pepper snapshot, patches and copied-code notice, then reverses the
+patches and compares its complete tree with upstream file hashes. Upstream license
 texts are included. Deliberate source/extra-file mutations must still fail that
 verification. SDK Git revision, tags, dirty status and actual generated descriptor
 are release inputs; see [release qualification](reproducible-builds.md).
