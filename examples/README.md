@@ -17,8 +17,9 @@ the original privacy template; renaming the template does not migrate state.
 its research sources across eight task-oriented endpoints using four topical
 wallet profiles: web; social; financials for business, finance, property and security;
 and global for world and the toolbox. Ordered source `send_tools` rules group
-tool families, exclude editorial choices and express sharing with destination arrays. Each source has one primary
-catch-all for future unmatched tools; listeners retain endpoint properties,
+tool families, exclude editorial choices and express sharing with destination
+arrays. Each source has one final catch-all that assigns or excludes unmatched
+tools; listeners retain endpoint properties,
 instructions, capabilities and wallet references. See
 [source tool distribution](../docs/configuration.md#source-tool-distribution) for
 matching, potential bindings and `config check --explain-routing` inspection.
@@ -33,6 +34,29 @@ resolvable. Exa, Trends and Concordance vendor help tools are omitted here;
 complete input schemas and inline guidance cover the selected calls without
 HTTP setup instructions or unavailable follow-ups. These are capability-based selections, not claims of identical
 upstream results or comparative live qualification.
+
+The desk also selects direct scientific and public-record datasets from 2s,
+additional national registries and scoped ownership/insolvency evidence from Strale,
+and international legislation, open-data catalogs and selected company records from
+Maxwell. HALOWERK adds geocoding, route matrices, HS candidates and text-injection
+checks; Daedalus adds static code and skill-content scans. These sources select
+and route tools entirely through ordered `send_tools` rules.
+Explicit destination selectors precede a final exclusion; comments name existing
+alternatives or explain why the remaining workflows are outside this research selection.
+Reusable provider definitions remain broader than these editorial selections.
+
+Biomedical datasets currently route to business, bibliographic identities to web,
+and aviation/trade/environment observations to world. A dedicated science/health
+endpoint would group biological/chemical references, drug/device evidence, hospital
+quality, surveillance and research funding. A travel/mobility endpoint could combine
+2s aviation with Maxwell ski/menu/trip tools and the separately bundled StableTravel
+provider. Legal/government research could also move from business into its own
+endpoint if legislative, case-law and political-record work becomes frequent.
+These are optional reorganizations; this template keeps eight listeners and its
+existing wallet assignments. Sports data and generative/developer workflows remain
+available through bundled provider selection rather than new default listeners.
+Published schemas and estimates do not establish comparative output quality,
+Tor delivery or funded settlement.
 
 Tool search reads the loaded catalog without provider requests. Prefer bundled
 provider listing before remote discovery; remote discovery can incur several
