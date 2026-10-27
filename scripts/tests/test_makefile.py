@@ -44,7 +44,7 @@ else:
         if os.environ.get('FAIL_PROTOC'):
             sys.exit(42)
         print('/fixture/protoc with spaces')
-    if os.environ.get('FAIL_ARGUMENT') in sys.argv[1:]:
+    if os.environ.get('FAIL_ARGUMENT') in sys.argv[1:] and (not os.environ.get('FAIL_COMMAND') or sys.argv[1] == os.environ['FAIL_COMMAND']):
         sys.exit(43)
 '''
         for name in ('cargo', 'rustc', 'python3'):
@@ -185,7 +185,6 @@ else:
                             '--', '--test-threads=8'),
             ],
             'check-default': [
-                application('test', '-p', 'pepper-sync', '--lib', 'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context', '--', '--exact'),
                 application('test', '--all-targets', '--', '--test-threads=8'),
             ],
             **{stage: [application('test', '--features', 'zcash-testutils', '--lib', case, '--', '--test-threads=1')]
@@ -238,12 +237,13 @@ else:
         expected = [command for stage in self.check_stages().values() for command in stage]
         for flags in ([], ['-j8'], ['-k']):
             for failure in ('vendor/verify.py', '--bins', 'clippy', 'sdk_compat',
-                            'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context',
+                            '--all-targets',
                             'treasury::send::proving_tests', 'treasury::lifecycle_tests',
                             'synthetic_address_codec_is_scoped_to_its_test_client'):
                 with self.subTest(flags=flags, failure=failure):
-                    _, calls = self.make(*flags, 'check', success=False, FAIL_ARGUMENT=failure)
-                    stop = next(i for i, (_, args) in enumerate(expected) if failure in args) + 1
+                    command = 'test' if failure == '--all-targets' else ''
+                    _, calls = self.make(*flags, 'check', success=False, FAIL_ARGUMENT=failure, FAIL_COMMAND=command)
+                    stop = next(i for i, (_, args) in enumerate(expected) if failure in args and (not command or args[0] == command)) + 1
                     self.assertEqual(self.check_commands(calls), expected[:stop])
 
     def test_check_forwards_interpreter_and_complexity_baseline_to_stages(self):

@@ -519,20 +519,24 @@ the repository.
 
 ### Combined workspace verification
 
-The root workspace includes the application, Pepper Sync and the complexity
-analyzer. Ordinary commands select only the application through `default-members`;
-the analyzer is selected explicitly for development checks and Pepper is selected
-explicitly for its private merge regression. Other vendored dependencies remain
+The root workspace includes the application and complexity analyzer. Ordinary
+commands select only the application through `default-members`; the analyzer is
+selected explicitly for development checks. Vendored dependencies remain
 nonmembers. All application tests use the root lockfile, patches, profile and
-build cache. The SDK wallet fixture lives in `tests/sdk_compat.rs`; it exercises
-public SDK restore/address continuity alongside Ethereum payer construction.
-Payment signing, MCP server and independent cryptographic-vector tests remain
-in their normal integration targets.
+build cache. The SDK fixtures in `tests/sdk_compat.rs` exercise public SDK
+restore/address continuity alongside Ethereum payer construction, and actual
+three-pool merge conflicts through public sync traits. Payment signing, MCP server
+and independent cryptographic-vector tests remain in their integration targets.
 
-`make check` explicitly runs the real three-pool merge-conflict fixture:
+The merge fixture in `tests/support/sdk_merge.rs` preserves typed Sapling, Orchard
+and Ironwood `ScanMerge` conflict context, retry refusal and absence of fetch
+requests. Pepper exposes a constructor for the payload already accepted by its
+public sync trait. This keeps the regression in the application test graph without
+building Pepper's separate unit-test executable or enabling its development
+features. Run the fixture directly with:
 
 ```sh
-make test CARGO_ARGS='-p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context' TEST_ARGS='--exact'
+make test CARGO_ARGS='--test sdk_compat' TEST_ARGS='sdk_merge::scan_merge_conflict_preserves_pool_context --exact'
 ```
 
 Run source verification and the combined suite with the reviewed vendored patches:

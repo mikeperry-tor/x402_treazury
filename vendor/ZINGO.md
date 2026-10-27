@@ -4,16 +4,20 @@ The application and its SDK integration tests use ordinary upstream `zingolib` a
 `zingo-netutils` Git sources at revision
 `bfb0a2156819ea7f75a9b09b1724abfd06c8925e` (v7.0.0). Neither crate has a local
 snapshot or override. The same cohort's `pepper-sync/` remains patched; the shared
-workspace retains its path override. The root workspace includes Pepper only so
-its private merge regression can execute with the application lockfile.
+workspace retains its path override. Pepper is excluded from workspace test
+selection; its merge regression runs through public traits in the application
+SDK integration target.
 
 `zingo-sources.json` records the upstream source archive hash, every retained
 Pepper snapshot file, its patches and the copied-code license notice.
 `python3 vendor/verify_zingo.py` verifies those files and rejects unexpected Pepper
 files. `zingo-progress.patch` contains only Pepper's `client.rs` and `scan/task.rs`
 changes; `pepper-sync-diagnostics.patch` covers `client/fetch.rs`, `error.rs`,
-`sync.rs` and `wallet/traits.rs`. Standalone manifest adaptations and Pepper's
-upstream unit-test dependencies remain necessary. Never edit Cargo caches or
+`sync.rs`, `wallet/traits.rs` and `witness.rs`. The payload accepted by the public
+sync trait has a public re-export and `from_parts` constructor; the witness module
+and payload fields remain private. Standalone manifest adaptations remain
+necessary for the path dependency; upstream unit-test dependencies are retained
+but are not selected by application checks. Never edit Cargo caches or
 reference checkouts to implement a dependency patch. The
 [checkout ledger](README.md#checkout-retirement-tracking) owns remaining blockers
 and candidate qualification.
@@ -84,11 +88,11 @@ recommendations are unchanged. The application extracts fixed labels and discard
 underlying errors before logs/status; no tree positions, hashes or upstream prose
 are exposed. Fetch spans are debug-only; mempool events contain fixed labels and
 numeric status codes. Replace these changes only with equivalent safe context and
-instrumentation. The private three-pool merge-conflict fixture must remain
-executable, not just copied in a dependency:
+instrumentation. The three-pool merge-conflict fixture remains executable in the
+application SDK integration target without a separate SDK unit-test build:
 
 ```sh
-make test CARGO_ARGS='-p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context' TEST_ARGS='--exact'
+make test CARGO_ARGS='--test sdk_compat' TEST_ARGS='sdk_merge::scan_merge_conflict_preserves_pool_context --exact'
 ```
 
 See [workspace verification](../docs/development.md#combined-workspace-verification).

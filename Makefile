@@ -110,7 +110,6 @@ check-compat: toolchain
 	@$(call application_cargo,test,--test sdk_compat --test payments --test server --test crypto_vectors -- --test-threads='$(TEST_THREADS)')
 
 check-default: toolchain
-	@$(call application_cargo,test,-p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context -- --exact)
 	@$(call application_cargo,test,--all-targets -- --test-threads='$(TEST_THREADS)')
 
 check-proving: toolchain
@@ -146,7 +145,7 @@ help:
 	  'make check-static       Format, tooling, complexity and provenance' \
 	  'make check-clippy       Production compiler warnings and all-target zcash-regtest Clippy' \
 	  'make check-compat       SDK wallet, payment, MCP and crypto integration tests' \
-	  'make check-default      SDK diagnostic and all default test targets' \
+	  'make check-default      All default application test targets' \
 	  'make check-proving      Synthetic treasury proving tests' \
 	  'make check-lifecycle    Synthetic treasury lifecycle tests' \
 	  'make check-codec        Synthetic address-codec isolation test' \

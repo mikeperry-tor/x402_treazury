@@ -3,7 +3,7 @@
   "archive_sha256": "82102e4f11ac4ab065b823f00be631921c04b90752d7fed60476aba8d8469a71",
   "files": {
     "ZINGO-LICENSE-MIT": "672ceeb8374de82f6e088f60cc6a93db60477fec9deb539673460c1708c243e4",
-    "pepper-sync-diagnostics.patch": "e4049332cb9ef987af0f2aafb27412d6d680dd392cc951f486fe2d0c4232b160",
+    "pepper-sync-diagnostics.patch": "2fdb5a2f2e8731e6ff6c7df3eb3aab4b40336c5fefa1c0031db7abda90414232",
     "pepper-sync/CHANGELOG.md": "a3506ac78c2c88dbfb8794e0946ef9aceeb061bb7ce141bf5b3ab7bc97cc75a1",
     "pepper-sync/Cargo.toml": "eb20c50fa170ae776e39f34435ab459a5f98cbacde4ec64b5cf570a317afce82",
     "pepper-sync/LICENSE-MIT": "6a5611d5f6589640aa9c14ec738527295ee93242954fcfff1fd71d75ee0a325a",
@@ -37,8 +37,8 @@
     "pepper-sync/src/utils/transaction.rs": "ae89558d436f0208ac5fb0e44e8bdbeaa17d7aa3845f691d4e994f8680806d59",
     "pepper-sync/src/wallet.rs": "5b237416b9aeed6111a6dad2da01e016fe93a28cbfba18b43df687f0ce0e8dda",
     "pepper-sync/src/wallet/serialization.rs": "e78533d592478ee3be98bd0da37ccc8b7bccc39a7768ed6d371cc363e2c722dc",
-    "pepper-sync/src/wallet/traits.rs": "faae09d2cce9414f3fe0c05cde1c99aa63cca88614133e82606b424fe9461062",
-    "pepper-sync/src/witness.rs": "21dcba95e70cdf12f98f3482a253cf00f21135abc81dd0519c1417616983d4f7",
+    "pepper-sync/src/wallet/traits.rs": "f9350764fb45e6ce2ca39056b5c465e9fe2b51921378c3ed44dcdb54be9fba02",
+    "pepper-sync/src/witness.rs": "834e88097908e41414a5b6db189377711454eb769cea98344b5cf95918df20ea",
     "zingo-progress.patch": "f408bcd21630ffea07b4a4e29939101574fc59d4ed200caeeadde2ab45946b59"
   }
 }

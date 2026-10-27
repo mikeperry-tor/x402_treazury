@@ -7,15 +7,16 @@ publish = false
 default-run = "x402_treazury"
 
 [workspace]
-members = [".", "vendor/pepper-sync", "tools/complexity"]
+members = [".", "tools/complexity"]
 default-members = ["."]
 resolver = "3"
-# Other vendored dependencies are not test packages in this workspace.
+# Vendored dependencies are not test packages in this workspace.
 exclude = [
     "vendor/reqwest",
     "vendor/hyper",
     "vendor/h2",
     "vendor/rmcp",
+    "vendor/pepper-sync",
 ]
 
 # Keep file/line backtraces without full type and variable debug information.
@@ -92,6 +93,8 @@ x402-reqwest = "=2.0.2"
 x402-types = "=2.0.2"
 
 [dev-dependencies]
+incrementalmerkletree = "0.9"
+orchard = { version = "0.16.0", default-features = false }
 tokio = { version = "1", features = ["test-util"] }
 h2 = "0.4"
 alloy-sol-types = "1.5"

@@ -1,4 +1,6 @@
 use std::num::NonZeroU32;
+#[path = "support/sdk_merge.rs"]
+mod sdk_merge;
 use x402_treazury::payment::{Payer, SpendPolicy};
 use zingolib::{
     config::{ClientConfig, WalletConfig},

@@ -38,7 +38,9 @@ repository does not retire its maintenance responsibility.
 Five patched crate directories remain. Alloy uses unpatched registry sources;
 `zingolib` and `zingo-netutils` use the coherent pinned upstream Git cohort, and
 `lightwallet-protocol` 0.4.0 supplies Ironwood fields without a Git override.
-Pepper retains its path override and private merge-fixture workspace membership.
+Pepper retains its path override; its public-trait merge regression runs in the
+application SDK integration target. Vendored crates are excluded from workspace
+test selection.
 The [unfinished assessment plan](../docs/plans/vendor_retirement.md) preserves
 remaining assessment requirements; this ledger owns current blockers, next actions
 and upstream follow-up.
@@ -49,7 +51,7 @@ and upstream follow-up.
 | `h2` | Pending-open queue cleanup and scheduler wakeups in `h2-transport.patch`. | Follow Hyper assessment; coordinate with #962 and assess zero-capacity cleanup, explicit resets and cancellation wakeups before qualification independently of Hyper's status. | [#962](https://github.com/hyperium/h2/pull/962) addresses [#878](https://github.com/hyperium/h2/issues/878); open/unmerged at inspection, head `26efaaabe9389d0bbf868787a75ef5a7c4676d1d`. Cleanup remains capacity-gated, checks only scheduled resets and lacks explicit/implicit cancellation scheduler wakeups. No retirement candidate qualified; recheck revised heads for all gaps. |
 | `reqwest` | Post-connect header timing, body inactivity/backpressure, disabled unstarted-request recovery and retained local SOCKS connection causes. | Identify a supported upstream implementation or hooks covering every hunk before selecting contributions or a local adapter. Hyper-util 0.1.21 hides its SOCKS underlying connector cause; removal also requires equivalent stage/cause evidence for local refusal versus target failure. Retain current retry behavior. | No retirement candidate qualified. |
 | `rmcp` | Raw request/event/result logging, malformed stdio frame logging and generic HTTP transport-error prose can expose caller secrets before application validation or after upstream echoes. | Seek an upstream payload-free diagnostic policy or supported hook; qualify both stdio and HTTP under an external TRACE subscriber, including library consumers, before removing the complete checkout. | Published 3.5.0 source is the inspected baseline; no unpatched candidate has been qualified. No upstream submission is authorized by this change. |
-| `pepper-sync` | Stream-message/drain changes and typed/sanitized diagnostics; standalone manifest adaptations and root membership for its private merge regression. | Establish a complete upstream route for both concerns before choosing contribution order; preserve lifecycle/merge regression evidence and remove local test membership when retiring the checkout. | No retirement candidate qualified. |
+| `pepper-sync` | Stream-message/drain changes and typed/sanitized diagnostics; standalone manifest adaptations and a constructible public sync payload for the application merge regression. | Establish a complete upstream route for both concerns before choosing contribution order; preserve lifecycle/merge regression evidence and the public payload construction API. | No retirement candidate qualified. |
 
 The application owns nineteen public-trait RPC delegations and a narrow lazy
 prover adapter instead of SDK/netutils source snapshots and manifest/patch

@@ -60,6 +60,17 @@ pub struct LocatedTreeData<H> {
     pub(crate) checkpoints: BTreeMap<BlockHeight, Position>,
 }
 
+impl<H> LocatedTreeData<H> {
+    /// Constructs the subtree and checkpoints to merge through `SyncShardTrees`.
+    #[must_use]
+    pub fn from_parts(
+        subtree: LocatedPrunableTree<H>,
+        checkpoints: BTreeMap<BlockHeight, Position>,
+    ) -> Self {
+        Self { subtree, checkpoints }
+    }
+}
+
 pub(crate) fn build_located_trees<H>(
     initial_position: Position,
     leaves_and_retentions: Vec<(H, Retention<BlockHeight>)>,
