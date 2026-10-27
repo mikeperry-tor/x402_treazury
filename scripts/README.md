@@ -121,7 +121,7 @@ sandbox and validates prefetched proving parameters. The release runner discover
 the resolved upstream SDK through frozen metadata in each isolated environment,
 records its observed Git inputs and actual generated descriptor, and retains that
 evidence on failure. Shared-cache comparison does not qualify independent caches.
-`vendor/verify_zingo.py` verifies the retained Pepper snapshot/patches and
+`vendor/verify_pepper.py` verifies the retained Pepper snapshot/patches and
 copied-code notice, including an exact upstream-tree comparison after patch
 reversal; both graphs use ordinary pinned upstream SDK/netutils sources.
 

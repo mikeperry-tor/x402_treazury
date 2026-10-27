@@ -10,7 +10,7 @@ vendored upstream lockfiles remain provenance inputs.
 | --- | --- | --- |
 | `reqwest-transport.patch` | `src/network.rs` needs per-request post-connect header inactivity, nonempty body progress, disabled recovery of unstarted pooled requests and retained local SOCKS connection causes. | Equivalent unpatched behavior through the production factory in `src/network/http_timeout_tests.rs` and `src/network/http_queue_tests.rs`, including retry policy review; SOCKS setup regressions must distinguish local refusal from target/handshake failures without changing Tor routing. |
 | `hyper-transport.patch`, `h2-transport.patch` | HTTP and gRPC queued cancellation must discard unopened streams before peer capacity returns; this includes signed payment HEADERS. | Queued timeout/cancellation regressions in `src/network/http_queue_tests.rs` and `tests/network.rs` pass with equivalent unpatched behavior. |
-| `pepper-sync-progress.patch` | Direct Pepper synchronization retains progressing stream responses and loader/worker drain ownership, with safe resource-status diagnostics before stream errors can be remapped. RPC adaptation lives in the application. | Equivalent response inactivity, progress/stall, cancellation/restart and truthful drain behavior through the full sync chain. See [Zingo details](ZINGO.md). |
+| `pepper-sync-progress.patch` | Direct Pepper synchronization retains progressing stream responses and loader/worker drain ownership, with safe resource-status diagnostics before stream errors can be remapped. RPC adaptation lives in the application. | Equivalent response inactivity, progress/stall, cancellation/restart and truthful drain behavior through the full sync chain. See [Zingo details](../docs/zingo-integration.md). |
 | `pepper-sync-manifest.patch` | Makes the upstream workspace manifest standalone with the same pinned Zingo cohort and dependency features. | The patch is incidental to retaining this checkout; retire it with Pepper. |
 | `pepper-sync-diagnostics.patch` | `src/treasury/diagnostics.rs` consumes typed pool/operation context without exposing raw upstream prose. | Equivalent sanitized diagnostics and tests; this is observability, not spendability or funding authority. |
 
@@ -59,7 +59,7 @@ attribution, complete factory/financial consumer coverage and actual SDK Git/
 descriptor release inputs. Direct Pepper execution keeps the existing runtime,
 checkpoint and cancellation owner; do not reintroduce a second controller or
 inline polling that deadlocks a wallet-lock checkpoint. Current contracts live in
-[Zingo integration](ZINGO.md), network policy and wallet ownership.
+[Zingo integration](../docs/zingo-integration.md), network policy and wallet ownership.
 
 Update each affected row during dependency work and when a relevant upstream
 response, accepted change or compatible release becomes known. Record actual
@@ -142,14 +142,14 @@ Run from the repository root:
 
 ```sh
 python3 vendor/verify.py
-python3 vendor/verify_zingo.py
+python3 vendor/verify_pepper.py
 ```
 
 `verify.py` uses `verify_transport.py` for the transport provenance manifest. It verifies
 patch hashes, reverses each recorded patch in temporary copies and checks
 all restored files against the recorded published-source hashes.
-`verify_zingo.py` checks the retained Pepper snapshot, patches and copied-code
-notice against `zingo-sources.json`, rejecting every unexpected Pepper file. It
+`verify_pepper.py` checks the retained Pepper snapshot, patches and copied-code
+notice against `pepper-sync-sources.json`, rejecting every unexpected Pepper file. It
 then reverses all declared patches in a temporary copy and checks the complete
 file inventory and every byte against hashes from the pinned upstream Git tree.
 All four crate trees must match upstream exactly after reversing their patches;

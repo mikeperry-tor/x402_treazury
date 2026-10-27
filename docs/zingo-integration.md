@@ -8,10 +8,10 @@ workspace retains its path override. Pepper is excluded from workspace test
 selection; its merge regression runs through public traits in the application
 SDK integration target.
 
-`zingo-sources.json` records the upstream source archive hash, every retained
+`pepper-sync-sources.json` records the upstream source archive hash, every retained
 Pepper snapshot file, its ordered patches, original upstream file hashes and the
 copied-code license notice.
-`python3 vendor/verify_zingo.py` verifies those files and rejects unexpected Pepper
+`python3 vendor/verify_pepper.py` verifies those files and rejects unexpected Pepper
 files. It reverses all patches in a temporary copy and compares the complete
 restored tree with the pinned upstream Git source.
 `pepper-sync-progress.patch` contains only Pepper's `client.rs` and `scan/task.rs`
@@ -23,8 +23,28 @@ standalone manifest adaptations necessary for the path dependency; upstream
 unit-test dependencies are retained
 but are not selected by application checks. Never edit Cargo caches or
 reference checkouts to implement a dependency patch. The
-[checkout ledger](README.md#checkout-retirement-tracking) owns remaining blockers
+[checkout ledger](../vendor/README.md#checkout-retirement-tracking) owns remaining blockers
 and candidate qualification.
+
+## Adapted application code and attribution
+
+Two application files retain implementations adapted from the upstream revision
+named above:
+
+| Application code | Upstream origin | Purpose of the local adapter |
+| --- | --- | --- |
+| [`src/network/indexer.rs`](../src/network/indexer.rs) | `zingo-netutils/src/lib.rs`: `GrpcIndexer` and its `Indexer` implementation; `zingo-netutils/src/globally_public.rs`: its `TransparentIndexer` implementation | Thirteen indexer and six transparent-indexer RPC delegations use the application's identity-bound SOCKS/progress transport. Upstream's private client uses tonic `Channel` and its constructors establish the SDK's transport. The adapter retains request/response conventions while the application owns network construction and inactivity handling. |
+| [`src/treasury/send/prover.rs`](../src/treasury/send/prover.rs) | `zingolib/src/wallet/utils.rs`: `LazySaplingProver` | A `OnceLock` initializes embedded Sapling parameters on first use, and `SpendProver`/`OutputProver` implementations delegate to `zcash_proofs::prover::LocalTxProver`. Upstream's adapter is crate-private; the application needs this behavior when calling backend transaction creation directly, including avoiding Sapling parameter parsing for Orchard-only sends. |
+
+Both files retain upstream copyright and revision attribution in their source
+headers. [`vendor/ZINGO-LICENSE-MIT`](../vendor/ZINGO-LICENSE-MIT) preserves the
+upstream copyright and permission notice for these adapted implementations.
+The notice matches the pinned upstream repository's root `LICENSE`. Its MIT terms
+require retaining that notice with copies or substantial portions of the code.
+These application implementations remain after removal of the Zingolib/netutils
+vendor checkouts, so the notice remains relevant independently of Pepper's
+checkout. Calls into ordinary upstream SDK dependencies are separate from these
+locally adapted implementations.
 
 ## Application SDK boundaries
 
@@ -42,7 +62,7 @@ safe quote stripping. Submission validates the result against the durable exact
 transaction. The adapter ignores the traits' legacy total-timeout arguments. The transport
 removes any total `grpc-timeout` metadata and measures response inactivity below
 protobuf decoding. Identity, authenticated SOCKS remote
-DNS and no-direct-fallback rules remain in [network policy](../docs/network-egress.md).
+DNS and no-direct-fallback rules remain in [network policy](network-egress.md).
 `ping-very-insecure` and nym capabilities are not enabled consumers.
 
 `src/treasury/mod.rs` runs one public Pepper engine task inside the existing
@@ -67,9 +87,7 @@ Public `clear_proposal` runs after releasing the wallet guard; no private propos
 manager or parallel input ledger is needed. The actor reuses canonical validation
 without a redundant connection; direct preparation retains network validation.
 The lazy Sapling prover uses embedded public parameter bytes only when needed.
-Copied RPC/prover code retains its exact upstream revision and the full notice in
-`ZINGO-LICENSE-MIT`. Financial authority, retained bytes, publication and recovery
-remain in [wallet ownership](../docs/wallet-rotation.md) and
+Financial authority, retained bytes, publication and recovery remain in [wallet ownership](wallet-rotation.md) and
 [lifecycle coverage](../tests/LIFECYCLE.md).
 
 ## Remaining Pepper responsibilities
@@ -99,12 +117,12 @@ application SDK integration target without a separate SDK unit-test build:
 make test CARGO_ARGS='--test sdk_compat' TEST_ARGS='sdk_merge::scan_merge_conflict_preserves_pool_context --exact'
 ```
 
-See [workspace verification](../docs/development.md#combined-workspace-verification).
+See [workspace verification](development.md#combined-workspace-verification).
 Upstream v7 owns same-height/deeper reorg truncation and synthetic branch hashes;
 application lifecycle tests retain exact historical facts and current SDK
 spendability without a historical capital veto. Wallet format 45 and the public
 v6 read/save/reopen/next-address fixture remain documented in
-[wallet administration](../docs/wallet-cli.md). Server protocol 0.5.0 capability
+[wallet administration](wallet-cli.md). Server protocol 0.5.0 capability
 requirements are distinct from the Rust protocol crate version.
 
 ## Build-time parameter downloads
@@ -128,7 +146,7 @@ digests before returning them; a forged TLS peer cannot substitute accepted
 parameter bytes, but can still interfere with download availability. Moving this
 graph to a maintained TLS stack requires an upstream dependency migration or a
 separately reviewed vendor patch, rather than a compatible lockfile update.
-The [release runner](../docs/reproducible-builds.md#prepare-inputs) separately
+The [release runner](reproducible-builds.md#prepare-inputs) separately
 verifies prefetched parameters and denies network access during qualification.
 
 ## Release descriptor inputs

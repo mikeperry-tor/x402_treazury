@@ -3,7 +3,7 @@
 The [checkout ledger](../../vendor/README.md#checkout-retirement-tracking) owns
 current checkout blockers, candidate revisions and upstream follow-up. This plan
 preserves unfinished assessment work. The maintained
-[Zingo integration guide](../../vendor/ZINGO.md) owns the application RPC adapter,
+[Zingo integration guide](../zingo-integration.md) owns the application RPC adapter,
 direct Pepper synchronization, backend calculation and remaining Pepper patches.
 
 Before selecting another track, read the [network policy](../network-egress.md),

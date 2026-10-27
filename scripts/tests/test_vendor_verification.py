@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 
-VERIFIER = Path(__file__).resolve().parents[2] / "vendor" / "verify_zingo.py"
+VERIFIER = Path(__file__).resolve().parents[2] / "vendor" / "verify_pepper.py"
 
 
 class PepperVerificationTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class PepperVerificationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        shutil.copyfile(VERIFIER, self.root / "verify_zingo.py")
+        shutil.copyfile(VERIFIER, self.root / "verify_pepper.py")
         self.originals = {
             "Cargo.toml": '[dependencies]\nexample = { workspace = true }\n',
             "src/lib.rs": "pub fn value() -> u8 { 1 }\n",
@@ -64,10 +64,10 @@ class PepperVerificationTests(unittest.TestCase):
             for path in self.root.rglob("*")
             if path.is_file() and (path.suffix == ".patch" or "pepper-sync" in path.parts)
         }
-        self.root.joinpath("zingo-sources.json").write_text(json.dumps(self.manifest))
+        self.root.joinpath("pepper-sync-sources.json").write_text(json.dumps(self.manifest))
 
     def verify(self):
-        return subprocess.run([sys.executable, str(self.root / "verify_zingo.py")],
+        return subprocess.run([sys.executable, str(self.root / "verify_pepper.py")],
                               capture_output=True, text=True)
 
     def test_declared_patch_chain_restores_upstream(self):

@@ -8,6 +8,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Configuration](configuration.md) | TOML composition, [source distribution](configuration.md#source-tool-distribution), tool filters, provider compatibility and pricing |
 | [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration and recovery |
 | [Development](development.md) | Local checks, coverage and complexity tooling |
+| [Zingo integration](zingo-integration.md) | SDK boundaries, Pepper patches and adapted-code attribution |
 | [Architecture](architecture.md) | Catalog generation, MCP execution, ownership and the [wallet selection/isolation decision](architecture.md#wallet-selection-and-network-isolation) |
 | [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, reserve claims, retained capacity, funding and recovery |
 | [Network egress](network-egress.md) | Direct/Tor factory, isolation identities, timeout policy and SDK boundaries |

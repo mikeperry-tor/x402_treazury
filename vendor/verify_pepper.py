@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parent
-manifest = json.loads((root / "zingo-sources.json").read_text())
+manifest = json.loads((root / "pepper-sync-sources.json").read_text())
 errors = []
 for name, expected in manifest["files"].items():
     path = root / name
@@ -20,7 +20,7 @@ for path in (root / "pepper-sync").rglob("*"):
     if path.relative_to(root).as_posix() not in manifest["files"]:
         errors.append(str(path.relative_to(root)))
 if errors:
-    raise SystemExit("Zingo vendor verification failed: " + ", ".join(errors))
+    raise SystemExit("Pepper vendor verification failed: " + ", ".join(errors))
 
 source = root / "pepper-sync"
 expected = manifest["original_files"]

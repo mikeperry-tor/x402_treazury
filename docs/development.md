@@ -512,7 +512,7 @@ consume locked dependency changes. Vendored upstream lockfiles are provenance
 inputs, not the dependency resolution used by the application workspace.
 
 The build-only legacy TLS dependency and parameter-integrity boundary are
-documented in [the Zingo integration guide](../vendor/ZINGO.md#build-time-parameter-downloads).
+documented in [the Zingo integration guide](zingo-integration.md#build-time-parameter-downloads).
 That graph still contains affected certificate-verification versions; these
 updates do not eliminate every advisory finding from the lockfiles.
 
@@ -576,13 +576,13 @@ Zingolib → bip32 0.6.0 → hmac 0.13.0 → digest 0.11.3
 `lightwallet-protocol` 0.4.0 supplies the required Ironwood fields without a
 separate root Git override. All workspace packages use ordinary upstream Zingolib/netutils
 Git sources at the same pinned revision, with no local checkout overrides. The
-[Zingo integration](../vendor/ZINGO.md) uses public RPC traits, direct Pepper sync
+[Zingo integration](zingo-integration.md) uses public RPC traits, direct Pepper sync
 and backend calculation over the application transport. Pepper's retained patches
 own progress/drain behavior and sanitized diagnostics. Upstream v7 handles
 same-height reorg truncation and synthetic branch hashes; the application keeps
 its lifecycle regressions. HTTP transport patches preserve the
 [network inactivity/cancellation contract](network-egress.md#timeout-budgets-and-concurrency).
-`vendor/verify.py` checks HTTP transport sources; `verify_zingo.py` checks the
+`vendor/verify.py` checks HTTP transport sources; `verify_pepper.py` checks the
 remaining Pepper snapshot, patches and copied-code notice, then reverses the
 patches and compares its complete tree with upstream file hashes. Upstream license
 texts are included. Deliberate source/extra-file mutations must still fail that

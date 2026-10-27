@@ -172,14 +172,14 @@ else:
                 ('cargo', ['test', '--locked', '-p', 'treazury-complexity', '--target-dir', 'target']),
                 ('python3', ['scripts/complexity.py', '--base', 'main']),
                 ('python3', ['vendor/verify.py']),
-                ('python3', ['vendor/verify_zingo.py']),
+                ('python3', ['vendor/verify_pepper.py']),
             ],
             'check-clippy': [
                 checked('check', '--lib', '--bins', '--message-format=json'),
                 checked('clippy', '--all-targets', '--features', 'zcash-regtest', '--message-format=json', '--', '-D', 'warnings'),
             ],
             'check-compat': [
-                ('python3', ['vendor/verify_zingo.py']),
+                ('python3', ['vendor/verify_pepper.py']),
                 application('test', '--test', 'sdk_compat', '--test', 'payments',
                             '--test', 'server', '--test', 'crypto_vectors',
                             '--', '--test-threads=8'),
@@ -252,12 +252,12 @@ else:
         _, calls = self.make('check', 'PYTHON=analysis-python', 'COMPLEXITY_BASE_REF=review-base')
         self.assertIn(('analysis-python', ['scripts/complexity.py', '--base', 'review-base']),
                       self.check_commands(calls))
-        self.assertIn(('analysis-python', ['vendor/verify_zingo.py']), self.check_commands(calls))
+        self.assertIn(('analysis-python', ['vendor/verify_pepper.py']), self.check_commands(calls))
 
     def test_compatibility_source_failure_stops_before_bootstrap_and_tests(self):
         _, calls = self.make('check-compat', success=False,
-                             FAIL_ARGUMENT='vendor/verify_zingo.py')
-        self.assertEqual(self.check_commands(calls), [('python3', ['vendor/verify_zingo.py'])])
+                             FAIL_ARGUMENT='vendor/verify_pepper.py')
+        self.assertEqual(self.check_commands(calls), [('python3', ['vendor/verify_pepper.py'])])
         self.assertEqual(len(calls), 1)
 
     def test_coverage_modes_remain_explicit(self):

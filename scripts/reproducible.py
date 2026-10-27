@@ -192,7 +192,7 @@ def qualify(run):
             # Prove that the sandbox is active: a refused connection is NOT enough.
             probe = "import socket\ns=socket.socket()\ntry: s.connect(('127.0.0.1',9))\nexcept PermissionError: pass\nelse: raise RuntimeError('network sandbox did not deny connect')"
             run_logged([sys.executable, "-c", probe], source, env, log)
-            for verifier in ("verify.py", "verify_zingo.py"):
+            for verifier in ("verify.py", "verify_pepper.py"):
                 run_logged([sys.executable, str(source / "vendor" / verifier)], source, env, log)
             metadata = json.loads(capture_logged(
                 ["cargo", "metadata", "--frozen", "--format-version", "1", "--manifest-path", "Cargo.toml",

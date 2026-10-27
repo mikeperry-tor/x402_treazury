@@ -99,14 +99,14 @@ check-static: toolchain
 	scripts/test-runner.sh --cargo cargo test --locked -p treazury-complexity --target-dir target
 	$(PYTHON) scripts/complexity.py --base '$(COMPLEXITY_BASE_REF)'
 	$(PYTHON) vendor/verify.py
-	$(PYTHON) vendor/verify_zingo.py
+	$(PYTHON) vendor/verify_pepper.py
 
 check-clippy: toolchain
 	@$(call application_cargo,check,--lib --bins --message-format=json,$(PYTHON) scripts/check_warnings.py)
 	@$(call application_cargo,clippy,--all-targets --features zcash-regtest --message-format=json -- -D warnings,$(PYTHON) scripts/check_warnings.py)
 
 check-compat: toolchain
-	$(PYTHON) vendor/verify_zingo.py
+	$(PYTHON) vendor/verify_pepper.py
 	@$(call application_cargo,test,--test sdk_compat --test payments --test server --test crypto_vectors -- --test-threads='$(TEST_THREADS)')
 
 check-default: toolchain

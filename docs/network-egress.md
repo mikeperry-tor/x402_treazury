@@ -600,7 +600,7 @@ Run the complete local regression suite:
 ```sh
 make test CARGO_ARGS='--offline --all-targets' TEST_ARGS='--test-threads=1'
 python3 vendor/verify.py
-python3 vendor/verify_zingo.py
+python3 vendor/verify_pepper.py
 make check-compat
 ```
 
