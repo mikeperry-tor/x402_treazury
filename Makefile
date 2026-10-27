@@ -6,7 +6,8 @@ SHELL := /bin/sh
 
 PYTHON ?= python3
 PROFILE ?= release
-TEST_ARGS ?= --test-threads=1
+TEST_THREADS ?= 8
+TEST_ARGS ?= --test-threads='$(TEST_THREADS)'
 COMPLEXITY_BASE_REF ?= main
 
 # Resolve protoc only when executing an application Cargo command. Keep failures
@@ -109,7 +110,7 @@ check-compat: toolchain
 
 check-default: toolchain
 	@$(call application_cargo,test,-p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context -- --exact)
-	@$(call application_cargo,test,--all-targets -- --test-threads=1)
+	@$(call application_cargo,test,--all-targets -- --test-threads='$(TEST_THREADS)')
 
 check-proving: toolchain
 	@$(call application_cargo,test,--features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1)
@@ -139,7 +140,7 @@ help:
 	@printf '%s\n' \
 	  'make / make build       Release build, incremental disabled (PROFILE=NAME to change)' \
 	  'make build-dev          Incremental development build' \
-	  'make test               All default test targets, one test thread' \
+	  'make test               All default test targets (TEST_THREADS=8 by default)' \
 	  'make check              All check stages in the order below' \
 	  'make check-static       Format, tooling, complexity and provenance' \
 	  'make check-clippy       Production compiler warnings and all-target zcash-regtest Clippy' \

@@ -1,3 +1,5 @@
+#[path = "support/log_capture.rs"]
+mod log_capture;
 use axum::{Router, routing::get};
 use serde_json::{Value, json};
 use std::{
@@ -454,6 +456,9 @@ async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
 
 #[tokio::test]
 async fn untagged_help_failures_warn_once_without_exposing_content() {
+    if log_capture::run_in_child("untagged_help_failures_warn_once_without_exposing_content") {
+        return;
+    }
     use axum::http::{HeaderMap, StatusCode};
     use tracing::instrument::WithSubscriber;
 

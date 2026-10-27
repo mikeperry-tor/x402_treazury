@@ -896,6 +896,11 @@ mod tests {
     }
     #[tokio::test]
     async fn rpc_failures_report_codes_without_upstream_secrets_in_errors_or_logs() {
+        if crate::test_log_capture::run_in_child(
+            "rotation::base::tests::rpc_failures_report_codes_without_upstream_secrets_in_errors_or_logs",
+        ) {
+            return;
+        }
         use super::*;
         use axum::{Router, http::StatusCode, routing::post};
         use tracing::instrument::WithSubscriber;

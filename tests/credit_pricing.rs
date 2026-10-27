@@ -1,4 +1,6 @@
 use serde_json::{Value, json};
+#[path = "support/log_capture.rs"]
+mod log_capture;
 use std::path::Path;
 use x402_treazury::{
     catalog::{self, Config, CreditPricing},
@@ -102,6 +104,9 @@ fn invalid_conversion_is_rejected_without_rounding() {
 }
 #[test]
 fn unsupported_metadata_has_visible_fallback_and_warning() {
+    if log_capture::run_in_child("unsupported_metadata_has_visible_fallback_and_warning") {
+        return;
+    }
     use std::sync::{Arc, Mutex};
     #[derive(Clone)]
     struct Writer(Arc<Mutex<Vec<u8>>>);

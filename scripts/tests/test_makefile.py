@@ -57,7 +57,7 @@ else:
         self.env = dict(os.environ, PATH=f'{self.root / "bin"}:{os.environ["PATH"]}',
                         MAKE_TEST_LOG=str(self.log), CARGO_INCREMENTAL='inherited')
         for key in ('MAKEFLAGS', 'MFLAGS', 'MAKELEVEL', 'CARGO_ARGS', 'TEST_ARGS',
-                    'PROFILE', 'COMPLEXITY_BASE_REF', 'TEST', 'PYTHON'):
+                    'PROFILE', 'COMPLEXITY_BASE_REF', 'TEST', 'TEST_THREADS', 'PYTHON'):
             self.env.pop(key, None)
 
     def make(self, *args, success=True, **env):
@@ -80,7 +80,7 @@ else:
             (['build-dev', 'PROFILE=release'], 'build', ['--profile', 'dev'], '1'),
             (['build-dev', 'CARGO_ARGS=--target-dir "path with spaces" --offline'],
              'build', ['--profile', 'dev', '--target-dir', 'path with spaces', '--offline'], '1'),
-            (['test'], 'test', ['--all-targets', '--', '--test-threads=1'], 'inherited'),
+            (['test'], 'test', ['--all-targets', '--', '--test-threads=8'], 'inherited'),
             (['test', 'CARGO_ARGS=--lib', 'TEST_ARGS=--exact "a b"'],
              'test', ['--lib', '--', '--exact', 'a b'], 'inherited'),
             (['cargo-check'], 'check', [], 'inherited'),
@@ -146,7 +146,7 @@ else:
                          ['--config', str(self.root / 'scripts/test-runner.toml')])
         self.assertEqual(calls[1][1][2:],
                          ['test', '--locked', '--manifest-path', 'Cargo.toml',
-                          '--lib', '--', '--test-threads=1'])
+                          '--lib', '--', '--test-threads=8'])
         for target in ('build', 'run', 'clippy', 'cargo-check'):
             with self.subTest(target=target):
                 _, calls = self.make(target, MAKE_TEST_PLATFORM='Darwin')
@@ -179,7 +179,7 @@ else:
             'check-compat': [('python3', ['scripts/check_compat.py'])],
             'check-default': [
                 application('test', '-p', 'pepper-sync', '--lib', 'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context', '--', '--exact'),
-                application('test', '--all-targets', '--', '--test-threads=1'),
+                application('test', '--all-targets', '--', '--test-threads=8'),
             ],
             **{stage: [application('test', '--features', 'zcash-testutils', '--lib', case, '--', '--test-threads=1')]
                for stage, case in (
@@ -214,6 +214,18 @@ else:
         for _ in range(2):
             _, calls = self.make('-j8', 'check-lifecycle', 'check-codec')
             self.assertEqual(self.check_commands(calls), stages['check-lifecycle'] + stages['check-codec'])
+
+    def test_thread_override_changes_scheduling_without_narrowing_fixed_selection(self):
+        for count in ('1', '2', '2 ignored'):
+            with self.subTest(count=count):
+                _, calls = self.make('check-default', f'TEST_THREADS={count}',
+                                     'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong')
+                self.assertEqual(self.check_commands(calls)[-1],
+                                 ('cargo', ['test', '--locked', '--manifest-path',
+                                            'Cargo.toml', '--all-targets', '--',
+                                            f'--test-threads={count}']))
+        _, calls = self.make('test', 'TEST_THREADS=1')
+        self.assertEqual(calls[-1][1][-1], '--test-threads=1')
 
     def test_check_stops_at_failed_stage_even_with_keep_going(self):
         expected = [command for stage in self.check_stages().values() for command in stage]

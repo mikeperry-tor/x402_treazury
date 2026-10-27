@@ -29,6 +29,11 @@ fn scope() -> Scope {
 
 #[tokio::test]
 async fn cleanup_ownership_outlives_zero_counters_and_prevents_replacement() {
+    if crate::test_log_capture::run_in_child(
+        "cover::runtime::retention_tests::cleanup_ownership_outlives_zero_counters_and_prevents_replacement",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()

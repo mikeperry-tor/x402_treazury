@@ -417,6 +417,11 @@ async fn stalled_response_body_warns_once_without_private_content() {
 #[cfg(test)]
 #[test]
 fn connection_failure_warning_does_not_log_transport_prose() {
+    if crate::test_log_capture::run_in_child(
+        "network::grpc::connection_failure_warning_does_not_log_transport_prose",
+    ) {
+        return;
+    }
     let logs = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()

@@ -20,6 +20,11 @@ async fn direct_startup_needs_no_socks_observation() {
 
 #[tokio::test]
 async fn unavailable_socks_coalesces_waiters_and_resumes_once_without_a_monitor() {
+    if crate::test_log_capture::run_in_child(
+        "network::startup_socks::tests::unavailable_socks_coalesces_waiters_and_resumes_once_without_a_monitor",
+    ) {
+        return;
+    }
     use std::{future::Future, path::Path, pin::Pin};
 
     async fn wait_for_error_count(

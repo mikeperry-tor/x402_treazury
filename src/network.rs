@@ -1218,6 +1218,11 @@ mod retention_tests {
 
     #[test]
     fn transport_cache_eviction_preserves_handles_without_warning_or_keys() {
+        if crate::test_log_capture::run_in_child(
+            "network::retention_tests::transport_cache_eviction_preserves_handles_without_warning_or_keys",
+        ) {
+            return;
+        }
         let logs = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
             .without_time()
@@ -1261,6 +1266,11 @@ mod retention_tests {
 
     #[tokio::test]
     async fn interleaved_wallet_clients_preserve_frequent_provider_entry() {
+        if crate::test_log_capture::run_in_child(
+            "network::retention_tests::interleaved_wallet_clients_preserve_frequent_provider_entry",
+        ) {
+            return;
+        }
         let context = NetworkContext::new(NetworkPolicy::default()).unwrap();
         let origin = "https://provider.example";
         let provider = IsolationId::discovery(origin).unwrap();

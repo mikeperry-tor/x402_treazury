@@ -48,3 +48,7 @@ pub mod discovery_relay;
 #[cfg(test)]
 #[path = "../tests/support/funding_quote.rs"]
 mod test_funding_quote;
+
+#[cfg(test)]
+#[path = "../tests/support/log_capture.rs"]
+mod test_log_capture;

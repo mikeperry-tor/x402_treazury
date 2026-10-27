@@ -1,6 +1,8 @@
 use anyhow::Result;
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
+#[path = "support/log_capture.rs"]
+mod log_capture;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -216,6 +218,11 @@ impl FundingBackend for Fake {
 }
 #[tokio::test]
 async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet() {
+    if log_capture::run_in_child(
+        "ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let writer = log.reopen().unwrap();
     let subscriber = tracing_subscriber::fmt()
@@ -1281,6 +1288,10 @@ async fn qualification_pause_preserves_quote_without_starting_new_work() {
 
 #[tokio::test]
 async fn confirmation_wait_and_retrying_reconciliation_errors_do_not_warn() {
+    if log_capture::run_in_child("confirmation_wait_and_retrying_reconciliation_errors_do_not_warn")
+    {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()

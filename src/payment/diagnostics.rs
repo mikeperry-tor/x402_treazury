@@ -322,6 +322,11 @@ mod tests {
 
     #[tokio::test]
     async fn response_body_category_is_logged_without_provider_prose_or_replay_permission() {
+        if crate::test_log_capture::run_in_child(
+            "payment::diagnostics::tests::response_body_category_is_logged_without_provider_prose_or_replay_permission",
+        ) {
+            return;
+        }
         let log = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
             .without_time()
@@ -380,6 +385,11 @@ mod tests {
 
     #[tokio::test]
     async fn transport_failure_reports_safe_cause_and_preserves_charge_caution() {
+        if crate::test_log_capture::run_in_child(
+            "payment::diagnostics::tests::transport_failure_reports_safe_cause_and_preserves_charge_caution",
+        ) {
+            return;
+        }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         drop(listener);
@@ -459,6 +469,11 @@ mod tests {
 
     #[tokio::test]
     async fn routine_results_are_debug_and_terminal_uncertainty_is_explained_at_warn() {
+        if crate::test_log_capture::run_in_child(
+            "payment::diagnostics::tests::routine_results_are_debug_and_terminal_uncertainty_is_explained_at_warn",
+        ) {
+            return;
+        }
         for debug in [false, true] {
             let log = tempfile::NamedTempFile::new().unwrap();
             let subscriber = tracing_subscriber::fmt()

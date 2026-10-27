@@ -250,6 +250,11 @@ async fn oversized_management_request_warns_without_logging_arguments() {
 
 #[test]
 fn import_policy_rejections_warn_without_private_content() {
+    if crate::test_log_capture::run_in_child(
+        "discovery::tests::import_limits::import_policy_rejections_warn_without_private_content",
+    ) {
+        return;
+    }
     let c: Candidate = serde_json::from_value(candidate("policy", "process", "server")).unwrap();
     let mut cases = vec![(b"PRIVATE_INVALID_JSON".to_vec(), "invalid OpenAPI JSON")];
     for (target, field, value, reason) in [
@@ -357,6 +362,11 @@ async fn saturated_mutation_capacity_warns_before_publication() {
 
 #[tokio::test]
 async fn import_redirect_and_read_timeout_warn_without_response_prose() {
+    if crate::test_log_capture::run_in_child(
+        "discovery::tests::import_limits::import_redirect_and_read_timeout_warn_without_response_prose",
+    ) {
+        return;
+    }
     for stall in [false, true] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/PRIVATE_SPEC", listener.local_addr().unwrap());
@@ -429,6 +439,11 @@ async fn import_redirect_and_read_timeout_warn_without_response_prose() {
 
 #[tokio::test]
 async fn reserved_source_delimiter_warns_for_add_inspection_and_restore() {
+    if crate::test_log_capture::run_in_child(
+        "discovery::tests::import_limits::reserved_source_delimiter_warns_for_add_inspection_and_restore",
+    ) {
+        return;
+    }
     let m = manager(None).await;
     let (result, logs) = capture_future_logs(m.invoke(
         "writer",

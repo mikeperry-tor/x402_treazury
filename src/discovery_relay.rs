@@ -1276,6 +1276,11 @@ pub(crate) mod tests {
 
     #[test]
     fn rejects_redirects_truncation_wrong_target_and_oversize() {
+        if crate::test_log_capture::run_in_child(
+            "discovery_relay::tests::rejects_redirects_truncation_wrong_target_and_oversize",
+        ) {
+            return;
+        }
         let log = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
             .without_time()

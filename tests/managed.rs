@@ -1,6 +1,8 @@
 //! Offline end-to-end admission against a local Base RPC and x402 seller.
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
+#[path = "support/log_capture.rs"]
+mod log_capture;
 use alloy_primitives::Address;
 use axum::{
     Json, Router,
@@ -682,6 +684,11 @@ impl std::io::Write for LogCapture {
 }
 #[tokio::test]
 async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization() {
+    if log_capture::run_in_child(
+        "managed_extensions_are_stripped_logged_and_do_not_change_authorization",
+    ) {
+        return;
+    }
     use tracing::instrument::WithSubscriber;
     let logs = LogCapture(Arc::default());
     let sink = logs.clone();
@@ -765,6 +772,11 @@ async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization(
 }
 #[tokio::test]
 async fn managed_failure_diagnostics_survive_cancellation_and_hide_upstream_prose() {
+    if log_capture::run_in_child(
+        "managed_failure_diagnostics_survive_cancellation_and_hide_upstream_prose",
+    ) {
+        return;
+    }
     use tracing::instrument::WithSubscriber;
     for cancel in [false, true] {
         let logs = LogCapture(Arc::default());
@@ -870,6 +882,11 @@ async fn managed_failure_diagnostics_survive_cancellation_and_hide_upstream_pros
 
 #[tokio::test]
 async fn direct_managed_failure_diagnostics_distinguish_refusal_and_rejection() {
+    if log_capture::run_in_child(
+        "direct_managed_failure_diagnostics_distinguish_refusal_and_rejection",
+    ) {
+        return;
+    }
     use tracing::instrument::WithSubscriber;
     let logs = LogCapture(Arc::default());
     let sink = logs.clone();

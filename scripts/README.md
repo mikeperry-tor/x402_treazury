@@ -35,8 +35,10 @@ platform issue and identity boundaries.
 
 `CARGO_ARGS` is a shell-quoted argument list. For `test` and `clippy`, it **replaces**
 the default `--all-targets`; include that flag explicitly when adding options for
-the complete suite. `TEST_ARGS` replaces the default `--test-threads=1` harness
-arguments. Do not include the separating `--` in `TEST_ARGS`; Make supplies it.
+the complete suite. `TEST_THREADS` selects libtest concurrency for `make test` and
+`check-default` (default 8); use `TEST_THREADS=1` for a serial run. `TEST_ARGS`
+replaces the complete default harness argument list, including that thread setting.
+Do not include the separating `--` in `TEST_ARGS`; Make supplies it.
 `run` accepts both Cargo and application arguments in `CARGO_ARGS`, separated by
 `--`. These are trusted shell fragments, not a structured argument API. Quote the
 outer assignment so your shell passes it as one Make argument; retain inner quotes
@@ -47,6 +49,7 @@ assignment). Do not place secrets in command arguments.
 ```sh
 make test CARGO_ARGS='--test payments' TEST_ARGS='case_name --exact --test-threads=1'
 make test CARGO_ARGS='--all-targets --offline'
+make test TEST_THREADS=1
 make run CARGO_ARGS='--example snapshot_spec -- "path with spaces/input.json" /tmp/output.json'
 make build PROFILE=dev CARGO_ARGS='--offline'
 ```
@@ -62,6 +65,10 @@ run independently and always execute when requested. See
 for the stage table, independent review and evidence needed to resume after a fix.
 Coordinate editor-triggered Cargo checks as well as separate Make invocations;
 `.NOTPARALLEL` only serializes one invocation.
+
+`TEST_THREADS` changes only scheduling in `check-default`, not its fixed target
+selection. The proving, lifecycle and codec stages retain one test thread. Build
+and feature stages remain sequential even when a harness runs tests concurrently.
 
 `make check-clippy` runs the production library/binary compiler check followed by
 all-target `zcash-regtest` Clippy. Both use `check_warnings.py` to display Cargo

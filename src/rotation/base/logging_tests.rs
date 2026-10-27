@@ -85,6 +85,11 @@ async fn balance_fallback_is_quiet_at_info_and_has_safe_provider_context_at_debu
 
 #[tokio::test]
 async fn view_warns_only_when_no_configured_provider_can_complete_verification() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::base::view_tests::logging::view_warns_only_when_no_configured_provider_can_complete_verification",
+    ) {
+        return;
+    }
     for healthy_fallback in [true, false] {
         let (primary, rejected, first) = endpoint(StatusCode::FORBIDDEN).await;
         let (healthy, _requests, healthy_server, _stamp) = fixture(false).await;

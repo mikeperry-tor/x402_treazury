@@ -280,6 +280,11 @@ async fn opt_out_isolation_missing_state_and_corruption() {
 
 #[tokio::test]
 async fn origin_limit_has_consumer_error_and_sanitized_log() {
+    if crate::test_log_capture::run_in_child(
+        "http_cache::tests::origin_limit_has_consumer_error_and_sanitized_log",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -497,6 +502,11 @@ async fn explicit_direct_entries_have_separate_provenance_and_require_freshness(
 
 #[tokio::test]
 async fn catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_urls() {
+    if crate::test_log_capture::run_in_child(
+        "http_cache::tests::catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_urls",
+    ) {
+        return;
+    }
     use tracing::instrument::WithSubscriber;
     for debug in [false, true] {
         let dir = tempfile::tempdir().unwrap();
@@ -586,6 +596,11 @@ fn cache_policy_labels_explain_conservative_rejections() {
 
 #[test]
 fn catalog_local_ttl_overrides_origin_freshness_and_logs_policy() {
+    if crate::test_log_capture::run_in_child(
+        "http_cache::tests::catalog_local_ttl_overrides_origin_freshness_and_logs_policy",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()

@@ -18,6 +18,11 @@ impl Write for Capture {
 
 #[tokio::test]
 async fn deadline_cleanup_reports_actual_capability_without_warn_on_available_shortfall() {
+    if crate::test_log_capture::run_in_child(
+        "cover::runtime::diagnostic_tests::deadline_cleanup_reports_actual_capability_without_warn_on_available_shortfall",
+    ) {
+        return;
+    }
     for checking in [false, true] {
         let logs = Capture::default();
         let sink = logs.clone();
@@ -123,6 +128,11 @@ async fn deadline_cleanup_reports_actual_capability_without_warn_on_available_sh
 
 #[tokio::test]
 async fn capacity_refusal_summaries_warn_without_reclassifying_normal_completion() {
+    if crate::test_log_capture::run_in_child(
+        "cover::runtime::diagnostic_tests::capacity_refusal_summaries_warn_without_reclassifying_normal_completion",
+    ) {
+        return;
+    }
     let engine = Engine::new(Limits::default());
     let identity = IsolationId::treasury("cover-diagnostic-fixture");
     let transport = crate::network::global()

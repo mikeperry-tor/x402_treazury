@@ -177,6 +177,11 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
 
 #[test]
 fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::funding::scheduler::tests::saturated_retry_records_preserve_active_work_and_unelapsed_backoff",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -285,6 +290,11 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
 
 #[tokio::test]
 async fn occupied_observation_lanes_report_once_per_pass_and_preserve_pending_work() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::funding::scheduler::tests::occupied_observation_lanes_report_once_per_pass_and_preserve_pending_work",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()

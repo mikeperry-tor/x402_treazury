@@ -270,6 +270,11 @@ async fn held_pending_read_allows_full_live_inventory_and_retains_a_new_failure(
 
 #[tokio::test]
 async fn advisory_capacity_reports_while_complete_inventory_still_drains() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::manager::maintenance::tests::inventory::advisory_capacity_reports_while_complete_inventory_still_drains",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()
@@ -296,6 +301,11 @@ async fn advisory_capacity_reports_while_complete_inventory_still_drains() {
 
 #[tokio::test]
 async fn advisory_capacity_looks_past_coalesced_rows_and_keeps_coalescing_silent() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::manager::maintenance::tests::inventory::advisory_capacity_looks_past_coalesced_rows_and_keeps_coalescing_silent",
+    ) {
+        return;
+    }
     use tracing::instrument::WithSubscriber;
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()

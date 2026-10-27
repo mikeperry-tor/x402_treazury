@@ -48,6 +48,27 @@ not implicitly rerun earlier stages. `CARGO_ARGS` and `TEST_ARGS` customize
 | `check-lifecycle` | `zcash-testutils` synthetic-chain treasury lifecycle |
 | `check-codec` | `zcash-testutils` address-codec isolation regression |
 
+Default application harnesses use eight libtest threads. `TEST_THREADS=1` selects
+serial execution for `make test` and `make check-default`; other positive counts
+can be measured the same way. `TEST_ARGS` still replaces the whole harness argument
+list for focused `make test` runs, while `check-default` retains its complete target
+selection. Proving, lifecycle and codec stages keep one thread, and feature builds
+remain sequential.
+
+Compare concurrency on an unchanged executable with the same test counts and
+assertions, then validate the complete default suite. Keep timing contracts intact;
+increasing their deadlines would hide contention or isolation failures rather than
+establish a faster test configuration. A measured default is not an optimum for
+every host, so use `TEST_THREADS` when local measurements justify another count.
+
+Diagnostic fixtures whose callsites are also reached by subscriberless siblings
+use the [log-capture guard](../tests/support/log_capture.rs) to run in an exact child
+process. A sibling's first use can otherwise cache disabled tracing interest
+without the fixture's scoped subscriber. All severity, count, privacy and financial
+assertions stay in that child; the parent verifies successful execution of one
+test. Other fixtures remain parallel; this is not a reason to serialize an entire
+harness.
+
 ### Compiler diagnostics and review
 
 `check-clippy` first checks the production library and binaries without test

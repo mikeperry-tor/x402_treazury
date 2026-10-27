@@ -315,6 +315,11 @@ fn automatic_help_priority_preserves_candidate_authority_and_deduplicates_urls()
 
 #[test]
 fn unavailable_cover_warning_explains_origins_without_private_url_parts() {
+    if crate::test_log_capture::run_in_child(
+        "cover::tests::unavailable_cover_warning_explains_origins_without_private_url_parts",
+    ) {
+        return;
+    }
     use std::sync::{Arc, Mutex};
     #[derive(Clone)]
     struct Writer(Arc<Mutex<Vec<u8>>>);

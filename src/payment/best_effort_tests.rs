@@ -2270,6 +2270,11 @@ async fn prior_wallet_liability_relay_child() {
 
 #[tokio::test]
 async fn manual_headers_stop_insufficiency_with_original_liability_and_no_second_wallet_io() {
+    if crate::test_log_capture::run_in_child(
+        "payment::best_effort_tests::manual_headers_stop_insufficiency_with_original_liability_and_no_second_wallet_io",
+    ) {
+        return;
+    }
     for method in ["GET", "POST"] {
         for wire in [Wire::Verification, Wire::Settlement] {
             let (success, signed, requests, error) = run_private(method, wire, 1, true).await;

@@ -41,6 +41,11 @@ fn denied<T>(r: Result<T>) {
 }
 #[test]
 fn restriction_allows_declaration_but_denies_allocation_and_source_work() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::store::funding_restriction_tests::restriction_allows_declaration_but_denies_allocation_and_source_work",
+    ) {
+        return;
+    }
     let (_dir, mut s, pool) = fixture();
     for wallet in s.status().unwrap().pools[0].addresses.iter() {
         s.record_credit(&wallet.id, "5000000", "block", 1).unwrap();

@@ -1956,6 +1956,11 @@ async fn directory_modes_and_details_dispatch_once_and_reject_mixed_arguments() 
 
 #[tokio::test]
 async fn import_aliases_share_active_fetches_and_failed_fetches_recover() {
+    if crate::test_log_capture::run_in_child(
+        "discovery::tests::import_aliases_share_active_fetches_and_failed_fetches_recover",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .without_time()

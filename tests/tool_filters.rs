@@ -1,4 +1,6 @@
 use serde_json::json;
+#[path = "support/log_capture.rs"]
+mod log_capture;
 use x402_treazury::{
     catalog::{Config, build_tools},
     config,
@@ -158,6 +160,9 @@ include_tools = ["api_company_post"]
 
 #[test]
 fn unmatched_wildcards_warn_while_other_matches_remain_usable() {
+    if log_capture::run_in_child("unmatched_wildcards_warn_while_other_matches_remain_usable") {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let writer = log.reopen().unwrap();
     let subscriber = tracing_subscriber::fmt()
