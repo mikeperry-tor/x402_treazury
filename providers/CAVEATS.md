@@ -51,6 +51,46 @@ alone do not establish incompatibility.
 | Straits | Authored free/premium contracts, historical feeds and JSON/CSV/RSS/HTML outputs; ordinary vessel collision naming. |
 | RelayShield phone companion | Authored vendor-omitted endpoint, with separate payment/version and unknown-result limitations. |
 
+### Unsigned HTTP/2 cover resources
+
+Cover requires a same-origin resource that accepts identity-encoded, unsigned
+single-range GETs with exact HTTP/2 206 responses. HTTP/2 200 responses show
+ignored ranges, not a failure to negotiate HTTP/2. Static pages are suitable;
+their contents are not interpreted as agent instructions. No runtime path search
+or full-download fallback is performed. See [cover policy](../docs/cover-traffic.md).
+
+Automatic cover prefers same-origin help before the catalog for every bundled
+provider without an explicit profile. The selected primary resources passed
+unsigned Tor probes at offsets zero and 1024, with exact 1024-byte responses and
+unchanged validators:
+
+| Provider | Primary | Fallback |
+| --- | --- | --- |
+| PDL | `https://stablepeopledata.dev/` | None |
+| StableEnrich | `https://stableenrich.dev/` | None |
+| Otto (automatic) | `https://x402.ottoai.services/llms-full.txt` | Catalog |
+| Vaaya (automatic) | `https://vaaya.ai/llms.txt` | Catalog |
+
+The two authored root-page profiles retain the built-in range-only budgets and
+timing values; runtime qualification still applies to all profiles. The automatic
+catalog fallbacks also require qualification; Otto and Vaaya catalogs ignored
+ranges in the probes. PDL and StableEnrich use their canonical static root pages rather than guessed document paths serving catch-all HTML.
+Otto's same-origin `AGENTS.md` and `.well-known/agent.json` also passed the probes,
+but its existing help URL already supplies a working automatic primary.
+x402stock retains its working automatic profile; both help and catalog support
+ranges. Vaaya's `robots.txt` also supports ranges but is shorter than the default 1024-byte
+qualification; the larger guide avoids a provider-specific size override.
+
+AgOSINT, AgentFund, Exa, BotSmith, IPIntel, Locus and NetIntel disable optional
+cover after their catalog/help or public discovery resources, root pages, and
+tested `agents.md`, `AGENTS.md`, `SKILL.md`, `robots.txt` and
+`.well-known/agent.json` candidates returned ignored ranges or missing resources.
+This does not establish that every resource on those origins is incompatible.
+SocialFetch and RelayShield retain their existing opt-outs. No paid call was
+needed for these resource probes; they do not establish paid settlement or
+physical-connection affinity. API functionality and configured Tor routing remain
+available without cover.
+
 ### Same-path method contracts
 
 GenuineGood's five grant pairs and Otto's generate-meme, llm-research,

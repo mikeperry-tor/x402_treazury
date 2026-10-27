@@ -1,4 +1,7 @@
 description = "US economic indicators, SEC filings, on-chain public data and deterministic text utilities."
+# Catalog/help and tested same-origin static paths did not support unsigned byte ranges.
+# Disable optional cover; ordinary API requests retain their configured network policy.
+cover_traffic_enabled = false
 
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://x402.agentfund.net/openapi.json"

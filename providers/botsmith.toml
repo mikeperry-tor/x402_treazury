@@ -1,4 +1,7 @@
 description = "Market signals covering X/Twitter intelligence, Polymarket, perpetual funding, open interest and stablecoin pegs."
+# Catalog/help and tested same-origin static paths did not support unsigned byte ranges.
+# Disable optional cover; ordinary API requests retain their configured network policy.
+cover_traffic_enabled = false
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://x402.botsmith.dev/openapi.json"
 name = "botsmith"

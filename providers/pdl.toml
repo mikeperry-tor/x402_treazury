@@ -33,3 +33,44 @@ description = "Search People Data Labs company records via Elasticsearch DSL or 
 
 [overrides.pdl_company_search.params]
 size = "Batch size 1-100 (default 1). Price scales with size."
+
+# Unsigned Tor probes verified HTTP/2 identity-encoded byte ranges at offsets 0 and 1024.
+# Use the static resource instead of the range-ignoring catalog; keep default cover budgets.
+[cover_traffic]
+url = "https://stablepeopledata.dev/"
+volume_mode = "extra_body"
+concurrency = 1
+max_requests_per_episode = 8
+max_cover_body_bytes_per_episode = 16384
+max_episode_ms = 10000
+qualification_range_bytes = 1024
+max_resource_bytes = 16777216
+
+[cover_traffic.volume]
+distribution = "log_normal"
+median_bytes = 8192
+sigma = 0.65
+min_bytes = 4096
+max_bytes = 16384
+
+[cover_traffic.ranges]
+distribution = "uniform"
+min_bytes = 1024
+max_bytes = 4096
+
+[cover_traffic.start_delay]
+distribution = "uniform"
+min_ms = 0
+max_ms = 100
+
+[cover_traffic.request_gap]
+distribution = "weibull"
+scale_ms = 100.0
+shape = 0.8
+min_ms = 50
+max_ms = 250
+
+[cover_traffic.tail]
+distribution = "uniform"
+min_ms = 1000
+max_ms = 3000

@@ -1,4 +1,7 @@
 description = "Corporate registry, company due diligence, domain, network, VAT and sanctions intelligence."
+# Catalog/help and tested same-origin static paths did not support unsigned byte ranges.
+# Disable optional cover; ordinary API requests retain their configured network policy.
+cover_traffic_enabled = false
 # Registry fan-out: /x402 anchors names; MPP aliases are the unsupported payment rail.
 spec = "https://agosint.shveik.dev/openapi.json"
 name = "AgOSINT"

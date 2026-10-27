@@ -1,4 +1,7 @@
 description = "Web search and retrieval of page contents for known URLs."
+# Catalog/help and tested same-origin static paths did not support unsigned byte ranges.
+# Disable optional cover; ordinary API requests retain their configured network policy.
+cover_traffic_enabled = false
 # Only these two operations support x402; the public spec also contains API-key APIs.
 spec = "https://api.exa.ai/openapi.json"
 name = "Exa"

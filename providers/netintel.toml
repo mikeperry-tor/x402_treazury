@@ -1,4 +1,7 @@
 description = "Network, domain, IP, email, crypto and web intelligence with supported model tools."
+# Catalog/help and tested same-origin static paths did not support unsigned byte ranges.
+# Disable optional cover; ordinary API requests retain their configured network policy.
+cover_traffic_enabled = false
 # Canonical POST preference retains supported aliases and public diagnostics.
 # Keep full path segments (no include prefix stripping) so /v1/embeddings and /embeddings remain distinct tool names.
 spec = "https://netintel.dev/openapi.json"

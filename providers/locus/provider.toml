@@ -1,4 +1,7 @@
 description = "Cited US property and public-record context, zoning, permits, flood and environmental reports."
+# Public discovery manifests and tested same-origin static paths ignored unsigned byte ranges.
+# Disable optional cover; ordinary API requests retain their configured network policy.
+cover_traffic_enabled = false
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "openapi.json"
 name = "Locus — US property & public-records context"

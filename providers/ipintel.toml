@@ -1,4 +1,7 @@
 description = "Domain, DNS, IP and email intelligence, satellite data and developer utilities."
+# Catalog/help and tested same-origin static paths did not support unsigned byte ranges.
+# Disable optional cover; ordinary API requests retain their configured network policy.
+cover_traffic_enabled = false
 # Domain, DNS, IP, satellite and developer tools; recommendations do not restrict availability.
 spec = "https://tools.ipintel.ai/openapi.json"
 name = "IPIntel.ai"
