@@ -83,12 +83,15 @@ make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::send:
 without Docker or external services:
 
 ```sh
-make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::lifecycle_tests' TEST_ARGS='--test-threads=1'
+make check-lifecycle
 ```
 
-This opt-in test uses public deterministic keys and a test-only network namespace
-that production wallet opening rejects. It complements the default bootstrap and
-replacement-credit fixtures; it does not establish end-to-end bridge settlement.
+The lifecycle stage runs its independent fixtures on eight test threads while
+feature builds remain sequential. For a serial diagnostic run, use
+`make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::lifecycle_tests' TEST_THREADS=1`.
+These opt-in tests use public deterministic keys and a test-only network namespace
+that production wallet opening rejects. They complement the default bootstrap and
+replacement-credit fixtures; they do not establish end-to-end bridge settlement.
 
 Run consensus qualification separately; [REGTEST.md](REGTEST.md) describes the
 pinned images and isolated networking:

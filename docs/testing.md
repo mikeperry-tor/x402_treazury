@@ -52,8 +52,8 @@ Default application harnesses use eight libtest threads. `TEST_THREADS=1` select
 serial execution for `make test` and `make check-default`; other positive counts
 can be measured the same way. `TEST_ARGS` still replaces the whole harness argument
 list for focused `make test` runs, while `check-default` retains its complete target
-selection. Proving, lifecycle and codec stages keep one thread, and feature builds
-remain sequential.
+selection. The lifecycle stage uses eight threads; proving and codec stages keep
+one thread. Feature builds remain sequential.
 
 `tests/integration_preparation.rs` owns the shared live-runner unit tests and its
 real-executable integration cases. The `live_integration` example has an empty

@@ -67,8 +67,9 @@ Coordinate editor-triggered Cargo checks as well as separate Make invocations;
 `.NOTPARALLEL` only serializes one invocation.
 
 `TEST_THREADS` changes only scheduling in `check-default`, not its fixed target
-selection. The proving, lifecycle and codec stages retain one test thread. Build
-and feature stages remain sequential even when a harness runs tests concurrently.
+selection. The lifecycle stage uses eight test threads; proving and codec stages
+retain one. Build and feature stages remain sequential even when a harness runs
+tests concurrently.
 
 `make check-clippy` runs the production library/binary compiler check followed by
 all-target `zcash-regtest` Clippy. Both use `check_warnings.py` to display Cargo

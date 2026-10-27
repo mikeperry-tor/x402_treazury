@@ -187,11 +187,11 @@ else:
             'check-default': [
                 application('test', '--all-targets', '--', '--test-threads=8'),
             ],
-            **{stage: [application('test', '--features', 'zcash-testutils', '--lib', case, '--', '--test-threads=1')]
-               for stage, case in (
-                   ('check-proving', 'treasury::send::proving_tests'),
-                   ('check-lifecycle', 'treasury::lifecycle_tests'),
-                   ('check-codec', 'synthetic_address_codec_is_scoped_to_its_test_client'))},
+            **{stage: [application('test', '--features', 'zcash-testutils', '--lib', case, '--', f'--test-threads={threads}')]
+               for stage, case, threads in (
+                   ('check-proving', 'treasury::send::proving_tests', 1),
+                   ('check-lifecycle', 'treasury::lifecycle_tests', 8),
+                   ('check-codec', 'synthetic_address_codec_is_scoped_to_its_test_client', 1))},
         }
 
     @staticmethod
