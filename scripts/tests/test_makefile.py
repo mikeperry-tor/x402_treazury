@@ -169,7 +169,7 @@ else:
                 ('cargo', ['fmt', '--check']),
                 ('python3', ['coverage-regression']),
                 ('python3', ['-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_*.py']),
-                ('cargo', ['test', '--locked', '--manifest-path', 'tools/complexity/Cargo.toml', '--target-dir', 'target/tools/complexity']),
+                ('cargo', ['test', '--locked', '-p', 'treazury-complexity', '--target-dir', 'target']),
                 ('python3', ['scripts/complexity.py', '--base', 'main']),
                 ('python3', ['vendor/verify.py']),
                 ('python3', ['vendor/verify_zingo.py']),

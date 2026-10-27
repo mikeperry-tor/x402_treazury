@@ -184,17 +184,19 @@ named cases in `tests/REGTEST.md`, one per process; it never enables a broad ign
 test filter. Docker/images must already be available. No live Tor or mainnet tests
 are selected. Keep optional results distinct from default-build percentages.
 
-The optional complexity reporter builds a small independent Rust helper in
-`tools/complexity/` using its own lockfile; it does not build the wallet or change
-application dependencies. Python 3.11+ assembles reports and joins existing LLVM
-coverage only for byte-identical source files. See [COMPLEXITY.md](../tests/COMPLEXITY.md)
-for parser qualification, score definitions, baseline findings and limitations.
-`make check` runs the offline report-integrity tests without installing the analyzer.
-The helper's syntax probes are an explicit development-tool check:
+The complexity reporter builds the `treazury-complexity` workspace package in
+`tools/complexity/`, sharing the application's root lockfile and development
+profile. It selects only the analyzer and writes to the shared root `target/`
+directory, regardless of inherited `CARGO_TARGET_DIR`. Python 3.11+ assembles
+reports and joins existing LLVM coverage only for byte-identical source files.
+See [COMPLEXITY.md](../tests/COMPLEXITY.md) for parser qualification, score
+definitions, baseline findings and limitations. `make check-static` runs both
+report-integrity tests and the analyzer's syntax probes. For focused checks:
 
 ```sh
-cargo test --locked --manifest-path tools/complexity/Cargo.toml --target-dir target/tools/complexity
-cargo clippy --locked --manifest-path tools/complexity/Cargo.toml --target-dir target/tools/complexity --all-targets -- -D warnings
+make toolchain
+scripts/test-runner.sh --cargo cargo test --locked -p treazury-complexity --target-dir target
+cargo clippy --locked -p treazury-complexity --target-dir target --all-targets -- -D warnings
 ```
 
 The opt-in `measure_startup_tor.py` runner compares unsigned startup time and

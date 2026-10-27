@@ -96,7 +96,7 @@ check-static: toolchain
 	cargo fmt --check
 	scripts/tests/coverage.sh
 	$(PYTHON) -m unittest discover -s scripts/tests -p 'test_*.py'
-	scripts/test-runner.sh --cargo cargo test --locked --manifest-path tools/complexity/Cargo.toml --target-dir target/tools/complexity
+	scripts/test-runner.sh --cargo cargo test --locked -p treazury-complexity --target-dir target
 	$(PYTHON) scripts/complexity.py --base '$(COMPLEXITY_BASE_REF)'
 	$(PYTHON) vendor/verify.py
 	$(PYTHON) vendor/verify_zingo.py

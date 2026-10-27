@@ -115,27 +115,34 @@ class ComplexityTests(unittest.TestCase):
     def test_parser_failure_preserves_successful_publication_and_raw_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for p in ["src/a.rs", "tools/complexity/Cargo.lock", "target/tools/complexity/debug/treazury-complexity"]:
+            for p in ["src/a.rs", "Cargo.lock", "target/debug/treazury-complexity"]:
                 path = root / p
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("fixture")
             data = {"version": reporter.VERSION, "files": [file_data()]}
+            commands = []
 
             def fake_git(*args):
                 return {"ls-files": b"src/a.rs\0", "rev-parse": b"abc", "status": b""}[args[0]]
 
             def fake_run(command, **kwargs):
+                commands.append(command)
                 kwargs["stdout"].write(json.dumps(data))
                 return subprocess.CompletedProcess(command, 0)
 
             output = io.StringIO()
-            with patch.object(reporter, "ROOT", root), patch.object(reporter, "git", fake_git), patch.object(reporter.subprocess, "run", fake_run), patch("sys.argv", ["complexity.py", "--no-build", "--no-compare"]), redirect_stdout(output), redirect_stderr(output):
+            with patch.object(reporter, "ROOT", root), patch.object(reporter, "git", fake_git), patch.object(reporter.subprocess, "run", fake_run), patch("sys.argv", ["complexity.py", "--no-compare"]), redirect_stdout(output), redirect_stderr(output):
                 self.assertEqual(reporter.main(), 0)
                 previous = (root / "target/complexity").resolve()
                 data["files"][0]["errors"] = ["injected parser failure"]
                 self.assertEqual(reporter.main(), 1)
                 self.assertEqual((root / "target/complexity").resolve(), previous)
                 self.assertEqual((previous / "status").read_text(), "complete\n")
+            self.assertEqual([c for c in commands if c[0] == "cargo"], [
+                ["cargo", "build", "--locked", "-p", "treazury-complexity", "--target-dir", "target"]
+            ] * 2)
+            report = json.loads((previous / "report.json").read_text())
+            self.assertEqual(report["tool_lock_sha256"], reporter.digest((root / "Cargo.lock").read_bytes()))
             runs = list((root / "target/complexity-runs").iterdir())
             self.assertEqual(len(runs), 2)
             failed = next(p for p in runs if p.resolve() != previous)
@@ -146,7 +153,7 @@ class ComplexityTests(unittest.TestCase):
     def test_warnings_succeed_but_baseline_failure_preserves_previous_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for p in ["src/a.rs", "tools/complexity/Cargo.lock", "target/tools/complexity/debug/treazury-complexity"]:
+            for p in ["src/a.rs", "Cargo.lock", "target/debug/treazury-complexity"]:
                 path = root / p
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("fixture")

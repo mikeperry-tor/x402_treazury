@@ -519,8 +519,9 @@ the repository.
 
 ### Combined workspace verification
 
-The root workspace includes the application and Pepper Sync. Ordinary commands
-select only the application through `default-members`; Pepper is selected
+The root workspace includes the application, Pepper Sync and the complexity
+analyzer. Ordinary commands select only the application through `default-members`;
+the analyzer is selected explicitly for development checks and Pepper is selected
 explicitly for its private merge regression. Other vendored dependencies remain
 nonmembers. All application tests use the root lockfile, patches, profile and
 build cache. The SDK wallet fixture lives in `tests/sdk_compat.rs`; it exercises

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reporting-only Rust complexity audit. Build inputs are separate from the app."""
+"""Reporting-only Rust complexity audit using the application workspace lockfile."""
 import argparse
 import csv
 import datetime
@@ -299,10 +299,10 @@ def main():
     out.mkdir(parents=True)
     print(f"Complexity artifacts: {out}", flush=True)
     try:
-        binary = ROOT / "target/tools/complexity/debug/treazury-complexity"
+        binary = ROOT / "target/debug/treazury-complexity"
         if not args.no_build:
             with (out / "build.log").open("w") as log:
-                subprocess.run(["cargo", "build", "--locked", "--manifest-path", "tools/complexity/Cargo.toml", "--target-dir", "target/tools/complexity"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
+                subprocess.run(["cargo", "build", "--locked", "-p", "treazury-complexity", "--target-dir", "target"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
         paths = selected_paths()
         if not paths:
             raise ValueError("no Rust inputs selected")
@@ -313,7 +313,7 @@ def main():
         coverage = attach_coverage(rows, args.coverage, hashes)
         report = {"status": "partial" if excluded else "complete", "source_revision": git("rev-parse", "HEAD").decode().strip(),
                   "source_status": git("status", "--short").decode(), "analyzer": VERSION,
-                  "analyzer_binary_sha256": digest(binary.read_bytes()), "tool_lock_sha256": digest((ROOT / "tools/complexity/Cargo.lock").read_bytes()),
+                  "analyzer_binary_sha256": digest(binary.read_bytes()), "tool_lock_sha256": digest((ROOT / "Cargo.lock").read_bytes()),
                   "files": hashes, "excluded": excluded, "coverage": coverage, "functions": rows}
         (out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         with (out / "functions.csv").open("w", newline="") as csvfile:

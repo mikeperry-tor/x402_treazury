@@ -7,13 +7,14 @@ gates or application/runtime dependencies. First use downloads development crate
 subsequent runs can use `CARGO_NET_OFFLINE=true`. No source is sent to an external
 analysis service. The report orchestrator requires Python 3.11+.
 
-The independent helper in `tools/complexity/` pins Mozilla's
+The workspace helper in `tools/complexity/` pins Mozilla's
 [rust-code-analysis](https://github.com/mozilla/rust-code-analysis) to **0.0.25**.
-Its separate committed lockfile is required: fresh dependency resolution can select
+It shares the application's committed root lockfile and development profile.
+That lockfile unifies Tree-sitter at **0.20.9**: fresh resolution can select
 Tree-sitter 0.27 through tree-sitter-rust 0.20.3, incompatible with the analyzer's
-0.20.9 API. The lockfile unifies that dependency at 0.20.9 without patching upstream
-source or changing the application's lockfile. Requalify the syntax probes and
-baseline when updating the analyzer or its grammar dependencies.
+0.20.9 API. Preserve the qualified grammar resolution when updating dependencies;
+requalify the syntax probes and baseline when changing the analyzer or its grammar
+cohort. The analyzer remains outside the default application package selection.
 
 ## Inputs and artifacts
 
@@ -35,7 +36,10 @@ and baseline discovery include these roots. It excludes vendor code, reference
 checkouts, build output,
 fixtures in other formats, and the development tool itself. Source changes during
 analysis abort publication. The default build command uses `--locked` and writes
-only to `target/tools/complexity`; `--no-build` explicitly reuses that helper binary.
+to the shared root `target/` directory; `--no-build` explicitly reuses
+`target/debug/treazury-complexity`. The reporter selects the analyzer package and
+fixes that target directory even when `CARGO_TARGET_DIR` is inherited. Report
+`tool_lock_sha256` records the root lockfile hash.
 
 Each run writes a new `target/complexity-runs/<timestamp>-<id>/` containing:
 

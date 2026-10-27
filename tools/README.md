@@ -30,7 +30,8 @@ and run commands use it, as does release qualification; see the
 [build entrypoints](../scripts/README.md) and
 [reproducible builds](../docs/reproducible-builds.md).
 
-`complexity/` is an independently locked development analyzer invoked by
+`complexity/` is a development analyzer in the application workspace, using its
+root lockfile and shared build cache. It is selected explicitly by package through
 `scripts/complexity.py` and `make check-static`; see
 [complexity review](../tests/COMPLEXITY.md). Neither helper is a root-package Cargo
 example target.
