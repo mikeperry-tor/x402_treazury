@@ -884,14 +884,14 @@ send_tools = [
 
 [servers.web]
 listen = "127.0.0.1:3010"
-allowed_hosts = ["host.docker.internal"]
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
 instructions_text = "Web search, page retrieval and scraping, news and coverage timelines, academic papers and researcher profiles, structured page extraction, blocked-page retrieval, web archives and historical snapshots, keyword trends, image search, reverse-image search and shopping. Use this endpoint for source discovery and web content; use social or business for profiles. Academic sources include OpenAlex and Valyu; news timelines use GDELT. Bright Data and Diffbot support blocked-page retrieval and typed extraction; Firecrawl and Serper offer comparison sources; Wayback supplies archived pages and snapshot discovery."
 
 [servers.social]
 listen = "127.0.0.1:3011"
-allowed_hosts = ["host.docker.internal"]
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "social"
 discover_on_demand = true
@@ -900,7 +900,7 @@ discovery_search_tool_instructions_text = "Social keywords: reddit, github, blue
 
 [servers.business]
 listen = "127.0.0.1:3012"
-allowed_hosts = ["host.docker.internal"]
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
@@ -909,7 +909,7 @@ discovery_search_tool_instructions_text = "Business keywords: registry, CNPJ, VA
 
 [servers.finance]
 listen = "127.0.0.1:3013"
-allowed_hosts = ["host.docker.internal"]
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
@@ -918,7 +918,7 @@ discovery_search_tool_instructions_text = "Finance keywords: ticker, equity, opt
 
 [servers.property]
 listen = "127.0.0.1:3014"
-allowed_hosts = ["host.docker.internal"]
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
@@ -927,7 +927,7 @@ discovery_search_tool_instructions_text = "Property keywords: Locus, US address,
 
 [servers.security]
 listen = "127.0.0.1:3015"
-allowed_hosts = ["host.docker.internal"]
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
@@ -936,7 +936,7 @@ discovery_search_tool_instructions_text = "Security keywords: breach, infosteale
 
 [servers.world]
 listen = "127.0.0.1:3016"
-allowed_hosts = ["host.docker.internal"]
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
 discover_on_demand = true
@@ -945,7 +945,7 @@ discovery_search_tool_instructions_text = "World keywords: Hormuz, strait, shipp
 
 [servers.toolbox]
 listen = "127.0.0.1:3017"
-allowed_hosts = ["host.docker.internal"]
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
 discover_on_demand = true
