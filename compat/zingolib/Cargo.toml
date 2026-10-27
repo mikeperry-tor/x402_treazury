@@ -1,25 +1,12 @@
-# Combined build/test experiment; not part of the runnable prototype.
+# Offline SDK/payment integration tests sharing the application's locked graph.
 [package]
 name = "x402-zingolib-compat"
 version = "0.0.0"
 edition = "2024"
 publish = false
-[workspace]
-
-# This independent workspace does not inherit the application's profiles.
-[profile.dev]
-debug = "line-tables-only"
-
 [dependencies]
 x402_treazury = { path = "../.." }
 zingolib = { git = "https://github.com/zingolabs/zingolib", rev = "bfb0a2156819ea7f75a9b09b1724abfd06c8925e", default-features = false }
-
-# Reviewed transport patches: see vendor/README.md.
-[patch.crates-io]
-reqwest = { path = "../../vendor/reqwest" }
-h2 = { path = "../../vendor/h2" }
-hyper = { path = "../../vendor/hyper" }
-rmcp = { path = "../../vendor/rmcp" }
 
 [dev-dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -46,6 +33,3 @@ path = "../../tests/server.rs"
 [[test]]
 name = "crypto_vectors"
 path = "../../tests/crypto_vectors.rs"
-
-[patch."https://github.com/zingolabs/zingolib"]
-pepper-sync = { path = "../../vendor/pepper-sync" }

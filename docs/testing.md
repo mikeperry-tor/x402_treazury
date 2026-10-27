@@ -42,7 +42,7 @@ not implicitly rerun earlier stages. `CARGO_ARGS` and `TEST_ARGS` customize
 | --- | --- |
 | `check-static` | Formatting, tooling regressions, analyzer tests and CogC/CycC report, vendor provenance |
 | `check-clippy` | Production library/binary compiler check, then all-target Clippy with `zcash-regtest`; emitted compiler warnings from both application and dependencies fail the stage |
-| `check-compat` | Complete combined dependency compatibility suite |
+| `check-compat` | Complete SDK/payment compatibility package using the application workspace's locked dependency graph |
 | `check-default` | SDK scan-merge diagnostic regression and all default application targets, including examples |
 | `check-proving` | `zcash-testutils` treasury proving tests |
 | `check-lifecycle` | `zcash-testutils` synthetic-chain treasury lifecycle |

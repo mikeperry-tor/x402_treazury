@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build/test payments + pinned upstream Zingolib through the application adapter, without funds.
+"""Test payments + pinned Zingolib with the shared application dependency graph, without funds.
 Downloads Cargo dependencies and public Sapling parameters on the first build.
 """
 from pathlib import Path
@@ -13,7 +13,7 @@ def main():
     compiler_manifest = ROOT / 'compat/protoc/Cargo.toml'
     protoc = subprocess.check_output(['cargo', 'run', '--quiet', '--locked', '--manifest-path', str(compiler_manifest)], text=True).strip()
     env = dict(os.environ, PROTOC=protoc)
-    subprocess.run([str(ROOT / 'scripts/test-runner.sh'), '--cargo', 'cargo', 'test', '--locked', '--manifest-path', str(ROOT / 'compat/zingolib/Cargo.toml')], env=env, check=True)
+    subprocess.run([str(ROOT / 'scripts/test-runner.sh'), '--cargo', 'cargo', 'test', '--locked', '--manifest-path', str(ROOT / 'Cargo.toml'), '--package', 'x402-zingolib-compat'], env=env, check=True)
 
 if __name__ == '__main__':
     main()

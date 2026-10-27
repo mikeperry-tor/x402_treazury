@@ -11,6 +11,7 @@ fn main() {
         "vendor",
         "Cargo.toml",
         "Cargo.lock",
+        "compat/zingolib/Cargo.toml",
         "build.rs",
         "rust-toolchain.toml",
         ".git/HEAD",
@@ -55,6 +56,7 @@ fn main() {
                     "vendor",
                     "Cargo.toml",
                     "Cargo.lock",
+                    "compat/zingolib/Cargo.toml",
                     "build.rs",
                     "rust-toolchain.toml",
                 ];

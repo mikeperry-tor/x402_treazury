@@ -74,8 +74,8 @@ Release compilation takes longer, but produces optimized code without debug info
 This ordinary build is separate from the qualified
 [reproducible release workflow](reproducible-builds.md).
 
-Development and test builds use `debug = "line-tables-only"` in the application
-and independent Zingolib compatibility workspace. This retains file/line
+Development and test builds use `debug = "line-tables-only"` throughout the
+application workspace, including the compatibility package. This retains file/line
 backtraces but omits type and variable information needed for richer debugger
 inspection. Enable incremental development builds explicitly:
 
@@ -104,13 +104,37 @@ compilation does not delete existing caches or other dependency/test artifacts.
 With builds stopped, the regenerable incremental caches can be removed directly:
 
 ```sh
-rm -rf target/debug/incremental compat/zingolib/target/debug/incremental
+rm -rf target/debug/incremental
 ```
 
 The next compilation will rebuild any needed cache. Preserve the rest of
 `target/`: it also contains retained live qualification evidence, pinned
 executables and reports. Do not use blanket `cargo clean` or delete `target/`
 as routine disk cleanup.
+
+### Compilation parallelism
+
+Cargo already schedules independent crates and targets concurrently. Its default
+job count is the number of logical CPUs; `CARGO_BUILD_JOBS` changes that compiler
+budget independently of libtest's `TEST_THREADS` setting. For example:
+
+```sh
+CARGO_BUILD_JOBS=8 make cargo-check CARGO_ARGS='--all-targets --timings'
+make test CARGO_ARGS='--all-targets --no-run --timings'
+```
+
+Cargo writes the concurrency and compilation timeline under
+`target/cargo-timings/`. Compare unchanged sources, features, profiles and warmed
+inputs before choosing a job count. See Cargo's
+[job control](https://doc.rust-lang.org/cargo/reference/config.html#buildjobs) and
+[timing reports](https://doc.rust-lang.org/cargo/reference/timings.html).
+
+The application, compatibility package and SDK regression share one lockfile,
+workspace profile, patch table and target directory. This permits reuse of
+matching compiled units; different features and target kinds can still require
+separate units. Keep their Cargo invocations and feature configurations sequential
+while validating tests, since CLI fixtures need a fixed executable. Separate
+Make commands do not isolate artifacts or bypass Cargo's build-directory lock.
 
 ## Verification
 
@@ -443,8 +467,8 @@ Keep ordinary CLI errors legible even with backtrace environment variables enabl
 
 ### TLS security updates
 
-The application and `compat/zingolib` are independent Cargo workspaces; update
-both committed lockfiles for TLS security fixes. For the
+The application and `compat/zingolib` share the root Cargo workspace and lockfile;
+update that lockfile for runtime TLS security fixes. For the
 [emSign intermediate-key compromise](https://rustsec.org/advisories/RUSTSEC-2026-0382),
 runtime verification requires `rustls-webpki` 0.103.16 or later in the 0.103
 series, together with `webpki-roots` and `webpki-root-certs` 1.0.10 or later.
@@ -452,7 +476,7 @@ The verifier rejects compromised intermediate public keys; the root-bundle
 update removes the affected emSign root. Host trust-store updates remain
 necessary for platform verification. Rebuild and replace deployed binaries to
 consume locked dependency changes. Vendored upstream lockfiles are provenance
-inputs, not the dependency resolution used by these two workspaces.
+inputs, not the dependency resolution used by the application workspace.
 
 The build-only legacy TLS dependency and parameter-integrity boundary are
 documented in [the Zingo integration guide](../vendor/ZINGO.md#build-time-parameter-downloads).
@@ -472,9 +496,13 @@ the repository.
 
 ### Combined workspace verification
 
-The root workspace includes Pepper Sync so its private shard-merge regression can
-run with the application's reviewed patches and lockfile. Ordinary root commands
-select only the application; the other vendored dependencies remain nonmembers.
+The root workspace includes the `x402-zingolib-compat` test package and Pepper Sync.
+All three packages use the root lockfile, patches, profile and build cache. Ordinary
+root commands select only the application through `default-members`; the other
+vendored dependencies remain nonmembers. The compatibility package exercises the
+public library API with offline SDK wallet restore/address continuity, payment
+signing, MCP server and independent cryptographic-vector tests. Dependency updates
+select one shared graph for the application and these tests.
 `make check` explicitly runs the real three-pool merge-conflict fixture:
 
 ```sh
@@ -489,7 +517,8 @@ python3 scripts/check_compat.py
 ```
 
 The checker verifies the vendored source hashes, obtains a Cargo-managed `protoc`
-compiler, and runs the combined suite with its committed lockfile. First builds
+compiler, and explicitly selects `x402-zingolib-compat` with the root lockfile.
+First builds
 fetch Cargo dependencies and zingolib's public Sapling proving parameters;
 zingolib embeds those parameters from the standard cache during its build. Tests use temporary
 offline wallets and localhost payment servers. No wallet sync, funded payment, approval or broadcast
@@ -497,7 +526,7 @@ occurs.
 
 The [vendored inventory](../vendor/README.md) records each remaining patch's
 current reason, consumers, removal evidence and source-verification scope.
-Both roots use unpatched Alloy core 1.7.3 with the pinned Zingolib v7 cohort:
+The shared graph uses unpatched Alloy core 1.7.3 with the pinned Zingolib v7 cohort:
 
 ```text
 Alloy → sha3 0.11.0 → digest 0.11.3
@@ -505,7 +534,7 @@ Zingolib → bip32 0.6.0 → hmac 0.13.0 → digest 0.11.3
 ```
 
 `lightwallet-protocol` 0.4.0 supplies the required Ironwood fields without a
-separate root Git override. Both roots use ordinary upstream Zingolib/netutils
+separate root Git override. All workspace packages use ordinary upstream Zingolib/netutils
 Git sources at the same pinned revision, with no local checkout overrides. The
 [Zingo integration](../vendor/ZINGO.md) uses public RPC traits, direct Pepper sync
 and backend calculation over the application transport. Pepper's retained patches
@@ -522,15 +551,14 @@ are release inputs; see [release qualification](reproducible-builds.md).
 The independent hash vectors are regenerated with
 `uv run --script scripts/generate_crypto_vectors.py`; normal Rust tests consume
 the committed vectors without Python. The combined suite runs the shared
-payment/MCP/crypto targets plus offline wallet tests. Both root manifests must
-repeat the remaining patches because dependency-root patches are not inherited.
-Both lockfiles retain their independently resolved graphs; neither workspace
-loads real wallet state for these checks. SDK upgrade coverage includes a public
+payment/MCP/crypto targets plus offline wallet tests. The root manifest supplies
+the patches and shared lockfile for both packages. These checks use temporary
+offline state. SDK upgrade coverage includes a public
 v6 snapshot, retained derived addresses and next-address continuity under v7.
 
 This focused compatibility suite tests dependency coexistence and offline wallet
 round trips. The application suites separately cover sync, proving and consensus
-recovery. Neither suite qualifies mainnet NEAR settlement. Both manifests use the
+recovery. Neither suite qualifies mainnet NEAR settlement. Both packages use the
 reviewed vendored patches; no reference checkout is required. The
 [wallet architecture](wallet-rotation.md) describes treasury ownership,
 admission, funding, persistence and recovery.

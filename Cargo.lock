@@ -6687,6 +6687,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "x402-zingolib-compat"
+version = "0.0.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "axum",
+ "base64 0.22.1",
+ "futures-util",
+ "reqwest 0.13.5",
+ "rmcp",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "x402_treazury",
+ "zingolib",
+ "zip32",
+]
+
+[[package]]
 name = "x402_treazury"
 version = "0.1.0"
 dependencies = [

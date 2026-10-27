@@ -492,7 +492,7 @@ transaction recovery attempts.
 
 
 The treasury receives/synchronizes Ironwood with capability checks on the injected
-lightwalletd transport. Both workspaces use ordinary upstream Zingolib/netutils
+lightwalletd transport. All workspace packages use ordinary upstream Zingolib/netutils
 sources; the application's public-trait RPC adapter preserves the factory transport
 without SDK-owned direct networking. Direct Pepper sync retains its reviewed
 progress/drain and diagnostic patches. The

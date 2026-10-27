@@ -3,8 +3,8 @@
 Both the application and `compat/zingolib` use ordinary upstream `zingolib` and
 `zingo-netutils` Git sources at revision
 `bfb0a2156819ea7f75a9b09b1724abfd06c8925e` (v7.0.0). Neither crate has a local
-snapshot or override. The same cohort's `pepper-sync/` remains patched; both
-workspaces retain its path override. The root workspace includes Pepper only so
+snapshot or override. The same cohort's `pepper-sync/` remains patched; the shared
+workspace retains its path override. The root workspace includes Pepper only so
 its private merge regression can execute with the application lockfile.
 
 `zingo-sources.json` records the upstream source archive hash, every retained

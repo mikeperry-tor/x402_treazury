@@ -1,9 +1,8 @@
 # Vendored dependency patches
 
-Both the application and `compat/zingolib` use this patch set. The independent
-compatibility workspace repeats root patches because Cargo does not inherit them
-from dependency manifests. The root manifests and committed lockfiles select the
-actual build graph; vendored upstream lockfiles are provenance inputs.
+The application and `compat/zingolib` test package share the root workspace's
+patches and committed lockfile. That lockfile selects the build graph for both;
+vendored upstream lockfiles remain provenance inputs.
 
 ## Current reasons and removal evidence
 
@@ -25,8 +24,8 @@ release already supplies equivalent behavior.
 
 Runtime contracts remain in [network policy](../docs/network-egress.md) and
 [wallet ownership](../docs/wallet-rotation.md). When changing a pin or removing a
-patch, review its complete consumers and retained regression coverage in both
-workspaces, then update this inventory and the owning guide.
+patch, review its complete consumers and retained regression coverage in the application and compatibility
+packages, then update this inventory and the owning guide.
 
 ## Checkout retirement tracking
 
@@ -69,7 +68,7 @@ qualified replacement. Failed candidates retain their specific blocking reason;
 keep detailed build logs and comparisons under ignored `target/`, not in this
 ledger. Do not invent an upstream status from a similar feature name.
 
-A retirement is complete when both root manifests and lockfiles use the qualified
+A retirement is complete when the workspace manifest and lockfile use the qualified
 unpatched source, the local crate directory and obsolete patch/provenance entries
 are removed, consumers and build/release tools work, and required regressions
 remain effective. Retain verification of every remaining vendored source. When
@@ -80,7 +79,7 @@ relevant dependency updates and use upstream notifications when explicitly set u
 
 ## Combined dependency compatibility
 
-Both workspaces use unpatched Alloy core 1.7.3 and the pinned Zingolib v7 cohort.
+The shared workspace uses unpatched Alloy core 1.7.3 and the pinned Zingolib v7 cohort.
 Alloy's `sha3 0.11.0` and Zingo's `bip32 0.6.0 → hmac 0.13.0` accept stable
 `digest 0.11.3`; no local hashing manifest override is needed. Independent
 Keccak/EIP-712 vectors, payment signing and the compatibility suite remain the
@@ -101,8 +100,8 @@ zero peer capacity.
 
 `transport-sources.json` records the archive SHA-256, every original file hash,
 and the reviewed patch hash. `python3 vendor/verify.py` also reverses the patches
-and checks every file against its upstream hash. Both application and independent
-compatibility workspace pin the same patch. No protocol downgrade, retry or
+and checks every file against its upstream hash. The application and compatibility
+package select the same root patch. No protocol downgrade, retry or
 change to financial authority is introduced. Application real TLS/SOCKS tests
 check raw HEADERS absence, GET/POST cancellation and timeout, and reuse of the
 healthy multiplexed connection. Remove the patch only after equivalent upstream
@@ -154,8 +153,8 @@ initialization errors to safe reasons rather than printing the original first
 message. Regression coverage lives in discovery's isolated real MCP/Tor fixture,
 `src/discovery/raw_privacy_tests.rs` and the executable's initialization-error test.
 `rmcp-sources.json` records the archive hash, every published file hash and patch
-hash; source verification reverses the patch before checking all files. Both root
-and independent compatibility graphs select the same path patch. No network
+hash; source verification reverses the patch before checking all files. Both application
+and compatibility packages select the same root path patch. No network
 constructor, timeout, retry, credential store or financial authority is added.
 
 The patch also gates three client-only helpers (`matches_response_id`,

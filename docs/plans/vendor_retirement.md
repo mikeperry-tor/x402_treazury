@@ -95,7 +95,7 @@ Pepper remain later assessments because each has multiple independent blockers.
 For both H and H2, preserve raw HEADERS absence, zero-peer-capacity cleanup,
 explicit/implicit cancellation, no stale bodies and healthy multiplexed reuse.
 Require queue/timeout tests in `src/network/`, HTTP/gRPC cases in
-`tests/network.rs`, network audit and independent compatibility. Review both sides
+`tests/network.rs`, network audit and the compatibility package. Review both sides
 of pending-open cancellation even if only one checkout can exit. Initial upstream
 source and PR inspection is not executed regression or retirement evidence.
 
@@ -104,5 +104,5 @@ Prepare independently useful fixes/APIs with small faithful upstream regressions
 separately from application financial-ownership fixtures. Actual submission needs
 its own authorization. Record links, merge revisions, exact candidate versions and
 remaining blockers in the ledger. An accepted PR or newer release is not qualified
-replacement evidence. Preserve both workspace graphs, regression/provenance
+replacement evidence. Preserve application and compatibility regression/provenance
 coverage and relevant build/release inputs with every eventual retirement.

@@ -77,6 +77,11 @@ Git archive produce the same snapshot. Each build uses `cargo build --frozen
 --release --bin x402_treazury --target aarch64-apple-darwin`; Zcash is unconditional.
 The locked protoc helper is also rebuilt independently.
 
+The source archive includes `compat/zingolib/Cargo.toml`, a workspace resolution
+input even when only the application is selected. Build fingerprints, dirty-input
+checks and Cargo rebuild triggers include that manifest alongside the root
+manifest and lockfile.
+
 The environment is constructed from an allowlist: no inherited Rust flags,
 profiling settings, proxy variables or wallet credentials. Cargo registry/Git
 source caches are shared, but compiled output, Cargo configuration and credentials

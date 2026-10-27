@@ -7,10 +7,10 @@ publish = false
 default-run = "x402_treazury"
 
 [workspace]
-members = [".", "vendor/pepper-sync"]
+members = [".", "compat/zingolib", "vendor/pepper-sync"]
 default-members = ["."]
 resolver = "3"
-# Only Pepper's private merge fixture needs dependency unit-test selection.
+# Other vendored dependencies are not test packages in this workspace.
 exclude = [
     "vendor/reqwest",
     "vendor/hyper",

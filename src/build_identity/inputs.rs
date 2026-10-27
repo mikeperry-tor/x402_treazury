@@ -63,6 +63,7 @@ pub fn source_hash(root: &Path) -> io::Result<String> {
         "vendor",
         "Cargo.toml",
         "Cargo.lock",
+        "compat/zingolib/Cargo.toml",
         "build.rs",
         "rust-toolchain.toml",
     ] {
@@ -92,7 +93,7 @@ mod tests {
     use super::{provider_files, source_hash};
 
     #[test]
-    fn relocated_runner_inputs_affect_fingerprint_without_private_live_inputs() {
+    fn compilation_inputs_affect_fingerprint_without_private_live_inputs() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         for name in ["src", "vendor"] {
@@ -101,6 +102,7 @@ mod tests {
         for name in [
             "Cargo.toml",
             "Cargo.lock",
+            "compat/zingolib/Cargo.toml",
             "build.rs",
             "rust-toolchain.toml",
             "tests/live/live_integration.rs",
@@ -130,6 +132,7 @@ mod tests {
         .unwrap();
         assert_eq!(source_hash(root).unwrap(), initial);
         for name in [
+            "compat/zingolib/Cargo.toml",
             "tests/live/live_integration.rs",
             "tests/live/runner/driver.rs",
             "tests/live/runner/fixtures/reporting_complete.txt",
