@@ -77,23 +77,22 @@ Do not create aliases or alter explicit raw HTTP methods.
 
 ## Reliability annotations
 
-The provider definitions contain `reliability_tags` and `reliability_note`
-observations. [Warning semantics and tag meanings](../docs/configuration.md#provider-reliability-observations)
+Provider definitions can carry `reliability_tags` and `reliability_note`
+observations. The bundled annotations are listed below.
+[Warning semantics and tag meanings](../docs/configuration.md#provider-reliability-observations)
 are separate from OpenAPI tool filtering.
 
 | Provider | Observed concern |
 | --- | --- |
-| AgentFund | Repeated upstream timeout in the treasury yield-curve response. |
 | AgentUtility | Repeated upstream rate limit in web search. |
-| Arkham | One paid response-body loss; subsequent responses completed. |
 | OneShot | Repeated catalog HTTP 403; help remained reachable. |
-| Kronos | Intermittent catalog/help connection timeouts. |
-| RegimeShift | Intermittent catalog/help timeouts and partial upstream data. |
-| Concordance | One query/result-metadata relevance mismatch. |
 
 These are stage-specific compatibility concerns, not current health guarantees or
 evidence that Tor caused a failure. Startup warnings describe the concern without
-changing selection or permitting retries. See [qualification limits](../docs/testing.md#qualification-status).
+changing selection or permitting retries. Runtime terminal-failure diagnostics
+remain independent of these annotations. Successful response content still needs
+caller interpretation of completeness and relevance. See
+[qualification limits](../docs/testing.md#qualification-status).
 
 ## Help and compatibility
 

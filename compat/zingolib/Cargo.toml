@@ -32,6 +32,8 @@ rmcp = { version = "=3.5.0", default-features = false, features = ["server"] }
 serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = "1"
 zip32 = "0.3.0"
 

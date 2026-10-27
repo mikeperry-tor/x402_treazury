@@ -162,7 +162,16 @@ impl HelpBinding {
                 "help document HTTP status {}",
                 status.as_u16()
             );
-            String::from_utf8(bytes.to_vec()).context("help document is not valid UTF-8 text")
+            String::from_utf8(bytes.to_vec())
+                .inspect_err(|_| {
+                    tracing::warn!(
+                        category = "help_invalid_utf8",
+                        http_status = status.as_u16(),
+                        authorization_may_charge = document.payment_may_have_occurred,
+                        "Help document is not valid UTF-8 text; tool call failed and no partial content was returned"
+                    );
+                })
+                .context("help document is not valid UTF-8 text")
         })?;
         Ok((text, document.payment_may_have_occurred))
     }

@@ -453,6 +453,75 @@ async fn catalog_replacement_preserves_inflight_routes_and_updates_all_views() {
 }
 
 #[tokio::test]
+async fn untagged_help_failures_warn_once_without_exposing_content() {
+    use axum::http::{HeaderMap, StatusCode};
+    use tracing::instrument::WithSubscriber;
+
+    for (status, body, expected_warning) in [
+        (
+            StatusCode::OK,
+            b"private-help-body\xff".to_vec(),
+            Some("help_invalid_utf8"),
+        ),
+        (
+            StatusCode::BAD_REQUEST,
+            b"private-help-body".to_vec(),
+            Some("Could not retrieve document"),
+        ),
+        (StatusCode::OK, b"useful help".to_vec(), None),
+    ] {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let observed = hits.clone();
+        let (base, task) = serve(Router::new().route(
+            "/help",
+            get(move |headers: HeaderMap| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                assert!(!headers.contains_key("payment-signature"));
+                let body = body.clone();
+                async move { (status, body) }
+            }),
+        ))
+        .await;
+        let cfg = Config {
+            help_url: Some(format!("{base}/help?token=private-help-token")),
+            ..Default::default()
+        };
+        assert!(cfg.reliability_tags.is_empty());
+        let tools = build_tools(&cfg, &json!({"paths":{"/unused":{"get":{}}}}), "fixture").unwrap();
+        let server = Server::new(tools, PaidClient::unsigned(), base.clone(), None);
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let result = server
+            .invoke("fixture_help", &Default::default())
+            .with_subscriber(subscriber)
+            .await;
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        let warnings: Vec<_> = logs.lines().filter(|line| line.contains("WARN")).collect();
+        if let Some(expected) = expected_warning {
+            assert!(result.is_err());
+            assert_eq!(warnings.len(), 1, "{logs}");
+            assert!(warnings[0].contains(expected), "{logs}");
+            assert!(
+                warnings[0].contains("authorization_may_charge=false"),
+                "{logs}"
+            );
+        } else {
+            assert_eq!(result.unwrap(), "useful help");
+            assert!(warnings.is_empty(), "{logs}");
+        }
+        for private in ["private-help-body", "private-help-token", base.as_str()] {
+            assert!(!logs.contains(private), "{logs}");
+        }
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        task.abort();
+    }
+}
+
+#[tokio::test]
 async fn help_failures_retry_concurrent_calls_coalesce_and_new_urls_get_new_content() {
     use axum::{
         http::{HeaderMap, StatusCode},

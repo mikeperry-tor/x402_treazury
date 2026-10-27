@@ -1662,7 +1662,32 @@ async fn tor_unsigned_retry_child() {
             TorStep::Free200(b"forbidden replay".to_vec()),
         ]
         .into();
-        let error = paid_bodies.execute(make_route()).await.unwrap_err();
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let error = paid_bodies
+            .execute(make_route())
+            .with_subscriber(subscriber)
+            .await
+            .unwrap_err();
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        let terminal: Vec<_> = logs
+            .lines()
+            .filter(|line| line.contains("WARN") && line.contains("Payment call failed"))
+            .collect();
+        assert_eq!(terminal.len(), 1, "{logs}");
+        assert!(
+            terminal[0].contains("authorization_may_charge=true"),
+            "{logs}"
+        );
+        assert!(
+            terminal[0].contains("do not automatically repeat"),
+            "{logs}"
+        );
+        assert!(!logs.contains("forbidden replay"), "{logs}");
         if matches!(body_failure, TorStep::Interrupted200 | TorStep::Stalled200) {
             assert!(
                 error.chain().any(|e| e

@@ -1120,11 +1120,19 @@ replaces the entire list, and `reliability_tags = []` suppresses its warnings.
 errors. Describe the affected stage and revise notes when new evidence warrants it;
 keep dated measurements in private local reports.
 
-The initial annotations cover AgentFund, AgentUtility, Arkham, OneShot, Kronos,
-RegimeShift and Concordance. These observations were made through Tor, but do
+Bundled annotations cover AgentUtility and OneShot. These observations were made through Tor, but do
 **not** establish Tor causation or long-term failure rates; warnings therefore
 apply in both network modes. See the [provider caveats](../providers/CAVEATS.md) and
 [qualification scope](testing.md#qualification-status).
+
+Clearing annotations suppresses only their startup notices. Actual API and help
+transport, unsuccessful HTTP status and incomplete-response failures still emit
+WARN after applicable retries and fallback finish. Unusable help text also warns
+without logging its contents. Required catalog failures retain source diagnostics
+and affected-endpoint ERRORs. Payment warnings retain possible-charge context;
+clearing metadata never authorizes replay. Successful HTTP responses retain their
+content, including upstream completeness and relevance markers, for the caller to
+interpret; annotations do not turn those markers into tool failures.
 
 ## SocialFetch and tag selection
 
