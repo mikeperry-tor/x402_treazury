@@ -15,7 +15,6 @@ exclude = [
     "vendor/reqwest",
     "vendor/hyper",
     "vendor/h2",
-    "vendor/rmcp",
     "vendor/pepper-sync",
 ]
 
@@ -105,7 +104,6 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 reqwest = { path = "vendor/reqwest" }
 h2 = { path = "vendor/h2" }
 hyper = { path = "vendor/hyper" }
-rmcp = { path = "vendor/rmcp" }
 
 [[example]]
 name = "quote_near"

@@ -27,7 +27,7 @@ pub fn schema() -> Value {
         "method":{"type":"string","description":"Documented HTTP method, such as GET, POST, PUT, PATCH, DELETE, HEAD or OPTIONS. Use the provider's exact method."},
         "url":{"type":"string","format":"uri","description":"Any documented public HTTPS x402 API URL. No URL credentials or fragments. Existing query parameters are preserved."},
         "query":{"type":"object","description":"Optional query parameters, appended to the URL and URL-encoded. Scalars become strings; arrays repeat the parameter name. Do not repeat parameters already in the URL unless the API requires it.","additionalProperties":{"oneOf":[scalar.clone(),{"type":"array","items":scalar}]}},
-        "headers":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional documented business headers, Authorization or Idempotency-Key. Values are private: no paid relay or wallet handoff. Idempotency-Key is caller-owned and grants no replay guarantee. Secrets can remain in client history and may be echoed in responses."},
+        "headers":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional documented business headers, Authorization or Idempotency-Key. No paid relay or wallet handoff. Idempotency-Key is caller-owned and grants no replay guarantee. Secrets can remain in client history, SDK logs/errors or upstream responses."},
         "body":{"description":"Optional JSON request body, sent as application/json exactly as supplied. Omit when the documented request has no body; explicit null sends JSON null."}
     },"required":["method","url"],"additionalProperties":false})
 }

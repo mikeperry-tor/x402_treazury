@@ -21,7 +21,7 @@ class WarningCheckTests(unittest.TestCase):
 
     @staticmethod
     def diagnostic(level, rendered):
-        return {'reason': 'compiler-message', 'package_id': 'path+file:///vendor/rmcp#3.5.0',
+        return {'reason': 'compiler-message', 'package_id': 'path+file:///vendor/reqwest#0.13.5',
                 'message': {'level': level, 'message': 'unused method', 'rendered': rendered}}
 
     def test_dependency_warning_fails_even_after_successful_cached_build(self):

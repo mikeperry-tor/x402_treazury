@@ -520,11 +520,16 @@ Accepted work retains its exact request after waiter disconnect until processing
 finishes; no host credential store, cross-call deduplication or recovery journal is added.
 
 Manual secrets appear in agent-authored arguments and may remain in client history.
-They do not satisfy a provider's host-only credential contract. Server diagnostics
-and route previews omit manual values. Host-authored validation/transport errors
-do not include them, but upstream raw responses and HTTP error bodies are not redacted:
-an upstream can echo a credential into ordinary output. This feature cannot clear
-secrets held by an agent; resending them after rotation can link wallet identities.
+They do not satisfy a provider's host-only credential contract. Application-owned
+diagnostics, route previews and validation errors omit manual values. The
+unmodified `rmcp` SDK can log raw tool arguments at DEBUG/TRACE, including
+`Authorization` supplied to raw GET calls or any other method, before application
+validation. SDK malformed-frame diagnostics, result/error logging and some
+HTTP transport-error bodies can also expose caller input or upstream credential
+echoes. Avoid verbose SDK logging with secrets, including in embedded consumers
+with their own tracing subscribers. Upstream raw responses and HTTP error bodies
+are not redacted: an upstream can echo a credential into ordinary output. This
+feature cannot clear secrets held by an agent; resending them after rotation can link wallet identities.
 Authorization is an invocation-local raw-call exception. Generated tools and
 public Rust routed business headers still cannot inject it. Automatic OpenAPI
 credential lookup/capture remains a separate, unimplemented mechanism; manual calls

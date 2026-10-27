@@ -222,8 +222,12 @@ continuity and absence of new replay authority. A barrier-controlled payment reg
 manual calls before challenge delivery and checks their distinct credentials,
 quotes and keys in unsigned and signed dispatch, verifying values never cross
 calls. The isolated directory fixture
-captures real MCP stdio/HTTP SDK logs at TRACE, including malformed frames, invalid inputs, body-reader errors and upstream
-credential echoes; initialization errors have a socket-free executable unit test.
+exercises real MCP stdio/HTTP calls, malformed frames, invalid inputs, body-reader
+errors and upstream credential echoes. It captures application targets at TRACE
+and checks that their diagnostics omit manual values; it also observes SDK
+activity without asserting SDK privacy. The accepted upstream logging/error
+limitation is documented under [manual raw headers](agent-sources.md#manual-raw-headers).
+Initialization errors have a socket-free executable unit test.
 `payment::header_capacity_tests` checks shared routed/manual overflow handling,
 JSON and runtime-header headroom, and real HTTP/2 challenge/signing exchanges near
 the map capacity. Cover padding skips those oversized header lists under its

@@ -27,6 +27,15 @@ are separate: [release reproducibility](reproducible-builds.md) and
 [real-Tor confinement](../tests/TOR.md) currently have macOS-specific evidence.
 Keep those claims narrow until equivalent backends are implemented and qualified.
 
+## Dependency vendoring
+
+Before introducing a new vendored package, tell the user the concrete need,
+why upstream releases or application-level alternatives are insufficient, and
+the maintenance cost. Logging or diagnostic changes alone generally do not
+justify a new checkout; document upstream limitations where practical. Existing
+patches are not precedent for adding another. Track necessary patches and their
+removal evidence in the [vendor ledger](../vendor/README.md).
+
 ## Embedded provider inputs
 
 The provider bundle uses `src/providers/assets.rs` as its asset membership manifest;
@@ -224,12 +233,13 @@ Manual raw-call headers use sensitive HTTP values outside the serializable route
 business-header map. Never log, serialize into previews, cache or persist their
 values, including arbitrary innocuous-looking names; validation errors must be
 value-free. This diagnostic rule does not redact generic upstream response bodies.
-See [manual raw headers](agent-sources.md#manual-raw-headers). The reviewed
-[MCP diagnostics patch](../vendor/README.md#mcp-diagnostics-patch) also removes
-pre-handler argument/frame and outgoing result logging from the SDK, protecting
-stdio/HTTP and embedded subscribers at TRACE. Host transport errors and executable
-initialization failures use safe categories without retaining payload-bearing
-error chains.
+See [manual raw headers](agent-sources.md#manual-raw-headers). These guarantees
+apply to application-owned diagnostics. The unmodified `rmcp` SDK can log raw
+arguments, malformed frames, results and error prose, including manual auth
+headers or upstream credential echoes. Its HTTP transport errors can also expose
+parser or body-reader prose. Do not enable verbose SDK logging when handling
+secrets; embedded library consumers must also configure their own subscribers.
+The executable separately sanitizes stdio initialization failures.
 
 ### Log severity
 
