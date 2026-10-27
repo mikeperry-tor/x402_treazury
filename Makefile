@@ -15,7 +15,7 @@ define application_cargo
 set -eu; \
 PROTOC=$$(cargo run --quiet --locked --manifest-path compat/protoc/Cargo.toml); \
 export PROTOC; \
-exec $(3) cargo $(1) --locked --manifest-path Cargo.toml $(2)
+exec $(3) $(if $(filter test,$(1)),scripts/test-runner.sh --cargo) cargo $(1) --locked --manifest-path Cargo.toml $(2)
 endef
 
 # Make owns build profile selection. Do not allow extra flags to turn build-dev
@@ -95,7 +95,7 @@ check-static: toolchain
 	cargo fmt --check
 	scripts/tests/coverage.sh
 	$(PYTHON) -m unittest discover -s scripts/tests -p 'test_*.py'
-	cargo test --locked --manifest-path tools/complexity/Cargo.toml --target-dir target/tools/complexity
+	scripts/test-runner.sh --cargo cargo test --locked --manifest-path tools/complexity/Cargo.toml --target-dir target/tools/complexity
 	$(PYTHON) scripts/complexity.py --base '$(COMPLEXITY_BASE_REF)'
 	$(PYTHON) vendor/verify.py
 	$(PYTHON) vendor/verify_zingo.py

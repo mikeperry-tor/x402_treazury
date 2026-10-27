@@ -1,0 +1,4 @@
+# Cargo resolves executable paths relative to this file's parent directory's
+# parent. Explicit target-triple runners take precedence over this cfg fallback.
+[target.'cfg(all(target_os = "macos", target_family = "unix"))']
+runner = ["./scripts/test-runner.sh"]

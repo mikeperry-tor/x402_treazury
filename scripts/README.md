@@ -17,6 +17,22 @@ even under `make -j`, since CLI fixtures share executable paths. Separate Make
 processes still need coordination; do not change sources or build feature
 configurations concurrently during validation.
 
+Test commands use `scripts/test-runner.sh`. On macOS it supplies a Cargo runner
+that copies each test executable without extended attributes into a private
+temporary directory, ad-hoc signs the copy, and executes it. The original Cargo
+artifact stays intact. Copies remain in the system temporary directory so
+`current_exe()` child fixtures can reuse them. Linux and Windows POSIX-shell
+entrypoints execute the usual command directly. This also applies to the analyzer
+and compatibility test stages; ordinary build/run, coverage and release
+qualification commands retain their existing execution paths.
+
+Cargo's explicit target-triple runners, including environment overrides, take
+precedence. If another cfg-based runner also matches macOS, Cargo reports the
+ambiguity; select the intended runner with a target-triple setting instead. The
+workaround does not redirect CLI fixtures using compiled `CARGO_BIN_EXE_*` paths.
+See [test executable startup](../docs/testing.md#test-executable-startup) for the
+platform issue and identity boundaries.
+
 `CARGO_ARGS` is a shell-quoted argument list. For `test` and `clippy`, it **replaces**
 the default `--all-targets`; include that flag explicitly when adding options for
 the complete suite. `TEST_ARGS` replaces the default `--test-threads=1` harness
@@ -71,6 +87,7 @@ available directly.
 | `make coverage-consensus TEST=NAME` | One explicitly selected consensus test; `target/coverage-consensus-NAME` |
 | `scripts/tests/coverage.sh` | Offline regression check for report publication and failure preservation |
 | `make build` / `make test` | Cargo-managed protoc; the application always includes Zcash |
+| `scripts/test-runner.sh --cargo cargo test …` | Automatic macOS copied-and-signed test execution; other hosts execute Cargo directly |
 | `check_compat.py` | Standard-library Python orchestration of the separate payment/Zingolib compatibility workspace |
 | `generate_crypto_vectors.py` | Independent Python Keccak/EIP-712 reference vectors using pinned script dependencies |
 

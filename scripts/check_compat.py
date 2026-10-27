@@ -13,7 +13,7 @@ def main():
     compiler_manifest = ROOT / 'compat/protoc/Cargo.toml'
     protoc = subprocess.check_output(['cargo', 'run', '--quiet', '--locked', '--manifest-path', str(compiler_manifest)], text=True).strip()
     env = dict(os.environ, PROTOC=protoc)
-    subprocess.run(['cargo', 'test', '--locked', '--manifest-path', str(ROOT / 'compat/zingolib/Cargo.toml')], env=env, check=True)
+    subprocess.run([str(ROOT / 'scripts/test-runner.sh'), '--cargo', 'cargo', 'test', '--locked', '--manifest-path', str(ROOT / 'compat/zingolib/Cargo.toml')], env=env, check=True)
 
 if __name__ == '__main__':
     main()

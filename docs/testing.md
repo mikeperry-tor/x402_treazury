@@ -140,6 +140,28 @@ recovery from an executed write whose first response TLS record is corrupted:
 the latter must fail after exactly one execution, without signing or replay.
 These prove routing and credential boundaries, not live Tor circuits or settlement.
 
+### Test executable startup
+
+On macOS, Make's Rust test commands automatically run private copied-and-ad-hoc-
+signed harnesses through the [shared launcher](../scripts/test-runner.sh). This
+works around pre-main `_dyld_start` stalls like
+[OpenAI Codex issue #23802](https://github.com/openai/codex/issues/23802).
+The symptom can also occur in ordinary terminal windows; the precise macOS cause
+is unconfirmed. Other platforms retain direct execution. See the
+[entrypoint reference](../scripts/README.md) for runner precedence and scope.
+
+Copies preserve arguments, working directory, environment, stdio and process
+exit/signal status. They remain available for child helpers. Copy or signing
+failures fail the test command instead of falling back to a potentially stalled
+original. CLI subprocesses launched through compiled `CARGO_BIN_EXE_*` paths still
+use the original application executable.
+
+Ad-hoc signing changes executable bytes. Record copied execution in development
+evidence and do not substitute copied binaries for hash-pinned live qualification
+or reproducible-release evidence. Sources and original build artifacts must still
+remain fixed during tests. This workaround changes no production transport,
+wallet or transaction authority.
+
 ### Sandbox permissions
 
 Choose execution permissions for the selected tests before starting them. Offline

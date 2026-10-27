@@ -19,11 +19,14 @@ class MakefileTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.root = Path(self.directory.name) / 'repo with spaces'
+        self.root = (Path(self.directory.name) / 'repo with spaces').resolve()
         self.root.mkdir()
         (self.root / 'bin').mkdir()
         shutil.copy(ROOT / 'Makefile', self.root)
         shutil.copy(ROOT / 'rust-toolchain.toml', self.root)
+        (self.root / 'scripts').mkdir()
+        for name in ('test-runner.sh', 'test-runner.toml'):
+            shutil.copy(ROOT / 'scripts' / name, self.root / 'scripts' / name)
         self.log = self.root / 'calls.jsonl'
         version = next(line.split('"')[1] for line in
                        (ROOT / 'rust-toolchain.toml').read_text().splitlines()
@@ -48,6 +51,9 @@ else:
             path = self.root / 'bin' / name
             path.write_text(mock)
             path.chmod(0o755)
+        uname = self.root / 'bin/uname'
+        uname.write_text('#!/bin/sh\nprintf "%s\\n" "${MAKE_TEST_PLATFORM:-Linux}"\n')
+        uname.chmod(0o755)
         self.env = dict(os.environ, PATH=f'{self.root / "bin"}:{os.environ["PATH"]}',
                         MAKE_TEST_LOG=str(self.log), CARGO_INCREMENTAL='inherited')
         for key in ('MAKEFLAGS', 'MFLAGS', 'MAKELEVEL', 'CARGO_ARGS', 'TEST_ARGS',
@@ -132,6 +138,19 @@ else:
         # No second protoc/build may interleave with the preceding command.
         self.assertEqual([call[1][0] for call in calls], ['run', 'build', 'run', 'test'])
         self.assertEqual([call[2] for call in calls], ['1', '1', 'inherited', 'inherited'])
+
+    def test_macos_runner_is_scoped_to_test_commands(self):
+        _, calls = self.make('test', 'CARGO_ARGS=--lib', MAKE_TEST_PLATFORM='Darwin')
+        self.assertEqual(calls[0][1][0], 'run')
+        self.assertEqual(calls[1][1][:2],
+                         ['--config', str(self.root / 'scripts/test-runner.toml')])
+        self.assertEqual(calls[1][1][2:],
+                         ['test', '--locked', '--manifest-path', 'Cargo.toml',
+                          '--lib', '--', '--test-threads=1'])
+        for target in ('build', 'run', 'clippy', 'cargo-check'):
+            with self.subTest(target=target):
+                _, calls = self.make(target, MAKE_TEST_PLATFORM='Darwin')
+                self.assertFalse(any('--config' in call[1] for call in calls))
 
     def check_stages(self):
         script = self.root / 'scripts/tests/coverage.sh'
@@ -218,7 +237,7 @@ else:
 
     def test_coverage_modes_remain_explicit(self):
         script = self.root / 'scripts/coverage.sh'
-        script.parent.mkdir(parents=True)
+        script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text('#!/bin/sh\nexec python3 coverage-helper "$@"\n')
         script.chmod(0o755)
         for target, args in [('coverage', []), ('coverage-branch', ['--branch']),
