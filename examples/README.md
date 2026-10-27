@@ -14,8 +14,9 @@ It retains the `state/privacy` treasury, registry and operational identities of
 the original privacy template; renaming the template does not migrate state.
 
 [deployments/research_desk.toml](deployments/research_desk.toml) distributes
-its research sources across eight task-oriented endpoints using four topical
-wallet profiles: web; social; financials for business, finance, property and security;
+its research sources across nine task-oriented endpoints using four topical
+wallet profiles: web for web and science; social; financials for business, finance,
+property and security;
 and global for world and the toolbox. Ordered source `send_tools` rules group
 tool families, exclude editorial choices and express sharing with destination
 arrays. Each source has one final catch-all that assigns or excludes unmatched
@@ -45,16 +46,23 @@ Explicit destination selectors precede a final exclusion; comments name existing
 alternatives or explain why the remaining workflows are outside this research selection.
 Reusable provider definitions remain broader than these editorial selections.
 
-Biomedical datasets currently route to business, bibliographic identities to web,
-and aviation/trade/environment observations to world. A dedicated science/health
-endpoint would group biological/chemical references, drug/device evidence, hospital
-quality, surveillance and research funding. A travel/mobility endpoint could combine
-2s aviation with Maxwell ski/menu/trip tools and the separately bundled StableTravel
-provider. Legal/government research could also move from business into its own
-endpoint if legislative, case-law and political-record work becomes frequent.
-These are optional reorganizations; this template keeps eight listeners and its
-existing wallet assignments. Sports data and generative/developer workflows remain
-available through bundled provider selection rather than new default listeners.
+Science groups academic search and metadata, citations, researcher/institution
+identities, research funding, biological/chemical references, clinical trials,
+drug/device evidence and health datasets. It shares the web wallet and its
+per-payment authority. Investment-oriented pharma catalysts and general product
+recalls remain on business. Legal/government records retain their existing split
+across business, world, property and finance.
+
+Travel/mobility stays on world, whose discovery keywords cover the selected flight,
+airport, geocoding and routing tools. Ski/menu/trip-planning tools remain outside
+this selection. Sports data and generative/developer workflows remain available
+through bundled provider selection.
+
+The listener order and ports are web 3010, science 3011, social 3012, business 3013,
+finance 3014, property 3015, security 3016, world 3017 and toolbox 3018. Existing
+client connections after web need their port updated when adopting this template.
+Local deployment overrides remain operator-owned.
+
 Published schemas and estimates do not establish comparative output quality,
 Tor delivery or funded settlement.
 

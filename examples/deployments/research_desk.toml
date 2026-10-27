@@ -1,7 +1,8 @@
 # Research APIs grouped into task-oriented MCP endpoints.
 #
 # Endpoint   Scope                                             Wallet
-# web        Search, retrieval, archives, academic research     web
+# web        Search, retrieval, news and archives              web
+# science    Academic, scientific and health research           web
 # social     People, contacts and platform content             social
 # business   Organizations, filings, jobs, funding, reviews     financials
 # finance    Equities, macro, crypto and derivatives            financials
@@ -48,7 +49,7 @@ indexer_url = "https://na.zec.rocks:443"
 confidentiality = "public"
 base_rpc_url_env = "BASE_RPC_URL"
 
-# Web search and content retrieval share this payer pool.
+# Web search, content retrieval and science share this payer pool.
 [wallets.web]
 mode = "zcash_rotation"
 max_api_payment_usdc = "0.50"
@@ -147,15 +148,13 @@ send_tools = [
 [sources.x402stock]
 extends = "../../providers/x402stock.toml"
 send_tools = [
+  { to = "science", tools = ["clinical_trials", "fda", "fda_shortages"] },
   # Route business research families before the primary fallback.
   { to = "business", tools = [
     "beneficial_ownership_ticker",
-    "clinical_trials",
     "concept_ticker",
     "congress_trades",
     "dossier_ticker",
-    "fda",
-    "fda_shortages",
     "filing_*",
     "financials_ticker",
     "form_144",
@@ -777,6 +776,7 @@ send_tools = [
     "tako_thinviz_create",
     "tako_visualize",
   ] },
+  { to = "science", tools = ["openalex_*", "valyu_academic"] },
   # Route business research families before the primary fallback.
   { to = "business", tools = [
     "akta_*",
@@ -918,11 +918,11 @@ send_tools = [
   ] },
   { to = "security", tools = ["security_*"] },
   { to = "property", tools = ["property_*", "soil_*", "geo_flood_zone", "gov_epa_facilities", "gov_fair_market_rent", "gov_income_limits", "gov_nfip_claims", "gov_risk_index", "gov_uk_crime"] },
-  { to = "web", tools = ["paper_doi_lookup", "papers_citations", "research_author", "research_org"] },
+  { to = "science", tools = ["paper_doi_lookup", "papers_citations", "research_*", "bio_*", "chem_*", "clinical_*", "health_*", "medical_*", "nutrition_*", "gov_fda_*"] },
   { to = "finance", tools = ["bank_*", "bls_*", "econ_*", "worldbank_*", "treasury_*", "tax_*", "gov_bea_gdp"] },
   { to = "world", tools = ["aviation_*", "airport_*", "flight_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
-  # Biomedical, legal, political and occupational records currently live on business.
-  { to = "business", tools = ["bio_*", "chem_*", "clinical_*", "health_*", "medical_*", "nutrition_*", "law_*", "gov_*", "research_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
+  # Legal, political and occupational records remain on business.
+  { to = "business", tools = ["law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
   # Exa/Otto/Vaaya cover search, retrieval, news and paper search; PDL/Deepline cover contacts.
   # Existing finance providers cover quotes, filings and crypto; AgOSINT covers routine company/LEI lookups.
   # Parsing/validation belongs locally. Model/media gateways, commerce, entertainment, trip planning,
@@ -965,7 +965,8 @@ send_tools = [
     "gov_gb_companies", # AgOSINT already supplies Companies House lookups.
   ] },
   { to = "world", tools = ["weather_alerts_by_state", "weather_discussion", "weather_gridpoint"] },
-  { to = "business", tools = ["gov_*", "openfda_drug_label", "openfda_drug_event"] },
+  { to = "science", tools = ["openfda_drug_label", "openfda_drug_event"] },
+  { to = "business", tools = ["gov_*"] },
   # x402stock/AgentFund/Otto cover SEC, macro and market data; Vaaya covers court search and patents.
   # AgOSINT supplies broader sanctions lists; Otto supplies RDAP and ordinary forecasts.
   # 2s supplies direct CVE/package evidence; existing recall tools cover the omitted FDA recall searches.
@@ -1008,10 +1009,19 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, pages, news, papers, archives, keyword trends, image/reverse-image search and shopping. Prefer exa_search for general search and vaaya_serper_news for news links. Read ordinary pages with otto_web_extract; use exa_contents for freshness or historical controls, socialfetch_web_markdown for selectors/scrolling, vaaya_firecrawl_scrape for rendering/actions, vaaya_brightdata_unblock for blocked pages and Diffbot for typed extraction. Use google_trends_trend_over_time for interest timelines. OpenAlex provides scholarly metadata; Valyu provides paper excerpts; 2s adds DOI/citation graphs, ORCID and ROR identities; Strale inspects C2PA media credentials; GDELT provides news-coverage timelines; Wayback provides archived pages."
+instructions_text = "Web search, pages, news, archives, keyword trends, image/reverse-image search and shopping. Prefer exa_search for general search and vaaya_serper_news for news links. Read ordinary pages with otto_web_extract; use exa_contents for freshness or historical controls, socialfetch_web_markdown for selectors/scrolling, vaaya_firecrawl_scrape for rendering/actions, vaaya_brightdata_unblock for blocked pages and Diffbot for typed extraction. Use google_trends_trend_over_time for interest timelines. Use science for academic papers, citations and research identities. Strale inspects C2PA media credentials; GDELT provides news-coverage timelines; Wayback provides archived pages."
+
+[servers.science]
+listen = "127.0.0.1:3011"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "web"
+discover_on_demand = true
+instructions_text = "Academic, scientific and health research: papers, citations, researchers, institutions, grants, biological and chemical references, clinical trials, drug/device records and public-health datasets. Preserve publication and observation dates, study status, identifiers and coverage. Use web for general search and page retrieval; business retains investment-oriented pharma catalysts and general product recalls."
+discovery_search_tool_instructions_text = "Science keywords: academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Valyu, arXiv, PubMed, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central, x402stock, Maxwell, 2s, twos."
 
 [servers.social]
-listen = "127.0.0.1:3011"
+listen = "127.0.0.1:3012"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "social"
@@ -1020,16 +1030,16 @@ instructions_text = "Social-platform, person, public-profile and business-contac
 discovery_search_tool_instructions_text = "Social keywords: reddit, github, bluesky, facebook, hackernews, instagram, linkedin, tiktok, trend charts, popular creators, popular songs, popular videos, popular hashtags, HireScrape, twitter, x, youtube, telegram, person, profile, headshot, enrichment, employer, title, seniority, location, phone, mobile phone, address, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, Tomba, LinkedIn email, contact phone, company phone, Threads, Pinterest, Snapchat, Twitch, Rumble, Truth Social, SoundCloud, Spotify, Apple Music, Linktree, Yelp, Amazon Shop, Google Ad Transparency, LinkedIn jobs and organizations."
 
 [servers.business]
-listen = "127.0.0.1:3012"
+listen = "127.0.0.1:3013"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Business, public-record, funding, jobs, grants and filing research, including decision-makers, employment changes, employee/customer reviews, compensation, litigation, procurement, clinical trials, drug shortages, product recalls, nonprofit filings, international legislation and scientific/health datasets. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research."
-discovery_search_tool_instructions_text = "Business keywords: registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, headcount, technographics, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, Glassdoor, Trustpilot, employee reviews, customer reviews, salaries, interviews, compensation, JSearch, Google Jobs, TheirStack, buying intent, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, clinical trials, FDA, drug shortages, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, EUR-Lex, eCFR, US Code, Congress, FEC, FARA, lobbying, OSHA, MSHA, NIH grants, PubChem, UniProt, gene, protein, species, RxNorm, ICD-10, NPI, CMS, hospital quality, Medicare, Open Payments, disease surveillance, drug labels, adverse events, medical devices, HS code, customs classification."
+instructions_text = "Business, public-record, funding, jobs, grants and filing research, including decision-makers, employment changes, employee/customer reviews, compensation, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic and health datasets."
+discovery_search_tool_instructions_text = "Business keywords: registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, headcount, technographics, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, Glassdoor, Trustpilot, employee reviews, customer reviews, salaries, interviews, compensation, JSearch, Google Jobs, TheirStack, buying intent, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, EUR-Lex, eCFR, US Code, Congress, FEC, FARA, lobbying, OSHA, MSHA, HS code, customs classification."
 
 [servers.finance]
-listen = "127.0.0.1:3013"
+listen = "127.0.0.1:3014"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
@@ -1038,7 +1048,7 @@ instructions_text = "Financial and macro research: equities, options, forex, com
 discovery_search_tool_instructions_text = "Finance keywords: ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, World Bank, tax reference, international economic indicators."
 
 [servers.property]
-listen = "127.0.0.1:3014"
+listen = "127.0.0.1:3015"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
@@ -1047,7 +1057,7 @@ instructions_text = "Property, parcel, local-government, zoning, lease, environm
 discovery_search_tool_instructions_text = "Property keywords: Locus, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, Whitepages, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD income limits, NFIP claims."
 
 [servers.security]
-listen = "127.0.0.1:3015"
+listen = "127.0.0.1:3016"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
@@ -1056,16 +1066,16 @@ instructions_text = "Threat, breach, LLM API-key exposure, network and complianc
 discovery_search_tool_instructions_text = "Security keywords: breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, LLM API keys, OpenAI, Anthropic, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting, 2s, twos, NVD, CISA KEV, EPSS, CWE, CAPEC, MITRE ATT&CK, OSV, OpenSSF, deps.dev, package vulnerabilities, exploit availability, ICS advisories, prompt injection, HALOWERK, Daedalus, static code audit, AI skill safety."
 
 [servers.world]
-listen = "127.0.0.1:3016"
+listen = "127.0.0.1:3017"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
 discover_on_demand = true
-instructions_text = "Geopolitical, shipping, energy, agricultural and physical-world research, including offshore oil/gas leases and satellite observations. Preserve observed-at and scene timestamps and distinguish current observations from historical baselines. Aviation, environmental observations, trade and route matrices complement regional reports."
-discovery_search_tool_instructions_text = "World keywords: Hormuz, strait, shipping, vessel, oil, Brent, energy, grid, power, weather, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades, 2s, twos, METAR, TAF, SIGMET, NTSB, flight status, airport board, USDA, drought, climate, water, maritime, space, geocoding, route matrix, HS, customs, dangerous goods."
+instructions_text = "Geopolitical, shipping, energy, agricultural and physical-world research, including offshore oil/gas leases and satellite observations. Preserve observed-at and scene timestamps and distinguish current observations from historical baselines. Travel and mobility tools cover flights, airports, geocoding and route matrices alongside environmental observations and trade."
+discovery_search_tool_instructions_text = "World keywords: Hormuz, strait, shipping, vessel, oil, Brent, energy, grid, power, weather, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades, 2s, twos, METAR, TAF, SIGMET, NTSB, travel, mobility, transportation, aviation, flight, flight status, flight tracking, airline, aircraft, airport, airport board, departures, arrivals, delay, cancellation, origin, destination, route schedule, driving, cycling, walking, travel time, distance matrix, USDA, drought, climate, water, maritime, space, geocoding, route matrix, HS, customs, dangerous goods."
 
 [servers.toolbox]
-listen = "127.0.0.1:3017"
+listen = "127.0.0.1:3018"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
