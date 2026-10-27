@@ -381,7 +381,11 @@ after caller cancellation. Routine completion belongs at DEBUG; terminal failure
 is WARN. Warnings include a fixed plain-language reason derived from the typed
 transport or payment category, with explicit uncertainty when no more specific
 cause is available. Provider error detail is never formatted, even when stored in
-a static string. An earlier unsigned HTTP status cannot explain a later signing
+a static string. A completed error body with the exact structured JSON
+`error.code` value `payment_settlement_failed` adds a fixed `provider_failure`
+category and explanation. This records an unverified provider claim, without
+logging its message or granting replay authority; other body text remains
+unclassified. An earlier unsigned HTTP status cannot explain a later signing
 or output failure by itself. Diagnostics retain a fixed failure kind, execution
 stage, unsigned attempt number/maximum when available, and
 `authorization_may_charge`. Counts describe dispatches in the latest payer's

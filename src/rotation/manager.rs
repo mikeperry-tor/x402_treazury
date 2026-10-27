@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use x402_chain_eip155::V2Eip155ExactClient;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector, X402SchemeClient};
 
-pub(crate) const OMITTED_EXTENSIONS: &str = "Managed payment omitted advertised x402 extensions; the provider may require them. A submitted authorization may still charge. Only the built-in recognized insufficient-funds traversal may repeat the request";
+pub(crate) const OMITTED_EXTENSIONS: &str = "Managed payment omitted advertised x402 extensions; this does not establish the cause of failure. A submitted authorization may still charge. Only the built-in recognized insufficient-funds traversal may repeat the request";
 
 #[derive(Clone, Debug)]
 pub struct PaymentCandidateHandle {

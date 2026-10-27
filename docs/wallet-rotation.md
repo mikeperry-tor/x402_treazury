@@ -245,10 +245,10 @@ the selected protocol, payer, payee, amount and validity. V1 uses `X-PAYMENT`;
 v2 uses `PAYMENT-SIGNATURE`. Standard body-only v1 challenges are normalized at
 the same bounded response boundary used for header challenges.
 Advertised extensions outside the managed payment contract are omitted
-with DEBUG diagnostics for `bazaar` discovery metadata and INFO diagnostics for
-other extensions during challenge preparation; this does not establish signing
-or submission. Seller rejection remains possible. Terminal payment-call failures
-are WARN events; see [logging and diagnostics](development.md#logging-and-diagnostics).
+with DEBUG diagnostics during challenge preparation; this does not establish
+signing, submission or the cause of a later failure. Seller rejection remains
+possible. Terminal payment-call failures are WARN events; see
+[logging and diagnostics](development.md#logging-and-diagnostics).
 
 Selection uses the saved wallet estimate as described in the
 [best-effort wallet rules](#best-effort-wallet-rules). It performs no balance RPC,

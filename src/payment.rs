@@ -22,6 +22,7 @@ pub(crate) use v1::V1ExactClient;
 pub(crate) struct HttpFailure {
     pub status: reqwest::StatusCode,
     detail: String,
+    provider_failure: Option<diagnostics::ProviderFailure>,
 }
 impl std::fmt::Display for HttpFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1016,6 +1017,7 @@ impl PaidClient {
                 {
                     let error = HttpFailure {
                         status,
+                        provider_failure: None,
                         detail: if participating_tor {
                             "unsigned Tor isolation attempts exhausted"
                         } else {
@@ -1074,7 +1076,18 @@ impl PaidClient {
         ) {
             Ok(call) => call,
             Err(error) => {
-                tracing::warn!(listener = %scope.listener, source = %scope.source, "optional cover unavailable: {error}");
+                let (level, reason) = diagnostics::cover_admission(&error);
+                match level {
+                    tracing::Level::WARN => {
+                        tracing::warn!(listener = %scope.listener, source = %scope.source, reason, "Optional cover traffic could not start because its process capacity is full; the API call will continue")
+                    }
+                    tracing::Level::DEBUG => {
+                        tracing::debug!(listener = %scope.listener, source = %scope.source, reason, "Optional cover traffic is stopping or cleaning up; the API call will continue")
+                    }
+                    _ => {
+                        tracing::info!(listener = %scope.listener, source = %scope.source, reason, "Optional cover traffic could not start with this configuration; the API call will continue")
+                    }
+                }
                 return None;
             }
         };
@@ -1108,6 +1121,7 @@ impl PaidClient {
             let body = String::from_utf8_lossy(&bytes);
             return Err(HttpFailure {
                 status,
+                provider_failure: diagnostics::ProviderFailure::from_body(&bytes),
                 detail: format!("{} {body}", detail.unwrap_or(Value::Null)),
             }
             .into());

@@ -3,6 +3,47 @@ use super::SubmissionProgress;
 use anyhow::Result;
 use std::{cell::Cell, future::Future};
 
+/// Provider-reported categories are diagnostic claims, never replay authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ProviderFailure {
+    PaymentSettlementFailed,
+}
+
+impl ProviderFailure {
+    pub(super) fn from_body(body: &[u8]) -> Option<Self> {
+        let body: serde_json::Value = serde_json::from_slice(body).ok()?;
+        match body.pointer("/error/code")?.as_str()? {
+            "payment_settlement_failed" => Some(Self::PaymentSettlementFailed),
+            _ => None,
+        }
+    }
+
+    fn code(self) -> &'static str {
+        match self {
+            Self::PaymentSettlementFailed => "payment_settlement_failed",
+        }
+    }
+
+    fn reason(self) -> &'static str {
+        match self {
+            Self::PaymentSettlementFailed => {
+                "The provider reported payment settlement failure; the result remains unverified"
+            }
+        }
+    }
+}
+
+/// Admission errors can include configuration detail: emit only fixed categories.
+pub(super) fn cover_admission(error: &anyhow::Error) -> (tracing::Level, &'static str) {
+    match error.to_string().as_str() {
+        "cover_owner_limit" => (tracing::Level::WARN, "cover_owner_limit"),
+        "cover_active_episode_limit" => (tracing::Level::WARN, "cover_active_episode_limit"),
+        "cover_owner_draining" => (tracing::Level::DEBUG, "cover_owner_draining"),
+        "cover_shutdown" => (tracing::Level::DEBUG, "cover_shutdown"),
+        _ => (tracing::Level::INFO, "cover_configuration_unavailable"),
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Observation {
     stage: &'static str,
@@ -103,13 +144,19 @@ pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress, relay
         .err()
         .and_then(|error| error.downcast_ref::<crate::rotation::error::AdmissionError>())
         .map(admission_reason);
+    let provider_failure = result
+        .as_ref()
+        .err()
+        .and_then(|error| error.downcast_ref::<super::HttpFailure>())
+        .and_then(|error| error.provider_failure);
     emit(
         result.is_ok(),
         kind,
         transport,
         progress,
         relay_call,
-        reason,
+        reason.or_else(|| provider_failure.map(ProviderFailure::reason)),
+        provider_failure.map(ProviderFailure::code),
     );
 }
 
@@ -122,6 +169,7 @@ pub(crate) fn finish_response(response: &reqwest::Response, progress: &Submissio
         None,
         progress,
         false,
+        None,
         None,
     );
 }
@@ -181,6 +229,7 @@ fn emit(
     progress: &SubmissionProgress,
     relay_call: bool,
     reason: Option<&'static str>,
+    provider_failure: Option<&'static str>,
 ) {
     let observation = OBSERVATION.with(Cell::get);
     let stage = observation.stage;
@@ -214,6 +263,7 @@ fn emit(
             stage,
             last_http_status,
             failure_kind,
+            provider_failure,
             reason,
             transport_reason,
             io_kind = ?io_kind,
@@ -228,6 +278,7 @@ fn emit(
             stage,
             last_http_status,
             failure_kind,
+            provider_failure,
             reason,
             transport_reason,
             io_kind = ?io_kind,
@@ -249,6 +300,83 @@ fn emit(
 mod tests {
     use super::*;
     use tracing::instrument::WithSubscriber;
+
+    #[test]
+    fn provider_failure_requires_an_allowlisted_structured_code() {
+        for body in [
+            r#"{"error":"payment_settlement_failed"}"#,
+            r#"{"error":{"message":"payment_settlement_failed"}}"#,
+            r#"{"error":{"code":"unknown_private_code"}}"#,
+            r#"{"error":{"code":["payment_settlement_failed"]}}"#,
+            r#"{"code":"payment_settlement_failed"}"#,
+            "payment_settlement_failed",
+            "{}",
+        ] {
+            assert_eq!(ProviderFailure::from_body(body.as_bytes()), None, "{body}");
+        }
+        assert_eq!(
+            ProviderFailure::from_body(br#"{"error":{"code":"payment_settlement_failed","message":"PRIVATE_PROVIDER_MESSAGE"}}"#),
+            Some(ProviderFailure::PaymentSettlementFailed)
+        );
+    }
+
+    #[tokio::test]
+    async fn response_body_category_is_logged_without_provider_prose_or_replay_permission() {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        scope(async {
+            let response = axum::http::Response::builder()
+                .status(reqwest::StatusCode::PAYMENT_REQUIRED)
+                .body(r#"{"error":{"code":"payment_settlement_failed","message":"PRIVATE_PROVIDER_MESSAGE","requestId":"PRIVATE_REQUEST_ID"}}"#)
+                .unwrap();
+            let response = reqwest::Response::from(response);
+            self::response(&response);
+            let result = super::super::PaidClient::unsigned()
+                .response_output(response, true, false)
+                .await;
+            let error = result.as_ref().unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<super::super::HttpFailure>().unwrap().provider_failure,
+                Some(ProviderFailure::PaymentSettlementFailed)
+            );
+            let progress = SubmissionProgress::default();
+            progress.mark_possible();
+            finish(&result, &progress, false);
+        })
+        .with_subscriber(subscriber)
+        .await;
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        for expected in [
+            "WARN",
+            "provider_failure=\"payment_settlement_failed\"",
+            "The provider reported payment settlement failure; the result remains unverified",
+            "authorization_may_charge=true",
+            "do not automatically repeat",
+        ] {
+            assert!(logs.contains(expected), "{logs}");
+        }
+        assert!(!logs.contains("PRIVATE_"), "{logs}");
+    }
+
+    #[test]
+    fn cover_admission_preserves_capacity_warnings_and_scopes_optional_failures() {
+        for (code, level) in [
+            ("cover_owner_limit", tracing::Level::WARN),
+            ("cover_active_episode_limit", tracing::Level::WARN),
+            ("cover_owner_draining", tracing::Level::DEBUG),
+            ("cover_shutdown", tracing::Level::DEBUG),
+        ] {
+            assert_eq!(cover_admission(&anyhow::anyhow!(code)), (level, code));
+        }
+        assert_eq!(
+            cover_admission(&anyhow::anyhow!("PRIVATE_CONFIGURATION_DETAIL")),
+            (tracing::Level::INFO, "cover_configuration_unavailable")
+        );
+    }
 
     #[tokio::test]
     async fn transport_failure_reports_safe_cause_and_preserves_charge_caution() {
