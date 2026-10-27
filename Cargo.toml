@@ -2,7 +2,7 @@
 name = "x402_treazury"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.93"
+rust-version = "1.94.1"
 publish = false
 default-run = "x402_treazury"
 
@@ -64,7 +64,7 @@ tonic = { version = "0.14", default-features = false }
 tower = { version = "0.5", features = ["util"] }
 tokio-stream = "0.1"
 alloy-primitives = "1.5"
-alloy-signer-local = "2.0"
+alloy-signer-local = "2.5"
 anyhow = "1"
 axum = "0.8"
 base64 = "0.22"

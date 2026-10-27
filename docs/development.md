@@ -465,6 +465,29 @@ Keep ordinary CLI errors legible even with backtrace environment variables enabl
 
 ## Dependency compatibility
 
+### Security update boundaries
+
+The root lockfile selects Tokio 1.53.3 and ctutils 0.4.4, containing the fixes for
+[Tokio I/O safety](https://rustsec.org/advisories/RUSTSEC-2026-0386.html) and
+[constant-time mask generation](https://rustsec.org/advisories/RUSTSEC-2026-0385.html).
+Preserve those fixes when resolving dependencies. Tokio 1.54.0 is yanked for a
+separate [timer race](https://rustsec.org/advisories/RUSTSEC-2026-0384.html);
+the 1.54 series requires 1.54.1 or later.
+
+Alloy's signer/network cohort is 2.5.0, alongside core crates 1.7.3. The application
+declares Rust 1.94.1 to meet Alloy's minimum; the pinned build toolchain remains
+Rust 1.99.1. The independent payment vectors and SDK/payment integration tests
+qualify this combination.
+
+The [crypto-bigint timing advisory](https://rustsec.org/advisories/RUSTSEC-2026-0387.html)
+remains unresolved in `crypto-bigint` 0.5.5 through
+`elliptic-curve` 0.13.8 and `k256` 0.13.4. Alloy 2.5.0 still requires that cohort;
+its upgrade does not supply the advisory's 0.7.6 fix. Removal requires a compatible
+upstream signing-cohort migration or a separately reviewed backport. Do not force
+the incompatible version through a manifest override or treat dependency presence
+alone as proof of application exploitability. Reassess the complete signing chain
+when upstream support changes; retain exact signature/address and state contracts.
+
 ### TLS security updates
 
 The application and its SDK/payment integration tests use the root lockfile;
