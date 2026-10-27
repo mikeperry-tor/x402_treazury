@@ -200,6 +200,11 @@ to use it and how to use its results. Include request, payment or retry constrai
 when they affect the caller's decision or correct use. Describe only available
 actions and inputs. Keep implementation details, maintainer rationale and repeated
 workflow explanations in the owning guides rather than tool context.
+Refer to available MCP tool names for follow-up actions rather than internal API
+paths or inaccessible vendor services. Describe caller-visible charges and replay
+constraints without explaining transport fallback costs or implementation mechanics.
+Distinguish searching the loaded catalog (no provider requests) from remote
+provider discovery and paid tool invocation.
 
 Document every parameter in the same concise, task-focused style: its meaning,
 expected value or format, and omission/default behavior and interactions where

@@ -5,5 +5,20 @@ name = "Google Trends SEO Keyword Data (x402 Atlas)"
 base_url = "https://google-trends.use.x402atlas.com"
 prefix = "google_trends"
 pricing_key = "x-payment-info"
-instructions_text = "Every route requires a seed keyword and ISO country code; country is lowercased. Results are aggregate Google Trends data."
+instructions_text = "Use a concise seed keyword. Country and time-window defaults vary by tool; set them explicitly when they matter. Values measure relative search interest, not search counts."
 help_url = "https://google-trends.use.x402atlas.com/llms.txt"
+
+[overrides.google_trends_trend]
+description = "Retrieve keyword interest over time, defaulting to 2004_present. For explicit bucket granularity use google_trends_trend_over_time. Values are relative interest (0–100), not search counts. Check data_source, notice and the returned geo/timeframe: fallback data may cover only worldwide, all-time monthly interest."
+
+[overrides.google_trends_trend_over_time]
+description = "Retrieve a keyword interest timeline and bucket granularity; defaults to past_12_months. Set timeframe=2004_present for all-time monthly data. Values are relative interest (0–100), not search counts. Check data_source, notice and returned geo/timeframe: fallback data may cover only worldwide, all-time monthly interest. Low-volume keywords may return no series."
+
+[overrides.google_trends_interest_by_region]
+description = "Compare keyword interest across a country's subregions; geo defaults to US. Values are relative popularity (0–100), not search counts. Low-volume keywords may return no regions."
+
+[overrides.google_trends_related_queries]
+description = "Find search phrases related to keyword; country defaults to US and timeframe to past_12_months. Returns top popularity scores (0–100) and rising percentage growth. Check data_source, notice and returned timeframe: fallback data may cover only past_12_months. Use google_trends_related_topics for subjects/entities."
+
+[overrides.google_trends_related_topics]
+description = "Find subjects/entities related to keyword; country defaults to US and timeframe to past_12_months. Returns top popularity scores (0–100) and rising percentage growth. Check data_source, notice and returned timeframe: fallback data may cover only past_12_months. Use google_trends_related_queries for search phrases."

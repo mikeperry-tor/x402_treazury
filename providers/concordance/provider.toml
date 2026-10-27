@@ -17,13 +17,23 @@ pricing_key = "x-payment-info"
 description = "Search aggregated news, filings, court opinions, papers, government records and developer discussions. Results include source, category, title, content, URL and publication time. Optional source/category/since filters; limit 1–100 (default 20). $0.01/call."
 
 [overrides.concordance_series]
-description = "Tabular time-series lookup by source + series_id: economic indicators (FRED, World Bank, UN Comtrade), crypto TVL (DefiLlama), weather (open_meteo), and stock quotes (finnhub/twelvedata/polygon). Optional start/end date range; returns [{observed_at, value}] points. $0.01 per call. Source slugs and series ids are listed in the param notes; the vendor's free /catalog endpoint has the live list."
+description = "Tabular time-series lookup by source + series_id: economic indicators (FRED, World Bank, UN Comtrade), crypto TVL (DefiLlama), weather (open_meteo), and stock quotes (finnhub/twelvedata/polygon). Optional start/end date range; returns [{observed_at, value}] points. $0.01 per call. Use concordance_catalog for current source and series IDs."
 
 [overrides.concordance_series.params]
 source = "Catalog source slug: arxiv, core, courtlistener, defillama, finnhub, gdelt, govinfo, hackernews, open_meteo, polygon, regulations_gov, sec_edgar, stackexchange, twelvedata, un_comtrade, wikipedia, world_bank, fred."
-series_id = "Vendor series id, e.g. fred: GDP, CPIAUCSL, UNRATE, FEDFUNDS, DGS10; world_bank: US-NY.GDP.MKTP.CD (<COUNTRY>-<indicator>). The vendor's free /catalog endpoint lists every live series."
+series_id = "Vendor series id, e.g. fred: GDP, CPIAUCSL, UNRATE, FEDFUNDS, DGS10; world_bank: US-NY.GDP.MKTP.CD (<COUNTRY>-<indicator>). Use concordance_catalog for current series IDs."
 
 [overrides.concordance_company_brief]
+description = "Combine market quotes, SEC filings and news, academic, legal or developer mentions for a company. Sections can be missing; inspect coverage before drawing conclusions."
 
 [overrides.concordance_company_brief.params]
 company = "Ticker (AAPL) or company name (Apple). Coverage is a bounded vendor watchlist."
+
+[overrides.concordance_digest]
+description = "Aggregate cited search hits across source categories for a topic. Returns structured category groups, not a generated summary. Use concordance_search for a filtered search within selected sources/categories."
+
+[overrides.concordance_corroboration]
+description = "Find matches for a claim grouped by source. Source counts help trace coverage but do not establish independent verification or truth. Use concordance_digest for category groups."
+
+[overrides.concordance_timeline]
+description = "Track topic coverage chronologically across aggregated sources, oldest first. Use concordance_search for relevance-ranked results and concordance_digest for category groups."

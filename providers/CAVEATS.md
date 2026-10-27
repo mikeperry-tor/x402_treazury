@@ -240,13 +240,19 @@ that schema nor the configured URL establishes current upstream availability.
 
 ## google-trends.toml — Google Trends SEO keyword data (x402 Atlas)
 
-Four GET endpoints on [google-trends.use.x402atlas.com](https://google-trends.use.x402atlas.com):
-interest over time ($0.05/call, worldwide), interest by region, related
-queries and related topics ($0.03/call each, per-country). Prices surface
-from the `x-payment-info` extension.
-Guidance: long vendor descriptions describe each route's limits (empty
-result sets, established search terms) — never re-enable trimming for this
-spec; `help_url` serves the vendor `llms.txt` via `google_trends_help()`.
+The [vendor catalog](https://google-trends.use.x402atlas.com/openapi.json)
+provides two interest timelines ($0.05 each), regional interest and related
+queries/topics ($0.03 each). Prices come from `x-payment-info`; lazy
+`google_trends_help` reads the vendor guide.
+
+Authored tool descriptions retain actual country/window defaults, relative-interest
+semantics and result-source limitations, using callable follow-up tool names rather
+than vendor paths or unconfigured bridge APIs. `trend` and `trend_over_time` both
+accept all windows; the latter defaults to twelve months and reports granularity.
+The research-desk deployment selects it alone; the reusable provider retains both.
+When `data_source` indicates fallback, inspect returned geography, time window and
+`notice` before making country- or window-specific claims. This result-validity
+requirement remains visible even when endpoint instructions replace provider prose.
 
 ## arkham.toml — Arkham Intel x402 rail (api.arkm.com/x402)
 
@@ -327,7 +333,10 @@ contract is pinned by `tests/provider_catalogs.rs`. The authored projection pres
 `/`, `/catalog` and `/healthz`, adding explicitly authored zero-price hints.
 `include = ["/tools", ""]` preserves paid names and adds `concordance_root`,
 `concordance_catalog` and `concordance_healthz` without changing wire paths.
-Catalog discovery completes the source/series lookup workflow. The existing
+Catalog discovery completes the source/series lookup workflow; the research-desk
+deployment shares it with business and finance. Authored descriptions refer to
+callable tool names; digest describes structured aggregation without vendor
+operating-cost rationale. The existing
 native `concordance_help` fetches the exact `/llms.txt` document, faithfully
 representing that fourth public resource without a duplicate HTTP tool.
 Captured source comparisons preserve the six paid request contracts and local
@@ -579,8 +588,11 @@ loading the full multi-product documentation corpus into context.
 
 Vendor `x-payment-info` supplies dynamic price ranges, but these are not total
 request caps. Requested search type, result/page count and content options affect
-the actual price, calculated upfront. Authored descriptions make the live
-challenge authoritative and recommend small batches. Pricing is request-dependent. One unsigned
+the actual price, calculated upfront. Authored descriptions explain per-result
+summary charges and per-page content choices and recommend small batches.
+The x402 guide documents a ten-result search maximum (larger requests are
+clamped) and default text when no content type is requested. Pricing is
+request-dependent. One unsigned
 request per operation returned HTTP 402 with x402 v2 exact Base USDC options;
 the sampled requests quoted 7000 and 1000 atomic units respectively. These were
 unpaid discovery checks, not funded settlement qualification or universal prices.
@@ -602,8 +614,16 @@ Instructions and the parameter description tell agents to omit it or use false;
 this provider does not impose or silently rewrite request values. Treazury does
 not relay a streaming Exa response as incremental MCP output. The 90-second
 request timeout allows slower search/crawling; an operator may override it.
-All selected request fields and descriptions remain available, including vendor
-deprecation guidance, without a description-length cap.
+All selected request fields remain available without a description-length cap.
+Authored parameter guidance favors current content options and marks the ignored
+crawl-date filters explicitly. Deprecated does not imply ignored: `includeText`
+and `excludeText` still describe word-level matching, and `numSentences` maps to
+a character budget. Do not blanket-remove those fields or supported subpage
+controls. `maxAgeHours` omitted permits cached pages and fetches uncached pages;
+`-1` uses cache only, `0` fetches fresh, and positive values bound cache age.
+`snapshotAsOf` selects stored history without fetching a live page. See the
+[Search](https://exa.ai/docs/reference/search) and
+[Contents](https://exa.ai/docs/reference/get-contents) references.
 
 ## oneshot.toml — OneShot synchronous web search
 

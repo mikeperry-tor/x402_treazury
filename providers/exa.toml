@@ -15,17 +15,29 @@ help_url = "https://exa.ai/docs/integrations/payments/x402/quickstart.md"
 instructions_text = "Use exa_search to discover URLs and exa_contents for known URLs. Prices scale with search type, result/page counts and content options."
 
 [overrides.exa_search]
-description = "Search the web and optionally retrieve result contents. Prefer a small numResults and contents.highlights for concise context. Pricing scales with search type, result count and content options; advertised ranges are not total-request caps."
+description = "Search the web and optionally retrieve result contents. Prefer a small numResults and contents.highlights for concise context. Select content options deliberately: summaries add a per-result charge. Search type and requested result count affect price; displayed prices are estimates."
 
 [overrides.exa_search.params]
-stream = "Omit or set false. Treazury returns completed tool responses and does not expose Exa's server-sent event stream."
+stream = "Omit or set false for a completed response."
+numResults = "Requested result count; x402 searches return at most 10 even if a larger count is requested."
+contents = "Choose text, highlights or summary only as needed; summary adds a per-result charge. For freshness, contents.maxAgeHours omitted allows cached pages, -1 uses cache only, 0 fetches fresh and a positive value bounds cache age in hours. Prefer highlights.maxCharacters over deprecated numSentences."
+startCrawlDate = "Ignored by Exa; omit. Use publication-date filters for publication dates."
+endCrawlDate = "Ignored by Exa; omit. Use publication-date filters for publication dates."
+context = "Deprecated; request contents.highlights or contents.text instead."
 
 [overrides.exa_contents]
-description = "Retrieve page contents from known URLs or Exa document IDs. Supply exactly one of urls or ids. Choose text, highlights or summary as needed. maxAgeHours controls freshness; snapshotAsOf selects historical content. Pricing scales with page counts and content options; the advertised range is not a total-request cap."
+description = "Retrieve page contents from known URLs or Exa document IDs. Supply exactly one of urls or ids. Choose text, highlights or summary as needed. maxAgeHours controls freshness; snapshotAsOf selects historical content. Each requested content type adds a per-page charge; omitted content types default to text. Displayed prices are estimates."
 
 [overrides.exa_contents.params]
 urls = "URLs to retrieve. Supply this or ids, never both; prefer small batches because pricing scales with requested pages and content options."
 ids = "Exa document IDs to retrieve. Supply this or urls, never both."
+maxAgeHours = "Maximum cache age in hours. Omit to use cached content when available and fetch uncached pages; -1 uses cache only, 0 fetches fresh, positive values fetch pages older than that age."
+snapshotAsOf = "Retrieve the newest stored version at or before an ISO date/time; a date alone means midnight UTC. Historical retrieval never fetches the live page."
+livecrawl = "Deprecated; use maxAgeHours instead. Do not combine them."
+context = "Deprecated; request highlights or text instead."
+highlights = "Request concise excerpts with true or options such as query and maxCharacters. Prefer maxCharacters over deprecated numSentences. Each page incurs a highlights charge."
+text = "Request page text with true or text options. Each page incurs a text charge."
+summary = "Request generated summaries only when needed; each page incurs a summary charge."
 
 [overrides.exa_help]
 description = "Read Exa’s x402 Search/Contents guide, examples and usage pricing. API-key and SDK setup is unnecessary here."

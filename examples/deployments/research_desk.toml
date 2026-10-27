@@ -104,12 +104,17 @@ max_funding_amount_usdc = "3.00"
 [sources.exa]
 extends = "../../providers/exa.toml"
 send_tools = [
+  # Inline schemas cover selected calls; vendor help adds HTTP/payment setup.
+  { to = "exclude", tools = ["help"] },
   { to = "web" },
 ]
 
 [sources.google_trends]
 extends = "../../providers/google-trends.toml"
 send_tools = [
+  # trend_over_time covers every supported window and reports granularity.
+  # Inline guidance replaces vendor help with unselected bridge follow-ups.
+  { to = "exclude", tools = ["trend", "help"] },
   { to = "web" },
 ]
 
@@ -329,8 +334,9 @@ send_tools = [
 [sources.concordance]
 extends = "../../providers/concordance/provider.toml"
 send_tools = [
-  # MCP discovery supplies the inventory; root and health checks add no research results.
-  { to = "exclude", tools = ["catalog", "healthz", "root"] },
+  # Root/health add no research; inline schemas replace vendor HTTP help.
+  { to = "exclude", tools = ["healthz", "root", "help"] },
+  { to = ["business", "finance"], tools = ["catalog"] },
   # Route business research families before the primary fallback.
   { to = "business", tools = ["company_brief"] },
   # Route financial research families before the primary fallback.
@@ -404,6 +410,10 @@ extends = "../../providers/stableenrich.toml"
 send_tools = [
   { to = "exclude", tools = [
     "exa_*",               # Use exa directly instead
+    # Vaaya exposes the same Firecrawl/Serper workflows with fuller scrape/news controls.
+    "firecrawl_scrape",
+    "firecrawl_search",
+    "serper_news",
     "pdl_people_enrich",   # Use PDL directly instead
     # Prefer solar_building_insights for directly usable structured results.
     # These imagery layers require extra asset retrieval and processing or viewing.
@@ -903,7 +913,7 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, page retrieval and scraping, news and coverage timelines, academic papers and researcher profiles, structured page extraction, blocked-page retrieval, web archives and historical snapshots, keyword trends, image search, reverse-image search and shopping. Use this endpoint for source discovery and web content; use social or business for profiles. Academic sources include OpenAlex and Valyu; news timelines use GDELT. Bright Data and Diffbot support blocked-page retrieval and typed extraction; Firecrawl and Serper offer comparison sources; Wayback supplies archived pages and snapshot discovery."
+instructions_text = "Web search, pages, news, papers, archives, keyword trends, image/reverse-image search and shopping. Prefer exa_search for general search and vaaya_serper_news for news links. Read ordinary pages with otto_web_extract; use exa_contents for freshness or historical controls, socialfetch_web_markdown for selectors/scrolling, vaaya_firecrawl_scrape for rendering/actions, vaaya_brightdata_unblock for blocked pages and Diffbot for typed extraction. Use google_trends_trend_over_time for interest timelines. OpenAlex provides scholarly metadata; Valyu provides paper excerpts; GDELT provides news-coverage timelines; Wayback provides archived pages."
 
 [servers.social]
 listen = "127.0.0.1:3011"
@@ -969,5 +979,5 @@ provider_management_local = true
 provider_management_remote = true
 remote_provider_directories = ["coinbase", "x402-list"]
 raw_url_calls = true
-instructions_text = "Dynamic provider management and documented-URL raw calls. Use this endpoint to discover and add APIs not already present on the categorized research endpoints."
+instructions_text = "Find and add APIs missing from the research endpoints, or call documented URLs. Prefer providers_list_local for bundled definitions before remote provider discovery."
 discovery_search_tool_instructions_text = "Search APIs registered on this endpoint. Use provider-management tools to find and add providers, or raw-call tools for documented URLs; this search covers currently loaded APIs."

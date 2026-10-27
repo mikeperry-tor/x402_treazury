@@ -23,6 +23,23 @@ instructions, capabilities and wallet references. See
 [source tool distribution](../docs/configuration.md#source-tool-distribution) for
 matching, potential bindings and `config check --explain-routing` inspection.
 
+The research desk prefers Exa for general search, Otto for ordinary page reads,
+and Vaaya for Firecrawl and Serper News; duplicate StableEnrich wrappers are
+excluded here, not in the reusable provider. Exa retains explicit freshness and
+historical controls; SocialFetch retains selector, scrolling and cache controls.
+Google Trends uses `trend_over_time` for all windows, including `2004_present`.
+Concordance's catalog is shared with business/finance so series IDs remain
+resolvable. Exa, Trends and Concordance vendor help tools are omitted here;
+complete input schemas and inline guidance cover the selected calls without
+HTTP setup instructions or unavailable follow-ups. These are capability-based selections, not claims of identical
+upstream results or comparative live qualification.
+
+Tool search reads the loaded catalog without provider requests. Prefer bundled
+provider listing before remote discovery; remote discovery can incur several
+charges. Wallet payment caps bound each challenge, not the sum of a research job.
+Agent guidance keeps invocation prices and uncertain-payment warnings, while
+transport fallback costs and vendor API path mappings remain operator concerns.
+
 Copy a deployment beside its tracked template as `NAME.local.toml` before
 customizing it. Relative paths resolve from the file declaring them. Existing
 local configurations remain operator-owned; keep using their original state and

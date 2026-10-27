@@ -33,7 +33,7 @@ pub fn listener_definitions(
         }), &["provider_id"])));
     }
     if policy.remote_search() {
-        let mut description = "Find APIs across the operator-selected remote directories. Returns native JSON objects keyed by directory; local_error marks a failed directory. Empty or partial results do not prove absence. One search may authorize multiple directory or relay charges; do not automatically repeat failed paid searches.".to_owned();
+        let mut description = "Find APIs across the operator-selected remote directories. Returns native JSON objects keyed by directory; local_error marks a failed directory.".to_owned();
         if policy.has_x402_list() {
             description.push_str(" Cite x402-list.com for its CC BY 4.0 data.");
         }
@@ -59,7 +59,7 @@ pub fn listener_definitions(
         definitions.push((super::raw::NAME, "Call an exact documented public HTTPS endpoint without registration. Supply its documented method, URL and arguments. May spend Base USDC; a failed call may have paid or completed a side effect. Do not automatically repeat it. Returns text or supported images.".into(), super::raw::schema()));
     }
     if policy.management() || discover_on_demand {
-        definitions.push(("x402_treazury_tools_search", "Find callable API tools and complete input schemas on this MCP endpoint. Omit query to enumerate and follow next_cursor for more. Invoke a returned tool_id with tool_call on this same endpoint. Unknown cost is not free.".into(), search_schema()));
+        definitions.push(("x402_treazury_tools_search", "Find callable API tools and complete input schemas on this MCP endpoint. This catalog search makes no provider requests. Omit query to enumerate and follow next_cursor for more. Invoke a returned tool_id with tool_call on this same endpoint; those calls may charge, and unknown cost does not mean free.".into(), search_schema()));
         definitions.push(("x402_treazury_tool_call", "Invoke a tool_id using its discovered input schema on this same MCP endpoint. Calls may charge; do not automatically repeat a failed paid call.".into(), object(json!({
             "tool_id":{"type":"string","description":"Exact tool_id returned by tools_search on this endpoint; reusable while available."},
             "arguments":{"type":"object","additionalProperties":true,"description":"Arguments matching the tool input_schema; use {} when no arguments are needed."}
