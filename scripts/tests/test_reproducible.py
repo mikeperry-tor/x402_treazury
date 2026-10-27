@@ -145,10 +145,10 @@ class ReproducibleTests(unittest.TestCase):
 
 
 class ZingolibReleaseInputsTests(unittest.TestCase):
-    def metadata(self, directory, graph="root"):
+    def metadata(self, directory):
         return {"packages": [
-            {"name": "x402_treazury" if graph == "root" else "x402-zingolib-compat",
-             "manifest_path": str(directory.parent / graph / "Cargo.toml")},
+            {"name": "x402_treazury",
+             "manifest_path": str(directory.parent / "root" / "Cargo.toml")},
             {"name": "zingolib", "id": "git+https://example.invalid/sdk#zingolib@7.0.0",
              "source": "git+https://example.invalid/sdk?rev=fixture#fixture",
              "version": "7.0.0", "manifest_path": str(directory / "Cargo.toml")},
@@ -170,22 +170,20 @@ class ZingolibReleaseInputsTests(unittest.TestCase):
         return {"PATH": os.environ["PATH"], "HOME": str(root), "GIT_CONFIG_NOSYSTEM": "1",
                 "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CEILING_DIRECTORIES": str(root)}
 
-    def test_root_and_compatibility_metadata_find_resolved_source_without_vendor_paths(self):
+    def test_workspace_metadata_finds_resolved_source_without_vendor_paths(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(r, "SANDBOX", []):
             root = Path(tmp)
             env = self.environment(root)
             sdk = root / "cached-upstream"
             self.repository(sdk, env)
             revision = self.git(sdk, env, "rev-parse", "HEAD")
-            for graph in ("root", "compatibility"):
-                with self.subTest(graph=graph):
-                    inputs = r.zingolib_inputs(self.metadata(sdk, graph), env)
-                    self.assertEqual(inputs["manifest_path"], str(sdk / "Cargo.toml"))
-                    self.assertEqual(inputs["version"], "7.0.0")
-                    self.assertEqual(inputs["source"], self.metadata(sdk)["packages"][1]["source"])
-                    self.assertEqual(inputs["git"]["revision"]["stdout"], revision)
-                    self.assertEqual(inputs["git"]["tags"]["stdout"], "")
-                    self.assertEqual(inputs["git"]["diff_index"]["returncode"], 0)
+            inputs = r.zingolib_inputs(self.metadata(sdk), env)
+            self.assertEqual(inputs["manifest_path"], str(sdk / "Cargo.toml"))
+            self.assertEqual(inputs["version"], "7.0.0")
+            self.assertEqual(inputs["source"], self.metadata(sdk)["packages"][1]["source"])
+            self.assertEqual(inputs["git"]["revision"]["stdout"], revision)
+            self.assertEqual(inputs["git"]["tags"]["stdout"], "")
+            self.assertEqual(inputs["git"]["diff_index"]["returncode"], 0)
 
     def test_matching_tags_and_dirty_status_are_observed_without_predicting_descriptor(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(r, "SANDBOX", []):

@@ -201,7 +201,7 @@ def qualify(run):
             ))
             build["zingolib"] = zingolib_inputs(metadata, env)
             # Build the locked protoc helper independently in each clean target.
-            run_logged(["cargo", "build", "--frozen", "--manifest-path", "compat/protoc/Cargo.toml"], source, env, log)
+            run_logged(["cargo", "build", "--frozen", "--manifest-path", "tools/protoc/Cargo.toml"], source, env, log)
             env["PROTOC"] = output(SANDBOX + [str(work / "target/debug/x402-protoc-path")], cwd=source, env=env)
             command = ["cargo", "build", "--frozen", "--release", "--bin", "x402_treazury", "--target", profile["host"]]
             run_logged(command, source, env, log)

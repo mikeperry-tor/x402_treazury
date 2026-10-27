@@ -63,7 +63,9 @@ pub fn source_hash(root: &Path) -> io::Result<String> {
         "vendor",
         "Cargo.toml",
         "Cargo.lock",
-        "compat/zingolib/Cargo.toml",
+        "tools/protoc/Cargo.toml",
+        "tools/protoc/Cargo.lock",
+        "tools/protoc/src",
         "build.rs",
         "rust-toolchain.toml",
     ] {
@@ -102,7 +104,9 @@ mod tests {
         for name in [
             "Cargo.toml",
             "Cargo.lock",
-            "compat/zingolib/Cargo.toml",
+            "tools/protoc/Cargo.toml",
+            "tools/protoc/Cargo.lock",
+            "tools/protoc/src/main.rs",
             "build.rs",
             "rust-toolchain.toml",
             "tests/live/live_integration.rs",
@@ -132,7 +136,9 @@ mod tests {
         .unwrap();
         assert_eq!(source_hash(root).unwrap(), initial);
         for name in [
-            "compat/zingolib/Cargo.toml",
+            "tools/protoc/Cargo.toml",
+            "tools/protoc/Cargo.lock",
+            "tools/protoc/src/main.rs",
             "tests/live/live_integration.rs",
             "tests/live/runner/driver.rs",
             "tests/live/runner/fixtures/reporting_complete.txt",

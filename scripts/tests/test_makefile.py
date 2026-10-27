@@ -40,7 +40,7 @@ if sys.argv[1:] == ['--version']:
 else:
     with open(os.environ['MAKE_TEST_LOG'], 'a') as log:
         log.write(json.dumps([name, sys.argv[1:], os.environ.get('CARGO_INCREMENTAL'), os.environ.get('PROTOC')]) + '\\n')
-    if name == 'cargo' and sys.argv[1] == 'run' and 'compat/protoc/Cargo.toml' in sys.argv:
+    if name == 'cargo' and sys.argv[1] == 'run' and 'tools/protoc/Cargo.toml' in sys.argv:
         if os.environ.get('FAIL_PROTOC'):
             sys.exit(42)
         print('/fixture/protoc with spaces')
@@ -92,7 +92,7 @@ else:
             with self.subTest(args=args):
                 _, calls = self.make(*args)
                 self.assertEqual(len(calls), 2)
-                self.assertEqual(calls[0][1], ['run', '--quiet', '--locked', '--manifest-path', 'compat/protoc/Cargo.toml'])
+                self.assertEqual(calls[0][1], ['run', '--quiet', '--locked', '--manifest-path', 'tools/protoc/Cargo.toml'])
                 self.assertEqual(calls[0][2], incremental)
                 self.assertEqual(calls[1], ['cargo', [command, '--locked', '--manifest-path',
                                                     'Cargo.toml', *forwarded], incremental,
@@ -118,9 +118,11 @@ else:
                     self.assertEqual(calls, [])
 
     def test_protoc_failure_cannot_fall_back_or_build(self):
-        _, calls = self.make('build', success=False, FAIL_PROTOC='yes', PROTOC='/inherited/protoc')
-        self.assertEqual(len(calls), 1)
-        self.assertIn('compat/protoc/Cargo.toml', calls[0][1])
+        for target, count in [('build', 1), ('check-compat', 2)]:
+            with self.subTest(target=target):
+                _, calls = self.make(target, success=False, FAIL_PROTOC='yes', PROTOC='/inherited/protoc')
+                self.assertEqual(len(calls), count)
+                self.assertIn('tools/protoc/Cargo.toml', calls[-1][1])
 
     def test_toolchain_mismatch_stops_before_protoc(self):
         for name in ('RUSTC', 'CARGO'):
@@ -176,7 +178,12 @@ else:
                 checked('check', '--lib', '--bins', '--message-format=json'),
                 checked('clippy', '--all-targets', '--features', 'zcash-regtest', '--message-format=json', '--', '-D', 'warnings'),
             ],
-            'check-compat': [('python3', ['scripts/check_compat.py'])],
+            'check-compat': [
+                ('python3', ['vendor/verify_zingo.py']),
+                application('test', '--test', 'sdk_compat', '--test', 'payments',
+                            '--test', 'server', '--test', 'crypto_vectors',
+                            '--', '--test-threads=8'),
+            ],
             'check-default': [
                 application('test', '-p', 'pepper-sync', '--lib', 'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context', '--', '--exact'),
                 application('test', '--all-targets', '--', '--test-threads=8'),
@@ -191,7 +198,7 @@ else:
     @staticmethod
     def check_commands(calls):
         return [(call[0], call[1]) for call in calls
-                if 'compat/protoc/Cargo.toml' not in call[1]]
+                if 'tools/protoc/Cargo.toml' not in call[1]]
 
     def test_check_preserves_selections_and_orders_static_lints_compat_before_runtime(self):
         stages = self.check_stages()
@@ -230,7 +237,7 @@ else:
     def test_check_stops_at_failed_stage_even_with_keep_going(self):
         expected = [command for stage in self.check_stages().values() for command in stage]
         for flags in ([], ['-j8'], ['-k']):
-            for failure in ('vendor/verify.py', '--bins', 'clippy', 'scripts/check_compat.py',
+            for failure in ('vendor/verify.py', '--bins', 'clippy', 'sdk_compat',
                             'wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context',
                             'treasury::send::proving_tests', 'treasury::lifecycle_tests',
                             'synthetic_address_codec_is_scoped_to_its_test_client'):
@@ -245,7 +252,13 @@ else:
         _, calls = self.make('check', 'PYTHON=analysis-python', 'COMPLEXITY_BASE_REF=review-base')
         self.assertIn(('analysis-python', ['scripts/complexity.py', '--base', 'review-base']),
                       self.check_commands(calls))
-        self.assertIn(('analysis-python', ['scripts/check_compat.py']), self.check_commands(calls))
+        self.assertIn(('analysis-python', ['vendor/verify_zingo.py']), self.check_commands(calls))
+
+    def test_compatibility_source_failure_stops_before_bootstrap_and_tests(self):
+        _, calls = self.make('check-compat', success=False,
+                             FAIL_ARGUMENT='vendor/verify_zingo.py')
+        self.assertEqual(self.check_commands(calls), [('python3', ['vendor/verify_zingo.py'])])
+        self.assertEqual(len(calls), 1)
 
     def test_coverage_modes_remain_explicit(self):
         script = self.root / 'scripts/coverage.sh'

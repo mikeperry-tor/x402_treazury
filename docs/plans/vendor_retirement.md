@@ -95,7 +95,7 @@ Pepper remain later assessments because each has multiple independent blockers.
 For both H and H2, preserve raw HEADERS absence, zero-peer-capacity cleanup,
 explicit/implicit cancellation, no stale bodies and healthy multiplexed reuse.
 Require queue/timeout tests in `src/network/`, HTTP/gRPC cases in
-`tests/network.rs`, network audit and the compatibility package. Review both sides
+`tests/network.rs`, network audit and the focused SDK/payment tests. Review both sides
 of pending-open cancellation even if only one checkout can exit. Initial upstream
 source and PR inspection is not executed regression or retirement evidence.
 

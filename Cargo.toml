@@ -7,7 +7,7 @@ publish = false
 default-run = "x402_treazury"
 
 [workspace]
-members = [".", "compat/zingolib", "vendor/pepper-sync"]
+members = [".", "vendor/pepper-sync"]
 default-members = ["."]
 resolver = "3"
 # Other vendored dependencies are not test packages in this workspace.

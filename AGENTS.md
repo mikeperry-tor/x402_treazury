@@ -192,7 +192,7 @@ links other maintained guides.
 | MCP images, binary output or truncation | [Output boundaries](docs/architecture.md#mcp-and-output-boundaries), [download/display limits](docs/configuration.md#download-and-display-limits) | `src/output.rs`, `src/server.rs`, `tests/media.rs` |
 | Optional cover traffic | [Cover policy](docs/cover-traffic.md) | `src/cover/` |
 | Live integration, financial evidence or qualification reports | [Runbook](tests/live/INTEGRATION.md), [technical reference](tests/live/INTEGRATION_REFERENCE.md), [qualification status](docs/testing.md#qualification-status) | `tests/live/runner/driver.rs`, `tests/integration_preparation.rs` |
-| Builds, dependencies, test infrastructure or release tooling | [Development](docs/development.md), [testing](docs/testing.md), [scripts](scripts/README.md), relevant [vendor provenance](vendor/README.md) / [Zingo patch](vendor/ZINGO.md) | `scripts/`, `compat/`, `vendor/`; [reproducible builds](docs/reproducible-builds.md) |
+| Builds, dependencies, test infrastructure or release tooling | [Development](docs/development.md), [testing](docs/testing.md), [scripts](scripts/README.md), relevant [vendor provenance](vendor/README.md) / [Zingo patch](vendor/ZINGO.md) | `scripts/`, `tools/`, `vendor/`; [reproducible builds](docs/reproducible-builds.md) |
 
 When changing policy, update its owning guide and affected references. Resource
 policy changes must keep both inventories current. Do not infer a runtime deadline,

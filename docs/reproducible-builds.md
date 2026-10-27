@@ -41,7 +41,7 @@ Preparation may use the network. From the repository root:
 ```sh
 make toolchain
 cargo fetch --locked --target aarch64-apple-darwin
-cargo fetch --locked --manifest-path compat/protoc/Cargo.toml
+cargo fetch --locked --manifest-path tools/protoc/Cargo.toml
 make build
 ```
 
@@ -77,10 +77,10 @@ Git archive produce the same snapshot. Each build uses `cargo build --frozen
 --release --bin x402_treazury --target aarch64-apple-darwin`; Zcash is unconditional.
 The locked protoc helper is also rebuilt independently.
 
-The source archive includes `compat/zingolib/Cargo.toml`, a workspace resolution
-input even when only the application is selected. Build fingerprints, dirty-input
-checks and Cargo rebuild triggers include that manifest alongside the root
-manifest and lockfile.
+The source archive includes the `tools/protoc` compiler locator. Build
+fingerprints, dirty-input checks and Cargo rebuild triggers include its manifest,
+independent lockfile and Rust sources alongside the application manifest and
+lockfile. Its build cache is outside those compilation inputs.
 
 The environment is constructed from an allowlist: no inherited Rust flags,
 profiling settings, proxy variables or wallet credentials. Cargo registry/Git

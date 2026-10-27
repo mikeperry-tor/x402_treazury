@@ -1,7 +1,7 @@
 # Vendored dependency patches
 
-The application and `compat/zingolib` test package share the root workspace's
-patches and committed lockfile. That lockfile selects the build graph for both;
+The application and its SDK/payment integration tests use the root workspace's
+patches and committed lockfile. That lockfile selects their shared build graph;
 vendored upstream lockfiles remain provenance inputs.
 
 ## Current reasons and removal evidence
@@ -24,8 +24,8 @@ release already supplies equivalent behavior.
 
 Runtime contracts remain in [network policy](../docs/network-egress.md) and
 [wallet ownership](../docs/wallet-rotation.md). When changing a pin or removing a
-patch, review its complete consumers and retained regression coverage in the application and compatibility
-packages, then update this inventory and the owning guide.
+patch, review its complete consumers and retained regression coverage in the application and focused SDK/payment
+tests, then update this inventory and the owning guide.
 
 ## Checkout retirement tracking
 
@@ -100,8 +100,8 @@ zero peer capacity.
 
 `transport-sources.json` records the archive SHA-256, every original file hash,
 and the reviewed patch hash. `python3 vendor/verify.py` also reverses the patches
-and checks every file against its upstream hash. The application and compatibility
-package select the same root patch. No protocol downgrade, retry or
+and checks every file against its upstream hash. The application and its integration
+tests select the same root patch. No protocol downgrade, retry or
 change to financial authority is introduced. Application real TLS/SOCKS tests
 check raw HEADERS absence, GET/POST cancellation and timeout, and reuse of the
 healthy multiplexed connection. Remove the patch only after equivalent upstream
@@ -153,8 +153,8 @@ initialization errors to safe reasons rather than printing the original first
 message. Regression coverage lives in discovery's isolated real MCP/Tor fixture,
 `src/discovery/raw_privacy_tests.rs` and the executable's initialization-error test.
 `rmcp-sources.json` records the archive hash, every published file hash and patch
-hash; source verification reverses the patch before checking all files. Both application
-and compatibility packages select the same root path patch. No network
+hash; source verification reverses the patch before checking all files. The application
+and its integration tests select the same root path patch. No network
 constructor, timeout, retry, credential store or financial authority is added.
 
 The patch also gates three client-only helpers (`matches_response_id`,

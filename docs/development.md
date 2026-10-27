@@ -75,7 +75,7 @@ This ordinary build is separate from the qualified
 [reproducible release workflow](reproducible-builds.md).
 
 Development and test builds use `debug = "line-tables-only"` throughout the
-application workspace, including the compatibility package. This retains file/line
+application workspace. This retains file/line
 backtraces but omits type and variable information needed for richer debugger
 inspection. Enable incremental development builds explicitly:
 
@@ -129,7 +129,7 @@ inputs before choosing a job count. See Cargo's
 [job control](https://doc.rust-lang.org/cargo/reference/config.html#buildjobs) and
 [timing reports](https://doc.rust-lang.org/cargo/reference/timings.html).
 
-The application, compatibility package and SDK regression share one lockfile,
+The application, its integration tests and SDK regression share one lockfile,
 workspace profile, patch table and target directory. This permits reuse of
 matching compiled units; different features and target kinds can still require
 separate units. Keep their Cargo invocations and feature configurations sequential
@@ -467,7 +467,7 @@ Keep ordinary CLI errors legible even with backtrace environment variables enabl
 
 ### TLS security updates
 
-The application and `compat/zingolib` share the root Cargo workspace and lockfile;
+The application and its SDK/payment integration tests use the root lockfile;
 update that lockfile for runtime TLS security fixes. For the
 [emSign intermediate-key compromise](https://rustsec.org/advisories/RUSTSEC-2026-0382),
 runtime verification requires `rustls-webpki` 0.103.16 or later in the 0.103
@@ -496,13 +496,15 @@ the repository.
 
 ### Combined workspace verification
 
-The root workspace includes the `x402-zingolib-compat` test package and Pepper Sync.
-All three packages use the root lockfile, patches, profile and build cache. Ordinary
-root commands select only the application through `default-members`; the other
-vendored dependencies remain nonmembers. The compatibility package exercises the
-public library API with offline SDK wallet restore/address continuity, payment
-signing, MCP server and independent cryptographic-vector tests. Dependency updates
-select one shared graph for the application and these tests.
+The root workspace includes the application and Pepper Sync. Ordinary commands
+select only the application through `default-members`; Pepper is selected
+explicitly for its private merge regression. Other vendored dependencies remain
+nonmembers. All application tests use the root lockfile, patches, profile and
+build cache. The SDK wallet fixture lives in `tests/sdk_compat.rs`; it exercises
+public SDK restore/address continuity alongside Ethereum payer construction.
+Payment signing, MCP server and independent cryptographic-vector tests remain
+in their normal integration targets.
+
 `make check` explicitly runs the real three-pool merge-conflict fixture:
 
 ```sh
@@ -513,13 +515,13 @@ Run source verification and the combined suite with the reviewed vendored patche
 
 ```sh
 python3 vendor/verify.py
-python3 scripts/check_compat.py
+make check-compat
 ```
 
-The checker verifies the vendored source hashes, obtains a Cargo-managed `protoc`
-compiler, and explicitly selects `x402-zingolib-compat` with the root lockfile.
-First builds
-fetch Cargo dependencies and zingolib's public Sapling proving parameters;
+`check-compat` verifies the retained SDK source hashes, obtains Cargo-managed
+`protoc` through `tools/protoc`, and selects the `sdk_compat`, `payments`, `server`
+and `crypto_vectors` test targets with the root lockfile. These targets also run
+in the complete default suite. First builds fetch Cargo dependencies and zingolib's public Sapling proving parameters;
 zingolib embeds those parameters from the standard cache during its build. Tests use temporary
 offline wallets and localhost payment servers. No wallet sync, funded payment, approval or broadcast
 occurs.
@@ -551,14 +553,14 @@ are release inputs; see [release qualification](reproducible-builds.md).
 The independent hash vectors are regenerated with
 `uv run --script scripts/generate_crypto_vectors.py`; normal Rust tests consume
 the committed vectors without Python. The combined suite runs the shared
-payment/MCP/crypto targets plus offline wallet tests. The root manifest supplies
-the patches and shared lockfile for both packages. These checks use temporary
+payment/MCP/crypto targets plus offline wallet tests. The root manifest and
+lockfile select one dependency graph for all of them. These checks use temporary
 offline state. SDK upgrade coverage includes a public
 v6 snapshot, retained derived addresses and next-address continuity under v7.
 
 This focused compatibility suite tests dependency coexistence and offline wallet
 round trips. The application suites separately cover sync, proving and consensus
-recovery. Neither suite qualifies mainnet NEAR settlement. Both packages use the
+recovery. Neither suite qualifies mainnet NEAR settlement. All tests use the
 reviewed vendored patches; no reference checkout is required. The
 [wallet architecture](wallet-rotation.md) describes treasury ownership,
 admission, funding, persistence and recovery.

@@ -601,7 +601,7 @@ Run the complete local regression suite:
 make test CARGO_ARGS='--offline --all-targets' TEST_ARGS='--test-threads=1'
 python3 vendor/verify.py
 python3 vendor/verify_zingo.py
-python3 scripts/check_compat.py
+make check-compat
 ```
 
 Run the Ironwood consensus lifecycle through the fake SOCKS proxy, alone in its

@@ -14,7 +14,7 @@ COMPLEXITY_BASE_REF ?= main
 # in the assignment visible; an empty/failed helper must never use system protoc.
 define application_cargo
 set -eu; \
-PROTOC=$$(cargo run --quiet --locked --manifest-path compat/protoc/Cargo.toml); \
+PROTOC=$$(cargo run --quiet --locked --manifest-path tools/protoc/Cargo.toml); \
 export PROTOC; \
 exec $(3) $(if $(filter test,$(1)),scripts/test-runner.sh --cargo) cargo $(1) --locked --manifest-path Cargo.toml $(2)
 endef
@@ -106,7 +106,8 @@ check-clippy: toolchain
 	@$(call application_cargo,clippy,--all-targets --features zcash-regtest --message-format=json -- -D warnings,$(PYTHON) scripts/check_warnings.py)
 
 check-compat: toolchain
-	$(PYTHON) scripts/check_compat.py
+	$(PYTHON) vendor/verify_zingo.py
+	@$(call application_cargo,test,--test sdk_compat --test payments --test server --test crypto_vectors -- --test-threads='$(TEST_THREADS)')
 
 check-default: toolchain
 	@$(call application_cargo,test,-p pepper-sync --lib wallet::traits::diagnostic_tests::scan_merge_conflict_preserves_pool_context -- --exact)
@@ -144,7 +145,7 @@ help:
 	  'make check              All check stages in the order below' \
 	  'make check-static       Format, tooling, complexity and provenance' \
 	  'make check-clippy       Production compiler warnings and all-target zcash-regtest Clippy' \
-	  'make check-compat       Combined dependency compatibility tests' \
+	  'make check-compat       SDK wallet, payment, MCP and crypto integration tests' \
 	  'make check-default      SDK diagnostic and all default test targets' \
 	  'make check-proving      Synthetic treasury proving tests' \
 	  'make check-lifecycle    Synthetic treasury lifecycle tests' \

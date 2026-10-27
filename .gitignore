@@ -5,7 +5,7 @@ __pycache__/
 dist/
 .DS_Store
 
-# Rust build output (including compatibility workspaces)
+# Rust build output (including independent development tools)
 target/
 
 # Local reference checkouts

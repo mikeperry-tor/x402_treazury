@@ -1,6 +1,6 @@
 # Zingo integration and Pepper patches
 
-Both the application and `compat/zingolib` use ordinary upstream `zingolib` and
+The application and its SDK integration tests use ordinary upstream `zingolib` and
 `zingo-netutils` Git sources at revision
 `bfb0a2156819ea7f75a9b09b1724abfd06c8925e` (v7.0.0). Neither crate has a local
 snapshot or override. The same cohort's `pepper-sync/` remains patched; the shared

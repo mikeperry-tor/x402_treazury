@@ -95,7 +95,8 @@ available directly.
 | `scripts/tests/coverage.sh` | Offline regression check for report publication and failure preservation |
 | `make build` / `make test` | Cargo-managed protoc; the application always includes Zcash |
 | `scripts/test-runner.sh --cargo cargo test …` | Automatic macOS copied-and-signed test execution; other hosts execute Cargo directly |
-| `check_compat.py` | Select the payment/Zingolib compatibility package using the root workspace lockfile, patches and build cache |
+| `make check-compat` | SDK wallet, payment, MCP and cryptographic integration targets with the root lockfile and build cache |
+| `tools/protoc/` | Independently locked build utility locating the bundled protoc compiler |
 | `generate_crypto_vectors.py` | Independent Python Keccak/EIP-712 reference vectors using pinned script dependencies |
 
 Zcash support is unconditional; static-wallet deployments omit treasury
@@ -130,7 +131,7 @@ Tests, checks and Clippy retain normal Cargo profiles and environment behavior.
 See [build storage options](../docs/development.md#build-storage-options) for
 debug-information settings and selective cache cleanup, and
 [compilation parallelism](../docs/development.md#compilation-parallelism) for
-Cargo's existing job controls and timing reports. Compatibility tests share the
+Cargo's existing job controls and timing reports. The focused SDK/payment tests share the
 application target directory and remain a separately selected, sequential stage.
 
 Regenerate the independent cryptographic vectors with:

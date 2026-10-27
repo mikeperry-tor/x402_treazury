@@ -42,7 +42,7 @@ CARGO_LLVM_COV_TARGET_DIR=$project_dir/target/llvm-cov-$mode
 export CARGO_LLVM_COV_TARGET_DIR
 mkdir -p target/coverage-runs
 run_dir=$(mktemp -d "$project_dir/target/coverage-runs/$mode-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
-exclude='/(tests|examples|tools|vendor|compat)/|/src/discovery/tests\.rs$'
+exclude='/(tests|examples|tools|vendor)/|/src/discovery/tests\.rs$'
 echo "Coverage run: $run_dir"
 echo running > "$run_dir/status"
 finish() {
@@ -82,7 +82,7 @@ run() {
     printf '\n' >> "$run_dir/commands.txt"
     "$@"
 }
-PROTOC=$(run cargo run --quiet --locked --manifest-path compat/protoc/Cargo.toml)
+PROTOC=$(run cargo run --quiet --locked --manifest-path tools/protoc/Cargo.toml)
 export PROTOC
 case $mode in
     default) set -- --all-targets ;;
