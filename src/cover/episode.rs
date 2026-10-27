@@ -41,13 +41,17 @@ impl Episode {
             tail: Duration::from_millis(tail),
         })
     }
-    pub fn attach(&mut self) {
+    pub fn attach(&mut self, now: Instant) {
+        // An expired tail may already be draining. Real callers can still join
+        // its cleanup ownership, but cannot revive its finished scheduler.
+        if !self.exhausted(now) {
+            self.tail_deadline = None;
+        }
         self.calls += 1;
-        self.tail_deadline = None;
     }
     pub fn detach(&mut self, now: Instant) {
         self.calls = self.calls.saturating_sub(1);
-        if self.calls == 0 {
+        if self.calls == 0 && self.tail_deadline.is_none() {
             self.tail_deadline = Some((now + self.tail).min(self.deadline));
         }
     }
@@ -124,7 +128,7 @@ mod tests {
         let mut e = Episode::new(&c, now, &mut StdRng::seed_from_u64(4)).unwrap();
         let deadline = e.deadline;
         let target = e.target;
-        e.attach();
+        e.attach(now);
         let a = e.reserve(&c, now, 10000).unwrap();
         let b = e.reserve(&c, now, 10000).unwrap();
         assert!(e.reserve(&c, now, 1).is_err());
@@ -138,10 +142,40 @@ mod tests {
         assert!(e.tail_deadline.is_none());
         e.detach(now);
         assert!(e.tail_deadline.is_some());
-        e.attach();
+        e.attach(now);
         assert_eq!(e.deadline, deadline);
         assert_eq!(e.target, target);
         assert!(e.reserve(&c, deadline, 1).is_err());
         assert_eq!(e.calls, 1);
+    }
+    #[test]
+    fn tail_attachments_clear_only_before_expiry_and_never_revive_on_detach() {
+        let config = crate::cover::tests::example_config();
+        let now = Instant::now();
+        for expired in [false, true] {
+            let mut episode = Episode::new(&config, now, &mut StdRng::seed_from_u64(4)).unwrap();
+            episode.detach(now);
+            let tail = episode.tail_deadline.unwrap();
+            let arrival = if expired {
+                tail
+            } else {
+                tail - Duration::from_millis(1)
+            };
+            episode.attach(arrival);
+            assert_eq!(episode.calls, 1);
+            assert_eq!(
+                episode.tail_deadline,
+                if expired { Some(tail) } else { None }
+            );
+            episode.detach(arrival + Duration::from_millis(1));
+            assert_eq!(episode.calls, 0);
+            if expired {
+                assert_eq!(episode.tail_deadline, Some(tail));
+                assert!(episode.exhausted(arrival));
+            } else {
+                assert!(episode.tail_deadline.unwrap() > tail);
+                assert!(!episode.exhausted(arrival));
+            }
+        }
     }
 }

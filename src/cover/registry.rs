@@ -152,7 +152,7 @@ impl Registry {
                 let mut e = episode.lock().expect("cover episode poisoned");
                 // Keep stopped episodes attached until all real calls and stream cleanup end.
                 if e.calls > 0 || e.streams > 0 || !e.exhausted(now) {
-                    e.attach();
+                    e.attach(now.max(Instant::now()));
                     return Ok((episode.clone(), false));
                 }
             }

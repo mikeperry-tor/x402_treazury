@@ -100,9 +100,16 @@ impl Engine {
     }
     fn record(&self, session: &Session, reason: &'static str) {
         let level = match reason {
-            "cover_preempted_for_api" | "cover_padding_disabled" => tracing::Level::DEBUG,
-            "cover_shutdown" | "cover_range_size_adjusted" => tracing::Level::INFO,
-            _ => tracing::Level::WARN,
+            "cover_preempted_for_api"
+            | "cover_padding_disabled"
+            | "cover_shutdown"
+            | "cover_range_size_adjusted"
+            | "cover_padding_http1_compatibility"
+            | "cover_episode_padding_limit" => tracing::Level::DEBUG,
+            "cover_header_list_limit" | "cover_padding_limit" | "cover_history_limit" => {
+                tracing::Level::WARN
+            }
+            _ => tracing::Level::INFO,
         };
         diagnostics::status(session, &self.limits, reason, level);
     }
@@ -225,7 +232,7 @@ impl Engine {
                 };
                 let length_request = requested.min(length).min(available);
                 if length_request != requested {
-                    tracing::info!(
+                    tracing::debug!(
                         code = "cover_range_size_adjusted",
                         sampled_bytes = requested,
                         admitted_bytes = length_request,
@@ -292,7 +299,7 @@ impl Engine {
         }
         let mut range = range;
         if reserved != range.length {
-            tracing::info!(
+            tracing::debug!(
                 code = "cover_range_size_adjusted",
                 requested_bytes = range.length,
                 admitted_bytes = reserved,
@@ -412,6 +419,27 @@ impl Engine {
                 let result = &outcome.result;
                 let resource = self.registry.lock().unwrap().owners[owner].resource_label();
                 let mut next = None;
+                // This is the local optional-work deadline, not a resource refusal.
+                // A newly attached call may already have cleared its sampled tail.
+                if matches!(result, Err(range::Failure("cover_deadline"))) {
+                    let capability = {
+                        let mut registry = self.registry.lock().unwrap();
+                        let state = registry.owners.get_mut(owner).unwrap();
+                        if matches!(state.capability, Capability::Checking) {
+                            state.capability = Capability::Unknown;
+                        }
+                        state.capability.clone()
+                    };
+                    diagnostics::attempt(
+                        s,
+                        resource,
+                        qualifying,
+                        &outcome,
+                        Some(&capability),
+                        false,
+                    );
+                    return Ok(Some(Instant::now()));
+                }
                 if qualifying {
                     if let Err(error) = result {
                         let switched = self
@@ -474,17 +502,38 @@ impl Engine {
                 Ok(next)
             }
             Some(Err(error)) if error.is_cancelled() => {
-                if matches!(
-                    self.registry.lock().unwrap().owners[owner].capability,
-                    Capability::Checking
-                ) {
-                    return Err("cover_qualification_preempted");
+                // A joined cancellation proves the guard released its reservation
+                // and accounted observed bytes. Only now may qualification resume.
+                let mut registry = self.registry.lock().unwrap();
+                let state = registry.owners.get_mut(owner).unwrap();
+                if matches!(state.capability, Capability::Checking) {
+                    state.capability = Capability::Unknown;
                 }
+                drop(registry);
                 self.record(s, "cover_preempted_for_api");
-                Ok(None)
+                Ok(Some(Instant::now()))
             }
             _ => Err("cover_task_failed"),
         }
+    }
+    async fn drain_ranges(
+        &self,
+        owner: &Owner,
+        s: &Arc<Session>,
+        pending: &mut JoinSet<RangeCompletion>,
+    ) -> (Capability, &'static str) {
+        pending.abort_all();
+        while let Some(item) = pending.join_next().await {
+            // Preserve completed facts even when the scheduler's deadline branch
+            // won the race. Cleanup never dispatches a fallback or another range.
+            let _ = self.complete_range(owner, s, Some(item));
+        }
+        let mut registry = self.registry.lock().unwrap();
+        let state = registry.owners.get_mut(owner).unwrap();
+        if matches!(state.capability, Capability::Checking) {
+            state.capability = Capability::Unknown;
+        }
+        (state.capability.clone(), state.resource_label())
     }
     async fn run(self: Arc<Self>, owner: Owner, s: Arc<Session>, http: reqwest::Client) {
         let mut pending = JoinSet::new();
@@ -590,35 +639,14 @@ impl Engine {
                 }
             }
         }
-        pending.abort_all();
-        while pending.join_next().await.is_some() {}
+        let (capability, resource) = self.drain_ranges(&owner, &s, &mut pending).await;
         // Guards have now released reservations and accounted every observed chunk.
         let reason = if reason == "cover_episode_deadline" {
             s.episode.lock().unwrap().deadline_reason()
         } else {
             reason
         };
-        let (capability, resource, newly_unavailable) = {
-            let mut registry = self.registry.lock().unwrap();
-            let state = registry.owners.get_mut(&owner).unwrap();
-            let newly_unavailable = matches!(state.capability, Capability::Checking);
-            if newly_unavailable {
-                state.capability = Capability::Unavailable("cover_qualification_cancelled");
-            }
-            (
-                state.capability.clone(),
-                state.resource_label(),
-                newly_unavailable,
-            )
-        };
-        diagnostics::episode(
-            &s,
-            &self.limits,
-            reason,
-            &capability,
-            resource,
-            newly_unavailable,
-        );
+        diagnostics::episode(&s, &self.limits, reason, &capability, resource);
     }
 }
 struct RangeGuard {

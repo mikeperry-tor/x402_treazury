@@ -24,6 +24,7 @@ use std::{
 fn paid_cover_lifecycle_in_isolated_process() {
     if std::env::var_os("TREAZURY_COVER_FIXTURE_CHILD").is_some() {
         tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
             .with_ansi(false)
             .with_writer(std::io::stderr)
             .init();

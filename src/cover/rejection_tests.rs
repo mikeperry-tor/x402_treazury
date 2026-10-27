@@ -50,9 +50,10 @@ fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
     let refusal: Vec<_> = logs
         .lines()
         .filter(|line| {
-            line.contains("WARN")
+            line.contains("INFO")
                 && line.contains("code=\"cover_forbidden\"")
                 && line.contains("capability_applied=true")
+                && line.contains("capability=\"unavailable\"")
         })
         .collect();
     assert_eq!(
@@ -121,9 +122,10 @@ fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
             .find(|field| field.starts_with("episode_id="))
             .unwrap();
         assert!(
-            !logs
-                .lines()
-                .any(|line| line.contains("WARN") && line.contains(episode)),
+            !logs.lines().any(|line| line.contains(episode)
+                && (line.contains("WARN")
+                    || (line.contains("capability_applied=true")
+                        && line.contains("capability=\"unavailable\"")))),
             "successful fallback must not disable ranges: {logs}"
         );
     }

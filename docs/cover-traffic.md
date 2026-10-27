@@ -21,8 +21,10 @@ global false. `config show` shows the effective network switch and authored
 source overrides without opening secrets.
 
 For authored static sources without a `[cover_traffic]` table, the default uses the
-same-origin HTTPS catalog URL, with the same-origin `help_url` (often `llms.txt`)
-as fallback. If only help qualifies as a candidate, it becomes the primary. Local
+same-origin HTTPS `help_url` (often `llms.txt`) first, with the same-origin
+catalog URL as fallback. If only the catalog qualifies as a candidate, it becomes
+the primary. This shared default applies to every bundled provider and authored
+static source without an explicit profile; provider opt-outs still apply. Local
 files, cross-origin documents, credentials and fragments are not candidates. When
 neither URL is suitable, startup logs `cover_no_same_origin_resource`, identifying
 HTTP/2 cover traffic, the API/catalog/help origins and each candidate's rejection
@@ -217,7 +219,9 @@ Owners are keyed by runtime, canonical EVM/discovery identity, effective isolati
 scope (`Owner::from_transport`), exact origin, transport policy, effective timeout
 and public-destination policy. Conflicting settings for one owner fail validation.
 Calls sharing an owner attach to one bounded episode; additional calls do not
-extend its deadline or restart its volume budget. Different effective scopes for
+extend its deadline or restart its volume budget. A real call arriving before
+tail expiry clears that tail; once expired, the tail remains expired through
+attachments and their cleanup, so a finished scheduler cannot be revived. Different effective scopes for
 the same canonical identity and origin cannot merge sessions or reuse
 qualification/negative capability; after transport record replacement or eviction,
 retained old sessions finish on their original client while new acquisitions attach
@@ -235,11 +239,15 @@ Every real physical request takes priority: outstanding cover streams are cancel
 and their local cleanup is awaited before dispatch. Cover stays paused through
 challenge/sign/retry until final response headers, then may overlap body download
 and the sampled successful-call tail. Thus cover does not run throughout the
-entire paid handshake. A canceled or failed qualification remains unavailable
-while that owner's cache entry is retained. Repeated calls and new episodes on
-the retained entry do not retry qualification. Ordinary eviction of a fully
-inactive entry forgets that result; a later recreation can qualify again under
-the unchanged process traffic limits.
+entire paid handshake. A completed resource refusal remains unavailable while that owner's cache entry
+is retained. Local cancellation and optional episode/tail deadlines do not prove
+resource incompatibility: after range cleanup, interrupted qualification becomes
+unknown and successful qualification remains available. A paused episode may
+qualify again after real response headers, within its original request/body/deadline
+and process budgets. An expired episode leaves unknown capability eligible for a
+later episode. Completed response facts are applied during cleanup even when the
+scheduler reaches its deadline first. Repeated calls do not retry retained resource
+refusals; ordinary eviction of a fully inactive entry forgets them.
 
 Cover never signs, retries a signed request, obtains an allowance, promotes a
 wallet or triggers funding. Static and managed calls retain ordinary financial
@@ -273,7 +281,8 @@ exact Content-Range, a finite resource size, a matching declared length when
 present, identity encoding and an exact bounded body. Subsequent reads preserve
 resource size and any observed validator. Redirects, authentication/payment
 challenges, ignored ranges (200), rate limits, compression, malformed ranges,
-changed validators, overflows, early EOF and deadlines refuse the resource. An
+changed validators, overflows and early EOF refuse the resource. Local episode
+and tail deadlines end optional work without refusing the resource. An
 optional `fallback_url` is tried at most once after completed initial qualification
 failure, within the same episode/global budgets. Rate limits, HTTP/2 unavailability,
 deadlines and cancellation do not trigger fallback. Success pins that resource for
@@ -297,7 +306,9 @@ Optional cover degradation alone does not fail an agent operation. A fresh
 failure applied as retained unavailability, or fallback selection, uses INFO
 when it explains meaningful user-visible degradation; otherwise it is DEBUG.
 The primary failure remains in the preceding range outcome with the same episode
-ID. Cached refusal is DEBUG with `fresh_attempt=false`; repeated calls do not
+ID. `automatic_requalification=true` describes unknown capability eligible for a
+later authorized episode; it does not schedule autonomous periodic probes or
+override shutdown. Cached refusal is DEBUG with `fresh_attempt=false`; repeated calls do not
 imply repeated HTTP probes. Completed attempt facts are also DEBUG before the
 scheduler consumes their result, so an episode-deadline race cannot erase an
 observed timeout. Local cancellation reports its own DEBUG event and observed
@@ -307,14 +318,13 @@ Episode summaries include sampled versus received bytes, request count, elapsed
 time, effective deadline kind (tail or episode), whether it expired, any explicit
 stop reason and the actual final capability/retained failure. An ordinary
 `cover_budget_unspent` shortfall is DEBUG; it is neither a wallet-funding failure
-nor proof that the resource is unusable. If cleanup cancels unfinished
-qualification, the summary records retained `cover_qualification_cancelled`, even
-when the episode reason is `cover_budget_unspent`. Previously available
-capability may remain available at the same deadline. Summaries for already
+nor proof that the resource is unusable. If cleanup cancels unfinished qualification, the summary records unknown
+capability without a retained failure. Previously available capability remains
+available at the same deadline. Summaries for already
 cached unavailability are DEBUG. Unexpected task or sampling failures and actual
 process-budget refusals retain explicit reasons and applicable limits; their
-severity follows the affected operation's outcome, rather than automatically
-warning for optional work. The aggregate `cover_episode_limit` reservation result
+severity follows the affected operation's outcome: concrete process-budget
+refusals use WARN, while optional task/sampling failures use INFO. The aggregate `cover_episode_limit` reservation result
 can represent ordinary target, deadline or scheduling completion. Normal budget
 completion, an authorized episode request-count completion, and an available
 resource's deadline shortfall belong at DEBUG. Capacity-driven owner eviction

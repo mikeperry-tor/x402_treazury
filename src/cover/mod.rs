@@ -268,12 +268,12 @@ impl crate::catalog::Config {
                 .as_ref()
                 .filter(|_| help_reason == "eligible")
                 .map(ToString::to_string);
-            if let Some(url) = catalog.clone().or_else(|| help.clone()) {
+            if let Some(url) = help.clone().or_else(|| catalog.clone()) {
                 let mut profile = Config::catalog_default(url.clone());
-                profile.fallback_url = help.filter(|h| *h != url);
+                profile.fallback_url = catalog.filter(|c| *c != url);
                 self.cover_traffic = Some(profile);
             } else {
-                tracing::warn!(
+                tracing::info!(
                     code = "cover_no_same_origin_resource", source = ?self.prefix,
                     api_origin = %origin.origin().ascii_serialization(),
                     catalog_origin = ?catalog_url.as_ref().map(|u| u.origin().ascii_serialization()),

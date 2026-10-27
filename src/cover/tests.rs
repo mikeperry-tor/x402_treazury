@@ -240,9 +240,10 @@ fn fallback_is_same_origin_and_automatic_help_is_reviewed() {
     cfg.resolve_cover("https://api.example.com/v1", true)
         .unwrap();
     let cover = cfg.cover_traffic.as_mut().unwrap();
+    assert_eq!(cover.url, "https://api.example.com/llms.txt");
     assert_eq!(
         cover.fallback_url.as_deref(),
-        Some("https://api.example.com/llms.txt")
+        Some("https://api.example.com/openapi.json")
     );
     cover.validate().unwrap();
     for url in [
@@ -262,6 +263,54 @@ fn fallback_is_same_origin_and_automatic_help_is_reviewed() {
         "https://api.example.com/llms.txt"
     );
     assert!(cfg.cover_traffic.as_ref().unwrap().fallback_url.is_none());
+}
+
+#[test]
+fn automatic_help_priority_preserves_candidate_authority_and_deduplicates_urls() {
+    for (help, expected, fallback) in [
+        (
+            "https://api.example.com/guide",
+            "https://api.example.com/guide",
+            Some("https://api.example.com/openapi.json"),
+        ),
+        (
+            "https://docs.example.com/guide",
+            "https://api.example.com/openapi.json",
+            None,
+        ),
+        (
+            "http://api.example.com/guide",
+            "https://api.example.com/openapi.json",
+            None,
+        ),
+        (
+            "https://private@api.example.com/guide",
+            "https://api.example.com/openapi.json",
+            None,
+        ),
+        (
+            "https://api.example.com/guide#fragment",
+            "https://api.example.com/openapi.json",
+            None,
+        ),
+        (
+            "https://api.example.com/openapi.json",
+            "https://api.example.com/openapi.json",
+            None,
+        ),
+    ] {
+        let mut cfg = crate::catalog::Config {
+            spec: "https://api.example.com/openapi.json".into(),
+            help_url: Some(help.into()),
+            ..Default::default()
+        };
+        cfg.resolve_cover("https://api.example.com/v1", true)
+            .unwrap();
+        let cover = cfg.cover_traffic.unwrap();
+        assert_eq!(cover.url, expected);
+        assert_eq!(cover.fallback_url.as_deref(), fallback);
+        cover.validate().unwrap();
+    }
 }
 
 #[test]

@@ -230,9 +230,19 @@ async fn partial_qualification_preemption_and_shutdown_drain_keep_observed_bytes
         let app = axum::Router::new().fallback(move |headers: axum::http::HeaderMap| {
             let seen = seen.clone();
             async move {
-                seen.fetch_add(1, Ordering::SeqCst);
+                let ordinal = seen.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(headers["range"], "bytes=0-1023");
                 assert!(!headers.contains_key("payment-signature"));
+                if ordinal > 0 {
+                    return (
+                        axum::http::StatusCode::PARTIAL_CONTENT,
+                        [
+                            ("content-range", "bytes 0-1023/4096"),
+                            ("content-length", "1024"),
+                        ],
+                        axum::body::Body::from(vec![b'a'; 1024]),
+                    );
+                }
                 let first = futures_util::stream::once(async {
                     Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"observed fragment"))
                 });
@@ -266,12 +276,13 @@ async fn partial_qualification_preemption_and_shutdown_drain_keep_observed_bytes
         .unwrap();
         let engine = Engine::new(Limits {
             max_active_streams: 1,
-            max_cover_body_bytes_per_window: 1024,
+            max_cover_body_bytes_per_window: 2048,
             ..Default::default()
         });
         let mut config = crate::cover::tests::example_config();
         config.padding = None;
         config.qualification_range_bytes = 1024;
+        config.max_requests_per_episode = 2;
         config.start_delay = toml::from_str("distribution='uniform'\nmin_ms=0\nmax_ms=0").unwrap();
         let config = Arc::new(config);
         let owner = owner("partial");
@@ -304,6 +315,18 @@ async fn partial_qualification_preemption_and_shutdown_drain_keep_observed_bytes
             tokio::time::timeout(Duration::from_secs(3), next.prioritize())
                 .await
                 .expect("API priority must not wait for remote EOF");
+            // Cleanup must leave cover paused until this physical API request's
+            // response headers arrive; no second qualifier may race its cleanup.
+            assert_eq!(requests.load(Ordering::SeqCst), 1);
+            let mut next = next;
+            next.response_headers();
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while engine.metrics().qualified_ranges == 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("interrupted qualification must resume after API headers");
             Some(next)
         } else {
             None
@@ -312,34 +335,40 @@ async fn partial_qualification_preemption_and_shutdown_drain_keep_observed_bytes
             .await
             .expect("shutdown must drain owned range tasks without remote EOF");
         assert!(engine.tasks.is_empty());
+        let received = observed + if preempt { 1024 } else { 0 };
+        let attempts = if preempt { 2 } else { 1 };
         {
             let episode = call.session.episode.lock().unwrap();
             assert_eq!(episode.streams, 0);
             assert_eq!(episode.reserved, 0);
-            assert_eq!(episode.received, observed);
-            assert_eq!(episode.requests, 1);
+            assert_eq!(episode.received, received);
+            assert_eq!(episode.requests, attempts);
         }
         let metrics = engine.metrics();
         assert_eq!(metrics.in_flight_ranges, 0);
-        assert_eq!(metrics.range_requests, 1);
-        assert_eq!(metrics.cover_body_bytes, observed);
-        assert_eq!(metrics.qualified_ranges, 0);
+        assert_eq!(metrics.range_requests, attempts as u64);
+        assert_eq!(metrics.cover_body_bytes, received);
+        assert_eq!(metrics.qualified_ranges, u64::from(preempt));
         assert_eq!(metrics.range_outcomes.get("cancelled"), Some(&1));
-        assert!(matches!(
-            engine.registry.lock().unwrap().owners[&owner].capability,
-            Capability::Unavailable("cover_qualification_cancelled")
-        ));
+        let capability = engine.registry.lock().unwrap().owners[&owner]
+            .capability
+            .clone();
+        assert!(if preempt {
+            matches!(capability, Capability::Available { .. })
+        } else {
+            matches!(capability, Capability::Unknown)
+        });
         // The freed stream and unused reservation are reusable, while bytes
         // actually received remain charged for the process accounting window.
         let unused = engine
             .budget
-            .reserve(Instant::now(), 1024 - observed, 0, true)
+            .reserve(Instant::now(), 2048 - received, 0, true)
             .unwrap();
         drop(unused);
         assert!(matches!(
             engine
                 .budget
-                .reserve(Instant::now(), 1025 - observed, 0, true),
+                .reserve(Instant::now(), 2049 - received, 0, true),
             Err(crate::cover::budget::Refusal::BodyLimit)
         ));
         assert!(
@@ -350,7 +379,7 @@ async fn partial_qualification_preemption_and_shutdown_drain_keep_observed_bytes
                 .to_string()
                 .contains("cover_shutdown")
         );
-        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(requests.load(Ordering::SeqCst), attempts);
         drop(next);
         drop(call);
         server.abort();
@@ -510,5 +539,185 @@ async fn distinct_effective_scopes_isolate_sessions_and_drain_after_replacement(
         "each effective scope must use its own SOCKS isolation token"
     );
     engine.shutdown().await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn expired_tail_attachments_keep_draining_session_and_allow_fresh_after_cleanup() {
+    let engine = Engine::new(Limits::default());
+    let owner = owner("tail-drain");
+    let http = local_client();
+    let mut config = crate::cover::tests::example_config();
+    config.ranges_enabled = false;
+    let config = Arc::new(config);
+    let mut call = engine
+        .begin(owner.clone(), config.clone(), scope(), http.clone())
+        .unwrap();
+    call.response_headers();
+    call.complete();
+    let draining = call.session.clone();
+    {
+        let mut episode = draining.episode.lock().unwrap();
+        // Retain a live stream during the expired-tail cleanup boundary.
+        episode.first_dispatch = Instant::now();
+        episode.reserve(&config, Instant::now(), 1024).unwrap();
+    }
+    drop(call);
+    let expired = Instant::now();
+    draining.episode.lock().unwrap().tail_deadline = Some(expired);
+    engine
+        .registry
+        .lock()
+        .unwrap()
+        .owners
+        .get_mut(&owner)
+        .unwrap()
+        .capability = Capability::Available {
+        length: 4096,
+        validator: None,
+    };
+    let mut attached = engine
+        .begin(owner.clone(), config.clone(), scope(), http.clone())
+        .unwrap();
+    assert!(Arc::ptr_eq(&draining, &attached.session));
+    assert!(
+        engine.tasks.is_empty(),
+        "joining cleanup must not launch a second scheduler"
+    );
+    assert_eq!(
+        draining.episode.lock().unwrap().tail_deadline,
+        Some(expired)
+    );
+    draining.episode.lock().unwrap().finish(1024, 17, true);
+    attached.complete();
+    drop(attached);
+    assert_eq!(
+        draining.episode.lock().unwrap().tail_deadline,
+        Some(expired)
+    );
+    assert!(
+        engine
+            .begin(owner.clone(), config.clone(), scope(), http.clone())
+            .is_err(),
+        "callbacks must finish before fresh session replacement"
+    );
+    drop(draining);
+    let next = engine.begin(owner.clone(), config, scope(), http).unwrap();
+    assert!(
+        !next
+            .session
+            .episode
+            .lock()
+            .unwrap()
+            .exhausted(Instant::now())
+    );
+    assert!(matches!(
+        engine.registry.lock().unwrap().owners[&owner].capability,
+        Capability::Available { .. }
+    ));
+}
+
+#[tokio::test]
+async fn completed_old_tail_timeout_allows_live_episode_to_schedule_again() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let reads = Arc::new(AtomicUsize::new(0));
+    let seen = reads.clone();
+    let app = axum::Router::new().fallback(move |headers: axum::http::HeaderMap| {
+        let seen = seen.clone();
+        async move {
+            seen.fetch_add(1, Ordering::SeqCst);
+            assert_eq!(headers["range"], "bytes=0-1023");
+            (
+                axum::http::StatusCode::PARTIAL_CONTENT,
+                [
+                    ("content-range", "bytes 0-1023/4096"),
+                    ("content-length", "1024"),
+                ],
+                vec![b'a'; 1024],
+            )
+        }
+    });
+    let (addr, server) =
+        crate::test_tls::serve_with(app, &[&rustls::version::TLS13], &[b"h2"]).await;
+    let socks = crate::test_socks::Socks::start(
+        std::collections::BTreeMap::from([("api.example.com".into(), addr)]),
+        crate::test_socks::Fault::None,
+    )
+    .await;
+    let http = NetworkContext::new(NetworkPolicy {
+        mode: Mode::Tor,
+        socks_endpoint: Some(socks.address),
+        ..Default::default()
+    })
+    .unwrap()
+    .with_test_root(crate::test_tls::CA)
+    .discovery("https://api.example.com", None)
+    .unwrap();
+    let engine = Engine::new(Limits::default());
+    let owner = owner("old-tail");
+    let mut config = crate::cover::tests::example_config();
+    // Launch the actual scheduler explicitly after supplying the completed result,
+    // so this fixture determines which side of the old-tail race is consumed first.
+    config.ranges_enabled = false;
+    config.start_delay = toml::from_str("distribution='uniform'\nmin_ms=0\nmax_ms=0").unwrap();
+    config.tail = toml::from_str("distribution='uniform'\nmin_ms=1000\nmax_ms=1000").unwrap();
+    config.max_requests_per_episode = 1;
+    let config = Arc::new(config);
+    let mut first = engine
+        .begin(owner.clone(), config.clone(), scope(), http.clone())
+        .unwrap();
+    first.response_headers();
+    first.complete();
+    let session = first.session.clone();
+    drop(first);
+    assert!(session.episode.lock().unwrap().tail_deadline.is_some());
+    engine
+        .registry
+        .lock()
+        .unwrap()
+        .owners
+        .get_mut(&owner)
+        .unwrap()
+        .capability = Capability::Checking;
+    let mut next = engine
+        .begin(owner.clone(), config, scope(), http.clone())
+        .unwrap();
+    assert!(Arc::ptr_eq(&session, &next.session));
+    assert!(session.episode.lock().unwrap().tail_deadline.is_none());
+    // An already completed range may still carry the former tail's deadline.
+    let at = engine.complete_range(
+        &owner,
+        &session,
+        Some(Ok((
+            true,
+            range::Outcome {
+                result: Err(range::Failure("cover_deadline")),
+                observation: range::Observation {
+                    start: 0,
+                    requested_bytes: 1024,
+                    http_status: None,
+                    http_version: None,
+                    declared_body_bytes: None,
+                    received_bytes: 0,
+                    elapsed_ms: 0,
+                    stage: "request",
+                },
+            },
+        ))),
+    );
+    assert!(matches!(at, Ok(Some(_))));
+    next.response_headers();
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        engine.clone().run(owner.clone(), session, http),
+    )
+    .await
+    .expect("live episode must schedule after the obsolete timeout");
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    assert_eq!(engine.metrics().range_requests, 1);
+    assert!(matches!(
+        engine.registry.lock().unwrap().owners[&owner].capability,
+        Capability::Available { .. }
+    ));
     server.abort();
 }

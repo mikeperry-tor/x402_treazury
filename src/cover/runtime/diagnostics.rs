@@ -13,6 +13,55 @@ pub(super) fn capability(capability: &Capability) -> (&'static str, Option<&'sta
 }
 
 pub(super) fn status(session: &Session, limits: &Limits, code: &'static str, level: Level) {
+    let message = match code {
+        "cover_fallback_selected" => {
+            "An alternate static resource was selected for optional HTTP/2 cover traffic"
+        }
+        "cover_http2_unavailable" => {
+            "This API response does not use HTTP/2; optional cover traffic stopped for this episode"
+        }
+        "cover_padding_rejected" => {
+            "The provider rejected optional request padding; later padding is disabled for this identity and origin"
+        }
+        "cover_padding_disabled" => {
+            "Optional request padding remains disabled for this identity and origin"
+        }
+        "cover_sampling_exhausted" => {
+            "Optional cover distribution sampling failed; this optional work was skipped"
+        }
+        "cover_task_failed" => {
+            "An optional cover task stopped unexpectedly; ordinary API execution continues"
+        }
+        "cover_header_list_limit" => {
+            "Optional request padding would exceed the configured header list limit and was skipped"
+        }
+        "cover_padding_limit" => {
+            "Optional request padding reached the process padding byte limit and was skipped"
+        }
+        "cover_history_limit" => {
+            "Optional request padding reached the process accounting history limit and was skipped"
+        }
+        "cover_episode_padding_limit" => {
+            "Optional request padding reached this episode's padding byte limit and was skipped"
+        }
+        "cover_padding_header_collision" => {
+            "Optional request padding was skipped because its configured header already exists"
+        }
+        "cover_padding_http1_compatibility" => {
+            "Optional request padding was skipped because HTTP/1 compatibility is enabled"
+        }
+        "cover_padding_skipped" => {
+            "Optional request padding could not be added; ordinary API execution continues"
+        }
+        "cover_preempted_for_api" => {
+            "Optional cover streams were cancelled to prioritize an API request"
+        }
+        "cover_range_size_adjusted" => {
+            "The optional byte range was reduced to the resource size or remaining episode capacity"
+        }
+        "cover_shutdown" => "Optional cover traffic stopped for shutdown",
+        _ => "Optional cover traffic changed state; ordinary API execution continues",
+    };
     for scope in session.scopes.lock().unwrap().iter() {
         macro_rules! event {
             ($level:expr) => {
@@ -28,7 +77,7 @@ pub(super) fn status(session: &Session, limits: &Limits, code: &'static str, lev
                     process_padding_byte_limit = limits.max_padding_value_bytes_per_window,
                     episode_padding_byte_limit = session.config.padding.as_ref().map(|p| p.max_value_bytes_per_episode),
                     header_list_byte_limit = session.config.padding.as_ref().map(|p| p.max_total_header_list_bytes),
-                    "optional cover status; ordinary API execution continues")
+                    "{message}")
             };
         }
         match level {
@@ -67,7 +116,7 @@ pub(super) fn attempt(
                     listener = %scope.listener, source = %scope.source,
                     episode_id = %session.id, code, resource, qualifying,
                     fresh_attempt = true, fallback_selected, capability_applied = capability_after.is_some(), capability, retained_failure,
-                    automatic_requalification = false,
+                    automatic_requalification = matches!(capability_after, Some(Capability::Unknown)),
                     stage = observation.stage,
                     range_start = observation.start, requested_bytes = observation.requested_bytes,
                     http_status = observation.http_status, http_version = ?observation.http_version,
@@ -78,14 +127,14 @@ pub(super) fn attempt(
         }
         if matches!(capability_after, Some(Capability::Unavailable(_))) {
             event!(
-                Level::WARN,
+                Level::INFO,
                 "HTTP/2 range cover traffic unavailable for provider [{}]; further range attempts disabled for this identity/origin until restart or cache eviction",
                 scope.source
             );
         } else if fallback_selected {
             event!(
                 Level::INFO,
-                "optional cover range outcome; no full-download fallback"
+                "Optional HTTP/2 cover range read did not complete successfully; an alternate resource was selected"
             );
         } else {
             event!(
@@ -102,7 +151,6 @@ pub(super) fn episode(
     code: &'static str,
     capability_after: &Capability,
     resource: &'static str,
-    newly_unavailable: bool,
 ) {
     let (capability, retained_failure) = capability(capability_after);
     let e = session.episode.lock().unwrap();
@@ -119,7 +167,7 @@ pub(super) fn episode(
                 tracing::event!($level,
                     listener = %scope.listener, source = %scope.source,
                     episode_id = %session.id, code, resource, capability, retained_failure,
-                    automatic_requalification = false, deadline_kind, deadline_expired, stop_reason = e.stopped,
+                    automatic_requalification = matches!(capability_after, Capability::Unknown), deadline_kind, deadline_expired, stop_reason = e.stopped,
                     sampled_body_bytes = e.target, cover_body_bytes = e.received,
                     range_requests = e.requests, padding_value_bytes = e.padding,
                     episode_request_limit = session.config.max_requests_per_episode,
@@ -135,17 +183,9 @@ pub(super) fn episode(
                     $($message)+)
             };
         }
-        if newly_unavailable {
-            event!(
-                Level::WARN,
-                "HTTP/2 range cover qualification did not finish for provider [{}]; further range attempts disabled for this identity/origin until restart or cache eviction",
-                scope.source
-            );
-        } else if matches!(
+        if matches!(
             code,
-            "cover_task_failed"
-                | "cover_sampling_exhausted"
-                | "cover_stream_limit"
+            "cover_stream_limit"
                 | "cover_request_limit"
                 | "cover_body_limit"
                 | "cover_padding_limit"
@@ -153,17 +193,22 @@ pub(super) fn episode(
         ) {
             event!(
                 Level::WARN,
-                "HTTP/2 cover traffic failed for provider [{}]; see diagnostic fields",
+                "Optional HTTP/2 cover traffic reached a process resource limit for provider [{}]; ordinary API execution continues",
                 scope.source
             );
-        } else if matches!(capability_after, Capability::Unavailable(_)) {
+        } else if code == "cover_task_failed" {
             event!(
-                Level::DEBUG,
-                "optional cover episode finished; pooled best-effort, not a privacy guarantee"
+                Level::INFO,
+                "An optional HTTP/2 cover task stopped unexpectedly; ordinary API execution continues"
+            );
+        } else if code == "cover_sampling_exhausted" {
+            event!(
+                Level::INFO,
+                "Optional HTTP/2 cover traffic stopped because distribution sampling failed; ordinary API execution continues"
             );
         } else {
             event!(
-                Level::INFO,
+                Level::DEBUG,
                 "optional cover episode finished; pooled best-effort, not a privacy guarantee"
             );
         }
