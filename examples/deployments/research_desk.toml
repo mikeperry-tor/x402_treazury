@@ -92,10 +92,10 @@ max_funding_amount_usdc = "3.00"
 
 # Each source owns its ordered exclusions and endpoint assignments. The first
 # matching send_tools rule consumes a tool; destination arrays preserve explicit sharing.
-# Family rules keep future tools with their research category. Each final catch-all
-# sends unmatched future tools to one primary endpoint. Provider compatibility
-# restrictions still apply before these deployment choices.
+# Each final catch-all sends unmatched future tools to one primary endpoint.
+#
 # Coverage and price comparisons are noted beside the affected selections.
+# We favor information quality before price, then ease of use when prices are close.
 #
 # --- Sources -----------------------------------------------------------------
 # One source per provider. Ordered send_tools rules assign generated tool families to endpoints.
@@ -183,11 +183,11 @@ send_tools = [
 ]
 
 # Asset digests, sentiment, OHLC, signals, stablecoins and trade preflight
-# complement market research. Both alerts_btc and alerts_asset are selected;
-# their asset-alert coverage overlaps.
+# complement market research. alerts_asset supplies BTC and other asset alerts.
 [sources.kronos]
 extends = "../../providers/kronos.toml"
 send_tools = [
+  { to = "exclude", tools = ["alerts_btc"] }, # Superseded by alerts_asset with asset="btc": matching alerts/state at the same $0.02.
   { to = "finance" },
 ]
 
@@ -197,11 +197,20 @@ send_tools = [
   { to = "finance" },
 ]
 
-# Retain full financial, corporate, property and regional research; omit
-# duplicate previews and the model/document workflows listed below.
+# Retain complementary financial, corporate, property and regional research;
+# omit superseded tools, duplicate previews and model/document workflows below.
 [sources.lonestar]
 extends = "../../providers/lonestar.toml"
 send_tools = [
+  { to = "exclude", tools = [
+    "read_read", # Superseded by Otto web_extract: preserves lists and long-document content lost by this reader, at the same $0.005.
+    "sanctions_screen", # Superseded by AgOSINT sanctions: dated OFAC/EU/UK evidence versus OFAC only; $0.015 versus $0.05.
+    "funding_extremes", # Same-price subset of funding_rates; ranks the same asset/venue rates.
+    "funding_signal", # Same-price signal already included in funding_rates.
+    "liq_biggest", # Same-price subset of liq_liquidations, which includes each asset's biggest liquidation.
+    "liq_signal", # Same-price signal already included in liq_liquidations.
+    "stable_risk_summary", # Same-price summary already included in stable_pulse; sampled payloads matched.
+  ] },
   { to = "exclude", tools = [               # These are expensive LLM calls/doc handling
     "content_repurpose",
     "doc_*",
@@ -243,9 +252,7 @@ send_tools = [
     "pharma_catalysts",
   ] },
   # Route security research families before the primary fallback.
-  { to = "security", tools = ["contract_verify", "kya_*", "sanctions_screen"] },
-  # Route web research families before the primary fallback.
-  { to = "web", tools = ["read_read"] },
+  { to = "security", tools = ["contract_verify", "kya_*"] },
   # Route world research families before the primary fallback.
   { to = "world", tools = [
     "africa_pulse",
@@ -270,7 +277,7 @@ send_tools = [
     "sovereign_sovereign",
     "spark_power",
     "supply_report",
-    "weather_forecast",
+    "weather_forecast", # Date-specific ensemble probabilities for ten US cities; complements Otto's global current/5-day weather.
   ] },
   # Unmatched tools include realestate_report: national housing/mortgage macro data.
   { to = "finance" },
@@ -281,6 +288,10 @@ send_tools = [
 [sources.otto]
 extends = "../../providers/otto.toml"
 send_tools = [
+  # Direct Exa returned more primary sources in both sampled searches and exposes filters/content controls.
+  { to = "exclude", tools = ["web_search"] }, # Superseded by Exa search; $0.007 sampled versus $0.009 for this Exa wrapper.
+  # Superseded by AgOSINT domain ($0.015 versus $0.02); Otto dns_lookup retains the email-auth/DKIM fields.
+  { to = "exclude", tools = ["domain_report"] },
   { to = "exclude", tools = [        # Expensive low-value LLM calls
     "generate_meme",
     "llm_research",
@@ -331,6 +342,8 @@ send_tools = [
 [sources.agentfund]
 extends = "../../providers/agentfund.toml"
 send_tools = [
+  # Superseded by x402stock filing_search: sampled matches preserve forms, filing URLs and reporting periods.
+  { to = "exclude", tools = ["edgar_full_text_search"] },
   # Route business research families before the primary fallback.
   { to = "business", tools = ["edgar_*", "structured_json_repair", "tabular_to_json"] },
   { to = "finance" },
@@ -465,6 +478,7 @@ extends = "../../providers/deepline.toml"
 # Retain targeted business-contact tools; keep general identity enrichment with Minerva/PDL.
 send_tools = [
   { to = "exclude", tools = [
+    "company_enrich", # Superseded by PDL company_enrich: richer funding and firmographics at similar price in both sampled companies.
     "email_personal",
     "linkedin_find",
     "person_from_email",
@@ -519,7 +533,7 @@ send_tools = [
     "campaign_scan", # $5.50 exceeds the cap; use targeted checks instead of campaign aggregation.
     "cert_expiry", # Narrow CT-based expiry check; AgOSINT domain already includes TLS details.
     "help", # Inline schemas cover selected tools; guide includes metered/account workflows.
-    "llm_credential_exposure", # Possible overlap with nhi_exposure; distinct coverage unverified.
+    # Keep llm_credential_exposure: explicit AI-provider API-key coverage is not promised by nhi_exposure.
     "nft_security", # Specialist NFT screening deliberately omitted for focus.
     "phone_reputation", # Same tool name is supplied by the phone companion source below.
     "prompt_injection_breach", # Account exposure overlaps session_risk/infostealer; not prompt-content analysis.
@@ -788,6 +802,7 @@ send_tools = [
     "locus_cleanup_sites", # Use free locus_cleanup_sites through locus_call.
     "locus_coastal_overlays", # Use free locus_coastal_county_overlays through locus_call.
     "locus_drinking_water_violations", # Use free locus_drinking_water_violations through locus_call.
+    "locus_development_cases", # Same records via free locus_development_cases through locus_call; paid route adds no coverage.
     "locus_electricity_context", # Specialist transmission/price context deferred; free utility resolver is available.
     "locus_environmental_context", # Aggregate overlaps free TRI/RCRA/water reads; compose targeted evidence first.
     "locus_environmental_history_lookup", # Use free locus_environmental_history through locus_call.
@@ -875,6 +890,7 @@ send_tools = [
     "locus_wildfire_history", # Use free locus_wildfire_history through locus_call.
     "locus_wildfire_risk", # Use free locus_wildfire_risk through locus_call.
     "locus_workplace_employment_context", # Specialist workplace-location aggregates deferred; free county industry context is available.
+    "locus_zoning", # Same records via free locus_zoning through locus_call; live same-coordinate payloads matched.
     "help", # Inline guidance and locus_list supply the selected workflow and exact input schemas.
   ] },
   { to = "property" },
@@ -931,8 +947,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Threat, breach, network and compliance intelligence. Preserve coverage, timestamps and degraded/unknown markers; a clean result is not proof of safety."
-discovery_search_tool_instructions_text = "Security keywords: breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting."
+instructions_text = "Threat, breach, LLM API-key exposure, network and compliance intelligence. Preserve coverage, timestamps and degraded/unknown markers; a clean result is not proof of safety."
+discovery_search_tool_instructions_text = "Security keywords: breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, LLM API keys, OpenAI, Anthropic, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting."
 
 [servers.world]
 listen = "127.0.0.1:3016"
