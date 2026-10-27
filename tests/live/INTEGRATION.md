@@ -26,6 +26,11 @@ next to its runbooks, manifests and deployment profiles. It remains an explicit
 root-package Cargo `[[example]]` target named `live_integration`; the source move
 does not change commands or ordinary application-only builds. See [tools](../../tools/README.md).
 
+The shared runner unit tests run once through `tests/integration_preparation.rs`,
+alongside its real-executable integration cases. The example's test harness is
+empty under `--all-targets`; ordinary example builds and all-target Clippy compile
+the actual runner. This avoids compiling and running the shared tests twice.
+
 Build the application and runner together; preparation pins their build identity.
 Default builds include Zcash. Build traffic is separate from runtime Tor policy.
 

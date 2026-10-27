@@ -55,6 +55,12 @@ list for focused `make test` runs, while `check-default` retains its complete ta
 selection. Proving, lifecycle and codec stages keep one thread, and feature builds
 remain sequential.
 
+`tests/integration_preparation.rs` owns the shared live-runner unit tests and its
+real-executable integration cases. The `live_integration` example has an empty
+test harness under `--all-targets`; its ordinary implementation remains covered
+by all-target Clippy and explicit runner builds. Shared tests are not repeated in
+the example harness.
+
 Compare concurrency on an unchanged executable with the same test counts and
 assertions, then validate the complete default suite. Keep timing contracts intact;
 increasing their deadlines would hide contention or isolation failures rather than
