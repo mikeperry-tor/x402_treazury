@@ -50,6 +50,15 @@ pub struct ConfirmationObservation {
     pub wallet_height: Option<u64>,
     pub scanned_height: Option<u64>,
 }
+impl ConfirmationObservation {
+    /// Only a known scan gap explains an unconfirmed wallet record as pending.
+    pub(crate) fn awaiting_scan(&self) -> bool {
+        self.wallet_height.is_none()
+            && self
+                .scanned_height
+                .is_some_and(|height| height < self.lookup_height)
+    }
+}
 impl std::fmt::Display for ConfirmationObservation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -262,6 +271,25 @@ impl TransactionFacts {
 #[cfg(test)]
 mod validity_tests {
     use super::*;
+    #[test]
+    fn confirmation_waits_only_for_a_known_unscanned_inclusion() {
+        for (wallet_height, scanned_height, pending) in [
+            (None, Some(99), true),
+            (None, Some(100), false),
+            (None, Some(101), false),
+            (None, None, false),
+            (Some(98), Some(99), false),
+            (Some(98), Some(101), false),
+            (Some(100), Some(101), false),
+        ] {
+            let observation = ConfirmationObservation {
+                lookup_height: 100,
+                wallet_height,
+                scanned_height,
+            };
+            assert_eq!(observation.awaiting_scan(), pending, "{observation}");
+        }
+    }
     #[test]
     fn returned_deadline_and_inclusive_consensus_expiry_are_independent() {
         let mut facts = TransactionFacts {

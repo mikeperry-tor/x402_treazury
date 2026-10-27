@@ -153,6 +153,107 @@ async fn funded_fixture_amount(
 }
 
 #[tokio::test]
+async fn inclusion_after_wallet_scan_waits_without_resubmitting_or_releasing_inputs() {
+    struct MineDuringLookup {
+        net: MockNet,
+        sender: submission::GrpcSubmission,
+        mined: bool,
+        sends: usize,
+    }
+    impl TransactionSubmission for MineDuringLookup {
+        async fn preflight(&mut self, tx: &PreparedTransaction, retry: bool) -> Result<()> {
+            self.sender.preflight(tx, retry).await
+        }
+        async fn submit(&mut self, tx: BroadcastTransaction) -> Result<SubmissionOutcome> {
+            self.sends += 1;
+            self.sender.submit(tx).await
+        }
+        async fn lookup(&mut self, tx: &PreparedTransaction) -> Result<TransactionPresence> {
+            if !self.mined {
+                self.net.chain.write().await.mine_mempool();
+                self.mined = true;
+            }
+            self.sender.lookup(tx).await
+        }
+    }
+    let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
+    let pool = owner
+        .ensure_capacity_group(
+            "scan_race".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let job = owner
+        .store
+        .call(|s| s.funding_jobs())
+        .await
+        .unwrap()
+        .remove(0);
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&owner.store, vec![job.clone()], deadline).await;
+    let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+    let raw = prepared.bytes().to_vec();
+    let mut sender = MineDuringLookup {
+        net,
+        sender: submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap(),
+        mined: false,
+        sends: 0,
+    };
+    let stop = CancellationToken::new();
+    owner
+        .submit_prepared(job.operation_id.clone(), &mut sender, false, &stop)
+        .await
+        .unwrap();
+    let error = owner
+        .reconcile_for_observation(job.operation_id.clone(), &mut sender, &stop)
+        .await
+        .unwrap_err();
+    assert!(
+        error.is::<crate::rotation::transaction::RecoveryEvidenceError>(),
+        "{error:#}"
+    );
+    assert_eq!(
+        recovery::evidence_outcome(&error),
+        Some(recovery::RecoveryOutcome::Waiting(
+            "zcash_confirmations_pending"
+        ))
+    );
+    pending(&owner.store, &job, &raw).await;
+    let before = owner.status().await.unwrap();
+    assert_eq!(before.treasury_operations[0].attempts, 1);
+    assert_eq!(sender.sends, 1);
+    assert_eq!(before.funding_jobs[0].operation_id, job.operation_id);
+    sender.net.chain.write().await.mine_empty_blocks(1);
+    owner.sync_once(&stop).await.unwrap();
+    assert!(matches!(
+        owner
+            .reconcile_for_observation(job.operation_id, &mut sender, &stop)
+            .await
+            .unwrap(),
+        TransactionPresence::Confirmed { .. }
+    ));
+    let after = owner.status().await.unwrap();
+    assert!(!after.outgoing_pending);
+    assert_eq!(after.treasury_operations[0].submission, "CONFIRMED");
+    assert_eq!(after.treasury_operations[0].attempts, 1);
+    assert_eq!(sender.sends, 1);
+    assert_eq!(after.funding_jobs.len(), before.funding_jobs.len());
+    owner.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn unsubmitted_funding_expiry_uses_only_its_two_proof_scans() {
     struct ReadOnly(submission::GrpcSubmission);
     impl TransactionSubmission for ReadOnly {

@@ -33,7 +33,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
             anyhow::Error::new(crate::rotation::transaction::ConfirmationObservation {
                 lookup_height: 100,
                 wallet_height: None,
-                scanned_height: Some(99),
+                scanned_height: Some(100),
             })
             .context(RecoveryBlocked("conflicting_transaction_or_input_evidence")),
             "WARN",

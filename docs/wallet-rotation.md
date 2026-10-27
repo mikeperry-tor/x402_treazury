@@ -455,14 +455,18 @@ requirement log at DEBUG even when height details change; successful observation
 clears that diagnostic episode. Repetition alone does not raise severity; see
 [log severity](development.md#log-severity).
 
-Source confirmation disagreement has the same operator-required classification in
-ordinary reconciliation and recovery. Diagnostics retain the lookup confirmation
-height, wallet confirmation height (or `unconfirmed`), and highest scanned wallet
-block (or `unknown`). Both an unconfirmed wallet record and unequal confirmed
-heights retain the existing conservative conflicting-evidence classification;
-these facts do not establish a root cause. Existing work, inputs and reservations
-remain owned, and observations continue on their existing schedule. No diagnostic
-or operator-review status authorizes a replacement deposit.
+Source confirmation disagreement has the same classification in ordinary
+reconciliation and recovery. An unconfirmed wallet record is pending when its
+known highest scanned block is below the lookup's inclusion height: the lookup
+can observe a new block after the wallet scan. This is an ordinary confirmation
+poll at DEBUG, not an operator requirement. Unknown scan progress, an unconfirmed
+record after scanning the inclusion height, and unequal confirmed heights remain
+conflicting evidence requiring operator review. Conflict diagnostics retain the
+lookup confirmation height, wallet confirmation height (or `unconfirmed`), and
+highest scanned block (or `unknown`); these facts do not establish a root cause.
+Existing work, inputs and reservations remain owned, and observations continue on
+their existing schedule. Neither pending confirmation nor operator-review status
+authorizes a replacement deposit; agreement still requires the configured depth.
 
 Bootstrap and the serving funding worker recover eligible jobs automatically.
 The operator can run `wallet recover --config FILE` with serving stopped for one

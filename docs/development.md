@@ -234,6 +234,14 @@ does not promote a recoverable condition. The owner that knows the final outcome
 emits the terminal diagnostic; lower layers retain the safe facts needed to
 explain it without announcing each failed attempt as an operation failure.
 
+Background treasury sync and shielding checks with automatic observation/retry
+remaining log failures at DEBUG, including fixed safe categories and available
+sanitized details. Explicit one-pass sync failures remain WARN because that
+command has no automatic retry. Shielding evidence conflicts requiring operator
+review remain WARN; a wallet scan behind a lookup's newly included transaction
+is ordinary pending confirmation. Logs never release financial ownership or
+authorize another submission.
+
 Expected negative results, routine caller rejections and normal cancellation are
 not automatically operational failures. Cancellation does not end accepted
 financial work or erase its eventual terminal diagnostic. Recommendations and

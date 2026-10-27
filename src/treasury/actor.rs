@@ -248,7 +248,7 @@ impl Treasury {
                         self.startup_discovery &= !startup_ready;
                         if let Err(error) = self.sync_for_observation(stop).await
                             && !stop.is_cancelled() {
-                                super::diagnostics::warn_sync_failure(
+                                super::diagnostics::report_sync_failure(
                                     &error,
                                     Some(self.observation.due().saturating_duration_since(tokio::time::Instant::now())),
                                 );
@@ -265,16 +265,10 @@ impl Treasury {
                 && self.last_completed_sync.is_some()
                 && self.last_completed_sync != observed_sync
             {
-                if self
-                    .maintain_owned_transparent(submission, stop)
-                    .await
-                    .is_err()
+                if let Err(error) = self.maintain_owned_transparent(submission, stop).await
                     && !stop.is_cancelled()
                 {
-                    tracing::warn!(
-                        category = "owned_transparent_maintenance_unavailable",
-                        "accepted shielding remains owned; independent Base service remains available"
-                    );
+                    super::diagnostics::report_shielding_failure(&error);
                 }
                 // Maintenance may itself complete canonical validation/proof
                 // scans. They are part of this pass, not another wakeup.

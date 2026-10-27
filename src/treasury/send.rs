@@ -519,6 +519,11 @@ impl Treasury {
                     .next_back()
                     .map(|h| u64::from(u32::from(*h))),
             };
+            if confirmation.awaiting_scan() {
+                return Err(
+                    crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending.into(),
+                );
+            }
             if confirmation.wallet_height != Some(height) {
                 return Err(anyhow::Error::new(
                     crate::rotation::transaction::RecoveryEvidenceError::ConfirmationMismatch,

@@ -247,7 +247,7 @@ fn wallet_reason(error: &WalletError, diagnostic: &mut SyncDiagnostic) -> &'stat
 }
 
 /// The owner supplies its existing retry schedule; one-pass callers pass `None`.
-pub(crate) fn warn_sync_failure(error: &anyhow::Error, retry_after: Option<std::time::Duration>) {
+pub(crate) fn report_sync_failure(error: &anyhow::Error, retry_after: Option<std::time::Duration>) {
     let diagnostic = error.downcast_ref::<SyncDiagnostic>();
     let connection = error.downcast_ref::<crate::network::ConnectionDiagnostic>();
     let progress = error.downcast_ref::<SyncProgress>();
@@ -256,28 +256,64 @@ pub(crate) fn warn_sync_failure(error: &anyhow::Error, retry_after: Option<std::
     } else {
         "Treasury sync unavailable; this one-pass command will not retry automatically; rerun wallet sync to try again"
     };
-    tracing::warn!(
-        automatic_retry = retry_after.is_some(),
-        retry_after_seconds = retry_after.map(|delay| delay.as_secs_f64().ceil() as u64),
-        phase = progress.map(|p| p.phase),
-        elapsed_ms = progress.map(|p| p.elapsed_ms),
-        target_height = progress.map(|p| p.target_height),
-        scanned_blocks = progress.map(|p| p.scanned_blocks),
-        category = sync_failure(error),
-        reason = diagnostic
-            .map(|d| d.reason)
-            .or_else(|| connection.map(|d| d.reason)),
-        pool = diagnostic.and_then(|d| d.pool),
-        operation = diagnostic
-            .and_then(|d| d.operation)
-            .or(connection.map(|_| "connect")),
-        route = connection.map(|d| d.route()),
-        grpc_code = diagnostic.and_then(|d| d.grpc_code).map(|c| c as i32),
-        grpc_status = diagnostic
-            .and_then(|d| d.grpc_code)
-            .map(|c| format!("{c:?}")),
-        "{message}"
-    );
+    // Each severity needs a static tracing callsite; share its sanitized fields.
+    macro_rules! report {
+        ($level:expr) => {
+            tracing::event!(
+                $level,
+                automatic_retry = retry_after.is_some(),
+                retry_after_seconds = retry_after.map(|delay| delay.as_secs_f64().ceil() as u64),
+                phase = progress.map(|p| p.phase),
+                elapsed_ms = progress.map(|p| p.elapsed_ms),
+                target_height = progress.map(|p| p.target_height),
+                scanned_blocks = progress.map(|p| p.scanned_blocks),
+                category = sync_failure(error),
+                reason = diagnostic
+                    .map(|d| d.reason)
+                    .or_else(|| connection.map(|d| d.reason)),
+                pool = diagnostic.and_then(|d| d.pool),
+                operation = diagnostic
+                    .and_then(|d| d.operation)
+                    .or(connection.map(|_| "connect")),
+                route = connection.map(|d| d.route()),
+                grpc_code = diagnostic.and_then(|d| d.grpc_code).map(|c| c as i32),
+                grpc_status = diagnostic
+                    .and_then(|d| d.grpc_code)
+                    .map(|c| format!("{c:?}")),
+                "{message}"
+            );
+        };
+    }
+    if retry_after.is_some() {
+        report!(tracing::Level::DEBUG);
+    } else {
+        report!(tracing::Level::WARN);
+    }
+}
+
+pub(crate) fn report_shielding_failure(error: &anyhow::Error) {
+    use super::recovery::RecoveryOutcome;
+    let outcome = super::recovery::evidence_outcome(error);
+    let category = match outcome {
+        Some(RecoveryOutcome::Waiting(reason) | RecoveryOutcome::OperatorRequired(reason)) => {
+            reason
+        }
+        _ => sync_failure(error),
+    };
+    let detail = sync_detail(error);
+    if matches!(outcome, Some(RecoveryOutcome::OperatorRequired(_))) {
+        tracing::warn!(
+            category,
+            detail,
+            "Zcash shielding requires operator review; existing work and reservations retained; observation checks continue"
+        );
+    } else {
+        tracing::debug!(
+            category,
+            detail,
+            "Zcash shielding check unavailable; existing work retained and checks will retry after treasury synchronization"
+        );
+    }
 }
 
 pub(crate) fn sync_detail(error: &anyhow::Error) -> Option<String> {
@@ -301,6 +337,12 @@ pub(crate) fn sync_detail(error: &anyhow::Error) -> Option<String> {
 }
 
 pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
+    if matches!(
+        error.downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>(),
+        Some(crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending)
+    ) {
+        return "treasury_confirmation_pending";
+    }
     if let Some(diagnostic) = error.downcast_ref::<SyncDiagnostic>() {
         return diagnostic.category;
     }
@@ -348,7 +390,7 @@ mod tests {
     use super::*;
 
     #[tokio::test(start_paused = true)]
-    async fn sync_warning_reports_existing_backoff_and_one_pass_without_retry_promises() {
+    async fn sync_diagnostics_distinguish_background_retries_from_one_pass_failures() {
         let mut schedule = crate::treasury::observation::Schedule::default();
         for seconds in [60, 120, 240, 300, 300] {
             schedule.complete(false);
@@ -369,11 +411,20 @@ mod tests {
                     .with_writer(log.reopen().unwrap())
                     .finish();
                 tracing::subscriber::with_default(subscriber, || {
-                    warn_sync_failure(&error, retry_after);
+                    report_sync_failure(&error, retry_after);
                 });
                 let logs = std::fs::read_to_string(log.path()).unwrap();
                 assert_eq!(logs.lines().count(), 1, "{logs}");
-                for expected in ["WARN", "grpc_headers_inactivity", "grpc_code=4"] {
+                let level = if retry_after.is_some() {
+                    "DEBUG"
+                } else {
+                    "WARN"
+                };
+                assert!(logs.contains(level), "{logs}");
+                if retry_after.is_some() {
+                    assert!(!logs.contains("WARN"), "{logs}");
+                }
+                for expected in ["grpc_headers_inactivity", "grpc_code=4"] {
                     assert!(logs.contains(expected), "missing {expected}: {logs}");
                 }
                 if retry_after.is_some() {
@@ -396,6 +447,76 @@ mod tests {
                 for private in ["ERROR", "private-token", "private-path", "example.invalid"] {
                     assert!(!logs.contains(private), "{logs}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn shielding_diagnostics_distinguish_waiting_and_conflicts_without_private_prose() {
+        use crate::rotation::transaction::{ConfirmationObservation, RecoveryEvidenceError};
+        for (error, level, category) in [
+            (
+                anyhow::Error::new(RecoveryEvidenceError::ConfirmationPending),
+                "DEBUG",
+                "zcash_confirmations_pending",
+            ),
+            (
+                anyhow::Error::new(RecoveryEvidenceError::ExpiryNotBuried),
+                "DEBUG",
+                "waiting_for_transaction_expiry",
+            ),
+            (
+                anyhow::Error::new(RecoveryEvidenceError::ConfirmationMismatch).context(
+                    ConfirmationObservation {
+                        lookup_height: 100,
+                        wallet_height: Some(98),
+                        scanned_height: Some(101),
+                    },
+                ),
+                "WARN",
+                "conflicting_transaction_or_input_evidence",
+            ),
+            (
+                client_failure(LightClientError::IndexerError(tonic::Status::unavailable(
+                    "private upstream response",
+                ))),
+                "DEBUG",
+                "indexer_request_failed",
+            ),
+            (
+                anyhow::anyhow!("private unclassified storage error"),
+                "DEBUG",
+                "sync_internal_or_storage_failure",
+            ),
+        ] {
+            let error = error.context("https://private-token@example.invalid/private-path");
+            let log = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(tracing::Level::TRACE)
+                .with_writer(log.reopen().unwrap())
+                .finish();
+            tracing::subscriber::with_default(subscriber, || report_shielding_failure(&error));
+            let logs = std::fs::read_to_string(log.path()).unwrap();
+            assert_eq!(logs.lines().count(), 1, "{logs}");
+            assert!(logs.contains(level) && logs.contains(category), "{logs}");
+            if level == "WARN" {
+                for expected in [
+                    "operator review",
+                    "lookup_height=100",
+                    "wallet_height=98",
+                    "scanned_height=101",
+                    "reservations retained",
+                ] {
+                    assert!(logs.contains(expected), "{logs}");
+                }
+            } else {
+                assert!(!logs.contains("WARN"), "{logs}");
+                assert!(logs.contains("checks will retry"), "{logs}");
+            }
+            for private in ["ERROR", "private", "example.invalid"] {
+                assert!(!logs.contains(private), "{logs}");
             }
         }
     }
@@ -425,7 +546,7 @@ mod tests {
                 .with_ansi(false)
                 .with_writer(log.reopen().unwrap())
                 .finish();
-            tracing::subscriber::with_default(subscriber, || warn_sync_failure(&error, None));
+            tracing::subscriber::with_default(subscriber, || report_sync_failure(&error, None));
             let logs = std::fs::read_to_string(log.path()).unwrap();
             for expected in [
                 "WARN",
@@ -473,7 +594,7 @@ mod tests {
             .with_ansi(false)
             .with_writer(log.reopen().unwrap())
             .finish();
-        tracing::subscriber::with_default(subscriber, || warn_sync_failure(&error, None));
+        tracing::subscriber::with_default(subscriber, || report_sync_failure(&error, None));
         let logs = std::fs::read_to_string(log.path()).unwrap();
         for field in [
             "elapsed_ms=120000",
@@ -531,7 +652,7 @@ mod tests {
                     .finish();
                 {
                     let _guard = tracing::subscriber::set_default(subscriber);
-                    warn_sync_failure(&error, None);
+                    report_sync_failure(&error, None);
                 }
                 let logs = std::fs::read_to_string(log.path()).unwrap();
                 assert!(logs.contains(&format!(r#"pool="{pool_name}""#)), "{logs}");
@@ -625,7 +746,7 @@ mod tests {
                 .finish();
             {
                 let _guard = tracing::subscriber::set_default(subscriber);
-                warn_sync_failure(&error.context("private outer context"), None);
+                report_sync_failure(&error.context("private outer context"), None);
             }
             let logs = std::fs::read_to_string(log.path()).unwrap();
             assert!(logs.contains(r#"category="sync_scan_failed""#), "{logs}");
@@ -788,7 +909,7 @@ mod tests {
             .with_writer(log.reopen().unwrap())
             .finish();
         tracing::subscriber::with_default(subscriber, || {
-            warn_sync_failure(&error.context("private outer context"), None);
+            report_sync_failure(&error.context("private outer context"), None);
         });
         let logs = std::fs::read_to_string(log.path()).unwrap();
         assert!(logs.contains(reason), "{logs}");

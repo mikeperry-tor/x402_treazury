@@ -184,7 +184,7 @@ async fn observe_zec(
             error: None,
         },
         Err(error) => {
-            crate::treasury::diagnostics::warn_sync_failure(&error, None);
+            crate::treasury::diagnostics::report_sync_failure(&error, None);
             AssetObservation {
                 attempted: 1,
                 failed: 1,
