@@ -30,6 +30,9 @@ removal blockers and upstream/candidate follow-up.
 The maintained [Best-effort wallet rules](wallet-rotation.md#best-effort-wallet-rules)
 describe advisory estimates, per-wallet attempts, no top-ups, SDK-owned Zcash
 funds, owner recovery and automatic owned-transparent shielding. The
+[reconciliation policy](wallet-rotation.md#recovery-and-reconciliation-policy)
+requires repair from established facts and forbids redundant consistency gates
+that obstruct otherwise authorized progress. The
 [wallet observation policy](wallet-rotation.md#wallet-observation-policy) owns
 USDC/ZEC discovery triggers, recurring cadence, stop rules and accepted-work
 exceptions.

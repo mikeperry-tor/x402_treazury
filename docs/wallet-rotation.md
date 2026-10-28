@@ -506,6 +506,52 @@ progress/drain and diagnostic patches. The
 [egress inventory](network-egress.md) explains treasury versus immutable recipient
 identities and the remaining upstream timeout boundaries.
 
+## Recovery and reconciliation policy
+
+Financial state supports recovery of accepted work and current spending authority.
+SDK/blockchain state owns actual funds, spent inputs and chain corrections. Use
+authoritative observations to repair derived estimates, outcomes and workflow
+phases, and finish work whose outcome is established. Preserve immutable accepted
+inputs, signed bytes, original identities and liabilities while doing so.
+
+Reuse existing validated observations, exact operation bindings and confirmed
+journals. Acquire a missing fact only when it can advance the affected operation,
+through the existing network/SDK owners and observation policy. Do not add fresh
+agreement checks, historical sweeps, refund watchers, cross-chain accounting
+ledgers or redundant balance certificates to certify an already established
+outcome. Failure to acquire optional corroboration must not invalidate that outcome.
+
+Stale phases, provider amount differences, fee deductions and missing optional
+attribution are reporting or reconciliation matters. They must not create
+financial-repair blockers, pause otherwise authorized payments or funding, or
+reopen proven completed work. For these derived observations, use the actual amount
+without requiring equality to a quote, target, provider report or locally calculated
+refund total. This does not relax quote acceptance or signing authority.
+The first positive USDC credit consumes its initial funding claim even below target.
+An empty refund address after shielding, or later spending of recovered funds,
+does not invalidate historical recovery. Refund receipt and shielding must not
+become additional prerequisites for an independently established terminal outcome.
+
+Keep uncertainty attached to the actual unresolved obligation. Preserve current
+authority checks, journal-before-disclosure, accepted input ownership, canonical
+source confirmation/expiry recovery and unresolved payment authorizations. Receipt
+or shielding of a refund does not prove non-submission or absence of future USDC
+delivery, release another attempt's inputs, or authorize another deposit. Genuinely
+conflicting execution/ownership evidence or unrecoverable required facts warrant
+scoped investigation; they do not justify halting unrelated work.
+
+Before adding a financial gate or consistency check, identify the concrete
+authority, liability or external contract it protects and existing enforcement.
+First assess whether correcting derived state or removing duplicate responsibility
+resolves the problem. Any necessary check must preserve useful recovery and the
+affected operation's ownership without requiring agreement among advisory records.
+Regression coverage should show established recovery completing, genuine
+liabilities remaining owned, and independent work continuing without redundant I/O.
+
+The [ordinary retirement plan](plans/usdc_wallet_retirement.md) applies this policy
+to the proposed destination-obligation closure and runtime retirement integration;
+those paths are not yet implemented.
+
 ## Refunds, state and recovery
 
 Each swap uses a persisted unique high-index transparent refund address derived
@@ -754,7 +800,8 @@ alone does not keep ZEC discovery running.
 ## Best-effort wallet rules
 
 Read the [wallet observation policy](#wallet-observation-policy) when changing
-balance estimation, refresh scheduling, funding or recovery.
+balance estimation, refresh scheduling, funding or recovery, and apply the
+[reconciliation policy](#recovery-and-reconciliation-policy).
 
 Managed USDC balances are advisory estimates. Payment selection prefers an affordable
 bound payer, then other eligible affordable identities, then unknown or low estimates.

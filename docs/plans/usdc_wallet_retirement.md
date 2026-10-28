@@ -20,6 +20,7 @@ manual force-retirement, new payment authority and funded qualification. Preserv
 the automatic reserve-replacement behavior already implemented at this baseline.
 
 Owning guides are [wallet rotation](../wallet-rotation.md#automatic-retirement),
+[reconciliation policy](../wallet-rotation.md#recovery-and-reconciliation-policy),
 [wallet observation policy](../wallet-rotation.md#wallet-observation-policy),
 [configuration](../configuration.md), [wallet CLI](../wallet-cli.md),
 [network policy](../network-egress.md), [resource limits](../local-resource-limits.md),
@@ -121,39 +122,14 @@ source spendability and discovery of returned funds.
 
 #### Reconcile from existing ZEC evidence
 
-Use authoritative SDK/chain observations to correct derived swap observations and
-stale workflow state, and finish work whose outcome they establish. Keep immutable
-accepted quotes, exact inputs, signed bytes and original identities intact. An
-exact source transaction's canonical confirmation resolves its submission outcome
-through the existing owner even when its saved phase is stale; it does not by
-itself establish destination delivery. Never require historical workflow labels
-or provider amount reports to agree before publishing an established recovery.
-
-A confirmed refund output to the saved refund address establishes receipt of that
-actual amount. A recorded, confirmed shielding spend of that exact outpoint
-establishes subsequent capital recovery; use existing SDK ownership validation
-for the shielded output. The transparent address may now be empty and the
-shielded funds may already have been spent. Neither invalidates historical
-recovery. Prefer these existing records and observations over new queries. A
-targeted missing-fact acquisition, if necessary, uses existing identity-bound
-network/SDK paths and observation cadence; do not add explorer dependencies,
-refund-address watchers, historical sweeps or new monetary tracking.
-
-These facts can repair receipt/recovery reporting and finish the corresponding
-source/shielding work. Receipt or shielding alone does not prove that the bridge
-cannot also deliver USDC. Conversely, a bound terminal refund that already closes
-the destination obligation does not require proof of receipt, shielding, refund
-amount equality, or recovery of its fee before retirement evaluation. No new
-refund-attribution or cross-chain consistency gate is permitted.
-
-Reporting differences, absent optional evidence and stale phases must not create
-financial-repair blockers, pause otherwise authorized funding/payments, or reopen
-proven completed work. Publish facts that are established, retain uncertainty
-only for the obligation not yet resolved, and continue independent work. A real
-unresolved accepted input owner or payment authorization still retains its existing
-protection. Correctable derived-state differences should be reconciled; operator
-investigation is for required facts that cannot be recovered or genuinely
-conflicting execution/ownership evidence, scoped to the affected operation.
+Apply the maintained [reconciliation policy](../wallet-rotation.md#recovery-and-reconciliation-policy).
+In this implementation, reuse exact source confirmations, bound refund outputs
+and confirmed shielding spends with existing SDK ownership validation to repair
+derived outcomes and finish the work they establish. They do not independently
+prove absence of future USDC delivery. A bound terminal refund that already
+closes that destination obligation needs no additional receipt, shielding,
+amount-equality or fee-recovery gate. Do not add explorer dependencies. The R2
+acceptance cases below verify this separation and absence of redundant I/O.
 
 Inspect bound provider status or existing chain evidence only while it can advance
 this specific unresolved obligation, using the existing observation owners,

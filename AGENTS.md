@@ -19,6 +19,12 @@ USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
 - Favor simplicity and best-effort execution. Prefer blockchain/SDK spendability
   and reconciliation over parallel local monetary tracking. Remove responsibilities
   before adding counters, certificates, recovery ledgers or workflow frameworks.
+  Use established facts to repair derived state and finish proven work. Stale
+  phases, reporting differences and missing optional evidence must not become
+  consistency gates that halt otherwise authorized progress. Before adding a
+  financial check, identify the actual authority or liability it protects, check
+  existing enforcement, and explain why reconciliation cannot resolve the issue.
+  Follow the [reconciliation policy](docs/wallet-rotation.md#recovery-and-reconciliation-policy).
 - Avoid additional local resource limits and network timeouts. Arbitrary limits
   are largely reliability hazards. Before adding or tightening a cap, queue,
   readiness gate, timer or failure switch, identify its concrete resource, external
@@ -100,8 +106,9 @@ quirks, workarounds, and compatibility exemptions are documented in
   authorized qualification retain their completeness and authority requirements.
 
 Read the
-[best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules) and
-[wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy)
+[best-effort wallet rules](docs/wallet-rotation.md#best-effort-wallet-rules),
+[wallet observation policy](docs/wallet-rotation.md#wallet-observation-policy),
+and [reconciliation policy](docs/wallet-rotation.md#recovery-and-reconciliation-policy)
 before changing estimation, polling, payment, funding or recovery behavior.
 
 ## Independent subagent workflows
