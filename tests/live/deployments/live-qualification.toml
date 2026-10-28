@@ -28,7 +28,7 @@ base_rpc_url_env = "BASE_RPC_URL"
 base_confirmations = 12
 [wallets.coverage_a]
 mode = "zcash_rotation"
-max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
+max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 # Funding floor; each new address uses a validated higher bridge minimum when needed.
 max_api_payment_usdc = "0.20"
 max_funding_spend_zec = "0.002"
@@ -39,7 +39,7 @@ funding_amount_usdc = "2.00"
 
 [wallets.coverage_b]
 mode = "zcash_rotation"
-max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
+max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 max_api_payment_usdc = "0.20"
 max_funding_spend_zec = "0.002"
 max_conversion_overhead_percent = 5

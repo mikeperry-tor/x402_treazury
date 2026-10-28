@@ -343,6 +343,10 @@ async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_o
             "3.00"
         );
         assert_eq!(shown["wallets"][name]["max_funding_spend_zec"], "0.006");
+        assert_eq!(
+            shown["wallets"][name]["max_retirement_remainder_usdc"],
+            "0.001"
+        );
     }
     assert!(
         shown["treasury"]
@@ -458,6 +462,7 @@ fn retirement_tolerance_is_exact_finite_nonnegative_and_bounded() {
         ("0", 0),
         ("0.000000", 0),
         ("0.000001", 1),
+        ("0.001", 1_000),
         ("1.23", 1_230_000),
         ("9223372036854.775807", i64::MAX as u64),
     ] {
@@ -477,6 +482,114 @@ fn retirement_tolerance_is_exact_finite_nonnegative_and_bounded() {
     }
 }
 
+#[tokio::test]
+async fn retirement_defaults_and_overrides_resolve_independently_for_groups_and_templates() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let managed =
+        "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n";
+    let text = format!(
+        "{}\n[wallets.exact]\n{managed}max_retirement_remainder_usdc='0'\n[wallets.exact.reserves.small]\nfunding_amount_usdc='2'\n[wallets.custom]\n{managed}max_retirement_remainder_usdc='0.002'\n[wallets.custom.reserves.small]\nfunding_amount_usdc='2'\n[wallet_templates.generated]\n{managed}[wallet_templates.generated.reserves.small]\nfunding_amount_usdc='2'\n[wallet_assignment]\nscope='server'\ntemplate='generated'\n[servers.generated]\nlisten='127.0.0.1:0'\nbearer_token_env='GENERATED_TOKEN'\nsources=['api']\n",
+        config()
+    );
+    std::fs::write(&path, text).unwrap();
+    let shown = Deployment::show_config(&path).await.unwrap();
+    for (name, expected) in [
+        ("research", "0.001"),
+        ("exact", "0"),
+        ("custom", "0.002"),
+        ("auto_v1_server_generated", "0.001"),
+    ] {
+        assert_eq!(
+            shown["resolved_wallets"][name]["max_retirement_remainder_usdc"],
+            expected
+        );
+    }
+    assert!(!dir.path().join("state").exists());
+}
+
+#[test]
+fn retirement_configuration_reopen_preserves_values_until_selected_groups_are_applied() {
+    use x402_treazury::rotation::{config::retirement_remainder, store::Store};
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    let key = dir.path().join("key");
+    let mut store = Store::create(&state, &key, 1, b"snapshot").unwrap();
+    let id = store.id().to_owned();
+    let profile = |setting: &str| -> WalletConfig {
+        toml::from_str(&format!(
+            "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n{setting}\n[reserves.small]\nfunding_amount_usdc='2'"
+        )).unwrap()
+    };
+    let apply = |store: &mut Store, name: &str, wallet: WalletConfig| {
+        let WalletConfig::ZcashRotation {
+            reserves,
+            max_retirement_remainder_usdc,
+            ..
+        } = wallet
+        else {
+            panic!("managed profile required")
+        };
+        store
+            .ensure_capacity_group(
+                name,
+                &reserves,
+                None,
+                retirement_remainder(&max_retirement_remainder_usdc).unwrap(),
+            )
+            .unwrap()
+    };
+    let exact = profile("max_retirement_remainder_usdc='0'");
+    let serialized = serde_json::to_value(&exact).unwrap();
+    assert_eq!(serialized["max_retirement_remainder_usdc"], "0");
+    let selected = apply(
+        &mut store,
+        "selected",
+        serde_json::from_value(serialized).unwrap(),
+    );
+    let other = apply(
+        &mut store,
+        "other",
+        profile("max_retirement_remainder_usdc='0.002'"),
+    );
+    drop(store);
+    let mut store = Store::open(&state, &key, &id).unwrap();
+    let before = store.status().unwrap();
+    assert_eq!(
+        before
+            .pools
+            .iter()
+            .find(|p| p.id == selected)
+            .unwrap()
+            .retirement_tolerance_atomic
+            .as_deref(),
+        Some("0")
+    );
+    assert_eq!(apply(&mut store, "selected", profile("")), selected);
+    let after = store.status().unwrap();
+    assert_eq!(
+        after
+            .pools
+            .iter()
+            .find(|p| p.id == selected)
+            .unwrap()
+            .retirement_tolerance_atomic
+            .as_deref(),
+        Some("1000")
+    );
+    assert_eq!(
+        after
+            .pools
+            .iter()
+            .find(|p| p.id == other)
+            .unwrap()
+            .retirement_tolerance_atomic
+            .as_deref(),
+        Some("2000")
+    );
+    assert!(after.pools.iter().all(|p| p.addresses.is_empty()));
+}
+
 #[test]
 fn managed_cap_is_explicit_and_independent_of_reserve_targets() {
     let base = "mode='zcash_rotation'\nmax_conversion_overhead_percent=5\n[reserves.small]\nfunding_amount_usdc='2'";
@@ -486,7 +599,7 @@ fn managed_cap_is_explicit_and_independent_of_reserve_targets() {
             toml::from_str(&format!("max_api_payment_usdc='{cap}'\n{base}")).unwrap();
         config.validate().unwrap();
         let shown = serde_json::to_value(config).unwrap();
-        assert_eq!(shown["max_retirement_remainder_usdc"], "0");
+        assert_eq!(shown["max_retirement_remainder_usdc"], "0.001");
         assert!(shown.get("funding_amount_usdc").is_none());
         assert!(shown.get("limit_payments_to_funding_target").is_none());
     }
@@ -546,7 +659,7 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
         "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\nwait_seconds=123\n[reserves.small]\nfunding_amount_usdc='2'",
     );
     assert_eq!(wallet["max_attempts"], 3);
-    assert_eq!(wallet["max_retirement_remainder_usdc"], "0");
+    assert_eq!(wallet["max_retirement_remainder_usdc"], "0.001");
     assert!(wallet.get("wait_seconds").is_none());
     let treasury = roundtrip::<TreasuryConfig>("state_dir='state'");
     assert_eq!(treasury["confirmations"], 3);

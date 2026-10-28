@@ -360,7 +360,7 @@ the 4x large-wallet sizing guidance above:
 [wallet_templates.research]
 mode = "zcash_rotation"
 max_api_payment_usdc = "2.50"
-max_retirement_remainder_usdc = "0"
+max_retirement_remainder_usdc = "0.001"
 max_funding_spend_zec = "0.006" # adjust for the intended USDC target and ZEC price
 max_conversion_overhead_percent = 5
 
@@ -378,6 +378,10 @@ template = "research"
 This is an alternative to explicit wallet assignments in either example. Remove
 those explicit wallet group assignments where you want the `wallet_assignment` policy to apply; explicit references
 retain priority.
+
+The retirement tolerance defaults to $0.001 independently per group; explicit
+`"0"` requires exact zero. Retired funds remain owned at their addresses. Positive
+tolerance has no cumulative stranded-funds cap.
 
 Each generated group in this example starts with $12 of requested
 USDC inventory, so three automatically assigned listeners would request $36 in total.

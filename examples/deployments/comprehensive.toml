@@ -67,7 +67,7 @@ base_rpc_url_env = "BASE_RPC_URL"
 # max_api_payment_usdc caps one payment, not the total research budget.
 [wallets.web]
 mode = "zcash_rotation"
-max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
+max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.10"
 max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
 max_conversion_overhead_percent = 5
@@ -81,7 +81,7 @@ max_funding_amount_usdc = "3.00" # explicit headroom for bridge minimums
 # Social and toolbox calls use this same cap; larger batches may still exceed it.
 [wallets.company]
 mode = "zcash_rotation"
-max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
+max_retirement_remainder_usdc = "0.001" # default per-group retirement tolerance
 max_api_payment_usdc = "0.50"
 max_funding_spend_zec = "0.006" # optional per-transfer ZEC cap, including network fee
 max_conversion_overhead_percent = 5

@@ -440,7 +440,7 @@ other listener settings. This substitutes automatic pools for the explicit pool:
 [wallet_templates.small]
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00" # Required explicit group per-payment authority.
-max_retirement_remainder_usdc = "0" # Default; only eligible empty retained wallets.
+max_retirement_remainder_usdc = "0.001" # Default per group; explicit "0" requires exact zero.
 max_funding_spend_zec = "0.02"
 max_conversion_overhead_percent = 5
 
@@ -509,8 +509,9 @@ First positive external credit permanently consumes the initial funding claim,
 including partial credit. Disabling a slot retains accepted source ownership.
 
 `max_retirement_remainder_usdc` is a finite nonnegative micro-USDC amount, default
-`"0"`. It authorizes eligible retained-wallet retirement on the canonical-publication
-path, independently of `auto_fund`, vacancies and treasury capacity. Ordinary
+`"0.001"` (1,000 atomic units) independently per managed group. Explicit `"0"`
+requires exact zero. It authorizes eligible retained-wallet retirement on the
+canonical-publication path, independently of `auto_fund`, vacancies and treasury capacity. Ordinary
 advisory refresh does not collect those canonical proofs or retire wallets. Retirement leaves
 funds and keys at their address, stops routine polling/selection, transfers nothing
 and never releases financial obligations. Positive tolerance trades purchasing

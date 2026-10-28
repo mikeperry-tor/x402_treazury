@@ -26,7 +26,7 @@ confidentiality = "public"
 base_confirmations = 12
 [wallets.test_pool]
 mode = "zcash_rotation"
-max_retirement_remainder_usdc = "0" # retire only eligible empty retained wallets
+max_retirement_remainder_usdc = "0" # exact-zero override; retire only eligible empty retained wallets
 max_api_payment_usdc = "0.20"
 max_funding_spend_zec = "0.002"
 max_conversion_overhead_percent = 5

@@ -50,7 +50,7 @@ auto_fund = true
 [wallets.research]
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
-max_retirement_remainder_usdc = "0"
+max_retirement_remainder_usdc = "0.001"
 max_funding_spend_zec = "0.02"
 max_conversion_overhead_percent = 5
 
@@ -68,7 +68,7 @@ funding_amount_usdc = "10.00"
 | `reserves.large.funding_amount_usdc` | Optional large target, at least as large as small. |
 | Slot `max_funding_amount_usdc` | Maximum accepted output after a bridge-minimum increase; omission permits no increase above that slot's target. |
 | `max_api_payment_usdc` | Required explicit cap for each payment by every group wallet, independently of reserve sizes. |
-| `max_retirement_remainder_usdc` | Nonnegative automatic-retirement tolerance, default zero; it never authorizes transfers or replacement allocation. |
+| `max_retirement_remainder_usdc` | Nonnegative automatic-retirement tolerance, default $0.001 per group; it never authorizes transfers or replacement allocation. |
 | `max_conversion_overhead_percent` | Integer percentage (0–100) by which quoted USD input valuation may exceed output; the Zcash transaction fee has its own safeguard. |
 
 Enabled automatic funding uses actual spendable treasury funds after confirmation,
@@ -314,7 +314,8 @@ The retained canonical-publication path may retire only a RETAINED wallet in an
 enabled group using compatible confirmed and latest balances. Ordinary advisory
 refresh does not collect these proofs or invoke permanent retirement. Both must be at or below
 `max_retirement_remainder_usdc`: the recorded bound is their maximum, not their
-minimum. Default zero therefore requires both observations to be zero. Pending
+minimum. The default `"0.001"` permits at most 1,000 atomic units per wallet;
+each group can override it, and explicit `"0"` requires both observations to be zero. Pending
 payment exposure, a current enabled reserve claim, an actual pending source operation or conflicting canonical retirement evidence
 prevents retirement.
 

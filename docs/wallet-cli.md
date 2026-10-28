@@ -767,7 +767,10 @@ increase above target. `max_funding_spend_zec` caps one transfer including its f
 The group payment cap is independent of reserve size; a price above a funding
 target can be attempted by an eligible wallet under that payment cap.
 
-`max_retirement_remainder_usdc` defaults to `"0"`; `max_attempts` defaults to 3.
+`max_retirement_remainder_usdc` defaults to `"0.001"` (1,000 atomic USDC units)
+independently per managed group; explicit `"0"` requires exact zero. Retired funds
+remain owned at their addresses, and positive tolerance has no cumulative
+stranded-funds cap. `max_attempts` defaults to 3.
 See [configuration](configuration.md) for exact syntax, rejected aggregate settings,
 reopen-only changes, initial inventory and legacy-state rejection.
 Static-wallet payment defaults remain unchanged. Payment admission has no total timeout. Legacy

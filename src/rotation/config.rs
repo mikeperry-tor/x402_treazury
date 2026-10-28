@@ -19,8 +19,8 @@ fn enabled() -> bool {
 fn cap() -> String {
     "1.00".into()
 }
-fn no_remainder() -> String {
-    "0".into()
+fn retirement_tolerance() -> String {
+    "0.001".into()
 }
 fn network_fee_limit() -> String {
     "0.0003".into()
@@ -160,7 +160,7 @@ pub enum WalletConfig {
     ZcashRotation {
         reserves: ReservesConfig,
         max_api_payment_usdc: String,
-        #[serde(default = "no_remainder")]
+        #[serde(default = "retirement_tolerance")]
         max_retirement_remainder_usdc: String,
         #[serde(default)]
         max_funding_spend_zec: Option<String>,
