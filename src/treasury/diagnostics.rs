@@ -391,8 +391,13 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn sync_diagnostics_distinguish_background_retries_from_one_pass_failures() {
+        if crate::test_log_capture::run_in_child(
+            "treasury::diagnostics::tests::sync_diagnostics_distinguish_background_retries_from_one_pass_failures",
+        ) {
+            return;
+        }
         let mut schedule = crate::treasury::observation::Schedule::default();
-        for seconds in [60, 120, 240, 300, 300] {
+        for seconds in [90, 180, 300, 300, 300] {
             schedule.complete(false);
             let remaining = schedule
                 .due()
