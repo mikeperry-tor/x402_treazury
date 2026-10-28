@@ -416,7 +416,7 @@ mod tests {
             observation: durable_observation.clone(),
             checkpoint: Some(anchor(120)),
         };
-        store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role) VALUES('history-proof',128,?1,'80','0',?2,?3,140,?4,?5,'ACTIVE')",params![durable_observation.confirmed.anchor.hash,"1000",{let mut value=serde_json::to_value(&durable_support).unwrap();value["observation"]["valid_until"]=serde_json::json!(1000);serde_json::to_string(&value).unwrap()},durable_observation.latest.anchor.hash,durable_observation.endpoint]).unwrap();
+        store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,valid_until,support,latest_height,latest_hash,endpoint,payer_role) VALUES('history-proof',128,?1,'80','0',?2,?3,140,?4,?5,'ACTIVE')",params![durable_observation.confirmed.anchor.hash,"1000",serde_json::to_string(&durable_support).unwrap(),durable_observation.latest.anchor.hash,durable_observation.endpoint]).unwrap();
         let identity = store.id().to_owned();
         drop(store);
         let mut store = Store::open(
@@ -458,28 +458,15 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("address");
-        let mut missing_validity = serde_json::to_value(&durable_support).unwrap();
-        missing_validity["observation"]
-            .as_object_mut()
-            .unwrap()
-            .remove("valid_until");
         for (support, failure) in [
             (
-                {
-                    let mut historical = serde_json::to_value(&wrong_height).unwrap();
-                    historical["observation"]["valid_until"] = serde_json::json!(1000);
-                    historical.to_string()
-                },
+                serde_json::to_string(&wrong_height).unwrap(),
                 EvidenceFailure::AmountContradiction,
             ),
             ("{broken".into(), EvidenceFailure::MalformedSupport),
             ("{}".into(), EvidenceFailure::MalformedSupport),
             (
                 missing_address.to_string(),
-                EvidenceFailure::MalformedSupport,
-            ),
-            (
-                missing_validity.to_string(),
                 EvidenceFailure::MalformedSupport,
             ),
         ] {
@@ -497,6 +484,21 @@ mod tests {
             assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::ZERO);
             assert_eq!(checkpoint(&store.db, &wallet).unwrap(), Some(anchor(128)));
         }
+        // Modern balance support has no local validity field. A faithful
+        // same-block record remains usable after historical contradiction checks.
+        store
+            .db
+            .execute(
+                "UPDATE payment_admission_evidence SET support=?1 WHERE attempt_id='history-proof'",
+                [serde_json::to_string(&durable_support).unwrap()],
+            )
+            .unwrap();
+        let query = store
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+            .unwrap();
+        store
+            .publish_scoped_evidence(&pool, rpc.view(query).await.unwrap())
+            .unwrap();
         server.abort();
     }
 
@@ -977,7 +979,6 @@ fn balance_support_queries() -> &'static [String; 6] {
             ("observation.latest.amount", "text"),
             ("observation.latest.anchor.height", "integer"),
             ("observation.latest.anchor.hash", "text"),
-            ("observation.valid_until", "integer"),
         ]
         .into_iter()
         .map(|(field, kind)| format!("json_type(e.support,'$.{field}') IS NOT '{kind}'"))
