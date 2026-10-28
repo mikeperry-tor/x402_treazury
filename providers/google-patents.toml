@@ -1,17 +1,24 @@
 description = "Google Patents keyword and filtered search, patent details, claims, classifications and families through x402 Atlas."
+# Reviewed same-origin cover resources ignore Range or are unavailable; see providers/CAVEATS.md.
+cover_traffic_enabled = false
 spec = "https://google-patents.use.x402atlas.com/openapi.json"
 name = "Google Patents Search & Data (x402 Atlas)"
 base_url = "https://google-patents.use.x402atlas.com"
 prefix = "google_patents"
 pricing_key = "x-payment-info"
 help_url = "https://google-patents.use.x402atlas.com/llms.txt"
-instructions_text = "Pass a patent_id from search into patent details. Preserve publication identifiers, source dates, family coverage and missing fields. Search snippets do not replace original claims or establish legal status."
+instructions_text = "Prefer precise quoted phrases joined with AND and assignee, office, date or verified classification restrictions; broad free text can rank noisily. Check a small result page before broadening. Pass a patent_id from search into details. Preserve source dates, family coverage and missing fields. Snippets do not replace original claims or establish legal status."
 
 [response_mappings."GET /search"]
 omit = ["/results/*/figures"]
 
 [overrides.google_patents_search]
-description = "Search Google Patents using q and optional inventor, assignee, office, date, language, status and classification filters. Returns patent IDs, snippets, dates and links; figure inventories are omitted. Pass patent_id to patent details. Empty results are valid. Cost: ~$0.02/call [spec]."
+description = "Search Google Patents with precise phrase/field queries and optional assignee, office or date filters. Broad free text can rank noisily. Returns patent IDs, snippets, dates and links; figure inventories are omitted. Empty results are valid. Cost: ~$0.02/call [spec]."
+
+[overrides.google_patents_search.params]
+q = 'Prefer "exact phrase" AND "another phrase". Narrow with TI=(...), AB=(...), CL=(...), or CPC=CODE/low using a verified code; broad text can rank noisily.'
+num = "Start at 10 and inspect relevance before requesting more. Range 10-100."
+sort = "Date order: new or old by filing date. Omit for relevance; changing date order does not narrow the query."
 
 [overrides.google_patents_patent]
 description = "Retrieve a patent by patent_id returned from search, including abstract, claims, inventors, assignees, dates, classifications, family applications and PDF link. Preserve missing fields and verify legal conclusions against original records. Cost: ~$0.02/call [spec]."

@@ -86,7 +86,10 @@ cover after their catalog/help or public discovery resources, root pages, and
 tested `agents.md`, `AGENTS.md`, `SKILL.md`, `robots.txt` and
 `.well-known/agent.json` candidates returned ignored ranges or missing resources.
 This does not establish that every resource on those origins is incompatible.
-SocialFetch and RelayShield retain their existing opt-outs. No paid call was
+AgentUtility and Atlas Google Patents also opt out after direct unsigned probes
+of their API-origin resources found no suitable range candidate; see their
+provider sections below. SocialFetch and RelayShield retain their existing
+opt-outs. No paid call was
 needed for these resource probes; they do not establish paid settlement or
 physical-connection affinity. API functionality and configured Tor routing remain
 available without cover.
@@ -947,6 +950,15 @@ not assume every requested field was populated. Research-desk selects only those
 three working operations and excludes web search. The bundled provider therefore
 carries no startup reliability flag for that search failure. Runtime call failures
 still warn with payment uncertainty; neither relay nor flag removal grants replay.
+
+Optional cover is disabled. The pinned catalog is local and the actual guide is
+on `agentutility.ai`, outside the API origin `https://x402.agentutility.ai`.
+Direct unsigned HTTP/2 range probes to the API root, remote OpenAPI, public agent
+manifest, favicon and manifest-advertised `/agent-image.png` returned 200 while
+ignoring Range; API `/llms.txt` redirected. Reviewed robots/agent/skill resources
+were missing. No reviewed resource qualified for exact 206 reads. This does not
+establish that every path lacks range support or that Tor caused a failure.
+Ordinary API calls retain the configured network policy without optional cover.
 
 The large [llms.txt](https://agentutility.ai/llms.txt) is loaded only when help is
 called and cached for the process. It includes excluded tools, aliases, other MCP
@@ -1959,6 +1971,21 @@ identifiers, source dates, classifications, family applications and missing data
 Search snippets and a successful claim response do not establish current legal
 status or substitute for interpreting original patent documents.
 
+Use precision-first search for technical families: start with explicit `AND`
+between quoted phrases and structured assignee, office and date filters, then
+inspect a small page before broadening. Broad free text can rank noisily. Google
+already defaults to AND; quoting and field restrictions provide the narrowing,
+not an assumption that the implicit operator was ignored. Its
+[search guide](https://support.google.com/faqs/answer/7049475?hl=en) documents
+`TI=(...)`, `AB=(...)`, `CL=(...)` and `CPC=CODE/low` (a verified classification
+and its descendants). Take codes from a known relevant patent rather than
+inventing them. Explicit AND plus quoted phrases was reported to improve this
+bridge's results; the additional Google-native field/classification forms are
+documented syntax, not a fresh exhaustive bridge qualification. EPO CQL is a
+separate query language. `sort=new`/`old` changes filing-date order, not query
+precision; omission retains relevance order. The search schema defaults to ten
+results; increase only after checking relevance.
+
 Search responses can contain large figure inventories. A CUDA/Nvidia search
 with `num=100` returned 829,409 characters and 3,153 figure entries; figure lists
 accounted for about 88% of the response. Removing those lists left about 96,306
@@ -1974,6 +2001,15 @@ unmapped raw call for the full search response when figure metadata is needed;
 that explicit request may require another payment. Other large fields can still
 consume substantial context. See
 [JSON response projection](../docs/configuration.md#json-response-projection).
+
+Optional cover is disabled after both help and catalog ignored ranges in the
+runtime and direct unsigned HTTP/2 probes. The API root also returned 200 for a
+range request; the 504-byte SVG favicon ignored Range and is smaller than the
+default qualification read. Reviewed robots/agent/skill resources were missing,
+and the public root advertised only paid data endpoints, not another static
+resource. No reviewed resource qualified for exact 206 reads; this is not proof
+of a permanent whole-origin restriction or a Tor-specific cause. API calls and
+the search JSON projection remain available under the configured network policy.
 
 The additive `_atlas` response metadata can suggest other paid services. It is
 discovery data, not authority to call them or follow payment/retry instructions.

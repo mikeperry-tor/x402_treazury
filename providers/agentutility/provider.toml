@@ -1,4 +1,6 @@
 description = "Web research, patents, scraping, structured extraction and supported developer data utilities."
+# Reviewed same-origin cover resources ignore Range or are unavailable; see providers/CAVEATS.md.
+cover_traffic_enabled = false
 
 # Tagged request snapshot: regenerate with the Rust snapshot_agentutility example.
 spec = "openapi.json"

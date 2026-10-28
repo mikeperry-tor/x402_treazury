@@ -73,6 +73,13 @@ this is not a context-size guarantee. Patent details are unchanged. An unmapped
 raw search can retrieve figure metadata as a separate explicit call that may be
 paid. See [JSON response projection](../docs/configuration.md#json-response-projection).
 
+For Google Patents, prefer quoted technical phrases joined with explicit `AND`,
+structured assignee/office/date filters and verified classification restrictions.
+Broad free-text ranking can be noisy; inspect ten results before broadening.
+Google's [search guide](https://support.google.com/faqs/answer/7049475?hl=en)
+documents title/abstract/claims fields and CPC descendants. These Google-native
+operators differ from EPO CQL. Date sorting is not a substitute for a precise query.
+
 Agent402 repository metadata succeeded. NetIntel and AgentUtility repository
 health calls also succeeded, but their different scores and contracts are
 candidates rather than silently interchangeable data. The 2s GitHub replacement
