@@ -448,7 +448,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recovery_requires_preparation_evidence_and_bound_survives_reopen() {
+    async fn recovery_requires_preparation_evidence_and_legacy_count_bound_survives_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let key = dir.path().join("key");
@@ -525,6 +525,11 @@ mod tests {
             .call(move |s| s.close_unprepared_funding(&id))
             .await
             .unwrap();
+        // Preserve the old unmarked archive contract in this compatibility test.
+        rusqlite::Connection::open(dir.path().join("state/state.sqlite"))
+            .unwrap()
+            .execute("DELETE FROM funding_quote_refreshes", [])
+            .unwrap();
         assert_eq!(
             owner
                 .recover_funding_job(job.id.clone(), 1, false, &mut NoNetwork, &stop)
@@ -560,6 +565,11 @@ mod tests {
             .store
             .call(move |s| s.close_unprepared_funding(&id))
             .await
+            .unwrap();
+        // Preserve the old unmarked archive contract in this compatibility test.
+        rusqlite::Connection::open(dir.path().join("state/state.sqlite"))
+            .unwrap()
+            .execute("DELETE FROM funding_quote_refreshes", [])
             .unwrap();
         let treasury_id = owner.status().await.unwrap().treasury_id;
         owner.close().await.unwrap();
@@ -892,7 +902,202 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn zero_recovery_allowance_closes_once_and_disabled_funding_precedes_attempt_limit() {
+    async fn untouched_incomplete_quote_recovers_without_network_or_attempt_charge() {
+        let (_dir, mut owner, jobs) = unfunded_recovery_fixture().await;
+        let job = jobs[0].clone();
+        let selected = job.clone();
+        owner
+            .store
+            .call(move |s| {
+                s.save_funding_quote(
+                    &selected.id,
+                    &serde_json::to_vec(&serde_json::json!({
+                        "request":{"amount":selected.target,"recipient":selected.recipient}
+                    }))?,
+                )?;
+                s.record_provider_outcome(
+                    &selected.id,
+                    &selected.operation_id,
+                    &crate::rotation::near::SwapStatus::IncompleteDeposit,
+                    now()?,
+                )?;
+                s.close_unprepared_funding(&selected.id)?;
+                let facts = s.funding_facts(&selected.id, &selected.operation_id)?;
+                assert!(facts.source_never_disclosed() && facts.new_funding_allowed);
+                assert!(!facts.credit_needed() && !facts.status_needed());
+                assert_eq!(s.funding_recovery_count(&selected.id)?, 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let result = owner
+            .recover_funding_observed(
+                job.id.clone(),
+                0,
+                true,
+                &mut NoNetwork,
+                &CancellationToken::new(),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.outcome, RecoveryOutcome::Recovered);
+        assert!(!result.source_observed);
+        let current = owner
+            .status()
+            .await
+            .unwrap()
+            .funding_jobs
+            .into_iter()
+            .find(|j| j.id == job.id)
+            .unwrap();
+        assert_ne!(current.operation_id, job.operation_id);
+        owner.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reconstructed_unpublished_funding_resets_without_network_or_recovery_allowance() {
+        for allowed in [false, true] {
+            let (dir, owner, jobs) = unfunded_recovery_fixture().await;
+            let job = jobs[0].clone();
+            let selected = job.clone();
+            owner
+                .store
+                .call(move |s| {
+                    s.save_funding_quote(
+                        &selected.id,
+                        &serde_json::to_vec(&serde_json::json!({
+                            "request":{"amount":selected.target,"recipient":selected.recipient}
+                        }))?,
+                    )?;
+                    s.accept_preparation(
+                        &selected.operation_id,
+                        Some(&selected.pool_id),
+                        10,
+                        None,
+                    )?;
+                    s.record_provider_outcome(
+                        &selected.id,
+                        &selected.operation_id,
+                        &crate::rotation::near::SwapStatus::IncompleteDeposit,
+                        now()?,
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+            let intent: Vec<u8> = db
+                .query_row(
+                    "SELECT preparation FROM operation_network WHERE operation_id=?1",
+                    [&job.operation_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let identity = owner.status().await.unwrap().treasury_id;
+            owner.close().await.unwrap();
+            // Store inspection alone is not the exclusive SDK reconstruction barrier.
+            let inspected = Store::open(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &identity,
+            )
+            .unwrap();
+            assert!(
+                !inspected
+                    .funding_facts(&job.id, &job.operation_id)
+                    .unwrap()
+                    .source_closed
+            );
+            drop(inspected);
+            let mut owner =
+                Treasury::open(dir.path().join("state"), dir.path().join("key"), identity)
+                    .await
+                    .unwrap();
+            let id = job.id.clone();
+            let original = job.operation_id.clone();
+            owner
+                .store
+                .call(move |s| {
+                    let facts = s.funding_facts(&id, &original)?;
+                    assert!(facts.source_never_disclosed());
+                    assert!(!facts.credit_needed() && !facts.status_needed());
+                    assert_eq!(s.funding_recovery_count(&id)?, 0);
+                    assert!(s.require_unstarted_preparation(&original).is_err());
+                    let report = s.qualification_state()?;
+                    assert!(
+                        !report["pending_source_operations"]
+                            .as_array()
+                            .unwrap()
+                            .contains(&serde_json::json!(original))
+                    );
+                    assert!(
+                        report["unprepared_archives"]
+                            .as_array()
+                            .unwrap()
+                            .contains(&serde_json::json!(original))
+                    );
+                    assert!(
+                        report["source_preparations"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|p| p["operation_id"] == original)
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let result = owner
+                .recover_funding_observed(
+                    job.id.clone(),
+                    0,
+                    allowed,
+                    &mut NoNetwork,
+                    &CancellationToken::new(),
+                    true,
+                )
+                .await
+                .unwrap();
+            assert!(!result.source_observed);
+            assert_eq!(
+                result.outcome,
+                if allowed {
+                    RecoveryOutcome::Recovered
+                } else {
+                    RecoveryOutcome::OperatorRequired("funding_disabled")
+                }
+            );
+            let current = owner
+                .status()
+                .await
+                .unwrap()
+                .funding_jobs
+                .into_iter()
+                .find(|j| j.id == job.id)
+                .unwrap();
+            assert_eq!(current.operation_id == job.operation_id, !allowed);
+            assert_eq!(
+                intent,
+                db.query_row::<Vec<u8>, _, _>(
+                    "SELECT preparation FROM operation_network WHERE operation_id=?1",
+                    [&job.operation_id],
+                    |r| r.get(0)
+                )
+                .unwrap()
+            );
+            assert_eq!(
+                db.query_row::<i64, _, _>("SELECT COUNT(*) FROM outgoing", [], |r| r.get(0))
+                    .unwrap(),
+                0
+            );
+            assert!(owner.status().await.unwrap().treasury_operations.is_empty());
+            owner.close().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_unmarked_closure_keeps_count_and_disabled_funding_precedes_attempt_limit() {
         let (dir, mut owner, jobs) = unfunded_recovery_fixture().await;
         let job = &jobs[0];
         let id = job.id.clone();
@@ -900,6 +1105,11 @@ mod tests {
             .store
             .call(move |store| store.close_unprepared_funding(&id))
             .await
+            .unwrap();
+        // An existing unmarked archive retains its historical recovery count.
+        rusqlite::Connection::open(dir.path().join("state/state.sqlite"))
+            .unwrap()
+            .execute("DELETE FROM funding_quote_refreshes", [])
             .unwrap();
         let financial_before = recovery_rows(dir.path(), true);
         let stop = CancellationToken::new();

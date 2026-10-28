@@ -217,7 +217,7 @@ async fn qualify_preparation(case: PreparationCase) {
             .unwrap();
         assert_eq!(selected.len(), 1);
         let status = treasury.status().await.unwrap();
-        assert!(status.outgoing_pending && status.treasury_operations.is_empty());
+        assert!(!status.outgoing_pending && status.treasury_operations.is_empty());
         assert!(
             treasury
                 .prepare(request())
@@ -237,7 +237,7 @@ async fn qualify_preparation(case: PreparationCase) {
                 assert_eq!(s.prepared_inputs(&operation)?, selected);
                 assert!(s.require_unstarted_preparation(&operation).is_err());
                 assert!(s.abandon_unprepared(&operation).is_err());
-                assert!(s.require_preparation_available().is_err());
+                s.require_preparation_available()?;
                 assert!(s.prepared_bytes(&operation).is_err());
                 Ok(())
             })
@@ -257,10 +257,25 @@ async fn qualify_preparation(case: PreparationCase) {
         assert_eq!(treasury.revision, revision);
         let status = treasury.status().await.unwrap();
         assert!(
-            status.outgoing_pending,
-            "accepted calculation survives failed byte publication"
+            !status.outgoing_pending,
+            "failed insert publishes no raw bytes"
+        );
+        assert!(
+            treasury.completed.is_some(),
+            "the live owner retains its calculation"
         );
         assert!(status.treasury_operations.is_empty());
+        let id = operation.clone();
+        let selected = treasury
+            .store
+            .call(move |s| {
+                assert!(s.require_unstarted_preparation(&id).is_err());
+                assert!(s.prepared_bytes(&id).is_err());
+                s.prepared_inputs(&id)
+            })
+            .await
+            .unwrap();
+        assert_eq!(selected.len(), 1);
         assert!(
             treasury
                 .prepare(request())
@@ -300,6 +315,15 @@ async fn qualify_preparation(case: PreparationCase) {
             exact
         );
         assert!(restored.status().await.unwrap().outgoing_pending);
+        restored
+            .store
+            .call(move |s| {
+                assert_eq!(s.prepared_inputs(&operation)?, selected);
+                assert!(s.require_unstarted_preparation(&operation).is_err());
+                Ok(())
+            })
+            .await
+            .unwrap();
         restored.close().await.unwrap();
         server.abort();
         return;

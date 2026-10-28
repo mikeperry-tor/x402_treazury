@@ -194,17 +194,21 @@ fn source_accounting_and_prepared_send_survive_restart_without_duplicate_work() 
     s.accept_preparation("op-a", Some(&a), 60, None).unwrap();
     s.accept_preparation("op-a", Some(&a), 60, None).unwrap();
     assert!(s.accept_preparation("op-a", Some(&b), 60, None).is_err());
-    assert!(
-        s.accept_preparation("independent", Some(&b), 50, None)
-            .is_err()
-    );
-    assert!(s.accept_preparation("op-b", Some(&b), 40, None).is_err());
+    s.accept_preparation("independent", Some(&b), 50, None)
+        .unwrap();
+    s.accept_preparation("op-b", Some(&b), 40, None).unwrap();
+    assert!(s.require_unstarted_preparation("op-a").is_err());
+    assert!(s.require_unstarted_preparation("op-b").is_err());
     assert_eq!(
         s.prepare("op-a", 1, b"post-calc", b"exact-transaction")
             .unwrap(),
         2
     );
     assert!(s.prepare("op-b", 2, b"other", b"other-tx").is_err());
+    assert!(
+        s.accept_preparation("blocked-after-raw", Some(&b), 40, None)
+            .is_err()
+    );
     assert_eq!(s.snapshot().unwrap().0, 2);
     assert!(
         s.prepare("op-a", 1, b"changed", b"exact-transaction")
@@ -221,6 +225,8 @@ fn source_accounting_and_prepared_send_survive_restart_without_duplicate_work() 
             .unwrap(),
         2
     );
+    assert!(s.require_unstarted_preparation("op-a").is_err());
+    assert!(s.require_unstarted_preparation("op-b").is_err());
     s.confirm_spend("op-a").unwrap();
     s.confirm_spend("op-a").unwrap();
     s.accept_preparation("op-a", Some(&a), 60, None).unwrap();
@@ -228,7 +234,7 @@ fn source_accounting_and_prepared_send_survive_restart_without_duplicate_work() 
     assert_eq!(s.prepare("op-b", 2, b"post-second", b"tx-b").unwrap(), 3);
 }
 #[tokio::test]
-async fn concurrent_pool_requests_and_source_reservations_serialize() {
+async fn concurrent_pool_requests_and_source_result_publications_serialize() {
     let dir = tempfile::tempdir().unwrap();
     let s = create(dir.path());
     let (handle, worker) = StoreHandle::spawn(s);
@@ -272,7 +278,45 @@ async fn concurrent_pool_requests_and_source_reservations_serialize() {
         handle.call(move |s| s.accept_preparation("a", Some(&pool), 60, None)),
         h.call(move |s| s.accept_preparation("b", Some(&other), 60, None))
     );
-    assert_ne!(a.is_ok(), b.is_ok(), "one SDK input owner starts");
+    a.unwrap();
+    b.unwrap();
+    handle
+        .call(|s| {
+            assert!(s.require_unstarted_preparation("a").is_err());
+            assert!(s.require_unstarted_preparation("b").is_err());
+            assert_eq!(s.snapshot()?.0, 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // These are durable result publications, not concurrent SDK calculations.
+    // Accepted intents are audit-only; actual raw ownership and snapshot CAS
+    // prevent a second result from replacing the committed wallet state.
+    let (a, b) = tokio::join!(
+        handle.call(|s| s.prepare("a", 1, b"post-a", b"raw-a")),
+        h.call(|s| s.prepare("b", 1, b"post-b", b"raw-b")),
+    );
+    assert_ne!(
+        a.is_ok(),
+        b.is_ok(),
+        "only one original raw result is committed"
+    );
+    let (winner, loser, raw) = if a.is_ok() {
+        ("a", "b", b"raw-a")
+    } else {
+        ("b", "a", b"raw-b")
+    };
+    handle
+        .call(move |s| {
+            assert_eq!(s.snapshot()?.0, 2);
+            assert_eq!(s.prepared_bytes(winner)?.as_slice(), raw);
+            assert!(s.prepared_bytes(loser).is_err());
+            assert!(s.operation_pending(winner)?);
+            assert!(s.accept_preparation("third", None, 1, None).is_err());
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert_eq!(
         handle.call(|s| s.status()).await.unwrap().pools[0]
             .addresses
@@ -911,12 +955,12 @@ fn accepted_calculation_survives_reopen_without_local_balance_or_day_policy() {
     let id = s.id().to_owned();
     assert!(s.require_preparation_available().is_ok());
     s.accept_preparation("pending", None, 90, None).unwrap();
-    assert!(s.require_preparation_available().is_err());
+    assert!(s.require_preparation_available().is_ok());
     assert!(s.abandon_unprepared("pending").is_err());
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
-    assert!(s.status().unwrap().outgoing_pending);
-    assert!(s.accept_preparation("another", None, 1, None).is_err());
+    assert!(!s.status().unwrap().outgoing_pending);
+    assert!(s.accept_preparation("another", None, 1, None).is_ok());
     assert!(s.accept_preparation("pending", None, 91, None).is_err());
     assert!(s.abandon_unprepared("pending").is_err());
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();

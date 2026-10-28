@@ -763,7 +763,7 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
     );
     let mut store = Store::open(&state, &state.join("wallet.key"), &id).unwrap();
     assert!(store.status().unwrap().treasury_operations.is_empty());
-    assert_eq!(store.funding_recovery_count(&recovery_job.id).unwrap(), 1);
+    assert_eq!(store.funding_recovery_count(&recovery_job.id).unwrap(), 0);
     assert_eq!(
         store
             .funding_job(&recovery_job.id)

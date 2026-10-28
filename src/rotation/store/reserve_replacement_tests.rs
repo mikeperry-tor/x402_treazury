@@ -177,7 +177,7 @@ fn accepted_calculation_and_archived_pending_source_keep_original_binding() {
         let before = binding(&store, &job);
         store.fill_funding_vacancies("pool").unwrap();
         assert_eq!(binding(&store, &job), before);
-        assert!(store.preparation_pending().unwrap());
+        assert!(!store.preparation_pending().unwrap());
         assert_eq!(store.funding_jobs().unwrap().len(), 1);
     }
 }

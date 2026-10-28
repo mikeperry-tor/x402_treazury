@@ -58,19 +58,21 @@ impl StartupPath {
         if self.destination_ready {
             return DestinationReady;
         }
+        let reset = self.facts.source_never_disclosed();
         // Original accepted bytes/outcomes remain observed even if permission to
         // start another attempt has since been disabled or exhausted.
         if self.facts.provider_success
-            || (self.facts.provider_incomplete
-                && !self.facts.provider_failed
-                && !self.facts.provider_refunded)
-            || self.facts.preparation_accepted
-            || self.facts.source_pending
-            || (!(self.facts.provider_failed || self.facts.provider_refunded)
-                && self
-                    .operation
-                    .as_ref()
-                    .is_some_and(|operation| operation.submission != "EXPIRED"))
+            || (!reset
+                && ((self.facts.provider_incomplete
+                    && !self.facts.provider_failed
+                    && !self.facts.provider_refunded)
+                    || self.facts.preparation_accepted
+                    || self.facts.source_pending
+                    || (!(self.facts.provider_failed || self.facts.provider_refunded)
+                        && self
+                            .operation
+                            .as_ref()
+                            .is_some_and(|operation| operation.submission != "EXPIRED"))))
         {
             return Waiting;
         }
@@ -114,7 +116,7 @@ impl StartupPath {
                 "treasury_insufficient_spendable_funds"
             }
             _ => {
-                return if self.facts.accepted_quote || source_pending {
+                return if !reset && (self.facts.accepted_quote || source_pending) {
                     Waiting
                 } else {
                     Actionable
@@ -339,9 +341,109 @@ impl Store {
 mod tests {
     use super::*;
     #[test]
+    fn reconstructed_unpublished_intent_uses_current_authority_with_zero_recovery_allowance() {
+        use crate::rotation::{error::FundingCondition, near::SwapStatus};
+        for disabled in [false, true] {
+            let (_dir, mut store, _pool) = fixture();
+            let job = store.funding_jobs().unwrap().remove(0);
+            store.save_funding_quote(&job.id, &serde_json::to_vec(&serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}})).unwrap()).unwrap();
+            store
+                .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                .unwrap();
+            store
+                .record_provider_outcome(
+                    &job.id,
+                    &job.operation_id,
+                    &SwapStatus::IncompleteDeposit,
+                    1,
+                )
+                .unwrap();
+            // Before reconstruction, the accepted live calculation still owns its result.
+            assert_eq!(
+                store.startup_path(&job.id).unwrap().disposition(0, false),
+                StartupDisposition::Waiting
+            );
+            store.close_unpublished_preparations().unwrap();
+            if disabled {
+                store.pause_new_funding();
+            }
+            let path = store.startup_path(&job.id).unwrap();
+            assert!(path.facts.preparation_accepted && path.facts.source_closed);
+            assert!(path.facts.provider_incomplete && path.operation.is_none());
+            assert_eq!(path.recovery_count, 0);
+            assert_eq!(
+                path.disposition(0, false),
+                if disabled {
+                    StartupDisposition::Obstructed("funding_disabled")
+                } else {
+                    StartupDisposition::Actionable
+                }
+            );
+            assert_eq!(
+                path.condition,
+                disabled.then_some(FundingCondition::Disabled)
+            );
+            assert!(
+                store
+                    .require_unstarted_preparation(&job.operation_id)
+                    .is_err()
+            );
+            assert_eq!(
+                store.funding_job(&job.id).unwrap().unwrap().operation_id,
+                job.operation_id
+            );
+            // SUCCESS owns settlement independently of any unpublished-reset history.
+            store
+                .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Success, 2)
+                .unwrap();
+            assert_eq!(
+                store.startup_path(&job.id).unwrap().disposition(0, false),
+                StartupDisposition::Waiting
+            );
+        }
+    }
+
+    #[test]
+    fn closed_untouched_quote_is_actionable_without_consuming_recovery_allowance() {
+        use crate::rotation::near::SwapStatus;
+        let (_dir, mut store, _pool) = fixture();
+        let job = store.funding_jobs().unwrap().remove(0);
+        store
+            .save_funding_quote(
+                &job.id,
+                &serde_json::to_vec(
+                    &serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        store
+            .record_provider_outcome(
+                &job.id,
+                &job.operation_id,
+                &SwapStatus::IncompleteDeposit,
+                1,
+            )
+            .unwrap();
+        store
+            .close_unprepared_funding_for_operation(&job.id, &job.operation_id)
+            .unwrap();
+        let path = store.startup_path(&job.id).unwrap();
+        assert!(path.facts.source_never_disclosed());
+        assert!(!path.facts.preparation_accepted);
+        assert_eq!(path.recovery_count, 0);
+        assert_eq!(path.disposition(0, false), StartupDisposition::Actionable);
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().operation_id,
+            job.operation_id
+        );
+        assert!(!store.status().unwrap().outgoing_pending);
+    }
+
+    #[test]
     fn provider_reports_do_not_obstruct_live_original_observation() {
         use crate::rotation::{near::SwapStatus, transaction::TransactionFacts};
-        let (_dir, mut store, pool) = fixture();
+        let (_dir, mut store, _pool) = fixture();
         let jobs = store.funding_jobs().unwrap();
         for job in &jobs {
             let quote = serde_json::to_vec(
@@ -362,9 +464,31 @@ mod tests {
             store
                 .startup_obstruction("configured", 3, None)
                 .unwrap()
-                .is_some()
+                .is_none()
         );
+        // The untouched quote above is closed without spending recovery authority.
+        // Use a fresh current source to exercise live accepted and published work.
+        let (_dir, mut store, pool) = fixture();
+        let jobs = store.funding_jobs().unwrap();
         let job = &jobs[0];
+        store
+            .save_funding_quote(
+                &job.id,
+                &serde_json::to_vec(&serde_json::json!({
+                    "request":{"amount":job.target,"recipient":job.recipient}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        store
+            .record_provider_outcome(
+                &job.id,
+                &job.operation_id,
+                &SwapStatus::IncompleteDeposit,
+                1,
+            )
+            .unwrap();
+
         store
             .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
             .unwrap();

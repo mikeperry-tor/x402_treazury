@@ -158,9 +158,10 @@ Repeating the command resumes current incomplete claims, including eligible reco
 source work closes after canonical confirmation or buried finite signed expiry
 with completed SDK coverage. Replacing a disclosed swap also needs its bound
 terminal NEAR failure/refund and separately revalidated funding authority.
-Unknown preparation outcomes and corrupt or missing immutable accepted records
-still require operator review; cancellation drains
-accepted financial work and preserves journals. Treasury ZEC funding and Base
+Unpublished calculations recover automatically after exclusive offline SDK
+reconstruction. Corrupt or missing immutable records needed to resolve disclosed
+work still require scoped operator review; cancellation drains accepted financial
+work and preserves journals. Treasury ZEC funding and Base
 confirmation can take time. The command introduces no new spending limits.
 While waiting, it logs unfinished jobs and their sync/submission state once a
 minute. The first positive USDC observation satisfies the captured destination
@@ -394,13 +395,16 @@ transactions retain their exact bytes, input owner and finite-expiry recovery.
 Already accepted calculations finish journaling; already submitted I/O drains.
 
 The wallet profile's `max_attempts` also bounds recovery using archived job history
-across process restarts. Quote refreshes proven to precede any accepted calculation
-or outgoing record do not consume attempts; unclassified historical records do.
+across process restarts. Proven never-disclosed resets do not consume attempts:
+these include untouched quote refreshes and unpublished calculations closed after
+exclusive offline SDK reconstruction. Unclassified historical records still count.
 Reaching that bound requires
 operator review; repeated bootstrap/recover commands do not reset it. Actual spendable
 source capacity and per-operation safeguards apply to every new preparation. Qualification runs require separately authorized
-recovery; this path does not grant new qualification authority. Missing bytes alone never authorize retry after
-uncertain preparation. Confirmed deposits with unresolved swap outcomes remain
+recovery; this path does not grant new qualification authority. Unpublished work
+can use a fresh operation only after successful offline reconstruction establishes
+that neither outgoing bytes nor factual transaction metadata was committed. A
+committed transaction with a lost acknowledgment remains owned. Confirmed deposits with unresolved swap outcomes remain
 pending in the automatic provider/credit lanes. Refunds alone grant no replacement
 deposit authority. The low-level recovery commands remain
 available for advanced use, but are omitted from ordinary help.
@@ -524,13 +528,18 @@ never from MCP tool arguments.
 
 Preparation selects SDK inputs, checks actual fee/output and permission, journals
 exact selected inputs, then calculates signed bytes. Known proposal insufficiency
-defers safely; uncertainty after accepted calculation retains ownership and requires
-owner teardown/reopen. Completed bytes and snapshots commit idempotently.
-before further preparation. Network/chain/expiry preflight precedes durable broadcast
-intent, so failure there consumes no submission attempt. The preflighted send path
+defers safely. The SDK owner retains live calculations and completed results;
+completed bytes and snapshots commit idempotently before another mutation. After
+a crash, successful offline reconstruction can close a calculation only when both
+outgoing and factual transaction journals are absent. Exact accepted inputs remain
+preserved; further work uses a fresh identity and current authority.
+Network/chain/expiry preflight precedes durable broadcast intent, so failure there
+consumes no submission attempt. The preflighted send path
 performs only local expiry checks before sending the saved bytes, without another
-unsigned tip read. Failure or cancellation after intent still has an unknown outcome. Unprepared reservations remain conservative
-until explicitly abandoned through the store's guarded recovery API. The automatic funding coordinator calls this API through the serialized owner.
+unsigned tip read. Failure or cancellation after broadcast intent retains the
+original signed transaction. Unpublished calculations recover through the existing
+exclusive SDK reconstruction and guarded recovery path; no manual abandonment
+is required for an ordinary pre-journal crash.
 
 `rotation/near.rs` supports public and confidential foreign-chain EXACT_OUTPUT swaps.
 The demo configurations explicitly select `funding.confidentiality = "public"`:
@@ -644,8 +653,10 @@ across days. One pending prepared outgoing operation gates new preparation, and 
 bytes plus its wallet snapshot commit together.
 
 A sync failure before the transaction preparer is invoked leaves the same quote
-eligible for a later attempt. Interrupted calculation or durable accepted-calculation/transaction
-effects still require recovery; absence of signed bytes alone never permits retry.
+eligible for a later attempt. Interrupted calculation recovers after successful
+offline reconstruction proves no outgoing or factual transaction journal exists.
+Durable transaction effects remain owned; an isolated missing byte record does not
+authorize retry.
 Recovery status retains its preceding failure instead of clearing it.
 
 Managed profiles connect these transitions to the x402 request path using a
@@ -894,8 +905,10 @@ real zingolib sync, wrong-network rejection, periodic checkpoints, cancellation,
 and encrypted restart/resume without real funds or external indexers.
 
 A restored backup must retain its exact accepted-work obligations and declared
-restoration restrictions. A rescan cannot reconstruct unpublished authorizations,
-uncertain source intent or consumed initial claims. Missing off-chain history does
+restoration restrictions. A rescan cannot reconstruct missing payment
+authorizations, disclosed source bytes or consumed initial claims. Unpublished
+calculation recovery uses the retained local journals and exclusive reconstructed
+owner, not blockchain absence. Missing off-chain history does
 not authorize replacement deposits or top-ups. Undeclared filesystem rollback is
 not automatically detectable; a code rollback is not a state downgrade.
 
@@ -943,9 +956,10 @@ canonical evidence. Ordinary serving and finite sync use candidate-scoped canoni
 proofs; the scalar estimate alone cannot retire a wallet. Both confirmed and latest
 balances must meet the group's tolerance, with their maximum recorded as the
 remainder. Never-credited predecessors remain retained for possible late credit
-unless their completed job's every original current/archived source operation
-has proven expiry or never accepted calculation/submission. Source confirmation,
-completion labels and refunds alone cannot establish that closure.
+unless each accepted current/archived swap has its bound NEAR terminal outcome
+and no unresolved local source work remains. Proven never-disclosed operations
+have no bridge obligation. Source confirmation or expiry, completion labels and
+unattributed returned coins alone cannot establish delivery closure.
 Low-balance traversal rotates payment selection without deleting keys or funds.
 
 Production storage preflight rejects unsupported legacy schemas without changing

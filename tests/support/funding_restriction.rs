@@ -537,7 +537,7 @@ fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_su
     store
         .accept_preparation("shield", None, 100, Some(manifest))
         .unwrap();
-    assert!(!store.automatic_shielding_available().unwrap());
+    assert!(store.automatic_shielding_available().unwrap());
     store
         .prepare_with_facts("shield", 1, b"next", b"exact shield", Some(facts))
         .unwrap();

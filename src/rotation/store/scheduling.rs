@@ -346,7 +346,7 @@ mod source_disposition_tests {
             let current = store.funding_job(&job.id).unwrap().unwrap();
             assert_eq!(current.operation_id, job.operation_id);
             assert!(current.last_error.is_none());
-            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 1);
+            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
             assert!(crate::rotation::store::funding::can_recover_facts(
                 None,
                 &store.funding_facts(&job.id, &job.operation_id).unwrap()

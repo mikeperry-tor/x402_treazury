@@ -128,9 +128,9 @@ after releasing the wallet guard; accepted input ownership remains durable.
 Canonical actor validation supplies the network/anchor check without an additional
 connection for local calculation; direct preparation keeps its network validation.
 A configured maximum is a
-rejection ceiling, not a capital reservation. Unknown outcomes after calculation
-acceptance retain that input fence. The preparation phase commits with input
-ownership; known proposal shortages and fee rejections leave the quoted operation
+rejection ceiling, not a capital reservation. The serialized SDK owner retains live
+calculations and completed results until publication. The preparation phase commits
+with accepted input evidence; known proposal shortages and fee rejections leave the quoted operation
 unstarted without consuming transaction recovery attempts. The
 SDK owns current balances, confirmations, witnesses, spent outputs and chain
 corrections. No full historical source/refund traversal gates publication.
@@ -145,8 +145,10 @@ to bound its native-asset permits.
 Treasury command and sync drivers retain their cleanup owner when callers disconnect.
 After an unhealthy SDK mutation, they discard that SDK and reconstruct it from the
 latest committed snapshot through the same serialized Store. Queued commands remain
-queued; an interrupted command is never replayed. Accepted input claims, funding
-restrictions and Base handles remain unchanged. Completed bytes take precedence:
+queued; an interrupted command is never replayed. Accepted input evidence, funding
+restrictions and Base handles remain preserved. Successful offline reconstruction
+can close an unpublished calculation whose outgoing and factual transaction journals
+are both absent. Completed bytes take precedence:
 only identical local publication repeats on the existing 60-second cadence, including
 shutdown. SDK reconstruction also retries unavailable snapshots on that cadence.
 Exited funding and reconciliation tasks reacquire their existing Store/group gates
@@ -442,15 +444,33 @@ commissions. Do not infer a commercial partner agreement from an API key.
 
 The SDK selects available confirmed inputs and calculates standard fees. The
 application checks exact output/fee and current operation/run permission, then
-journals the exact selected-input owner before calculation. One unresolved input
-owner for an unsettled operation prevents overlapping SDK calculations. Completed
-snapshots and exact signed bytes commit atomically; failed publication does not
-grant another calculation.
-An accepted calculation with no bytes remains uncertain across restart until the
-operation's bound NEAR SUCCESS establishes settlement. Its accepted inputs remain
-preserved, but no longer block unrelated calculations or wallet retirement after
-that success. The serialized SDK owner still journals any live calculation's late
-result before processing its next mutation, without disclosing a new deposit.
+journals the exact selected inputs before calculation. The serialized SDK owner
+prevents overlapping calculations. Completed snapshots and exact signed bytes
+commit atomically; failed publication retains the identical completed result and
+does not grant another calculation. A pending signed original remains a durable
+source-work fence. Historical calculation intents are preserved evidence rather
+than an independent global capital reservation. A full SDK rescan can discard
+unconfirmed calculated transaction records and their input reservations. The
+retained signed original therefore keeps its source-work fence until closure;
+actor serialization alone cannot prevent later input reselection after that reset.
+This protects genuinely unfinished work without auditing completed transactions.
+
+Production calculation is offline. Broadcasting requires committed outgoing bytes
+and factual transaction metadata before the Store can grant disclosure authority.
+After successful exclusive offline SDK reconstruction, with no completed result
+still owned, a funding calculation with neither journal can close automatically.
+The original accepted inputs remain encrypted under the original operation ID;
+existing recovery archival records the never-disclosed reset. Another calculation
+uses a fresh operation ID, current claim and funding authority, and SDK spendable
+funds. A jobless shielding calculation uses its normal fresh identity. This local
+recovery needs no blockchain absence proof or extra observation. An outgoing
+commit with a lost acknowledgment stays owned, and a factual transaction record
+without its outgoing journal is corruption, not proof of non-disclosure.
+
+Bound NEAR SUCCESS independently closes source work. Its preserved calculation
+intent cannot block unrelated work or retirement. The serialized SDK owner still
+journals any live calculation's late result before processing its next mutation,
+without disclosing a new deposit.
 
 A returned quote deadline that has actually expired prevents a new preparation or
 first submission. Untouched quote refresh requires proof of no accepted calculation
@@ -580,9 +600,9 @@ Bootstrap and the serving funding worker recover eligible jobs automatically.
 The operator can run `wallet recover --config FILE` with serving stopped for one
 pass through the same classifier, without starting funding or submitting transactions.
 Reports distinguish recovered, waiting, failed checks and operator-required cases.
-Unknown preparation outcomes without a bound NEAR SUCCESS, and missing immutable
-accepted records needed to resolve unfinished work, require review before
-restarting or replacing the funding attempt. A confirmed source with an
+Unpublished calculations recover at the exclusive reconstructed SDK owner;
+missing immutable records required to resolve genuinely disclosed work still
+require scoped review before replacing that funding attempt. A confirmed source with an
 unresolved swap remains automatic pending work for the existing provider/credit
 lanes; a refund alone cannot authorize a replacement deposit. Ordinary discovery and shielding
 of owned outputs can continue under the current funding authority.
@@ -617,9 +637,9 @@ transaction. An archived original confirmed through the canonical-proof/Store
 boundary (including compatible library or legacy state) does not consume another
 entry for the same operation. Ordinary reconciliation remains pending-only;
 scanning a replacement chain does not reopen completed historical source journals.
-New quote refreshes proven to have no accepted calculation or outgoing record are explicitly
-marked in durable history and excluded from that count; historical
-unclassified records still count. Earlier binaries reject the newer state schema.
+Proven never-disclosed resets, including untouched quote refreshes and unpublished
+calculations closed after offline reconstruction, are marked in durable history
+and excluded from that count. Historical unclassified records still count. Earlier binaries reject the newer state schema.
 Unsigned quote outages use bounded per-pass work and backoff without consuming
 transaction recovery attempts.
 
@@ -935,9 +955,9 @@ exact pool, wallet and claim-generation bindings, rather than historical funding
 jobs. Completed funding jobs do not request new-funding scans or reopen their original
 funding authority. With automatic funding enabled, the ordinary vacancy pass
 replaces a current `ALLOCATED`, uncredited reserve whose job is complete once all
-current and archived source ownership for that job is closed: no accepted
-calculation or pending transaction, and any signed operation confirmed or proven
-expired. The Store atomically retains the old wallet, clears its exact slot and
+current and archived source ownership for that job is closed: no live unresolved
+calculation or pending transaction. Bound NEAR SUCCESS, canonical confirmation,
+verified finite expiry or proven non-disclosure can close the relevant source work. The Store atomically retains the old wallet, clears its exact slot and
 increments the claim generation; ordinary allocation then creates a fresh wallet
 and operation under current funding authority. A crash between these commits
 leaves a vacancy for the next pass. The old financial journal and uncertain bridge
@@ -965,10 +985,11 @@ release proofs keep their separate correctness checks.
 Positive destination credit alone cannot finish a pending source transaction.
 Validated bound NEAR SUCCESS closes source work as described above. Other pending
 originals retain observation demand across stale phases, disabled/removed profiles,
-cancellation and restart. Accepted unpublished calculations and invalid retained
-bytes keep their input fence, but do not request scans that cannot reconstruct or
-publish them. Such an owner also prevents new funding-demand scans whose
-calculations it blocks. Completed-result publication and SDK reconstruction retry
+cancellation and restart. Live calculations and completed results retain their
+serialized SDK owner; unpublished calculation metadata alone does not request a
+network scan or create a global input fence. Invalid retained outgoing bytes keep
+their actual pending-source fence, while local publication and reconstruction
+handle recoverable failures without network scans. Completed-result publication and SDK reconstruction retry
 locally at their own 60-second cadence. A successful needed persisted scan may
 recover owned transparent funds through automatic shielding under existing
 permission/fee checks; accepted shielding keeps observation even after its original
@@ -1069,12 +1090,14 @@ Failed SDK capabilities reconstruct and exited funding/reconciliation tasks resu
 through existing ownership. Automatic shielding recovers owned transparent capital
 per address under existing authority. Local tests cover these paths without live-funded,
 consensus or Tor qualification; see [testing](testing.md#qualification-status).
-Reopening never erases uncertain accepted work or recovers unpublished bytes lost
-with a process. An accepted shielding calculation blocks new calculation until its
-original transaction confirms or completed canonical SDK coverage establishes
-its buried signed finite expiry. Automatic initial submission requires current
-authority and zero prior attempts; uncertain broadcasts are never automatically
-replayed. Missing prepared bytes retain their uncertain accepted input claim.
+Reopening preserves accepted evidence and does not recover unpublished bytes lost
+with a process. A pending signed shielding original keeps its source-work fence
+until confirmation or verified finite expiry. An unpublished calculation with
+neither outgoing nor factual journal recovers through successful offline SDK
+reconstruction; later shielding uses a fresh identity and current SDK funds.
+Automatic initial submission requires current authority and zero prior attempts;
+uncertain broadcasts are never automatically replayed. A factual transaction
+record with missing outgoing bytes remains a scoped corruption case.
 
 Multiple charges after the accepted USDC failure category and incomplete external
 settlement proof are accepted limitations. The [network guide](network-egress.md#remaining-timers-and-budgets)

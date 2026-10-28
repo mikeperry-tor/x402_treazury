@@ -519,7 +519,7 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
             let facts = s.funding_facts(&current.id, &current.operation_id)?;
             assert!(!facts.accepted_quote);
             assert_eq!(facts.source_attempts, 0);
-            assert_eq!(s.funding_recovery_count(&current.id)?, 1);
+            assert_eq!(s.funding_recovery_count(&current.id)?, 0);
             Ok(())
         })
         .await
@@ -642,7 +642,7 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                     assert!(!facts.provider_success && !facts.initial_credit_recorded);
                     assert!(facts.source_submission.is_none());
                     assert_eq!(facts.source_attempts, 0);
-                    assert_eq!(s.funding_recovery_count(&current.id)?, u64::from(!refresh));
+                    assert_eq!(s.funding_recovery_count(&current.id)?, 0);
                     assert!(
                         s.funding_facts(&sibling_check.id, &sibling_check.operation_id)?
                             .provider_success
@@ -668,10 +668,7 @@ async fn operation_rollover_after_inventory_capture_keeps_scheduler_and_siblings
                 reopened.funding_job(&old.id).unwrap().unwrap().operation_id,
                 replacement
             );
-            assert_eq!(
-                reopened.funding_recovery_count(&old.id).unwrap(),
-                u64::from(!refresh)
-            );
+            assert_eq!(reopened.funding_recovery_count(&old.id).unwrap(), 0);
             assert_eq!(reopened.status().unwrap().treasury_operations.len(), 1);
         }
     }
@@ -2902,7 +2899,18 @@ async fn successful_no_progress_keeps_the_source_observation_floor() {
         worker.tick(1000).await.unwrap();
         if blocked_by_owner {
             store
-                .call(|s| s.accept_preparation("unrelated-owned-calculation", None, 60, None))
+                .call(|s| {
+                    let id = "unrelated-owned-calculation";
+                    s.accept_preparation(id, None, 60, None)?;
+                    s.prepare_with_facts(
+                        id,
+                        s.snapshot()?.0,
+                        b"owned SDK snapshot",
+                        b"owned signed result",
+                        None,
+                    )?;
+                    Ok(())
+                })
                 .await
                 .unwrap();
         }

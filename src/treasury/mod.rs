@@ -260,6 +260,14 @@ impl Treasury {
             client.indexer_uri().is_none(),
             "offline treasury must not connect to an indexer"
         );
+        // No prior SDK capability or completed publisher exists here. A missing
+        // outgoing AND factual operation is proof no result could be disclosed.
+        let store = tokio::task::spawn_blocking(move || {
+            let mut store = store;
+            store.close_unpublished_preparations()?;
+            Ok::<_, anyhow::Error>(store)
+        })
+        .await??;
         let (store, worker) = StoreHandle::spawn(store);
         Ok(OpenedTreasury::Ready(Box::new(Self {
             network,

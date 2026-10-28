@@ -36,6 +36,9 @@ impl Treasury {
             "reconstructed SDK must be offline"
         );
         ensure!(!stop.is_cancelled(), "treasury stopping");
+        self.store
+            .call(|s| s.close_unpublished_preparations())
+            .await?;
         self.client = Some(client);
         self.revision = revision;
         self.healthy = true;
@@ -97,7 +100,7 @@ mod tests {
         owner.close().await.unwrap();
     }
     #[tokio::test]
-    async fn lost_ack_reconstructs_latest_commit_and_keeps_uncertain_input_owner_and_restriction() {
+    async fn unpublished_jobless_intent_stays_audit_only_after_reconstruction_with_restriction() {
         let (_dir, mut owner) = fixture().await;
         owner
             .client
@@ -142,7 +145,12 @@ mod tests {
             .call(|s| {
                 assert!(s.require_unstarted_preparation("uncertain").is_err());
                 assert!(s.abandon_unprepared("uncertain").is_err());
-                assert!(s.require_preparation_available().is_err());
+                let blocked = s.require_preparation_available().unwrap_err();
+                assert_eq!(
+                    blocked.downcast_ref::<crate::rotation::error::AdmissionError>(),
+                    Some(&crate::rotation::error::AdmissionError::FundingRestricted),
+                    "audit-only intents do not remove the separately imposed funding restriction"
+                );
                 let inputs = s.prepared_inputs("uncertain")?;
                 assert_eq!(
                     (inputs[0].txid.as_str(), inputs[0].output_index),
@@ -156,6 +164,46 @@ mod tests {
         assert!(owner.healthy);
         owner.close().await.unwrap();
     }
+    #[tokio::test]
+    async fn published_lost_ack_reconstructs_committed_sdk_and_retains_exact_outgoing_owner() {
+        let (_dir, mut owner) = fixture().await;
+        let bytes = snapshot(owner.client.as_ref().unwrap()).await.unwrap();
+        owner
+            .store
+            .call(move |s| {
+                s.accept_preparation("published", None, 10, None)?;
+                s.prepare_with_facts("published", 1, &bytes, b"original signed result", None)?;
+                Err::<(), _>(anyhow::anyhow!("fixture lost commit acknowledgment"))
+            })
+            .await
+            .unwrap_err();
+        owner.healthy = false;
+        owner
+            .reconstruct_sdk(&CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(owner.revision, 2);
+        owner
+            .store
+            .call(|s| {
+                assert_eq!(
+                    s.prepared_bytes("published")?.as_slice(),
+                    b"original signed result"
+                );
+                assert!(s.require_preparation_available().is_err());
+                assert!(s.require_unstarted_preparation("published").is_err());
+                assert!(s.abandon_unprepared("published").is_err());
+                assert_eq!(
+                    s.qualification_state()?["unprepared_archives"],
+                    serde_json::json!([])
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        owner.close().await.unwrap();
+    }
+
     #[tokio::test]
     async fn shutdown_during_store_barrier_never_installs_a_replacement_sdk() {
         let (_dir, mut owner) = fixture().await;

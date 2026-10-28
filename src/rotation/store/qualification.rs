@@ -206,9 +206,9 @@ fn read(db: &Connection) -> Result<Value> {
         let raw=raw.map(|bytes|format!("{:x}",Sha256::digest(&bytes)));
         Ok(json!({"operation_id":id,"preparation_sha256":format!("{:x}",Sha256::digest(&bytes)),"prepared_record_sha256":raw,"job_id":binding.as_ref().map(|v|&v.0),"pool_name":binding.as_ref().map(|v|&v.1)}))
     }).collect::<Result<Vec<_>>>()?;
-    let pending = db.prepare("SELECT operation_id FROM operation_network WHERE preparation IS NOT NULL UNION ALL SELECT id FROM outgoing WHERE state='PREPARED' ORDER BY 1")?
+    let pending = db.prepare("SELECT n.operation_id FROM operation_network n WHERE n.preparation IS NOT NULL AND NOT EXISTS(SELECT 1 FROM funding_recovery r JOIN funding_quote_refreshes q ON q.operation_id=r.operation_id WHERE r.operation_id=n.operation_id AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.operation_id=n.operation_id AND j.job_id!=r.job_id) AND NOT EXISTS(SELECT 1 FROM outgoing WHERE id=n.operation_id) AND NOT EXISTS(SELECT 1 FROM treasury_operations WHERE id=n.operation_id)) UNION ALL SELECT id FROM outgoing WHERE state='PREPARED' ORDER BY 1")?
         .query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    let archived = db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM operation_network n WHERE n.operation_id=r.operation_id AND n.preparation IS NOT NULL) ORDER BY r.operation_id")?
+    let archived = db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM treasury_operations t WHERE t.id=r.operation_id) AND (NOT EXISTS(SELECT 1 FROM operation_network n WHERE n.operation_id=r.operation_id AND n.preparation IS NOT NULL) OR (EXISTS(SELECT 1 FROM funding_quote_refreshes q WHERE q.operation_id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.operation_id=r.operation_id AND j.job_id!=r.job_id))) ORDER BY r.operation_id")?
         .query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let status = read_status(db)?;
     let wallets = db.prepare("SELECT id,pool_id,role,balance FROM wallets ORDER BY id")?

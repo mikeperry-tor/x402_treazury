@@ -24,8 +24,8 @@ impl Store {
         if accepted {
             return Ok(true);
         }
-        // Bare accepted calculations/invalid bytes retain the input fence, but
-        // a scan cannot reconstruct unpublished bytes or authorize re-calculation.
+        // Invalid published bytes keep their owner. Unpublished intent history
+        // cannot hide an unrelated current claim after SDK reconstruction.
         if self.preparation_pending()?
             || self.funding_restriction != super::super::restriction::FundingRestriction::Ordinary
         {
@@ -272,7 +272,7 @@ mod tests {
         );
     }
     #[test]
-    fn bare_calculation_and_invalid_bytes_keep_fences_without_useless_scan_demand() {
+    fn unpublished_intent_does_not_hide_claims_but_invalid_published_bytes_keep_their_fence() {
         for publish_invalid in [false, true] {
             let (_dir, mut store) = fixture();
             let job = allocate(&mut store);
@@ -283,10 +283,11 @@ mod tests {
                     .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
                     .unwrap();
             }
-            assert!(
-                !store
+            assert_eq!(
+                store
                     .treasury_observation_needed(&["pool".to_owned()])
-                    .unwrap()
+                    .unwrap(),
+                !publish_invalid
             );
             assert!(
                 store
@@ -294,7 +295,10 @@ mod tests {
                     .is_err()
             );
             assert!(store.abandon_unprepared(&job.operation_id).is_err());
-            assert!(store.require_preparation_available().is_err());
+            assert_eq!(
+                store.require_preparation_available().is_err(),
+                publish_invalid
+            );
         }
     }
     #[test]

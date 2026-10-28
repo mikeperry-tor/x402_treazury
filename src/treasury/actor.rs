@@ -820,7 +820,13 @@ mod tests {
             .call(move |s| {
                 assert_eq!(s.refund_address(&job)?.as_deref(), Some(address.as_str()));
                 assert!(s.require_unstarted_preparation("uncertain").is_err());
-                assert!(s.accept_preparation("duplicate", None, 100, None).is_err());
+                assert!(s.accept_preparation("uncertain", None, 101, None).is_err());
+                s.require_preparation_available()?;
+                s.accept_preparation("fresh", None, 100, None)?;
+                assert!(s.require_unstarted_preparation("fresh").is_err());
+                assert!(s.prepared_bytes("uncertain").is_err());
+                assert!(s.prepared_bytes("fresh").is_err());
+                assert!(s.require_unstarted_preparation("uncertain").is_err());
                 Ok(())
             })
             .await
@@ -975,7 +981,7 @@ mod tests {
             .call(move |s| {
                 assert!(s.require_unstarted_preparation(&job.operation_id).is_err());
                 assert!(s.abandon_unprepared(&job.operation_id).is_err());
-                assert!(s.require_preparation_available().is_err());
+                s.require_preparation_available()?;
                 assert!(s.status()?.treasury_operations.is_empty());
                 Ok(())
             })

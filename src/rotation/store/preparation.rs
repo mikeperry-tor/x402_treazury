@@ -30,24 +30,14 @@ pub(super) struct PreparationIntent {
     pub calculation: Option<CalculationInputs>,
 }
 
-/// Fulfilled intent-only records remain audit evidence, not source work. Raw
-/// pending results still require their existing operation-bound normalization.
+/// Live SDK calculation is owned by the serialized Treasury capability. An
+/// accepted intent alone cannot disclose bytes and remains immutable audit data.
 pub(super) fn preparation_pending(db: &Connection) -> Result<bool> {
-    if db.query_row(
+    Ok(db.query_row(
         "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
         [],
-        |r| r.get::<_, bool>(0),
-    )? {
-        return Ok(true);
-    }
-    let mut query =
-        db.prepare("SELECT operation_id FROM operation_network WHERE preparation IS NOT NULL")?;
-    for id in query.query_map([], |r| r.get::<_, String>(0))? {
-        if !funding::provider_succeeded(db, &id?)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+        |r| r.get(0),
+    )?)
 }
 
 impl Store {
@@ -235,7 +225,7 @@ mod tests {
             serde_json::json!(["operation"])
         );
         assert!(store.abandon_unprepared("operation").is_err());
-        assert!(store.accept_preparation("other", None, 1, None).is_err());
+        store.require_preparation_available()?;
         drop(store);
         let mut store = Store::open(&state, &key, &owner)?;
         store.deny_new_funding();

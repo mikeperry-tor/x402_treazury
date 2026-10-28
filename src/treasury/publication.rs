@@ -137,6 +137,22 @@ mod tests {
         let (_dir, mut treasury, db) = fixture(true).await;
         assert!(!treasury.healthy);
         assert!(treasury.derive_address().await.is_err());
+        let original = treasury.completed.as_ref().unwrap().raw.clone();
+        let revision = treasury.revision;
+        let error = treasury
+            .reconstruct_sdk(&CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("completed publication still owned")
+        );
+        assert_eq!(treasury.revision, revision);
+        assert_eq!(
+            treasury.completed.as_ref().unwrap().raw.as_slice(),
+            original.as_slice()
+        );
         db.execute_batch("DROP TRIGGER reject_completed;").unwrap();
         let completion = treasury.completed.as_ref().unwrap();
         let (id, revision, bytes, raw, facts) = (

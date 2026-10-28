@@ -262,7 +262,7 @@ fn captured_phase_and_facts_survive_rollover_and_reopen() {
             .operation,
         replacement.job.operation_id
     );
-    assert_eq!(store.funding_recovery_count(&old.id).unwrap(), 1);
+    assert_eq!(store.funding_recovery_count(&old.id).unwrap(), 0);
     assert!(store.status().unwrap().treasury_operations.is_empty());
 }
 

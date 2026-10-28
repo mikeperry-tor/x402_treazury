@@ -179,6 +179,21 @@ v6 read/save/reopen/next-address fixture remain documented in
 [wallet administration](wallet-cli.md). Server protocol 0.5.0 capability
 requirements are distinct from the Rust protocol crate version.
 
+SDK calculation is offline; only an atomically committed outgoing journal can
+supply submission authority. Successful exclusive offline reconstruction, with no
+completed result awaiting publication, closes a funding calculation whose outgoing
+and factual transaction journals are both absent. Existing recovery archival
+preserves its encrypted accepted inputs; the next calculation needs a fresh
+operation and current authority. The persisted `funding_quote_refreshes` table also
+marks these proven never-disclosed resets for recovery-count exclusion; its legacy
+name and existing quote-refresh rows remain compatible. Raw pending originals and
+committed results with lost acknowledgments retain their owner. Calculation
+metadata alone does not create a global source-work fence. Full SDK clear can
+discard pending transaction records and their spend links; the application
+therefore retains the fence for actual unfinished signed originals until closure.
+The synthetic `sdk_reorg_rescan_preserves_original_signed_work` regression covers
+this gap without requiring lifetime tracking of completed source transactions.
+
 The application does not mirror SDK reorg history into completed swap workflows.
 NEAR owns the outcome of a bound swap; a validated SUCCESS closes source work
 without requiring a local CONFIRMED label. Current SDK state independently owns
