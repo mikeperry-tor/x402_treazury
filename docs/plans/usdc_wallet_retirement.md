@@ -261,7 +261,8 @@ Acceptance must exercise the real ordinary producer-to-publication path, includi
 - Auto-funding paused, disabled group, qualification mutation denial, Store-only
   operation, finite explicit sync, startup SOCKS unavailability and no direct fallback.
 - Stable idle RPC counts: no additional retirement-driven canonical reads of
-  unrelated/above-tolerance/never-credited wallets; existing finite scalar startup
+  unrelated or above-tolerance wallets, or never-credited wallets with unresolved
+  original delivery obligations; existing finite scalar startup
   and accepted-credit observations remain valid. A verified latest balance above
   tolerance stops retirement work even when the saved minimum stays low. The
   opposite disagreement retains progress until confirmed balance catches up;
