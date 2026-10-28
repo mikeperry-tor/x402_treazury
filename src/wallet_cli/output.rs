@@ -114,6 +114,11 @@ pub(super) fn status(status: &Status) -> String {
             pool.funding_degraded
         )
         .unwrap();
+        for claim in &pool.reserve_claims {
+            if let Some(job) = &claim.blocked_funding_job_id {
+                writeln!(text, "    {} reserve blocked by completed, uncredited funding job {job}; when automatic funding is enabled, replacement follows resolution of original source ownership", claim.slot).unwrap();
+            }
+        }
         for wallet in pool
             .addresses
             .iter()

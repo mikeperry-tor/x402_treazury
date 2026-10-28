@@ -300,7 +300,10 @@ impl Store {
         };
         let mut failure = None;
         for kind in [super::AllocationKind::Small, super::AllocationKind::Large] {
-            if let Err(error) = self.allocate_capacity_kind(&pool, kind, true) {
+            if let Err(error) = self
+                .replace_completed_reserve(&pool, kind)
+                .and_then(|()| self.allocate_capacity_kind(&pool, kind, true))
+            {
                 failure.get_or_insert(error);
             }
         }

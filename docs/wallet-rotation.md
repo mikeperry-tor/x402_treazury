@@ -708,10 +708,25 @@ New reserve demand wakes shared treasury discovery. Known shortages keep needed
 scans running so later deposits and confirmations can supply spendable SDK funds.
 New-funding discovery demand comes from enabled current reserve slots and their
 exact pool, wallet and claim-generation bindings, rather than historical funding
-jobs. Completed funding jobs do not request new-funding scans, even if their
-uncredited slot binding remains; completion does not reopen funding or assert
-settlement. Replaced or disabled claims do not keep discovery running; validated accepted
-transactions retain their independent journal-based observation demand.
+jobs. Completed funding jobs do not request new-funding scans or reopen their original
+funding authority. With automatic funding enabled, the ordinary vacancy pass
+replaces a current `ALLOCATED`, uncredited reserve whose job is complete once all
+current and archived source ownership for that job is closed: no accepted
+calculation or pending transaction, and any signed operation confirmed or proven
+expired. The Store atomically retains the old wallet, clears its exact slot and
+increments the claim generation; ordinary allocation then creates a fresh wallet
+and operation under current funding authority. A crash between these commits
+leaves a vacancy for the next pass. The old financial journal and uncertain bridge
+delivery remain unchanged. Late credit stays usable on the retained wallet and
+cannot reclaim the replacement slot. Low balances on previously credited wallets
+never trigger this recovery or authorize top-ups.
+
+Committed replacement logs at INFO. A completed uncredited slot still waiting
+for source ownership is identified once at funding-owner startup at INFO and in
+wallet status as degraded inventory; recurring checks remain DEBUG. This condition does not assert insufficient ZEC. Pending
+original source work retains its independent observation and recovery. Replaced
+or disabled claims do not keep discovery running; validated accepted transactions
+retain their independent journal-based observation demand.
 Waiting source operations reuse an applicable current-owner scan without extra
 tip probes. Local quote, preparation and submission handoffs remain immediate.
 Immediate continuation follows an actual successful local result and current

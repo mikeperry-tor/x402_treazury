@@ -291,7 +291,11 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             let name = name.clone();
             if self
                 .store
-                .call(move |s| s.fill_funding_vacancies(&name))
+                .call(move |s| {
+                    let result = s.fill_funding_vacancies(&name);
+                    s.report_blocked_reserves(&name)?;
+                    result
+                })
                 .await
                 .is_err()
             {

@@ -1,7 +1,6 @@
 //! Bounded startup reads over configured groups and their destination paths.
 //! No partial Status, full wallet inventory, refund history, or new readiness ledger.
-pub(super) const STARTUP_CLAIM_SQL: &str =
-    "SELECT id FROM funding_jobs WHERE pool_id=?1 AND allocation_kind=?2 AND claim_generation=?3";
+pub(super) const STARTUP_CLAIM_SQL: &str = "SELECT f.id,f.state='COMPLETE' AND f.readiness_requirement IS NULL AND w.role='RETAINED' FROM funding_jobs f JOIN wallets w ON w.id=f.wallet_id WHERE f.pool_id=?1 AND f.allocation_kind=?2 AND f.claim_generation=?3";
 
 use super::funding::{FundingFacts, FundingJob};
 use super::*;
@@ -246,9 +245,10 @@ impl Store {
     ) -> Result<Vec<(String, String)>> {
         ensure!(claims.len() <= 2, "startup claim inventory too large");
         claims.iter().map(|claim| {
+            let job = self.startup_claim_job(pool, claim)?.context("bootstrap replacement allocation pending")?;
             let balance: String = self.db.query_row(
-                "SELECT w.balance FROM funding_jobs j JOIN wallets w ON w.id=j.wallet_id AND w.pool_id=j.pool_id WHERE j.pool_id=?1 AND j.allocation_kind=?2 AND j.claim_generation=?3",
-                params![pool, claim.slot, claim.generation],
+                "SELECT w.balance FROM funding_jobs j JOIN wallets w ON w.id=j.wallet_id WHERE j.id=?1",
+                [&job],
                 |row| row.get(0),
             ).context("bootstrap wallet estimate unavailable")?;
             let display = amount(&balance).ok()
@@ -266,19 +266,36 @@ impl Store {
         ensure!(claims.len() <= 2, "startup claim inventory too large");
         let mut result = Vec::new();
         for claim in claims {
-            let saved: Option<String> = self
-                .db
-                .query_row(
-                    STARTUP_CLAIM_SQL,
-                    params![pool, claim.slot, claim.generation],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            if let Some(id) = saved {
+            if let Some(id) = self.startup_claim_job(pool, claim)? {
                 result.push(self.startup_path(&id)?);
             }
         }
         Ok(result)
+    }
+
+    /// Follow only replaced, never-credited inventory. A credited generation
+    /// satisfies this finite goal even if payments have since consumed it.
+    fn startup_claim_job(&self, pool: &str, claim: &StartupClaim) -> Result<Option<String>> {
+        let mut generation = claim.generation;
+        loop {
+            let row: Option<(String, bool)> = self
+                .db
+                .query_row(
+                    STARTUP_CLAIM_SQL,
+                    params![pool, claim.slot, generation],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            match row {
+                None => return Ok(None),
+                Some((id, false)) => return Ok(Some(id)),
+                Some((_, true)) => {
+                    generation = generation
+                        .checked_add(1)
+                        .context("reserve_generation_overflow")?
+                }
+            }
+        }
     }
 
     fn startup_path(&self, id: &str) -> Result<StartupPath> {

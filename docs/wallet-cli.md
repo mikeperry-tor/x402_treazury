@@ -74,8 +74,12 @@ reads the encrypted snapshot without exclusive ownership and returns all saved
 receive addresses as JSON. Neither command derives an address or changes sync
 readiness. `wallet init` refuses an existing wallet; `wallet address` creates a new
 address and requires exclusive ownership, so it cannot run against the same
-treasury while `serve` owns it. Status JSON retains its existing saved-state shape
-and needs neither the key nor SDK snapshot decoding.
+treasury while `serve` owns it. Status JSON needs neither the key nor SDK snapshot
+decoding. Reserve claims include `blocked_funding_job_id` when completed, uncredited funding still occupies
+the slot; the pool then reports `funding_degraded=true`. Human status explains
+that automatic funding replaces this inventory after original source ownership
+resolves. This is distinct from insufficient spendable ZEC, and previously
+credited low-balance wallets are never topped up.
 
 Only `treasury.state_dir` is required in the treasury table.
 Actual spendable funds after reservations, confirmations and fees govern enabled funding;
@@ -836,9 +840,11 @@ original interpretation; none of these observations grants payment or retry auth
 
 Bootstrap reports `serving_ready_groups`, `inventory_ready_groups`, and
 `captured_completed_groups` separately. The captured command waits only for its
-enabled slot generations, including claims vacant when it
-starts. Successful completion has an empty `incomplete_captured_jobs` list;
-obstruction or cancellation remains an error with persisted work retained. Current
+enabled slot generations, including claims vacant when it starts. A completed,
+uncredited generation retained by automatic reserve replacement follows its
+immediate successor; the command stops following once a generation receives
+credit, even if payments consume it before bootstrap finishes. Successful
+completion has an empty `incomplete_captured_jobs` list; obstruction or cancellation remains an error with persisted work retained. Current
 inventory can become incomplete again after a reserve is consumed.
 
 Status replaces the old pool `deposit_atomic` and `bootstrapped` fields with current

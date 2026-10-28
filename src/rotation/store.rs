@@ -24,6 +24,7 @@ pub(crate) mod history;
 pub(crate) mod inventory;
 mod ownership;
 mod reporting;
+mod reserve_replacement;
 pub use reporting::{BalancePointStatus, RetirementAccounting, RuntimeBalanceEvidence};
 pub mod preparation;
 pub mod refunds;
@@ -135,6 +136,8 @@ pub struct ReserveClaimStatus {
     pub target_atomic: String,
     pub maximum_output_atomic: String,
     pub destination_ready: bool,
+    /// Completed initial funding still occupies an uncredited reserve slot.
+    pub blocked_funding_job_id: Option<String>,
 }
 #[derive(Serialize)]
 pub struct RetirementStatus {
@@ -1084,15 +1087,19 @@ fn read_status(db: &Connection) -> Result<Status> {
         vec![]
     };
     for pool in &mut pools {
-        pool.funding_degraded = funding_jobs.iter().any(|j| {
-            j.pool_id == pool.id
-                && (j.timed_out
-                    || matches!(
-                        j.phase,
-                        funding::FundingPhase::RecoveryRequired
-                            | funding::FundingPhase::RefundPending
-                    ))
-        });
+        pool.funding_degraded = pool
+            .reserve_claims
+            .iter()
+            .any(|c| c.blocked_funding_job_id.is_some())
+            || funding_jobs.iter().any(|j| {
+                j.pool_id == pool.id
+                    && (j.timed_out
+                        || matches!(
+                            j.phase,
+                            funding::FundingPhase::RecoveryRequired
+                                | funding::FundingPhase::RefundPending
+                        ))
+            });
     }
     Ok(Status {
         schema_version: 5,

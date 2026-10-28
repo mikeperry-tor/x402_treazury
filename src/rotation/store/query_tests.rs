@@ -35,7 +35,7 @@ fn indexed_lookups_preserve_retirement_claim_generations_and_refresh_exclusions(
             params!["pool", "small", 0]
         )
         .0,
-        vec![vec![Value::Text("reserve".into())]]
+        vec![vec![Value::Text("reserve".into()), Value::Integer(0)]]
     );
     assert!(
         inspect(
@@ -124,7 +124,10 @@ fn scoped_query_work_is_independent_of_unrelated_lifetime_history() {
     }
     assert_eq!(before[0].0.len(), 1);
     assert!(before[1].0.is_empty());
-    assert_eq!(before[2].0, vec![vec![Value::Text("job".into())]]);
+    assert_eq!(
+        before[2].0,
+        vec![vec![Value::Text("job".into()), Value::Integer(0)]]
+    );
     assert!(before[3].0.is_empty());
     assert_eq!(before[4].0, vec![vec![Value::Integer(1)]]);
     assert_eq!(before[5].0, vec![vec![Value::Integer(0)]]);

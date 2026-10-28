@@ -206,10 +206,13 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
                 target_atomic: r.get(4)?,
                 maximum_output_atomic: r.get(5)?,
                 destination_ready: false,
+                blocked_funding_job_id: None,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
     for claim in &mut pool.reserve_claims {
+        claim.blocked_funding_job_id =
+            super::reserve_replacement::blocked_job(db, &pool.id, &claim.slot)?;
         if let Some(wallet) = &claim.wallet_id {
             claim.destination_ready = capacity::payment_ownership(db, &pool.id, wallet)?
                 .is_some_and(|ownership| {
