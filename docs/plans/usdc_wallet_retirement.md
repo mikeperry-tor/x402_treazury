@@ -91,20 +91,69 @@ itself retire the wallet, release source inputs or authorize replacement funding
 | Delivery bound to the original quote and independently verified by the existing destination USDC transfer proof | That delivery completed, even if its credit was missed and the current balance is zero |
 | Original-quote-bound terminal refund whose protocol contract establishes completion of refund processing and no outstanding destination delivery | That swap no longer promises destination credit; account for contractual fees rather than requiring refunded amount to equal the gross deposit |
 
+These are alternative grounds for closing an attempt, not a cumulative checklist.
+Use an already validated, exactly bound terminal observation or existing canonical
+proof when it establishes the required fact; do not require a fresh provider or
+chain lookup merely to agree with it. Each genuinely unresolved attempt and
+authorization remains independently owned.
+
+Preserve the existing first-positive-USDC-credit contract when recovering missed
+historical delivery. Use the actual bound receipt, not equality to the quoted
+target, to establish that credit. Do not introduce a new wait for the expected
+target amount; actual unresolved accepted source work remains independently owned.
+
 Complete provenance means the existing journal contract and retained facts, not
 a new provenance-certificate framework. A refunded current attempt cannot close
 an unresolved archived attempt or an accepted source attempt still able to deliver.
 Use the provider's documented terminal semantics, exact saved deposit/request
-bindings and existing receipt verification. A status enum or historical Boolean
-without its binding and applicable semantics is insufficient. Partial refunds,
-contradictory success/refund evidence, unverified delivery, `FAILED`,
-`PENDING_DEPOSIT`, HTTP errors and timeouts retain uncertainty. Expired quote time
-alone does not prove source nonexecution or release an accepted transaction.
+bindings and existing receipt verification. An unbound status enum or Boolean
+does not establish those facts. A partial refund with an outstanding contractual
+delivery leg, genuinely conflicting delivery evidence, unverified delivery,
+`FAILED`, `PENDING_DEPOSIT`, HTTP errors and timeouts alone do not establish closure.
+A net refund below the gross deposit or a difference between provider-reported and
+observed amounts is not itself evidence of an outstanding delivery leg. Expired
+quote time alone does not prove source nonexecution or release an accepted transaction.
 Independently resolve source liabilities through existing source recovery; a
 terminal provider result never releases source inputs. Do not require a new
 refund-attribution ledger or artificial positive-credit event to close an otherwise
 proven destination obligation. SDK/blockchain reconciliation continues to own
 source spendability and discovery of returned funds.
+
+#### Reconcile from existing ZEC evidence
+
+Use authoritative SDK/chain observations to correct derived swap observations and
+stale workflow state, and finish work whose outcome they establish. Keep immutable
+accepted quotes, exact inputs, signed bytes and original identities intact. An
+exact source transaction's canonical confirmation resolves its submission outcome
+through the existing owner even when its saved phase is stale; it does not by
+itself establish destination delivery. Never require historical workflow labels
+or provider amount reports to agree before publishing an established recovery.
+
+A confirmed refund output to the saved refund address establishes receipt of that
+actual amount. A recorded, confirmed shielding spend of that exact outpoint
+establishes subsequent capital recovery; use existing SDK ownership validation
+for the shielded output. The transparent address may now be empty and the
+shielded funds may already have been spent. Neither invalidates historical
+recovery. Prefer these existing records and observations over new queries. A
+targeted missing-fact acquisition, if necessary, uses existing identity-bound
+network/SDK paths and observation cadence; do not add explorer dependencies,
+refund-address watchers, historical sweeps or new monetary tracking.
+
+These facts can repair receipt/recovery reporting and finish the corresponding
+source/shielding work. Receipt or shielding alone does not prove that the bridge
+cannot also deliver USDC. Conversely, a bound terminal refund that already closes
+the destination obligation does not require proof of receipt, shielding, refund
+amount equality, or recovery of its fee before retirement evaluation. No new
+refund-attribution or cross-chain consistency gate is permitted.
+
+Reporting differences, absent optional evidence and stale phases must not create
+financial-repair blockers, pause otherwise authorized funding/payments, or reopen
+proven completed work. Publish facts that are established, retain uncertainty
+only for the obligation not yet resolved, and continue independent work. A real
+unresolved accepted input owner or payment authorization still retains its existing
+protection. Correctable derived-state differences should be reconciled; operator
+investigation is for required facts that cannot be recovered or genuinely
+conflicting execution/ownership evidence, scoped to the affected operation.
 
 Inspect bound provider status or existing chain evidence only while it can advance
 this specific unresolved obligation, using the existing observation owners,
@@ -130,7 +179,7 @@ Define completion independently of the saved scalar:
 | Latest within tolerance but confirmed balance still above it | Retain confirmation-progress work under the existing cadence; retire only after both qualify and other blockers resolve |
 | Unresolved original authorization or transient proof/publication failure | Retain scoped work and retry under existing observation cadence/backoff |
 | Role, group, reserve-claim or destination eligibility changed | Recheck current facts; stop ineligible network work and reconsider on its relevant transition |
-| Required stored records malformed or inconsistent | Preserve obligations, surface a scoped operator requirement, and continue independent wallets; avoid repeated proofs that cannot repair those records |
+| Required facts cannot be recovered from accepted inputs and authoritative observations, or execution/ownership evidence genuinely conflicts | Preserve the affected obligation, surface a scoped operator requirement, and continue independent wallets; reconcile recoverable derived state instead of treating reporting differences as blockers |
 | Cancellation, restart or owner replacement | Keep accepted work owned; rederive unfinished work from durable facts without replaying payments; restart may supply one fresh finite startup evaluation |
 
 A low saved minimum can coexist with a latest balance above tolerance. It must not
@@ -153,7 +202,9 @@ failure policy to make this reuse convenient.
 Review original source/destination closure alongside this scheduling decision:
 identify which existing persisted proofs establish each closure case, how exact
 quote bindings survive restart, and how legacy gaps and contradictions remain
-visible without repeated useless I/O. Establish the terminal-refund contract from
+visible without repeated useless I/O. Identify where existing SDK/chain facts can
+replace stale derived state and finish work without adding a consistency gate.
+Establish the terminal-refund contract from
 [the provider status API](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
 and its [status semantics](https://github.com/near/agent-skills/blob/main/skills/near-intents/references/concepts.md).
 Do not treat an enum's spelling or a successful diagnostic lookup as sufficient
@@ -244,7 +295,8 @@ Acceptance must exercise the real ordinary producer-to-publication path, includi
   and reserve-replacement generation ownership remaining intact.
 - Complete never-started provenance versus missing legacy history; canonical
   expired/unspent source recovery; verified delivery missed by scalar history;
-  bound terminal refunds including fees; partial/contradictory refunds and bare
+  bound terminal refunds including fees; refunds with unresolved delivery legs,
+  genuinely conflicting execution evidence, and bare
   failed/pending/expired-quote results retaining their obligations. Exercise
   closure with current balance zero without fabricating first positive credit,
   refund attribution, source release, replay, top-ups or new allocations.
@@ -252,8 +304,23 @@ Acceptance must exercise the real ordinary producer-to-publication path, includi
   completion across cancellation/restart; no recurring balance reads that cannot
   resolve a source/provider blocker. One attempt's closure cannot conceal another
   current or archived attempt capable of delivery. Reject wrong deposit, recipient,
-  asset or quote bindings and mixed success/refund evidence; revalidate concurrent
-  source ownership changes before publishing closure.
+  asset or quote bindings; retain genuinely conflicting execution evidence while
+  reconciling ordinary status progression. Revalidate concurrent source ownership
+  changes before publishing closure.
+- Refund received while offline, discovered after restart and later shielded;
+  exact outpoint linkage, an empty refund address after shielding, and already
+  spent recovered capital. Reuse existing confirmed records without an additional
+  chain/status lookup; missing optional receipt/shielding evidence must not defeat
+  independently established terminal closure.
+- Provider/refund amount differences and fee deductions, stale phases and older
+  nonterminal status followed by bound terminal evidence: correct derived state
+  and finish proven work without a repair halt, amount-equality gate or repeated
+  acquisition. Assert unrelated authorized payment/funding work continues. Keep
+  genuinely unresolved source inputs and destination delivery independently owned;
+  refund receipt/shielding alone grants neither retirement nor another deposit.
+- Verified historical positive USDC receipt below the quoted target consumes the
+  original claim under existing semantics; no target-equality or additional
+  expected-credit gate, and no release of independent accepted source work.
 - Incoming credit, concurrent payment/role reuse, changed eligibility and stale
   evidence during proof acquisition; exact atomic retirement evidence and reopen.
 - Cancellation/disconnected waiters, slow progress versus a true stalled response,
