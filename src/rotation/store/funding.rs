@@ -670,14 +670,7 @@ pub(super) fn finish_if_proven(tx: &Connection, job: &str, operation: &str) -> R
             |r| r.get(0),
         )?;
         Some(if signed { "RECOVERED" } else { "EXTERNAL" })
-    } else if ready
-        && correlation.as_deref() == Some(operation)
-        && success
-        && !failed
-        && !refunded
-        && !incomplete
-        && confirmed
-    {
+    } else if ready && correlation.as_deref() == Some(operation) && success && confirmed {
         Some("SUCCESS")
     } else {
         None
@@ -713,6 +706,12 @@ fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result
         |r| r.get(0),
     )?;
     ensure!(matched, "funding operation correlation mismatch");
+    // Preserve every provider observation, but let the existing positive
+    // source/credit/fulfillment proof settle the operation before projecting
+    // an older or delayed negative report into a blocking phase.
+    if finish_if_proven(db, job, operation)? {
+        return Ok(());
+    }
     db.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_integrity_conflict; contradictory completed provider outcome' WHERE job_id=?1 AND operation_id=?2 AND (provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1))) AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state='COMPLETE')",params![job,operation])?;
     db.execute("UPDATE funding_progress SET phase=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN '\"RECOVERY_REQUIRED\"' WHEN provider_failed=1 OR provider_refunded=1 THEN '\"REFUND_PENDING\"' WHEN provider_success=1 THEN '\"VERIFYING_CREDIT\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o WHERE o.id=operation_id AND o.submission='CONFIRMED') THEN '\"SWAPPING\"' WHEN EXISTS(SELECT 1 FROM treasury_operations o JOIN outgoing x ON x.id=o.id WHERE o.id=operation_id AND o.attempts>0 AND x.state='PREPARED') THEN '\"DEPOSIT_PENDING\"' ELSE phase END WHERE job_id=?1 AND operation_id=?2 AND phase NOT IN ('\"RECOVERY_REQUIRED\"','\"COMPLETE\"')", params![job,operation])?;
     Ok(())
@@ -2406,6 +2405,120 @@ mod completion_tests {
                 FundingPhase::RecoveryRequired
             );
             assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
+        }
+    }
+
+    #[test]
+    fn positive_completion_recovers_prior_provider_reports_after_restart() {
+        use crate::rotation::near::SwapStatus;
+        for negative in [
+            SwapStatus::IncompleteDeposit,
+            SwapStatus::Failed,
+            SwapStatus::Refunded,
+        ] {
+            for credit_first in [true, false] {
+                let (dir, mut store, job) = fixture();
+                let identity = store.id().to_owned();
+                let quote = serde_json::to_vec(
+                    &serde_json::json!({"request":{"amount":"10","recipient":job.recipient}}),
+                )
+                .unwrap();
+                store.save_funding_quote(&job.id, &quote).unwrap();
+                submit_source_for_status(&mut store, &job);
+                let bytes = store.prepared_bytes(&job.operation_id).unwrap();
+                store
+                    .record_provider_outcome(&job.id, &job.operation_id, &negative, 1)
+                    .unwrap();
+                if credit_first {
+                    store
+                        .record_destination_readiness(&job.id, "10", "block", 1)
+                        .unwrap();
+                }
+                assert!(
+                    !store
+                        .finish_funding_if_proven(&job.id, &job.operation_id)
+                        .unwrap(),
+                    "credit and negative reporting cannot substitute for fulfillment"
+                );
+                store
+                    .record_provider_outcome(&job.id, &job.operation_id, &SwapStatus::Success, 2)
+                    .unwrap();
+                assert!(
+                    !store
+                        .finish_funding_if_proven(&job.id, &job.operation_id)
+                        .unwrap(),
+                    "provider fulfillment cannot substitute for canonical source confirmation"
+                );
+                store.confirm_spend(&job.operation_id).unwrap();
+                if !credit_first {
+                    assert!(
+                        !store
+                            .finish_funding_if_proven(&job.id, &job.operation_id)
+                            .unwrap(),
+                        "source confirmation and fulfillment cannot substitute for destination credit"
+                    );
+                    store
+                        .record_destination_readiness(&job.id, "10", "block", 1)
+                        .unwrap();
+                }
+                // This is the persisted phase produced by the former negative-report veto.
+                assert_eq!(
+                    store.funding_job(&job.id).unwrap().unwrap().phase,
+                    FundingPhase::RecoveryRequired
+                );
+                drop(store);
+                store = Store::open(
+                    &dir.path().join("state"),
+                    &dir.path().join("key"),
+                    &identity,
+                )
+                .unwrap();
+                assert!(
+                    store
+                        .settle_funding_source(&job.id, &job.operation_id, false)
+                        .unwrap()
+                        .is_none()
+                );
+                for status in [&negative, &SwapStatus::Processing] {
+                    store
+                        .record_provider_outcome(&job.id, &job.operation_id, status, 3)
+                        .unwrap();
+                    assert_eq!(
+                        store.funding_job(&job.id).unwrap().unwrap().phase,
+                        FundingPhase::Complete,
+                        "a delayed report cannot revoke the same positive completion proof"
+                    );
+                }
+                let facts = store.funding_facts(&job.id, &job.operation_id).unwrap();
+                assert!(facts.provider_success);
+                assert!(match negative {
+                    SwapStatus::IncompleteDeposit => facts.provider_incomplete,
+                    SwapStatus::Failed => facts.provider_failed,
+                    SwapStatus::Refunded => facts.provider_refunded,
+                    _ => unreachable!(),
+                });
+                assert_eq!(
+                    store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
+                    bytes.as_slice()
+                );
+                assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
+                assert_eq!(
+                    store.funding_quote(&job.id).unwrap().as_slice(),
+                    quote.as_slice()
+                );
+                assert_eq!(store.funding_jobs().unwrap().len(), 2);
+                assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+                assert!(
+                    store
+                        .record_provider_outcome(
+                            &job.id,
+                            "another-operation",
+                            &SwapStatus::Success,
+                            4
+                        )
+                        .is_err()
+                );
+            }
         }
     }
 

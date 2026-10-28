@@ -434,8 +434,10 @@ after reopen. Successful observations reset only their own error streak. Status
 errors contain fixed actionable categories, never remote bodies, credentials or
 deposit addresses. The coordinator resumes phases without repeating ambiguous
 submissions, reconciles source confirmation, polls the same deposit, and independently
-checks Base credit. Provider-reported partial deposits enter `recovery_required`;
-failed/refunded swaps stay `refund_pending`. The SDK owns incoming returns and current spendable inputs. Local refund credits,
+checks Base credit. Until [funding completion is proven](wallet-rotation.md#funding-and-source-safety),
+provider-reported partial deposits enter `recovery_required`; failed/refunded swaps
+stay `refund_pending`. Later negative reports retain their audit facts without
+revoking that completion proof. The SDK owns incoming returns and current spendable inputs. Local refund credits,
 principal caps and historical refund revalidation are removed; provider status alone
 never proves an on-chain return or authorizes a new deposit.
 

@@ -471,8 +471,14 @@ Successful financial completion combines three independent facts: the wallet's f
 and validated provider fulfillment. Initial credit alone publishes the funded
 wallet role and may permit payments before the other facts arrive. Consumption does
 not erase that consumed claim or require rebuilding the original funding balance.
-Conflicting terminal outcomes preserve review-required work; provider fulfillment
-is not canonical source or return evidence.
+Provider reports remain in the audit history. Earlier or delayed negative reports
+cannot veto the same positive conjunction of bound fulfillment, canonical source
+confirmation and initial destination credit. Until that conjunction is established,
+conflicting outcomes remain unresolved; provider fulfillment is not canonical
+source or return evidence. Startup waits for existing accepted, pending or
+canonically confirmed source work despite provider reporting conflicts. Historical
+preparation retained after proven source expiry does not count as live work or
+authorize another deposit.
 
 One retained funding owner schedules independent status, credit and prerequisite-
 complete unsigned quote observations in bounded lanes, alongside serialized treasury

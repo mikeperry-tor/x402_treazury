@@ -58,12 +58,6 @@ impl StartupPath {
         if self.destination_ready {
             return DestinationReady;
         }
-        if self.facts.provider_review_required()
-            || self.facts.provider_failed
-            || self.facts.provider_refunded
-        {
-            return Obstructed("funding_outcome_requires_review");
-        }
         // Original accepted bytes/outcomes remain observed even if permission to
         // start another attempt has since been disabled or exhausted.
         if self.facts.preparation_accepted
@@ -74,6 +68,12 @@ impl StartupPath {
                 .is_some_and(|operation| operation.submission != "EXPIRED")
         {
             return Waiting;
+        }
+        if self.facts.provider_review_required()
+            || self.facts.provider_failed
+            || self.facts.provider_refunded
+        {
+            return Obstructed("funding_outcome_requires_review");
         }
         if self.recovery_count > u64::from(max_attempts) {
             return Obstructed("recovery_attempt_limit_reached");
@@ -329,6 +329,108 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn provider_reports_do_not_obstruct_live_original_observation() {
+        use crate::rotation::{near::SwapStatus, transaction::TransactionFacts};
+        let (_dir, mut store, pool) = fixture();
+        let jobs = store.funding_jobs().unwrap();
+        for job in &jobs {
+            let quote = serde_json::to_vec(
+                &serde_json::json!({"request":{"amount":job.target,"recipient":job.recipient}}),
+            )
+            .unwrap();
+            store.save_funding_quote(&job.id, &quote).unwrap();
+            store
+                .record_provider_outcome(
+                    &job.id,
+                    &job.operation_id,
+                    &SwapStatus::IncompleteDeposit,
+                    1,
+                )
+                .unwrap();
+        }
+        assert!(
+            store
+                .startup_obstruction("configured", 3, None)
+                .unwrap()
+                .is_some()
+        );
+        let job = &jobs[0];
+        store
+            .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+            .unwrap();
+        assert!(
+            store
+                .startup_obstruction("configured", 3, None)
+                .unwrap()
+                .is_none(),
+            "accepted original work still has an observation owner"
+        );
+        let revision = store.snapshot().unwrap().0;
+        store
+            .prepare_with_facts(
+                &job.operation_id,
+                revision,
+                b"snapshot",
+                b"original signed bytes",
+                Some(TransactionFacts {
+                    txid: "original".into(),
+                    expiry_height: 100,
+                    amount_zatoshis: 50,
+                    fee_zatoshis: 10,
+                    deadline: Some(u64::MAX),
+                }),
+            )
+            .unwrap();
+        store
+            .request_broadcast(&job.operation_id, 1, 1, false)
+            .unwrap();
+        assert!(
+            store
+                .startup_obstruction("configured", 3, None)
+                .unwrap()
+                .is_none()
+        );
+        store.confirm_spend(&job.operation_id).unwrap();
+        assert!(
+            store
+                .startup_obstruction("configured", 3, None)
+                .unwrap()
+                .is_none(),
+            "canonical source confirmation can still be followed by destination credit"
+        );
+        let group = store
+            .startup_groups(&["configured".into()])
+            .unwrap()
+            .remove(0);
+        let mut path = store
+            .startup_claim_paths(&pool, &group.claims)
+            .unwrap()
+            .into_iter()
+            .find(|path| path.job.id == job.id)
+            .unwrap();
+        assert!(!path.facts.preparation_accepted);
+        // Model the existing expiry owner's closed archived result. Retained
+        // preparation bytes are historical evidence, not active observation work.
+        path.facts.source_closed = true;
+        path.facts.source_pending = false;
+        path.operation.as_mut().unwrap().submission = "EXPIRED".into();
+        assert_eq!(
+            path.disposition(3, false),
+            StartupDisposition::Obstructed("funding_outcome_requires_review")
+        );
+        path.facts.source_pending = true;
+        path.facts.source_closed = false;
+        path.operation.as_mut().unwrap().submission = "UNKNOWN".into();
+        assert_eq!(
+            path.disposition(3, false),
+            StartupDisposition::Waiting,
+            "a canonical correction restores the original observation owner"
+        );
+        assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 1);
+        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+    }
+
     #[test]
     fn current_status_contract_has_explicit_authority_and_claims() {
         let (_dir, store, _pool) = fixture();
