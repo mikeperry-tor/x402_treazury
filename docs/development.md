@@ -289,6 +289,11 @@ Financial uncertainty must remain explicit in terminal diagnostics. A level or a
 successful HTTP response never establishes settlement, grants replay authority or
 changes recovery policy. All levels obey the same privacy and sanitization rules.
 
+Successful payment-protocol compatibility adjustments, including challenge
+description truncation, are DEBUG diagnostics. Actual call failures retain their
+terminal WARN and correlated call ID; an adjustment observed during that call
+does not by itself establish the cause of failure.
+
 Apply this policy to new diagnostics and correct violations encountered in the
 affected development work, including excessive INFO, unclear messages and
 inadequate failure detail. Update owning documentation and affected diagnostic

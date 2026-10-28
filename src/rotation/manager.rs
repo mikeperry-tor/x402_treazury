@@ -455,7 +455,7 @@ fn prepare_challenge(
         && let Some(text) = desc.as_str()
     {
         if text.chars().count() > 500 {
-            tracing::warn!(
+            tracing::debug!(
                 limit_chars = 500,
                 "x402 challenge description truncated for facilitator protocol compatibility"
             );
@@ -743,6 +743,56 @@ mod offer_tests {
         serde_json::json!({"scheme":"exact","network":"eip155:8453","asset":USDC,
             "amount":amount,"payTo":format!("0x{payee:040x}"),"maxTimeoutSeconds":60,
             "extra":{"name":"USD Coin","version":"2"},"annotation":{"opaque":true}})
+    }
+    #[test]
+    fn successful_description_truncation_is_debug_only() {
+        if crate::test_log_capture::run_in_child(
+            "rotation::manager::offer_tests::successful_description_truncation_is_debug_only",
+        ) {
+            return;
+        }
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let original_offer = offer("1", 1);
+        let challenge = serde_json::json!({
+            "x402Version":2,
+            "resource":{"url":"https://example.com/pay","description":"秘".repeat(501)},
+            "accepts":[original_offer.clone()]
+        });
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(402)
+                .header("payment-required", STANDARD.encode(challenge.to_string()))
+                .body(Vec::<u8>::new())
+                .unwrap(),
+        );
+        let (prepared, selected, _) =
+            prepare_challenge(&response, &SpendPolicy { max_atomic: None }).unwrap();
+        let x402_types::proto::PaymentRequired::V2(prepared) = prepared else {
+            panic!("expected v2 challenge");
+        };
+        let prepared = serde_json::to_value(prepared).unwrap();
+        assert_eq!(
+            prepared["resource"]["description"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            500
+        );
+        assert_eq!(selected.raw, original_offer);
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert!(
+            logs.contains("DEBUG") && logs.contains("description truncated"),
+            "{logs}"
+        );
+        assert!(!logs.contains("WARN") && !logs.contains('秘'), "{logs}");
     }
     #[tokio::test]
     async fn body_only_v1_uses_the_owning_response_limit_once() {
