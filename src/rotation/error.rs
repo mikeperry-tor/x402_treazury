@@ -68,3 +68,14 @@ impl std::fmt::Display for FundingCondition {
     }
 }
 impl std::error::Error for FundingCondition {}
+
+/// Read-only receive information for an operator-facing capital shortage message.
+/// Display stays fixed so generic error chains do not disclose the address.
+#[derive(Debug)]
+pub(crate) struct TreasuryDepositAddress(pub String);
+impl std::fmt::Display for TreasuryDepositAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("treasury deposit address available")
+    }
+}
+impl std::error::Error for TreasuryDepositAddress {}

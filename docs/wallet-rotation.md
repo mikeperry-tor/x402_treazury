@@ -158,6 +158,13 @@ lose unpublished bytes; the durable input claim still prevents duplicate calcula
 
 ## Treasury sync coverage
 
+Scan starts log at DEBUG; successful persisted completion logs at INFO. Long
+scans also report saved progress at INFO every 30 seconds. These INFO messages
+show only the saved scanned height; tip and block-count diagnostics remain in
+status and DEBUG output. A new spendable-ZEC shortage reports the treasury deposit
+address, asks the operator to add ZEC and allow confirmations, and explains that
+synchronization and funding retry automatically while demand remains.
+
 Recurring `treasury sync unavailable` warnings include a broad `category` and,
 for Zingolib scan/launch failures, a fixed `reason`. Indexer request failures also
 include numeric `grpc_code` and a fixed `grpc_status`, for example
@@ -619,19 +626,20 @@ The observation scope, cadence and completion rule belong to the work requesting
 | --- | --- | --- |
 | Fresh managed serving startup | One finite Base pass over existing eligible managed wallets and initial-funding recipients; one background ZEC scan when the treasury capability is available | Finish or report failure of the captured pass; new allocations do not extend it and startup alone creates no recurring watcher |
 | Preparing a new wallet's initial funding | Discover SDK funds as needed, then read that exact Base destination after a valid spendable proposal; reuse applicable same-work observations | Positive credit consumes the unused claim; acceptance rechecks the claim before calculation. An advisory RPC failure does not gate funding, while Store/publication failure defers it |
-| Enabled initial-funding demand waiting for capital or confirmations | Shared ZEC scans; each recurring scan starts at least 60 seconds after the previous scan completes | Stop when no enabled unfilled claim can advance and no validated accepted transaction needs observation; a new claim wakes discovery |
+| Enabled initial-funding demand waiting for capital or confirmations | Shared ZEC scans; each recurring scan starts at least 90 seconds after the previous scan completes | Stop when no enabled unfilled claim can advance and no validated accepted transaction needs observation; a new claim wakes discovery |
 | Accepted initial funding without positive destination credit | Shared Base recipient acquisition when due; each repeated read starts at least 60 seconds after the previous read completes | First positive credit permanently finishes that claim's credit lane; source recovery remains independent |
 | Recognized signed-payment insufficient funds | Asynchronous scalar Base refresh when due, coalesced per wallet; each repeated read starts at least 60 seconds after the previous read completes | Success, including zero, finishes the captured request. Failure or a notification arriving during the read retains follow-up work |
-| Validated pending source or shielding transaction | Shared ZEC scans and operation observations with their own completion-based minute floor | Canonical confirmation or exact consensus-expiry/input recovery resolves that obligation, including after destination credit, disablement, removal or restart |
+| Validated pending source or shielding transaction | Shared ZEC scans with a 90-second completion-based floor; operation observations retain their own 60-second floor | Canonical confirmation or exact consensus-expiry/input recovery resolves that obligation, including after destination credit, disablement, removal or restart |
 | Submitted swap awaiting provider outcome | NEAR status observations; each recurring check starts at least 60 seconds after the previous check completes | Existing provider outcome/recovery rules stop that lane; status alone cannot release source inputs |
 | Explicit `wallet sync` | One requested ZEC scan and configured managed-USDC pass, including outstanding accepted funding recipients | Report each asset's completion, failure or inapplicability; create no background watcher and require serving to be stopped |
 | Completed-result publication or SDK reconstruction | Existing local owner retries after 60 seconds, independently of scan scheduling | Publish the identical result or reconstruct the SDK; this work alone requests no network scan or new calculation |
 | Fully funded idle serving without requested refresh or accepted observation work | No recurring Base or ZEC balance discovery | Relevant new work requests observation again |
 
 The interval applies per wallet, operation or serialized treasury scan; it is not
-one RPC per minute globally. A scan, provider fallback or canonical proof can issue
+a global RPC rate limit. A scan, provider fallback or canonical proof can issue
 several requests. Recurring failures retain independent backoff bounded by
-300 seconds and existing jitter where applicable; a new event or sibling success
+300 seconds and existing jitter where applicable; treasury scan failures wait
+90, 180, then 300 seconds after completion; a new event or sibling success
 cannot shorten that work's interval or clear its failure. Configured local polling
 and healthy handoffs do not change these network observation floors.
 
@@ -695,7 +703,9 @@ New reserve demand wakes shared treasury discovery. Known shortages keep needed
 scans running so later deposits and confirmations can supply spendable SDK funds.
 New-funding discovery demand comes from enabled current reserve slots and their
 exact pool, wallet and claim-generation bindings, rather than historical funding
-jobs. Replaced or disabled claims do not keep discovery running; validated accepted
+jobs. Completed funding jobs do not request new-funding scans, even if their
+uncredited slot binding remains; completion does not reopen funding or assert
+settlement. Replaced or disabled claims do not keep discovery running; validated accepted
 transactions retain their independent journal-based observation demand.
 Waiting source operations reuse an applicable current-owner scan without extra
 tip probes. Local quote, preparation and submission handoffs remain immediate.

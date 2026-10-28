@@ -23,7 +23,7 @@ impl Schedule {
         } else {
             self.failures.saturating_add(1)
         };
-        let seconds = 60u64
+        let seconds = 90u64
             .saturating_mul(1 << self.failures.saturating_sub(1).min(3))
             .min(300);
         self.due = Some(Instant::now() + Duration::from_secs(seconds));
@@ -52,11 +52,11 @@ impl Treasury {
 mod tests {
     use super::*;
     #[tokio::test(start_paused = true)]
-    async fn completion_sets_minute_floor_and_independent_failure_backoff() {
+    async fn completion_sets_ninety_second_floor_and_independent_failure_backoff() {
         let mut schedule = Schedule::default();
         assert!(schedule.due() <= Instant::now());
         schedule.complete(false);
-        for seconds in [60, 120, 240, 300, 300] {
+        for seconds in [90, 180, 300, 300, 300] {
             assert_eq!(
                 schedule.due() - Instant::now(),
                 Duration::from_secs(seconds)
@@ -70,6 +70,6 @@ mod tests {
             schedule.complete(false);
         }
         schedule.complete(true);
-        assert_eq!(schedule.due() - Instant::now(), Duration::from_secs(60));
+        assert_eq!(schedule.due() - Instant::now(), Duration::from_secs(90));
     }
 }

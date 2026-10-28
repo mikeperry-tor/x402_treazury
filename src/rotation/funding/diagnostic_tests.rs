@@ -8,6 +8,15 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
     let cases = [
         (
             anyhow::Error::new(FundingCondition::InsufficientFunds)
+                .context(crate::rotation::error::TreasuryDepositAddress(
+                    "public-receive-address".into(),
+                ))
+                .context("private upstream shortage"),
+            "INFO",
+            "add ZEC to public-receive-address and allow confirmations",
+        ),
+        (
+            anyhow::Error::new(FundingCondition::InsufficientFunds)
                 .context("private upstream shortage"),
             "INFO",
             "waiting for confirmed spendable ZEC",
@@ -195,6 +204,36 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
             );
         }
         assert!(!logged.contains("private"), "{logged}");
+        assert!(!category.contains("public-receive-address"));
+        if condition == Some(FundingCondition::InsufficientFunds) {
+            assert!(
+                logged.contains("synchronization and funding retry automatically"),
+                "{logged}"
+            );
+            if !logged.contains("public-receive-address") {
+                assert!(logged.contains("wallet status --config FILE"), "{logged}");
+            }
+            let repeated = anyhow::Error::new(FundingCondition::InsufficientFunds).context(
+                crate::rotation::error::TreasuryDepositAddress("public-receive-address".into()),
+            );
+            tracing::dispatcher::with_default(&subscriber, || {
+                report_observation_failure(
+                    &job,
+                    "small",
+                    Kind::Source,
+                    &job.phase,
+                    &repeated,
+                    Some(&category),
+                )
+            });
+            let repeated_logs = std::fs::read_to_string(log.path()).unwrap();
+            let repeated_logs = &repeated_logs[logged.len()..];
+            assert!(!repeated_logs.contains("INFO"), "{repeated_logs}");
+            assert!(
+                !repeated_logs.contains("public-receive-address"),
+                "{repeated_logs}"
+            );
+        }
         {
             let state = lease.state.lock().unwrap();
             let record = &state.records[&key];

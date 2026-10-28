@@ -174,6 +174,13 @@ async fn qualify_preparation(case: PreparationCase) {
             Some(&crate::rotation::error::FundingCondition::InsufficientFunds),
             "{error:#}"
         );
+        let address = error
+            .downcast_ref::<crate::rotation::error::TreasuryDepositAddress>()
+            .unwrap();
+        assert_eq!(
+            Some(address.0.as_str()),
+            treasury.addresses().await.unwrap()[0]["encoded_address"].as_str()
+        );
         assert!(treasury.healthy && treasury.completed.is_none());
         assert!(!treasury.status().await.unwrap().outgoing_pending);
         treasury.close().await.unwrap();

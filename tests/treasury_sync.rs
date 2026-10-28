@@ -524,6 +524,7 @@ spec="nonexistent.json"
                 .env_clear()
                 .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
                 .env("INDEXER", &endpoint)
+                .env("NO_COLOR", "1")
                 .args(["wallet", "sync", "--config"])
                 .arg(&config);
             if json {
@@ -557,11 +558,23 @@ spec="nonexistent.json"
     for stage in [
         "loading configuration and opening encrypted wallet",
         "wallet opened; starting synchronization",
-        "Synchronizing Zcash treasury wallet",
         "Zcash treasury wallet synchronized; progress saved",
     ] {
         assert!(logs.contains(stage), "missing {stage}: {logs}");
     }
+    assert!(
+        !logs.contains("Synchronizing Zcash treasury wallet"),
+        "{logs}"
+    );
+    let synchronized = logs
+        .lines()
+        .find(|line| line.contains("Zcash treasury wallet synchronized; progress saved"))
+        .unwrap();
+    assert!(synchronized.contains("height=2000000"), "{synchronized}");
+    assert!(
+        !synchronized.contains("tip") && !synchronized.contains("blocks"),
+        "{synchronized}"
+    );
     assert!(!logs.contains(SEED));
     let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(output["state"]["sync"]["phase"], "ready");
@@ -1341,7 +1354,7 @@ async fn sync_cli_reports_failed_stage_without_claiming_completion() {
     assert_eq!(reported["observations"]["usdc"]["status"], "inapplicable");
     let logs = String::from_utf8_lossy(&output.stderr);
     assert!(
-        logs.contains("Synchronizing Zcash treasury wallet"),
+        !logs.contains("Synchronizing Zcash treasury wallet"),
         "{logs}"
     );
     assert!(logs.contains("indexer_network_mismatch"), "{logs}");

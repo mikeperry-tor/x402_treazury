@@ -344,10 +344,18 @@ impl Treasury {
             Err(zingolib::wallet::error::ProposeSendError::Proposal(
                 zcash_client_backend::data_api::error::Error::InsufficientFunds { .. },
             )) => {
-                return Err(anyhow::Error::new(
-                    crate::rotation::error::FundingCondition::InsufficientFunds,
-                )
-                .context(crate::rotation::transaction::PreparationDeferred));
+                let mut error =
+                    anyhow::Error::new(crate::rotation::error::FundingCondition::InsufficientFunds);
+                if let Ok(addresses) = super::address_info(client).await
+                    && let Some(address) = addresses
+                        .get(0)
+                        .and_then(|address| address["encoded_address"].as_str())
+                {
+                    error = error.context(crate::rotation::error::TreasuryDepositAddress(
+                        address.to_owned(),
+                    ));
+                }
+                return Err(error.context(crate::rotation::transaction::PreparationDeferred));
             }
             Err(_) => {
                 return Err(anyhow::anyhow!("treasury proposal failed")

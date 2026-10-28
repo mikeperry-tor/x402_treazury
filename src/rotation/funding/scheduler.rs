@@ -128,8 +128,16 @@ fn report_observation_failure(
         && funding_condition(error)
             == Some(super::super::error::FundingCondition::InsufficientFunds)
     {
-        tracing::info!(wallet=%job.pool_name,size=wallet_type,category,
-            "Wallet funding is waiting for confirmed spendable ZEC");
+        let address = error
+            .downcast_ref::<super::super::error::TreasuryDepositAddress>()
+            .map(|address| address.0.as_str());
+        if let Some(address) = address {
+            tracing::info!(wallet=%job.pool_name,size=wallet_type,category,
+                "Wallet funding is waiting for confirmed spendable ZEC; add ZEC to {address} and allow confirmations; synchronization and funding retry automatically");
+        } else {
+            tracing::info!(wallet=%job.pool_name,size=wallet_type,category,
+                "Wallet funding is waiting for confirmed spendable ZEC; run wallet status --config FILE with the serving configuration to find the deposit address; add ZEC and allow confirmations; synchronization and funding retry automatically");
+        }
     } else if new_requirement
         && error.is::<super::super::transaction::PreparationDeferred>()
         && crate::treasury::diagnostics::sync_detail(error).is_some()

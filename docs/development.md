@@ -448,12 +448,17 @@ cleanup and safe resource labels.
 
 Waiting for confirmed spendable ZEC and funding deferred by a reported treasury
 sync failure use INFO for meaningful state changes; repetitive observations belong
-at DEBUG. Their retry backoff and stored failure conditions remain intact.
+at DEBUG. On a new capital shortage, the funding message includes the existing
+shielded receive address and asks the operator to add ZEC and allow confirmations.
+If receive information is unavailable, it directs the operator to `wallet status`
+with the serving configuration. Address lookup does not derive a new address or
+change funding authority; the address is not added to persisted failure categories.
+Their retry backoff and stored failure conditions remain intact.
 Treasury sync diagnostics retain safe connection reasons and direct/Tor route
 details when available. Recoverable background failures use INFO for the affected
 recovery state and DEBUG for individual attempts. Background diagnostics report
 `automatic_retry=true` and `retry_after_seconds` from the existing observation
-schedule (60, 120, 240, then 300 seconds after consecutive scan failures). Retry
+schedule (90, 180, then 300 seconds after consecutive scan failures). Retry
 continues while serving and sync is needed; SDK reconstruction can delay it.
 One-pass `wallet sync` warnings report `automatic_retry=false` and instruct the
 operator to rerun the command. Pepper Sync fetch spans are debug-only and do not

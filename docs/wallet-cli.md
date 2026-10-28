@@ -285,7 +285,7 @@ local testing. Account 0's shielded funds are used, with `confirmations` (defaul
 
 Available treasury serving requests one background ZEC scan after listeners bind.
 Further scans need enabled unfilled funding claims or validated pending source or
-shielding transactions. Each recurring scan starts at least 60 seconds after the
+shielding transactions. Each recurring scan starts at least 90 seconds after the
 previous scan completes, with independent failure backoff bounded by 300 seconds.
 New reserve demand wakes discovery; idle serving does not watch for deposits.
 The [wallet observation policy](wallet-rotation.md#wallet-observation-policy)

@@ -111,14 +111,19 @@ fn config(dir: &Path, wallet: WalletConfig, network: TreasuryNetwork) -> Result<
         .map_err(|_| anyhow::anyhow!("invalid offline wallet configuration"))
 }
 async fn snapshot(client: &LightClient) -> Result<Zeroizing<Vec<u8>>> {
+    Ok(snapshot_with_height(client).await?.0)
+}
+async fn snapshot_with_height(client: &LightClient) -> Result<(Zeroizing<Vec<u8>>, Option<u64>)> {
     let wallet = client.wallet();
     let mut wallet = wallet.write().await;
     wallet.mark_dirty();
-    Ok(Zeroizing::new(
+    let height = wallet.sync_state.fully_scanned_height().map(u64::from);
+    let bytes = Zeroizing::new(
         wallet
             .save()?
             .context("wallet did not produce a snapshot")?,
-    ))
+    );
+    Ok((bytes, height))
 }
 impl Treasury {
     pub async fn create(
@@ -480,7 +485,7 @@ impl Treasury {
             });
         observation.phase = SyncPhase::Syncing;
         observation.confirmations = settings.confirmations.get();
-        tracing::info!("Synchronizing Zcash treasury wallet");
+        tracing::debug!("Synchronizing Zcash treasury wallet");
         self.checkpoint(observation.clone()).await?;
         let session = SyncSession {
             identity: crate::network::IsolationId::treasury(
@@ -516,19 +521,12 @@ impl Treasury {
         observation.last_error = outcome.as_ref().err().map(|e| e.to_string());
         tracing::debug!("treasury sync: saving final wallet checkpoint");
         let height = observation.height;
-        let observed_tip_height = observation.observed_tip_height;
-        let scanned_blocks = observation.scanned_blocks;
         self.checkpoint(observation).await?;
         self.healthy = true;
         if outcome.is_ok() && !stop.is_cancelled() {
             self.reusable_sync_revision = Some(self.revision);
             self.last_completed_sync = Some(tokio::time::Instant::now());
-            tracing::info!(
-                height,
-                observed_tip_height,
-                scanned_blocks,
-                "Zcash treasury wallet synchronized; progress saved"
-            );
+            tracing::info!(height, "Zcash treasury wallet synchronized; progress saved");
         } else {
             tracing::debug!("treasury sync: wallet checkpoint saved after interruption or failure");
         }
@@ -592,8 +590,10 @@ impl SyncSession {
         drop(runtime);
         Ok((self, observation, outcome))
     }
-    async fn checkpoint(&mut self, observation: SyncObservation) -> Result<()> {
-        let bytes = snapshot(&self.client).await?;
+    async fn checkpoint(&mut self, observation: &mut SyncObservation) -> Result<()> {
+        let (bytes, height) = snapshot_with_height(&self.client).await?;
+        observation.height = height;
+        let observation = observation.clone();
         let expected = self.revision;
         self.revision = self
             .store
@@ -675,11 +675,9 @@ impl SyncSession {
                     if let Some(progress) = progress.borrow().as_ref() {
                         observation.scanned_blocks = progress.total_blocks_scanned;
                     }
-                    self.checkpoint(observation.clone()).await?;
+                    self.checkpoint(observation).await?;
                     tracing::info!(
-                        target_height,
-                        scanned_blocks = observation.scanned_blocks,
-                        elapsed_seconds = started.elapsed().as_secs(),
+                        height = observation.height,
                         "Zcash treasury wallet synchronization in progress; progress saved"
                     );
                 }

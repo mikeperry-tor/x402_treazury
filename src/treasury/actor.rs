@@ -494,9 +494,9 @@ mod tests {
             0,
             "SOCKS recovery cannot reset failed scan cooldown"
         );
-        assert!(tokio::time::Instant::now() < failed_at + Duration::from_secs(59));
+        assert!(tokio::time::Instant::now() < failed_at + Duration::from_secs(89));
         tokio::time::advance(
-            (failed_at + Duration::from_secs(59)).duration_since(tokio::time::Instant::now()),
+            (failed_at + Duration::from_secs(89)).duration_since(tokio::time::Instant::now()),
         )
         .await;
         assert!(
@@ -511,7 +511,7 @@ mod tests {
             "commands cannot shorten scan cooldown"
         );
         tokio::time::advance(
-            (failed_at + Duration::from_secs(61)).duration_since(tokio::time::Instant::now()),
+            (failed_at + Duration::from_secs(91)).duration_since(tokio::time::Instant::now()),
         )
         .await;
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -531,7 +531,7 @@ mod tests {
         stop.cancel();
         let owner = running.await.unwrap();
         assert!(owner.observation.failed());
-        assert!(owner.observation.due() > failed_at + Duration::from_secs(61));
+        assert!(owner.observation.due() > failed_at + Duration::from_secs(91));
         assert!(!owner.startup_discovery);
         let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
         for table in ["outgoing", "treasury_operations", "funding_recovery"] {
@@ -589,10 +589,10 @@ mod tests {
         owner.configure_funding_discovery(vec!["notifications".into()]);
         owner.startup_discovery = false;
         // Make the shared observation unambiguously overdue before starting the
-        // real owner, without waiting through the production minute interval.
+        // real owner, without waiting through the production scan interval.
         tokio::time::pause();
         owner.observation.complete(true);
-        tokio::time::advance(std::time::Duration::from_secs(61)).await;
+        tokio::time::advance(std::time::Duration::from_secs(91)).await;
         tokio::time::resume();
 
         let changed = owner.store.treasury_changes();
