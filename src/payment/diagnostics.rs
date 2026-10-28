@@ -2,18 +2,38 @@
 use super::SubmissionProgress;
 use anyhow::Result;
 use std::{cell::Cell, future::Future};
+mod http;
+use http::{HeaderFacts, OmittedExtensions};
+#[cfg(test)]
+mod http_tests;
 
 /// Provider-reported categories are diagnostic claims, never replay authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ProviderFailure {
     PaymentSettlementFailed,
+    InvalidRequestBody,
+    TemporarilyUnavailable,
 }
 
 impl ProviderFailure {
+    #[cfg(test)]
     pub(super) fn from_body(body: &[u8]) -> Option<Self> {
         let body: serde_json::Value = serde_json::from_slice(body).ok()?;
-        match body.pointer("/error/code")?.as_str()? {
-            "payment_settlement_failed" => Some(Self::PaymentSettlementFailed),
+        Self::from_json(&body)
+    }
+
+    fn from_json(body: &serde_json::Value) -> Option<Self> {
+        match body
+            .pointer("/error/code")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("payment_settlement_failed") => Some(Self::PaymentSettlementFailed),
+            Some("temporarily_unavailable") => Some(Self::TemporarilyUnavailable),
+            _ if body.get("tag").and_then(serde_json::Value::as_str)
+                == Some("INVALID_REQUEST_BODY") =>
+            {
+                Some(Self::InvalidRequestBody)
+            }
             _ => None,
         }
     }
@@ -21,6 +41,8 @@ impl ProviderFailure {
     fn code(self) -> &'static str {
         match self {
             Self::PaymentSettlementFailed => "payment_settlement_failed",
+            Self::InvalidRequestBody => "INVALID_REQUEST_BODY",
+            Self::TemporarilyUnavailable => "temporarily_unavailable",
         }
     }
 
@@ -28,6 +50,12 @@ impl ProviderFailure {
         match self {
             Self::PaymentSettlementFailed => {
                 "The provider reported payment settlement failure; the result remains unverified"
+            }
+            Self::InvalidRequestBody => {
+                "The provider rejected the request body as invalid; check the tool arguments. This does not establish whether payment settled"
+            }
+            Self::TemporarilyUnavailable => {
+                "The provider reported that the lookup is temporarily unavailable; this does not establish whether payment settled"
             }
         }
     }
@@ -50,6 +78,10 @@ struct Observation {
     last_http_status: Option<u16>,
     unsigned_attempt: Option<usize>,
     max_unsigned_attempts: Option<usize>,
+    payment_required: HeaderFacts,
+    payment_response: HeaderFacts,
+    response_body_kind: Option<&'static str>,
+    omitted_extensions: Option<OmittedExtensions>,
 }
 tokio::task_local! {
     static OBSERVATION: Cell<Observation>;
@@ -64,6 +96,10 @@ pub(crate) async fn scope<T>(work: impl Future<Output = T>) -> T {
                 last_http_status: None,
                 unsigned_attempt: None,
                 max_unsigned_attempts: None,
+                payment_required: HeaderFacts::default(),
+                payment_response: HeaderFacts::default(),
+                response_body_kind: None,
+                omitted_extensions: None,
             }),
             work,
         )
@@ -120,8 +156,38 @@ pub(crate) fn response(response: &reqwest::Response) {
     let _ = OBSERVATION.try_with(|cell| {
         cell.set(Observation {
             last_http_status: Some(response.status().as_u16()),
+            payment_required: HeaderFacts::read(response.headers(), &["payment-required"], "error"),
+            payment_response: HeaderFacts::read(
+                response.headers(),
+                &["payment-response", "x-payment-response"],
+                "errorReason",
+            ),
+            response_body_kind: None,
             ..cell.get()
         });
+    });
+}
+
+pub(super) fn response_body(body: &[u8]) -> Option<ProviderFailure> {
+    let value = serde_json::from_slice::<serde_json::Value>(body).ok();
+    let kind = http::body_kind(body, value.as_ref());
+    let _ = OBSERVATION.try_with(|cell| {
+        cell.set(Observation {
+            response_body_kind: Some(kind),
+            ..cell.get()
+        })
+    });
+    value.as_ref().and_then(ProviderFailure::from_json)
+}
+
+pub(crate) fn omitted_extensions(extensions: &serde_json::Map<String, serde_json::Value>) {
+    let _ = OBSERVATION.try_with(|cell| {
+        let mut observation = cell.get();
+        observation
+            .omitted_extensions
+            .get_or_insert_default()
+            .observe(extensions);
+        cell.set(observation);
     });
 }
 
@@ -144,18 +210,21 @@ pub(crate) fn finish<T>(result: &Result<T>, progress: &SubmissionProgress, relay
         .err()
         .and_then(|error| error.downcast_ref::<crate::rotation::error::AdmissionError>())
         .map(admission_reason);
-    let provider_failure = result
+    let http_failure = result
         .as_ref()
         .err()
-        .and_then(|error| error.downcast_ref::<super::HttpFailure>())
-        .and_then(|error| error.provider_failure);
+        .and_then(|error| error.downcast_ref::<super::HttpFailure>());
+    let provider_failure = http_failure.and_then(|error| error.provider_failure);
     emit(
         result.is_ok(),
         kind,
         transport,
         progress,
         relay_call,
-        reason.or_else(|| provider_failure.map(ProviderFailure::reason)),
+        reason.or_else(|| provider_failure.map(ProviderFailure::reason)).or_else(|| {
+            http_failure.filter(|error| error.status == reqwest::StatusCode::PAYMENT_REQUIRED)
+                .map(|_| "The provider rejected payment; the cause and settlement outcome remain unconfirmed")
+        }),
         provider_failure.map(ProviderFailure::code),
     );
 }
@@ -286,6 +355,13 @@ fn emit(
             unsigned_attempt,
             max_unsigned_attempts,
             authorization_may_charge,
+            last_payment_required_state = observation.payment_required.state,
+            last_payment_required_error = observation.payment_required.error,
+            last_payment_response_state = observation.payment_response.state,
+            last_payment_response_error = observation.payment_response.error,
+            last_seller_success = observation.payment_response.seller_success,
+            response_body_kind = observation.response_body_kind,
+            omitted_extensions = ?observation.omitted_extensions,
             "{}",
             if authorization_may_charge {
                 "Payment call failed; do not automatically repeat a call whose authorization may charge"

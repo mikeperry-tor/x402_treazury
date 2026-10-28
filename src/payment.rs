@@ -1111,6 +1111,7 @@ impl PaidClient {
         paid_submission: bool,
         head: bool,
     ) -> Result<crate::output::HttpOutput> {
+        diagnostics::response(&response);
         let status = response.status();
         let mime_type = response
             .headers()
@@ -1131,7 +1132,7 @@ impl PaidClient {
             let body = String::from_utf8_lossy(&bytes);
             return Err(HttpFailure {
                 status,
-                provider_failure: diagnostics::ProviderFailure::from_body(&bytes),
+                provider_failure: diagnostics::response_body(&bytes),
                 detail: format!("{} {body}", detail.unwrap_or(Value::Null)),
             }
             .into());

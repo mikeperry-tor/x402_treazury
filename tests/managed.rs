@@ -746,14 +746,12 @@ async fn managed_extensions_are_stripped_logged_and_do_not_change_authorization(
     .with_subscriber(subscriber)
     .await;
     let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
-    for name in ["unknown-extension", "bazaar", "builder-code"] {
-        assert!(logs.contains(name), "{logs}");
-    }
+    assert!(!logs.contains("unknown-extension"), "{logs}");
     let omissions: Vec<_> = logs
         .lines()
-        .filter(|line| line.contains("omitting advertised x402 extension"))
+        .filter(|line| line.contains("Managed payment omitted advertised extensions"))
         .collect();
-    assert!(!omissions.is_empty(), "{logs}");
+    assert_eq!(omissions.len(), 2, "{logs}");
     assert!(
         omissions.iter().all(|line| line.contains("DEBUG")
             && line.contains("call_id=")
@@ -797,8 +795,7 @@ async fn managed_failure_diagnostics_survive_cancellation_and_hide_upstream_pros
                 let mut c = h.f.challenge.lock().unwrap();
                 c["resource"]["description"] = json!("short");
                 c["error"] = json!("private-upstream-prose");
-                c["extensions"] =
-                    json!({"payment-identifier":{"secret":"private-extension-value"}});
+                c["extensions"] = json!({"payment-identifier":{"secret":"private-extension-value"},"private-extension-name":{}});
             }
             h.f.reject.store(true, Ordering::SeqCst);
             h.f.hold.store(cancel, Ordering::SeqCst);
@@ -858,7 +855,12 @@ async fn managed_failure_diagnostics_survive_cancellation_and_hide_upstream_pros
             "stage=\"response_body\"",
             "authorization_may_charge=true",
             "failure_kind=\"http_status\"",
-            "The server returned an unsuccessful HTTP status",
+            "The provider rejected payment; the cause and settlement outcome remain unconfirmed",
+            "payment_identifier: true",
+            "other: true",
+            "response_body_kind=\"non_json\"",
+            "last_payment_required_state=\"decoded_object\"",
+            "last_payment_required_error=\"unrecognized\"",
         ] {
             assert!(warning.contains(expected), "{logs}");
         }
@@ -871,6 +873,7 @@ async fn managed_failure_diagnostics_survive_cancellation_and_hide_upstream_pros
         for secret in [
             "private-upstream-prose",
             "private-extension-value",
+            "private-extension-name",
             "private-query-value",
             "127.0.0.1",
             "payment-signature",

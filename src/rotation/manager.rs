@@ -520,12 +520,12 @@ fn strip_extensions(challenge: &mut Value) -> Result<bool> {
             "malformed extensions: expected an object",
         ))?;
     let omitted = !extensions.is_empty();
-    for name in extensions.keys() {
-        if name == "bazaar" {
-            tracing::debug!(extension = ?name, "managed payment omitting Bazaar discovery metadata before signing");
-        } else {
-            tracing::debug!(extension = ?name, stage = "challenge_preparation", reason = "unsupported_extension", "managed payment omitting advertised x402 extension before offer validation and signing; provider may require it");
-        }
+    if omitted {
+        diagnostics::omitted_extensions(extensions);
+        tracing::debug!(
+            stage = "challenge_preparation",
+            "Managed payment omitted advertised extensions; a provider may require them"
+        );
     }
     challenge
         .as_object_mut()

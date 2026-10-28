@@ -138,7 +138,17 @@ async fn origin(
             return challenge(&target);
         }
         return match kind {
-            "origin-signed503" => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+            "origin-signed400" => (
+                StatusCode::BAD_REQUEST,
+                axum::Json(json!({"tag":"INVALID_REQUEST_BODY","error":"Invalid body"})),
+            )
+                .into_response(),
+            "origin-signed402" => (StatusCode::PAYMENT_REQUIRED, "{}").into_response(),
+            "origin-signed503" => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(json!({"error":{"code":"temporarily_unavailable"}})),
+            )
+                .into_response(),
             "origin-signed-stall" => stalled(StatusCode::OK),
             _ => ([("content-type", "text/plain")], "target paid").into_response(),
         };
@@ -755,7 +765,12 @@ async fn fixture(mode: &str) {
             );
             assert!(events[0].provider.is_none() && events[0].signer.is_none());
         }
-        for kind in ["origin-signed503", "origin-signed-stall"] {
+        for kind in [
+            "origin-signed400",
+            "origin-signed402",
+            "origin-signed503",
+            "origin-signed-stall",
+        ] {
             let progress = SubmissionProgress::default();
             assert!(
                 timed

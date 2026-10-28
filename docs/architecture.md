@@ -495,8 +495,9 @@ scope never becomes financial endpoint provenance or settlement authority.
 ### Payment extensions and offer metadata
 
 Managed payments remove advertised top-level challenge extensions before
-validating and signing a supported ordinary offer. Diagnostics identify extension
-names without logging their contents. Omission implements neither wallet
+validating and signing a supported ordinary offer. Terminal payment diagnostics
+identify known omitted-extension categories and the presence of other extensions,
+without logging arbitrary names or contents. Omission implements neither wallet
 ownership authentication nor seller-receipt verification or vendor idempotency
 keys; a provider may reject it. Static SDK extension handling is separate.
 Omission grants no additional replay authority; the
