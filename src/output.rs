@@ -4,6 +4,8 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+mod projection;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ImageLimits {
@@ -36,7 +38,10 @@ impl ImageLimits {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResponseMapping {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ImageField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub omit: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -66,7 +71,13 @@ fn valid_pointer(pointer: &str) -> bool {
 }
 impl ResponseMapping {
     pub fn validate(&self, limits: &ImageLimits) -> Result<()> {
-        ensure!(!self.images.is_empty(), "response mapping requires images");
+        ensure!(
+            !self.images.is_empty() || !self.omit.is_empty(),
+            "response mapping requires images or omitted fields"
+        );
+        for pointer in &self.omit {
+            ensure!(valid_pointer(pointer), "invalid JSON omission pointer");
+        }
         bound(
             self.images.len(),
             limits.max_images,
@@ -250,7 +261,7 @@ impl HttpOutput {
             paid,
             self.render_inner(mapping, limits)
                 .map(|mut output| {
-                    output.advisories = advisories;
+                    output.advisories.extend(advisories);
                     output.payment_may_have_occurred = paid;
                     output
                 })
@@ -301,8 +312,7 @@ fn mapped_output(
 ) -> Result<ToolOutput> {
     let mut total: usize = 0;
     mapping.validate(limits)?;
-    let mut doc: Value =
-        serde_json::from_str(text).context("image response mapping requires JSON")?;
+    let mut doc: Value = serde_json::from_str(text).context("response mapping requires JSON")?;
     let mut images = Vec::new();
     // Read every field before replacing any; MIME pointers may refer to other fields.
     for field in &mapping.images {
@@ -338,13 +348,18 @@ fn mapped_output(
             .expect("validated image pointer") =
             json!({"treazury_attachment": index + 1, "mime_type": images[index].mime_type});
     }
+    let advisories = projection::apply(&mut doc, &mapping.omit);
+    let text = serde_json::to_string(&doc)?;
     Ok(ToolOutput {
         payment_may_have_occurred: false,
-        advisories: vec![],
-        text: format!(
-            "Image payloads extracted into numbered MCP image attachments; metadata follows:\n{}",
-            serde_json::to_string(&doc)?
-        ),
+        advisories,
+        text: if images.is_empty() {
+            text
+        } else {
+            format!(
+                "Image payloads extracted into numbered MCP image attachments; metadata follows:\n{text}"
+            )
+        },
         images,
     })
 }

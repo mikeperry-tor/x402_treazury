@@ -354,7 +354,8 @@ without cover; `drain_direct_payments` waits for accepted signing and dispatch.
 rendering happens later and cannot retry payment.
 
 `src/output.rs` preserves response bytes and MIME, handles ordinary text/JSON,
-small supported inline images and configured base64/data-URI mappings. Encoded
+small supported inline images, configured base64/data-URI mappings and explicit
+JSON field omissions. Encoded
 media inside ordinary JSON remains text/metadata unless an explicit response
 mapping extracts it; no automatic base64 decoding or asset fetch occurs.
 Unsupported raw MIME types and multipart request uploads remain separate
@@ -370,7 +371,13 @@ copying the full receipt. Logs retain only fixed safe categories. Provider claim
 remain unverified and do not authorize replay; see the
 [diagnostic boundary](development.md#diagnostic-context).
 Accepted tool text, JSON and image metadata remain complete through direct and
-wrapper invocation. There is no completed-output character slicing; provider
+wrapper invocation except for configured JSON field omissions. The same response
+is parsed once, image extraction runs first, and omission paths remove only
+object fields rather than array elements. Result advisories disclose actual
+removals and retain transport notices. This local transformation never initiates
+another HTTP request or payment; unmapped raw calls retain the full response.
+See [JSON response projection](configuration.md#json-response-projection).
+There is no completed-output character slicing; provider
 `max_description_chars` remains a separate explicit description control. Download
 and image bounds still reject oversized resources with explicit errors. Durable
 [artifact storage](plans/artifact_storage.md) and

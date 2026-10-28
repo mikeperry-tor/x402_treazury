@@ -234,7 +234,33 @@ recommendations. Use source tags or listener selection to narrow it deliberately
 [Agent402 caveats](CAVEATS.md#agent402toml--agent402tools) for actual support
 boundaries, supported media modes and request guidance.
 
-## Inline image results
+## Response mappings
+
+Reusable providers and deployment sources can map a successful JSON response by
+exact HTTP method and original OpenAPI path, independently of the source alias
+or tool prefix. An `omit` mapping removes selected object fields:
+
+```toml
+[response_mappings."GET /search"]
+omit = ["/results/*/figures"]
+```
+
+Omission paths use RFC 6901 escaping (`~0`, `~1`); `*` additionally traverses
+array elements, never object keys. Only object fields are removed; array elements
+cannot be deletion targets. Removing a field removes its whole value, including
+nested content. Unmatched paths are no-ops. Root paths and malformed
+escapes are invalid. Each path that removes fields produces a result advisory
+with the removal count; transport advisories remain visible. Preserve identifiers,
+pagination, source dates and upstream completeness markers when choosing fields.
+
+Use omission rules for named, documented verbose fields rather than as implicit
+size limits. Projection does not constrain context size or download size. It
+runs on the already received response without another HTTP request or payment.
+Unmapped raw calls retain the full response; requesting it separately is a new
+explicit call that may be paid. See
+[JSON response projection](../docs/configuration.md#json-response-projection).
+
+### Inline image results
 
 Successful PNG, JPEG and WebP HTTP bodies become MCP image content blocks. JSON
 and text remain text unless an operator supplies a response mapping. Unsupported
@@ -276,10 +302,13 @@ No MIME guessing, array discovery, optional-field fallback or URL fetching occur
 
 Each extracted JSON field becomes an explicit `{treazury_attachment, mime_type}`
 marker in the metadata text, indexed from 1 into the following image blocks.
-Other JSON fields are retained. All extractions must succeed: no partial successful
-result is returned. Text truncation limits apply only to the text block and retain
-the existing visible marker; encoded image data is never truncated. Inline data is
-not persisted and there is no artifact retrieval URI.
+Other JSON fields are retained unless the same mapping explicitly lists them in
+`omit`. Image extraction runs before omissions on the same parsed response, so
+omission cannot bypass required image validation. All extractions must succeed:
+no partial successful result is returned. A mapping needs at least one image
+extraction or omission; `images` may be omitted for a projection-only mapping.
+Completed text and encoded images are not sliced to a character limit. Inline
+data is not persisted and there is no artifact retrieval URI.
 
 Mapping and limit tables replace inherited tables in full, like other source
 fields. Provider response mappings also appear in `config show` and resolved tool

@@ -1556,6 +1556,7 @@ async fn tor_unsigned_retry_child() {
         steps.push_back(TorStep::Free200(b"not-json".to_vec()));
     }
     let mapping = crate::output::ResponseMapping {
+        omit: vec![],
         images: vec![crate::output::ImageField {
             pointer: "/image".into(),
             encoding: crate::output::ImageEncoding::Base64,

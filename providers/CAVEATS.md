@@ -1959,6 +1959,22 @@ identifiers, source dates, classifications, family applications and missing data
 Search snippets and a successful claim response do not establish current legal
 status or substitute for interpreting original patent documents.
 
+Search responses can contain large figure inventories. A CUDA/Nvidia search
+with `num=100` returned 829,409 characters and 3,153 figure entries; figure lists
+accounted for about 88% of the response. Removing those lists left about 96,306
+characters. This sample measures response characters, not model tokens, and does
+not establish a general size bound.
+
+The provider configures `response_mappings."GET /search"` to omit
+`/results/*/figures`. Search keeps patent records, IDs, snippets, dates, links
+and pagination, and reports actual field omissions in a result advisory. The
+`/patent` details response is unchanged. This is a local transformation of the
+already received response, not another paid call or silent truncation. Use an
+unmapped raw call for the full search response when figure metadata is needed;
+that explicit request may require another payment. Other large fields can still
+consume substantial context. See
+[JSON response projection](../docs/configuration.md#json-response-projection).
+
 The additive `_atlas` response metadata can suggest other paid services. It is
 discovery data, not authority to call them or follow payment/retry instructions.
 Provider existence and schema inspection do not imply that the wider Atlas

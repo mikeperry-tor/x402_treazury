@@ -808,13 +808,49 @@ stderr logs the rejection. No partial content is returned or cached as success.
 A paid response may already have settled before its size is known; an oversize
 response does not trigger another payment attempt.
 
-Completed tool output is returned in full, including JSON and image metadata.
+Completed tool output is returned in full, including JSON and image metadata,
+except for explicitly configured JSON field omissions. Each omission is disclosed
+in the tool result; it is not silent character truncation. See
+[JSON response projection](#json-response-projection).
 The listener setting `max_response_chars` and CLI flag `--max-response-chars` have
 been removed and reject by name; remove them from existing configurations/commands.
 `max_description_chars` remains an explicit provider-description display control:
 shortened descriptions include a marker and stderr records the event. It does not
 control download size. MCP HTTP requests have a 4 MiB incoming-body limit;
 exceeding it returns HTTP 413 with the limit in its message and a stderr warning.
+
+### JSON response projection
+
+Sources and reusable providers can omit verbose JSON fields from a successful
+response by exact HTTP method and original OpenAPI path:
+
+```toml
+[response_mappings."GET /search"]
+omit = ["/results/*/figures"]
+```
+
+Paths use RFC 6901 segment escaping (`~0` for `~`, `~1` for `/`), with `*`
+additionally traversing array elements. Wildcards do not match object keys.
+Only object fields can be removed; array elements cannot be deletion targets.
+Removing a field removes its whole value, including nested content. Empty root
+paths and invalid pointer escapes are rejected at configuration
+load. A path that matches no removable field leaves the response unchanged.
+
+The returned advisory identifies each path that removed fields and its removal
+count, alongside any transport advisories. Other JSON fields, pagination and
+upstream partial-result markers remain intact. When the same mapping extracts
+images, image extraction runs before omissions on the same parsed response;
+the image mapping's required-field checks still apply. A mapping must contain
+at least one image extraction or omission. See the
+[provider mapping reference](../providers/README.md#response-mappings).
+
+Projection runs locally after the response arrives, without another HTTP request
+or payment attempt. It reduces selected content, not the download size, and does
+not guarantee a model context size. Unmapped raw calls return the full response;
+requesting it later is a new explicit call that may require another payment.
+The entire `response_mappings` table replaces the inherited table when overridden;
+an empty table clears inherited mappings. Agent source registration cannot supply
+mapping configuration.
 
 ## Implemented behavior
 

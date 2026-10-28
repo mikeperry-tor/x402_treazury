@@ -7,8 +7,11 @@ pricing_key = "x-payment-info"
 help_url = "https://google-patents.use.x402atlas.com/llms.txt"
 instructions_text = "Pass a patent_id from search into patent details. Preserve publication identifiers, source dates, family coverage and missing fields. Search snippets do not replace original claims or establish legal status."
 
+[response_mappings."GET /search"]
+omit = ["/results/*/figures"]
+
 [overrides.google_patents_search]
-description = "Search Google Patents using q and optional inventor, assignee, office, date, language, status and classification filters. Returns patent IDs, snippets, publication dates and links; pass patent_id to patent details. Empty results are a valid completed search. Cost: ~$0.02/call [spec]."
+description = "Search Google Patents using q and optional inventor, assignee, office, date, language, status and classification filters. Returns patent IDs, snippets, dates and links; figure inventories are omitted. Pass patent_id to patent details. Empty results are valid. Cost: ~$0.02/call [spec]."
 
 [overrides.google_patents_patent]
 description = "Retrieve a patent by patent_id returned from search, including abstract, claims, inventors, assignees, dates, classifications, family applications and PDF link. Preserve missing fields and verify legal conclusions against original records. Cost: ~$0.02/call [spec]."

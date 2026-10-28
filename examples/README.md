@@ -65,6 +65,14 @@ per-source errors. These narrow workflows are enabled, rather than whole catalog
 | Social and company evidence | Botsmith X, StableEnrich Reddit, Agent402 GitHub repository metadata, 2s HN, AgData LinkedIn company/Instagram/TikTok/YouTube/Facebook reads, existing contact providers | No complete SocialFetch platform or endpoint parity. |
 | Patents | Atlas Google Patents search/details, all seven 2s USPTO/EPO operations, Maxwell cached USPTO search, existing x402stock patent/company tools | Atlas returned 23 claims; 2s adds application detail, document indexes, bibliography, families and historical legal events. Neither a document index nor a legal-event list establishes full document retrieval or current legal status. |
 
+Atlas Google Patents remains enabled. Its search mapping omits
+`/results/*/figures` and discloses removals in the result advisory, preserving
+patent records and pagination. A sampled 100-result CUDA/Nvidia response shrank
+from 829,409 to about 96,306 characters after figure inventories were removed;
+this is not a context-size guarantee. Patent details are unchanged. An unmapped
+raw search can retrieve figure metadata as a separate explicit call that may be
+paid. See [JSON response projection](../docs/configuration.md#json-response-projection).
+
 Agent402 repository metadata succeeded. NetIntel and AgentUtility repository
 health calls also succeeded, but their different scores and contracts are
 candidates rather than silently interchangeable data. The 2s GitHub replacement

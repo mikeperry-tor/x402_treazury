@@ -61,6 +61,38 @@ fn image_envelopes_preserve_metadata_and_text_remains_unchanged() {
     assert_eq!(raw.images[0].data, PNG); // Binary alternative bypasses JSON mapping.
 }
 #[test]
+fn images_are_extracted_before_projection_removes_their_envelope() {
+    let mapping: ResponseMapping = serde_json::from_value(json!({
+        "images":[{"pointer":"/payload/image","mime_type":"image/png"}],
+        "omit":["/payload"]
+    }))
+    .unwrap();
+    let output = response(
+        serde_json::to_vec(&json!({
+            "payload":{"image":PNG,"private_metadata":"omitted with envelope"},
+            "usage":{"cost":0.05},
+            "id":"retained"
+        }))
+        .unwrap(),
+        "application/json",
+        false,
+    )
+    .render(Some(&mapping), &Default::default())
+    .unwrap();
+    assert_eq!(output.images.len(), 1);
+    assert_eq!(output.images[0].data, PNG);
+    assert_eq!(output.images[0].mime_type, "image/png");
+    let (_, metadata) = output.text.split_once('\n').unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(metadata).unwrap(),
+        json!({"usage":{"cost":0.05},"id":"retained"})
+    );
+    assert_eq!(output.advisories.len(), 1);
+    assert!(output.advisories[0].contains("omitted 1 field"));
+    assert!(output.advisories[0].contains("/payload"));
+}
+
+#[test]
 fn malformed_and_unsupported_media_fail_without_leaking_payloads() {
     let fields = mapping(json!([{"pointer":"/image","mime_type":"image/png"}]));
     for body in [
@@ -288,7 +320,137 @@ async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversio
 }
 
 #[tokio::test]
-async fn paid_image_decode_failure_is_explicit_and_never_replays() {
+async fn json_projection_reaches_direct_and_discovered_mcp_calls_without_changing_raw_calls() {
+    use axum::{Router, routing::get};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use x402_treazury::{
+        catalog::{Config, RoutedRequest, build_tools},
+        payment::PaidClient,
+        server::{Server, http_app},
+    };
+    let original = json!({
+        "results":[
+            {"id":"A","title":"First","figures":[{"thumbnail":"large figure inventory"}]},
+            {"id":"B","title":"Second","figures":[]},
+            {"id":"C","title":"Third"}
+        ],
+        "pagination":{"next":"page-2"},
+        "total":3
+    });
+    let calls = Arc::new(AtomicUsize::new(0));
+    let count = calls.clone();
+    let body = original.clone();
+    let (vendor, vendor_task) = serve(Router::new().route(
+        "/search",
+        get(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            let body = body.clone();
+            async move { axum::Json(body) }
+        }),
+    ))
+    .await;
+    let cfg = Config {
+        response_mappings: std::collections::BTreeMap::from([(
+            "GET /search".into(),
+            serde_json::from_value(json!({"omit":["/results/*/figures"]})).unwrap(),
+        )]),
+        ..Default::default()
+    };
+    let tools = build_tools(&cfg, &json!({"paths":{"/search":{"get":{}}}}), "fixture").unwrap();
+    let server = Server::new(tools, PaidClient::unsigned(), vendor.clone(), None);
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    for discovered in [false, true] {
+        let mut server = server.clone();
+        server.discover_on_demand = discovered;
+        let (base, task) = serve(http_app(server, "fixture".into())).await;
+        let params = if discovered {
+            json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":"fixture_search","arguments":{}}})
+        } else {
+            json!({"name":"fixture_search","arguments":{}})
+        };
+        let result: Value = http
+            .post(format!("{base}/mcp"))
+            .bearer_auth("fixture")
+            .header("accept", "application/json, text/event-stream")
+            .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":params}))
+            .send()
+            .await
+            .unwrap()
+            .mcp_json()
+            .await
+            .unwrap();
+        assert_ne!(result["result"]["isError"], true, "{result}");
+        let content = result["result"]["content"].as_array().unwrap();
+        let projected: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+        let mut expected = original.clone();
+        for record in expected["results"].as_array_mut().unwrap() {
+            record.as_object_mut().unwrap().remove("figures");
+        }
+        assert_eq!(projected, expected);
+        assert!(result["result"].get("structuredContent").is_none());
+        assert_eq!(content.len(), 2, "{result}");
+        let notice = content[1]["text"].as_str().unwrap();
+        assert!(notice.contains("omitt"), "{notice}");
+        assert!(notice.contains("/results/*/figures"), "{notice}");
+        task.abort();
+    }
+    let raw = PaidClient::unsigned()
+        .execute_response(RoutedRequest {
+            headers: Default::default(),
+            method: "GET".into(),
+            url: format!("{vendor}/search"),
+            query: Default::default(),
+            body: None,
+        })
+        .await
+        .unwrap()
+        .render(None, &Default::default())
+        .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&raw.text).unwrap(), original);
+    assert!(raw.advisories.is_empty());
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    vendor_task.abort();
+}
+
+#[test]
+fn projection_notice_preserves_transport_advisories_and_payment_evidence() {
+    let mapping: ResponseMapping =
+        serde_json::from_value(json!({"omit":["/results/*/figures"]})).unwrap();
+    let mut input = response(
+        serde_json::to_vec(&json!({"results":[{"id":"A","figures":[]}]})).unwrap(),
+        "application/json",
+        false,
+    );
+    input
+        .advisories
+        .push("Relay payment may have occurred.".into());
+    input.relay_payment_may_have_occurred = true;
+    let output = input.render(Some(&mapping), &Default::default()).unwrap();
+    assert!(output.payment_may_have_occurred);
+    assert_eq!(output.advisories.len(), 2);
+    assert!(
+        output
+            .advisories
+            .iter()
+            .any(|notice| notice == "Relay payment may have occurred.")
+    );
+    assert!(
+        output
+            .advisories
+            .iter()
+            .any(|notice| notice.contains("/results/*/figures"))
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&output.text).unwrap(),
+        json!({"results":[{"id":"A"}]})
+    );
+}
+
+#[tokio::test]
+async fn paid_output_decode_failures_are_explicit_and_never_replay() {
     use axum::{
         http::{HeaderMap, StatusCode},
         response::IntoResponse,
@@ -302,38 +464,52 @@ async fn paid_image_decode_failure_is_explicit_and_never_replays() {
         catalog::RoutedRequest,
         payment::{PaidClient, Payer, SpendPolicy, USDC},
     };
-    let signed = Arc::new(AtomicUsize::new(0));
-    let unsigned = Arc::new(AtomicUsize::new(0));
-    let (s, u) = (signed.clone(), unsigned.clone());
-    let (base,task)=serve(axum::Router::new().route("/image",get(move|headers:HeaderMap| {
+    for (mime, body, mapping) in [
+        ("image/png", "bad image after settlement", None),
+        (
+            "application/json",
+            "private malformed JSON after settlement",
+            Some(serde_json::from_value(json!({"omit":["/results/*/figures"]})).unwrap()),
+        ),
+    ] {
+        let signed = Arc::new(AtomicUsize::new(0));
+        let unsigned = Arc::new(AtomicUsize::new(0));
+        let (s, u) = (signed.clone(), unsigned.clone());
+        let (base,task)=serve(axum::Router::new().route("/image",get(move|headers:HeaderMap| {
         let(s,u)=(s.clone(),u.clone());async move {
             if headers.contains_key("payment-signature") {
                 s.fetch_add(1,Ordering::SeqCst);
-                return ([("content-type","image/png")],"bad image after settlement").into_response();
+                return ([("content-type",mime)],body).into_response();
             }
             u.fetch_add(1,Ordering::SeqCst);
-            let challenge=json!({"x402Version":2,"resource":{"url":"https://vendor.example/image","mimeType":"image/png"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+            let challenge=json!({"x402Version":2,"resource":{"url":"https://vendor.example/image","mimeType":mime},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":USDC,"amount":"1000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
             (StatusCode::PAYMENT_REQUIRED,[("payment-required",STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
         }
     }))).await;
-    let client = PaidClient::new(
-        Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
-    );
-    let output = client
-        .execute_response(RoutedRequest {
-            headers: Default::default(),
-            method: "GET".into(),
-            url: format!("{base}/image"),
-            query: Default::default(),
-            body: None,
-        })
-        .await
-        .unwrap();
-    let error = output.render(None, &Default::default()).unwrap_err();
-    assert!(format!("{error:#}").contains("payment may already have settled"));
-    assert_eq!(signed.load(Ordering::SeqCst), 1);
-    assert_eq!(unsigned.load(Ordering::SeqCst), 1);
-    task.abort();
+        let client = PaidClient::new(
+            Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
+        );
+        let output = client
+            .execute_response(RoutedRequest {
+                headers: Default::default(),
+                method: "GET".into(),
+                url: format!("{base}/image"),
+                query: Default::default(),
+                body: None,
+            })
+            .await
+            .unwrap();
+        let error = output
+            .render(mapping.as_ref(), &Default::default())
+            .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("payment may already have settled"));
+        assert!(message.contains("do not automatically repeat"));
+        assert!(!message.contains("private malformed JSON"));
+        assert_eq!(signed.load(Ordering::SeqCst), 1);
+        assert_eq!(unsigned.load(Ordering::SeqCst), 1);
+        task.abort();
+    }
 }
 
 #[tokio::test]
@@ -351,6 +527,8 @@ max_total_bytes=1024
 max_images=2
 [response_mappings."POST /images"]
 images=[{pointer="/data/0/image",mime_type="image/png"}]
+[response_mappings."GET /search"]
+omit=["/results/*/figures"]
 "#,
     )
     .unwrap();
@@ -365,6 +543,10 @@ images=[{pointer="/data/0/image",mime_type="image/png"}]
             .response_mappings
             .contains_key("POST /images")
     );
+    assert_eq!(
+        resolved.settings.response_mappings["GET /search"].omit,
+        ["/results/*/figures"]
+    );
     assert!(resolved.origins["response_mappings"].ends_with("provider.toml"));
     let cleared = config::resolve(
         toml::from_str("extends='provider.toml'\nresponse_mappings={}").unwrap(),
@@ -374,6 +556,8 @@ images=[{pointer="/data/0/image",mime_type="image/png"}]
     .unwrap();
     assert!(cleared.settings.response_mappings.is_empty());
     for invalid in [
+        "spec='x'\n[response_mappings.'GET /unused']\nomit=['results/*/figures']",
+        "spec='x'\n[response_mappings.'GET /unused']\nomit=['/results/~bad']",
         "spec='x'\n[image_limits]\nmax_images=0",
         "spec='x'\n[response_mappings.'GET /unused']\nimages=[{pointer='/x',mime_type='image/svg+xml'}]",
         "spec='x'\n[response_mappings.'bad']\nimages=[{pointer='/x',mime_type='image/png'}]",
