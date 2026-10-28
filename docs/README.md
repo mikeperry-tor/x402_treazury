@@ -10,7 +10,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Development](development.md) | Local checks, coverage and complexity tooling |
 | [Zingo integration](zingo-integration.md) | SDK boundaries, Pepper patches and adapted-code attribution |
 | [Architecture](architecture.md) | Catalog generation, MCP execution, ownership and the [wallet selection/isolation decision](architecture.md#wallet-selection-and-network-isolation) |
-| [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, reserve claims, retained capacity, funding and recovery |
+| [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, reserve claims, retained capacity, [automatic retirement](wallet-rotation.md#automatic-retirement), funding and recovery |
 | [Network egress](network-egress.md) | Direct/Tor factory, isolation identities, timeout policy and SDK boundaries |
 | [Local resource limits](local-resource-limits.md) | Existing failure thresholds, cache lifetimes and maintenance cadence for troubleshooting |
 | [Cover traffic](cover-traffic.md) | Optional bounded HTTP/2 ranges, padding, sampling and evidence |
@@ -19,8 +19,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Public swap demo](public-swap-demo.md) | Bounded operator workflows for treasury or static-wallet demos |
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
-[Plans](plans/) describe unfinished work, including
-[ordinary USDC wallet retirement](plans/usdc_wallet_retirement.md), artifact storage,
+[Plans](plans/) describe unfinished work, including artifact storage,
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
