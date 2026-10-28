@@ -1471,6 +1471,16 @@ results remain subject to ordinary visible text truncation. Quotes depend on
 requested counts; the vendor documents partial-result refunds and invalid-body
 quotes, which are not evidence that invalid inputs can be delivered.
 
+Sampled synchronous AgData social calls delivered one NASA Instagram post,
+one NASA TikTok video, one NASA YouTube channel video and NASA's Facebook
+page details. These qualify the sampled account-post/video and page-detail
+requests, alongside the separately exercised LinkedIn company lookup. The
+TikTok item was dated 2026-07-21, not evidence of a latest-post ordering guarantee.
+The separate comments, transcript, personal-profile and other platform modes
+remain unqualified; sampled comments embedded in an Instagram post do not
+establish complete comment retrieval. These operations remain available in
+the reusable provider regardless of the deployment's narrower selection.
+
 Degenscan's six Carry reads support keyless per-call x402 despite the schema's
 subscription/API-key descriptions. Their guide prices are retained in overrides;
 an unsigned funding-matrix probe returned an x402 Base USDC offer for $0.03.
