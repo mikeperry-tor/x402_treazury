@@ -1852,6 +1852,24 @@ returned useful PubMed metadata but an arXiv component error (`This operation wa
 aborted`). Its partial results are enabled with explicit coverage caveats. These
 application responses do not establish a Tor-specific cause or grant paid replay.
 
+Additional sampled research-desk reads delivered Strale UK charity registration
+and dated finances; 2s state-company records in NY, CO and CT, FCC filings and
+spectrum geographies, OpenFIGI identifiers, issuer joins and HN item/feed/user
+records; and Maxwell cached CourtListener results. Name searches are not entity
+identity proofs. The 2s resolver joins an issuer LEI by name and returns issuer
+ISINs, including debt, rather than exact share-class identifier equivalence.
+Strale's two MiCA checks returned unavailable-register notes and null update
+dates despite HTTP success and false match flags. The 2s HICP response advertised
+as latest contained 2025-12 data in October 2026. These three operations remain
+unselected in research_desk.
+
+2s destination advisory and visa-reference requests returned records; visa data
+is community-maintained rather than an official entry ruling. Maxwell's Austria
+inventory returned 354 resorts, Kitzbühel ticket prices returned 27 rows for
+2026/27 with official-source links, and conditions returned dated forecasts.
+The sampled calls do not qualify other countries, US state disambiguation,
+complete station/lift coverage or live ticket availability.
+
 ## google-patents.toml — Google Patents through x402 Atlas
 
 This definition uses the bridge's complete two-route vendor OpenAPI at

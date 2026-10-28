@@ -10,6 +10,7 @@
 # security   Threats, breaches and infrastructure checks        financials
 # world      Geopolitics, weather, shipping, regional conditions global
 # toolbox    Dynamic provider management and raw calls          global
+# travel     Destination references, ski resorts and conditions global
 #
 # Wallets share payer identities within each topical group. Separate groups
 # reduce payer reuse across topics; they do not guarantee unlinkability.
@@ -80,7 +81,7 @@ max_conversion_overhead_percent = 5
 funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00"
 
-# World research and dynamic toolbox calls share this payer pool.
+# World, travel and dynamic toolbox calls share this payer pool.
 # LoneStar CrownBlock region/report calls advertise $1.00 pricing.
 [wallets.global]
 mode = "zcash_rotation"
@@ -824,17 +825,22 @@ send_tools = [
   { to = "security", tools = ["security_*"] },
   { to = "property", tools = ["property_*", "soil_*", "geo_flood_zone", "gov_epa_facilities", "gov_fair_market_rent", "gov_income_limits", "gov_nfip_claims", "gov_risk_index", "gov_uk_crime"] },
   { to = "science", tools = ["paper_doi_lookup", "papers_citations", "papers_search", "research_*", "bio_*", "chem_*", "clinical_*", "health_*", "medical_*", "nutrition_*", "gov_fda_*"] },
+  { to = "finance", tools = ["finance_figi", "finance_security_resolve"] },
+  { to = "travel", tools = ["travel_advisory", "travel_visa"] },
+  { to = ["property", "world"], tools = ["telecom_market_area"] },
+  { to = "business", tools = ["business_sos_search", "telecom_fcc_filings"] },
   { to = "finance", tools = ["bank_*", "bls_*", "econ_*", "worldbank_*", "treasury_*", "tax_*", "gov_bea_gdp"] },
   { to = "world", tools = ["aviation_*", "airport_*", "flight_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
   # HN search returned dated story links and discussion counts; GitHub failed upstream authentication.
-  { to = "social", tools = ["news_hn_search"] },
+  { to = "social", tools = ["news_hn_search", "news_hn_item", "news_hn_top", "news_hn_user"] },
   # All seven patent operations returned useful records. Documents are an index;
   # EPO legal rows are historical events, not a complete current-status verdict.
   # Legal, political and occupational records remain on business.
   { to = "business", tools = ["patents_search", "patents_detail", "patents_documents", "patents_epo_search", "patents_epo_biblio", "patents_epo_family", "patents_epo_legal", "law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
   # Exa, Otto, StableEnrich and AgentUtility cover web research; PDL/Deepline cover contacts.
   # Existing finance providers cover quotes, filings and crypto; AgOSINT covers routine company/LEI lookups.
-  # Parsing/validation belongs locally. Model/media gateways, commerce, entertainment, trip planning,
+  # inflation_hicp returned 2025-12 as latest in October 2026; leave it unselected.
+  # Parsing/validation belongs locally. Model/media gateways, commerce, entertainment, other trip planning,
   # remote infrastructure and provider feedback/diagnostics are outside this research selection.
   { to = "exclude" },
 ]
@@ -853,8 +859,10 @@ send_tools = [
     "beneficial_ownership_lookup", "uk_companies_house_officers", "uk_disqualified_director_check",
     "french_insolvency_check", "fr_bodacc_lookup", "no_bankruptcy_check", "insolvency_check",
     "pep_check", "adverse_media_check", "country_tax_rates", "employment_cost_estimate",
-    "work_permit_requirements", "eu_trademark_search", "eori_validate",
+    "work_permit_requirements", "eu_trademark_search", "eori_validate", "charity_lookup_uk",
   ] },
+  # MiCA vasp_verify and vasp_non_compliant_check reported unavailable registers,
+  # despite HTTP success; neither qualifies a compliance verdict.
   # AgOSINT supplies routine CZ/NO/GB/FR/FI/US/DE company lookups; Brazilayer supplies CNPJ.
   # Maxwell supplies CA/CH/PL/SK records. Retain the additional jurisdictions and scoped KYB tools above.
   # Selected web/science tools cover web/papers, finance covers markets, and NetIntel/AgOSINT cover DNS/domains.
@@ -875,15 +883,18 @@ send_tools = [
   ] },
   { to = "world", tools = ["weather_alerts_by_state", "weather_discussion", "weather_gridpoint"] },
   { to = "science", tools = ["openfda_drug_label", "openfda_drug_event"] },
+  # Qualified Austrian inventory, published season prices and dated forecasts.
+  { to = "travel", tools = ["ski_inventory", "ski_prices", "resort_conditions"] },
+  { to = "business", tools = ["courts_search"] },
   { to = "business", tools = ["gov_*"] },
   # A cached keyword query delivered ten USPTO records after the compatibility fix.
   # Preserve fetchedAt; not_cached queues retrieval but is not an empty search.
   { to = "business", tools = ["uspto_patent"] },
   # Atlas Google Patents and 2s remain separately callable patent alternatives.
-  # x402stock/AgentFund/Otto cover SEC, macro and markets; 2s covers court search.
+  # x402stock/AgentFund/Otto cover SEC, macro and markets; 2s also covers court search.
   # AgOSINT supplies broader sanctions lists; NetIntel supplies RDAP and Otto combined forecasts.
   # 2s supplies direct CVE/package evidence; existing recall tools cover the omitted FDA recall searches.
-  # Ski/menu/trip planning, model calls and provider-mediated test purchases are separate workflows.
+  # Other ski/menu/trip planning, model calls and provider-mediated test purchases remain unselected.
   # Provider diagnostics/help add no selected research data; inline schemas cover the tools above.
   { to = "exclude" },
 ]
@@ -924,12 +935,13 @@ send_tools = [
   { to = "exclude" },
 ]
 
-# Company-page enrichment returned the requested company and source identity.
-# Other social-platform workflows remain candidates, not qualified replacements.
+# Company enrichment and four one-record NASA platform reads delivered data.
+# Separate comments/transcripts/personal-profile modes remain unqualified.
 [sources.agdata]
 extends = "../../providers/agdata.toml"
 send_tools = [
   { to = ["business", "social"], tools = ["linkedin_company"] },
+  { to = "social", tools = ["instagram", "tiktok", "youtube", "facebook_page"] },
   { to = "exclude" },
 ]
 
@@ -958,7 +970,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "social"
 discover_on_demand = true
 instructions_text = "Social-platform, GitHub repository metadata, person, public-profile and business-contact research, including email lookup and validation. Search by platform, repository or person. Preserve platform, date and partial-result markers; missing posts do not prove absence."
-discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, GitHub repository metadata, Agent402, Hacker News, APEX research search, 2s HN search, Twitter, X, Botsmith posts and profiles, Otto curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, contact phone, company phone, LinkedIn company enrichment, AgData."
+discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, GitHub repository metadata, Agent402, Hacker News, APEX research search, 2s HN search, stories, comments, feeds and users, Instagram posts, TikTok videos, YouTube channel videos, Facebook page details, Twitter, X, Botsmith posts and profiles, Otto curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, contact phone, company phone, LinkedIn company enrichment, AgData."
 
 [servers.business]
 listen = "127.0.0.1:3013"
@@ -967,7 +979,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
 instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic and health datasets."
-discovery_search_tool_instructions_text = "Business keywords: patent keyword search, patent claims, Google Patents, x402 Atlas, EPO, 2s patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+discovery_search_tool_instructions_text = "Business keywords: state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, x402 Atlas, EPO, 2s patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
 
 [servers.finance]
 listen = "127.0.0.1:3014"
@@ -976,7 +988,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
 instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, DeFi, derivatives and prediction markets. Use business for organizations and filings; use property for parcel and site records."
-discovery_search_tool_instructions_text = "Finance keywords: ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
+discovery_search_tool_instructions_text = "Finance keywords: FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
 
 [servers.property]
 listen = "127.0.0.1:3015"
@@ -985,7 +997,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
 instructions_text = "Property, parcel, local-government, zoning, lease, environmental and site research. For Locus, use the free list/call gateway for coverage and record checks before paid reports. Preserve record dates, coverage and uncertainty; estimates are not appraisals."
-discovery_search_tool_instructions_text = "Property keywords: Locus, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, local legislation, ordinances, municipal code, city council, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, Whitepages, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD, income limits, Fair Market Rents, housing assistance, NFIP claims, flood insurance."
+discovery_search_tool_instructions_text = "Property keywords: FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, Locus, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, local legislation, ordinances, municipal code, city council, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, Whitepages, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD, income limits, Fair Market Rents, housing assistance, NFIP claims, flood insurance."
 
 [servers.security]
 listen = "127.0.0.1:3016"
@@ -1017,3 +1029,13 @@ remote_provider_directories = ["coinbase", "x402-list"]
 raw_url_calls = true
 instructions_text = "Find and add APIs missing from the research endpoints, or call documented URLs. Prefer providers_list_local for bundled definitions before remote provider discovery."
 discovery_search_tool_instructions_text = "Search APIs registered on this endpoint. Use provider-management tools to find and add providers, or raw-call tools for documented URLs; this search covers currently loaded APIs."
+
+# Destination and leisure research shares the existing global payer pool.
+[servers.travel]
+listen = "127.0.0.1:3019"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "global"
+discover_on_demand = true
+instructions_text = "Destination references, travel advisories, visa requirements, ski resorts, published lift-ticket prices and resort conditions. Preserve source dates, seasons, currencies, forecast times and unavailable components. Visa reference data is community-maintained; verify entry requirements with the destination authority. Published prices do not establish live ticket availability. World retains flights, airports and route matrices."
+discovery_search_tool_instructions_text = "Travel keywords: destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski, skiing, snow, resort, lift ticket, ski pass, season prices, base and summit forecast, lift status, Maxwell, 2s, twos."

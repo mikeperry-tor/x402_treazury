@@ -14,10 +14,10 @@ It retains the `state/privacy` treasury, registry and operational identities of
 the original privacy template; renaming the template does not migrate state.
 
 [deployments/research_desk.toml](deployments/research_desk.toml) distributes
-its research sources across nine task-oriented endpoints using four topical
+its research sources across ten task-oriented endpoints using four topical
 wallet profiles: web for web and science; social; financials for business, finance,
 property and security;
-and global for world and the toolbox. Ordered source `send_tools` rules group
+and global for world, travel and the toolbox. Ordered source `send_tools` rules group
 tool families, exclude editorial choices and express sharing with destination
 arrays. Each source has one final catch-all that assigns or excludes unmatched
 tools; listeners retain endpoint properties,
@@ -48,7 +48,10 @@ Selections belong here, not in the reusable providers.
 APEX's two rendered readers retrieved the JavaScript test page, and its research
 search returned credited OpenAlex and Hacker News results. Research search is
 shared with science/social; it does not replace full paper retrieval or discussion
-threads. AgData company enrichment returned the requested LinkedIn company.
+threads. AgData company enrichment returned the requested LinkedIn company; Instagram posts,
+TikTok videos, YouTube channel videos and Facebook page details also delivered
+records. These narrow platform operations are enabled; separate comments,
+transcripts and personal-profile modes remain unqualified.
 AgentUtility closest-date archive lookup and 2s Hacker News search also succeeded.
 2s scholarly search returned PubMed results with an explicit arXiv failure; preserve
 per-source errors. These narrow workflows are enabled, rather than whole catalogs.
@@ -59,7 +62,7 @@ per-source errors. These narrow workflows are enabled, rather than whole catalog
 | Papers | 2s scholarly search/citations, APEX OpenAlex search, existing science tools | No complete OpenAlex author/work API or guaranteed full text. |
 | SEC, court records, rules, nonprofits and recalls | Existing x402stock and 2s APIs | Different query/pagination contracts; US recalls do not replace six-authority international coverage. |
 | Archives | AgentUtility `archive_snapshot` | Closest snapshot lookup; no full CDX inventory or qualified archived-text read. |
-| Social and company evidence | Botsmith X, StableEnrich Reddit, Agent402 GitHub repository metadata, 2s HN, AgData LinkedIn company, existing contact providers | No complete SocialFetch platform or endpoint parity. |
+| Social and company evidence | Botsmith X, StableEnrich Reddit, Agent402 GitHub repository metadata, 2s HN, AgData LinkedIn company/Instagram/TikTok/YouTube/Facebook reads, existing contact providers | No complete SocialFetch platform or endpoint parity. |
 | Patents | Atlas Google Patents search/details, all seven 2s USPTO/EPO operations, Maxwell cached USPTO search, existing x402stock patent/company tools | Atlas returned 23 claims; 2s adds application detail, document indexes, bibliography, families and historical legal events. Neither a document index nor a legal-event list establishes full document retrieval or current legal status. |
 
 Agent402 repository metadata succeeded. NetIntel and AgentUtility repository
@@ -89,6 +92,23 @@ SocialFetch's long tail of social platforms. Do not silently substitute ordinary
 web search for those structured datasets. The bundled FreeQ provider is available
 for discovery: static Markdown worked, JavaScript-generated content did not; it is
 not selected as another rendered-reader replacement.
+
+The travel listener at port 3019 shares the existing global wallet. Qualified
+2s calls supply destination advisories and community-maintained visa references.
+Maxwell returned 354 Austrian resorts, 27 published 2026/27 ticket-price rows for
+Kitzbühel and dated base/summit forecasts; lift and station components may be
+unavailable. Preserve dates, seasons, price channels and source links. Published
+prices are not live inventory; entry requirements require destination-authority
+verification. Flights and route matrices remain on world.
+
+New business coverage includes Strale UK charity records, 2s NY/CO/CT state
+company records and FCC proceeding filings, plus Maxwell CourtListener search as
+a separately callable gateway to the same underlying legal source. 2s adds HN
+items/feeds/users, FCC spectrum geographies and FIGI/security resolution. Its
+issuer-level ISIN list may include bonds rather than identify the input share.
+Strale MiCA checks reported unavailable registers despite HTTP success; they
+remain excluded. 2s HICP returned 2025-12 as latest in October 2026 and remains
+unselected. Neither payment success nor a false match field proves data coverage.
 
 The bundled-provider catalog was audited for candidate alternatives; this was not
 an exhaustive paid test of every provider or every endpoint. The selected narrow
@@ -132,15 +152,15 @@ per-payment authority. Investment-oriented pharma catalysts and general product
 recalls remain on business. Legal/government records retain their existing split
 across business, world, property and finance.
 
-Travel/mobility stays on world, whose discovery keywords cover the selected flight,
-airport, geocoding and routing tools. Ski/menu/trip-planning tools remain outside
-this selection. Sports data and generative/developer workflows remain available
-through bundled provider selection.
+Flights, airports, geocoding and route matrices stay on world. Destination
+references, ski-resort data and leisure trip research use travel. Sports data
+and generative/developer workflows remain available through bundled provider
+selection.
 
 The listener order and ports are web 3010, science 3011, social 3012, business 3013,
-finance 3014, property 3015, security 3016, world 3017 and toolbox 3018. Existing
-client connections after web need their port updated when adopting this template.
-Local deployment overrides remain operator-owned.
+finance 3014, property 3015, security 3016, world 3017, toolbox 3018 and travel
+3019. Connect each client to its listed port. Local deployment overrides remain
+operator-owned.
 
 Published schemas and estimates do not establish comparative output quality,
 Tor delivery or funded settlement.

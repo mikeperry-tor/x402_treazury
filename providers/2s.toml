@@ -11,3 +11,6 @@ exclude_operations = ["POST /api/batch/run", "GET /api/countdown/gif"]
 pricing_key = "x-payment-info"
 help_url = "https://2s.io/llms.txt"
 instructions_text = "Preserve original sources, observation dates and per-feed availability. Trial responses are marked; missing records and unavailable feeds do not establish absence."
+
+[overrides.twos_finance_security_resolve]
+description = "Resolve exactly one ticker, ISIN or LEI across SEC, OpenFIGI and GLEIF. Preserve per-source status and name-match provenance. Returned ISINs belong to the resolved issuer and may include bonds; they are not an exact list of identifiers for the input security. Use finance_figi for a specific security mapping."
