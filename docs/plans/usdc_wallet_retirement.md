@@ -42,12 +42,14 @@ Owning guides are [wallet rotation](../wallet-rotation.md#automatic-retirement),
   enabled reserve claim or an existing destination/source obligation blocks
   retirement. A payment, incoming credit or role change during acquisition must
   be revalidated through the existing scoped publication contract.
-- **Never-credited wallets remain protected.**
+- **Never-credited wallets remain protected until their original delivery
+  obligations are resolved.**
   `destination_obligation_pending` currently returns true until first positive
   initial credit, including completed, abandoned funding whose source is already
-  confirmed. Newly retained predecessors of reserve replacement therefore remain
-  available for late bridge credit. Integrating retirement must not remove this
-  guard or treat the old completion label as proof of delivery or permanent loss.
+  confirmed. Replace this blanket guard only with the evidence-backed closure
+  rules below. A completion/abandonment label, missing legacy records, quote age
+  or an observed zero is insufficient. Preserve unresolved predecessors for late
+  bridge credit; do not manufacture a positive initial-credit observation.
 - Commit retirement role and supporting evidence atomically through the existing
   publication path. Preserve keys, funds, old authorizations and funding history.
   Retirement neither transfers dust nor creates reserve vacancies or funding
@@ -71,6 +73,46 @@ changes through existing notifications. Reopening configuration reevaluates the
 new group tolerance. Unknown or above-tolerance balances wait for ordinary
 observation; arbitrary external transfers do not create an incoming-funds watcher.
 Never-credited or source-obstructed wallets do not justify useless balance polling.
+Resolve their specific original obligation where useful; do not use repeated
+balance reads as a substitute for unavailable source or provider evidence.
+
+### Closing original destination obligations
+
+Evaluate every original current and archived attempt that could still deliver.
+Reuse accepted quote/operation bindings, source journals and canonical proofs;
+do not add a parallel financial ledger or infer negative evidence from missing
+legacy history. Closure permits ordinary retirement evaluation; it does not
+itself retire the wallet, release source inputs or authorize replacement funding.
+
+| Evidence | Permitted conclusion |
+| --- | --- |
+| Complete journal provenance establishes that no original attempt reached a state capable of submission or disclosure | That attempt cannot deliver; missing records alone do not establish this for legacy work |
+| Existing canonical consensus-expiry and original-unspent-input recovery proves the source attempt cannot execute | That attempt cannot create a future destination delivery |
+| Delivery bound to the original quote and independently verified by the existing destination USDC transfer proof | That delivery completed, even if its credit was missed and the current balance is zero |
+| Original-quote-bound terminal refund whose protocol contract establishes completion of refund processing and no outstanding destination delivery | That swap no longer promises destination credit; account for contractual fees rather than requiring refunded amount to equal the gross deposit |
+
+Complete provenance means the existing journal contract and retained facts, not
+a new provenance-certificate framework. A refunded current attempt cannot close
+an unresolved archived attempt or an accepted source attempt still able to deliver.
+Use the provider's documented terminal semantics, exact saved deposit/request
+bindings and existing receipt verification. A status enum or historical Boolean
+without its binding and applicable semantics is insufficient. Partial refunds,
+contradictory success/refund evidence, unverified delivery, `FAILED`,
+`PENDING_DEPOSIT`, HTTP errors and timeouts retain uncertainty. Expired quote time
+alone does not prove source nonexecution or release an accepted transaction.
+Independently resolve source liabilities through existing source recovery; a
+terminal provider result never releases source inputs. Do not require a new
+refund-attribution ledger or artificial positive-credit event to close an otherwise
+proven destination obligation. SDK/blockchain reconciliation continues to own
+source spendability and discovery of returned funds.
+
+Inspect bound provider status or existing chain evidence only while it can advance
+this specific unresolved obligation, using the existing observation owners,
+cadence and independent backoff. Stop that lane on proven closure. Missing legacy
+provenance or contradictory evidence requiring operator investigation must appear
+as a scoped unresolved status, without an indefinite balance-polling loop or an
+age-based automatic abandonment. New relevant evidence or explicit inspection
+can reopen evaluation; elapsed time alone grants no retirement authority.
 
 For a candidate, page only its outstanding authorizations through existing
 canonical proof/publication machinery, then publish the required dual balance
@@ -107,6 +149,15 @@ completion and retries within the existing owners. First assess reusing existing
 refresh-demand state with a retained-wallet proof stage. Do not conflate a
 completed scalar refresh with completed retirement work or change advisory RPC
 failure policy to make this reuse convenient.
+
+Review original source/destination closure alongside this scheduling decision:
+identify which existing persisted proofs establish each closure case, how exact
+quote bindings survive restart, and how legacy gaps and contradictions remain
+visible without repeated useless I/O. Establish the terminal-refund contract from
+[the provider status API](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
+and its [status semantics](https://github.com/near/agent-skills/blob/main/skills/near-intents/references/concepts.md).
+Do not treat an enum's spelling or a successful diagnostic lookup as sufficient
+production proof. Resolve material contract gaps before implementing that case.
 
 If existing state cannot preserve the completion rules above across overlapping
 requests and rederive unfinished work on restart, justify a minimal work marker with its exact ownership,
@@ -158,6 +209,13 @@ Startup follows the existing SOCKS prerequisite. Explicit `wallet sync` performs
 only a finite eligible-candidate pass, reports unresolved work and creates no
 watcher; it remains usable with auto-funding paused.
 
+Include the original-obligation closure rules in the same coherent integration.
+Reuse existing proof/publication paths and preserve all current/archived attempt
+ownership. No closure path fabricates initial credit, reopens a consumed funding
+claim, resubmits an old deposit or allocates another wallet. Publish supporting
+closure facts and eligibility under the existing Store transaction discipline;
+revalidate relevant changes before committing retirement.
+
 Include diagnostics with this implementation: INFO for committed retirement and
 meaningful deferred/recovered work, DEBUG for individual checks and ordinary
 cooldowns. Replace the touched routine-success WARN for authorized nonzero-dust
@@ -181,9 +239,21 @@ Acceptance must exercise the real ordinary producer-to-publication path, includi
   at the threshold, retained eligibility, and active/ready/current-claim exclusion.
 - More than one authorization page; used, confirmed-expired-unused and still-valid
   unused nonces; no replay, release on local clock alone, or collateral history scan.
-- Never-credited abandoned predecessors remaining retained, original late credit
-  becoming usable, pending current/archived source work, and reserve-replacement
-  generation ownership remaining intact.
+- Never-credited abandoned predecessors remaining retained while unresolved,
+  original late credit becoming usable, pending current/archived source work,
+  and reserve-replacement generation ownership remaining intact.
+- Complete never-started provenance versus missing legacy history; canonical
+  expired/unspent source recovery; verified delivery missed by scalar history;
+  bound terminal refunds including fees; partial/contradictory refunds and bare
+  failed/pending/expired-quote results retaining their obligations. Exercise
+  closure with current balance zero without fabricating first positive credit,
+  refund attribution, source release, replay, top-ups or new allocations.
+- Scoped unresolved legacy status, useful status/receipt observation and terminal
+  completion across cancellation/restart; no recurring balance reads that cannot
+  resolve a source/provider blocker. One attempt's closure cannot conceal another
+  current or archived attempt capable of delivery. Reject wrong deposit, recipient,
+  asset or quote bindings and mixed success/refund evidence; revalidate concurrent
+  source ownership changes before publishing closure.
 - Incoming credit, concurrent payment/role reuse, changed eligibility and stale
   evidence during proof acquisition; exact atomic retirement evidence and reopen.
 - Cancellation/disconnected waiters, slow progress versus a true stalled response,
