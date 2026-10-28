@@ -99,7 +99,8 @@ Maxwell returned 354 Austrian resorts, 27 published 2026/27 ticket-price rows fo
 Kitzbühel and dated base/summit forecasts; lift and station components may be
 unavailable. Preserve dates, seasons, price channels and source links. Published
 prices are not live inventory; entry requirements require destination-authority
-verification. Flights and route matrices remain on world.
+verification. Flight prices, operational lookups, airport references and route
+matrices also belong on travel; aviation weather and accident research stay on world.
 
 New business coverage includes Strale UK charity records, 2s NY/CO/CT state
 company records and FCC proceeding filings, plus Maxwell CourtListener search as
@@ -144,6 +145,22 @@ discovery, while research_desk enables only the sampled useful operations. No
 new wallet profile is introduced. See [provider caveats](../providers/CAVEATS.md)
 for source provenance, qualification boundaries and observed failures.
 
+A full-schema travel inventory covered all 61 bundled providers. StableTravel
+Google Flights returned 22 priced JFK–LHR itineraries for a one-way date, and its
+FlightAware departure read returned 15 JFK records. 2s flight status, airport
+board and route-schedule samples returned real flight records. These operations
+now live on travel with 2s airport lookup/nearby and HALOWERK route matrices;
+generic geocoding is shared with world. StableTravel and 2s flight operations
+share FlightAware, so gateway redundancy is not independent upstream redundancy.
+The fare search uses a separate Google Flights/SerpAPI workflow. Booking-link
+follow-ups, cached mileage awards and other StableTravel reads remain unqualified
+and unselected. Published fare observations do not hold or purchase tickets.
+
+The inventory also found additional unqualified travel candidates: APEX cached
+flight deals, HealthTravel hotels and regional transit, Maxwell resort lodging/
+attractions and ShopSocial hiking trails. A catalog-wide inventory is not a paid
+test of every operation. No absence claim should be inferred for these candidates.
+
 The bundled-provider catalog was audited for candidate alternatives; this was not
 an exhaustive paid test of every provider or every endpoint. The selected narrow
 workflows above have specific delivery evidence; similarly named untested APIs
@@ -186,10 +203,11 @@ per-payment authority. Investment-oriented pharma catalysts and general product
 recalls remain on business. Legal/government records retain their existing split
 across business, world, property and finance.
 
-Flights, airports, geocoding and route matrices stay on world. Destination
-references, ski-resort data and leisure trip research use travel. Sports data
-and generative/developer workflows remain available through bundled provider
-selection.
+Travel groups trip planning: dated flight prices, operational flight data,
+airport references, route matrices, destination references and ski/leisure data.
+World retains general weather, aviation weather/hazards and accident research;
+generic geocoding is shared. Sports data and generative/developer workflows
+remain available through bundled provider selection.
 
 The listener order and ports are web 3010, science 3011, social 3012, business 3013,
 finance 3014, property 3015, security 3016, world 3017, toolbox 3018 and travel

@@ -1637,8 +1637,15 @@ body ident collides with the repaired path ident: supply the same flight in
 Unsigned GET probes for Google Flights search, a UAL123 lookup and a KJFK/KLAX
 route returned x402 Base USDC offers of $0.02, $0.01 and $0.04 respectively,
 alongside Solana offers. These confirm concrete route/challenge discovery, not
-paid data delivery. No new timeout, payment rail or response transformation is
-introduced.
+paid data delivery. Subsequent paid samples returned 22 dated one-way JFK–LHR
+fare itineraries (3 best and 19 other) and 15 JFK departures. These two reads are
+selected on research_desk travel. Fare observations do not hold availability;
+booking-link/token follow-ups and cached awards remain unqualified. Search
+returned booking_token values in this sample, while the booking route declares
+departure_token, so that follow-up must not be assumed interchangeable.
+The 2s flight status/board/schedule samples also returned records but share
+FlightAware upstream with StableTravel operations. No new timeout, payment rail
+or response transformation is introduced.
 
 Update the local schema deliberately from the vendor document and guide. Retain
 all request/response/pricing metadata, repair only documented placeholder slots,
