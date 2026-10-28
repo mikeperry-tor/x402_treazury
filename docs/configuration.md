@@ -1138,9 +1138,12 @@ replaces the entire list, and `reliability_tags = []` suppresses its warnings.
 errors. Describe the affected stage and revise notes when new evidence warrants it;
 keep dated measurements in private local reports.
 
-Bundled annotations cover AgentUtility and OneShot. These observations were made through Tor, but do
-**not** establish Tor causation or long-term failure rates; warnings therefore
-apply in both network modes. See the [provider caveats](../providers/CAVEATS.md) and
+Bundled annotations currently cover OneShot catalog access. Individual API
+failures belong in the provider caveats and runtime operation diagnostics; they
+do not justify a provider-wide startup warning when other operations work,
+especially when the deployment excludes the affected operation. These observations
+do not establish Tor causation or long-term failure rates. Annotations apply in
+both network modes. See the [provider caveats](../providers/CAVEATS.md) and
 [qualification scope](testing.md#qualification-status).
 
 Clearing annotations suppresses only their startup notices. Actual API and help

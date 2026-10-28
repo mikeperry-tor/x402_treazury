@@ -124,7 +124,6 @@ are separate from OpenAPI tool filtering.
 
 | Provider | Observed concern |
 | --- | --- |
-| AgentUtility | Repeated upstream rate limit in web search. |
 | OneShot | Repeated catalog HTTP 403; help remained reachable. |
 
 These are stage-specific compatibility concerns, not current health guarantees or
@@ -938,6 +937,16 @@ Venice/Fal/CloudConvert credentials or initialize a separate vendor wallet/clien
   component failures and degraded markers rather than presenting partial reports
   as complete. Web-search can return an explicitly marked recent-news fallback;
   `include_text` is a compatibility input and does not enable page-text retrieval.
+
+A web-search probe returned HTTP 424 with `dependency=search_provider`
+and `upstream_status=429`. This is an operation-specific upstream failure, not a
+provider-wide outage: link extraction, static-page JSON and closest-date archive
+lookup all returned useful results in the same qualification round. JSON extraction
+returned a title/description but omitted a requested optional summary field; do
+not assume every requested field was populated. Research-desk selects only those
+three working operations and excludes web search. The bundled provider therefore
+carries no startup reliability flag for that search failure. Runtime call failures
+still warn with payment uncertainty; neither relay nor flag removal grants replay.
 
 The large [llms.txt](https://agentutility.ai/llms.txt) is loaded only when help is
 called and cached for the process. It includes excluded tools, aliases, other MCP
