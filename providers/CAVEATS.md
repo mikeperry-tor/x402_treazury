@@ -1660,6 +1660,16 @@ The vendor schema at `https://2s.io/api/openapi` supplies request contracts and
 Base USDC exact offers are available alongside optional metered offers. No funded
 settlement or comparative output quality is established by schema inspection.
 
+The help and catalog resources both ignored unsigned range requests with HTTP/2
+200 responses, exhausting automatic cover qualification. The explicit cover
+profile instead uses the homepage-linked `https://2s.io/2sio-avatar.png`. A direct
+unsigned HTTP/2 probe at offset zero returned exact identity-encoded 206 bytes
+0–1023 of a 7,910-byte PNG without redirect. This is not Tor qualification; the
+runtime must still qualify the resource. The profile preserves all built-in
+range-only budgets and timing values and omits the known-incompatible fallback.
+An identity/origin already marked unavailable needs a restart or normal inactive
+cache eviction before attempting cover again.
+
 Storage, locks, queues, schedules, pub/sub and watchers retain payer-wallet ownership
 across calls. Rotating payment identities cannot preserve that workflow. Batch can
 embed these primitives without a schema-level eligibility boundary, so it is also

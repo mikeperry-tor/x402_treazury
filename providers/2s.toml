@@ -12,5 +12,46 @@ pricing_key = "x-payment-info"
 help_url = "https://2s.io/llms.txt"
 instructions_text = "Preserve original sources, observation dates and per-feed availability. Trial responses are marked; missing records and unavailable feeds do not establish absence."
 
+# Mirror the built-in range-only defaults; the homepage-linked PNG supports
+# unsigned ranges while this provider's help and catalog ignore Range.
+[cover_traffic]
+url = "https://2s.io/2sio-avatar.png"
+volume_mode = "extra_body"
+concurrency = 1
+max_requests_per_episode = 8
+max_cover_body_bytes_per_episode = 16384
+max_episode_ms = 10000
+qualification_range_bytes = 1024
+max_resource_bytes = 16777216
+
+[cover_traffic.volume]
+distribution = "log_normal"
+median_bytes = 8192
+sigma = 0.65
+min_bytes = 4096
+max_bytes = 16384
+
+[cover_traffic.ranges]
+distribution = "uniform"
+min_bytes = 1024
+max_bytes = 4096
+
+[cover_traffic.start_delay]
+distribution = "uniform"
+min_ms = 0
+max_ms = 100
+
+[cover_traffic.request_gap]
+distribution = "weibull"
+scale_ms = 100.0
+shape = 0.8
+min_ms = 50
+max_ms = 250
+
+[cover_traffic.tail]
+distribution = "uniform"
+min_ms = 1000
+max_ms = 3000
+
 [overrides.twos_finance_security_resolve]
 description = "Resolve exactly one ticker, ISIN or LEI across SEC, OpenFIGI and GLEIF. Preserve per-source status and name-match provenance. Returned ISINs belong to the resolved issuer and may include bonds; they are not an exact list of identifiers for the input security. Use finance_figi for a specific security mapping."
