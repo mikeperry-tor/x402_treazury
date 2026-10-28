@@ -19,7 +19,8 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Public swap demo](public-swap-demo.md) | Bounded operator workflows for treasury or static-wallet demos |
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
-[Plans](plans/) describe unfinished work, including artifact storage,
+[Plans](plans/) describe unfinished work, including
+[ordinary USDC wallet retirement](plans/usdc_wallet_retirement.md), artifact storage,
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
