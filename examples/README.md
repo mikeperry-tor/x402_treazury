@@ -141,8 +141,9 @@ so they do not establish four independent fallback vendors. Their primary schema
 guides and sampled paid operations were live; the Workers hostname itself does
 not establish durability. Radar's shared-recipient activity is not endpoint-level
 paid-delivery proof. Full reusable catalogs stay available through local-provider
-discovery, while research_desk enables only the sampled useful operations. No
-new wallet profile is introduced. See [provider caveats](../providers/CAVEATS.md)
+discovery. Research_desk also selects contract-reviewed travel companions after
+representative delivery tests; this does not qualify every operation. No new
+wallet profile is introduced. See [provider caveats](../providers/CAVEATS.md)
 for source provenance, qualification boundaries and observed failures.
 
 A full-schema travel inventory covered all 61 bundled providers. StableTravel
@@ -152,19 +153,44 @@ board and route-schedule samples returned real flight records. These operations
 now live on travel with 2s airport lookup/nearby and HALOWERK route matrices;
 generic geocoding is shared with world. StableTravel and 2s flight operations
 share FlightAware, so gateway redundancy is not independent upstream redundancy.
-The fare search uses a separate Google Flights/SerpAPI workflow. Booking-link
-follow-ups, cached mileage awards and other StableTravel reads remain unqualified
-and unselected. Published fare observations do not hold or purchase tickets.
+The fare search uses a separate Google Flights/SerpAPI workflow. A later award
+search returned ten cached availability records; details for one record returned
+12 itineraries and five booking links. All four Seats.aero reads and operational
+FlightAware reads are selected on travel, including history, tracks, delays and
+disruption counts. Intent writes and overlapping weather are excluded. Cash
+booking remains excluded: the sampled search returned booking_token while its
+booking route expects departure_token. Published observations do not hold tickets.
 
-The inventory also found additional unqualified travel candidates: APEX cached
-flight deals, HealthTravel hotels and regional transit, Maxwell resort lodging/
-attractions and ShopSocial hiking trails. A catalog-wide inventory is not a paid
-test of every operation. No absence claim should be inferred for these candidates.
+Representative travel qualification made nine calls across five providers:
+StableTravel award search/details; HealthTravel dated hotel prices and Amtrak;
+APEX cached flight deals; Maxwell resort lodging/access; ShopSocial hiking and FlixBus. All
+returned useful records. Paris hotel search preserved the requested two-night
+stay and returned three EUR prices; Amtrak returned two trains from eleven NYP
+matches. FlixBus returned 21 Berlin–Munich trips for the requested date with
+EUR fares and fees. APEX returned 30 cached London-origin deals. Maxwell returned 186
+Kitzbühel lodging records and 40 lift/ticket entry points plus rail, bus and
+parking context. Hiking returned the 153.45 km West Highland Way from OSM.
+These are delivery observations, not independent settlement or booking guarantees.
 
-The bundled-provider catalog was audited for candidate alternatives; this was not
-an exhaustive paid test of every provider or every endpoint. The selected narrow
-workflows above have specific delivery evidence; similarly named untested APIs
-remain candidates, not missing-by-assumption or qualified replacements.
+Travel also selects contract-reviewed companions: hotel/hostel/vacation-rental
+sources and reviews, regional rail/transit, FlixBus/FlixTrain, EV-charger
+directories, Michelin and Grubhub restaurants, Rappi menus, ski operators and pass quotes, resort dining/menus, rentals, ski
+schools, attractions and local mountain tips. Maxwell local tips advertise $1
+per call and currently cover Slovakia; the name does not mean financial tips.
+Resort proximity uses approximate map distances rather than routed walking time.
+APEX deals are roughly 48-hour cached Aviasales fares with affiliate links;
+hiking is Waymarked Trails/OpenStreetMap rather than AllTrails user content;
+EV chargers are OSM/NREL directory records rather than PlugShare live occupancy.
+FlixBus/FlixTrain searches cover one adult one way; Rappi menus require a known
+store ID or URL and supply no store search. Grubhub discovery covers US locations.
+SiteCheck hotel city-page samples are not date-specific availability; use dated
+Google Hotels/Airbnb reads for stay dates. No hotel-loyalty API was found.
+
+Only representative calls were tested, not every selected companion operation.
+HealthTravel Google Flights (empty) and Wikivoyage (503) remain excluded; aviation
+weather stays on world. Maxwell bulk prices/trip bundles repeat selected component
+data and remain omitted. Non-travel namespace operations remain omitted as well.
+The full local-catalog inventory is not an exhaustive paid test of provider health.
 
 Otto's browser-dependent JSON/link tools remain available because static HTML
 alternatives do not establish equivalent JavaScript coverage. Inspect freshness,

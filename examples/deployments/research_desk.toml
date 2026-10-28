@@ -9,7 +9,7 @@
 # property   Parcels, local records, zoning and site context    financials
 # security   Threats, breaches and infrastructure checks        financials
 # world      Geopolitics, weather, shipping, regional conditions global
-# travel     Flights, airports, routes and destination planning global
+# travel     Flights, awards, stays, transit and destinations   global
 # toolbox    Dynamic provider management and raw calls          global
 #
 # Wallets share payer identities within each topical group. Separate groups
@@ -883,8 +883,12 @@ send_tools = [
   ] },
   { to = "world", tools = ["weather_alerts_by_state", "weather_discussion", "weather_gridpoint"] },
   { to = "science", tools = ["openfda_drug_label", "openfda_drug_event"] },
-  # Qualified Austrian inventory, published season prices and dated forecasts.
-  { to = "travel", tools = ["ski_inventory", "ski_prices", "resort_conditions"] },
+  # Inventory/prices/conditions plus sampled lodging/access; other trip reads are contract-reviewed.
+  { to = "travel", tools = [
+    "ski_inventory", "ski_prices", "resort_conditions", "ski_resort", "ski_quote", "ski_operator",
+    "food_menu", "food_near", "food_near_resort", "food_venues", "insider_info",
+    "trip_attractions", "trip_bars", "trip_getting_there", "trip_lodging", "trip_rental",
+  ] },
   { to = "business", tools = ["courts_search"] },
   { to = "business", tools = ["gov_*"] },
   # A cached keyword query delivered ten USPTO records after the compatibility fix.
@@ -894,7 +898,7 @@ send_tools = [
   # x402stock/AgentFund/Otto cover SEC, macro and markets; 2s also covers court search.
   # AgOSINT supplies broader sanctions lists; NetIntel supplies RDAP and Otto combined forecasts.
   # 2s supplies direct CVE/package evidence; existing recall tools cover the omitted FDA recall searches.
-  # Other ski/menu/trip planning, model calls and provider-mediated test purchases remain unselected.
+  # Bulk ski prices and trip bundles repeat selected component data; model calls/test purchases stay omitted.
   # Provider diagnostics/help add no selected research data; inline schemas cover the tools above.
   { to = "exclude" },
 ]
@@ -927,12 +931,13 @@ send_tools = [
   { to = "exclude" },
 ]
 
-# Qualified rendered readers and source-specific research search, not the full catalog.
+# Rendered readers, source-specific research search and sampled cached flight deals.
 [sources.apexfaucet]
 extends = "../../providers/apexfaucet.toml"
 send_tools = [
   { to = "web", tools = ["page_extract", "page_markdown"] },
   { to = ["science", "social"], tools = ["research_search"] },
+  { to = "travel", tools = ["flight_deals"] },
   { to = "exclude" },
 ]
 
@@ -946,13 +951,15 @@ send_tools = [
   { to = "exclude" },
 ]
 
-# Dated cash fares and a FlightAware departure board returned nonempty records.
+# Cash fares, departures and award search/trip details returned records.
 [sources.stabletravel]
 extends = "../../providers/stabletravel/provider.toml"
 send_tools = [
-  { to = "travel", tools = ["google_flights_search", "flightaware_airports_id_flights_departures"] },
-  # Booking-link follow-ups, cached awards and other operations need separate qualification.
-  # Flight intent is a write operation, not a flight lookup.
+  # Intent is a write; world already supplies aviation weather.
+  { to = "exclude", tools = ["flightaware_flights_ident_intents", "flightaware_airports_id_weather_*"] },
+  { to = "travel", tools = ["google_flights_search", "seats_aero_*", "flightaware_*"] },
+  # Cash booking expects departure_token but the sampled search returned booking_token.
+  # Other reads are contract-reviewed; representative calls do not qualify every operation.
   { to = "exclude" },
 ]
 
@@ -982,7 +989,8 @@ send_tools = [
 ]
 
 # These four SiteCheck catalogs share an operator and payment wallet.
-# Enable only sampled useful reads; related catalogs do not provide independent redundancy.
+# Social/business selections are sampled; travel also includes contract-reviewed companion reads.
+# Related catalogs do not provide independent redundancy.
 [sources.shopsocial]
 extends = "../../providers/shopsocial.toml"
 send_tools = [
@@ -991,6 +999,8 @@ send_tools = [
     "social_facebook_pages", "social_youtube_transcript", "social_youtube_comments",
     "social_threads_profile", "social_pinterest", "social_telegram_channel",
   ] },
+  # The sampled hiking read uses OpenStreetMap, not AllTrails user content.
+  { to = "travel", tools = ["social_alltrails", "ecommerce_flixbus", "ecommerce_grubhub", "ecommerce_rappi"] },
   { to = "exclude" },
 ]
 
@@ -1005,10 +1015,20 @@ send_tools = [
 [sources.healthtravel]
 extends = "../../providers/healthtravel.toml"
 send_tools = [
-  { to = "travel", tools = ["travel_numbeo", "travel_rome2rio"] },
+  # Dated hotel prices and Amtrak tracking returned records; companion reads are contract-reviewed.
+  { to = "travel", tools = [
+    "travel_numbeo", "travel_rome2rio", "travel_plugshare", "travel_agoda",
+    "travel_booking_com_hotels", "travel_booking_com_reviews", "travel_booking_com",
+    "travel_hotel_booking_sites_direct_hotel_websites", "travel_trivago", "travel_hostelworld",
+    "travel_airbnb", "travel_airbnb_reviews", "travel_google_hotels_price", "travel_google_travel",
+    "travel_flightradar24_live_flights", "travel_flightaware_public_tracker",
+    "travel_skyscanner", "travel_kayak", "travel_momondo",
+    "travel_amtrak_train_tracker", "travel_hk_mtr_realtime", "travel_seat61_routes",
+    "travel_mbta_realtime", "travel_septa_train_view", "travel_michelin_restaurant_guide",
+  ] },
   { to = "science", tools = ["health_ema_shortages_safety"] },
   # Wikivoyage failed upstream HTTP 503; Google Flights returned no fare data.
-  # No successful flight retrieval or complete catalog qualification is implied.
+  # Aviation weather stays on world; cars, corporate data and other non-travel namespace reads stay omitted.
   { to = "exclude" },
 ]
 
@@ -1100,8 +1120,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
 discover_on_demand = true
-instructions_text = "Trip planning, dated cash flight fares, flight status, schedules, airport references and departure boards, route matrices, destination advisories, visa references, ski resorts, published lift-ticket prices, resort conditions and city cost-of-living observations. StableTravel Google Flights searches default to round trips requiring return_date; set type to string 2 for one way. Fares are observations, not held reservations. 2s and StableTravel flight operations share FlightAware upstream data. Preserve source dates, seasons, currencies, forecast times and unavailable components. Visa reference data is community-maintained; verify entry requirements with the destination authority. Published prices do not establish live ticket availability. World retains general weather, aviation hazards and accident research; geocoding is shared."
-discovery_search_tool_instructions_text = "Travel keywords: flight search, airfare, cash fare, Google Flights, StableTravel, SerpAPI, FlightAware, AeroAPI, flight status, flight tracking, flight schedule, airport lookup, nearby airports, airport board, departures, arrivals, delays, cancellations, airline, aircraft, IATA, ICAO, route schedule, driving, cycling, walking, route matrix, geocoding, travel time, distance, SiteCheck, HealthTravel, Numbeo, city cost of living, Rome2Rio, intercity transport, route options, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski, skiing, snow, resort, lift ticket, ski pass, season prices, base and summit forecast, lift status, Maxwell, 2s, twos."
+instructions_text = "Trip planning: cash fares, cached airline-mileage awards, flight operations/history, airport references, route matrices, stays, dining, hiking, rail/transit, EV chargers, destination/visa references and ski travel. StableTravel Google Flights defaults to round trips requiring return_date; type string 2 selects one way. Seats.aero search returns availability IDs for trip details; preserve cache timestamps, mileage program, cabin and taxes. Resolve FlightAware identifiers before position/track/map calls; 2s shares that upstream. APEX fares are cached Aviasales deals with affiliate links. Hotel sample prices, published ski prices and booking links do not hold availability or issue tickets. Preserve source dates, currencies, unavailable components and partial coverage. Resort proximity is approximate, not a routed walking distance; Maxwell local tips presently cover Slovakia and advertise $1 per call. Hiking uses OpenStreetMap rather than AllTrails reviews; charger data is a directory rather than live occupancy. FlixBus/FlixTrain searches cover one adult one way; Rappi menus require a store ID or URL and do not search stores. Verify community-maintained visa references with the destination authority. World retains general/aviation weather, hazards and accidents; geocoding is shared."
+discovery_search_tool_instructions_text = "Travel keywords: flight search, airfare, cash fare, Google Flights, StableTravel, SerpAPI, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, departures, arrivals, IATA, ICAO, Seats.aero, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, APEX, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, SiteCheck, HealthTravel, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips, Maxwell, 2s, twos."
 
 [servers.toolbox]
 listen = "127.0.0.1:3019"

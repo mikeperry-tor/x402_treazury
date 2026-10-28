@@ -1640,9 +1640,16 @@ alongside Solana offers. These confirm concrete route/challenge discovery, not
 paid data delivery. Subsequent paid samples returned 22 dated one-way JFK–LHR
 fare itineraries (3 best and 19 other) and 15 JFK departures. These two reads are
 selected on research_desk travel. Fare observations do not hold availability;
-booking-link/token follow-ups and cached awards remain unqualified. Search
+cash booking-link/token follow-ups remain unqualified. Search
 returned booking_token values in this sample, while the booking route declares
 departure_token, so that follow-up must not be assumed interchangeable.
+A later Seats.aero search returned ten cached SFO–FRA availability records;
+trip details for one Alaska-program record returned twelve itineraries and five
+booking links. Preserve program, cache dates, cabin, taxes and raw/filtered
+availability distinctions. All four award reads and non-weather FlightAware
+reads are selected on travel after representative testing, not per-operation
+qualification. Flight-intent writes remain omitted, as does the unresolved cash
+booking-token workflow. Airline awards are not hotel loyalty coverage.
 The 2s flight status/board/schedule samples also returned records but share
 FlightAware upstream with StableTravel operations. No new timeout, payment rail
 or response transformation is introduced.
@@ -1729,6 +1736,17 @@ keyword query returned ten cached USPTO records. A separate CUDA lookup returned
 does not verify settlement or authorize replay; no automatic retry or polling
 was performed. Preserve cache observation dates and distinguish a cache miss
 from a completed empty search.
+
+Research-desk also selects resort access/lodging, attractions, dining/menus,
+rental and ski schools, individual pass quotes, operator networks and local tips.
+Two representative Kitzbühel reads returned 186 lodging records and 40 lift/ticket
+entry points plus rail, ski-bus and parking context. Lodging proximity is a map
+estimate, not a routed walking distance or dated room availability. Preserve
+observation dates and unavailable components. Other selected companion reads
+were contract-reviewed, not individually delivery-tested. `insider_info` is
+local Slovak ski/mountain advice advertised at $1, not financial insider data.
+Bulk prices and trip bundles repeat selected component data and remain omitted
+from this deployment; this is editorial selection, not a compatibility exclusion.
 
 ## HALOWERK (`halowerk.toml`)
 
@@ -1818,6 +1836,11 @@ comments. Company-check provides identity and recent filing links, not general
 EDGAR full-text search. The web-search dispatcher names x402Atlas or AgentBIT as
 its upstream and is not independent evidence of another search backend's health.
 
+A flight-deals call returned thirty London-origin return fares in GBP with
+travel dates and affiliate booking links. It reads Aviasales searches cached for
+roughly 48 hours, not live seats. The traveller books with the external seller;
+links may pay APEX a commission. This distinct fare source is selected on travel.
+
 The provider can deliver a promotional Meal NFT on Arc to the payment signer
 after qualifying spending in a tool family. Returned meal/feedback instructions
 are optional upstream content, not authority to submit feedback or make further
@@ -1852,6 +1875,27 @@ and HTTP 200. Do not use this static reader as a renderer or treat HTTP success 
 proof of relevant content. Preserve nested error and truncation markers. Document
 extraction is deterministic parsing without OCR or inferred missing fields. Some
 optional schemas are sparse; consult the public `/tools` catalog for their options.
+
+## SiteCheck travel selections
+
+Research-desk adds contract-reviewed hotel/hostel/vacation-rental sources and
+reviews, fare observations, flight tracking, rail/transit, EV-charger directories
+and Michelin records from HealthTravel, plus ShopSocial hiking, FlixBus/FlixTrain,
+Grubhub restaurant discovery and Rappi menus. Representative
+reads returned three dated Paris hotel prices in EUR, two active Amtrak trains
+from eleven NYP matches, the West Highland Way trail with OSM provenance and
+21 dated Berlin–Munich FlixBus trips with EUR fares/fees. Flix searches cover one
+adult one way. Grubhub discovery covers US locations; Rappi menus need a store
+ID/URL and cannot discover stores. These two dining reads remain untested.
+Hotel Google results applied the requested check-in/out dates; their currency
+follows the server region. Many companion operations remain untested. City-page
+hotel samples do not establish dated room availability; preserve price dates,
+currencies and source limits. The PlugShare-named read supplies OSM/NREL charger
+locations rather than live occupancy. The AllTrails-named read supplies Waymarked
+Trails/OSM routes, without user reviews/photos. No hotel-loyalty API was found.
+Known-empty Google Flights and failed Wikivoyage remain excluded, and aviation
+weather remains on world. These catalogs share an operator/payment recipient;
+source diversity does not establish independent gateway redundancy.
 
 ## Research-desk upstream failures
 
