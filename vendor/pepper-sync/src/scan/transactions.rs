@@ -124,9 +124,10 @@ pub(crate) async fn scan_transactions(
             Err(ServerError::RequestFailed(status)) if !status_is_network_weather(&status) => {
                 match scan_target.origin() {
                     ScanTargetOrigin::External => {
-                        tracing::warn!(
-                            "scan target {txid} at block {} dropped: the server does not serve the transaction. {status}",
-                            scan_target.block_height()
+                        tracing::debug!(
+                            block_height = u32::from(scan_target.block_height()),
+                            status_code = ?status.code(),
+                            "Prior wallet scan target is no longer served; continuing canonical scanning"
                         );
                         dropped_targets.insert(scan_target);
                         continue;

@@ -521,7 +521,12 @@ impl Treasury {
         observation.last_error = outcome.as_ref().err().map(|e| e.to_string());
         tracing::debug!("treasury sync: saving final wallet checkpoint");
         let height = observation.height;
-        self.checkpoint(observation).await?;
+        let bytes = snapshot(self.client.as_ref().context("treasury unavailable")?).await?;
+        let expected = self.revision;
+        self.revision = self
+            .store
+            .call(move |s| s.save_sync_snapshot(expected, &bytes, Some(observation)))
+            .await?;
         self.healthy = true;
         if outcome.is_ok() && !stop.is_cancelled() {
             self.reusable_sync_revision = Some(self.revision);

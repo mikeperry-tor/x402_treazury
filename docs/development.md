@@ -271,10 +271,17 @@ explain it without announcing each failed attempt as an operation failure.
 Background treasury sync and shielding checks with automatic observation/retry
 remaining log failures at DEBUG, including fixed safe categories and available
 sanitized details. Explicit one-pass sync failures remain WARN because that
-command has no automatic retry. Shielding evidence conflicts requiring operator
-review remain WARN; a wallet scan behind a lookup's newly included transaction
+command has no automatic retry. Unreconstructible original transaction/input
+records requiring operator review remain WARN. Current SDK spendability and unfinished transaction observation remain separate.
+Missing, moved or spent old inputs cannot veto buried finite expiry of the exact
+authenticated original. Established SDK confirmation or finite-expiry closure
+requires no indexer corroboration. A wallet scan behind a lookup's newly included transaction
 is ordinary pending confirmation. Logs never release financial ownership or
 authorize another submission.
+SDK chain recovery does not reopen completed source work or settled swaps.
+Unrecoverable original evidence for unfinished work needs
+the operation identity and a safe failure category; do not discard the cause or
+log original signed bytes or credential-bearing upstream messages.
 
 Expected negative results, routine caller rejections and normal cancellation are
 not automatically operational failures. Cancellation does not end accepted
@@ -497,8 +504,9 @@ workflow owns its outcome: retrying retirement reports a meaningful delay at INF
 while an operator-required stop warns once with the affected wallet/group and a
 safe record-failure category for unreconstructible original records or authority.
 Recoverable canonical-history changes and derived checkpoints continue through
-the existing observation schedule; they do not request manual repair.
-A true record failure preserves obligations and asks for inspection;
+the existing observation schedule; they do not request manual repair. SDK/indexer
+disagreements retain useful height and scan context while further observations
+resolve them. A true record failure preserves obligations and asks for inspection;
 later checks of the same stopped request do not repeat the warning.
 Malformed optional historical balance support is retained as disputed audit data;
 fresh canonical proof can replace its current role without an operator-only stop.

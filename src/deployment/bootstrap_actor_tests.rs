@@ -96,7 +96,7 @@ fn quote(job: &crate::rotation::store::funding::FundingJob, now: u64) -> Quote {
     }
 }
 #[tokio::test]
-async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_commit() {
+async fn occupied_treasury_sync_does_not_block_proven_funding_completion() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
@@ -234,13 +234,15 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
         .call(move |s| {
             assert_eq!(
                 s.funding_job(&original.id)?.unwrap().phase,
-                FundingPhase::VerifyingCredit
+                FundingPhase::Complete
             );
             let operation = s.operation(&original.operation_id)?;
             assert_eq!(operation.attempts, 1);
-            assert_ne!(operation.submission, "CONFIRMED");
+            assert_eq!(operation.submission, "UNKNOWN");
+            assert!(!s.operation_pending(&original.operation_id)?);
+            assert!(PreparedTransaction::load(s, &original.operation_id).is_err());
             assert_eq!(
-                PreparedTransaction::load(s, &original.operation_id)?.bytes(),
+                s.prepared_bytes(&original.operation_id)?.as_slice(),
                 b"unfunded-original-prepared-bytes"
             );
             assert_eq!(
@@ -253,10 +255,10 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
         .await
         .unwrap();
     let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
-    let pending: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='PREPARED' AND preparation IS NOT NULL)",[&first.operation_id],|r|r.get(0)).unwrap();
+    let resolved: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE id=?1 AND state='RESOLVED' AND preparation IS NOT NULL)",[&first.operation_id],|r|r.get(0)).unwrap();
     assert!(
-        pending,
-        "destination/provider progress cannot release original source ownership"
+        resolved,
+        "bound fulfillment closes local source work while preserving its evidence"
     );
     drop(db);
     stop.cancel();
@@ -279,13 +281,23 @@ async fn occupied_treasury_sync_preserves_source_owner_while_status_and_credit_c
         &crate::rotation::store::status(&state).unwrap().treasury_id,
     )
     .unwrap();
-    assert!(reopened.operation_pending(&first.operation_id).unwrap());
+    assert!(!reopened.operation_pending(&first.operation_id).unwrap());
+    assert!(PreparedTransaction::load(&reopened, &first.operation_id).is_err());
     assert_eq!(
-        PreparedTransaction::load(&reopened, &first.operation_id)
+        reopened.funding_job(&first.id).unwrap().unwrap().phase,
+        FundingPhase::Complete
+    );
+    assert_eq!(
+        reopened
+            .prepared_bytes(&first.operation_id)
             .unwrap()
-            .bytes(),
+            .as_slice(),
         b"unfunded-original-prepared-bytes"
     );
     assert_eq!(reopened.operation(&first.operation_id).unwrap().attempts, 1);
+    assert_eq!(
+        reopened.operation(&first.operation_id).unwrap().submission,
+        "UNKNOWN"
+    );
     assert_eq!(reopened.funding_jobs().unwrap().len(), 2);
 }

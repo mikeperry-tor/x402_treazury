@@ -555,10 +555,12 @@ over-cap work still cannot sign. Multi-attempt tests retain every original journ
 entry and distinguish ambiguous protocol records from the exact retry category.
 Owner-replacement tests interrupt a scheduler while accepted child work still
 holds its lease, then check exclusion, release, restart, shutdown and retained
-backoff. Count completed scans directly when proving two-scan recovery; snapshot
-revisions also count intermediate checkpoints. Manifest tests use actual SDK
-transactions and selected inputs, including a missing small input when the
-remaining value covers the fee. Diagnostic prose, workflow phases and aggregate
+backoff. Count completed scans directly when proving single-scan expiry recovery;
+the authenticated original signed expiry, burial and final unchanged Ready
+snapshot coverage must still be checked. Snapshot revisions also count
+intermediate checkpoints. Missing, relocated or differently spent old inputs must
+not become negative-expiry gates; current SDK state owns spendability. Test bridge
+terminality and current authority separately from local source closure. Diagnostic prose, workflow phases and aggregate
 balances alone do not prove these properties.
 Verify that a changed financial test is reachable through its module declarations
 and actually runs with the intended feature/platform gates. A successful filtered

@@ -155,9 +155,11 @@ exit status. Add `--json` for the versioned machine-readable result, including
 `balance_estimate_usdc` fields. The JSON result separates current serving/inventory readiness from
 completion of captured work (see [capacity output](#versioned-capacity-output)).
 Repeating the command resumes current incomplete claims, including eligible recovery. Signed
-transactions are replaced only after the existing canonical expiry and unspent-input
-proof succeeds. Unknown preparation outcomes and conflicting evidence still require
-operator review; cancellation drains
+source work closes after canonical confirmation or buried finite signed expiry
+with completed SDK coverage. Replacing a disclosed swap also needs its bound
+terminal NEAR failure/refund and separately revalidated funding authority.
+Unknown preparation outcomes and corrupt or missing immutable accepted records
+still require operator review; cancellation drains
 accepted financial work and preserves journals. Treasury ZEC funding and Base
 confirmation can take time. The command introduces no new spending limits.
 While waiting, it logs unfinished jobs and their sync/submission state once a
@@ -347,8 +349,13 @@ random EVM keys, pending payment authorizations or the rotation journal.
 
 The embedded Zingolib v7 SDK reads older wallet snapshots and writes SDK wallet
 format 45 on the next save, including the finite-sync and transparent-scan fields.
-The treasury database schema, encrypted envelope, identities and journaled
-transaction bytes retain their existing formats. Stop serving and take a complete
+Opening an owned schema-21 treasury upgrades its database additively to schema 22;
+earlier binaries reject that version. Existing source history and snapshot
+references remain preserved, including the guard against automatic disclosure of
+previously closed originals. Historical rows do not reopen settled swap workflows.
+Read-only status/identity inspection accepts schemas 21 and 22 without upgrading.
+Encrypted records, identities and journaled transaction bytes retain their
+formats. Stop serving and take a complete
 backup before upgrading. Older v6 application binaries cannot reopen a format-45
 SDK snapshot. A pre-upgrade backup is not a safe rollback after new financial work:
 restoring it would discard the newer accepted operations and liabilities. Preserve
@@ -364,18 +371,38 @@ The JSON report distinguishes `recovered`, `waiting`, `operator_required` and
 `check_failed`. This command does not create pools, request quotes, prepare deposits
 or broadcast transactions. It uses the same recovery logic as bootstrap and serving.
 A known pre-preparation failure can reset an eligible unprepared job. A signed
-operation retains its reservation until verified expiry; submitted or ambiguous
-operations are reconciled first, never automatically rebroadcast. Recovery archives
-the original operation and resets the job under a new operation ID. Run bootstrap
-after successful standalone recovery to continue funding.
+operation retains its owner until canonical confirmation, verified finite expiry
+or bound NEAR SUCCESS; submitted or ambiguous operations are reconciled first,
+never automatically rebroadcast. Recovery archives and resets an eligible job
+under a new operation ID only with the required bridge terminal outcome and current
+funding authority. Run bootstrap after successful standalone recovery to continue
+funding.
+Recoverable SDK/indexer disagreement remains pending while observations continue;
+it does not require a manual reset. A fork beyond the SDK's upstream 100-block rolling
+history requires a full rescan; that history window is not consensus finality.
+Malformed immutable identities, missing accepted bytes and unavailable authority
+remain scoped operator requirements with diagnostic context.
+Malformed submission counters or unknown source-status labels instead keep the
+original observe-only: canonical confirmation, finite expiry or bound settlement
+can close it without repairing those columns. Strict inspection can still report
+the damaged metadata; it never grants disclosure authority.
+SDK reorg recovery repairs spendability without reopening completed swap work.
+A validated bound NEAR SUCCESS closes source work regardless of its last observed
+Zcash status. A successful swap awaiting its first positive Base observation keeps
+the credit lane; no credit or source confirmation is fabricated. Unfinished source
+transactions retain their exact bytes, input owner and finite-expiry recovery.
+Already accepted calculations finish journaling; already submitted I/O drains.
 
-The wallet profile's `max_attempts` also bounds recovery using archived job history,
-including quote refreshes, across process restarts. Reaching that bound requires
+The wallet profile's `max_attempts` also bounds recovery using archived job history
+across process restarts. Quote refreshes proven to precede any accepted calculation
+or outgoing record do not consume attempts; unclassified historical records do.
+Reaching that bound requires
 operator review; repeated bootstrap/recover commands do not reset it. Actual spendable
 source capacity and per-operation safeguards apply to every new preparation. Qualification runs require separately authorized
 recovery; this path does not grant new qualification authority. Missing bytes alone never authorize retry after
-uncertain preparation. Refund handling and confirmed deposits with unresolved swap
-outcomes are reported for operator review. The low-level recovery commands remain
+uncertain preparation. Confirmed deposits with unresolved swap outcomes remain
+pending in the automatic provider/credit lanes. Refunds alone grant no replacement
+deposit authority. The low-level recovery commands remain
 available for advanced use, but are omitted from ordinary help.
 
 Managed serving performs finite startup Base discovery and requested scalar
@@ -463,11 +490,20 @@ restart-safe outgoing journal. Refund principal becomes shielded spendable only
 after the shielding transaction confirms. Expired funding deposits use automatic
 recovery or `wallet recover --config servers.toml`. For an individual shielding
 operation, the advanced `wallet recover-expired --config servers.toml --operation-id UUID`
-remains available with serving stopped. Expiry recovery requires a fresh tip beyond expiry by the configured confirmation
-count, no positive indexer inclusion, and every originally selected confirmed unspent input
-matched against the immutable preparation snapshot. It closes the original input owner. A replacement funding attempt needs separately
+remains available with serving stopped. Expiry recovery requires one completed
+canonical tip scan beyond original expiry by the configured confirmation count,
+with the same Ready snapshot revision and coverage checked at publication. The
+exact authenticated transaction supplies its signed finite expiry. Current old
+inputs may be absent, relocated or differently spent; the SDK owns spendability
+and automatically releases expired pending reservations. No original-input
+inventory or optional indexer report adds a second expiry gate.
+An already SDK-confirmed original transaction with
+matching computed transaction identity/effects and sufficient depth finishes
+without another indexer lookup. Original journaled signed bytes remain unchanged;
+valid v5 authorization-data variants do not require an identical SDK encoding.
+Recovery closes the original input owner. A replacement funding attempt needs separately
 revalidated current authority. Signed bytes and
-recovery evidence remain archived; the old operation cannot be broadcast again.
+recovery evidence remain archived; reconciliation grants no automatic rebroadcast.
 Missing or conflicting evidence keeps the original ownership.
 
 `treasury/send.rs` retains the public Zingolib proposal through accepted-input
@@ -545,12 +581,17 @@ x402_treazury wallet reconcile --config servers.toml --operation-id UUID
 x402_treazury wallet reconcile --config servers.toml --operation-id UUID --rebroadcast
 ```
 
-Confirmation releases the send gate only when fresh wallet sync and exact-byte
-lookup agree at the configured depth; lookup also checks transaction inclusion in
-a stable canonical compact block. An absent or expired transaction is quarantined,
-not treated as unspent. Recovery never generates a replacement transaction.
-SIGINT/SIGTERM preserve ambiguous submission state. Managed startup still only
-syncs and queues funding jobs; it never sends ZEC automatically.
+Confirmation uses the original computed transaction identity and the configured
+depth from a coherent SDK scan. Indexer disagreement retains observation work;
+it does not veto sufficient SDK confirmation. Verified finite expiry or bound
+NEAR SUCCESS can close source work under the
+[recovery policy](wallet-rotation.md#recovery-and-reconciliation-policy).
+An absent lookup or a refund alone grants no replacement authority. This
+reconciliation command never creates a replacement transaction; rebroadcast
+requires the explicit flag and the original saved bytes and authority.
+SIGINT/SIGTERM preserve ambiguous submission state. Ordinary serving can fund
+wallets under enabled automatic funding and current authority; standalone
+`wallet recover` never prepares or broadcasts a transaction.
 
 The adapters are experimental. Tests cover empty-wallet admission, synthetic gRPC
 transport, journal recovery and sync. The optional proving suite exercises the

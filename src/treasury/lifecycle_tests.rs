@@ -1,7 +1,11 @@
 //! Local synthetic-chain coverage of the real treasury owner and signed journal.
 //! Real proofs/bytes and scans, but no consensus validation or live bridge settlement.
+mod birthday;
 mod discovery;
+mod sapling;
+mod scan_bounds;
 mod shielding;
+mod terminal;
 mod worker;
 use super::*;
 use crate::rotation::{
@@ -254,97 +258,142 @@ async fn inclusion_after_wallet_scan_waits_without_resubmitting_or_releasing_inp
 }
 
 #[tokio::test]
-async fn unsubmitted_funding_expiry_uses_only_its_two_proof_scans() {
-    struct ReadOnly(submission::GrpcSubmission);
+async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
+    struct ReadOnly;
     impl TransactionSubmission for ReadOnly {
         async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
             panic!("recovery must not submit");
         }
-        async fn lookup(&mut self, tx: &PreparedTransaction) -> Result<TransactionPresence> {
-            self.0.lookup(tx).await
+        async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
+            panic!("canonical expiry proof needs no external inclusion corroboration");
         }
     }
-    let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
-    let pool = owner
-        .ensure_capacity_group(
-            "expiry".into(),
-            crate::rotation::test_capacity::small_reserve("5"),
-            None,
-            0,
-        )
-        .await
-        .unwrap();
-    owner
-        .allocate_capacity_kind(pool, AllocationKind::Small, true)
-        .await
-        .unwrap();
-    let jobs = owner.store.call(|s| s.funding_jobs()).await.unwrap();
-    let job = jobs[0].clone();
-    let deadline = now().unwrap() + 7200;
-    save_quotes(&owner.store, jobs, deadline).await;
-    let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
-    let expiry = prepared.facts().unwrap().expiry_height;
-    {
-        let mut chain = net.chain.write().await;
-        let blocks = expiry + 2 - chain.tip();
-        chain.mine_empty_blocks(blocks);
-    }
-    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-    db.execute_batch(
-        "CREATE TABLE fixture_completed_scans(observation TEXT NOT NULL);
-        CREATE TRIGGER record_completed_scan AFTER INSERT ON treasury_sync
-        WHEN json_extract(NEW.observation,'$.phase')='ready'
-        BEGIN INSERT INTO fixture_completed_scans VALUES(NEW.observation); END;",
-    )
-    .unwrap();
-    let mut sender = ReadOnly(
-        submission::GrpcSubmission::with_network(
-            endpoint.clone(),
-            endpoint,
-            TreasuryNetwork::Synthetic,
-        )
-        .unwrap(),
-    );
-    assert_eq!(
-        owner
-            .recover_funding_job(
-                job.id.clone(),
-                3,
-                false,
-                &mut sender,
-                &CancellationToken::new()
+    for (malformed_sequencing, warm_cached) in [(false, false), (true, false), (true, true)] {
+        let (dir, net, mut owner, _endpoint) = funded_fixture(2).await;
+        let pool = owner
+            .ensure_capacity_group(
+                "expiry".into(),
+                crate::rotation::test_capacity::small_reserve("5"),
+                None,
+                0,
             )
             .await
-            .unwrap(),
-        recovery::RecoveryOutcome::OperatorRequired("funding_disabled")
-    );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM fixture_completed_scans", [], |row| {
-            row.get::<_, i64>(0)
-        })
-        .unwrap(),
-        2,
-        "do not scan just to decide whether to run the two-scan proof"
-    );
-    owner
-        .store
-        .call(move |s| {
-            assert_eq!(
-                s.funding_job(&job.id)?.unwrap().operation_id,
-                job.operation_id
-            );
-            assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
-            assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
-            assert_eq!(
-                s.prepared_bytes(&job.operation_id)?.as_slice(),
-                prepared.bytes()
-            );
-            assert!(!s.status()?.outgoing_pending);
-            Ok(())
-        })
-        .await
+            .unwrap();
+        owner
+            .allocate_capacity_kind(pool, AllocationKind::Small, true)
+            .await
+            .unwrap();
+        let jobs = owner.store.call(|s| s.funding_jobs()).await.unwrap();
+        let job = jobs[0].clone();
+        let deadline = now().unwrap() + 7200;
+        save_quotes(&owner.store, jobs, deadline).await;
+        let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+        let expiry = prepared.facts().unwrap().expiry_height;
+        {
+            let mut chain = net.chain.write().await;
+            let blocks = expiry + 2 - chain.tip();
+            chain.mine_empty_blocks(blocks);
+        }
+        if warm_cached {
+            // A successful cached observation is not a new proof scan in this
+            // invocation. Recovery must still acquire one actual canonical scan.
+            owner.sync_once(&CancellationToken::new()).await.unwrap();
+        }
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE fixture_completed_scans(observation TEXT NOT NULL);
+            CREATE TRIGGER record_completed_scan AFTER INSERT ON treasury_sync
+            WHEN json_extract(NEW.observation,'$.phase')='ready'
+            BEGIN INSERT INTO fixture_completed_scans VALUES(NEW.observation); END;",
+        )
         .unwrap();
-    owner.close().await.unwrap();
+        if malformed_sequencing {
+            db.execute_batch("PRAGMA ignore_check_constraints=ON")
+                .unwrap();
+            db.execute(
+                "UPDATE treasury_operations SET attempts='invalid',submission=x'00' WHERE id=?1",
+                [&job.operation_id],
+            )
+            .unwrap();
+            db.execute_batch("PRAGMA ignore_check_constraints=OFF")
+                .unwrap();
+        }
+        let original_operation = job.operation_id.clone();
+        let mut sender = ReadOnly;
+        assert_eq!(
+            owner
+                .recover_funding_job(
+                    job.id.clone(),
+                    3,
+                    false,
+                    &mut sender,
+                    &CancellationToken::new()
+                )
+                .await
+                .unwrap(),
+            if malformed_sequencing {
+                recovery::RecoveryOutcome::Waiting("swap_outcome_pending")
+            } else {
+                recovery::RecoveryOutcome::OperatorRequired("funding_disabled")
+            }
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM fixture_completed_scans", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            1,
+            "one completed canonical proof scan suffices; do not scan just to decide whether to scan"
+        );
+        owner
+            .store
+            .call(move |s| {
+                assert_eq!(
+                    s.funding_job(&job.id)?.unwrap().operation_id,
+                    job.operation_id
+                );
+                assert_eq!(
+                    s.observation_operation(&job.operation_id)?.submission,
+                    "EXPIRED"
+                );
+                if malformed_sequencing {
+                    assert!(s.operation(&job.operation_id).is_err());
+                } else {
+                    assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
+                }
+                assert_eq!(
+                    s.prepared_bytes(&job.operation_id)?.as_slice(),
+                    prepared.bytes()
+                );
+                assert!(!s.operation_pending(&job.operation_id)?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let sequencing: (rusqlite::types::Value, rusqlite::types::Value) = db
+            .query_row(
+                "SELECT attempts,submission FROM treasury_operations WHERE id=?1",
+                [&original_operation],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            sequencing,
+            if malformed_sequencing {
+                (
+                    rusqlite::types::Value::Text("invalid".into()),
+                    rusqlite::types::Value::Blob(vec![0]),
+                )
+            } else {
+                (
+                    rusqlite::types::Value::Integer(0),
+                    rusqlite::types::Value::Text("PREPARED".into()),
+                )
+            },
+            "canonical expiry closes ownership without rewriting sequencing reports"
+        );
+        owner.close().await.unwrap();
+    }
 }
 
 #[tokio::test]
@@ -693,6 +742,8 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
             for id in originals {
                 let operation = s.operation(&id)?;
                 assert_eq!(operation.submission, "CONFIRMED");
+                assert!(!s.operation_pending(&id)?);
+                assert!(!s.source_previously_closed(&id)?);
                 assert_eq!(operation.attempts, 1, "reorg detection cannot rebroadcast");
             }
             Ok(())
@@ -723,7 +774,7 @@ async fn concurrent_funding_reuses_scans_preserves_pending_bytes_and_resumes_aft
 }
 
 #[tokio::test]
-async fn same_height_tip_only_reorg_updates_sdk_without_historical_source_gate() {
+async fn same_height_tip_reorg_rebuilds_sdk_without_reopening_historical_source_work() {
     let (dir, net, mut owner, endpoint) = funded_fixture(1).await;
     let pool = owner
         .ensure_capacity_group(
@@ -769,6 +820,8 @@ async fn same_height_tip_only_reorg_updates_sdk_without_historical_source_gate()
         TransactionPresence::Confirmed { height: 24 }
     );
     accounting(&dir.path().join("state"), &prepared, true);
+    let id = job.operation_id.clone();
+    let original_inputs = store.call(move |s| s.prepared_inputs(&id)).await.unwrap();
     {
         let mut chain = net.chain.write().await;
         assert_eq!(chain.reorg_to(23), vec![prepared.bytes().to_vec()]);
@@ -780,10 +833,17 @@ async fn same_height_tip_only_reorg_updates_sdk_without_historical_source_gate()
         SyncPhase::Ready
     );
     let id = job.operation_id.clone();
+    let expected_inputs = original_inputs.clone();
+    let original_bytes = prepared.bytes().to_vec();
     store
         .call(move |s| {
             assert_eq!(s.operation(&id)?.attempts, 1);
-            assert!(s.require_preparation_available().is_ok());
+            assert_eq!(s.operation(&id)?.submission, "CONFIRMED");
+            assert!(!s.operation_pending(&id)?);
+            assert!(!s.source_previously_closed(&id)?);
+            assert_eq!(s.prepared_inputs(&id)?, expected_inputs);
+            assert_eq!(s.prepared_bytes(&id)?.as_slice(), original_bytes);
+            s.require_preparation_available()?;
             Ok(())
         })
         .await
@@ -802,6 +862,575 @@ async fn same_height_tip_only_reorg_updates_sdk_without_historical_source_gate()
         SyncPhase::Ready
     );
     accounting(&dir.path().join("state"), &prepared, true);
+    let id = job.operation_id;
+    let original_bytes = prepared.bytes().to_vec();
+    store
+        .call(move |s| {
+            assert_eq!(
+                s.operation(&id)?.attempts,
+                1,
+                "canonical return cannot rebroadcast"
+            );
+            assert_eq!(s.prepared_inputs(&id)?, original_inputs);
+            assert_eq!(s.prepared_bytes(&id)?.as_slice(), original_bytes);
+            assert!(!s.operation_pending(&id)?);
+            Ok(())
+        })
+        .await
+        .unwrap();
     drop(store);
     owner.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn sdk_reorg_rescan_preserves_original_signed_work() {
+    use crate::rotation::store::preparation::{InputPool, OwnedInput};
+    use pepper_sync::wallet::{
+        IronwoodNote, OrchardNote, OutputInterface, SaplingNote, TransparentCoin,
+    };
+    use shardtree::store::ShardStore as _;
+    fn canonical_input<T: OutputInterface>(
+        wallet: &zingolib::wallet::LightWallet,
+        input: &OwnedInput,
+    ) -> (u64, Option<zcash_primitives::transaction::TxId>) {
+        let id = zcash_primitives::transaction::TxId::from_hex(&input.txid).unwrap();
+        let output = wallet
+            .wallet_outputs::<T>()
+            .into_iter()
+            .find(|output| {
+                output.output_id().txid() == id
+                    && output.output_id().output_index() == input.output_index
+            })
+            .expect("the exact original funding output must be reconstructed");
+        assert_eq!(
+            wallet
+                .output_transaction(output)
+                .status()
+                .get_confirmed_height()
+                .map(u32::from),
+            Some(21),
+            "the original funding transaction must remain canonically confirmed"
+        );
+        (output.value(), output.spending_transaction())
+    }
+    for (rollback, old_checkpoint_window, same_height_fork) in [
+        (pepper_sync::sync::MAX_REORG_ALLOWANCE - 1, false, false),
+        (pepper_sync::sync::MAX_REORG_ALLOWANCE - 1, true, false),
+        (pepper_sync::sync::MAX_REORG_ALLOWANCE + 1, false, false),
+        (pepper_sync::sync::MAX_REORG_ALLOWANCE + 1, false, true),
+    ] {
+        let (dir, net, mut owner, _endpoint) = funded_fixture(1).await;
+        net.chain.write().await.mine_empty_blocks(rollback);
+        owner.sync_once(&CancellationToken::new()).await.unwrap();
+        let pool = owner
+            .ensure_capacity_group(
+                "rollback".into(),
+                crate::rotation::test_capacity::small_reserve("5"),
+                None,
+                0,
+            )
+            .await
+            .unwrap();
+        owner
+            .allocate_capacity_kind(pool, AllocationKind::Small, true)
+            .await
+            .unwrap();
+        let mut store = owner.store_handle();
+        let job = store
+            .call(|s| Ok(s.funding_jobs()?.remove(0)))
+            .await
+            .unwrap();
+        let deadline = now().unwrap() + 7200;
+        save_quotes(&store, vec![job.clone()], deadline).await;
+        let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+        let addresses = owner.addresses().await.unwrap();
+        let original_inputs = {
+            let operation = job.operation_id.clone();
+            store
+                .call(move |s| s.prepared_inputs(&operation))
+                .await
+                .unwrap()
+        };
+        let settings = owner.sync_settings.clone().unwrap();
+        let treasury_id = owner.status().await.unwrap().treasury_id;
+        if old_checkpoint_window {
+            // A retained rollback boundary may be absent from an older saved
+            // tree even while newer checkpoints and the actual note data exist.
+            // Stay inside the current cache horizon so this exercises the exact
+            // missing-checkpoint fallback rather than the known-deep-tip reset.
+            {
+                let mut wallet = owner.client.as_ref().unwrap().wallet().write().await;
+                let tree = &mut wallet.shard_trees.orchard;
+                let tip = tree.store().max_checkpoint_id().unwrap().unwrap();
+                let rollback_height = 23.into();
+                assert!(
+                    tree.store()
+                        .get_checkpoint(&rollback_height)
+                        .unwrap()
+                        .is_some()
+                );
+                tree.store_mut()
+                    .remove_checkpoint(&rollback_height)
+                    .unwrap();
+                assert!(
+                    tree.store()
+                        .get_checkpoint(&rollback_height)
+                        .unwrap()
+                        .is_none()
+                );
+                assert_eq!(tree.store().max_checkpoint_id().unwrap(), Some(tip));
+            }
+            let observation = store
+                .call(|s| Ok(s.treasury_sync_state()?.sync.unwrap()))
+                .await
+                .unwrap();
+            owner.checkpoint(observation).await.unwrap();
+            drop(store);
+            owner.close().await.unwrap();
+            owner = Treasury::open_with_network(
+                dir.path().join("state"),
+                dir.path().join("key"),
+                treasury_id.clone(),
+                TreasuryNetwork::Synthetic,
+            )
+            .await
+            .unwrap();
+            owner.configure_sync(settings.clone());
+            store = owner.store_handle();
+        }
+        {
+            let mut chain = net.chain.write().await;
+            let tip = chain.tip();
+            chain.reorg_to(23);
+            if same_height_fork {
+                chain.mine_empty_blocks(tip - 23);
+            }
+        }
+        if old_checkpoint_window || same_height_fork {
+            // Existing SDK truncation/fork recovery checkpoints its cleared
+            // derived state even when this scan reports the recovery error.
+            assert!(owner.sync_once(&CancellationToken::new()).await.is_err());
+            pending(&store, &job, prepared.bytes()).await;
+            drop(store);
+            owner.close().await.unwrap();
+            owner = Treasury::open_with_network(
+                dir.path().join("state"),
+                dir.path().join("key"),
+                treasury_id,
+                TreasuryNetwork::Synthetic,
+            )
+            .await
+            .unwrap();
+            owner.configure_sync(settings);
+            store = owner.store_handle();
+        }
+        owner.sync_once(&CancellationToken::new()).await.unwrap();
+        assert_eq!(owner.addresses().await.unwrap(), addresses);
+        let synced = owner.status().await.unwrap().sync.unwrap();
+        assert_eq!(synced.phase, SyncPhase::Ready);
+        let (funding_value, reservation) = {
+            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+            assert_eq!(
+                original_inputs.len(),
+                1,
+                "this fixture selects its one original funding note"
+            );
+            let input = &original_inputs[0];
+            match &input.pool {
+                InputPool::Transparent => canonical_input::<TransparentCoin>(&wallet, input),
+                InputPool::Sapling => canonical_input::<SaplingNote>(&wallet, input),
+                InputPool::Orchard => canonical_input::<OrchardNote>(&wallet, input),
+                InputPool::Ironwood => canonical_input::<IronwoodNote>(&wallet, input),
+            }
+        };
+        assert_eq!(
+            funding_value, 1_000_000,
+            "a Ready rescan must reconstruct the exact canonical owned value"
+        );
+        // The SDK advisory confirmed balance excludes notes reserved by a
+        // Calculated transaction. A shallow rollback can retain that original
+        // SDK reservation; a full clear reconstructs the note without it.
+        let expected_balance = if let Some(spender) = reservation {
+            assert_eq!(
+                spender.to_string(),
+                prepared.facts().unwrap().txid,
+                "only the exact accepted original may reserve this funding note"
+            );
+            0
+        } else {
+            funding_value
+        };
+        assert_eq!(synced.confirmed_shielded_zatoshis, expected_balance);
+        pending(&store, &job, prepared.bytes()).await;
+        let operation = job.operation_id.clone();
+        store
+            .call(move |s| {
+                assert_eq!(s.prepared_inputs(&operation)?, original_inputs);
+                assert_eq!(s.operation(&operation)?.attempts, 0);
+                assert_eq!(s.funding_jobs()?.len(), 1);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        // A second scan must finish from the repaired snapshot rather than
+        // restoring the stale tip or abandoning the original input owner.
+        owner.sync_once(&CancellationToken::new()).await.unwrap();
+        pending(&store, &job, prepared.bytes()).await;
+        drop(store);
+        owner.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_replay() {
+    struct StaleLookup {
+        presence: TransactionPresence,
+        lookups: usize,
+    }
+    impl TransactionSubmission for StaleLookup {
+        async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
+            panic!("recovery cannot resubmit signed work");
+        }
+        async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
+            self.lookups += 1;
+            Ok(match &self.presence {
+                TransactionPresence::Confirmed { height } => {
+                    TransactionPresence::Confirmed { height: *height }
+                }
+                _ => TransactionPresence::Unknown,
+            })
+        }
+    }
+    for (presence, journaled_submission, alternate_authorization, malformed_sequencing) in [
+        (TransactionPresence::Unknown, false, false, false),
+        (
+            TransactionPresence::Confirmed { height: 23 },
+            true,
+            false,
+            false,
+        ),
+        (TransactionPresence::Unknown, false, true, false),
+        (TransactionPresence::Unknown, false, false, true),
+    ] {
+        let (dir, net, mut owner, endpoint) = funded_fixture(1).await;
+        let pool = owner
+            .ensure_capacity_group(
+                "confirmation".into(),
+                crate::rotation::test_capacity::small_reserve("5"),
+                None,
+                0,
+            )
+            .await
+            .unwrap();
+        owner
+            .allocate_capacity_kind(pool, AllocationKind::Small, true)
+            .await
+            .unwrap();
+        let store = owner.store_handle();
+        let job = store
+            .call(|s| Ok(s.funding_jobs()?.remove(0)))
+            .await
+            .unwrap();
+        let deadline = now().unwrap() + 7200;
+        save_quotes(&store, vec![job.clone()], deadline).await;
+        let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+        let stop = CancellationToken::new();
+        let mut actual = submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap();
+        if journaled_submission {
+            owner
+                .submit_prepared(job.operation_id.clone(), &mut actual, false, &stop)
+                .await
+                .unwrap();
+            net.chain.write().await.mine_mempool();
+        } else {
+            // This matching fixture does not validate consensus signatures.
+            // ZIP 244 permits authorizing-data variants with the same effects.
+            let mut canonical = prepared.bytes().to_vec();
+            if alternate_authorization {
+                let scalar_start = canonical.len() - 32;
+                canonical[scalar_start] ^= 1;
+                assert_ne!(canonical.as_slice(), prepared.bytes());
+                assert_eq!(
+                    submission::decode(&canonical).unwrap().txid(),
+                    submission::decode(prepared.bytes()).unwrap().txid()
+                );
+            }
+            // The local submission-attempt label can still be zero.
+            net.chain.write().await.mine_block(vec![canonical]);
+        }
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        if malformed_sequencing {
+            db.execute_batch("PRAGMA ignore_check_constraints=ON")
+                .unwrap();
+            db.execute(
+                "UPDATE treasury_operations SET attempts='invalid',submission=x'00' WHERE id=?1",
+                [&job.operation_id],
+            )
+            .unwrap();
+            db.execute_batch("PRAGMA ignore_check_constraints=OFF")
+                .unwrap();
+        }
+        let mut sender = StaleLookup {
+            presence,
+            lookups: 0,
+        };
+        assert_eq!(
+            owner
+                .recover_funding_job(job.id.clone(), 3, false, &mut sender, &stop)
+                .await
+                .unwrap(),
+            recovery::RecoveryOutcome::Waiting("swap_outcome_pending")
+        );
+        assert_eq!(
+            sender.lookups, 0,
+            "established SDK confirmation needs no indexer corroboration"
+        );
+        if alternate_authorization {
+            let txid = submission::decode(prepared.bytes()).unwrap().txid();
+            let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+            let record = wallet.wallet_transactions.get(&txid).unwrap();
+            let mut current = Vec::new();
+            record.transaction().write(&mut current).unwrap();
+            assert_ne!(
+                current.as_slice(),
+                prepared.bytes(),
+                "the SDK record must exercise distinct authorizing bytes"
+            );
+            assert_eq!(record.transaction().txid(), txid);
+        }
+        let original_operation = job.operation_id.clone();
+        let operation = job.operation_id;
+        store
+            .call(move |s| {
+                assert_eq!(s.observation_operation(&operation)?.submission, "CONFIRMED");
+                if malformed_sequencing {
+                    assert!(s.operation(&operation).is_err());
+                } else {
+                    assert_eq!(
+                        s.operation(&operation)?.attempts,
+                        i64::from(journaled_submission)
+                    );
+                }
+                assert_eq!(s.prepared_bytes(&operation)?.as_slice(), prepared.bytes());
+                assert_eq!(s.funding_recovery_count(&job.id)?, 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let count: rusqlite::types::Value = db
+            .query_row(
+                "SELECT attempts FROM treasury_operations WHERE id=?1",
+                [&original_operation],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count,
+            if malformed_sequencing {
+                rusqlite::types::Value::Text("invalid".into())
+            } else {
+                rusqlite::types::Value::Integer(i64::from(journaled_submission))
+            },
+            "canonical confirmation never repairs or resets disclosure counts"
+        );
+        drop(store);
+        owner.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn expired_original_closes_after_another_canonical_transaction_spends_its_inputs() {
+    struct NoLookup;
+    impl TransactionSubmission for NoLookup {
+        async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
+            panic!("expiry recovery cannot submit");
+        }
+        async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
+            panic!("canonical input proof needs no indexer corroboration");
+        }
+    }
+    async fn prepare(owner: &mut Treasury, name: &str) -> (FundingJob, PreparedTransaction) {
+        let pool = owner
+            .ensure_capacity_group(
+                name.into(),
+                crate::rotation::test_capacity::small_reserve("5"),
+                None,
+                0,
+            )
+            .await
+            .unwrap();
+        owner
+            .allocate_capacity_kind(pool, AllocationKind::Small, true)
+            .await
+            .unwrap();
+        let job = owner
+            .store
+            .call(|s| Ok(s.funding_jobs()?.remove(0)))
+            .await
+            .unwrap();
+        let deadline = now().unwrap() + 7200;
+        save_quotes(&owner.store, vec![job.clone()], deadline).await;
+        let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+        (job, prepared)
+    }
+    let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
+    // A second deterministic test wallet owns the same funded note. It represents
+    // another authorized spender, never another calculation by the original owner.
+    let other_dir = tempfile::tempdir().unwrap();
+    let mut other = Treasury::create_with_network(
+        other_dir.path().join("state"),
+        other_dir.path().join("key"),
+        1,
+        Some(Zeroizing::new(SEED.into())),
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    other.configure_sync(SyncSettings::new(endpoint.clone(), 2).unwrap());
+    let stop = CancellationToken::new();
+    other.sync_once(&stop).await.unwrap();
+    let (job, original) = prepare(&mut owner, "original").await;
+    let (other_job, competing) = prepare(&mut other, "other").await;
+    assert_ne!(
+        original.facts().unwrap().txid,
+        competing.facts().unwrap().txid
+    );
+    let mut sender = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint,
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    other
+        .submit_prepared(other_job.operation_id, &mut sender, false, &stop)
+        .await
+        .unwrap();
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_mempool();
+        let expiry = original.facts().unwrap().expiry_height;
+        let remaining = expiry + 2 - chain.tip();
+        chain.mine_empty_blocks(remaining);
+    }
+    let store = owner.store_handle();
+    let operation = job.operation_id.clone();
+    let initial = original.bytes().to_vec();
+    owner
+        .recover_expired(operation.clone(), &mut NoLookup, &stop)
+        .await
+        .unwrap();
+    store
+        .call(move |s| {
+            assert_eq!(s.operation(&operation)?.submission, "EXPIRED");
+            assert_eq!(s.operation(&operation)?.attempts, 0);
+            assert!(!s.operation_pending(&operation)?);
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), initial);
+            assert_eq!(s.funding_jobs()?.len(), 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    owner.close().await.unwrap();
+    other.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn buried_funding_expiry_ignores_stale_inclusion_hints_without_replay_or_new_deposit() {
+    struct StaleHint {
+        confirmed: bool,
+        lookups: usize,
+    }
+    impl TransactionSubmission for StaleHint {
+        async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
+            panic!("recovery cannot submit");
+        }
+        async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
+            self.lookups += 1;
+            Ok(if self.confirmed {
+                TransactionPresence::Confirmed { height: 24 }
+            } else {
+                TransactionPresence::Mempool
+            })
+        }
+    }
+    for confirmed in [false, true] {
+        let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
+        let pool = owner
+            .ensure_capacity_group(
+                "expiry_hint".into(),
+                crate::rotation::test_capacity::small_reserve("5"),
+                None,
+                0,
+            )
+            .await
+            .unwrap();
+        owner
+            .allocate_capacity_kind(pool, AllocationKind::Small, true)
+            .await
+            .unwrap();
+        let store = owner.store_handle();
+        let job = store
+            .call(|s| Ok(s.funding_jobs()?.remove(0)))
+            .await
+            .unwrap();
+        let deadline = now().unwrap() + 7200;
+        save_quotes(&store, vec![job.clone()], deadline).await;
+        let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+        let stop = CancellationToken::new();
+        let mut actual = submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap();
+        owner
+            .submit_prepared(job.operation_id.clone(), &mut actual, false, &stop)
+            .await
+            .unwrap();
+        {
+            let mut chain = net.chain.write().await;
+            let remaining = prepared.facts().unwrap().expiry_height + 2 - chain.tip();
+            chain.mine_empty_blocks(remaining);
+        }
+        // Scheduled source observation reuses this completed current-owner scan;
+        // only the actual expiry input proof requests another completed scan.
+        owner.sync_once(&stop).await.unwrap();
+        let mut sender = StaleHint {
+            confirmed,
+            lookups: 0,
+        };
+        let outcome = owner
+            .recover_funding_observed(job.id.clone(), 3, false, &mut sender, &stop, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            outcome.outcome,
+            recovery::RecoveryOutcome::OperatorRequired("funding_disabled")
+        );
+        assert_eq!(
+            sender.lookups, 0,
+            "a stale hint cannot veto canonical expiry input proof"
+        );
+        let operation = job.operation_id;
+        store
+            .call(move |s| {
+                assert_eq!(s.operation(&operation)?.submission, "EXPIRED");
+                assert_eq!(s.operation(&operation)?.attempts, 1);
+                assert_eq!(s.prepared_bytes(&operation)?.as_slice(), prepared.bytes());
+                assert!(!s.operation_pending(&operation)?);
+                assert_eq!(s.funding_jobs()?.len(), 1);
+                assert_eq!(s.funding_recovery_count(&job.id)?, 1);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(store);
+        owner.close().await.unwrap();
+    }
 }

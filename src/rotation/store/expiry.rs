@@ -1,6 +1,7 @@
 //! Finalization of operator-requested expiry recovery after wallet/chain proof.
 use super::*;
 impl Store {
+    #[cfg(test)]
     pub(crate) fn prepared_snapshot(&self, id: &str) -> Result<Zeroizing<Vec<u8>>> {
         let (revision, bytes): (i64,Vec<u8>) = self.db.query_row("SELECT s.revision,s.bytes FROM outgoing o JOIN snapshots s ON s.revision=o.revision WHERE o.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?)))?;
         unseal(
@@ -38,11 +39,13 @@ impl Store {
             sync.at_observed_tip(),
             crate::rotation::transaction::RecoveryEvidenceError::TipLag
         );
-        let op = self.operation(id)?;
+        let facts = self
+            .operation_facts(id)?
+            .context("operation facts missing")?;
         let height = sync.height.context("missing recovery height")?;
         ensure!(
-            op.facts.expiry_height > 0
-                && height >= u64::from(op.facts.expiry_height) + u64::from(sync.confirmations),
+            facts.expiry_height > 0
+                && height >= u64::from(facts.expiry_height) + u64::from(sync.confirmations),
             crate::rotation::transaction::RecoveryEvidenceError::ExpiryNotBuried
         );
         let tx = self.db.transaction()?;
@@ -62,7 +65,7 @@ impl Store {
         // current-authority check permits reauthorization on the same job.
         let job: Option<String> = tx.query_row("SELECT job_id FROM funding_progress WHERE operation_id=?1 AND EXISTS(SELECT 1 FROM funding_jobs f WHERE f.id=job_id AND f.state!='COMPLETE')",[id],|r|r.get(0)).optional()?;
         if let Some(job) = job {
-            tx.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund,provider_success,provider_failed,provider_refunded,provider_incomplete,provider_observed_at,quote_target,quote_ceiling,accepted_output,accepted_recipient) SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.provider_observed_at,j.quote_target,j.quote_ceiling,j.accepted_output,j.accepted_recipient FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1",[&job])?;
+            tx.execute("INSERT OR IGNORE INTO funding_recovery(operation_id,job_id,phase,quote,refund,provider_success,provider_failed,provider_refunded,provider_incomplete,provider_observed_at,quote_target,quote_ceiling,accepted_output,accepted_recipient) SELECT j.operation_id,j.job_id,j.phase,j.quote,r.address,j.provider_success,j.provider_failed,j.provider_refunded,j.provider_incomplete,j.provider_observed_at,j.quote_target,j.quote_ceiling,j.accepted_output,j.accepted_recipient FROM funding_progress j LEFT JOIN funding_refunds r ON r.job_id=j.job_id WHERE j.job_id=?1",[&job])?;
             tx.execute("UPDATE funding_progress SET phase='\"RECOVERY_REQUIRED\"',last_error='funding_attempt_closed; current authority required for another attempt' WHERE job_id=?1",[&job])?;
         }
         tx.commit()?;
@@ -157,8 +160,8 @@ mod tests {
         let facts = s.funding_facts(&job.id, &job.operation_id)?;
         assert!(facts.archived && facts.accepted_quote && facts.source_attempts == 1);
         assert!(
-            !facts.status_needed(),
-            "archived operations cannot trigger status I/O"
+            facts.status_needed(),
+            "source expiry does not close a disclosed swap's bridge obligation"
         );
         assert!(!s.operation_pending(&job.operation_id)?);
         let next = s.funding_jobs()?.remove(0);
@@ -174,6 +177,14 @@ mod tests {
             job.operation_id
         );
         s.funding_restriction = super::super::super::restriction::FundingRestriction::Ordinary;
+        assert!(s.reauthorize_closed_funding(&job.id, 1).is_err());
+        s.record_provider_outcome(
+            &job.id,
+            &job.operation_id,
+            &crate::rotation::near::SwapStatus::Failed,
+            100,
+        )?;
+        assert!(!s.funding_facts(&job.id, &job.operation_id)?.status_needed());
         s.reauthorize_closed_funding(&job.id, 1)?;
         assert_ne!(
             s.funding_job(&job.id)?.unwrap().operation_id,
@@ -182,7 +193,8 @@ mod tests {
         assert_eq!(s.funding_recovery_count(&job.id)?, 1);
         s.resolve_expired(&job.operation_id, revision)?;
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
-        assert!(s.confirm_spend(&job.operation_id).is_err());
+        s.confirm_spend(&job.operation_id)?;
+        assert_eq!(s.operation(&job.operation_id)?.submission, "CONFIRMED");
         let treasury = s.id().to_owned();
         let recovery_revision = revision;
         let mut revision = s.snapshot()?.0;
@@ -201,7 +213,7 @@ mod tests {
             &treasury,
         )?;
         assert_eq!(&*s.prepared_snapshot(&job.operation_id)?, b"prepared");
-        assert_eq!(s.operation(&job.operation_id)?.submission, "EXPIRED");
+        assert_eq!(s.operation(&job.operation_id)?.submission, "CONFIRMED");
         Ok(())
     }
 }

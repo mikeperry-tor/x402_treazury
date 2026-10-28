@@ -268,7 +268,7 @@ impl Treasury {
                 if let Err(error) = self.maintain_owned_transparent(submission, stop).await
                     && !stop.is_cancelled()
                 {
-                    super::diagnostics::report_shielding_failure(&error);
+                    super::diagnostics::report_shielding_failure(&error, None);
                 }
                 // Maintenance may itself complete canonical validation/proof
                 // scans. They are part of this pass, not another wakeup.

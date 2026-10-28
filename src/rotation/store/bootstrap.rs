@@ -60,19 +60,23 @@ impl StartupPath {
         }
         // Original accepted bytes/outcomes remain observed even if permission to
         // start another attempt has since been disabled or exhausted.
-        if self.facts.preparation_accepted
+        if self.facts.provider_success
+            || (self.facts.provider_incomplete
+                && !self.facts.provider_failed
+                && !self.facts.provider_refunded)
+            || self.facts.preparation_accepted
             || self.facts.source_pending
-            || self
-                .operation
-                .as_ref()
-                .is_some_and(|operation| operation.submission != "EXPIRED")
+            || (!(self.facts.provider_failed || self.facts.provider_refunded)
+                && self
+                    .operation
+                    .as_ref()
+                    .is_some_and(|operation| operation.submission != "EXPIRED"))
         {
             return Waiting;
         }
-        if self.facts.provider_review_required()
-            || self.facts.provider_failed
-            || self.facts.provider_refunded
-        {
+        let terminal_recovery = (self.facts.provider_failed || self.facts.provider_refunded)
+            && funding::can_recover_facts(self.operation.as_ref(), &self.facts);
+        if (self.facts.provider_failed || self.facts.provider_refunded) && !terminal_recovery {
             return Obstructed("funding_outcome_requires_review");
         }
         if self.recovery_count > u64::from(max_attempts) {
@@ -86,7 +90,7 @@ impl StartupPath {
         {
             return Obstructed("preparation_or_swap_requires_review");
         }
-        if !self.facts.new_funding_allowed {
+        if !self.facts.new_funding_allowed && !terminal_recovery {
             return Obstructed(match self.condition {
                 Some(super::super::error::FundingCondition::Disabled) => "funding_disabled",
                 Some(super::super::error::FundingCondition::QualificationDenied) => {
@@ -299,8 +303,13 @@ impl Store {
     }
 
     fn startup_path(&self, id: &str) -> Result<StartupPath> {
-        let (job, operation) = self.funding_recovery_context(id)?;
+        let job = self.funding_job(id)?.context("funding job missing")?;
         let facts = self.funding_facts(id, &job.operation_id)?;
+        let operation = if facts.provider_success {
+            None
+        } else {
+            self.funding_recovery_context(id)?.1
+        };
         let destination_ready = funding::initial_credit_recorded(&self.db, &job.wallet_id)?;
         Ok(StartupPath {
             condition: match self.funding_restriction {
@@ -415,10 +424,7 @@ mod tests {
         path.facts.source_closed = true;
         path.facts.source_pending = false;
         path.operation.as_mut().unwrap().submission = "EXPIRED".into();
-        assert_eq!(
-            path.disposition(3, false),
-            StartupDisposition::Obstructed("funding_outcome_requires_review")
-        );
+        assert_eq!(path.disposition(3, false), StartupDisposition::Waiting);
         path.facts.source_pending = true;
         path.facts.source_closed = false;
         path.operation.as_mut().unwrap().submission = "UNKNOWN".into();
@@ -436,7 +442,7 @@ mod tests {
         let (_dir, store, _pool) = fixture();
         let value = serde_json::to_value(store.status().unwrap()).unwrap();
         assert_eq!(value["schema_version"], 5);
-        assert_eq!(value["state_schema_version"], 21);
+        assert_eq!(value["state_schema_version"], 22);
         let keys: Vec<_> = value["pools"][0]
             .as_object()
             .unwrap()

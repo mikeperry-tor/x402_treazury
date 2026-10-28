@@ -338,7 +338,7 @@ fn resolve_administrative_identity(
 ) -> Result<String> {
     use anyhow::ensure;
     let treasury_id = if let Some(expected) = expected {
-        let actual = crate::rotation::store::status(state_dir)?.treasury_id;
+        let actual = crate::rotation::store::treasury_id(state_dir)?;
         ensure!(
             expected == actual,
             "treasury ID does not match state (state identity mismatch); use the treasury_id from `wallet status` (it is a UUID, not an account number)"
@@ -347,7 +347,7 @@ fn resolve_administrative_identity(
     } else if matches!(action, Action::Status { .. } | Action::Addresses) {
         String::new()
     } else {
-        crate::rotation::store::status(state_dir)?.treasury_id
+        crate::rotation::store::treasury_id(state_dir)?
     };
     Ok(treasury_id)
 }
@@ -533,13 +533,17 @@ async fn run_args(
         );
         return Ok(());
     }
-    println!(
-        "{}",
-        serde_json::to_string_pretty(
-            &serde_json::json!({"state":treasury.status().await?,"receive_addresses":treasury.addresses().await?})
-        )?
-    );
-    treasury.close().await
+    let report = async {
+        serde_json::to_string_pretty(&serde_json::json!({
+            "state":treasury.status().await?, "receive_addresses":treasury.addresses().await?
+        }))
+        .map_err(anyhow::Error::from)
+    }
+    .await
+    .context("wallet work may have completed; journals preserved; status report unavailable");
+    treasury.close().await?;
+    println!("{}", report?);
+    Ok(())
 }
 
 async fn show_status(state_dir: PathBuf, key_file: PathBuf, json: bool) -> Result<()> {
@@ -651,9 +655,9 @@ async fn recover_funding(
     )?;
     let stop = tokio_util::sync::CancellationToken::new();
     let result = finish_on_shutdown("wallet_recovery", &stop, async {
-        let status = treasury.status().await?;
+        let jobs = treasury.store_handle().call(|s| s.funding_jobs()).await?;
         let mut reports = Vec::new();
-        for job in &status.funding_jobs {
+        for job in &jobs {
             if !treasury.recovery_needed(job).await? { continue; }
             let (max_attempts, enabled) = match wallets.get(&job.pool_name) {
                 Some(crate::rotation::config::WalletConfig::ZcashRotation { max_attempts, .. }) => (*max_attempts, allow_new_attempt),

@@ -236,6 +236,7 @@ fn wallet_reason(error: &WalletError, diagnostic: &mut SyncDiagnostic) -> &'stat
         WalletError::NoSyncData => "wallet_no_sync_data",
         WalletError::SyncIncomplete => "wallet_sync_incomplete",
         WalletError::CheckpointNotFound { .. } => "wallet_checkpoint_missing",
+        WalletError::BlockNotFound(_) => "wallet_block_missing",
         WalletError::ShardTreeError(e) => shard_reason(e),
         WalletError::TransactionRead(_) => "wallet_transaction_read",
         WalletError::TransactionWrite(_) => "wallet_transaction_write",
@@ -291,7 +292,7 @@ pub(crate) fn report_sync_failure(error: &anyhow::Error, retry_after: Option<std
     }
 }
 
-pub(crate) fn report_shielding_failure(error: &anyhow::Error) {
+pub(crate) fn report_shielding_failure(error: &anyhow::Error, operation_id: Option<&str>) {
     use super::recovery::RecoveryOutcome;
     let outcome = super::recovery::evidence_outcome(error);
     let category = match outcome {
@@ -303,15 +304,17 @@ pub(crate) fn report_shielding_failure(error: &anyhow::Error) {
     let detail = sync_detail(error);
     if matches!(outcome, Some(RecoveryOutcome::OperatorRequired(_))) {
         tracing::warn!(
+            operation_id,
             category,
             detail,
-            "Zcash shielding requires operator review; existing work and reservations retained; observation checks continue"
+            "Zcash transaction requires operator review; existing work and reservations retained; observation checks continue"
         );
     } else {
         tracing::debug!(
+            operation_id,
             category,
             detail,
-            "Zcash shielding check unavailable; existing work retained and checks will retry after treasury synchronization"
+            "Zcash transaction check unavailable; existing work retained and checks will retry after treasury synchronization"
         );
     }
 }
@@ -478,6 +481,11 @@ mod tests {
                         scanned_height: Some(101),
                     },
                 ),
+                "DEBUG",
+                "waiting_for_fresh_canonical_sync",
+            ),
+            (
+                anyhow::Error::new(RecoveryEvidenceError::TransactionMismatch),
                 "WARN",
                 "conflicting_transaction_or_input_evidence",
             ),
@@ -494,6 +502,7 @@ mod tests {
                 "sync_internal_or_storage_failure",
             ),
         ] {
+            let has_confirmation_detail = error.is::<ConfirmationObservation>();
             let error = error.context("https://private-token@example.invalid/private-path");
             let log = tempfile::NamedTempFile::new().unwrap();
             let subscriber = tracing_subscriber::fmt()
@@ -502,23 +511,29 @@ mod tests {
                 .with_max_level(tracing::Level::TRACE)
                 .with_writer(log.reopen().unwrap())
                 .finish();
-            tracing::subscriber::with_default(subscriber, || report_shielding_failure(&error));
+            tracing::subscriber::with_default(subscriber, || {
+                report_shielding_failure(&error, Some("pending-operation"))
+            });
             let logs = std::fs::read_to_string(log.path()).unwrap();
             assert_eq!(logs.lines().count(), 1, "{logs}");
+            assert!(logs.contains("pending-operation"), "{logs}");
             assert!(logs.contains(level) && logs.contains(category), "{logs}");
             if level == "WARN" {
-                for expected in [
-                    "operator review",
-                    "lookup_height=100",
-                    "wallet_height=98",
-                    "scanned_height=101",
-                    "reservations retained",
-                ] {
+                for expected in ["operator review", "reservations retained"] {
                     assert!(logs.contains(expected), "{logs}");
                 }
             } else {
                 assert!(!logs.contains("WARN"), "{logs}");
                 assert!(logs.contains("checks will retry"), "{logs}");
+            }
+            if has_confirmation_detail {
+                for expected in [
+                    "lookup_height=100",
+                    "wallet_height=98",
+                    "scanned_height=101",
+                ] {
+                    assert!(logs.contains(expected), "missing {expected}: {logs}");
+                }
             }
             for private in ["ERROR", "private", "example.invalid"] {
                 assert!(!logs.contains(private), "{logs}");
@@ -785,6 +800,12 @@ mod tests {
                     SyncStatusError::SyncProgressChannelClosed,
                 )),
                 "sync_progress_channel_closed",
+            ),
+            (
+                LightClientError::SyncError(SyncError::WalletError(WalletError::BlockNotFound(
+                    private_height,
+                ))),
+                "wallet_block_missing",
             ),
             (
                 LightClientError::SyncError(SyncError::SyncStatusError(

@@ -16,7 +16,9 @@ files. It reverses all patches in a temporary copy and compares the complete
 restored tree with the pinned upstream Git source.
 `pepper-sync-progress.patch` contains only Pepper's `client.rs` and `scan/task.rs`
 changes; `pepper-sync-diagnostics.patch` covers `client/fetch.rs`, `error.rs`,
-`sync.rs`, `wallet/traits.rs` and `witness.rs`. The payload accepted by the public
+`sync.rs`, `wallet/traits.rs` and `witness.rs`. `pepper-sync-reorg.patch` keeps
+the upstream 100-block rolling rollback/checkpoint/transparent-discovery horizon
+and repairs derived chain state when retained rollback boundaries are unavailable. The payload accepted by the public
 sync trait has a public re-export and `from_parts` constructor; the witness module
 and payload fields remain private. `pepper-sync-manifest.patch` records the
 standalone manifest adaptations necessary for the path dependency; upstream
@@ -98,8 +100,8 @@ of forced timeout success. Header/body inactivity remains in the application
 transport. Resource-related gRPC codes (`OutOfRange` and `ResourceExhausted`)
 emit safe WARNs at the existing stream-consumption points before recovery can
 replace the original status. The application adapter reports the same codes for
-unary and stream-opening failures; mempool consumption retains its existing safe
-status warning. These statuses may originate at the peer or the local decoder:
+unary, stream-opening and mempool retry failures.
+These statuses may originate at the peer or the local decoder:
 logs contain fixed stages and numeric codes, never upstream prose or metadata.
 Read retries, protobuf size bounds and mempool drain contracts remain unchanged. Remove these hunks only with equivalent progressing/stalled response,
 cancellation/restart and worker-drain evidence through the full sync chain.
@@ -109,7 +111,9 @@ scan merge, reorg rollback and pool-recovery rollback failures. Recovery
 recommendations are unchanged. The application extracts fixed labels and discards
 underlying errors before logs/status; no tree positions, hashes or upstream prose
 are exposed. Fetch spans are debug-only; mempool events contain fixed labels and
-numeric status codes. Replace these changes only with equivalent safe context and
+numeric status codes. Rollback, automatic pool reset and mempool retry diagnostics
+stay at DEBUG while recovery remains available; the owner reports the final
+capability outcome. Replace these changes only with equivalent safe context and
 instrumentation. The three-pool merge-conflict fixture remains executable in the
 application SDK integration target without a separate SDK unit-test build:
 
@@ -118,12 +122,78 @@ make test CARGO_ARGS='--test sdk_compat' TEST_ARGS='sdk_merge::scan_merge_confli
 ```
 
 See [workspace verification](development.md#combined-workspace-verification).
-Upstream v7 owns same-height/deeper reorg truncation and synthetic branch hashes;
-application lifecycle tests retain exact historical facts and current SDK
-spendability without a historical capital veto. Wallet format 45 and the public
+Upstream v7 owns same-height/deeper reorg truncation and synthetic branch hashes.
+The upstream 100-block rolling horizon is a cache-retention policy, not consensus
+finality. A node's larger rollback window does not require matching local retention. A rollback outside the
+retained horizon clears derived SDK chain state and resumes from the effective
+scan floor. Missing older shard checkpoints use upstream's existing
+clear-and-rescan fallback; older snapshots need not contain additional checkpoints.
+The same fallback handles a pruned checkpoint or required wallet-block boundary
+that rollback can no longer reconstruct locally. Startup also repairs persisted
+scanned ranges with missing boundary blocks, including interrupted older rollbacks.
+New-chain metadata is not attached to an unverified old scanned prefix.
+A full clear without a proven common ancestor starts at supported Sapling
+activation, even when the replacement tip is above the declared birthday. Clamping
+to the replacement tip or old birthday could miss replacement credits already
+mined below both. An initial birthday hint beyond the observed tip uses the same
+conservative rescan. Existing persisted scan ranges retain the earlier effective
+floor through clearing, interruption and reopen; the declared birthday, keys and
+original operation journals remain unchanged. A chain below supported activation
+still reports a diagnostic rather than inventing usable history. This uses the
+existing scan owner and ranges, with no additional recovery ledger or deadline.
+The treasury retains keys, address derivation, accepted input claims, original
+signed bytes and financial journals through either rescan. Sync readiness and
+reuse are rebuilt by the existing scan owner; clearing chain state grants no
+submission, release or new deposit authority. Application lifecycle tests cover
+rollback beyond the rolling window
+while retaining exact pending work. The patched SDK fixture
+`future_birthday_rescans_supported_history_and_keeps_floor_across_clear` also
+checks the activation-floor fallback with unchanged declared metadata before
+the first resumed block is scanned. Mutable input/inclusion/confirmation
+observations wait for canonical progress; malformed immutable transaction
+identities require scoped inspection. Reorgs can move a Sapling note and change
+its current position-derived nullifier. The SDK reconstructs those current inputs;
+the application does not compare them with historical inputs to authorize expiry.
+Confirmed source work continues the existing swap
+observation rather than requesting manual review. A completed SDK observation of
+the transaction's computed identity at configured depth proves confirmation without
+a second indexer report. [ZIP 244](https://zips.z.cash/zip-0244) separates v5
+transaction effects from authorization data: a valid authorization-data variant
+can have the same transaction ID while its serialized bytes differ. Canonical SDK
+matching therefore uses computed transaction identity/effects, while original
+journaled bytes, transaction ID, expiry and input bindings remain strict. Legacy
+v4 IDs commit to the whole transaction encoding. This comparison never replaces
+the original disclosed bytes or grants replay authority.
+Local broadcast counters are not part of this immutable transaction identity.
+Malformed counters or unknown source-status labels conservatively retain possible
+disclosure while canonical observation continues; they neither authorize another
+submission nor veto an otherwise established confirmation or finite expiry.
+For unfinished source expiry, the application validates the authenticated original
+transaction and signed finite expiry, then uses a completed canonical SDK tip at
+the configured depth. It does not reconstruct old SDK inputs or require current
+unspent/alternative-spender proofs. Pepper already expires pending originals and
+clears only their own spend links across all supported pools; confirmed competing
+spenders remain spent. Actual SDK spendability, bridge terminal outcome and new
+funding authority remain separate. Wallet format 45 and the public
 v6 read/save/reopen/next-address fixture remain documented in
 [wallet administration](wallet-cli.md). Server protocol 0.5.0 capability
 requirements are distinct from the Rust protocol crate version.
+
+The application does not mirror SDK reorg history into completed swap workflows.
+NEAR owns the outcome of a bound swap; a validated SUCCESS closes source work
+without requiring a local CONFIRMED label. Current SDK state independently owns
+spendability. Actual unfinished sources retain their exact journals and existing
+observation/finite-expiry recovery owner. Production deposits use the SDK's finite
+expiry (40 blocks before NU7, 120 afterward); shielding uses the backend's ordinary
+finite default. No production zero-expiry constructor requires a parallel recovery
+framework.
+
+Schema-21 stores still upgrade additively to schema 22 under exclusive ownership;
+read-only status accepts both versions. Existing historical source dispositions,
+original bytes and snapshot references remain preserved. Historical rows do not
+reopen terminal work or authorize automatic disclosure; the exact-ID legacy guard
+prevents previously reopened originals from being sent automatically. Multiple
+legacy pending rows remain compatible and continue through the existing owner.
 
 ## Build-time parameter downloads
 

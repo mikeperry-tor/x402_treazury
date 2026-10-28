@@ -1533,9 +1533,9 @@ async fn disabled_quote_closes_after_explicit_discovery_without_polling_or_new_s
 }
 
 #[tokio::test]
-async fn timed_out_submitted_operation_dispatches_owned_recovery_without_replay() {
+async fn buried_expiry_dispatches_owned_recovery_without_replay() {
     use x402_treazury::treasury::recovery::RecoveryOutcome;
-    assert_timed_out_source_observations(
+    assert_due_source_observations(
         Some(RecoveryOutcome::Waiting("waiting_for_transaction_expiry")),
         0,
     )
@@ -1543,14 +1543,14 @@ async fn timed_out_submitted_operation_dispatches_owned_recovery_without_replay(
 }
 
 #[tokio::test]
-async fn timed_out_backend_without_recovery_still_reconciles_once() {
-    assert_timed_out_source_observations(None, 1).await;
+async fn buried_expiry_backend_without_recovery_still_reconciles_once() {
+    assert_due_source_observations(None, 1).await;
 }
 
 #[tokio::test]
 async fn operator_disposition_preserves_pending_source_reconciliation() {
     use x402_treazury::treasury::recovery::RecoveryOutcome;
-    assert_timed_out_source_observations(
+    assert_due_source_observations(
         Some(RecoveryOutcome::OperatorRequired(
             "conflicting_transaction_or_input_evidence",
         )),
@@ -1559,7 +1559,28 @@ async fn operator_disposition_preserves_pending_source_reconciliation() {
     .await;
 }
 
-async fn assert_timed_out_source_observations(
+// The scheduler model consumes saved SDK facts; the real SDK lifecycle tests
+// separately establish the canonical proof. Diagnostic health is not eligibility.
+async fn bury_source_expiry(store: &StoreHandle, operation: String) {
+    store
+        .call(move |s| {
+            let facts = s.operation(&operation)?.facts;
+            let mut sync = s.status()?.sync.unwrap();
+            let height = u64::from(facts.expiry_height) + u64::from(sync.confirmations);
+            sync.phase = SyncPhase::Ready;
+            sync.height = Some(height);
+            sync.target_height = Some(height);
+            sync.observed_tip_height = Some(height);
+            sync.scanned_blocks = u32::try_from(height)?;
+            let (revision, snapshot) = s.snapshot()?;
+            s.save_sync_snapshot(revision, &snapshot, Some(sync))?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+async fn assert_due_source_observations(
     recovery: Option<x402_treazury::treasury::recovery::RecoveryOutcome>,
     ordinary_reconciliations: usize,
 ) {
@@ -1583,6 +1604,13 @@ async fn assert_timed_out_source_observations(
     worker.backend.lock().await.timeout = 1;
     worker.backend.lock().await.recovery = recovery;
     worker.backend.lock().await.recovery_observed = ordinary_reconciliations == 0;
+    worker.tick(now + 500).await.unwrap();
+    assert_eq!(
+        worker.backend.lock().await.recovery_calls,
+        0,
+        "diagnostic timeout alone does not authorize source recovery"
+    );
+    bury_source_expiry(&worker.store, before.funding_jobs[0].operation_id.clone()).await;
     let reconciles_before = worker.backend.lock().await.reconcile_calls;
     worker.tick(now + 1000).await.unwrap();
     let after = worker.store.call(|s| s.status()).await.unwrap();
@@ -1599,6 +1627,17 @@ async fn assert_timed_out_source_observations(
         before.funding_jobs[0].operation_id
     );
     assert!(after.outgoing_pending);
+    assert_eq!(after.treasury_operations[0].attempts, 1);
+    let operation = before.funding_jobs[0].operation_id.clone();
+    worker
+        .store
+        .call(move |s| {
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), b"signed");
+            assert_eq!(s.funding_recovery_count(&s.funding_jobs()?[0].id)?, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
     drop(worker);
     task.await.unwrap();
 }
@@ -1606,7 +1645,7 @@ async fn assert_timed_out_source_observations(
 #[tokio::test]
 async fn operator_disposition_after_source_observation_does_not_reconcile_again() {
     use x402_treazury::treasury::recovery::RecoveryOutcome;
-    assert_timed_out_source_observations(
+    assert_due_source_observations(
         Some(RecoveryOutcome::OperatorRequired(
             "conflicting_transaction_or_input_evidence",
         )),
@@ -1618,8 +1657,7 @@ async fn operator_disposition_after_source_observation_does_not_reconcile_again(
 #[tokio::test]
 async fn recovery_wait_before_source_observation_preserves_ordinary_reconciliation() {
     use x402_treazury::treasury::recovery::RecoveryOutcome;
-    assert_timed_out_source_observations(Some(RecoveryOutcome::Waiting("funding_in_progress")), 1)
-        .await;
+    assert_due_source_observations(Some(RecoveryOutcome::Waiting("funding_in_progress")), 1).await;
 }
 
 #[tokio::test]
@@ -1643,9 +1681,8 @@ async fn confirmation_conflicts_preserve_facts_and_ownership_in_ordinary_and_rec
             if via_recovery {
                 let mut backend = worker.backend.lock().await;
                 backend.recovery_observed = true;
-                backend.recovery = Some(RecoveryOutcome::OperatorRequired(
-                    "conflicting_transaction_or_input_evidence",
-                ));
+                backend.recovery =
+                    Some(RecoveryOutcome::Waiting("waiting_for_fresh_canonical_sync"));
                 drop(backend);
                 let job = before.funding_jobs[0].id.clone();
                 worker
@@ -1653,6 +1690,8 @@ async fn confirmation_conflicts_preserve_facts_and_ownership_in_ordinary_and_rec
                     .call(move |s| s.mark_funding_timeout(&job))
                     .await
                     .unwrap();
+                bury_source_expiry(&worker.store, before.funding_jobs[0].operation_id.clone())
+                    .await;
             }
             for i in 3..5 {
                 let calls = worker.backend.lock().await.reconcile_calls;
@@ -1663,7 +1702,8 @@ async fn confirmation_conflicts_preserve_facts_and_ownership_in_ordinary_and_rec
                 assert_eq!(job.phase, FundingPhase::DepositPending);
                 assert_eq!(job.operation_id, before.funding_jobs[0].operation_id);
                 let error = job.last_error.as_deref().unwrap();
-                assert!(error.contains("funding_recovery_requires_operator; conflicting_transaction_or_input_evidence"), "{error}");
+                assert!(error.contains("source_reconciliation_failed"), "{error}");
+                assert!(!error.contains("requires_operator"), "{error}");
                 let observation = confirmation_fixture(reason).unwrap();
                 assert!(error.contains(&observation.to_string()), "{error}");
                 assert!(status.outgoing_pending);

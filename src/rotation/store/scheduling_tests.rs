@@ -267,33 +267,74 @@ fn captured_phase_and_facts_survive_rollover_and_reopen() {
 }
 
 #[test]
-fn malformed_facts_retain_the_job_without_failing_independent_inventory() {
-    let (_dir, mut store) = fixture();
-    allocate(&mut store, "pool");
-    let job = store.funding_jobs().unwrap().remove(0);
-    // Job decoding does not read this field; paired fact acquisition must fail.
-    store
-        .db
-        .execute(
-            "UPDATE funding_progress SET provider_success='invalid' WHERE job_id=?1",
-            [&job.id],
-        )
-        .unwrap();
-    assert!(store.funding_job(&job.id).unwrap().is_some());
-    let through = store.funding_work_boundary().unwrap();
-    let page = store.funding_work_page("", through).unwrap();
-    assert_eq!(page.len(), 2);
-    assert_eq!(page.iter().filter(|(_, work)| work.is_err()).count(), 1);
-    assert_eq!(
-        page.into_iter()
-            .find(|(id, _)| id == &job.id)
-            .unwrap()
-            .1
-            .err()
-            .unwrap()
-            .operation,
-        job.operation_id
-    );
+fn optional_provider_and_disclosure_metadata_do_not_block_inventory() {
+    for required_source in [false, true] {
+        let (_dir, mut store) = fixture();
+        allocate(&mut store, "pool");
+        let job = store.funding_jobs().unwrap().remove(0);
+        if required_source {
+            store
+                .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                .unwrap();
+            store
+                .prepare_with_facts(
+                    &job.operation_id,
+                    1,
+                    b"next",
+                    b"exact original bytes",
+                    Some(TransactionFacts {
+                        txid: "original".into(),
+                        expiry_height: 100,
+                        amount_zatoshis: 50,
+                        fee_zatoshis: 10,
+                        deadline: None,
+                    }),
+                )
+                .unwrap();
+            // A damaged local sequence is possibly disclosed; preserve observation
+            // of the authenticated original while withholding first-send authority.
+            store
+                .db
+                .execute(
+                    "UPDATE treasury_operations SET attempts='invalid' WHERE id=?1",
+                    [&job.operation_id],
+                )
+                .unwrap();
+        } else {
+            // Optional provider hints are unknown when malformed, not authority
+            // to close an original or suppress independently authorized work.
+            store
+                .db
+                .execute(
+                    "UPDATE funding_progress SET provider_success='invalid' WHERE job_id=?1",
+                    [&job.id],
+                )
+                .unwrap();
+        }
+        assert!(store.funding_job(&job.id).unwrap().is_some());
+        let through = store.funding_work_boundary().unwrap();
+        let page = store.funding_work_page("", through).unwrap();
+        assert_eq!(page.len(), 2);
+        assert_eq!(page.iter().filter(|(_, work)| work.is_err()).count(), 0);
+        let result = page.into_iter().find(|(id, _)| id == &job.id).unwrap().1;
+        if required_source {
+            let work = result.unwrap();
+            assert_eq!(work.facts.source_submission.as_deref(), Some("UNKNOWN"));
+            assert!(work.facts.source_attempts >= 1);
+            assert!(!work.facts.new_funding_allowed);
+            assert!(store.operation(&job.operation_id).is_err());
+            assert_eq!(
+                store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
+                b"exact original bytes"
+            );
+            assert!(store.operation_pending(&job.operation_id).unwrap());
+        } else {
+            let work = result.unwrap();
+            assert!(!work.facts.provider_success);
+            assert!(work.facts.new_funding_allowed);
+            assert!(store.status().unwrap().treasury_operations.is_empty());
+        }
+    }
 }
 
 #[test]
@@ -472,5 +513,138 @@ fn malformed_health_is_scoped_without_normalizing_values_or_hiding_sql_errors() 
                 .funding_work_page("", store.funding_work_boundary().unwrap())
                 .is_err()
         );
+    }
+}
+
+#[test]
+fn damaged_disclosure_sequence_is_observe_only_and_never_rewritten() {
+    use rusqlite::types::Value;
+    for (submission, attempts) in [
+        (
+            Value::Text("PREPARED".into()),
+            Value::Text("invalid".into()),
+        ),
+        (Value::Text("PREPARED".into()), Value::Blob(vec![0])),
+        (Value::Text("PREPARED".into()), Value::Integer(-1)),
+        (Value::Text("UNKNOWN".into()), Value::Integer(0)),
+        (Value::Blob(vec![0]), Value::Integer(0)),
+    ] {
+        let (_dir, mut store) = fixture();
+        allocate(&mut store, "observer");
+        let job = store.funding_jobs().unwrap().remove(0);
+        store
+            .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+            .unwrap();
+        store
+            .prepare_with_facts(
+                &job.operation_id,
+                1,
+                b"prepared SDK",
+                b"exact original bytes",
+                Some(TransactionFacts {
+                    txid: "original".into(),
+                    expiry_height: 100,
+                    amount_zatoshis: 50,
+                    fee_zatoshis: 10,
+                    deadline: None,
+                }),
+            )
+            .unwrap();
+        store
+            .db
+            .execute_batch("PRAGMA ignore_check_constraints=ON")
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE treasury_operations SET submission=?2,attempts=?3 WHERE id=?1",
+                params![job.operation_id, submission, attempts],
+            )
+            .unwrap();
+        store
+            .db
+            .execute_batch("PRAGMA ignore_check_constraints=OFF")
+            .unwrap();
+        let observed = store.observation_operation(&job.operation_id).unwrap();
+        assert_eq!(observed.submission, "UNKNOWN");
+        assert!(observed.attempts >= 1);
+        let facts = store.funding_facts(&job.id, &job.operation_id).unwrap();
+        assert_eq!(facts.source_submission.as_deref(), Some("UNKNOWN"));
+        assert!(facts.source_attempts >= 1 && facts.source_reconciliation_needed());
+        assert!(!facts.new_funding_allowed);
+        assert!(
+            store
+                .request_broadcast(&job.operation_id, 1, 1, false)
+                .is_err()
+        );
+        // Even explicit retry cannot invent the missing counter/history.
+        assert!(
+            store
+                .request_broadcast(&job.operation_id, 1, 1, true)
+                .is_err()
+        );
+        let saved: (Value, Value) = store
+            .db
+            .query_row(
+                "SELECT submission,attempts FROM treasury_operations WHERE id=?1",
+                [&job.operation_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(saved, (submission, attempts.clone()));
+        assert_eq!(
+            store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
+            b"exact original bytes"
+        );
+        store.confirm_spend(&job.operation_id).unwrap();
+        let confirmed = store.observation_operation(&job.operation_id).unwrap();
+        assert_eq!(confirmed.submission, "CONFIRMED");
+        assert!(!store.operation_pending(&job.operation_id).unwrap());
+        let saved: Value = store
+            .db
+            .query_row(
+                "SELECT attempts FROM treasury_operations WHERE id=?1",
+                [&job.operation_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            saved, attempts,
+            "canonical closure never repairs the local counter"
+        );
+    }
+    // NULL cannot be written through the current NOT NULL schema, but a damaged
+    // row must still differ from an absent LEFT JOIN when projecting observations.
+    let db = Connection::open_in_memory().unwrap();
+    let observed = db
+        .query_row("SELECT NULL,0", [], |r| {
+            observation_disclosure(r, 0, 1, true, false)
+        })
+        .unwrap();
+    assert_eq!(observed, (Some("UNKNOWN".into()), 1));
+    let absent = db
+        .query_row("SELECT NULL,0", [], |r| {
+            observation_disclosure(r, 0, 1, false, false)
+        })
+        .unwrap();
+    assert_eq!(absent, (None, 0));
+}
+
+#[test]
+fn expiry_label_preserves_native_disclosure_evidence() {
+    let db = Connection::open_in_memory().unwrap();
+    for (status, count, expected_status, expected_count) in [
+        ("PREPARED", 0, "EXPIRED", 0),
+        ("UNKNOWN", 0, "EXPIRED", 1),
+        ("CONFIRMED", 0, "CONFIRMED", 1),
+        ("broken", 0, "EXPIRED", 1),
+    ] {
+        let expired = expected_status == "EXPIRED";
+        let observed = db
+            .query_row("SELECT ?1,?2", params![status, count], |r| {
+                observation_disclosure(r, 0, 1, true, expired)
+            })
+            .unwrap();
+        assert_eq!(observed, (Some(expected_status.into()), expected_count));
     }
 }

@@ -1,75 +1,99 @@
-# Canonical evidence and automatic reorg recovery
+# Simplify settlement and chain recovery
 
-Starting baseline: `0a6dbb93f5017c91e8eca1487b6d8416ecf26d2e`.
-The operator wants blockchain evidence to resolve recoverable uncertainty instead
-of permanent manual-repair stops. Current Base depth-only proofs and repair
-latches do not meet that requirement. Current Pepper rollback retention also
-predates Zebra's wider local rollback policy.
+The operator wants automatic progress from blockchain/SDK facts, finite transaction
+expiry and NEAR-owned swap settlement. The current branch overextended source
+reorg recovery into lifetime historical swap reconciliation. Reform this branch
+in place; the recovery checkpoint is
+`review/usdc-reorg-before-model-reform-20261028` at `973d0574`.
+The original review baseline remains `0a6dbb93` for accumulated complexity review.
 
-Preserve original authorization identities, accepted inputs, exact signed bytes,
-first-positive-credit claim consumption, retired signer exclusion, existing
-observation owners/cadence and financial authority. No replay, replacement deposit,
-quorum, watcher, whole-work timer or parallel monetary ledger is authorized by
-reconciliation. Corrupt/missing original authority remains a scoped record error.
+Preserve journal-before-disclosure, exact accepted inputs and original signed
+bytes, actual pending transaction ownership, first-positive-credit claim
+consumption, retired signer exclusion, configured payment/funding/fee authority,
+network isolation and existing observation owners. Never infer another deposit
+from refunds or source expiry. A provider operation may remain unresolved after
+its source transaction expires. No new ledger, watcher, timer or zero-expiry
+framework is proposed. Production deposits already use ordinary SDK finite expiry.
 
-Owning guides: wallet-rotation.md, wallet-cli.md, configuration.md,
-network-egress.md, zingo-integration.md, vendor/README.md, tests/LIFECYCLE.md.
-AGENTS.md already links these enduring rules.
+Owning maintained guides: wallet-rotation.md, wallet-cli.md,
+zingo-integration.md, configuration.md, network-egress.md, vendor/README.md and
+tests/LIFECYCLE.md. AGENTS.md links these guides. Completed plans are review
+artifacts, not maintained policy, and this file will be removed after handoff.
 
-Independent initial design reviews challenged checkpoint necessity, archive
-representation, SDK rollback and full consumers. Accepted requirements: preserve
-superseded exact proof records; atomically reopen original liability and rebuild
-exposure; invalidate stale captures; avoid historical anchors recreating latches;
-finality unavailability must never silently downgrade evidence.
+Ordered coherent changes:
 
-Ordered commits:
+1. **M1 Delegate settlement and remove lifetime source reconciliation.**
+   A validated, bound NEAR SUCCESS closes source work without fabricating Zcash
+   confirmation or Base credit. First-positive Base observation remains advisory
+   readiness and consumes the initial claim; the existing credit lane finishes
+   independently of source confirmation. Prevent a new calculation after SUCCESS,
+   retain an already accepted calculation until its exact result is journaled,
+   close late results without disclosure, and let already accepted I/O drain.
+   Provider FAILED/REFUNDED closes bridge observation, while genuinely pending
+   source work retains its original owner until canonical confirmation/finite
+   expiry. INCOMPLETE/unknown remain unresolved. Remove historical terminal-source
+   rescans, reopening and app-level chain-replacement event plumbing. Keep real SDK
+   missing-boundary/pruned-checkpoint/deep-rescan repairs; restore upstream rolling
+   retention instead of equating a node retention window with finality. Preserve
+   schema-22 history, snapshot pins and the read-only no-automatic-disclosure guard
+   for previously reopened originals; tolerate multiple legacy pending originals.
+   Update permanent guides with this commit. Cover SUCCESS races, delayed credit,
+   restart, pending/terminal provider combinations, unchanged terminal work across
+   SDK rescan and genuinely unfinished original preservation.
+2. **M2 Remove redundant historical Base consistency authority.** Independently
+   approved scope deletes historical balance-support and archived-resolution
+   vetoes and retired-support anchor RPC revalidation. Preserve all audit bytes.
+   Retain current authorization binding, generation fences, finalized/depth RPC
+   tuples and checkpoint/debit publication ordering. Fix equal-confirmed-height
+   cache ordering using latest height, with an old-zero cache, newer positive
+   latest read and out-of-order retiring publication regression. M2 is independent
+   of M1 source semantics and can be prepared while its final focused regression
+   work finishes; commit M1 before M2, then validate frozen combined sources. No
+   generic corruption-repair framework is proposed.
+3. **M1b Recover unpublished calculations from the disclosure boundary.**
+   Current intent-only crash recovery still requires operator review. Production
+   calculation is offline; only an atomically committed outgoing journal can
+   supply broadcast authority. Remove the parallel global intent-only fence,
+   including its schema uniqueness constraint; preserve the raw PREPARED fence,
+   serialized SDK mutation owner, completed-result publication and exact old-ID
+   guards. After successful exclusive offline reconstruction with no completed
+   result retained, an intent with neither outgoing nor factual source operation
+   can close without a chain-absence proof. Preserve its encrypted inputs and use
+   existing funding recovery archival and fresh-operation/current-authority paths.
+   Orphan factual operations remain corruption. Jobless shielding needs no fake
+   funding row or closure ledger; its next calculation uses a new identity and SDK
+   spendability. Classify never-disclosed resets in the existing durable exclusion
+   from transaction-recovery attempt counts, without charging local crashes as
+   signed transaction recovery. Keep persisted table names compatible and explain
+   their expanded nondisclosure meaning in the owning guide. Update wallet
+   ownership, CLI and SDK guides and the lifecycle matrix with this change.
+   Independent design review must challenge live cancellation/reconstruction,
+   completed-result retry and lost acknowledgments; runtime regressions must cover
+   pre-journal crashes, committed outgoing with lost acknowledgment, unrelated
+   progress and preserved input evidence. Independently review this exact commit
+   and all prior fixups, with complexity comparison, before final integration.
+4. **M3 Integration and documentation handoff.** Independently review the combined
+   branch and all previous fixups against complete consumers. Remove this file
+   only after maintained docs match actual behavior and validate the exact cleanup
+   SHA and final combined branch.
 
-0. **K0 Historical support schema fixup.** Correct the stale local validity-field
-   requirement left after age-policy removal, against its introducing change.
-   Use faithful same-block support in regression coverage. Implemented as
-   `cbaacabb`; independently reviewed, final runtime evidence pending.
-1. **R1 Base finality and canonical correction.** Require both configured depth
-   and the RPC finalized declaration for balance/nonce/receipt final evidence.
-   Latest scalars remain advisory. Replace permanent repair latches with scoped,
-   atomic original-authorization reopening and append-only historical proof
-   preservation. Existing pending pages own restart recovery. Repair derived
-   checkpoint/debit projections without changing original journals. Cover fork
-   replacement, used→unused-valid→expired, expiry rollback, stale publication,
-   restart, transaction failure, unrelated progress and unavailable finality.
-   Close never-credited completed destinations only when every current/archived
-   source operation has exact expiry evidence or was never accepted; preserve
-   unknown delivery from confirmed deposits. Recover optional historical-support
-   damage without confusing it with missing original authorization identities.
-   Update Base configuration, reconciliation, CLI and observation documentation.
-2. **R2 Zcash canonical continuation.** Align the shared rolling SDK rollback
-   horizon with the node's local 1000-block policy, preserve automatic deeper-fork
-   rescan and recover shorter-tip/missing-checkpoint cases without losing keys or
-   application input ownership. Treat recoverable chain/SDK observation disagreement
-   as waiting and let confirmed source work continue ordinary settlement lanes.
-   Preserve exact transaction/input release checks.
-   Let a completed canonical SDK observation confirm exact original bytes without
-   an independent lookup veto. After buried original expiry, accept a different
-   sufficiently confirmed spend of an exact original input as positive exclusion,
-   while validating every immutable original input before that shortcut.
-   Review the saved-birthday/deeper-fork boundary and preserve scan coverage.
-   Add wired SDK/lifecycle
-   regressions; update vendor provenance and Zingo/recovery guides.
-3. **R3 Integration and documentation handoff.** Resolve discovered gaps with
-   fixups against introducing commits; independently review each exact SHA/fixup.
-   Remove this plan only after canonical documentation covers implemented rules.
+Independent read-only design review precedes substantive decisions. Implementation
+ownership separates SDK/source recovery from NEAR/funding and root publication
+boundaries. An independent reviewer who did not author the changes reviews each
+exact committed SHA; discovered defects use fixup commits against their introducer
+and receive independent exact-SHA review. History stays unsquashed.
 
-Review gates after R1 and R2 examine all preceding changes/fixups and complete
-financial/network consumers, concurrency, cancellation and historical journals.
-An independent reviewer must challenge necessity and opportunities to remove
-enforcement. Compare CogC/CycC against the starting baseline, inspect changed and
-unchanged high-risk call chains, and explicitly disposition warnings. Material
-findings reopen affected design before dependent implementation.
+Architecture gates after M1 and any M2 examine all prior commits/fixups, recurring
+causes, concurrency/cancellation/restart, financial ownership, network policy and
+permanent documentation. Compare CogC/CycC to both 973d0574 and the original
+baseline, inspect unchanged high-risk chains and explicitly resolve warnings.
+Prefer removing responsibilities over relocating complexity. Material findings
+reopen the affected gate before dependent work.
 
-Validation: no repeat of the previously completed full suite merely for audit.
-For these changes run static/provenance/complexity, production compiler/all-target
-Clippy and compatibility gates, then focused Base/store/retirement/treasury and
-synthetic-chain regressions on frozen matching sources. Broaden only where changed
-behavior invalidates prior evidence. Verify nonzero test counts and forbidden
-side-effect assertions. Keep detailed evidence/metrics in ignored target output.
-Final integration independently examines all commits/fixups, final cleanup SHA,
-canonical docs and remaining genuine operator boundaries before completion.
+Do not repeat the full suite already run by the operator. Freeze sources and Git
+state for validation. Complete applicable static/provenance/complexity, production
+compiler, all-target Clippy and compatibility checks before focused runtime tests.
+Validate changed contracts and affected consumers with nonzero execution counts,
+forbidden-side-effect assertions, cancellation/restart and unrelated progress.
+Carry forward unaffected evidence and complete previously unfinished jobless-source
+and wallet-workflow checks. Store generated evidence under ignored target output.

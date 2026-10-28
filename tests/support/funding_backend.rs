@@ -315,7 +315,9 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     assert_eq!(id, job.operation_id);
     // Count actual commands crossing the production backend/treasury boundary.
     // The fixture rejects ordinary reconciliation; recovery reports an owned
-    // observation. A duplicate command either violates the match or times out.
+    // observation. Diagnostic timeout alone cannot authorize recovery; buried
+    // signed expiry under canonical SDK coverage selects the one proof owner.
+    // A duplicate command either violates the match or times out.
     let (id, operation) = (job.id.clone(), job.operation_id.clone());
     store
         .call(move |s| {
@@ -325,12 +327,34 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         .await
         .unwrap();
     let coordinator = FundingWorker::new(store.clone(), backend, 60);
-    for timed_out in [false, true] {
+    for (timed_out, proof_due) in [(false, false), (true, false), (false, true)] {
         let id = job.id.clone();
         let current = store
             .call(move |s| {
                 if timed_out {
                     s.mark_funding_timeout(&id)?;
+                }
+                if proof_due {
+                    let revision = s.snapshot()?.0;
+                    s.save_sync_snapshot(
+                        revision,
+                        b"canonical proof coverage",
+                        Some(crate::rotation::store::SyncObservation {
+                            phase: crate::rotation::store::SyncPhase::Ready,
+                            last_error: None,
+                            snapshot_revision: revision,
+                            checked_at: Some(1),
+                            checkpoint_at: 1,
+                            scanned_blocks: 102,
+                            target_height: Some(102),
+                            observed_tip_height: Some(102),
+                            height: Some(102),
+                            confirmations: 2,
+                            confirmed_pool_balances_zatoshis: None,
+                            confirmed_shielded_zatoshis: 0,
+                            spendable_shielded_zatoshis: 0,
+                        }),
+                    )?;
                 }
                 s.funding_job(&id)?.context("fixture job missing")
             })
@@ -349,11 +373,11 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
         .await
         .unwrap();
         match observed {
-            ObservedCommand::Reconcile(id) if !timed_out => {
+            ObservedCommand::Reconcile(id) if !proof_due => {
                 assert_eq!(id, job.operation_id);
                 assert!(result.is_err());
             }
-            ObservedCommand::RecoverFunding(id, _, false) if timed_out => {
+            ObservedCommand::RecoverFunding(id, _, false) if proof_due => {
                 assert_eq!(id, job.id);
                 assert!(matches!(result.unwrap(), Observation::None));
             }

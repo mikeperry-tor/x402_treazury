@@ -1,4 +1,4 @@
--- Fresh schema21 only. Legacy conversion has a separate strict preflight.
+-- Fresh schema22 only. Legacy conversion has a separate strict preflight.
 -- Historical stores may retain unused payment_anchors and funding_progress.turn.
 -- They are never read/written by runtime code; no destructive cleanup is needed.
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
@@ -16,7 +16,6 @@ CREATE TABLE funding_recovery(operation_id TEXT PRIMARY KEY,job_id TEXT NOT NULL
 CREATE TABLE expired_operations(id TEXT PRIMARY KEY REFERENCES outgoing(id),height INTEGER NOT NULL,revision INTEGER NOT NULL REFERENCES snapshots(revision));
 CREATE TABLE funding_health(job_id TEXT PRIMARY KEY REFERENCES funding_jobs(id),started_at INTEGER,error_streak INTEGER NOT NULL DEFAULT 0,timed_out INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE operation_network(operation_id TEXT PRIMARY KEY,recipient TEXT,preparation BLOB);
-CREATE UNIQUE INDEX one_calculation ON operation_network((1)) WHERE preparation IS NOT NULL;
 CREATE TABLE payment_resolutions(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),outcome TEXT NOT NULL CHECK(outcome IN ('USED','EXPIRED_UNUSED')),height INTEGER NOT NULL,hash TEXT NOT NULL,block_time INTEGER NOT NULL, support TEXT);
 CREATE TABLE funding_quote_refreshes(operation_id TEXT PRIMARY KEY REFERENCES funding_recovery(operation_id));
 CREATE TABLE payment_admission_evidence(attempt_id TEXT PRIMARY KEY REFERENCES payment_attempts(id),block_height INTEGER,block_hash TEXT,balance TEXT,reserved_before TEXT,valid_until TEXT, support TEXT, latest_height INTEGER, latest_hash TEXT, endpoint TEXT, payer_role TEXT NOT NULL CHECK(payer_role IN ('ACTIVE','RETAINED','READY')), reserve_slot TEXT CHECK(reserve_slot IN ('small','large')), claim_generation INTEGER, CHECK((payer_role='READY' AND reserve_slot IS NOT NULL AND claim_generation IS NOT NULL AND claim_generation>=0) OR (payer_role!='READY' AND reserve_slot IS NULL AND claim_generation IS NULL)));
@@ -48,7 +47,7 @@ CREATE TABLE wallet_retirements(
  recorded_at INTEGER NOT NULL);
 CREATE INDEX wallet_role_sequence ON wallets(pool_id,role,sequence);
 CREATE UNIQUE INDEX one_active ON wallets(pool_id) WHERE role='ACTIVE';
-CREATE UNIQUE INDEX one_outgoing ON outgoing((1)) WHERE state='PREPARED';
+-- The serialized owner checks pending work; legacy stores can retain several unfinished originals.
 CREATE UNIQUE INDEX payment_reconciliation_sequence ON payment_attempts(reconciliation_sequence);
 CREATE INDEX payment_pending_sequence ON payment_attempts(pool_id,state,reconciliation_sequence);
 CREATE INDEX payment_wallet_state ON payment_attempts(wallet_id,state);
@@ -70,7 +69,7 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=21;
+PRAGMA user_version=22;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';

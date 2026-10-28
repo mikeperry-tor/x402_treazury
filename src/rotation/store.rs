@@ -26,6 +26,7 @@ pub(crate) mod inventory;
 mod ownership;
 mod reporting;
 mod reserve_replacement;
+pub(crate) mod source_reconciliation;
 pub use reporting::{BalancePointStatus, RetirementAccounting, RuntimeBalanceEvidence};
 pub mod preparation;
 pub mod refunds;
@@ -439,6 +440,7 @@ impl Store {
         tx.execute("INSERT INTO snapshots VALUES (1,?1)", [encrypted])?;
         tx.commit()?;
         evidence::initialize_runtime(&db)?;
+        source_reconciliation::initialize(&db)?;
         File::open(dir)?.sync_all()?;
         if let Some(parent) = dir.parent().filter(|p| !p.as_os_str().is_empty()) {
             File::open(parent)?.sync_all()?;
@@ -484,7 +486,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                version == 21,
+                matches!(version, 21 | 22),
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -527,6 +529,7 @@ impl Store {
         configure(&store.db)?;
         admission_schema(&store.db)?;
         evidence::initialize_runtime(&store.db)?;
+        source_reconciliation::initialize(&store.db)?;
         Ok(store)
     }
     pub fn id(&self) -> &str {
@@ -583,7 +586,7 @@ impl Store {
                 params![job, encrypted],
             )?;
         }
-        tx.execute("DELETE FROM snapshots WHERE revision < ?1 AND revision NOT IN (SELECT revision FROM outgoing UNION SELECT revision FROM expired_operations)", [revision])?;
+        tx.execute("DELETE FROM snapshots WHERE revision < ?1 AND revision NOT IN (SELECT revision FROM outgoing UNION SELECT revision FROM expired_operations UNION SELECT revision FROM source_disposition_history WHERE revision IS NOT NULL)", [revision])?;
         if let Some(mut observation) = observation {
             observation.snapshot_revision = revision;
             observation.checkpoint_at =
@@ -843,9 +846,12 @@ impl Store {
         let current: i64 = tx.query_row("SELECT MAX(revision) FROM snapshots", [], |r| r.get(0))?;
         ensure!(current == expected_revision, "snapshot_revision_conflict");
         tx.execute("INSERT INTO snapshots VALUES (?1,?2)", params![next, snap])?;
+        // Settlement may arrive while the accepted SDK calculation is running.
+        // Retain its exact result, but never disclose it after the swap succeeded.
+        let fulfilled = funding::provider_succeeded(&tx, id)?;
         ensure!(tx.execute(
-            "INSERT INTO outgoing(id,state,raw,revision,preparation) SELECT ?1,'PREPARED',?2,?3,preparation FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL",
-            params![id, encrypted, next],
+            "INSERT INTO outgoing(id,state,raw,revision,preparation) SELECT ?1,?4,?2,?3,preparation FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL",
+            params![id, encrypted, next, if fulfilled { "RESOLVED" } else { "PREPARED" }],
         )? == 1, "accepted calculation owner changed");
         if let Some(facts) = facts {
             let cost = facts
@@ -865,7 +871,9 @@ impl Store {
             "UPDATE operation_network SET preparation=NULL WHERE operation_id=?1",
             [id],
         )?;
-        tx.execute("UPDATE funding_progress SET phase='\"PREPARED\"' WHERE operation_id=?1 AND phase='\"PREPARING\"'", [id])?;
+        if !fulfilled {
+            tx.execute("UPDATE funding_progress SET phase='\"PREPARED\"' WHERE operation_id=?1 AND phase='\"PREPARING\"'", [id])?;
+        }
         tx.commit()?;
         Ok(next)
     }
@@ -889,8 +897,8 @@ impl Store {
             |r| r.get(0),
         )?)
     }
-    /// The existing SDK input fence permits one pending transaction. Funding
-    /// jobs have their worker; the treasury actor owns observation of jobless shielding.
+    /// Test convenience for fixtures containing one jobless original.
+    #[cfg(test)]
     pub(crate) fn jobless_pending_operation(&self) -> Result<Option<String>> {
         Ok(self.db.query_row("SELECT x.id FROM outgoing x WHERE x.state='PREPARED' AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.operation_id=x.id)",[],|r|r.get(0)).optional()?)
     }
@@ -909,12 +917,7 @@ impl Store {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let expired: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)",
-            [id],
-            |r| r.get(0),
-        )?;
-        ensure!(!expired, "expired operation confirmation conflict");
+        source_reconciliation::archive_expiry(&tx, id)?;
         ensure!(
             tx.execute("UPDATE outgoing SET state='RESOLVED' WHERE id=?1", [id])? == 1,
             "unknown prepared operation"
@@ -995,7 +998,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        schema == 21,
+        matches!(schema, 21 | 22),
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1076,11 +1079,15 @@ fn read_status(db: &Connection) -> Result<Status> {
     } else {
         None
     };
-    let outgoing_pending = db.query_row(
-        if version>=21 {"SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)"} else {"SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')"},
-        [],
-        |r| r.get(0),
-    )?;
+    let outgoing_pending = if version >= 21 {
+        preparation::preparation_pending(db)?
+    } else {
+        db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
+            [],
+            |r| r.get(0),
+        )?
+    };
     let sync_complete = sync.as_ref().is_some_and(|observation| {
         observation.phase == SyncPhase::Ready && observation.snapshot_revision == revision
     });
@@ -1254,7 +1261,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        version == 21,
+        matches!(version, 21 | 22),
         "unsupported state schema; private-state conversion requires separate authorization; a code rollback is not a state downgrade"
     );
     // Additive lookup optimization for existing schema16 stores; financial
@@ -1654,6 +1661,55 @@ fn sql_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
     })
 }
 
+/// Conservative read-only disclosure projection. Invalid local sequencing data
+/// can withhold first-send authority, but cannot veto canonical observation.
+fn observation_disclosure(
+    row: &rusqlite::Row<'_>,
+    status: usize,
+    count: usize,
+    present: bool,
+    expired: bool,
+) -> rusqlite::Result<(Option<String>, i64)> {
+    use rusqlite::types::ValueRef;
+    let raw_status = row.get_ref(status)?;
+    let raw_count = row.get_ref(count)?;
+    if !present {
+        return Ok((None, 0));
+    }
+    let status = match raw_status {
+        ValueRef::Text(value) => std::str::from_utf8(value).ok(),
+        _ => None,
+    }
+    .filter(|value| {
+        matches!(
+            *value,
+            "PREPARED" | "BROADCAST_REQUESTED" | "BROADCAST" | "UNKNOWN" | "CONFIRMED" | "EXPIRED"
+        )
+    });
+    let count = match raw_count {
+        ValueRef::Integer(value) if value >= 0 => Some(value),
+        _ => None,
+    };
+    // Disclosure comes from the native sequence. An expiry proof closes future
+    // inclusion without proving the original was ever disclosed.
+    let canonical = matches!(status, Some("CONFIRMED" | "EXPIRED"));
+    let valid = status.is_some() && count.is_some();
+    let status = if valid || canonical {
+        status.unwrap()
+    } else {
+        "UNKNOWN"
+    };
+    let count = count.unwrap_or(1);
+    Ok((
+        Some(if expired { "EXPIRED" } else { status }.into()),
+        if status == "PREPARED" && valid {
+            count
+        } else {
+            count.max(1)
+        },
+    ))
+}
+
 impl Store {
     pub(crate) fn operation_facts(
         &self,
@@ -1672,11 +1728,37 @@ impl Store {
             .transpose()
     }
 
+    pub(crate) fn observation_operation(&self, id: &str) -> Result<OperationStatus> {
+        let (facts, (submission, attempts)) = self.db.query_row(
+            "SELECT facts,submission,attempts,EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=o.id) FROM treasury_operations o WHERE id=?1",
+            [id], |row| Ok((row.get::<_,String>(0)?, observation_disclosure(row,1,2,true,row.get(3)?)?)),
+        ).optional()?.context("operation metadata missing")?;
+        Ok(OperationStatus {
+            operation_id: id.into(),
+            facts: serde_json::from_str(&facts).context(scheduling::FundingDecodeFailure)?,
+            submission: submission.unwrap_or_else(|| "UNKNOWN".into()),
+            attempts,
+        })
+    }
+
     pub fn operation(&self, id: &str) -> Result<OperationStatus> {
         let (facts, submission, attempts): (String, String, i64) = self.db.query_row(
             "SELECT facts,CASE WHEN EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=o.id) THEN 'EXPIRED' ELSE submission END,attempts FROM treasury_operations o WHERE id=?1",
             [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
         ).optional()?.context("operation metadata missing")?;
+        ensure!(attempts >= 0, "invalid source disclosure count");
+        ensure!(
+            matches!(
+                submission.as_str(),
+                "PREPARED"
+                    | "BROADCAST_REQUESTED"
+                    | "BROADCAST"
+                    | "UNKNOWN"
+                    | "CONFIRMED"
+                    | "EXPIRED"
+            ),
+            "invalid source disclosure status"
+        );
         Ok(OperationStatus {
             operation_id: id.to_owned(),
             facts: serde_json::from_str(&facts).context(scheduling::FundingDecodeFailure)?,
@@ -1707,7 +1789,19 @@ impl Store {
         retry: bool,
     ) -> Result<i64> {
         ensure!(self.operation_pending(id)?, "transaction is not pending");
+        ensure!(
+            !funding::provider_succeeded(&self.db, id)?,
+            "swap already succeeded; source submission is closed"
+        );
         let operation = self.operation(id)?;
+        ensure!(
+            operation.attempts > 0 || operation.submission == "PREPARED",
+            "source disclosure history uncertain; observe original transaction"
+        );
+        ensure!(
+            retry || !self.source_previously_closed(id)?,
+            "explicit_rebroadcast_required"
+        );
         operation
             .facts
             .require_protocol_validity(|| Ok(now), height)?;

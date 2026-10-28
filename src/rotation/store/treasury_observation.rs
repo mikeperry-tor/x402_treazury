@@ -309,9 +309,18 @@ mod tests {
             )
             .unwrap();
         assert!(
-            !store
+            store
                 .treasury_observation_needed(&["pool".to_owned()])
                 .unwrap()
+        );
+        // An unknown optional provider hint cannot suppress a current enabled
+        // funding claim, or invent demand outside configured groups.
+        assert!(!store.treasury_observation_needed(&[]).unwrap());
+        assert!(
+            !store
+                .funding_facts(&malformed.id, &malformed.operation_id)
+                .unwrap()
+                .provider_success
         );
         crate::rotation::test_capacity::declare_and_allocate!(
             store,

@@ -32,7 +32,7 @@ impl TransactionSubmission for Undelivered {
 }
 
 #[tokio::test]
-async fn automatic_shielding_expiry_requires_every_selected_input_before_recovery() {
+async fn automatic_shielding_expiry_closes_work_despite_orphaned_selected_input() {
     let (dir, net, mut owner, endpoint) = funded_fixture(2).await;
     let addresses = transparent_addresses(&mut owner, 1).await;
     let small = faucet_funding_transaction(vec![(&addresses[0], 20_000, None)]).await;
@@ -40,7 +40,7 @@ async fn automatic_shielding_expiry_requires_every_selected_input_before_recover
     {
         let mut chain = net.chain.write().await;
         chain.mine_block(vec![small]);
-        chain.mine_block(vec![large]);
+        chain.mine_block(vec![large.clone()]);
         chain.mine_empty_blocks(2);
     }
     let stop = CancellationToken::new();
@@ -91,82 +91,37 @@ async fn automatic_shielding_expiry_requires_every_selected_input_before_recover
         "absence before expiry never permits replay"
     );
 
-    // Expire an intent that never reached the node. The SDK must actually
-    // invalidate its calculated transaction and make the inputs unspent again.
+    // The replacement history omits one originally selected outpoint. Signed
+    // expiry still closes the absent original, while SDK facts alone govern the
+    // surviving capital. The immutable accepted manifest stays unchanged.
     {
         let mut chain = net.chain.write().await;
+        chain.reorg_to(23);
+        chain.mine_block(vec![large]);
         let blocks = expiry + 2 - chain.tip();
         chain.mine_empty_blocks(blocks);
     }
-    owner.sync_once(&stop).await.unwrap();
-
-    // Exercise the manifest-to-transaction validator with actual SDK snapshots,
-    // not just its value helper. A missing small input cannot be replaced by a
-    // sufficient aggregate remainder. Use an isolated copy, leaving the owner
-    // unchanged for the full automatic expiry path below.
-    let original_bytes = owner
-        .store
-        .call({
-            let operation = operation.clone();
-            move |s| s.prepared_snapshot(&operation)
-        })
-        .await
-        .unwrap();
-    let original = LightClient::from_reader(
-        original_bytes.as_slice(),
-        config(owner._scratch.path(), WalletConfig::Read, owner.network).unwrap(),
-    )
-    .await
-    .unwrap();
-    let current_bytes = snapshot(owner.client.as_ref().unwrap()).await.unwrap();
-    let missing = LightClient::from_reader(
-        current_bytes.as_slice(),
-        config(owner._scratch.path(), WalletConfig::Read, owner.network).unwrap(),
-    )
-    .await
-    .unwrap();
-    let original = original.wallet().read().await;
-    let mut current = missing.wallet().write().await;
-    let small_id = current
-        .wallet_outputs::<pepper_sync::wallet::TransparentCoin>()
-        .into_iter()
-        .find(|output| output.value() == 20_000)
-        .unwrap()
-        .output_id()
-        .txid();
-    current.wallet_transactions.remove(&small_id);
-    assert!(
-        current
+    if owner.sync_once(&stop).await.is_err() {
+        owner.sync_once(&stop).await.unwrap();
+    }
+    {
+        let wallet = owner.client.as_ref().unwrap().wallet().read().await;
+        let outputs = wallet
             .wallet_outputs::<pepper_sync::wallet::TransparentCoin>()
-            .iter()
-            .map(|o| o.value())
-            .sum::<u64>()
-            > prepared.facts().unwrap().fee_zatoshis
-    );
-    let txid =
-        zcash_primitives::transaction::TxId::from_hex(&prepared.facts().unwrap().txid).unwrap();
-    let error = super::super::expiry::check_inputs::<pepper_sync::wallet::TransparentCoin>(
-        &original,
-        &current,
-        &txid,
-        &selected,
-        crate::rotation::store::preparation::InputPool::Transparent,
-        u64::from(expiry) + 2,
-        2,
-    )
-    .unwrap_err();
-    assert_eq!(
-        error.downcast_ref::<crate::rotation::transaction::RecoveryEvidenceError>(),
-        Some(&crate::rotation::transaction::RecoveryEvidenceError::InputMissing),
-        "{error:#}"
-    );
-    drop(current);
-    drop(original);
+            .into_iter()
+            .filter(|o| wallet.output_transaction(*o).status().is_confirmed())
+            .collect::<Vec<_>>();
+        assert_eq!(outputs.iter().map(|o| o.value()).sum::<u64>(), 1_000_000);
+        assert!(
+            outputs
+                .iter()
+                .all(|o| wallet.output_spend_status(*o).is_unspent())
+        );
+    }
     assert_eq!(load_pending(&owner).await.bytes(), prepared.bytes());
     assert_eq!(sender.attempts, 1);
 
-    // The real owner still has every original outpoint. Exercise automatic
-    // manifest-backed two-scan release rather than calling Store directly.
+    // Exercise the automatic one-scan source closure, not a direct Store update.
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch(
         "CREATE TABLE fixture_completed_scans (observation TEXT NOT NULL);
@@ -188,8 +143,8 @@ async fn automatic_shielding_expiry_requires_every_selected_input_before_recover
         .collect();
     assert_eq!(
         completed.len(),
-        2,
-        "expiry performs two new completed scans, not just checkpoints"
+        1,
+        "expiry performs one new completed canonical scan, not just checkpoints"
     );
     assert!(
         completed
@@ -206,6 +161,7 @@ async fn automatic_shielding_expiry_requires_every_selected_input_before_recover
                 assert_eq!(s.operation(&operation)?.submission, "EXPIRED");
                 assert_eq!(s.operation(&operation)?.attempts, 1);
                 assert_eq!(s.prepared_bytes(&operation)?.as_slice(), bytes);
+                assert_eq!(s.prepared_inputs(&operation)?, selected);
                 Ok(())
             }
         })
@@ -647,4 +603,97 @@ async fn shielding_callback_scans_are_consumed_before_unrelated_commands() {
     drop(handle);
     drop(store);
     task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn buried_shielding_expiry_ignores_stale_inclusion_hints_without_another_calculation() {
+    struct StaleHint {
+        confirmed: bool,
+        lookups: usize,
+    }
+    impl TransactionSubmission for StaleHint {
+        async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
+            panic!("recovery cannot resubmit");
+        }
+        async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
+            self.lookups += 1;
+            Ok(if self.confirmed {
+                TransactionPresence::Confirmed { height: 24 }
+            } else {
+                TransactionPresence::Mempool
+            })
+        }
+    }
+    for confirmed in [false, true] {
+        let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
+        let addresses = transparent_addresses(&mut owner, 1).await;
+        let funding = faucet_funding_transaction(vec![(&addresses[0], 1_000_000, None)]).await;
+        {
+            let mut chain = net.chain.write().await;
+            chain.mine_block(vec![funding]);
+            chain.mine_empty_blocks(2);
+        }
+        let stop = CancellationToken::new();
+        owner.sync_once(&stop).await.unwrap();
+        let prepared = owner
+            .shield_address(addresses[0].clone(), None, 30_000, &stop)
+            .await
+            .unwrap();
+        let mut actual = submission::GrpcSubmission::with_network(
+            endpoint.clone(),
+            endpoint,
+            TreasuryNetwork::Synthetic,
+        )
+        .unwrap();
+        owner
+            .submit_prepared(
+                prepared.operation_id().to_owned(),
+                &mut actual,
+                false,
+                &stop,
+            )
+            .await
+            .unwrap();
+        {
+            let mut chain = net.chain.write().await;
+            let remaining = prepared.facts().unwrap().expiry_height + 2 - chain.tip();
+            chain.mine_empty_blocks(remaining);
+        }
+        owner.sync_once(&stop).await.unwrap();
+        owner.configure_automatic_shielding(30_000);
+        // Maintenance owns this completed scan. Losing the indexer afterward
+        // cannot veto its already-established expiry proof with another scan.
+        net.chain.write().await.faults.inject(
+            Rpc::LightdInfo,
+            Fault::Fail(tonic::Code::Unavailable, "synthetic indexer offline".into()),
+        );
+        let mut sender = StaleHint {
+            confirmed,
+            lookups: 0,
+        };
+        owner
+            .maintain_owned_transparent(&mut sender, &stop)
+            .await
+            .unwrap();
+        assert_eq!(
+            sender.lookups, 0,
+            "canonical expiry does not require the external hint"
+        );
+        assert_eq!(net.chain.read().await.faults.pending(Rpc::LightdInfo), 1);
+        owner
+            .store
+            .call(move |s| {
+                let operation = prepared.operation_id();
+                assert_eq!(s.operation(operation)?.submission, "EXPIRED");
+                assert_eq!(s.operation(operation)?.attempts, 1);
+                assert_eq!(s.prepared_bytes(operation)?.as_slice(), prepared.bytes());
+                assert!(!s.operation_pending(operation)?);
+                assert_eq!(s.status()?.treasury_operations.len(), 1);
+                assert!(s.funding_jobs()?.is_empty());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        owner.close().await.unwrap();
+    }
 }

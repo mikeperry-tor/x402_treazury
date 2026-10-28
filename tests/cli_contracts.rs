@@ -1716,3 +1716,122 @@ async fn invalid_network_overrides_and_unpinned_qualification_fail_before_side_e
     assert!(!dir.path().join("state").exists());
     assert!(!dir.path().join("registry.sqlite").exists());
 }
+
+#[tokio::test]
+async fn recovery_cli_does_not_require_unrelated_disclosure_status_to_be_renderable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let config = r#"version=1
+[treasury]
+state_dir="state"
+max_refund_shielding_fee_zec="0.001"
+indexer_url="https://127.0.0.1:1"
+[funding]
+auto_fund=false
+base_rpc_url_env="BASE"
+base_rpc_fallback_url_envs=[]
+[wallets.web]
+mode="zcash_rotation"
+max_api_payment_usdc="1"
+reserves={small={funding_amount_usdc="1"},large={funding_amount_usdc="2"}}
+max_funding_spend_zec="0.02"
+max_conversion_overhead_percent=5
+[wallets.static_unused]
+mode="static"
+private_key_env="UNSET_STATIC_KEY"
+[sources.api]
+spec="missing-catalog.json"
+[servers.web]
+listen="127.0.0.1:0"
+sources=["api"]
+wallet="web"
+bearer_token_env="UNSET_LISTENER_TOKEN"
+"#;
+
+    std::fs::write(dir.join("deployment.toml"), config).unwrap();
+    let state = dir.join("state");
+    let key = state.join("wallet.key");
+    let treasury=x402_treazury::treasury::Treasury::create(state.clone(),key.clone(),2_000_000,
+        Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+    let identity = treasury.status().await.unwrap().treasury_id;
+    treasury.close().await.unwrap();
+    let mut store = Store::open(&state, &key, &identity).unwrap();
+    crate::capacity_fixture::declare_and_allocate!(
+        store,
+        "web",
+        crate::capacity_fixture::two_reserves("2"),
+        Some(alloy_primitives::U256::from(1_000_000u64)),
+        0
+    )
+    .unwrap();
+    let job = store.funding_jobs().unwrap().remove(0);
+    store
+        .advance_funding(
+            &job.id,
+            FundingPhase::Allocated,
+            FundingPhase::RecoveryRequired,
+        )
+        .unwrap();
+    store
+        .accept_preparation("unrelated-original", None, 10, None)
+        .unwrap();
+    let (revision, sdk) = store.snapshot().unwrap();
+    store
+        .prepare_with_facts(
+            "unrelated-original",
+            revision,
+            &sdk,
+            b"exact pending original",
+            Some(x402_treazury::rotation::transaction::TransactionFacts {
+                txid: "unrelated".into(),
+                expiry_height: 2_000_100,
+                amount_zatoshis: 0,
+                fee_zatoshis: 10,
+                deadline: None,
+            }),
+        )
+        .unwrap();
+    drop(store);
+    let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
+    db.execute(
+        "UPDATE treasury_operations SET attempts='damaged counter' WHERE id='unrelated-original'",
+        [],
+    )
+    .unwrap();
+    assert!(
+        x402_treazury::rotation::store::status(&state).is_err(),
+        "strict reporting stays strict"
+    );
+    let report = good(
+        run(
+            dir,
+            &["wallet", "recover", "--config", "deployment.toml"],
+            &[],
+        )
+        .await,
+    );
+    assert_eq!(report["recovery"][0]["job_id"], job.id);
+    assert_eq!(
+        report["recovery"][0]["outcome"]["reason"],
+        "funding_disabled"
+    );
+    let store = Store::open(&state, &key, &identity).unwrap();
+    assert!(store.operation("unrelated-original").is_err());
+    assert!(store.operation_pending("unrelated-original").unwrap());
+    assert_eq!(
+        store
+            .prepared_bytes("unrelated-original")
+            .unwrap()
+            .as_slice(),
+        b"exact pending original"
+    );
+    assert_eq!(
+        db.query_row::<String, _, _>(
+            "SELECT attempts FROM treasury_operations WHERE id='unrelated-original'",
+            [],
+            |r| r.get(0)
+        )
+        .unwrap(),
+        "damaged counter"
+    );
+}

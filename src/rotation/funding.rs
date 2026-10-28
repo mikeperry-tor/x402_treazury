@@ -1,5 +1,5 @@
-//! Restartable funding coordinator. Remote observations never release source
-//! reservations or mark a wallet ready; those actions require chain evidence.
+//! Restartable funding coordinator. Bound NEAR fulfillment closes swap work;
+//! destination credit independently publishes a wallet's readiness.
 use super::{
     base::now,
     near::{Quote, SwapStatus},
@@ -194,37 +194,47 @@ impl<B: FundingBackend> FundingWorker<B> {
         use crate::treasury::recovery::RecoveryOutcome;
         use FundingPhase::*;
         // Recovery owns the ordinary submitted-source observation when eligible,
-        // including its separate two-sync expiry proof. Do not sync/lookup twice.
+        // including its single canonical expiry proof. Do not sync/lookup twice.
         let original = self.facts(job).await?;
-        let unsubmitted_expired = if original.source_pending
-            && original.source_attempts == 0
-            && original.source_submission.is_some()
-        {
-            let id = job.operation_id.clone();
-            let instant = clock.now();
-            self.store
-                .call(move |s| {
-                    let facts = s.operation(&id)?.facts;
-                    let height = s.treasury_sync_state()?.sync.and_then(|sync| sync.height);
-                    Ok(facts.deadline.is_some_and(|deadline| deadline <= instant)
-                        || (facts.expiry_height > 0
-                            && height
-                                .is_some_and(|height| height >= u64::from(facts.expiry_height))))
-                })
-                .await?
-        } else {
-            false
-        };
-        let recovery_needed = if original.source_pending && original.source_attempts == 0 {
-            !original.new_funding_allowed
-                || unsubmitted_expired
-                || original.source_submission.is_none()
-                || original.provider_failed
-                || original.provider_refunded
-                || original.provider_incomplete
-        } else {
-            crate::treasury::recovery::needs_recovery(job)
-        };
+        if original.provider_success {
+            return Ok(Observation::None);
+        }
+        let (unsubmitted_expired, proof_due) =
+            if original.source_pending && original.source_submission.is_some() {
+                let id = job.operation_id.clone();
+                let instant = clock.now();
+                self.store
+                    .call(move |s| {
+                        let facts = s.operation_facts(&id)?.context("operation facts missing")?;
+                        let sync = s.treasury_sync_state()?.sync;
+                        Ok((
+                            original.source_attempts == 0
+                                && facts.deadline.is_some_and(|deadline| deadline <= instant),
+                            facts.expiry_height > 0
+                                && sync.is_some_and(|sync| {
+                                    sync.height.is_some_and(|height| {
+                                        height
+                                            >= u64::from(facts.expiry_height)
+                                                + u64::from(sync.confirmations)
+                                    })
+                                }),
+                        ))
+                    })
+                    .await?
+            } else {
+                (false, false)
+            };
+        let recovery_needed = proof_due
+            || if original.source_pending && original.source_attempts == 0 {
+                !original.new_funding_allowed
+                    || unsubmitted_expired
+                    || original.source_submission.is_none()
+                    || original.provider_failed
+                    || original.provider_refunded
+                    || original.provider_incomplete
+            } else {
+                crate::treasury::recovery::needs_recovery(job)
+            };
         let recovery = if original.preparation_accepted || recovery_needed {
             self.backend.lock().await.recover(job).await?
         } else {
@@ -669,7 +679,8 @@ impl FundingBackend for Backend {
         if self
             .store
             .call(move |s| {
-                Ok(!s.operation_pending(&id)? && s.operation(&id)?.submission == "CONFIRMED")
+                Ok(!s.operation_pending(&id)?
+                    && s.observation_operation(&id)?.submission == "CONFIRMED")
             })
             .await?
         {

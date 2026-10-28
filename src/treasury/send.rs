@@ -64,6 +64,12 @@ impl TransactionPreparer for Treasury {
     }
 }
 impl Treasury {
+    pub(super) async fn source_work_fulfilled(&self, id: &str) -> Result<bool> {
+        let id = id.to_owned();
+        self.store
+            .call(move |s| s.funding_operation_fulfilled(&id))
+            .await
+    }
     pub(crate) async fn prepare_with_observation(
         &mut self,
         request: PrepareRequest,
@@ -468,14 +474,17 @@ impl Treasury {
             .await?;
         Ok(outcome)
     }
-    /// Only fresh local sync AND matching lookup evidence at sufficient depth can
-    /// release the global send gate. Absence, expiry and rejection never release it.
+    /// The completed SDK observation proves exact-byte confirmation at configured
+    /// depth. Lookup can request further observation but cannot veto that proof.
     pub async fn reconcile_prepared(
         &mut self,
         id: String,
         sender: &mut impl TransactionSubmission,
         stop: &tokio_util::sync::CancellationToken,
     ) -> Result<TransactionPresence> {
+        if self.source_work_fulfilled(&id).await? {
+            return Ok(TransactionPresence::Unknown);
+        }
         self.sync_for_command(stop).await?;
         self.reconcile_scanned(id, sender, stop).await
     }
@@ -485,6 +494,9 @@ impl Treasury {
         sender: &mut impl TransactionSubmission,
         stop: &tokio_util::sync::CancellationToken,
     ) -> Result<TransactionPresence> {
+        if self.source_work_fulfilled(&id).await? {
+            return Ok(TransactionPresence::Unknown);
+        }
         self.sync_for_observation(stop).await?;
         self.reconcile_scanned(id, sender, stop).await
     }
@@ -494,76 +506,134 @@ impl Treasury {
         sender: &mut impl TransactionSubmission,
         stop: &tokio_util::sync::CancellationToken,
     ) -> Result<TransactionPresence> {
+        if self.source_work_fulfilled(&id).await? {
+            return Ok(TransactionPresence::Unknown);
+        }
         let operation = id.clone();
         let prepared = self
             .store
             .call(move |s| PreparedTransaction::load(s, &operation))
             .await?;
+        if let Some(height) = self.confirm_sdk_transaction(&prepared).await? {
+            return Ok(TransactionPresence::Confirmed { height });
+        }
+        let expiry = prepared
+            .facts()
+            .context("operation facts missing")?
+            .expiry_height;
+        let expected_revision = self.revision;
+        let expiry_buried = self
+            .store
+            .call(move |s| {
+                let (_, revision, observation) = s.funding_preparation_context()?;
+                Ok(revision == expected_revision
+                    && observation.phase == SyncPhase::Ready
+                    && observation.snapshot_revision == revision
+                    && expiry > 0
+                    && observation.height.is_some_and(|height| {
+                        height >= u64::from(expiry) + u64::from(observation.confirmations)
+                    }))
+            })
+            .await?;
+        if expiry_buried {
+            // A lookup cannot establish more than the next canonical input
+            // proof. Unknown grants no absence, release or submission authority.
+            return Ok(TransactionPresence::Unknown);
+        }
         let presence = tokio::select! {
             biased;
             _ = stop.cancelled() => TransactionPresence::Unknown,
             result = sender.lookup(&prepared) => result.unwrap_or(TransactionPresence::Unknown),
         };
         if let TransactionPresence::Confirmed { height } = presence {
-            let client = self
+            let wallet = self
                 .client
                 .as_ref()
-                .context("treasury client unavailable")?;
-            let transaction = super::submission::decode(prepared.bytes())?;
-            let wallet = client.wallet().read().await;
-            let record = wallet
-                .wallet_transactions
-                .get(&transaction.txid())
-                .context("transaction not seen by wallet sync")?;
+                .context("treasury client unavailable")?
+                .wallet()
+                .read()
+                .await;
             let confirmation = crate::rotation::transaction::ConfirmationObservation {
                 lookup_height: height,
-                wallet_height: record
-                    .status()
-                    .get_confirmed_height()
-                    .map(|h| u64::from(u32::from(h))),
+                wallet_height: None,
                 scanned_height: wallet
                     .wallet_blocks
                     .keys()
                     .next_back()
-                    .map(|h| u64::from(u32::from(*h))),
+                    .map(|height| u64::from(u32::from(*height))),
             };
             if confirmation.awaiting_scan() {
                 return Err(
                     crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending.into(),
                 );
             }
-            if confirmation.wallet_height != Some(height) {
-                return Err(anyhow::Error::new(
-                    crate::rotation::transaction::RecoveryEvidenceError::ConfirmationMismatch,
-                )
-                .context(confirmation));
-            }
-            let mut bytes = zeroize::Zeroizing::new(Vec::new());
-            record.transaction().write(&mut *bytes)?;
-            ensure!(
-                bytes.as_slice() == prepared.bytes(),
-                crate::rotation::transaction::RecoveryEvidenceError::TransactionMismatch
-            );
-            drop(wallet);
-            self.store
-                .call(move |s| {
-                    let (_, revision, observation) = s.funding_preparation_context()?;
-                    ensure!(
-                        (observation.phase == SyncPhase::Ready
-                            && observation.snapshot_revision == revision),
-                        "treasury_snapshot_changed"
-                    );
-                    ensure!(
-                        height > 0
-                            && observation.height.is_some_and(|tip| tip >= height
-                                && tip - height + 1 >= u64::from(observation.confirmations)),
-                        crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending
-                    );
-                    s.confirm_spend(&id)
-                })
-                .await?;
+            return Err(anyhow::Error::new(
+                crate::rotation::transaction::RecoveryEvidenceError::ConfirmationMismatch,
+            )
+            .context(confirmation));
         }
         Ok(presence)
+    }
+
+    /// Publish an already completed SDK proof. No indexer lookup or submission
+    /// is needed, including when the saved submission-attempt label is stale.
+    pub(super) async fn confirm_sdk_transaction(
+        &self,
+        prepared: &PreparedTransaction,
+    ) -> Result<Option<u64>> {
+        let signed = super::submission::decode(prepared.bytes())?;
+        let facts = prepared.facts().context("operation facts missing")?;
+        ensure!(
+            signed.txid().to_string() == facts.txid
+                && u32::from(signed.expiry_height()) == facts.expiry_height,
+            crate::rotation::transaction::RecoveryEvidenceError::TransactionMismatch
+        );
+        let wallet = self
+            .client
+            .as_ref()
+            .context("treasury client unavailable")?
+            .wallet()
+            .read()
+            .await;
+        let Some(record) = wallet.wallet_transactions.get(&signed.txid()) else {
+            return Ok(None);
+        };
+        let Some(height) = record
+            .status()
+            .get_confirmed_height()
+            .map(|height| u64::from(u32::from(height)))
+        else {
+            return Ok(None);
+        };
+        // ZIP 244 permits different authorizing bytes with the same committed
+        // effects. Match the canonical transaction's computed identity, while
+        // retaining the exact original signed journal for any disclosure.
+        ensure!(
+            record.transaction().txid() == signed.txid(),
+            crate::rotation::transaction::RecoveryEvidenceError::TransactionMismatch
+        );
+        drop(wallet);
+        let id = prepared.operation_id().to_owned();
+        let expected_revision = self.revision;
+        self.store
+            .call(move |s| {
+                let (_, revision, observation) = s.funding_preparation_context()?;
+                ensure!(
+                    revision == expected_revision
+                        && observation.phase == SyncPhase::Ready
+                        && observation.snapshot_revision == revision,
+                    "treasury_snapshot_changed"
+                );
+                ensure!(
+                    height > 0
+                        && observation.height.is_some_and(|tip| tip >= height
+                            && tip - height + 1 >= u64::from(observation.confirmations)),
+                    crate::rotation::transaction::RecoveryEvidenceError::ConfirmationPending
+                );
+                s.confirm_spend(&id)
+            })
+            .await?;
+        Ok(Some(height))
     }
 }
 

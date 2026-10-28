@@ -19,6 +19,7 @@ pub(super) struct Funding {
     sends: Arc<Mutex<std::collections::BTreeSet<String>>>,
     available: Arc<AtomicBool>,
     refund_pool: Option<String>,
+    hold_confirmation_pool: Option<String>,
     pub(super) capital: Arc<std::sync::atomic::AtomicU64>,
 }
 pub(super) fn synced(s: &mut Store) -> Result<()> {
@@ -160,6 +161,9 @@ impl FundingBackend for Funding {
         Ok(())
     }
     async fn reconcile(&mut self, job: &FundingJob) -> Result<bool> {
+        if self.hold_confirmation_pool.as_deref() == Some(job.pool_name.as_str()) {
+            return Ok(false);
+        }
         let id = job.operation_id.clone();
         let capital = self.capital.clone();
         self.store
@@ -188,6 +192,7 @@ pub(super) fn funder(
             sends,
             available: Arc::new(AtomicBool::new(true)),
             refund_pool: None,
+            hold_confirmation_pool: None,
             capital: Arc::new(std::sync::atomic::AtomicU64::new(10000)),
         },
         1,
@@ -427,7 +432,7 @@ async fn bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation()
 }
 
 #[tokio::test]
-async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
+async fn failed_swap_retains_original_source_terms_while_another_pool_serves() {
     let h = Harness::new().await;
     // Existing research pool is funded independently; only the new pool swaps.
     h.client.execute(h.route()).await.unwrap();
@@ -446,7 +451,13 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
         .unwrap();
     let sends = Arc::default();
     let mut worker = funder(&h, Arc::clone(&sends));
-    worker.backend.lock().await.refund_pool = Some("refund".into());
+    {
+        let mut backend = worker.backend.lock().await;
+        backend.refund_pool = Some("refund".into());
+        // Keep native confirmation pending so SUCCESS must preserve BROADCAST
+        // rather than racing this fixture's immediate confirmation callback.
+        backend.hold_confirmation_pool = Some("research".into());
+    }
     let mut instant = now().unwrap();
     for _ in 0..35 {
         tick(&mut worker, &mut instant).await;
@@ -466,10 +477,47 @@ async fn failed_swap_keeps_source_expense_while_another_pool_serves() {
         "API status must never manufacture on-chain refund credit"
     );
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
-    let consumed: i64 = db
-        .query_row("SELECT SUM(json_extract(facts,'$.amount_zatoshis')+json_extract(facts,'$.fee_zatoshis')) FROM treasury_operations WHERE submission='CONFIRMED'", [], |r| r.get(0))
+    // Accepted source terms are immutable audit data. Provider fulfillment
+    // closes source work without fabricating an SDK confirmation for it.
+    assert_eq!(status.treasury_operations.len(), 3);
+    let journaled: u64 = status
+        .treasury_operations
+        .iter()
+        .map(|operation| {
+            assert_eq!(operation.facts.txid, operation.operation_id);
+            assert_eq!(operation.facts.amount_zatoshis, 80);
+            assert_eq!(operation.facts.fee_zatoshis, 20);
+            assert_eq!(operation.facts.expiry_height, 100);
+            assert_eq!(operation.attempts, 1);
+            operation.facts.amount_zatoshis + operation.facts.fee_zatoshis
+        })
+        .sum();
+    assert_eq!(journaled, 300);
+    let (confirmed,confirmed_terms):(i64,i64)=db.query_row("SELECT COUNT(*),SUM(json_extract(facts,'$.amount_zatoshis')+json_extract(facts,'$.fee_zatoshis')) FROM treasury_operations WHERE submission='CONFIRMED'",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!((confirmed, confirmed_terms), (2, 200));
+    let (fulfilled_native,fulfilled_work):(String,String)=db.query_row("SELECT o.submission,x.state FROM funding_progress j JOIN treasury_operations o ON o.id=j.operation_id JOIN outgoing x ON x.id=o.id WHERE j.provider_success=1",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(
+        (fulfilled_native.as_str(), fulfilled_work.as_str()),
+        ("BROADCAST", "RESOLVED")
+    );
+    let originals: Vec<_> = status
+        .treasury_operations
+        .iter()
+        .map(|operation| operation.operation_id.clone())
+        .collect();
+    h.store
+        .call(move |s| {
+            for operation in originals {
+                assert_eq!(
+                    s.prepared_bytes(&operation)?.as_slice(),
+                    operation.as_bytes()
+                );
+                assert!(!s.operation_pending(&operation)?);
+            }
+            Ok(())
+        })
+        .await
         .unwrap();
-    assert_eq!(consumed, 300);
     assert_eq!(sends.lock().unwrap().len(), 3);
     h.f.used.store(true, Ordering::SeqCst);
     let active = status

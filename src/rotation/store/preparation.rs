@@ -30,6 +30,26 @@ pub(super) struct PreparationIntent {
     pub calculation: Option<CalculationInputs>,
 }
 
+/// Fulfilled intent-only records remain audit evidence, not source work. Raw
+/// pending results still require their existing operation-bound normalization.
+pub(super) fn preparation_pending(db: &Connection) -> Result<bool> {
+    if db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
+        [],
+        |r| r.get::<_, bool>(0),
+    )? {
+        return Ok(true);
+    }
+    let mut query =
+        db.prepare("SELECT operation_id FROM operation_network WHERE preparation IS NOT NULL")?;
+    for id in query.query_map([], |r| r.get::<_, String>(0))? {
+        if !funding::provider_succeeded(db, &id?)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 impl Store {
     pub(super) fn preparation_intent(&self, id: &str) -> Result<PreparationIntent> {
         let bytes: Vec<u8> = self.db.query_row(
@@ -65,6 +85,10 @@ impl Store {
             ensure!(self.preparation_intent(id)? == intent, "operation_conflict");
             return Ok(());
         }
+        ensure!(
+            !funding::provider_succeeded(&self.db, id)?,
+            "swap already succeeded; new source calculation is closed"
+        );
         self.funding_restriction
             .require_new_funding("source_preparation_start")?;
         let job:Option<(String,String)>=self.db.query_row("SELECT j.job_id,f.pool_id FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id WHERE j.operation_id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
@@ -113,7 +137,7 @@ impl Store {
     }
 
     pub(super) fn preparation_pending(&self) -> Result<bool> {
-        Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED') OR EXISTS(SELECT 1 FROM operation_network WHERE preparation IS NOT NULL)", [], |r| r.get(0))?)
+        preparation_pending(&self.db)
     }
 
     /// Read-only authority/readiness check. Qualification permits currently
@@ -134,7 +158,9 @@ impl Store {
             return Ok(false);
         }
         let operation = self.operation(id)?;
-        Ok(operation.attempts == 0
+        Ok(!self.source_previously_closed(id)?
+            && operation.attempts == 0
+            && operation.submission == "PREPARED"
             && operation.facts.fee_zatoshis <= max_fee
             && self
                 .shielding_identity(id, Some(&operation.facts))?
@@ -175,6 +201,7 @@ impl Store {
         .ok())
     }
 
+    #[cfg(test)]
     pub(crate) fn prepared_inputs(&self, id: &str) -> Result<Vec<OwnedInput>> {
         self.preparation_intent(id)?
             .calculation

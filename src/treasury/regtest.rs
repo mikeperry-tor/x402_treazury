@@ -904,67 +904,28 @@ async fn expiry_run(cli: bool) -> Result<()> {
         Treasury::open_with_network(state.clone(), key, id, TreasuryNetwork::Regtest).await?;
     treasury.configure_sync(settings);
     treasury.sync_once(&stop).await?;
-    // An unresolved/missing original input must block recovery even when the
-    // transaction itself has expired. Exercise the same production verifier.
-    {
-        use pepper_sync::wallet::{IronwoodNote, OrchardNote, SaplingNote, TransparentCoin};
-        let operation = op.clone();
-        let (bytes, selected) = treasury
-            .store
-            .call(move |s| {
-                Ok((
-                    s.prepared_snapshot(&operation)?,
-                    s.prepared_inputs(&operation)?,
-                ))
-            })
-            .await?;
-        let original = LightClient::from_reader(
-            bytes.as_slice(),
-            config(
-                treasury._scratch.path(),
-                WalletConfig::Read,
-                TreasuryNetwork::Regtest,
-            )?,
-        )
+    // SDK expiration already releases the finite pending transaction's input
+    // reservations. Source closure does not reconstruct a parallel input proof.
+    let operation = op.clone();
+    let selected = treasury
+        .store
+        .call(move |s| s.prepared_inputs(&operation))
         .await?;
-        let original = original.wallet().read().await;
+    {
+        let wallet = treasury.client.as_ref().unwrap().wallet().read().await;
         let txid = submission::decode(prepared.bytes())?.txid();
-        let mut current = treasury.client.as_ref().unwrap().wallet().write().await;
-        let checked = [
-            reject_missing_input::<TransparentCoin>(
-                &original,
-                &mut current,
-                &txid,
-                &selected,
-                crate::rotation::store::preparation::InputPool::Transparent,
-                target,
-            )?,
-            reject_missing_input::<SaplingNote>(
-                &original,
-                &mut current,
-                &txid,
-                &selected,
-                crate::rotation::store::preparation::InputPool::Sapling,
-                target,
-            )?,
-            reject_missing_input::<OrchardNote>(
-                &original,
-                &mut current,
-                &txid,
-                &selected,
-                crate::rotation::store::preparation::InputPool::Orchard,
-                target,
-            )?,
-            reject_missing_input::<IronwoodNote>(
-                &original,
-                &mut current,
-                &txid,
-                &selected,
-                crate::rotation::store::preparation::InputPool::Ironwood,
-                target,
-            )?,
-        ];
-        assert!(checked.into_iter().any(|checked| checked));
+        assert!(
+            !wallet
+                .wallet_transactions
+                .get(&txid)
+                .is_some_and(|r| r.status().is_confirmed())
+        );
+        assert!(
+            wallet
+                .shielded_spendable_balance(zip32::AccountId::ZERO, false)?
+                .into_u64()
+                > 0
+        );
     }
     if cli {
         treasury.close().await?;
@@ -978,6 +939,16 @@ async fn expiry_run(cli: bool) -> Result<()> {
             .recover_expired(op.clone(), &mut sender, &stop)
             .await?;
     }
+    let operation = op.clone();
+    let original = prepared.bytes().to_vec();
+    treasury
+        .store
+        .call(move |s| {
+            assert_eq!(s.prepared_inputs(&operation)?, selected);
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), original);
+            Ok(())
+        })
+        .await?;
     assert_eq!(operation_cost(&state, &op)?, (0, 0));
     assert_eq!(
         treasury.status().await?.treasury_operations[0].submission,
@@ -1028,51 +999,6 @@ async fn indexer_non_inclusion_response() -> Result<()> {
     );
     chain.passed = true;
     Ok(())
-}
-
-fn reject_missing_input<T: pepper_sync::wallet::OutputInterface>(
-    original: &zingolib::wallet::LightWallet,
-    current: &mut zingolib::wallet::LightWallet,
-    txid: &zcash_primitives::transaction::TxId,
-    selected: &[crate::rotation::store::preparation::OwnedInput],
-    pool: crate::rotation::store::preparation::InputPool,
-    height: u64,
-) -> Result<bool> {
-    let inputs = T::transaction_inputs(original.wallet_transactions.get(txid).unwrap());
-    let Some(origin) = current
-        .wallet_outputs::<T>()
-        .into_iter()
-        .find(|n| n.spend_link().is_some_and(|link| inputs.contains(&&link)))
-        .map(|n| n.output_id().txid())
-    else {
-        return Ok(false);
-    };
-    let removed = current.wallet_transactions.remove(&origin).unwrap();
-    assert!(
-        super::expiry::check_inputs::<T>(
-            original,
-            current,
-            txid,
-            selected,
-            pool.clone(),
-            height,
-            2
-        )
-        .is_err()
-    );
-    current.wallet_transactions.insert(origin, removed);
-    assert!(
-        super::expiry::check_inputs::<T>(
-            original,
-            current,
-            txid,
-            selected,
-            pool.clone(),
-            height,
-            2
-        )? > 0
-    );
-    Ok(true)
 }
 
 use crate::test_socks as socks;

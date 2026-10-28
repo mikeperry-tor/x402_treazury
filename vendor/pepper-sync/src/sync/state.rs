@@ -83,9 +83,9 @@ fn drop_external_scan_targets_outside_the_chain(
         let reachable = scan_target.origin() == ScanTargetOrigin::Internal
             || (birthday..=chain_height).contains(&scan_target.block_height());
         if !reachable {
-            tracing::warn!(
-                "scan target at block {} dropped: outside the wallet's chain range {birthday}..={chain_height}",
-                scan_target.block_height()
+            tracing::debug!(
+                block_height = u32::from(scan_target.block_height()),
+                "Prior wallet scan target is outside the current chain; continuing canonical scanning"
             );
         }
         reachable

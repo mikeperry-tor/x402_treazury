@@ -1725,6 +1725,7 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
     struct Observer {
         seen: tokio::sync::oneshot::Sender<()>,
         finish: tokio::sync::oneshot::Receiver<()>,
+        original: Vec<u8>,
     }
     impl TransactionSubmission for Observer {
         async fn submit(&mut self, _: BroadcastTransaction) -> anyhow::Result<SubmissionOutcome> {
@@ -1735,7 +1736,7 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
             prepared: &PreparedTransaction,
         ) -> anyhow::Result<TransactionPresence> {
             assert_eq!(prepared.operation_id(), "jobless");
-            assert_eq!(prepared.bytes(), b"original jobless bytes");
+            assert_eq!(prepared.bytes(), self.original);
             let (unused, _) = tokio::sync::oneshot::channel();
             let _ = std::mem::replace(&mut self.seen, unused).send(());
             let _ = (&mut self.finish).await;
@@ -1758,6 +1759,19 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
     treasury.close().await.unwrap();
     let state = dir.path().join("state");
     let key = dir.path().join("key");
+    // Syntactically valid empty V5 transaction, used only for immutable journal
+    // identity and observation; no consensus-valid payment or submission occurs.
+    let expiry = TIP as u32 + 100;
+    let mut raw = Vec::new();
+    for value in [0x80000005u32, 0x26a7270a, 0xc2d6d0b4, 0, expiry] {
+        raw.extend(value.to_le_bytes());
+    }
+    raw.extend([0, 0, 0, 0, 0]);
+    let original = zcash_primitives::transaction::Transaction::read(
+        raw.as_slice(),
+        zcash_protocol::consensus::BranchId::Nu5,
+    )
+    .unwrap();
     let mut store = Store::open(&state, &key, &id).unwrap();
     let (revision, snapshot) = store.snapshot().unwrap();
     store
@@ -1768,10 +1782,10 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
             "jobless",
             revision,
             &snapshot,
-            b"original jobless bytes",
+            &raw,
             Some(TransactionFacts {
-                txid: "original".into(),
-                expiry_height: TIP as u32 + 100,
+                txid: original.txid().to_string(),
+                expiry_height: expiry,
                 amount_zatoshis: 80,
                 fee_zatoshis: 20,
                 deadline: Some(u64::MAX),
@@ -1793,6 +1807,7 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
         Observer {
             seen,
             finish: drained,
+            original: raw.clone(),
         },
         stop.clone(),
     ));
@@ -1809,7 +1824,7 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
     let store = Store::open(&state, &key, &id).unwrap();
     assert_eq!(
         store.prepared_bytes("jobless").unwrap().as_slice(),
-        b"original jobless bytes"
+        raw.as_slice()
     );
     assert!(store.operation_pending("jobless").unwrap());
     assert_eq!(store.operation("jobless").unwrap().attempts, 0);

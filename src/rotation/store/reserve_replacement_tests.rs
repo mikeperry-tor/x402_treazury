@@ -336,6 +336,11 @@ fn never_credited_destination_closes_only_when_every_original_source_cannot_deli
                 }
                 "confirmed" => store.confirm_spend(&job.operation_id).unwrap(),
                 "unknown" => {
+                    // A real send intent, unlike a private signed result, leaves
+                    // bridge delivery uncertain after losing its response.
+                    store
+                        .request_broadcast(&job.operation_id, 1, 1, false)
+                        .unwrap();
                     store
                         .db
                         .execute(

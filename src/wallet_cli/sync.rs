@@ -124,7 +124,7 @@ pub(super) async fn run(
                 }
             };
             let (zec, usdc) = tokio::join!(zec, observe_usdc(&config, store.clone(), &stop),);
-            let state = store.call(|store| store.status()).await?;
+            let state = store.call(|store| store.status()).await.context("wallet synchronization may have completed; journals preserved; status report unavailable")?;
             Ok((Observations { zec, usdc }, state, addresses))
         };
         tokio::pin!(work);

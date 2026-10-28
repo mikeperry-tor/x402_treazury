@@ -69,6 +69,16 @@ impl std::fmt::Display for FundingCondition {
 }
 impl std::error::Error for FundingCondition {}
 
+/// A replacement would exceed the durable transaction recovery allowance.
+#[derive(Debug)]
+pub(crate) struct RecoveryAttemptLimit;
+impl std::fmt::Display for RecoveryAttemptLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("recovery_attempt_limit_reached")
+    }
+}
+impl std::error::Error for RecoveryAttemptLimit {}
+
 /// Read-only receive information for an operator-facing capital shortage message.
 /// Display stays fixed so generic error chains do not disclose the address.
 #[derive(Debug)]

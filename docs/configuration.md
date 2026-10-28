@@ -517,8 +517,10 @@ scoped authorization resolution and compatible confirmed/latest balances; both
 must satisfy the group's tolerance. Active, ready, disabled-group, current-claim
 and wallets with unresolved original delivery obligations cannot retire. A
 never-credited completed job can close that guard only when every current and
-archived original operation has proven source expiry or never accepted a
-calculation/submission; confirmed deposits and uncertain work keep the guard.
+archived accepted swap has its bound NEAR terminal outcome and no unresolved
+source work remains, or the operation never accepted a calculation/submission.
+Source confirmation or expiry alone does not close a disclosed bridge obligation.
+A preserved intent for a fulfilled swap does not keep that guard open.
 Explicit sync attempts eligible
 candidates once without starting a watcher. Qualification funding permits confer
 no retirement authority. Retirement leaves
@@ -533,8 +535,8 @@ of `latest - base_confirmations` and the finalized height. A lagging finalized
 chain delays evidence; unsupported or unavailable finality retains pending work
 and may use a configured RPC fallback, without substituting depth-only evidence.
 Ordinary scalar balance estimates still read `latest`. Persisted support may
-therefore span more than the minimum depth; older binaries that required an
-exact depth can conservatively reject such support on rollback.
+therefore span more than the minimum depth. The owned schema upgrade also protects
+reorg recovery from older readers; see the [database rollback boundary](wallet-cli.md#treasury-and-managed-pools).
 
 Funding capital comes from actual spendable treasury funds after confirmations,
 reservations, liabilities and fees. Displayed total balance is not spendable

@@ -176,7 +176,7 @@ impl Store {
         error: Option<&str>,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
-        let changed=tx.execute("UPDATE funding_progress SET next_poll=CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?3 END,last_error=CASE WHEN provider_incomplete=1 OR (provider_success=1 AND (provider_failed=1 OR provider_refunded=1)) THEN 'funding_integrity_conflict; contradictory provider outcome' WHEN phase='\"COMPLETE\"' THEN NULL ELSE ?4 END WHERE job_id=?1 AND operation_id=?2",params![job,operation,i64::try_from(next)?,error])?;
+        let changed=tx.execute("UPDATE funding_progress SET next_poll=CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?3 END,last_error=CASE WHEN phase='\"COMPLETE\"' THEN NULL ELSE ?4 END WHERE job_id=?1 AND operation_id=?2",params![job,operation,i64::try_from(next)?,error])?;
         if changed == 1 {
             tx.execute("INSERT INTO funding_health(job_id,error_streak) SELECT ?1,CASE WHEN phase='\"COMPLETE\"' THEN 0 ELSE ?2 END FROM funding_progress WHERE job_id=?1 ON CONFLICT(job_id) DO UPDATE SET error_streak=excluded.error_streak",params![job,streak])?;
         }
@@ -221,6 +221,13 @@ mod tests {
                 0,
                 Some("quote_refresh_exhausted; no preparation started"),
                 false,
+            )
+            .unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE funding_progress SET provider_incomplete=1 WHERE job_id=?1",
+                [&job.id],
             )
             .unwrap();
         for error in [

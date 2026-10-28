@@ -28,13 +28,7 @@ struct ObservationContext {
 }
 
 pub(crate) fn needs_recovery(job: &FundingJob) -> bool {
-    job.phase == FundingPhase::RecoveryRequired
-        || job.phase == FundingPhase::RefundPending
-        || (job.timed_out
-            && matches!(
-                job.phase,
-                FundingPhase::Preparing | FundingPhase::Prepared | FundingPhase::DepositPending
-            ))
+    job.phase == FundingPhase::RecoveryRequired || job.phase == FundingPhase::RefundPending
 }
 
 pub(crate) fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome> {
@@ -42,15 +36,13 @@ pub(crate) fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome>
     Some(match error.downcast_ref::<Evidence>()? {
         Evidence::ConfirmationPending => RecoveryOutcome::Waiting("zcash_confirmations_pending"),
         Evidence::ExpiryNotBuried => RecoveryOutcome::Waiting("waiting_for_transaction_expiry"),
-        Evidence::TipLag | Evidence::StaleSync | Evidence::ChainChanged => {
+        Evidence::TipLag
+        | Evidence::StaleSync
+        | Evidence::ChainChanged
+        | Evidence::ConfirmationMismatch => {
             RecoveryOutcome::Waiting("waiting_for_fresh_canonical_sync")
         }
-        Evidence::InputMissing
-        | Evidence::InputMismatch
-        | Evidence::InputSpent
-        | Evidence::IndexerInclusion
-        | Evidence::TransactionMismatch
-        | Evidence::ConfirmationMismatch => {
+        Evidence::TransactionMismatch => {
             RecoveryOutcome::OperatorRequired("conflicting_transaction_or_input_evidence")
         }
     })
@@ -58,6 +50,9 @@ pub(crate) fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome>
 
 impl Treasury {
     pub(crate) async fn recovery_needed(&self, job: &FundingJob) -> Result<bool> {
+        if self.source_work_fulfilled(&job.operation_id).await? {
+            return Ok(false);
+        }
         let (id, operation) = (job.id.clone(), job.operation_id.clone());
         let facts = self
             .store
@@ -131,6 +126,27 @@ impl Treasury {
         observation: &mut ObservationContext,
     ) -> Result<RecoveryOutcome> {
         use RecoveryOutcome::*;
+        let lookup = job_id.clone();
+        if let Some(complete) = self
+            .store
+            .call(move |s| {
+                let job = s.funding_job(&lookup)?.context("funding job missing")?;
+                if s.funding_operation_fulfilled(&job.operation_id)? {
+                    Ok(Some(
+                        s.finish_funding_if_proven(&job.id, &job.operation_id)?,
+                    ))
+                } else {
+                    Ok(None)
+                }
+            })
+            .await?
+        {
+            return Ok(if complete {
+                Recovered
+            } else {
+                Waiting("swap_fulfilled_waiting_for_credit")
+            });
+        }
         ensure!(self.healthy, "treasury requires reopen");
         if crate::qualification::active() {
             return Ok(OperatorRequired("qualification_recovery_requires_review"));
@@ -148,41 +164,41 @@ impl Treasury {
         {
             return Ok(Recovered);
         }
-        let id = job.id.clone();
-        let count = self
-            .store
-            .call(move |s| s.funding_recovery_count(&id))
-            .await?;
-        let exhausted = count >= u64::from(max_attempts);
         let Some(operation) = operation.as_ref() else {
             return self
                 .recover_unprepared_job(&job, max_attempts, allow_new_attempt)
                 .await;
         };
-        if operation.submission == "CONFIRMED" {
-            return Ok(Waiting("source_confirmed_waiting_for_swap"));
-        }
-        if operation.submission == "EXPIRED" {
+        if matches!(operation.submission.as_str(), "CONFIRMED" | "EXPIRED") {
             return self
-                .reauthorize_recovery(
-                    &job,
-                    max_attempts,
-                    allow_new_attempt,
-                    count > u64::from(max_attempts),
-                )
+                .reauthorize_recovery(&job, max_attempts, allow_new_attempt)
                 .await;
         }
-        let terminal = job.phase == FundingPhase::RecoveryRequired;
         let operation_id = operation.operation_id.clone();
         let expiry = u64::from(operation.facts.expiry_height);
-        if operation.attempts > 0 {
+        let revision_before_observation = self.revision;
+        if operation.attempts > 0 || expiry == 0 {
             if let Some(outcome) = self
-                .observe_recovery_source(operation, terminal, sender, stop, observation)
+                .observe_recovery_source(operation, sender, stop, observation)
                 .await?
             {
                 return Ok(outcome);
             }
-            let sync = self.store.call(|s| s.funding_sync_observation()).await?;
+            let lookup = operation_id.clone();
+            let (sync, confirmed) = self
+                .store
+                .call(move |s| {
+                    Ok((
+                        s.funding_sync_observation()?,
+                        s.observation_operation(&lookup)?.submission == "CONFIRMED",
+                    ))
+                })
+                .await?;
+            if confirmed {
+                return self
+                    .reauthorize_recovery(&job, max_attempts, allow_new_attempt)
+                    .await;
+            }
             if expiry > 0
                 && sync.height.is_none_or(|height| {
                     height < expiry.saturating_add(u64::from(sync.confirmations))
@@ -192,12 +208,12 @@ impl Treasury {
             }
         }
         if expiry == 0 {
-            return Ok(OperatorRequired("transaction_has_no_consensus_expiry"));
+            return Ok(Waiting("waiting_for_original_confirmation_or_swap_outcome"));
         }
         // A scheduled first proof scan is also the next observation. Until due,
         // an unburied saved height cannot justify another scan just to forecast
         // expiry. Explicit recovery and an already buried expiry retain their
-        // two fresh scans, exact inputs and canonical release checks.
+        // one completed canonical-tip scan, exact inputs and publication checks.
         if observation.scheduled && !self.observation.ready() && self.observation.failed() {
             return Ok(Waiting("waiting_for_fresh_canonical_sync"));
         }
@@ -210,7 +226,16 @@ impl Treasury {
                 return Ok(Waiting("waiting_for_transaction_expiry"));
             }
         }
-        self.recover_expired(operation_id, sender, stop).await?;
+        observation.source_observed = true;
+        if self.revision != revision_before_observation
+            && self.reusable_sync_revision == Some(self.revision)
+        {
+            // The ordinary observation just completed the canonical scan. Do
+            // not scan again merely to publish its already-established proof.
+            self.recover_expired_scanned(operation_id, stop).await?;
+        } else {
+            self.recover_expired(operation_id, sender, stop).await?;
+        }
         let id = job.id.clone();
         let operation = job.operation_id.clone();
         if self
@@ -220,7 +245,7 @@ impl Treasury {
         {
             return Ok(Recovered);
         }
-        self.reauthorize_recovery(&job, max_attempts, allow_new_attempt, exhausted)
+        self.reauthorize_recovery(&job, max_attempts, allow_new_attempt)
             .await
     }
 
@@ -241,58 +266,59 @@ impl Treasury {
         }
         let id = job.id.clone();
         let expected_operation = job.operation_id.clone();
-        let (closed_count, completed) = self
+        let completed = self
             .store
             .call(move |s| {
                 s.close_unprepared_funding_for_operation(&id, &expected_operation)?;
-                Ok((
-                    s.funding_recovery_count(&id)?,
-                    s.finish_funding_if_proven(&id, &expected_operation)?,
-                ))
+                s.finish_funding_if_proven(&id, &expected_operation)
             })
             .await?;
         if completed {
             return Ok(Recovered);
         }
-        self.reauthorize_recovery(
-            job,
-            max_attempts,
-            allow_new_attempt,
-            closed_count > u64::from(max_attempts),
-        )
-        .await
+        self.reauthorize_recovery(job, max_attempts, allow_new_attempt)
+            .await
     }
 
-    /// Closure already consumed the durable attempt; each caller supplies its
-    /// existing before/after-closure comparison rather than recomputing it here.
+    /// The Store checks the allowance after idempotently archiving this original.
     async fn reauthorize_recovery(
         &mut self,
         job: &FundingJob,
         max_attempts: u32,
         allow_new_attempt: bool,
-        attempt_limit_reached: bool,
     ) -> Result<RecoveryOutcome> {
         use RecoveryOutcome::*;
+        let (id, operation) = (job.id.clone(), job.operation_id.clone());
+        if !self
+            .store
+            .call(move |s| s.funding_retry_allowed(&id, &operation))
+            .await?
+        {
+            return Ok(Waiting("swap_outcome_pending"));
+        }
         if !allow_new_attempt {
             return Ok(OperatorRequired("funding_disabled"));
         }
-        if attempt_limit_reached {
-            return Ok(OperatorRequired("recovery_attempt_limit_reached"));
-        }
         let id = job.id.clone();
         let expected_operation = job.operation_id.clone();
-        self.store
+        match self
+            .store
             .call(move |s| {
                 s.reauthorize_closed_funding_for_operation(&id, &expected_operation, max_attempts)
             })
-            .await?;
-        Ok(Recovered)
+            .await
+        {
+            Ok(()) => Ok(Recovered),
+            Err(error) if error.is::<crate::rotation::error::RecoveryAttemptLimit>() => {
+                Ok(OperatorRequired("recovery_attempt_limit_reached"))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn observe_recovery_source(
         &mut self,
         operation: &crate::rotation::transaction::OperationStatus,
-        terminal: bool,
         sender: &mut impl TransactionSubmission,
         stop: &CancellationToken,
         observation: &mut ObservationContext,
@@ -300,7 +326,7 @@ impl Treasury {
         use RecoveryOutcome::*;
         let operation_id = operation.operation_id.clone();
         // Submitted/ambiguous work is observed, never resubmitted. Even expired
-        // operations still require the caller's independent two-sync input proof.
+        // operations still require the caller's canonical-tip expiry proof.
         observation.source_observed = true;
         let result = if observation.scheduled {
             self.reconcile_for_observation(operation_id.clone(), sender, stop)
@@ -316,18 +342,6 @@ impl Treasury {
                 return Ok(Some(Waiting("zcash_confirmations_pending")));
             }
             return Err(error);
-        }
-        let id = operation_id.clone();
-        if self
-            .store
-            .call(move |s| Ok(s.operation(&id)?.submission == "CONFIRMED"))
-            .await?
-        {
-            return Ok(Some(if terminal {
-                OperatorRequired("source_confirmed_check_swap_outcome")
-            } else {
-                Waiting("source_confirmed_waiting_for_swap")
-            }));
         }
         Ok(None)
     }
@@ -357,7 +371,7 @@ mod tests {
         assert_eq!(
             evidence_outcome(
                 &anyhow::Error::new(
-                    crate::rotation::transaction::RecoveryEvidenceError::InputMismatch
+                    crate::rotation::transaction::RecoveryEvidenceError::TransactionMismatch
                 )
                 .context("outer diagnostic")
             ),
@@ -377,7 +391,7 @@ mod tests {
         );
     }
     #[test]
-    fn confirmation_facts_preserve_operator_classification_through_context() {
+    fn confirmation_facts_wait_for_canonical_observation_through_context() {
         use crate::rotation::transaction::{ConfirmationObservation, RecoveryEvidenceError};
         for wallet_height in [None, Some(98)] {
             let observation = ConfirmationObservation {
@@ -390,15 +404,28 @@ mod tests {
                 .context("private upstream detail");
             assert_eq!(
                 evidence_outcome(&error),
-                Some(RecoveryOutcome::OperatorRequired(
-                    "conflicting_transaction_or_input_evidence"
-                ))
+                Some(RecoveryOutcome::Waiting("waiting_for_fresh_canonical_sync"))
             );
             assert_eq!(
                 crate::treasury::diagnostics::sync_detail(&error),
                 Some(observation.to_string())
             );
         }
+    }
+
+    #[test]
+    fn mutable_chain_observations_wait_without_releasing_original_work() {
+        use crate::rotation::transaction::RecoveryEvidenceError as Evidence;
+        assert_eq!(
+            evidence_outcome(&anyhow::Error::new(Evidence::ConfirmationMismatch)),
+            Some(RecoveryOutcome::Waiting("waiting_for_fresh_canonical_sync"))
+        );
+        assert_eq!(
+            evidence_outcome(&anyhow::Error::new(Evidence::TransactionMismatch)),
+            Some(RecoveryOutcome::OperatorRequired(
+                "conflicting_transaction_or_input_evidence"
+            ))
+        );
     }
 
     #[test]
@@ -409,10 +436,6 @@ mod tests {
             Evidence::TipLag,
             Evidence::StaleSync,
             Evidence::ChainChanged,
-            Evidence::InputMissing,
-            Evidence::InputMismatch,
-            Evidence::InputSpent,
-            Evidence::IndexerInclusion,
             Evidence::TransactionMismatch,
             Evidence::ConfirmationMismatch,
             Evidence::ConfirmationPending,
@@ -601,6 +624,99 @@ mod tests {
         .unwrap();
         let jobs = owner.status().await.unwrap().funding_jobs;
         (dir, owner, jobs)
+    }
+
+    #[tokio::test]
+    async fn confirmed_source_reauthorizes_only_after_bound_negative_swap_without_network() {
+        use crate::rotation::{near::SwapStatus, transaction::TransactionFacts};
+        for terminal in [None, Some(SwapStatus::Failed), Some(SwapStatus::Refunded)] {
+            let (_dir, mut owner, jobs) = unfunded_recovery_fixture().await;
+            let job = jobs[0].clone();
+            let original = job.operation_id.clone();
+            let selected = job.clone();
+            let sdk = snapshot(owner.client.as_ref().unwrap()).await.unwrap();
+            let has_terminal = terminal.is_some();
+            let result = terminal;
+            owner.revision = owner
+                .store
+                .call(move |s| {
+                    s.save_funding_quote(
+                        &selected.id,
+                        &serde_json::to_vec(&serde_json::json!({
+                            "request":{"amount":selected.target,"recipient":selected.recipient}
+                        }))?,
+                    )?;
+                    s.accept_preparation(
+                        &selected.operation_id,
+                        Some(&selected.pool_id),
+                        60,
+                        None,
+                    )?;
+                    let revision = s.prepare_with_facts(
+                        &selected.operation_id,
+                        s.snapshot()?.0,
+                        &sdk,
+                        b"exact original signed bytes",
+                        Some(TransactionFacts {
+                            txid: "confirmed original fixture".into(),
+                            expiry_height: 2_000_100,
+                            amount_zatoshis: 50,
+                            fee_zatoshis: 10,
+                            deadline: Some(now()? + 7200),
+                        }),
+                    )?;
+                    s.request_broadcast(&selected.operation_id, now()?, 2_000_000, false)?;
+                    s.confirm_spend(&selected.operation_id)?;
+                    s.reconcile_funding_phase(&selected.id, &selected.operation_id)?;
+                    if let Some(status) = result {
+                        s.record_provider_outcome(
+                            &selected.id,
+                            &selected.operation_id,
+                            &status,
+                            now()?,
+                        )?;
+                    }
+                    Ok(revision)
+                })
+                .await
+                .unwrap();
+            let outcome = owner
+                .recover_funding_job(
+                    job.id.clone(),
+                    3,
+                    true,
+                    &mut NoNetwork,
+                    &CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                outcome,
+                if has_terminal {
+                    RecoveryOutcome::Recovered
+                } else {
+                    RecoveryOutcome::Waiting("swap_outcome_pending")
+                }
+            );
+            owner
+                .store
+                .call(move |s| {
+                    let current = s.funding_job(&job.id)?.unwrap();
+                    assert_eq!(current.operation_id != original, has_terminal);
+                    assert_eq!(s.funding_recovery_count(&job.id)?, u64::from(has_terminal));
+                    assert_eq!(s.operation(&original)?.submission, "CONFIRMED");
+                    assert_eq!(s.operation(&original)?.attempts, 1);
+                    assert_eq!(
+                        s.prepared_bytes(&original)?.as_slice(),
+                        b"exact original signed bytes"
+                    );
+                    assert!(!s.operation_pending(&original)?);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            owner.close().await.unwrap();
+        }
     }
 
     #[tokio::test(start_paused = true)]

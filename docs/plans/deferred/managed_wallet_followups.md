@@ -68,10 +68,10 @@ Ordinary serving and finite explicit sync invoke candidate-scoped canonical
 retirement under the configured per-group tolerance, default 0.001 USDC. See
 [automatic retirement](../../wallet-rotation.md#automatic-retirement).
 Never-credited predecessors retain their destination guard while original delivery
-remains possible. A completed job can close it only when every current and archived
-operation has proven source expiry or never accepted calculation/submission; a
-completed or abandoned label, refund or source confirmation alone proves neither
-delivery nor loss. The maintained guide describes the implemented proof boundary.
+remains possible. A completed job can close it only when accepted current/archived
+swaps have bound NEAR terminal outcomes and closed local source work, or never
+accepted calculation/submission. A completed/abandoned label or source
+expiry/confirmation alone proves neither delivery nor loss. The maintained guide describes the implemented proof boundary.
 There is no manual retirement CLI. Any future manual command needs explicit
 wallet selection, fresh dual balance evidence, unresolved-liability and destination
 checks, and durable audit support. It must not sweep funds or infer replacement

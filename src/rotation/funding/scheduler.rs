@@ -84,12 +84,13 @@ fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
     [
         facts.credit_needed(),
         facts.status_needed(),
-        facts.source_pending
-            || facts.preparation_accepted
-            || crate::treasury::recovery::needs_recovery(job)
-            || matches!(job.phase, FundingPhase::Preparing | FundingPhase::Prepared)
-            || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
-                && (facts.new_funding_allowed || facts.initial_credit_recorded)),
+        !facts.provider_success
+            && (facts.source_pending
+                || facts.preparation_accepted
+                || crate::treasury::recovery::needs_recovery(job)
+                || matches!(job.phase, FundingPhase::Preparing | FundingPhase::Prepared)
+                || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
+                    && (facts.new_funding_allowed || facts.initial_credit_recorded))),
         job.phase == FundingPhase::Allocated && facts.new_funding_allowed && !facts.accepted_quote,
     ]
 }
@@ -470,7 +471,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
             lane.cursor = page.last().unwrap().0.clone();
             for (_, entry) in page {
-                let FundingWork { mut job, facts } = match entry {
+                let FundingWork { mut job, mut facts } = match entry {
                     Ok(work) => work,
                     Err(fault) => {
                         report_decode_failure(&fault);
@@ -478,6 +479,18 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         continue;
                     }
                 };
+                if facts.provider_success && facts.source_pending {
+                    let id = job.id.clone();
+                    let operation = job.operation_id.clone();
+                    let Some(updated) = self
+                        .store
+                        .call(move |s| s.settle_funding_source(&id, &operation, false))
+                        .await?
+                    else {
+                        continue;
+                    };
+                    (job, facts) = updated;
+                }
                 if job
                     .started_at
                     .is_some_and(|started| clock.now().saturating_sub(started) >= health_after)

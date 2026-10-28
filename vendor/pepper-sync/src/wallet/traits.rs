@@ -530,15 +530,24 @@ where
         PoolTruncation::Untouched => Ok(()),
         PoolTruncation::ToCheckpoint { checkpoint } => {
             match tree.rollback_to_checkpoint(checkpoint).map_err(|error| {
-                SyncError::ShardTreeContext {
-                    pool,
-                    operation: ShardTreeOperation::ReorgRollback,
-                    error,
+                if matches!(
+                    &error,
+                    shardtree::error::ShardTreeError::Query(
+                        shardtree::error::QueryError::CheckpointPruned
+                    )
+                ) {
+                    SyncError::TruncationError(truncate_height, pool)
+                } else {
+                    SyncError::ShardTreeContext {
+                        pool,
+                        operation: ShardTreeOperation::ReorgRollback,
+                        error,
+                    }
                 }
             })? {
                 RollbackOutcome::RolledBack => Ok(()),
                 RollbackOutcome::NoSuchCheckpoint => {
-                    tracing::error!(
+                    tracing::debug!(
                         "{pool} shard tree refused the planned rollback to its checkpoint at \
                          {checkpoint}! Beginning rescan."
                     );
@@ -547,7 +556,7 @@ where
             }
         }
         PoolTruncation::RequiresRescan { newest_checkpoint } => {
-            tracing::error!(
+            tracing::debug!(
                 "{pool} shard tree holds state up to checkpoint {newest_checkpoint}, above the \
                  truncation target {truncate_height}, with no checkpoint at the target! \
                  Beginning rescan."

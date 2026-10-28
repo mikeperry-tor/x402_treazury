@@ -6,6 +6,7 @@
     "pepper-sync-diagnostics.patch": "2fdb5a2f2e8731e6ff6c7df3eb3aab4b40336c5fefa1c0031db7abda90414232",
     "pepper-sync-manifest.patch": "6be68548599100ae72f903905d08dc2a92a1a44581ca6ac57e621d170cb7d12a",
     "pepper-sync-progress.patch": "f408bcd21630ffea07b4a4e29939101574fc59d4ed200caeeadde2ab45946b59",
+    "pepper-sync-reorg.patch": "9e56023c3ac20278bfce0f449b98758a5e9b43b26139209a9ce894406c34dc32",
     "pepper-sync/CHANGELOG.md": "a3506ac78c2c88dbfb8794e0946ef9aceeb061bb7ce141bf5b3ab7bc97cc75a1",
     "pepper-sync/Cargo.toml": "eb20c50fa170ae776e39f34435ab459a5f98cbacde4ec64b5cf570a317afce82",
     "pepper-sync/LICENSE-MIT": "6a5611d5f6589640aa9c14ec738527295ee93242954fcfff1fd71d75ee0a325a",
@@ -27,11 +28,11 @@
     "pepper-sync/src/scan/compact_blocks.rs": "0524ede00da463d5eba887b2ebfa64caa96b0ea34288fc83d605c2246273e2da",
     "pepper-sync/src/scan/compact_blocks/runners.rs": "69aecdf74b0895fbdbbfe07f7d5da8fcba20f5722787474c9d181ceb8f03c1c4",
     "pepper-sync/src/scan/task.rs": "0969cbad453585c6d6823b51f49ff5d71070eb03de1bddb01421a49858f9e21e",
-    "pepper-sync/src/scan/transactions.rs": "6e1ca821df7ed4718ebf986d597b09a76a753ffe16fd9d34543fb1691b0e6ec4",
+    "pepper-sync/src/scan/transactions.rs": "196ccdb03d792bc6e51134ae3e26216d03354d8c6be236a37ca71ec08cbac808",
     "pepper-sync/src/shardtree_ext.rs": "d73b1dc74bd7019d9bc5b5ff59c5556882ea68ee75dfcebbcf45bbbeba1abf93",
-    "pepper-sync/src/sync.rs": "7bfb4a1f20f4c1525fcde9a5ff2f663385dc47061c6f2c6cbe6021b846fd8a66",
+    "pepper-sync/src/sync.rs": "5e2c88b20ce45b87b795b5c60b6186889c6cc378f636f0502e2746d6b6ad3858",
     "pepper-sync/src/sync/spend.rs": "81837dcbd331997aa8339fdcb20e9da26df8e760efd0a533e39d4e8a8a53f2be",
-    "pepper-sync/src/sync/state.rs": "8ab2408a1491a0740420bc411cbe55cc6ac0f8f30c32bc05a7440de5ca05f018",
+    "pepper-sync/src/sync/state.rs": "70042c9e3002d3df2eebae5f4180642fd20e1318447ace574cf386aabbd186f9",
     "pepper-sync/src/sync/transparent.rs": "b4025cd498775af74d112ad17dec9c703f95ca70dd83290cf5afe42a2bb64de6",
     "pepper-sync/src/sync/truncate.rs": "51fa30b089eff01597a16f3ca42e64c11113d2688993ce87062a6df2dc574053",
     "pepper-sync/src/utils.rs": "94143291b729fcac1647fb525d12b3e8ad40c1626cb5306893e66ce1041ddc27",
@@ -39,13 +40,14 @@
     "pepper-sync/src/utils/transaction.rs": "ae89558d436f0208ac5fb0e44e8bdbeaa17d7aa3845f691d4e994f8680806d59",
     "pepper-sync/src/wallet.rs": "5b237416b9aeed6111a6dad2da01e016fe93a28cbfba18b43df687f0ce0e8dda",
     "pepper-sync/src/wallet/serialization.rs": "e78533d592478ee3be98bd0da37ccc8b7bccc39a7768ed6d371cc363e2c722dc",
-    "pepper-sync/src/wallet/traits.rs": "f9350764fb45e6ce2ca39056b5c465e9fe2b51921378c3ed44dcdb54be9fba02",
+    "pepper-sync/src/wallet/traits.rs": "21b277b74407d3a780f47eff2f08eb135eac33bb48b2a255892251f86ac05d74",
     "pepper-sync/src/witness.rs": "834e88097908e41414a5b6db189377711454eb769cea98344b5cf95918df20ea"
   },
   "patches": [
     "pepper-sync-manifest.patch",
     "pepper-sync-progress.patch",
-    "pepper-sync-diagnostics.patch"
+    "pepper-sync-diagnostics.patch",
+    "pepper-sync-reorg.patch"
   ],
   "original_files": {
     "CHANGELOG.md": "a3506ac78c2c88dbfb8794e0946ef9aceeb061bb7ce141bf5b3ab7bc97cc75a1",

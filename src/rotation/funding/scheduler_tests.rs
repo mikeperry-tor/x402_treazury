@@ -718,83 +718,141 @@ fn submitted(store: &mut Store, job: &FundingJob) {
 }
 
 #[tokio::test]
-async fn accepted_source_is_observed_despite_complete_phase_disabled_pool_and_retired_wallet() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state");
-    let key = dir.path().join("key");
-    let mut state = Store::create(&path, &key, 1, b"fixture").unwrap();
-    crate::rotation::test_capacity::declare_and_allocate!(
-        state,
-        "stale",
-        crate::rotation::test_capacity::two_reserves("5"),
-        Some(alloy_primitives::U256::from(100)),
-        0
-    )
-    .unwrap();
-    let job = state.funding_jobs().unwrap().remove(0);
-    submitted(&mut state, &job);
-    state.disable_pool("stale").unwrap();
-    let db = rusqlite::Connection::open(path.join("state.sqlite")).unwrap();
-    db.execute(
-        "UPDATE funding_jobs SET state='COMPLETE' WHERE id=?1",
-        [&job.id],
-    )
-    .unwrap();
-    db.execute("UPDATE funding_progress SET phase='\"COMPLETE\"',provider_success=1,provider_refunded=1 WHERE job_id=?1",[&job.id]).unwrap();
-    db.execute(
-        "UPDATE wallets SET role='RETIRED' WHERE id=?1",
-        [&job.wallet_id],
-    )
-    .unwrap();
-    let (store, owner) = StoreHandle::spawn(state);
-    let (started, mut observations) = mpsc::unbounded_channel();
-    let (statuses, _) = mpsc::unbounded_channel();
-    let backend = Source {
-        store: store.clone(),
-        gate: Arc::new(Semaphore::new(1)),
-        started,
-        reads: Reads {
-            credits: Arc::new(Semaphore::new(100)),
-            credit_calls: Arc::default(),
-            statuses,
-            status_gates: Arc::default(),
-            failed_job: Arc::default(),
-            processing: true,
-            quotes: None,
-        },
-    };
-    let worker = FundingWorker::new(store.clone(), backend, 60);
-    worker.tick(now().unwrap()).await.unwrap();
-    assert_eq!(observations.try_recv().unwrap(), job.id);
-    assert!(observations.try_recv().is_err());
-    assert_eq!(
-        db.query_row(
-            "SELECT attempts FROM treasury_operations WHERE id=?1",
-            [&job.operation_id],
-            |r| r.get::<_, i64>(0)
+async fn inventory_settles_legacy_success_before_held_credit_or_no_eligible_lanes() {
+    for completed in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state");
+        let mut state = Store::create(&path, &dir.path().join("key"), 1, b"fixture").unwrap();
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut state,
+            "legacy",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
         )
-        .unwrap(),
-        1
-    );
-    assert_eq!(
-        db.query_row(
-            "SELECT count(*) FROM outgoing WHERE state='PREPARED'",
-            [],
-            |r| r.get::<_, i64>(0)
+        .unwrap();
+        let job = state.funding_jobs().unwrap().remove(0);
+        submitted(&mut state, &job);
+        let raw = state.prepared_bytes(&job.operation_id).unwrap();
+        if completed {
+            state
+                .record_destination_readiness(&job.id, "1", "credit", 1)
+                .unwrap();
+        }
+        // Reproduce already-persisted SUCCESS from the prior implementation,
+        // without using the new status writer that immediately closes source work.
+        let db = rusqlite::Connection::open(path.join("state.sqlite")).unwrap();
+        db.execute(
+            "UPDATE funding_progress SET provider_success=1 WHERE job_id=?1",
+            [&job.id],
         )
-        .unwrap(),
-        1
-    );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM funding_jobs", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
-        2
-    );
-    drop(db);
-    drop(worker);
-    drop(store);
-    owner.await.unwrap();
+        .unwrap();
+        if completed {
+            db.execute(
+                "UPDATE funding_jobs SET state='COMPLETE' WHERE id=?1",
+                [&job.id],
+            )
+            .unwrap();
+            db.execute(
+                "UPDATE funding_progress SET phase='\"COMPLETE\"' WHERE job_id=?1",
+                [&job.id],
+            )
+            .unwrap();
+        }
+        state.disable_pool("legacy").unwrap();
+        assert!(state.operation_pending(&job.operation_id).unwrap());
+        assert!(!state.funding_source_ready().unwrap());
+        let (store, actor) = StoreHandle::spawn(state);
+        let (started, mut source_events) = mpsc::unbounded_channel();
+        let (statuses, mut status_events) = mpsc::unbounded_channel();
+        let credits = Arc::new(Semaphore::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker = FundingWorker::new(
+            store.clone(),
+            Source {
+                store: store.clone(),
+                gate: Arc::new(Semaphore::new(0)),
+                started,
+                reads: Reads {
+                    credits: credits.clone(),
+                    credit_calls: calls.clone(),
+                    statuses,
+                    status_gates: Default::default(),
+                    failed_job: Default::default(),
+                    processing: true,
+                    quotes: None,
+                },
+            },
+            60,
+        );
+        let running = tokio::spawn({
+            let worker = worker.clone();
+            async move { worker.tick(1000).await }
+        });
+        if !completed {
+            wait_until(|| calls.load(Ordering::SeqCst) == 1).await;
+            assert!(
+                !running.is_finished(),
+                "the original credit read is still progressing"
+            );
+        } else {
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while !running.is_finished() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                0,
+                "completed credited work has no observation lane"
+            );
+        }
+        let operation = job.operation_id.clone();
+        let expected = raw.clone();
+        store
+            .call(move |s| {
+                assert!(!s.operation_pending(&operation)?);
+                assert_eq!(s.prepared_bytes(&operation)?, expected);
+                let original = s.operation(&operation)?;
+                assert_eq!(original.attempts, 1);
+                assert_eq!(original.submission, "BROADCAST_REQUESTED");
+                assert!(s.funding_source_ready()?);
+                // Independent treasury work can obtain its existing acceptance fence
+                // while the successful swap's credit read remains held.
+                s.accept_preparation("independent-calculation", None, 1, None)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(
+            source_events.try_recv().is_err(),
+            "fulfilled work must not borrow the source backend"
+        );
+        assert!(
+            status_events.try_recv().is_err(),
+            "fulfilled work needs no provider poll"
+        );
+        if !completed {
+            credits.add_permits(1);
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), running)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), usize::from(!completed));
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM outgoing", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        drop(db);
+        drop(worker);
+        drop(store);
+        actor.await.unwrap();
+    }
 }
 
 #[tokio::test]
@@ -995,7 +1053,7 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
         let worker = worker.clone();
         async move { worker.tick(1000).await }
     });
-    tokio::time::timeout(std::time::Duration::from_secs(5), source_rx.recv())
+    let first_source = tokio::time::timeout(std::time::Duration::from_secs(5), source_rx.recv())
         .await
         .unwrap()
         .unwrap();
@@ -1046,14 +1104,22 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
     .await
     .unwrap();
     assert_eq!(credit_calls.load(Ordering::SeqCst), jobs.len());
-    let mut source_steps = 1; // The first accepted source step was observed above.
-    while source_rx.try_recv().is_ok() {
-        source_steps += 1;
+    let target_started_before_success = first_source == target.id;
+    let mut source_jobs = vec![first_source];
+    while let Ok(id) = source_rx.try_recv() {
+        source_jobs.push(id);
     }
+    source_jobs.sort();
+    let mut expected_sources: Vec<_> = unsubmitted.iter().map(|job| job.id.clone()).collect();
+    if target_started_before_success {
+        // A callback already accepted before SUCCESS may finish; the latch
+        // suppresses only source work that has not started yet.
+        expected_sources.push(target.id.clone());
+    }
+    expected_sources.sort();
     assert_eq!(
-        source_steps,
-        unsubmitted.len() + 1,
-        "a finite pass must not cap total serialized source progress"
+        source_jobs, expected_sources,
+        "every unsubmitted source progresses; bound SUCCESS closes the target source without another callback"
     );
     let id = target.id.clone();
     let operation = target.operation_id.clone();
@@ -1965,7 +2031,6 @@ fn sibling_observations_report_current_phase_once_per_operation() {
 async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drain_siblings() {
     for (table, field, value) in [
         ("funding_progress", "phase", "'invalid'"),
-        ("funding_progress", "provider_success", "'invalid'"),
         ("funding_health", "error_streak", "'invalid'"),
         ("funding_progress", "next_poll", "-1"),
     ] {
@@ -2884,5 +2949,131 @@ async fn successful_no_progress_keeps_the_source_observation_floor() {
         drop(worker);
         drop(store);
         owner.await.unwrap();
+    }
+}
+
+/// Records only the local recovery decision; it cannot perform network/source work.
+struct ExpiryDecision {
+    recovered: Arc<AtomicUsize>,
+    reconciled: Arc<AtomicUsize>,
+}
+impl FundingBackend for ExpiryDecision {
+    type Observations = Reads;
+    fn observations(&self) -> Reads {
+        panic!("source-only fixture")
+    }
+    fn max_attempts(&self, _: &FundingJob) -> u32 {
+        3
+    }
+    async fn quote_prerequisite(&mut self, _: &FundingJob) -> Result<Quote> {
+        panic!("no new quote")
+    }
+    async fn prepare(&mut self, _: &FundingJob, _: &Quote) -> Result<()> {
+        panic!("no new calculation")
+    }
+    async fn submit(&mut self, _: &FundingJob) -> Result<()> {
+        panic!("no new disclosure")
+    }
+    async fn reconcile(&mut self, _: &FundingJob) -> Result<bool> {
+        self.reconciled.fetch_add(1, Ordering::SeqCst);
+        Ok(false)
+    }
+    async fn recover(
+        &mut self,
+        _: &FundingJob,
+    ) -> Result<Option<crate::treasury::recovery::RecoveryObservation>> {
+        self.recovered.fetch_add(1, Ordering::SeqCst);
+        Ok(Some(crate::treasury::recovery::RecoveryObservation {
+            outcome: crate::treasury::recovery::RecoveryOutcome::Waiting("fixture_pending"),
+            source_observed: true,
+            confirmation: None,
+        }))
+    }
+}
+
+#[tokio::test]
+async fn submitted_finite_expiry_runs_recovery_without_timeout_or_error_health() {
+    use crate::rotation::store::{SyncObservation, SyncPhase};
+    for height in [101, 102] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut raw = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut raw,
+            "pool",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+        let job = raw.funding_jobs().unwrap().remove(0);
+        submitted(&mut raw, &job);
+        let job = raw.funding_job(&job.id).unwrap().unwrap();
+        assert!(!job.timed_out && job.error_streak == 0);
+        assert!(!crate::treasury::recovery::needs_recovery(&job));
+        let raw_bytes = raw.prepared_bytes(&job.operation_id).unwrap();
+        let revision = raw.snapshot().unwrap().0;
+        raw.save_sync_snapshot(
+            revision,
+            b"scanned",
+            Some(SyncObservation {
+                phase: SyncPhase::Ready,
+                last_error: None,
+                snapshot_revision: revision,
+                checked_at: Some(1),
+                checkpoint_at: 1,
+                scanned_blocks: height,
+                target_height: Some(u64::from(height)),
+                observed_tip_height: Some(u64::from(height)),
+                height: Some(u64::from(height)),
+                confirmations: 2,
+                confirmed_pool_balances_zatoshis: None,
+                confirmed_shielded_zatoshis: 1000,
+                spendable_shielded_zatoshis: 1000,
+            }),
+        )
+        .unwrap();
+        let recovered = Arc::new(AtomicUsize::new(0));
+        let reconciled = Arc::new(AtomicUsize::new(0));
+        let (store, actor) = StoreHandle::spawn(raw);
+        let worker = FundingWorker::new(
+            store.clone(),
+            ExpiryDecision {
+                recovered: recovered.clone(),
+                reconciled: reconciled.clone(),
+            },
+            60,
+        );
+        worker
+            .source_step(
+                &job,
+                &TickClock {
+                    epoch: 1,
+                    started: tokio::time::Instant::now(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(recovered.load(Ordering::SeqCst), usize::from(height == 102));
+        assert_eq!(
+            reconciled.load(Ordering::SeqCst),
+            usize::from(height == 101)
+        );
+        let operation = job.operation_id.clone();
+        assert_eq!(
+            store
+                .call(move |s| s.prepared_bytes(&operation))
+                .await
+                .unwrap(),
+            raw_bytes
+        );
+        drop(worker);
+        drop(store);
+        actor.await.unwrap();
     }
 }
