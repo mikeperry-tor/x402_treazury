@@ -252,13 +252,17 @@ payloads, raw RPC/prose, or claim that retired dust was spent. Avoid one reminde
 per polling iteration. Zero retirement must also be visible as a lifecycle change.
 
 Permanent documentation belongs in the automatic-retirement, payment-reconciliation
-and observation-policy sections of `docs/wallet-rotation.md`; configured authority
+and observation-policy sections of `docs/wallet-rotation.md`, including its
+[reconciliation policy](../wallet-rotation.md#recovery-and-reconciliation-policy); configured authority
 in `docs/configuration.md`; finite sync and status in `docs/wallet-cli.md`; network
 scope and scheduling responsibilities in `docs/network-egress.md` and
 `docs/local-resource-limits.md`; focused evidence/limits in `docs/testing.md`.
-Update the managed-wallet deferred plan's runtime-gap claim. These owning guides
-are already linked by root `AGENTS.md`; verify those links rather than duplicating
-policy in the instructions.
+Update the managed-wallet deferred plan's runtime-gap claim. In this implementation
+commit, update the permanent reconciliation rules and root `AGENTS.md` financial
+boundary summary and required-read links to match the implemented behavior; keep
+detailed contracts in their owning guides. Replace the wallet guide's statement
+that destination closure and ordinary retirement are not yet implemented only
+when their implementation and acceptance evidence are complete.
 
 Acceptance must exercise the real ordinary producer-to-publication path, including:
 
@@ -344,6 +348,8 @@ requested by the user; verify each rewritten SHA and its unchanged tree again.
 **G3 — final integration:** review the full branch from `b61ec526`, including all
 prior commits/fixups, complete consumers and the reasons behind corrections.
 Resolve recurring assumptions, hazards and test gaps; widen the audit or simplify
-if the evidence requires it. Confirm permanent guidance and AGENTS links, remove
-this completed plan, and independently review that exact cleanup SHA and final
+if the evidence requires it. Verify the reconciliation-policy and AGENTS handoff
+against the final behavior and evidence, including removal of obsolete
+not-yet-implemented wording and links to this plan. Then remove this completed
+plan, and independently review that exact cleanup SHA and final
 combined branch. Do not retain a completed-plan archive or delete financial evidence.

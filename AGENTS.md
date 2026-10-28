@@ -16,25 +16,13 @@ USDC wallets through NEAR Intents; optional Tor uses the same runtime machinery.
   alternatives and maintenance costs. Logging or diagnostic changes alone are
   generally insufficient justification for vendoring. Follow the
   [dependency policy](docs/development.md#dependency-vendoring).
-- Favor simplicity and best-effort execution. Prefer blockchain/SDK spendability
-  and reconciliation over parallel local monetary tracking. Remove responsibilities
-  before adding counters, certificates, recovery ledgers or workflow frameworks.
-  Use established facts to repair derived state and finish proven work. Stale
-  phases, reporting differences and missing optional evidence must not become
-  consistency gates that halt otherwise authorized progress. Before adding a
-  financial check, identify the actual authority or liability it protects, check
-  existing enforcement, and explain why reconciliation cannot resolve the issue.
-  Follow the [reconciliation policy](docs/wallet-rotation.md#recovery-and-reconciliation-policy).
+- Favor simplicity and best-effort execution. Remove responsibilities before
+  adding counters, certificates, recovery ledgers or workflow frameworks.
 - Avoid additional local resource limits and network timeouts. Arbitrary limits
   are largely reliability hazards. Before adding or tightening a cap, queue,
   readiness gate, timer or failure switch, identify its concrete resource, external
   contract or correctness invariant and check existing guards. Generic caution is
   insufficient. Existing limits are not precedent or proof of necessity.
-- Needless double-enforcement is forbidden. Treasury funding expresses the
-  operator's capital limit: actual spendable funds govern ordinary enabled
-  auto-funding. Do not reintroduce daily/cumulative allocation or ZEC spending
-  budgets. Per-payment authority, actual operation/fee safeguards, accepted-work
-  ownership and separately authorized qualification limits protect distinct things.
 - Let valid work finish while it makes progress. Do not stack whole-work deadlines
   or replace removed timers with enormous durations. Connection establishment,
   response inactivity, signed expiry and polling cadence have separate meanings.
@@ -76,6 +64,18 @@ quirks, workarounds, and compatibility exemptions are documented in
 
 ## Financial and execution boundaries
 
+- Reconcile from established blockchain/SDK facts instead of parallel local
+  monetary tracking. Repair derived state and finish proven work; stale phases,
+  reporting differences and missing optional evidence must not halt otherwise
+  authorized progress. Follow the [reconciliation policy](docs/wallet-rotation.md#recovery-and-reconciliation-policy).
+- Before adding a financial check, identify the actual authority or liability it
+  protects, check existing enforcement, and explain why reconciliation cannot
+  resolve the issue.
+- Needless double-enforcement is forbidden. Treasury funding expresses the
+  operator's capital limit: actual spendable funds govern ordinary enabled
+  auto-funding. Do not reintroduce daily/cumulative allocation or ZEC spending
+  budgets. Per-payment authority, actual operation/fee safeguards, accepted-work
+  ownership and separately authorized qualification limits protect distinct things.
 - Ordinary USDC payment selection treats balances and price hints as advisory;
   current payer ownership and amount authority govern signing.
 - After recognized structured insufficient funds, try each existing eligible wallet
