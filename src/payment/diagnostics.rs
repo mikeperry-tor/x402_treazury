@@ -3,6 +3,7 @@ use super::SubmissionProgress;
 use anyhow::Result;
 use std::{cell::Cell, future::Future};
 mod http;
+pub(super) use http::payment_response_error;
 use http::{HeaderFacts, OmittedExtensions};
 #[cfg(test)]
 mod http_tests;
@@ -13,6 +14,7 @@ pub(super) enum ProviderFailure {
     PaymentSettlementFailed,
     InvalidRequestBody,
     TemporarilyUnavailable,
+    InlineRefreshFailed,
 }
 
 impl ProviderFailure {
@@ -34,6 +36,12 @@ impl ProviderFailure {
             {
                 Some(Self::InvalidRequestBody)
             }
+            _ if body.get("status").and_then(serde_json::Value::as_str) == Some("unavailable")
+                && body.get("reason").and_then(serde_json::Value::as_str)
+                    == Some("inline-refresh-failed") =>
+            {
+                Some(Self::InlineRefreshFailed)
+            }
             _ => None,
         }
     }
@@ -43,6 +51,7 @@ impl ProviderFailure {
             Self::PaymentSettlementFailed => "payment_settlement_failed",
             Self::InvalidRequestBody => "INVALID_REQUEST_BODY",
             Self::TemporarilyUnavailable => "temporarily_unavailable",
+            Self::InlineRefreshFailed => "inline-refresh-failed",
         }
     }
 
@@ -56,6 +65,9 @@ impl ProviderFailure {
             }
             Self::TemporarilyUnavailable => {
                 "The provider reported that the lookup is temporarily unavailable; this does not establish whether payment settled"
+            }
+            Self::InlineRefreshFailed => {
+                "The provider could not refresh the requested data; any reported billing status remains unverified"
             }
         }
     }

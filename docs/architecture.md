@@ -364,6 +364,11 @@ success. Typed results flow through `PaidClient::execute_response`,
 `BoundTool::invoke_output` and `Server::invoke_output`, including dynamic fallback.
 Text-only Rust convenience methods reject attachments. Image mapping and validation
 contracts are in the [provider guide](../providers/README.md).
+For unsuccessful API responses, the private tool error retains the upstream body
+and the unique payment receipt's string `errorReason`/`errorMessage`, without
+copying the full receipt. Logs retain only fixed safe categories. Provider claims
+remain unverified and do not authorize replay; see the
+[diagnostic boundary](development.md#diagnostic-context).
 Accepted tool text, JSON and image metadata remain complete through direct and
 wrapper invocation. There is no completed-output character slicing; provider
 `max_description_chars` remains a separate explicit description control. Download

@@ -174,3 +174,119 @@ async fn response_facts_replace_previous_claims_and_classify_body_shapes() {
     })
     .await;
 }
+
+#[test]
+fn private_receipt_projection_rejects_ambiguity_and_nonstring_fields() {
+    let encode = |value: serde_json::Value| STANDARD.encode(value.to_string());
+    for values in [
+        vec![],
+        vec![("payment-response", "PRIVATE_MALFORMED".to_owned())],
+        vec![("payment-response", encode(json!([])))],
+        vec![(
+            "payment-response",
+            encode(json!({"errorReason":{},"errorMessage":42,"payer":"PRIVATE_PAYER"})),
+        )],
+        vec![
+            (
+                "payment-response",
+                encode(json!({"errorReason":"PRIVATE_A"})),
+            ),
+            (
+                "x-payment-response",
+                encode(json!({"errorReason":"PRIVATE_B"})),
+            ),
+        ],
+        vec![
+            (
+                "payment-response",
+                encode(json!({"errorReason":"PRIVATE_A"})),
+            ),
+            (
+                "payment-response",
+                encode(json!({"errorReason":"PRIVATE_B"})),
+            ),
+        ],
+    ] {
+        let mut headers = reqwest::header::HeaderMap::new();
+        for (name, value) in values {
+            headers.append(
+                reqwest::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        assert_eq!(payment_response_error(&headers), None);
+    }
+    for name in ["payment-response", "x-payment-response"] {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(name, encode(json!({"errorReason":"PRIVATE_REASON","errorMessage":"PRIVATE_MESSAGE","payer":"PRIVATE_PAYER","transaction":"PRIVATE_TRANSACTION","extensions":{"secret":"PRIVATE_EXTENSION"}})).parse().unwrap());
+        assert_eq!(
+            payment_response_error(&headers),
+            Some(json!({"errorReason":"PRIVATE_REASON","errorMessage":"PRIVATE_MESSAGE"}))
+        );
+    }
+}
+
+#[tokio::test]
+async fn private_payment_explanations_never_enter_logs_or_grant_replay() {
+    if crate::test_log_capture::run_in_child(
+        "payment::diagnostics::http_tests::private_payment_explanations_never_enter_logs_or_grant_replay",
+    ) {
+        return;
+    }
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(log.reopen().unwrap())
+        .finish();
+    scope(async {
+        let progress = SubmissionProgress::default();
+        progress.mark_possible();
+        for reason in ["invalid_exact_evm_payload_signature", "PRIVATE_UNKNOWN_CODE"] {
+            let response = axum::http::Response::builder().status(402)
+                .header("payment-response", STANDARD.encode(json!({"success":false,"errorReason":reason,"errorMessage":"PRIVATE_EXPLANATION","payer":"PRIVATE_PAYER","transaction":"PRIVATE_TRANSACTION"}).to_string()))
+                .body("{}").unwrap();
+            let result = super::super::PaidClient::unsigned().response_output(response.into(), true, false).await;
+            let result = super::super::with_payment_context(progress.possible(), result);
+            let error = format!("{:#}", result.as_ref().unwrap_err());
+            assert!(error.contains(reason));
+            assert!(error.contains("PRIVATE_EXPLANATION"));
+            assert!(error.contains("settlement unverified"));
+            assert!(error.contains("do not automatically repeat"));
+            for private in ["PRIVATE_PAYER", "PRIVATE_TRANSACTION"] { assert!(!error.contains(private), "{error}"); }
+            finish(&result, &progress, false);
+        }
+        let response = axum::http::Response::builder().status(503)
+            .body(r#"{"status":"unavailable","reason":"inline-refresh-failed","charged":false,"endpointId":"PRIVATE_ENDPOINT"}"#).unwrap();
+        let result = super::super::PaidClient::unsigned().response_output(response.into(), true, false).await;
+        finish(&result, &progress, false);
+    }).with_subscriber(subscriber).await;
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    assert!(
+        logs.contains("last_payment_response_error=\"invalid_exact_evm_payload_signature\""),
+        "{logs}"
+    );
+    assert!(
+        logs.contains("last_payment_response_error=\"unrecognized\""),
+        "{logs}"
+    );
+    assert!(
+        logs.contains("provider_failure=\"inline-refresh-failed\""),
+        "{logs}"
+    );
+    assert!(
+        logs.contains("could not refresh the requested data"),
+        "{logs}"
+    );
+    assert_eq!(
+        logs.lines()
+            .filter(|line| line.contains("authorization_may_charge=true")
+                && line.contains("do not automatically repeat"))
+            .count(),
+        3,
+        "{logs}"
+    );
+    assert!(!logs.contains("PRIVATE"), "{logs}");
+    assert!(!logs.contains("charged=false"), "{logs}");
+}

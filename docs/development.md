@@ -369,18 +369,28 @@ prose are logged. Terminal ordinary payment failures and terminal potentially
 chargeable relay failures retain WARN and possible-charge facts, including when
 an optional probe's payment fails. These levels do not grant retry or payment authority.
 Payment WARN events retain fixed provider-reported categories for settlement
-failure, invalid request bodies and temporary lookup unavailability. They include
+failure, invalid request bodies, temporary lookup unavailability and failed inline
+data refreshes. They include
 the last observed payment-challenge/receipt header state (absent, duplicate,
 malformed or decoded object), allowlisted x402 error codes, an optional seller
 success claim, and the failed response body's shape, including empty objects.
 Header facts describe the last response, which can precede a later signed transport
 failure; seller claims never establish settlement or replay authority. Unknown
-codes are reported as unrecognized without their values. Omitted managed-payment
+codes are reported as unrecognized without their values. The exact code vocabulary
+includes the pinned Rust SDK and the public x402 v2 specification's error codes;
+substring matching of provider prose is never used. Omitted managed-payment
 extensions accumulate known-category flags (Bazaar, builder code, payment identifier,
 Sign-In-With-X and other) across payer attempts on the same call, including signing
 or transport failures. Neither omission nor HTTP status proves the root cause.
 Upstream messages, arbitrary extension names, request IDs, credentials, request
 arguments and response bodies remain excluded at every application log level.
+Private failed-tool responses retain the upstream error body and the unique
+payment receipt's string-valued `errorReason` and `errorMessage`, even when the
+code is not recognized for logging. Other receipt fields are not copied into the
+error detail. Duplicate receipt headers across both aliases, malformed headers
+and non-string fields supply no private receipt detail. This private error
+projection is untrusted provider prose and must never be logged; it grants no
+settlement or replay authority, including when a provider reports `charged:false`.
 The Coinbase directory search owner reports a terminal WARN after origin and
 fallback recovery ends, including safe cause/status and possible-charge facts;
 individual unsigned relay failures remain DEBUG.

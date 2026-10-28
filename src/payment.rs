@@ -1124,16 +1124,25 @@ impl PaidClient {
             .and_then(|h| STANDARD.decode(h.as_bytes()).ok())
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .and_then(|v| v.get("error").cloned());
+        let payment_error = (!status.is_success())
+            .then(|| diagnostics::payment_response_error(response.headers()))
+            .flatten();
         let bytes = crate::limits::read(response, self.max_response_bytes, "API response", "max_response_bytes")
             .await.map_err(|error| if paid_submission {
                 error.context("API response unavailable; a payment may already have settled. Do not automatically retry a paid request")
             } else { error })?;
         if !status.is_success() {
             let body = String::from_utf8_lossy(&bytes);
+            let mut detail = format!("{} {body}", detail.unwrap_or(Value::Null));
+            if let Some(payment_error) = payment_error {
+                detail = format!(
+                    "{detail}; provider-reported payment error (settlement unverified): {payment_error}"
+                );
+            }
             return Err(HttpFailure {
                 status,
                 provider_failure: diagnostics::response_body(&bytes),
-                detail: format!("{} {body}", detail.unwrap_or(Value::Null)),
+                detail,
             }
             .into());
         }
