@@ -93,7 +93,7 @@ web search for those structured datasets. The bundled FreeQ provider is availabl
 for discovery: static Markdown worked, JavaScript-generated content did not; it is
 not selected as another rendered-reader replacement.
 
-The travel listener at port 3019 shares the existing global wallet. Qualified
+The travel listener at port 3018 shares the existing global wallet. Qualified
 2s calls supply destination advisories and community-maintained visa references.
 Maxwell returned 354 Austrian resorts, 27 published 2026/27 ticket-price rows for
 Kitzbühel and dated base/summit forecasts; lift and station components may be
@@ -210,7 +210,7 @@ generic geocoding is shared. Sports data and generative/developer workflows
 remain available through bundled provider selection.
 
 The listener order and ports are web 3010, science 3011, social 3012, business 3013,
-finance 3014, property 3015, security 3016, world 3017, toolbox 3018 and travel
+finance 3014, property 3015, security 3016, world 3017, travel 3018 and toolbox
 3019. Connect each client to its listed port. Local deployment overrides remain
 operator-owned.
 

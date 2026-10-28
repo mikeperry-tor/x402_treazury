@@ -9,8 +9,8 @@
 # property   Parcels, local records, zoning and site context    financials
 # security   Threats, breaches and infrastructure checks        financials
 # world      Geopolitics, weather, shipping, regional conditions global
-# toolbox    Dynamic provider management and raw calls          global
 # travel     Flights, airports, routes and destination planning global
+# toolbox    Dynamic provider management and raw calls          global
 #
 # Wallets share payer identities within each topical group. Separate groups
 # reduce payer reuse across topics; they do not guarantee unlinkability.
@@ -1093,8 +1093,18 @@ discover_on_demand = true
 instructions_text = "Geopolitical, shipping, energy, agricultural and physical-world research, including offshore oil/gas leases and satellite observations. Preserve observed-at and scene timestamps and distinguish current observations from historical baselines. Aviation coverage supplies weather observations/forecasts, in-flight hazards and accident records. Geocoding and FCC spectrum geographies add location context. Use travel for flight prices, status, schedules, airports and trip routes."
 discovery_search_tool_instructions_text = "World keywords: Hormuz, strait, shipping, vessel, oil, Brent, energy, grid, power, weather, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades, FEMA, disaster declarations, disaster assistance, public assistance, hazard mitigation, disaster recovery, 2s, twos, METAR, TAF, SIGMET, NTSB, aviation weather, airport weather, air safety, aircraft accidents, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, USDA, drought, climate, water, maritime, space, geocoding, HS, customs, dangerous goods."
 
-[servers.toolbox]
+# Destination and leisure research shares the existing global payer pool.
+[servers.travel]
 listen = "127.0.0.1:3018"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "global"
+discover_on_demand = true
+instructions_text = "Trip planning, dated cash flight fares, flight status, schedules, airport references and departure boards, route matrices, destination advisories, visa references, ski resorts, published lift-ticket prices, resort conditions and city cost-of-living observations. StableTravel Google Flights searches default to round trips requiring return_date; set type to string 2 for one way. Fares are observations, not held reservations. 2s and StableTravel flight operations share FlightAware upstream data. Preserve source dates, seasons, currencies, forecast times and unavailable components. Visa reference data is community-maintained; verify entry requirements with the destination authority. Published prices do not establish live ticket availability. World retains general weather, aviation hazards and accident research; geocoding is shared."
+discovery_search_tool_instructions_text = "Travel keywords: flight search, airfare, cash fare, Google Flights, StableTravel, SerpAPI, FlightAware, AeroAPI, flight status, flight tracking, flight schedule, airport lookup, nearby airports, airport board, departures, arrivals, delays, cancellations, airline, aircraft, IATA, ICAO, route schedule, driving, cycling, walking, route matrix, geocoding, travel time, distance, SiteCheck, HealthTravel, Numbeo, city cost of living, Rome2Rio, intercity transport, route options, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski, skiing, snow, resort, lift ticket, ski pass, season prices, base and summit forecast, lift status, Maxwell, 2s, twos."
+
+[servers.toolbox]
+listen = "127.0.0.1:3019"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
@@ -1105,13 +1115,3 @@ remote_provider_directories = ["coinbase", "x402-list"]
 raw_url_calls = true
 instructions_text = "Find and add APIs missing from the research endpoints, or call documented URLs. Prefer providers_list_local for bundled definitions before remote provider discovery."
 discovery_search_tool_instructions_text = "Search APIs registered on this endpoint. Use provider-management tools to find and add providers, or raw-call tools for documented URLs; this search covers currently loaded APIs."
-
-# Destination and leisure research shares the existing global payer pool.
-[servers.travel]
-listen = "127.0.0.1:3019"
-allowed_hosts = ["host.docker.internal", "127.0.0.1"]
-bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
-wallet = "global"
-discover_on_demand = true
-instructions_text = "Trip planning, dated cash flight fares, flight status, schedules, airport references and departure boards, route matrices, destination advisories, visa references, ski resorts, published lift-ticket prices, resort conditions and city cost-of-living observations. StableTravel Google Flights searches default to round trips requiring return_date; set type to string 2 for one way. Fares are observations, not held reservations. 2s and StableTravel flight operations share FlightAware upstream data. Preserve source dates, seasons, currencies, forecast times and unavailable components. Visa reference data is community-maintained; verify entry requirements with the destination authority. Published prices do not establish live ticket availability. World retains general weather, aviation hazards and accident research; geocoding is shared."
-discovery_search_tool_instructions_text = "Travel keywords: flight search, airfare, cash fare, Google Flights, StableTravel, SerpAPI, FlightAware, AeroAPI, flight status, flight tracking, flight schedule, airport lookup, nearby airports, airport board, departures, arrivals, delays, cancellations, airline, aircraft, IATA, ICAO, route schedule, driving, cycling, walking, route matrix, geocoding, travel time, distance, SiteCheck, HealthTravel, Numbeo, city cost of living, Rome2Rio, intercity transport, route options, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski, skiing, snow, resort, lift ticket, ski pass, season prices, base and summit forecast, lift status, Maxwell, 2s, twos."
