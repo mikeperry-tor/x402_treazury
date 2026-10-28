@@ -59,16 +59,34 @@ per-source errors. These narrow workflows are enabled, rather than whole catalog
 | Papers | 2s scholarly search/citations, APEX OpenAlex search, existing science tools | No complete OpenAlex author/work API or guaranteed full text. |
 | SEC, court records, rules, nonprofits and recalls | Existing x402stock and 2s APIs | Different query/pagination contracts; US recalls do not replace six-authority international coverage. |
 | Archives | AgentUtility `archive_snapshot` | Closest snapshot lookup; no full CDX inventory or qualified archived-text read. |
-| Social and company evidence | Botsmith X, StableEnrich Reddit, HireScrape TikTok, 2s HN, AgData LinkedIn company, existing contact providers | No complete SocialFetch platform or endpoint parity. |
-| Patents | Existing x402stock patent/company tools | AgentUtility keyword search failed upstream 403; broad keyword coverage remains a gap. |
+| Social and company evidence | Botsmith X, StableEnrich Reddit, Agent402 GitHub repository metadata, 2s HN, AgData LinkedIn company, existing contact providers | No complete SocialFetch platform or endpoint parity. |
+| Patents | Atlas Google Patents search/details, 2s keyword/EPO search, existing x402stock patent/company tools | Atlas returned the requested patent with all 23 claims; 2s supplies a second working search service. Other detail/family/legal/document operations still need individual qualification. |
 
-The 2s GitHub replacement failed upstream authentication and remains excluded.
+Agent402 repository metadata succeeded. NetIntel and AgentUtility repository
+health calls also succeeded, but their different scores and contracts are
+candidates rather than silently interchangeable data. The 2s GitHub replacement
+failed upstream authentication and remains excluded. HireScrape's one-record
+Instagram profile, LinkedIn company, YouTube video and TikTok profile calls all
+failed with upstream HTTP 401 `Token expired`; TikTok also reported settlement
+before failure. Its social tools remain excluded. These failures do not prove
+that every small mode is asynchronous. A separate Indeed-only, one-record jobs
+request completed inline in 37 seconds at a reported $0.052; jobs stays selected.
+Its `sd_sync_` snapshot identifier accompanied complete items and required no
+polling. Other job boards remain unqualified. AgentUtility patent keyword search
+failed upstream USPTO 403.
+Maxwell USPTO search remains a candidate pending paid delivery after the payment
+compatibility fix; Atlas and 2s already provide two working search services.
 Other gaps include GitHub profiles/trending, GDELT timelines, employer/customer
 reviews, TheirStack technographics and buying intent, licensed Tako data cards and
 SocialFetch's long tail of social platforms. Do not silently substitute ordinary
 web search for those structured datasets. The bundled FreeQ provider is available
 for discovery: static Markdown worked, JavaScript-generated content did not; it is
 not selected as another rendered-reader replacement.
+
+The bundled-provider catalog was audited for candidate alternatives; this was not
+an exhaustive paid test of every provider or every endpoint. The selected narrow
+workflows above have specific delivery evidence; similarly named untested APIs
+remain candidates, not missing-by-assumption or qualified replacements.
 
 Otto's browser-dependent JSON/link tools remain available because static HTML
 alternatives do not establish equivalent JavaScript coverage. Inspect freshness,

@@ -456,6 +456,22 @@ send_tools = [
   { to = "exclude" },
 ]
 
+# Qualified repository metadata; other GitHub operations remain separate candidates.
+[sources.agent402]
+extends = "../../providers/agent402.toml"
+send_tools = [
+  { to = "social", tools = ["github_repo"] },
+  { to = "exclude" },
+]
+
+# Keyword search plus original patent claims; 2s supplies a second search service.
+[sources.google_patents]
+extends = "../../providers/google-patents.toml"
+send_tools = [
+  { to = "business", tools = ["search", "patent"] },
+  { to = "exclude" },
+]
+
 # Market families and project trend feeds are available on the finance endpoint.
 # Entity, funding and ecosystem/category research is available on business.
 [sources.claw402]
@@ -514,21 +530,25 @@ send_tools = [
 ]
 
 # Job-board research is available on business.
-# TikTok scraping and trend charts are available on social.
+# Small synchronous social probes failed with an expired upstream token.
 [sources.hirescrape]
 extends = "../../providers/hirescrape.toml"
 send_tools = [
   { to = "exclude", tools = [
     "help",
-    # SIWX asynchronous completion remains unsupported for these workflows.
+    # Instagram, LinkedIn, TikTok and YouTube returned HTTP 401 "Token expired"
+    # even for one-record synchronous modes; TikTok reported settlement before failure.
+    # Other modes can also hand off to unsupported SIWX snapshot retrieval.
     "instagram",
     "linkedin",
+    "tiktok",
     "tiktok_shop",
     "youtube",
   ] },
   # Route business research families before the primary fallback.
   { to = "business", tools = ["jobs"] },
-  { to = "social" },
+  # An Indeed-only one-record jobs request completed inline; other boards remain unqualified.
+  { to = "exclude" },
 ]
 
 # Network ownership and routing checks are available on security.
@@ -808,8 +828,10 @@ send_tools = [
   { to = "world", tools = ["aviation_*", "airport_*", "flight_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
   # HN search returned dated story links and discussion counts; GitHub failed upstream authentication.
   { to = "social", tools = ["news_hn_search"] },
+  # The two patent searches returned results; detail/family/legal/document routes
+  # are candidates for separate qualification rather than assumed equivalents.
   # Legal, political and occupational records remain on business.
-  { to = "business", tools = ["law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
+  { to = "business", tools = ["patents_search", "patents_epo_search", "law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
   # Exa, Otto, StableEnrich and AgentUtility cover web research; PDL/Deepline cover contacts.
   # Existing finance providers cover quotes, filings and crypto; AgOSINT covers routine company/LEI lookups.
   # Parsing/validation belongs locally. Model/media gateways, commerce, entertainment, trip planning,
@@ -854,7 +876,9 @@ send_tools = [
   { to = "world", tools = ["weather_alerts_by_state", "weather_discussion", "weather_gridpoint"] },
   { to = "science", tools = ["openfda_drug_label", "openfda_drug_event"] },
   { to = "business", tools = ["gov_*"] },
-  # x402stock/AgentFund/Otto cover SEC, macro and markets; 2s covers court search and x402stock company patents.
+  # Atlas Google Patents and 2s provide qualified keyword searches; Maxwell
+  # uspto_patent remains a candidate pending paid delivery after the payment fix.
+  # x402stock/AgentFund/Otto cover SEC, macro and markets; 2s covers court search.
   # AgOSINT supplies broader sanctions lists; NetIntel supplies RDAP and Otto combined forecasts.
   # 2s supplies direct CVE/package evidence; existing recall tools cover the omitted FDA recall searches.
   # Ski/menu/trip planning, model calls and provider-mediated test purchases are separate workflows.
@@ -931,8 +955,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "social"
 discover_on_demand = true
-instructions_text = "Social-platform, person, public-profile and business-contact research, including email lookup and validation. Search by platform or person. Preserve platform, date and partial-result markers; missing posts do not prove absence."
-discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, Hacker News, APEX research search, 2s HN search, HireScrape TikTok, Twitter, X, Botsmith posts and profiles, Otto curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, contact phone, company phone, LinkedIn company enrichment, AgData."
+instructions_text = "Social-platform, GitHub repository metadata, person, public-profile and business-contact research, including email lookup and validation. Search by platform, repository or person. Preserve platform, date and partial-result markers; missing posts do not prove absence."
+discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, GitHub repository metadata, Agent402, Hacker News, APEX research search, 2s HN search, Twitter, X, Botsmith posts and profiles, Otto curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, contact phone, company phone, LinkedIn company enrichment, AgData."
 
 [servers.business]
 listen = "127.0.0.1:3013"
@@ -940,8 +964,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Business, public-record, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic and health datasets."
-discovery_search_tool_instructions_text = "Business keywords: registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic and health datasets."
+discovery_search_tool_instructions_text = "Business keywords: patent keyword search, patent claims, Google Patents, x402 Atlas, EPO, 2s patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
 
 [servers.finance]
 listen = "127.0.0.1:3014"

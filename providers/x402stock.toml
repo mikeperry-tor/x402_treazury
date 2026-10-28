@@ -1,4 +1,4 @@
-description = "Stocks, ETFs, options, forex, crypto, commodities, economic data and SEC filings."
+description = "Stocks, ETFs, options, forex, crypto, commodities, economic data, patents and SEC filings."
 # Reusable Rust provider settings. Paths are relative to this file.
 spec = "https://x402stock.xyz/openapi.json"
 name = "x402stock"

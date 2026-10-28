@@ -1,4 +1,4 @@
-description = "Web and company research, SEC filings, content retrieval and supported JSON and image tools."
+description = "Web and company research, patents, SEC filings, content retrieval and supported JSON and image tools."
 # Supported x402 catalog; exclude specific MPP-only, lifecycle and authority contracts.
 spec = "https://vaaya.ai/openapi.json"
 name = "Vaaya"

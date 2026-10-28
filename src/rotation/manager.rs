@@ -575,10 +575,7 @@ fn select_offer(challenge: &Value, policy: &SpendPolicy) -> Result<Offer> {
                 );
                 &raw["maxAmountRequired"]
             } else {
-                ensure!(
-                    raw["network"] == "eip155:8453" && raw.get("maxAmountRequired").is_none(),
-                    "unsupported offer"
-                );
+                ensure!(raw["network"] == "eip155:8453", "unsupported offer");
                 &raw["amount"]
             };
             ensure!(
@@ -895,6 +892,51 @@ mod offer_tests {
         let challenge = serde_json::json!({"x402Version":2,"accepts":[cheap,equal,expected]});
         let selected = select_offer(&challenge, &SpendPolicy { max_atomic: None }).unwrap();
         assert_eq!(selected.raw, challenge["accepts"][2]);
+    }
+    #[test]
+    fn v2_legacy_amount_metadata_never_selects_or_limits_the_authorized_amount() {
+        for legacy in [
+            serde_json::json!("1"),
+            serde_json::json!("5000001"),
+            serde_json::json!("display only"),
+            serde_json::json!(1),
+            serde_json::json!(null),
+            serde_json::json!({"maximum": "5000001"}),
+        ] {
+            let mut raw = offer("1", 1);
+            raw["maxAmountRequired"] = legacy;
+            let challenge = serde_json::json!({"x402Version":2,"accepts":[raw]});
+            let selected = select_offer(
+                &challenge,
+                &SpendPolicy {
+                    max_atomic: Some(U256::from(1)),
+                },
+            )
+            .unwrap();
+            assert_eq!(selected.amount, U256::from(1));
+            assert_eq!(selected.raw, challenge["accepts"][0]);
+        }
+        for amount in [
+            serde_json::json!(null),
+            serde_json::json!(1),
+            serde_json::json!("invalid"),
+            serde_json::json!("0"),
+            serde_json::json!("2"),
+        ] {
+            let mut raw = offer("1", 1);
+            raw["amount"] = amount;
+            raw["maxAmountRequired"] = serde_json::json!("1");
+            let challenge = serde_json::json!({"x402Version":2,"accepts":[raw]});
+            assert!(
+                select_offer(
+                    &challenge,
+                    &SpendPolicy {
+                        max_atomic: Some(U256::from(1))
+                    }
+                )
+                .is_err()
+            );
+        }
     }
     #[test]
     fn v1_base_exact_offer_selection_requires_v1_fields_and_forbids_conflicting_amounts() {

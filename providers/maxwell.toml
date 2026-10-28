@@ -1,4 +1,4 @@
-description = "International registries and legislation, public datasets, financial records and ski-travel data."
+description = "International registries and legislation, USPTO patent search, public datasets, financial records and ski-travel data."
 spec = "https://api.maxwellinternational.ai/openapi.json"
 name = "Maxwell International"
 base_url = "https://api.maxwellinternational.ai"

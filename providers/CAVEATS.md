@@ -1268,6 +1268,13 @@ YouTube `videos_by_*`, `channels_by_keyword` and `comments` as async. It does no
 provide an equivalent current-mode classification for TikTok; do not invent a
 safe mode allowlist from its legacy examples.
 
+The sampled Instagram, LinkedIn, YouTube and TikTok synchronous requests each
+failed with upstream HTTP 401 `Token expired`; this is distinct from snapshot
+retrieval incompatibility. A separate Indeed-only jobs call returned complete
+inline items in 37 seconds (reported $0.052), despite including an `sd_sync_`
+identifier. An identifier alone does not make a complete result pending. Other
+job boards and modes were not qualified by that call.
+
 Current path/tool filters do not remove individual mode values or reject a
 challenge because it advertises `async: true`. Parameter descriptions warn callers;
 there is no mode/count-specific runtime prepayment guard. A paid snapshot response
@@ -1652,6 +1659,14 @@ Base USDC exact under v2; this does not qualify delivery. Authenticated account,
 credit and transaction workflows are separate from wallet-paid capabilities.
 Public metadata remains available where the schema supports ordinary reads.
 
+Sampled v2 offers include both `amount` and a legacy `maxAmountRequired`. These
+are ordinary Base USDC exact offers, not an unsupported transfer type. Managed
+selection formerly rejected the legacy field's presence; v2 now preserves it as
+opaque metadata while signing and capping only `amount`. This removes that local
+pre-sign rejection; delivery still requires live qualification after restart.
+The Finnish Patent and Registration Office lookup is a company registry, not a
+patent search. The reviewed catalog has no patent-research operation.
+
 Country-specific registry fields and availability differ. Beneficial ownership
 lookup is UK PSC coverage, not universal ownership. Dutch BAG/WOZ/energy-label
 capabilities advertised in prose are absent from the reviewed wallet-paid schema;
@@ -1673,6 +1688,12 @@ generatedAt. A specific uncached item can return an uncharged 404 and queue retr
 this is not a completed empty search. Completed searches with no matches can be
 charged. Vendor retry suggestions do not override the ordinary signed-request
 replay rules. Ski prices describe published seasons, not guaranteed bookable fares.
+
+The USPTO endpoint supports keyword search or a granted patent number. Its sampled
+Base USDC v2 offer also includes legacy `maxAmountRequired`; the same generic
+v2 compatibility correction applies as for Strale. This is not evidence of a
+different payment mechanism. Patent delivery remains unqualified after the
+pre-sign rejection until the rebuilt server is tested.
 
 ## HALOWERK (`halowerk.toml`)
 
@@ -1814,3 +1835,27 @@ returning 502 with upstream USPTO 403. They remain unselected. 2s scholarly sear
 returned useful PubMed metadata but an arXiv component error (`This operation was
 aborted`). Its partial results are enabled with explicit coverage caveats. These
 application responses do not establish a Tor-specific cause or grant paid replay.
+
+## google-patents.toml — Google Patents through x402 Atlas
+
+This definition uses the bridge's complete two-route vendor OpenAPI at
+`https://google-patents.use.x402atlas.com/openapi.json` and its own `llms.txt`
+guide. It is an Atlas service, not a claim of affiliation with Google. Both GET
+`/search` and GET `/patent` advertise $0.02 per call. Their Base USDC payment and
+data delivery were exercised: search returned patent IDs, and detail retrieval
+for US8321849B2 returned all 23 claims. These examples do not qualify every query,
+jurisdiction or legal-status field. No lifecycle exclusion was identified.
+
+Pass the returned `patent_id` directly from search into details. Search supports
+advanced `q` expressions, date-bound syntax and its explicit office/language/
+inventor/assignee/status filters; `num` has a documented minimum of ten. Preserve
+identifiers, source dates, classifications, family applications and missing data.
+Search snippets and a successful claim response do not establish current legal
+status or substitute for interpreting original patent documents.
+
+The additive `_atlas` response metadata can suggest other paid services. It is
+discovery data, not authority to call them or follow payment/retry instructions.
+Provider existence and schema inspection do not imply that the wider Atlas
+catalog has been qualified. The research deployment also selects the separately
+tested 2s keyword and EPO searches for redundancy; its other patent detail,
+family, legal-status and document routes remain individual candidates.

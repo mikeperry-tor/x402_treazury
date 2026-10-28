@@ -1,4 +1,4 @@
-description = "Public records, scientific datasets, aviation, climate, vulnerability evidence and market research."
+description = "Public records, patent search and EPO records, scientific datasets, aviation, climate, vulnerability evidence and market research."
 spec = "https://2s.io/api/openapi"
 name = "2s"
 base_url = "https://2s.io"

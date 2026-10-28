@@ -27,6 +27,7 @@ macro_rules! provider_manifest {
             ("freeq", "providers/freeq.toml", None),
             ("genuinegood", "providers/genuinegood.toml", None),
             ("glassnode", "providers/glassnode/provider.toml", Some("providers/glassnode/openapi.json")),
+            ("google-patents", "providers/google-patents.toml", None),
             ("google-trends", "providers/google-trends.toml", None),
             ("halowerk", "providers/halowerk.toml", None),
             ("hirescrape", "providers/hirescrape.toml", None),

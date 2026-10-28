@@ -75,6 +75,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Genuine Good Grants | `genuinegood.toml` | POST grant research; search/detail recommendations; bearer pass excluded |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
 | Google Trends | `google-trends.toml` | Vendor OpenAPI |
+| Google Patents (x402 Atlas) | `google-patents.toml` | Full two-operation search/details catalog; claims and family data |
 | IPIntel.ai | `ipintel.toml` | Domain/DNS/IP, satellite and developer tools; core lookup recommendations |
 | Kronos | `kronos.toml` | Market data plus public status/methodology; existing names preserved |
 | Locus | `locus/provider.toml` | Local `locus/openapi.json` |

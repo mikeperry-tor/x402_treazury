@@ -514,6 +514,11 @@ including vendor annotations and display prices, remain opaque and are preserved
 in the accepted offer. `outputSchema` must be an object or boolean; its contents
 are not evaluated and references are not fetched.
 
+For v2, `amount` alone determines the atomic amount signed and checked against
+the payment cap. A top-level legacy `maxAmountRequired` is preserved as opaque
+metadata, without requiring equality or interpreting it as payment authority.
+V1 continues to use its required `maxAmountRequired` field.
+
 Admission validates the actual network, asset, payee, atomic amount, transfer
 mechanism and USDC domain. Duplicated or conflicting authority fields in `extra`
 and unsupported transfer/flow mechanisms are rejected. Display prices and nested annotations

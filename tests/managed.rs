@@ -1064,6 +1064,52 @@ async fn opaque_annotations_and_display_prices_preserve_atomic_payment_terms() {
     h.close().await;
 }
 #[tokio::test]
+async fn v2_legacy_amount_metadata_preserves_signature_journal_cap_and_no_replay() {
+    let h = Harness::new().await;
+    let mut c = challenge("1");
+    c["accepts"][0]["maxAmountRequired"] = json!("5000001");
+    c["accepts"][0]["outputSchema"] = json!({"type":"object"});
+    *h.f.challenge.lock().unwrap() = c.clone();
+    h.f.reject.store(true, Ordering::SeqCst);
+    let error = h.client.execute(h.route()).await.unwrap_err();
+    assert!(format!("{error:#}").contains("do not automatically repeat"));
+    {
+        let signed = h.f.signed.lock().unwrap();
+        assert_eq!(signed.len(), 1);
+        assert_eq!(signed[0]["accepted"], c["accepts"][0]);
+        assert_eq!(signed[0]["payload"]["authorization"]["value"], "1");
+    }
+    let db = rusqlite::Connection::open(&h.f.db).unwrap();
+    let (amount, hash, state): (String, String, String) = db
+        .query_row(
+            "SELECT amount,requirements_hash,state FROM payment_attempts",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(amount, "1");
+    assert_eq!(
+        hash,
+        alloy_primitives::keccak256(serde_json::to_vec(&c["accepts"][0]).unwrap()).to_string()
+    );
+    assert_eq!(state, "POSSIBLY_SUBMITTED");
+    let rpc_calls = h.f.rpc_calls.load(Ordering::SeqCst);
+    c["accepts"][0]["amount"] = json!("5000001");
+    c["accepts"][0]["maxAmountRequired"] = json!("1");
+    *h.f.challenge.lock().unwrap() = c;
+    assert!(h.client.execute(h.route()).await.is_err());
+    assert_eq!(h.f.signed.lock().unwrap().len(), 1);
+    assert_eq!(h.f.rpc_calls.load(Ordering::SeqCst), rpc_calls);
+    assert_eq!(
+        db.query_row("SELECT COUNT(*) FROM payment_attempts", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    drop(db);
+    h.close().await;
+}
+#[tokio::test]
 async fn informational_metadata_cannot_override_payment_safety() {
     let h = Harness::new().await;
     for (key, value) in [
