@@ -268,6 +268,16 @@ pub struct PaidClient {
     managed: Option<Arc<crate::rotation::manager::ManagedPool>>,
 }
 impl PaidClient {
+    pub(crate) fn startup_funding_pool(
+        &self,
+    ) -> Option<Arc<crate::rotation::manager::ManagedPool>> {
+        self.require_available().ok()?;
+        self.managed
+            .as_ref()
+            .filter(|pool| pool.has_finite_payment_limit())
+            .cloned()
+    }
+
     pub fn new(payer: Payer) -> Self {
         Self {
             work: Default::default(),

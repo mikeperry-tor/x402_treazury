@@ -109,6 +109,24 @@ wait_for_catalogs = true # Default; false enables incremental availability.
 
 Sockets are reserved early, so TCP connections can queue while MCP HTTP service
 waits. `MCP listening at /mcp` is logged only when that endpoint starts serving.
+The one-time INFO message `All MCP endpoints listening, funded, and ready` follows
+successful catalog startup for every endpoint, every listening message, and saved
+USDC estimates covering each bound managed wallet pool's finite
+`max_api_payment_usdc` on at least one eligible payer. Effective source bindings,
+successfully published sources and provider-management wallets are included; unused pools and
+complete reserve inventory are not required. Existing balance/credit notifications
+can complete the announcement after swaps finish. Eager endpoints keep serving
+while this announcement waits for their catalog outcomes. Optional catalog failures
+retain their normal allowed behavior; required catalog or selection failures
+suppress the announcement.
+
+This is an advisory startup observation, identified by the log's `funding_basis`,
+not a payment guarantee or a new serving gate. It performs no extra network reads,
+funding actions or periodic polling. Estimates may subsequently change; payment
+permission and challenge validation remain authoritative. Static payers have no
+saved balance observations, and unlimited payment caps have no finite funding
+threshold, so those bindings suppress this funded announcement. Unsigned or
+unavailable wallet bindings cannot establish funding either.
 There is no overall catalog-startup deadline: progress, server-directed retry
 waits, Tor availability or relay payer readiness can keep a dependent endpoint
 waiting. Funding and discovery workers run during this wait under their existing

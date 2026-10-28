@@ -12,6 +12,7 @@ pub mod routing;
 #[cfg(test)]
 mod routing_tests;
 use routing::{EffectiveBindings, SendToolsRule};
+mod readiness;
 mod selection_diagnostics;
 mod startup;
 pub use startup::StartupConfig;
@@ -1520,6 +1521,13 @@ impl Deployment {
                 return Err(error);
             }
         };
+        let local_startup_pools = (!self.defer_discovery)
+            .then(|| readiness::funding_pools(&self, &deferred_wallets))
+            .flatten();
+        let local_catalogs_ready = self
+            .listeners
+            .keys()
+            .all(|name| matches!(self.endpoint_readiness(name), Some(Ok(()))));
         let can_allocate = runtime.funding_available()
             && self.config.funding.as_ref().is_some_and(|f| f.auto_fund)
             && restriction == crate::rotation::restriction::FundingRestriction::Ordinary;
@@ -1530,7 +1538,18 @@ impl Deployment {
             .as_mut()
             .map(deferred::Runtime::catalog_readiness)
             .unwrap_or_default();
+        let startup_catalogs = match deferred.as_mut() {
+            Some(runtime) => runtime.startup_readiness(),
+            None => {
+                let (send, receive) = tokio::sync::oneshot::channel();
+                if local_catalogs_ready {
+                    let _ = send.send(local_startup_pools);
+                }
+                receive
+            }
+        };
         Ok(RunningDeployment {
+            startup_catalogs,
             deferred,
             catalog_readiness,
             listeners,
@@ -1824,6 +1843,7 @@ type FundingRuntime = (
     crate::rotation::funding::FundingWorker<crate::rotation::funding::Backend>,
 );
 pub struct RunningDeployment {
+    startup_catalogs: tokio::sync::oneshot::Receiver<readiness::FundingPools>,
     deferred: Option<deferred::Runtime>,
     catalog_readiness: BTreeMap<String, tokio::sync::oneshot::Receiver<Result<()>>>,
     accepted_work: Vec<crate::server::work::Work>,
@@ -1897,6 +1917,7 @@ impl RunningDeployment {
         #[cfg(test)]
         let mut listener_failure = self.listener_failure;
         let mut catalog_readiness = self.catalog_readiness;
+        let mut listening = Vec::new();
         for (name, listener, app) in self.listeners {
             let stopped = listener_stop.clone();
             let readiness = catalog_readiness.remove(&name);
@@ -1906,6 +1927,8 @@ impl RunningDeployment {
             } else {
                 None
             };
+            let (listening_send, listening_receive) = tokio::sync::oneshot::channel();
+            listening.push(listening_receive);
             tasks.spawn(async move {
                 if let Some(readiness) = readiness {
                     tracing::info!(server = name, "MCP endpoint waiting for catalogs");
@@ -1934,6 +1957,7 @@ impl RunningDeployment {
                 }
                 let address = listener.local_addr()?;
                 tracing::info!(server = name, %address, "MCP listening at /mcp");
+                let _ = listening_send.send(());
                 let serving =
                     axum::serve(listener, app).with_graceful_shutdown(stopped.cancelled_owned());
                 #[cfg(test)]
@@ -1961,10 +1985,14 @@ impl RunningDeployment {
         let deferred_task = self
             .deferred
             .map(|runtime| tokio::spawn(runtime.run(deferred_stop.clone())));
+        let mut startup_announcement =
+            Box::pin(readiness::announce(self.startup_catalogs, listening));
+        let mut announcement_finished = false;
         let mut funding_stopped = false;
         let result = loop {
             tokio::select! {
                 _ = shutdown.cancelled() => break Ok(()),
+                _ = &mut startup_announcement, if !announcement_finished => announcement_finished = true,
                 _ = stop.cancelled(), if !funding_stopped => {
                     funding_stopped = true;
                     tracing::error!(category = "treasury_funding_stopped",
@@ -1977,6 +2005,7 @@ impl RunningDeployment {
                 }
             }
         };
+        drop(startup_announcement);
         deferred_stop.cancel();
         crate::server::log_http_shutdown();
         for work in &self.accepted_work {

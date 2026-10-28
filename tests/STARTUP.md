@@ -37,6 +37,14 @@ the retained inventory. Startup unit tests cover a fresh cached JSON document
 whose unsupported header schema prevents generation, and shared failures preserving
 safe acquisition stages and status. Existing accepted-relay-payment cancellation and
 panic fixtures also run with default waiting and verify drain/Store ownership.
+`deployment::readiness::tests` verifies the once-only funded startup announcement
+waits for catalog success, every listener and sufficient current estimates across
+all bound pools, including an earlier pool spending while another awaits credit.
+Closed readiness channels and cancellation release Store ownership. The store
+selection regression covers exact cap equality, split balances, low/unknown or
+malformed estimates, disabled pools and ineligible payer roles without financial
+mutation. The aggregate catalog signal fixture also covers eager endpoints,
+required failure and allowed optional failure without changing serving readiness.
 The waiting-endpoint regression also checks that the INFO startup summary
 identifies catalogs still loading instead of announcing discovery completion.
 Publication preserves authored prices, tool order and existing callable snapshots.

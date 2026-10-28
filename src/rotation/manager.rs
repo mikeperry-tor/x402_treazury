@@ -99,6 +99,27 @@ impl PaymentSelector for Offer {
     }
 }
 impl ManagedPool {
+    pub(crate) fn has_finite_payment_limit(&self) -> bool {
+        self.policy.max_atomic.is_some()
+    }
+    pub(crate) async fn startup_funding_ready(pools: &[Arc<Self>]) -> Result<bool> {
+        let Some(first) = pools.first() else {
+            return Ok(true);
+        };
+        let pools: Vec<_> = pools.iter().map(|pool| pool.pool.clone()).collect();
+        first
+            .store
+            .call(move |store| {
+                for pool in pools {
+                    if !store.payment_estimate_covers_limit(&pool)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            })
+            .await
+    }
+
     pub fn new(
         store: StoreHandle,
         pool: String,

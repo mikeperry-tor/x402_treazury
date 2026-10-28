@@ -936,3 +936,46 @@ async fn worker_or_publication_failure_closes_waiters_and_keeps_ready_peers() {
         fixtures.origin.abort();
     }
 }
+
+#[tokio::test]
+async fn aggregate_catalog_signal_waits_for_eager_sources_and_respects_failures() {
+    for (source, optional) in [("slow", false), ("failure", false), ("optional", true)] {
+        let mut fixture = Fixture::new(
+            &(listener("local", "['local']", "")
+                + &listener("eager", &format!("['{source}']"), "wait_for_catalogs=false")),
+            true,
+        )
+        .await;
+        let (_, replacement) = tokio::sync::oneshot::channel();
+        let mut catalogs = std::mem::replace(&mut fixture.running.startup_catalogs, replacement);
+        let addresses: BTreeMap<_, _> = fixture.running.addresses().into_iter().collect();
+        let stop = CancellationToken::new();
+        let serving = tokio::spawn(fixture.running.serve(stop.clone()));
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            rpc(addresses["eager"], "initialize"),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            catalogs.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        if source == "slow" {
+            fixture.slow.add_permits(1);
+        } else {
+            fixture.failure.add_permits(1);
+        }
+        let outcome = tokio::time::timeout(Duration::from_secs(5), catalogs)
+            .await
+            .unwrap();
+        assert_eq!(outcome.is_ok(), source == "slow" || optional);
+        stop.cancel();
+        tokio::time::timeout(Duration::from_secs(5), serving)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        fixture.origin.abort();
+    }
+}

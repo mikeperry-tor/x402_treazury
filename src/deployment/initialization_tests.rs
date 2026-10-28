@@ -512,9 +512,12 @@ async fn binding_restricts_reused_managed_owner_and_socket_failure_releases_it()
         } else {
             None
         };
-        match deployment
-            .bind_restricted(&env(), FundingRestriction::DenyNewFunding)
-            .await
+        match tokio::time::timeout(
+            Duration::from_secs(5),
+            deployment.bind_restricted(&env(), FundingRestriction::DenyNewFunding),
+        )
+        .await
+        .expect("bind rollback must release announcement and wallet ownership")
         {
             Ok(mut running) => {
                 assert!(!fail_bind);

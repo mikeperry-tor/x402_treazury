@@ -650,7 +650,12 @@ Accepted obligations remain durable. This existing degraded-serving boundary doe
 not create a hidden SDK owner or relax strict inspection/qualification requirements.
 
 Listeners bind before startup discovery. Ordinary serving does not sweep idle
-ACTIVE, READY or RETAINED wallets.
+ACTIVE, READY or RETAINED wallets. The [aggregate startup announcement](configuration.md#multiple-mcp-ports-from-one-configuration)
+uses existing saved estimates and capacity notifications to report when all
+listening endpoints can cover their finite maximum payment on an eligible payer.
+It neither sums separate wallets nor requires reserve inventory to be full, and
+rechecks all bound pools together after each wake. It adds no observation or
+financial authority and stops after its single announcement or serving shutdown.
 
 In Tor mode, finite serving startup discovery retains its captured work while the
 configured local SOCKS port is unreachable. A shared TCP-only check reports the

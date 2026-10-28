@@ -19,6 +19,7 @@ pub(super) struct Runtime {
     relays: Vec<Arc<crate::discovery_relay::Relay>>,
     can_allocate: bool,
     readiness: BTreeMap<String, tokio::sync::oneshot::Sender<Result<()>>>,
+    startup_ready: Option<tokio::sync::oneshot::Sender<readiness::FundingPools>>,
 }
 enum Event {
     OperatorStatus(String, Option<bool>, tokio::sync::watch::Receiver<bool>),
@@ -60,6 +61,7 @@ impl Runtime {
         Self {
             can_allocate,
             readiness: BTreeMap::new(),
+            startup_ready: None,
             #[cfg(test)]
             failure: None,
             deployment,
@@ -90,31 +92,35 @@ impl Runtime {
     // source ledger. Call only after the corresponding snapshot is published.
     fn signal_readiness(&mut self) {
         for name in self.readiness.keys().cloned().collect::<Vec<_>>() {
-            let sources = &self.deployment.listeners[&name].sources;
-            let failed = sources.iter().find(|id| {
-                !self.deployment.pending_sources.contains_key(*id)
-                    && !self.deployment.sources.contains_key(*id)
-                    && !self.deployment.config.sources[*id].optional_startup
-            });
-            let result = if let Some(reason) = self.deployment.selection_errors.get(&name) {
-                Some(Err(anyhow::anyhow!(
-                    "endpoint tool selection failed: {reason}"
-                )
-                .context(catalog::LoadStage::Selection)))
-            } else if let Some(id) = failed {
-                Some(Err(anyhow::anyhow!("required catalog unavailable: {id}")))
-            } else if sources
-                .iter()
-                .all(|id| !self.deployment.pending_sources.contains_key(id))
-            {
-                Some(Ok(()))
-            } else {
-                None
-            };
+            let result = self.deployment.endpoint_readiness(&name);
             if let Some(result) = result {
                 let _ = self.readiness.remove(&name).unwrap().send(result);
             }
         }
+        if self.startup_ready.is_some() {
+            let mut complete = true;
+            for name in self.deployment.listeners.keys() {
+                match self.deployment.endpoint_readiness(name) {
+                    Some(Ok(())) => {}
+                    Some(Err(_)) => {
+                        self.startup_ready.take();
+                        return;
+                    }
+                    None => complete = false,
+                }
+            }
+            if complete {
+                let pools = readiness::funding_pools(&self.deployment, &self.wallets);
+                let _ = self.startup_ready.take().unwrap().send(pools);
+            }
+        }
+    }
+    pub(super) fn startup_readiness(
+        &mut self,
+    ) -> tokio::sync::oneshot::Receiver<readiness::FundingPools> {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        self.startup_ready = Some(send);
+        receive
     }
     async fn publish(&self) -> Result<()> {
         let mut snapshot = crate::catalog_state::CatalogSnapshot::default();
@@ -302,6 +308,7 @@ impl Runtime {
             self.signal_readiness();
         }
         drop(work);
+        self.startup_ready.take();
         for (_, sender) in std::mem::take(&mut self.readiness) {
             let _ = sender.send(Err(anyhow::anyhow!(
                 "catalog publication stopped before endpoint readiness"

@@ -4,6 +4,30 @@ use super::*;
 use crate::rotation::manager::PaymentCandidateHandle;
 
 impl Store {
+    /// Startup diagnostic only; never gates payment or requests an observation.
+    pub(crate) fn payment_estimate_covers_limit(&self, pool: &str) -> Result<bool> {
+        let mut query = self.db.prepare("SELECT id,address,balance FROM wallets WHERE pool_id=?1 AND role IN ('ACTIVE','RETAINED','READY') AND low_balance=0")?;
+        let mut rows = query.query([pool])?;
+        while let Some(row) = rows.next()? {
+            let (Ok(wallet), Ok(address), Ok(balance)) = (
+                row.get_ref(0)?.as_str(),
+                row.get_ref(1)?.as_str(),
+                row.get_ref(2)?.as_str(),
+            ) else {
+                continue;
+            };
+            if address.parse::<alloy_primitives::Address>().is_err() {
+                continue;
+            }
+            if let Some(owner) = payment_ownership(&self.db, pool, wallet)?
+                && amount(balance).is_ok_and(|balance| balance >= owner.payment_limit)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub(crate) fn advisory_candidate(
         &self,
         pool: &str,
@@ -145,5 +169,95 @@ mod notification_tests {
         store.notify_capacity_changed("one");
         next.await;
         assert!(!std::sync::Arc::ptr_eq(&changes, &other));
+    }
+}
+
+#[cfg(test)]
+mod startup_funding_tests {
+    use super::*;
+    #[test]
+    fn startup_requires_one_eligible_estimate_covering_the_cap_without_mutation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let pool = crate::rotation::test_capacity::declare_and_allocate!(
+            store,
+            "pool",
+            crate::rotation::test_capacity::two_reserves("2"),
+            Some(U256::from(1_000_000)),
+            0
+        )
+        .unwrap();
+        let jobs = store.funding_jobs().unwrap();
+        for job in &jobs {
+            store
+                .record_funding_balance(
+                    &job.id,
+                    &job.operation_id,
+                    &job.wallet_id,
+                    &job.recipient,
+                    U256::from(600_000),
+                )
+                .unwrap();
+        }
+        assert!(
+            !store.payment_estimate_covers_limit(&pool).unwrap(),
+            "separate payer balances cannot be summed"
+        );
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET balance='1000000' WHERE id=?1",
+                [&jobs[0].wallet_id],
+            )
+            .unwrap();
+        assert!(store.payment_estimate_covers_limit(&pool).unwrap());
+        for mutation in [
+            "balance='999999'",
+            "balance='unknown'",
+            "balance=X'FF'",
+            "low_balance=1",
+            "address='invalid'",
+            "role='RETIRED'",
+            "role='ALLOCATED'",
+        ] {
+            store
+                .db
+                .execute(
+                    &format!("UPDATE wallets SET {mutation} WHERE id=?1"),
+                    [&jobs[0].wallet_id],
+                )
+                .unwrap();
+            assert!(
+                !store.payment_estimate_covers_limit(&pool).unwrap(),
+                "{mutation}"
+            );
+            store.db.execute("UPDATE wallets SET balance='1000000',low_balance=0,address=?2,role='READY' WHERE id=?1", params![jobs[0].wallet_id,jobs[0].recipient]).unwrap();
+        }
+        store
+            .db
+            .execute("UPDATE reserve_claims SET enabled=0", [])
+            .unwrap();
+        assert!(!store.payment_estimate_covers_limit(&pool).unwrap());
+        store
+            .db
+            .execute(
+                "UPDATE wallets SET role='ACTIVE' WHERE id=?1",
+                [&jobs[0].wallet_id],
+            )
+            .unwrap();
+        assert!(
+            store.payment_estimate_covers_limit(&pool).unwrap(),
+            "active payer needs no reserve inventory"
+        );
+        store.disable_pool("pool").unwrap();
+        assert!(!store.payment_estimate_covers_limit(&pool).unwrap());
+        assert!(store.status().unwrap().treasury_operations.is_empty());
+        assert_eq!(store.funding_jobs().unwrap().len(), 2);
     }
 }
