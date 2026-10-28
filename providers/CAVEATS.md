@@ -1663,7 +1663,9 @@ Sampled v2 offers include both `amount` and a legacy `maxAmountRequired`. These
 are ordinary Base USDC exact offers, not an unsupported transfer type. Managed
 selection formerly rejected the legacy field's presence; v2 now preserves it as
 opaque metadata while signing and capping only `amount`. This removes that local
-pre-sign rejection; delivery still requires live qualification after restart.
+pre-sign rejection. A subsequent static link-extraction call returned 26 IANA
+links and reported settlement at $0.0324. Other Strale operations still require
+separate delivery qualification.
 The Finnish Patent and Registration Office lookup is a company registry, not a
 patent search. The reviewed catalog has no patent-research operation.
 
@@ -1692,8 +1694,12 @@ replay rules. Ski prices describe published seasons, not guaranteed bookable far
 The USPTO endpoint supports keyword search or a granted patent number. Its sampled
 Base USDC v2 offer also includes legacy `maxAmountRequired`; the same generic
 v2 compatibility correction applies as for Strale. This is not evidence of a
-different payment mechanism. Patent delivery remains unqualified after the
-pre-sign rejection until the rebuilt server is tested.
+different payment mechanism. After restart, the documented lithium-battery
+keyword query returned ten cached USPTO records. A separate CUDA lookup returned
+404 `not_cached`, queued retrieval and a provider claim of no charge. That claim
+does not verify settlement or authorize replay; no automatic retry or polling
+was performed. Preserve cache observation dates and distinguish a cache miss
+from a completed empty search.
 
 ## HALOWERK (`halowerk.toml`)
 
@@ -1857,5 +1863,11 @@ The additive `_atlas` response metadata can suggest other paid services. It is
 discovery data, not authority to call them or follow payment/retry instructions.
 Provider existence and schema inspection do not imply that the wider Atlas
 catalog has been qualified. The research deployment also selects the separately
-tested 2s keyword and EPO searches for redundancy; its other patent detail,
-family, legal-status and document routes remain individual candidates.
+tested 2s USPTO/EPO operations and Maxwell cached search for redundancy. The five
+additional 2s probes returned application metadata, a 72-document file-wrapper
+index, EPO bibliography, six family publications and 50 legal-event rows. The
+document API lists formats/page counts and a Patent Center link; PDF bytes were
+not retrieved. Some application-detail arrays were empty despite other records
+being present. EPO family coverage varies, and returned legal events were unsorted
+and lacked jurisdiction on many rows. Neither response establishes complete
+coverage or current legal status; preserve source identifiers and dates.

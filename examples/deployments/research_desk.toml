@@ -828,10 +828,10 @@ send_tools = [
   { to = "world", tools = ["aviation_*", "airport_*", "flight_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
   # HN search returned dated story links and discussion counts; GitHub failed upstream authentication.
   { to = "social", tools = ["news_hn_search"] },
-  # The two patent searches returned results; detail/family/legal/document routes
-  # are candidates for separate qualification rather than assumed equivalents.
+  # All seven patent operations returned useful records. Documents are an index;
+  # EPO legal rows are historical events, not a complete current-status verdict.
   # Legal, political and occupational records remain on business.
-  { to = "business", tools = ["patents_search", "patents_epo_search", "law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
+  { to = "business", tools = ["patents_search", "patents_detail", "patents_documents", "patents_epo_search", "patents_epo_biblio", "patents_epo_family", "patents_epo_legal", "law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
   # Exa, Otto, StableEnrich and AgentUtility cover web research; PDL/Deepline cover contacts.
   # Existing finance providers cover quotes, filings and crypto; AgOSINT covers routine company/LEI lookups.
   # Parsing/validation belongs locally. Model/media gateways, commerce, entertainment, trip planning,
@@ -876,8 +876,10 @@ send_tools = [
   { to = "world", tools = ["weather_alerts_by_state", "weather_discussion", "weather_gridpoint"] },
   { to = "science", tools = ["openfda_drug_label", "openfda_drug_event"] },
   { to = "business", tools = ["gov_*"] },
-  # Atlas Google Patents and 2s provide qualified keyword searches; Maxwell
-  # uspto_patent remains a candidate pending paid delivery after the payment fix.
+  # A cached keyword query delivered ten USPTO records after the compatibility fix.
+  # Preserve fetchedAt; not_cached queues retrieval but is not an empty search.
+  { to = "business", tools = ["uspto_patent"] },
+  # Atlas Google Patents and 2s remain separately callable patent alternatives.
   # x402stock/AgentFund/Otto cover SEC, macro and markets; 2s covers court search.
   # AgOSINT supplies broader sanctions lists; NetIntel supplies RDAP and Otto combined forecasts.
   # 2s supplies direct CVE/package evidence; existing recall tools cover the omitted FDA recall searches.

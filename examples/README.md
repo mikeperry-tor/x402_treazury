@@ -60,7 +60,7 @@ per-source errors. These narrow workflows are enabled, rather than whole catalog
 | SEC, court records, rules, nonprofits and recalls | Existing x402stock and 2s APIs | Different query/pagination contracts; US recalls do not replace six-authority international coverage. |
 | Archives | AgentUtility `archive_snapshot` | Closest snapshot lookup; no full CDX inventory or qualified archived-text read. |
 | Social and company evidence | Botsmith X, StableEnrich Reddit, Agent402 GitHub repository metadata, 2s HN, AgData LinkedIn company, existing contact providers | No complete SocialFetch platform or endpoint parity. |
-| Patents | Atlas Google Patents search/details, 2s keyword/EPO search, existing x402stock patent/company tools | Atlas returned the requested patent with all 23 claims; 2s supplies a second working search service. Other detail/family/legal/document operations still need individual qualification. |
+| Patents | Atlas Google Patents search/details, all seven 2s USPTO/EPO operations, Maxwell cached USPTO search, existing x402stock patent/company tools | Atlas returned 23 claims; 2s adds application detail, document indexes, bibliography, families and historical legal events. Neither a document index nor a legal-event list establishes full document retrieval or current legal status. |
 
 Agent402 repository metadata succeeded. NetIntel and AgentUtility repository
 health calls also succeeded, but their different scores and contracts are
@@ -74,8 +74,15 @@ request completed inline in 37 seconds at a reported $0.052; jobs stays selected
 Its `sd_sync_` snapshot identifier accompanied complete items and required no
 polling. Other job boards remain unqualified. AgentUtility patent keyword search
 failed upstream USPTO 403.
-Maxwell USPTO search remains a candidate pending paid delivery after the payment
-compatibility fix; Atlas and 2s already provide two working search services.
+Maxwell returned ten cached USPTO records for its documented lithium-battery
+query after the payment compatibility fix. A separate CUDA query returned
+`not_cached` with queued retrieval; it was not automatically repeated. This is
+not an empty search or independently verified free failure. Check `fetchedAt`.
+All five additional 2s patent operations delivered records: application detail
+and a 72-document index for US application 11627892, and bibliography, six family
+publications and 50 legal events for EP1000000. The family included EP, AT, DE,
+NL and US publications. Legal rows were unsorted and often lacked jurisdiction;
+complete worldwide coverage and current status were not established.
 Other gaps include GitHub profiles/trending, GDELT timelines, employer/customer
 reviews, TheirStack technographics and buying intent, licensed Tako data cards and
 SocialFetch's long tail of social platforms. Do not silently substitute ordinary
@@ -92,7 +99,9 @@ Otto's browser-dependent JSON/link tools remain available because static HTML
 alternatives do not establish equivalent JavaScript coverage. Inspect freshness,
 degradation, truncation and final destination before relying on a result; a
 successful extraction or quality grade does not prove the intended page was read.
-AgentUtility browser rendering and Strale extraction did not qualify, and 2s
+AgentUtility browser rendering and Strale structured extraction did not qualify;
+Strale static link extraction subsequently delivered 26 links after the same
+compatibility fix. No rendered/structured equivalence follows from that result. 2s
 structured extraction returned unknown fields on the JavaScript test page.
 Otto's remaining financial, owned-account, chain-specific and curated APIs retain
 distinct contracts; overlapping endpoint names alone do not justify removing them.
