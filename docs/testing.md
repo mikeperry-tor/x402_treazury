@@ -251,7 +251,11 @@ they establish neither vendor deduplication nor live payment/authentication qual
 Tests should establish the absence of forbidden side effects as well as the
 expected result: no signature for a rejected payment, no publication for a denied
 registration, no source send before persistence, no connection outside the network
-factory. Use barriers and controlled clocks to expose concurrency boundaries;
+factory. Fixed-chain RPC fixtures capture block timestamps when the chain snapshot is
+created; rereading wall time for each request can fabricate contradictory
+latest/finalized/confirmed headers across a second boundary. Deliberate chain-time
+changes belong in the fixture's explicit chain state.
+Use barriers and controlled clocks to expose concurrency boundaries;
 sleeps alone do not prove ordering. Retain positive fixture controls so a broken
 fixture cannot make every negative test pass.
 
@@ -273,8 +277,19 @@ Cover independent per-group defaults/overrides, inclusive integer thresholds and
 both directions of confirmed/latest disagreement. Candidate authorization paging
 must cross 64 records, preserve still-valid unused signatures, use confirmed chain
 time for expiry and avoid unrelated history reads or payment replay. Preserve
-never-credited predecessors, late usable credit, current/archived source blockers,
-reserve generations and exact atomic evidence through races and reopen.
+never-credited predecessors while original delivery remains possible, late usable
+credit, current/archived source blockers, reserve generations and exact atomic
+evidence through races and reopen. A completed never-credited job can close its
+destination guard only when every original operation has proven expiry or never
+accepted calculation/submission; test both safe closure and contrary source facts.
+Malformed optional historical balance support must not become a manual-repair
+gate: retain disputed history and acquire fresh proof. Contrast this with malformed
+original authorization identities or missing accepted bytes, whose scoped failure
+must remain visible. Exercise malformed history at the current canonical block,
+including an earlier malformed row followed by a valid same-block contradiction;
+ignoring optional corruption must neither require a new block nor hide that conflict.
+Replaced checkpoints and authorization resolutions must
+rebuild through cancellation/restart without replay or discarded original liability.
 
 Scheduling evidence must count RPCs across idle wakes and disposable cache eviction:
 latest-high completes even with a low saved minimum, whereas confirmed-high/latest-low

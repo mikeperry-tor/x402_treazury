@@ -38,7 +38,7 @@ impl BaseRpc {
                         && error
                             .downcast_ref::<RpcFailure>()
                             .is_some_and(RpcFailure::can_failover);
-                    tracing::warn!(provider_index=index+1, failover,
+                    tracing::debug!(provider_index=index+1, failover,
                         category=%safe_diagnostic(&error),
                         "receipt chain verification failed; no payment outcome inferred");
                     if !failover {
@@ -58,7 +58,7 @@ impl BaseRpc {
             Ok(((), true))
         })
         .await?;
-        let (latest, _) = self.block("latest").await?;
+        let (latest, timestamp) = self.block("latest").await?;
         let confirmed = self
             .rpc(
                 "eth_getTransactionReceipt",
@@ -91,6 +91,14 @@ impl BaseRpc {
         let Some((claimed, proof)) = confirmed else {
             return Ok(None);
         };
+        // A missing or shallow receipt is pending without financial-header work.
+        // A qualified receipt still needs the complete finalized/depth bound.
+        let headers = self
+            .finalized_headers(latest, timestamp, &ViewProgress::new())
+            .await?;
+        if claimed.height > headers.confirmed.height {
+            return Ok(None);
+        }
         // Confirmed receipt acceptance validates transfer fields; canonical chain
         // proof remains separate and retains the existing pinned-block rechecks.
         let (block, _) = self.block(&format!("0x{:x}", claimed.height)).await?;
@@ -102,8 +110,22 @@ impl BaseRpc {
             block.hash == claimed.hash,
             "receipt transaction/block mismatch"
         );
-        for pinned in [&block, &latest] {
-            let (current, _) = self.block(&format!("0x{:x}", pinned.height)).await?;
+        let mut rechecked = BTreeMap::new();
+        let progress = ViewProgress::new();
+        for pinned in [
+            &block,
+            &headers.confirmed,
+            &headers.latest,
+            &headers.finalized,
+        ] {
+            let current = self
+                .recheck_anchor(
+                    pinned.height,
+                    &mut rechecked,
+                    &progress,
+                    "receipt_checkpoint",
+                )
+                .await?;
             ensure!(
                 current.height == pinned.height && current.hash == pinned.hash,
                 "Base view changed during reconciliation"
@@ -292,31 +314,54 @@ mod tests {
             "reorg",
             "wrong_chain",
             "wrong_receipt",
+            "not_finalized",
+            "finality_unavailable",
+            "finality_reorg",
+            "pending_without_finality",
+            "unconfirmed_without_finality",
         ] {
             let (e, b, mut receipt) = fixture();
-            if mode == "unconfirmed" {
+            if matches!(mode, "unconfirmed" | "unconfirmed_without_finality") {
                 receipt["blockNumber"] = json!("0x63");
             }
             if mode == "wrong_receipt" {
                 receipt["transactionHash"] = json!(B256::ZERO);
             }
+            let stamp = match mode {
+                "old" => 1,
+                "host_future" => now().unwrap() + 3600,
+                _ => now().unwrap() - 5,
+            };
             let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let seen = reads.clone();
+            let requested = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let requests = requested.clone();
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = format!("http://{}", listener.local_addr().unwrap());
             let server = tokio::spawn(async move {
                 axum::serve(listener,Router::new().route("/",post(move |Json(q):Json<Value>| {
-                    let receipt = receipt.clone(); let b = b.clone(); let seen = seen.clone();
+                    let receipt = receipt.clone(); let b = b.clone(); let seen = seen.clone(); let requested = requested.clone();
                     async move {
+                        requested.lock().unwrap().push(q.clone());
                         let result = match q["method"].as_str().unwrap() {
                             "eth_chainId" => json!(if mode == "wrong_chain" { "0x1" } else { "0x2105" }),
-                            "eth_getTransactionReceipt" => if mode == "pending" { Value::Null } else { receipt },
+                            "eth_getTransactionReceipt" => if matches!(mode, "pending" | "pending_without_finality") { Value::Null } else { receipt },
                             "eth_getBlockByNumber" => {
-                                let latest = q["params"][0] == "latest" || q["params"][0] == "0x64";
-                                let changed = !latest && seen.fetch_add(1,std::sync::atomic::Ordering::SeqCst)>0 && mode == "reorg";
-                                json!({"number":if latest {"0x64"} else {"0x50"},
-                                    "hash":if latest {B256::repeat_byte(6).to_string()} else if changed {B256::ZERO.to_string()} else {b.hash},
-                                    "timestamp":format!("0x{:x}",match mode {"old"=>1,"host_future"=>now().unwrap()+3600,_=>now().unwrap()-5})})
+                                let tag = q["params"][0].as_str().unwrap();
+                                if tag == "finalized" && matches!(mode, "finality_unavailable" | "pending_without_finality" | "unconfirmed_without_finality") {
+                                    return Json(json!({"jsonrpc":"2.0","id":1,"result":null}));
+                                }
+                                let height = match tag {
+                                    "latest" => 100,
+                                    "finalized" if mode == "not_finalized" => 70,
+                                    "finalized" if mode == "finality_reorg" => 90,
+                                    "finalized" => 100,
+                                    _ => u64::from_str_radix(&tag[2..],16).unwrap(),
+                                };
+                                let changed = height == 80 && seen.fetch_add(1,std::sync::atomic::Ordering::SeqCst)>0 && mode == "reorg";
+                                json!({"number":format!("0x{height:x}"),
+                                    "hash":if height == 80 {if changed {B256::ZERO.to_string()} else {b.hash}} else if tag == "0x5a" && mode == "finality_reorg" {B256::ZERO.to_string()} else {format!("0x{height:064x}")},
+                                    "timestamp":format!("0x{stamp:x}")})
                             },
                             method => panic!("unexpected RPC {method}"),
                         };
@@ -337,8 +382,89 @@ mod tests {
                 "valid" | "old" | "host_future" | "fallback" => {
                     assert_eq!(result.unwrap().unwrap().amount_atomic, "7000")
                 }
-                "pending" | "unconfirmed" => assert!(result.unwrap().is_none()),
+                "pending"
+                | "unconfirmed"
+                | "not_finalized"
+                | "pending_without_finality"
+                | "unconfirmed_without_finality" => assert!(result.unwrap().is_none()),
                 _ => assert!(result.is_err(), "{mode}"),
+            }
+            if matches!(
+                mode,
+                "pending_without_finality" | "unconfirmed_without_finality"
+            ) {
+                let requests = requests.lock().unwrap();
+                assert_eq!(
+                    requests.len(),
+                    3,
+                    "pending receipts need no financial header acquisition"
+                );
+                assert_eq!(requests[1]["params"][0], "latest");
+                assert_eq!(requests[2]["method"], "eth_getTransactionReceipt");
+            }
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn finalized_receipt_fallback_reacquires_the_receipt_on_its_own_endpoint() {
+        use axum::{Json, Router, routing::post};
+        for healthy_fallback in [true, false] {
+            let (expected, block, receipt) = fixture();
+            let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let observed = requests.clone();
+            let app = Router::new().route("/{endpoint}",post(move |uri:axum::http::Uri,Json(q):Json<Value>| {
+                let (block,mut receipt,requests)=(block.clone(),receipt.clone(),requests.clone());
+                async move {
+                    requests.lock().unwrap().push((uri.path().to_owned(),q["method"].as_str().unwrap().to_owned()));
+                    let result=match q["method"].as_str().unwrap() {
+                        "eth_chainId"=>json!("0x2105"),
+                        "eth_getTransactionReceipt"=>{
+                            if uri.path()=="/fallback" && !healthy_fallback {receipt["transactionHash"]=json!(B256::ZERO);}
+                            receipt
+                        },
+                        "eth_getBlockByNumber"=>{
+                            let tag=q["params"][0].as_str().unwrap();
+                            if uri.path()=="/primary" && tag=="finalized" {
+                                return Json(json!({"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"private unsupported tag"}}));
+                            }
+                            let height=match tag {"latest"=>100,"finalized"=>80,_=>u64::from_str_radix(&tag[2..],16).unwrap()};
+                            json!({"number":format!("0x{height:x}"),"hash":if height==80 {block.hash} else {format!("0x{height:064x}")},"timestamp":format!("0x{height:x}")})
+                        },
+                        method=>panic!("unexpected RPC {method}"),
+                    };
+                    Json(json!({"jsonrpc":"2.0","id":1,"result":result}))
+                }
+            }));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let rpc = BaseRpc::with_fallbacks(
+                &[
+                    format!("http://{address}/primary"),
+                    format!("http://{address}/fallback"),
+                ],
+                12,
+            )
+            .unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let result = rpc.verify_transfer(&expected).await;
+            if healthy_fallback {
+                assert_eq!(result.unwrap().unwrap().amount_atomic, "7000");
+            } else {
+                assert!(
+                    result.is_err(),
+                    "a valid first receipt cannot qualify the fallback's invalid receipt"
+                );
+            }
+            let requests = observed.lock().unwrap();
+            for path in ["/primary", "/fallback"] {
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|(p, method)| p == path && method == "eth_getTransactionReceipt")
+                        .count(),
+                    1
+                );
             }
             server.abort();
         }

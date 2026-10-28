@@ -515,12 +515,26 @@ canonical-publication path, independently of `auto_fund`, vacancies and treasury
 capacity. Ordinary serving considers low-estimate retained candidates through
 scoped authorization resolution and compatible confirmed/latest balances; both
 must satisfy the group's tolerance. Active, ready, disabled-group, current-claim
-and never-credited wallets cannot retire. Explicit sync attempts eligible
+and wallets with unresolved original delivery obligations cannot retire. A
+never-credited completed job can close that guard only when every current and
+archived original operation has proven source expiry or never accepted a
+calculation/submission; confirmed deposits and uncertain work keep the guard.
+Explicit sync attempts eligible
 candidates once without starting a watcher. Qualification funding permits confer
 no retirement authority. Retirement leaves
 funds and keys at their address, stops routine polling/selection, transfers nothing
 and never releases financial obligations. Positive tolerance trades purchasing
 power for less observation work; it does not bound cumulative stranded capital.
+
+`funding.base_confirmations` defaults to 12 and sets a minimum depth for Base
+financial evidence. Canonical balances, authorization resolution and payment
+receipts also require the RPC's `finalized` chain: the selected height is the lower
+of `latest - base_confirmations` and the finalized height. A lagging finalized
+chain delays evidence; unsupported or unavailable finality retains pending work
+and may use a configured RPC fallback, without substituting depth-only evidence.
+Ordinary scalar balance estimates still read `latest`. Persisted support may
+therefore span more than the minimum depth; older binaries that required an
+exact depth can conservatively reject such support on rollback.
 
 Funding capital comes from actual spendable treasury funds after confirmations,
 reservations, liabilities and fees. Displayed total balance is not spendable

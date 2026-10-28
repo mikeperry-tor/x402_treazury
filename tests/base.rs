@@ -26,7 +26,7 @@ async fn balances_use_the_minimum_and_expiry_requires_a_later_confirmed_block() 
                         let result=match v["method"].as_str().unwrap() {
                             "eth_chainId"=>json!("0x2105"),
                             "eth_getBlockByNumber"=>{
-                                let height=if v["params"][0]=="latest" {100} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()};
+                                let height=if matches!(v["params"][0].as_str(),Some("latest"|"finalized")) {100} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()};
                                 json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{stamp:x}")})
                             }
                             "eth_call"=>{
@@ -97,14 +97,16 @@ async fn balances_use_the_minimum_and_expiry_requires_a_later_confirmed_block() 
                     json!({"blockHash":format!("0x{height:064x}"),"requireCanonical":true})
                 );
             }
-            assert!(
-                rpc.view(query(Some(Anchor {
+            let refreshed = rpc
+                .view(query(Some(Anchor {
                     height: 89,
-                    hash: format!("0x{:064x}", 89)
+                    hash: format!("0x{:064x}", 89),
                 })))
                 .await
-                .is_err(),
-                "regressing confirmed height"
+                .unwrap();
+            assert_eq!(
+                refreshed.anchor.height, 88,
+                "legacy pool anchors do not gate current wallet-scoped evidence"
             );
             server.abort();
         }

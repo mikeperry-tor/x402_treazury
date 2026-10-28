@@ -356,6 +356,11 @@ fn acquisition_only_failures_allow_configured_fallback_but_not_local_errors() {
     assert!(tls.can_failover());
     let local = RpcFailure::new("eth_chainId", "request construction", "send", None);
     assert!(!local.can_failover());
+    let mut unsupported = RpcFailure::new("eth_getBlockByNumber", "RPC error", "decode", Some(200));
+    unsupported.code = Some(-32602);
+    assert!(unsupported.can_failover());
+    unsupported.method = "eth_call";
+    assert!(!unsupported.can_failover());
 }
 
 #[tokio::test]

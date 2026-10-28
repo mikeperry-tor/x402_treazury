@@ -151,13 +151,7 @@ impl ManagedPool {
 fn operator_required(error: &anyhow::Error) -> bool {
     matches!(
         error.downcast_ref::<EvidenceFailure>(),
-        Some(
-            EvidenceFailure::MalformedSupport
-                | EvidenceFailure::MalformedExposure
-                | EvidenceFailure::ResolutionConflict
-                | EvidenceFailure::ChainRepairRequired
-                | EvidenceFailure::EvidenceRepairRequired
-        )
+        Some(EvidenceFailure::MalformedSupport | EvidenceFailure::MalformedExposure)
     ) || matches!(
         error.downcast_ref::<rusqlite::Error>(),
         Some(

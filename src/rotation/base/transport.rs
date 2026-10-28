@@ -65,6 +65,9 @@ impl RpcFailure {
             )
             || matches!(self.http, Some(403 | 408 | 429 | 500 | 502 | 503 | 504))
             || matches!(self.code, Some(-32005 | -32016 | -32601))
+            // RPCs may reject an unsupported finalized block tag as invalid
+            // parameters. Another configured reader can supply the full proof.
+            || (self.method == "eth_getBlockByNumber" && self.code == Some(-32602))
             || matches!(
                 self.category,
                 "timeout" | "connect" | "transport" | "body transport"

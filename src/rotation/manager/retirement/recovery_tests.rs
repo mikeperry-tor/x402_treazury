@@ -121,13 +121,7 @@ async fn concurrent_canonical_publication_owns_retirement_completion_in_both_dir
 
 #[tokio::test]
 async fn malformed_stored_capture_stops_its_request_while_healthy_sibling_retires() {
-    for corruption in [
-        "financial_height=1,financial_hash=NULL",
-        "financial_height=NULL,financial_hash='private-invalid-checkpoint'",
-        "financial_height=-1,financial_hash='0x0000000000000000000000000000000000000000000000000000000000000001'",
-        "financial_height=1,financial_hash='private-invalid-checkpoint'",
-        "address='private-invalid-wallet-address'",
-    ] {
+    for corruption in ["address='private-invalid-wallet-address'"] {
         let f = Fixture::new(1_000, true, true, 0).await;
         let (group, wallet) = (f.pool.pool.clone(), f.wallet.clone());
         f.store
@@ -513,5 +507,61 @@ async fn replacing_maintenance_owner_joins_detached_authorization_work() {
             .unwrap(),
         1
     );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn malformed_derived_checkpoints_rebuild_without_stopping_retirement() {
+    for corruption in [
+        "financial_height=1,financial_hash=NULL",
+        "financial_height=NULL,financial_hash='private-invalid-checkpoint'",
+        "financial_height=-1,financial_hash='0x0000000000000000000000000000000000000000000000000000000000000001'",
+        "financial_height=1,financial_hash='private-invalid-checkpoint'",
+        "debit_height=999,debit_hash='0x0000000000000000000000000000000000000000000000000000000000000001'",
+        "evidence_repair='chain_repair_required'",
+    ] {
+        let f = Fixture::new(1_000, true, true, 0).await;
+        let (group, wallet) = (f.pool.pool.clone(), f.wallet.clone());
+        f.store
+            .call(move |s| s.finish_balance(&group, &wallet, Some(U256::ZERO)))
+            .await
+            .unwrap();
+        f.db()
+            .execute(
+                &format!("UPDATE wallets SET {corruption} WHERE id=?1"),
+                [&f.wallet],
+            )
+            .unwrap();
+        assert!(f.pool.reconcile().await.is_ok(), "{corruption}");
+        assert_eq!(f.role(), "RETIRED", "{corruption}");
+        f.close().await;
+    }
+}
+
+#[tokio::test]
+async fn completed_never_accepted_destination_retires_without_fabricating_initial_credit() {
+    let f = Fixture::new(1_000, false, true, 0).await;
+    f.db()
+        .execute(
+            "UPDATE funding_jobs SET state='COMPLETE' WHERE wallet_id=?1",
+            [&f.wallet],
+        )
+        .unwrap();
+    f.db()
+        .execute(
+            "UPDATE wallets SET role='RETAINED' WHERE id=?1",
+            [&f.wallet],
+        )
+        .unwrap();
+    let (group, wallet) = (f.pool.pool.clone(), f.wallet.clone());
+    f.store
+        .call(move |s| s.finish_balance(&group, &wallet, Some(U256::ZERO)))
+        .await
+        .unwrap();
+    assert!(f.pool.reconcile().await.is_ok());
+    assert_eq!(f.role(), "RETIRED");
+    let (credited,jobs,attempts):(bool,i64,i64)=f.db().query_row("SELECT readiness_requirement IS NOT NULL,(SELECT COUNT(*) FROM funding_jobs),(SELECT COUNT(*) FROM payment_attempts) FROM funding_jobs WHERE wallet_id=?1",[&f.wallet],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert!(!credited);
+    assert_eq!((jobs, attempts), (1, 0));
     f.close().await;
 }

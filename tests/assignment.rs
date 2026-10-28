@@ -423,17 +423,18 @@ async fn automatic_scope_bindings_match_actual_payment_signers() {
     let logs = signed.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let rpc = |Json(request): Json<Value>| async move {
+    let timestamp = now().unwrap();
+    let rpc = move |Json(request): Json<Value>| async move {
         let result = match request["method"].as_str().unwrap() {
             "eth_chainId" => json!("0x2105"),
             "eth_getBlockByNumber" => {
                 let tag = request["params"][0].as_str().unwrap();
-                let height = if tag == "latest" {
+                let height = if matches!(tag, "latest" | "finalized") {
                     256
                 } else {
                     u64::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap()
                 };
-                json!({"number":format!("0x{height:x}"),"timestamp":format!("0x{:x}",now().unwrap()),"hash":format!("0x{height:064x}")})
+                json!({"number":format!("0x{height:x}"),"timestamp":format!("0x{timestamp:x}"),"hash":format!("0x{height:064x}")})
             }
             "eth_call" => {
                 let data = request["params"][0]["data"].as_str().unwrap();

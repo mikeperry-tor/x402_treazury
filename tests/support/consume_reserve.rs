@@ -32,6 +32,7 @@ fn consume(store: Store, state: &Path, key: &Path, pool: &str, replace: bool) ->
             use serde_json::{Value,json};
             let ready=store.status().unwrap().pools.into_iter().find(|p|p.id==pool).unwrap().addresses.into_iter().find(|w|w.role=="READY").unwrap();
             let address=ready.address.to_lowercase();
+            let timestamp=now().unwrap();
             let app=Router::new().route("/rpc",post(move |Json(v):Json<Value>| {
                 let address=address.clone();
                 async move {
@@ -39,8 +40,8 @@ fn consume(store: Store, state: &Path, key: &Path, pool: &str, replace: bool) ->
                         "eth_chainId"=>json!("0x2105"),
                         "eth_getBlockByNumber"=>{
                             let tag=v["params"][0].as_str().unwrap();
-                            let height=if tag=="latest"{200}else{u64::from_str_radix(&tag[2..],16).unwrap()};
-                            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                            let height=if matches!(tag,"latest"|"finalized"){200}else{u64::from_str_radix(&tag[2..],16).unwrap()};
+                            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                         },
                         "eth_call"=>{
                             let data=v["params"][0]["data"].as_str().unwrap();

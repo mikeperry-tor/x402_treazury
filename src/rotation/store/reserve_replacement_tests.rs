@@ -299,6 +299,86 @@ fn proven_expired_source_can_be_replaced_without_erasing_expiry_or_bytes() {
 }
 
 #[test]
+fn never_credited_destination_closes_only_when_every_original_source_cannot_deliver() {
+    for source in [
+        "unprepared",
+        "accepted",
+        "pending",
+        "expired",
+        "confirmed",
+        "unknown",
+    ] {
+        let (_dir, mut store, job) = fixture();
+        complete(&store, &job);
+        if source == "accepted" {
+            store
+                .accept_preparation(&job.operation_id, Some(&job.pool_id), 60, None)
+                .unwrap();
+        } else if source != "unprepared" {
+            prepare(&mut store, &job);
+            match source {
+                "expired" => {
+                    let revision = store.snapshot().unwrap().0;
+                    store
+                        .db
+                        .execute(
+                            "UPDATE outgoing SET state='RESOLVED' WHERE id=?1",
+                            [&job.operation_id],
+                        )
+                        .unwrap();
+                    store
+                        .db
+                        .execute(
+                            "INSERT INTO expired_operations(id,height,revision) VALUES(?1,101,?2)",
+                            params![job.operation_id, revision],
+                        )
+                        .unwrap();
+                }
+                "confirmed" => store.confirm_spend(&job.operation_id).unwrap(),
+                "unknown" => {
+                    store
+                        .db
+                        .execute(
+                            "UPDATE outgoing SET state='RESOLVED' WHERE id=?1",
+                            [&job.operation_id],
+                        )
+                        .unwrap();
+                }
+                _ => {}
+            }
+        }
+        let closed = matches!(source, "unprepared" | "expired");
+        assert_eq!(
+            !funding::destination_obligation_pending(&store.db, &job.wallet_id).unwrap(),
+            closed,
+            "{source}"
+        );
+        assert!(
+            !funding::initial_credit_recorded(&store.db, &job.wallet_id).unwrap(),
+            "closure is not positive credit"
+        );
+        // A confirmed archived deposit remains capable of delivery even if the
+        // current operation never started. Every attempt must close together.
+        store.db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES('archived',?1,'\"COMPLETE\"')",[&job.id]).unwrap();
+        let facts = serde_json::to_string(&TransactionFacts {
+            txid: "archive".into(),
+            expiry_height: 100,
+            amount_zatoshis: 1,
+            fee_zatoshis: 1,
+            deadline: None,
+        })
+        .unwrap();
+        let revision = store.snapshot().unwrap().0;
+        store.db.execute("INSERT INTO outgoing(id,state,raw,revision,preparation) VALUES('archived','RESOLVED',X'00',?1,X'00')",[revision]).unwrap();
+        store.db.execute("INSERT INTO treasury_operations(id,facts,submission,attempts) VALUES('archived',?1,'CONFIRMED',1)",[facts]).unwrap();
+        assert!(
+            funding::destination_obligation_pending(&store.db, &job.wallet_id).unwrap(),
+            "{source}: archived deposit still owns delivery uncertainty"
+        );
+    }
+}
+
+#[test]
 fn replacement_logs_recovery_once_and_pending_source_as_delay() {
     if crate::test_log_capture::run_in_child(
         "rotation::store::reserve_replacement::tests::replacement_logs_recovery_once_and_pending_source_as_delay",

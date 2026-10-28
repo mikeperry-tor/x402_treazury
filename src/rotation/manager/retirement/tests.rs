@@ -394,7 +394,7 @@ async fn handle(State(rpc): State<Arc<Rpc>>, Json(request): Json<Value>) -> Json
             "eth_chainId" => (json!("0x2105"), false),
             "eth_getBlockByNumber" => {
                 let tag = request["params"][0].as_str().unwrap();
-                let height = if tag == "latest" {
+                let height = if matches!(tag, "latest" | "finalized") {
                     state.head
                 } else {
                     u64::from_str_radix(&tag[2..], 16).unwrap()
@@ -1062,7 +1062,28 @@ fn stopped_records_warn_once_with_safe_cause_while_proof_retries_remain_recovera
         .build()
         .unwrap()
         .block_on(async {
-            for corrupt in ["nonce", "checkpoint", "column", "tolerance"] {
+            // Derived checkpoint damage rebuilds from canonical evidence without
+            // an operator stop or warning; immutable original damage below does not.
+            let f = Fixture::new(1_000, true, true, 0).await;
+            let (group, wallet) = (f.pool.pool.clone(), f.wallet.clone());
+            f.store
+                .call(move |s| s.finish_balance(&group, &wallet, Some(U256::ZERO)))
+                .await
+                .unwrap();
+            f.db()
+                .execute(
+                    "UPDATE wallets SET financial_height=1,financial_hash=NULL WHERE id=?1",
+                    [&f.wallet],
+                )
+                .unwrap();
+            assert!(f.pool.reconcile().await.is_ok());
+            assert_eq!(f.role(), "RETIRED");
+            f.close().await;
+            let repaired = std::fs::read_to_string(log.path()).unwrap();
+            assert!(!repaired.contains("WARN"), "{repaired}");
+            assert!(!repaired.contains("ERROR"), "{repaired}");
+
+            for corrupt in ["nonce", "column", "tolerance"] {
                 let f = Fixture::new(
                     1_000,
                     true,
@@ -1070,14 +1091,7 @@ fn stopped_records_warn_once_with_safe_cause_while_proof_retries_remain_recovera
                     usize::from(matches!(corrupt, "nonce" | "column")),
                 )
                 .await;
-                if corrupt == "checkpoint" {
-                    f.db()
-                        .execute(
-                            "UPDATE wallets SET financial_height=1,financial_hash=NULL WHERE id=?1",
-                            [&f.wallet],
-                        )
-                        .unwrap();
-                } else if corrupt == "nonce" {
+                if corrupt == "nonce" {
                     f.db()
                         .execute(
                             "UPDATE payment_attempts SET nonce='private-malformed-nonce'",
@@ -1158,12 +1172,12 @@ fn stopped_records_warn_once_with_safe_cause_while_proof_retries_remain_recovera
             }
         });
     let logged = std::fs::read_to_string(log.path()).unwrap();
-    assert_eq!(logged.matches("WARN").count(), 4, "{logged}");
+    assert_eq!(logged.matches("WARN").count(), 3, "{logged}");
     assert_eq!(
         logged
             .matches("Wallet retirement stopped because stored records need inspection")
             .count(),
-        3,
+        2,
         "{logged}"
     );
     assert_eq!(
@@ -1184,10 +1198,8 @@ fn stopped_records_warn_once_with_safe_cause_while_proof_retries_remain_recovera
         "{logged}"
     );
     for expected in [
-        "stored financial checkpoint",
         "stored payment authorization",
         "stored retirement tolerance",
-        "malformed_durable_evidence_support",
         "stored wallet record has an invalid column type",
         "Wallet retirement check completed after a delay",
         "pool=",

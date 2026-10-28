@@ -3,6 +3,23 @@
 These tests use public deterministic keys, localhost fixtures and isolated regtest
 chains. None spends mainnet funds or contacts NEAR's production API.
 
+Canonical recovery coverage must distinguish Base finality from confirmation
+depth: finalized lag/unavailability, incoherent headers and mid-read reorgs must
+not produce a depth-only balance, nonce or receipt proof. Replaced historical
+anchors must recover through original authorization pages after atomic archival
+and reopening of derived resolutions, including still-valid signatures and
+unburied expiry. Exercise restart and stale concurrent publication at the reset
+boundary, preserve retired signer exclusion and consumed initial funding claims,
+and assert no payment replay or replacement deposit. Historical resolution/balance
+support must remain audit data without vetoing fresh canonical proof. Equal
+finalized heights with newer latest balances must preserve the newer observation
+through out-of-order publication and forbid retirement on an older zero balance.
+Never-credited closure must
+check every current and archived original operation: proven expiry or no accepted
+calculation/submission can close a completed job; confirmed or uncertain source
+work, pending preparation and missing provenance must retain it.
+These fixtures do not establish live consensus finality.
+
 | Coverage | Test | Evidence and limits |
 | --- | --- | --- |
 | Bootstrap → payment → promotion → pending refill → restart → ready replacement | `managed::lifecycle::bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation` | Real payment admission, EVM signing, durable journals and Base RPC adapter. Deterministic funding backend; proves five distinct sends for two bootstrapped pools plus one refill, with stable operation identity across restart. |

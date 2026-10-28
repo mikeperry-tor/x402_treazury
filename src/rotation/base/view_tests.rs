@@ -36,7 +36,7 @@ async fn fixture_timestamp(
                     "eth_chainId" => json!("0x2105"),
                     "eth_getBlockByNumber" => {
                         let tag = v["params"][0].as_str().unwrap();
-                        let height = if tag == "latest" {
+                        let height = if matches!(tag, "latest" | "finalized") {
                             head.load(std::sync::atomic::Ordering::SeqCst)
                         } else {
                             u64::from_str_radix(&tag[2..], 16).unwrap()
@@ -98,7 +98,6 @@ fn capture(wallet: &str, checkpoint: Option<Anchor>) -> EvidenceCapture {
         checkpoint,
         previous: None,
         previous_confirmed_covered: false,
-        durable_balance_anchors: vec![],
     }
 }
 
@@ -129,8 +128,7 @@ async fn captured_and_acquired_anchors_share_post_balance_checks_across_wallets(
         .wallets
         .push(("second".into(), format!("0x{:040x}", 2)));
     for wallet in ["wallet", "second"] {
-        let mut captured = capture(wallet, Some(anchor(88)));
-        captured.durable_balance_anchors = vec![anchor(88), anchor(100)];
+        let captured = capture(wallet, Some(anchor(88)));
         query.captures.insert(wallet.into(), captured);
     }
     let view = rpc.view(query).await.unwrap();
@@ -142,28 +140,24 @@ async fn captured_and_acquired_anchors_share_post_balance_checks_across_wallets(
         "initial header and one post-state recheck"
     );
     assert_eq!(header_reads(&requests, 100), 1);
-    assert_eq!(requests.lock().unwrap().len(), 9);
+    assert_eq!(requests.lock().unwrap().len(), 10);
     server.abort();
 }
 
 #[tokio::test]
-async fn shared_header_checks_preserve_captured_conflict_scope() {
-    // Both the financial checkpoint and immutable readiness-only support must
-    // retain their typed attribution when an acquired anchor changes.
-    for financial in [false, true] {
-        let (rpc, _, server, _) = fixture(true).await;
-        let mut query = query(false);
-        let mut captured = capture("wallet", financial.then(|| anchor(88)));
-        captured.durable_balance_anchors.push(anchor(88));
-        query.captures.insert("wallet".into(), captured);
-        let error = rpc.view(query).await.err().unwrap();
-        let conflict = error.downcast_ref::<EvidenceConflict>().unwrap();
-        assert_eq!(conflict.wallet, "wallet");
-        assert_eq!(conflict.anchor, anchor(88));
-        assert_eq!(conflict.financial_checkpoint, financial);
-        assert!(!conflict.latest_only);
-        server.abort();
-    }
+async fn shared_header_recheck_preserves_current_financial_checkpoint_conflict_scope() {
+    let (rpc, _, server, _) = fixture(true).await;
+    let mut query = query(false);
+    query
+        .captures
+        .insert("wallet".into(), capture("wallet", Some(anchor(88))));
+    let error = rpc.view(query).await.err().unwrap();
+    let conflict = error.downcast_ref::<EvidenceConflict>().unwrap();
+    assert_eq!(conflict.wallet, "wallet");
+    assert_eq!(conflict.anchor, anchor(88));
+    assert!(conflict.financial_checkpoint);
+    assert!(!conflict.latest_only);
+    server.abort();
 }
 
 #[tokio::test]
@@ -211,33 +205,18 @@ async fn historical_resolution_and_compatibility_share_identical_anchors() {
                 "eth_chainId",
                 "eth_getBlockByNumber",
                 "eth_getBlockByNumber",
+                "eth_getBlockByNumber",
                 "eth_call",
+                "eth_getBlockByNumber",
                 "eth_getBlockByNumber"
             ]
         );
         assert_eq!(requests[1]["params"][0], "latest");
-        assert_eq!(requests[2]["params"][0], "0x58");
-        assert_eq!(requests[4]["params"][0], "0x58");
+        assert_eq!(requests[2]["params"][0], "finalized");
+        assert_eq!(requests[3]["params"][0], "0x58");
+        assert_eq!(requests[5]["params"][0], "0x64");
+        assert_eq!(requests[6]["params"][0], "0x58");
     }
-    server.abort();
-}
-
-#[tokio::test]
-async fn history_replacement_retains_readiness_only_conflict_scope() {
-    let (rpc, _, server, _) = fixture(true).await;
-    let mut query = query(true);
-    query.wallets.clear();
-    let mut captured = capture("wallet", None);
-    captured.durable_balance_anchors.push(anchor(88));
-    query.captures.insert("wallet".into(), captured);
-    let error = rpc.view(query).await.err().unwrap();
-    let conflict = error
-        .downcast_ref::<EvidenceConflict>()
-        .expect("historical readiness conflict must remain typed");
-    assert_eq!(conflict.wallet, "wallet");
-    assert_eq!(conflict.anchor, anchor(88));
-    assert!(!conflict.financial_checkpoint);
-    assert!(!conflict.latest_only);
     server.abort();
 }
 
@@ -250,13 +229,13 @@ async fn balance_only_reads_one_header_pair_and_rechecks_both_anchors() {
     assert_eq!(observation.latest.anchor.height, 100);
 
     let requests = requests.lock().unwrap();
-    assert_eq!(requests.len(), 7, "no redundant admission header fetches");
+    assert_eq!(requests.len(), 8, "no redundant admission header fetches");
     let headers: Vec<_> = requests
         .iter()
         .filter(|r| r["method"] == "eth_getBlockByNumber")
         .map(|r| r["params"][0].as_str().unwrap())
         .collect();
-    assert_eq!(headers, ["latest", "0x58", "0x58", "0x64"]);
+    assert_eq!(headers, ["latest", "finalized", "0x58", "0x58", "0x64"]);
     let balances: Vec<_> = requests
         .iter()
         .filter(|r| r["method"] == "eth_call")
@@ -293,7 +272,18 @@ async fn combined_history_acquires_new_admission_headers_without_relabeling_reso
         .collect();
     assert_eq!(
         headers,
-        ["latest", "0x58", "latest", "0xbc", "0x58", "0xbc", "0xc8"]
+        [
+            "latest",
+            "finalized",
+            "0x58",
+            "latest",
+            "finalized",
+            "0xbc",
+            "0x58",
+            "0xbc",
+            "0xc8",
+            "0x64"
+        ]
     );
     let balances: Vec<_> = requests
         .iter()
@@ -366,11 +356,12 @@ async fn unused_authorization_requires_strictly_later_confirmed_time_for_release
         let reads = requests.lock().unwrap();
         assert_eq!(
             reads.len(),
-            5,
-            "historical proof requires one exact anchor recheck and no balance acquisition"
+            7,
+            "historical proof rechecks its resolution and finalized anchors without balances"
         );
-        assert_eq!(reads[3]["params"][1]["blockHash"], anchor(88).hash);
-        assert_eq!(reads[4]["params"][0], "0x58");
+        assert_eq!(reads[4]["params"][1]["blockHash"], anchor(88).hash);
+        assert_eq!(reads[5]["params"][0], "0x64");
+        assert_eq!(reads[6]["params"][0], "0x58");
         drop(reads);
         server.abort();
     }
@@ -391,15 +382,16 @@ async fn invalid_authorization_boolean_fails_before_admission_balance_reads() {
     let reads = requests.lock().unwrap();
     assert_eq!(
         reads.len(),
-        4,
+        5,
         "invalid historical evidence must stop before fresh admission headers or balances"
     );
     assert_eq!(reads[0]["method"], "eth_chainId");
     assert_eq!(reads[1]["params"][0], "latest");
-    assert_eq!(reads[2]["params"][0], "0x58");
-    assert_eq!(reads[3]["method"], "eth_call");
+    assert_eq!(reads[2]["params"][0], "finalized");
+    assert_eq!(reads[3]["params"][0], "0x58");
+    assert_eq!(reads[4]["method"], "eth_call");
     assert!(
-        !reads[3]["params"][0]["data"]
+        !reads[4]["params"][0]["data"]
             .as_str()
             .unwrap()
             .starts_with("0x70a08231")

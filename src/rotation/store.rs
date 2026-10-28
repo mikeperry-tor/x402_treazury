@@ -1322,14 +1322,13 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
-    /// Read-only query construction is also used by funding credit without the
-    /// payment gate. It must never reclaim a live signer's unsigned reservation.
+    /// Query construction may rebuild derived chain projections from original
+    /// attempts. It never reclaims a live signer's unsigned reservation.
     pub fn chain_query(&self, pool: &str) -> Result<super::base::ChainQuery> {
         self.chain_query_inner(pool, true)
     }
     /// Historical authorizations still reconcile, but retired balances cannot
     /// fund a payment and must not delay acquisition of active admission evidence.
-    #[cfg(test)]
     #[cfg(test)]
     pub(crate) fn payment_chain_query(&self, pool: &str) -> Result<super::base::ChainQuery> {
         self.chain_query_inner(pool, false)

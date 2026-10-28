@@ -4,6 +4,7 @@ use crate::rotation::base::{
     Anchor,
     evidence::{BalanceObservation, EvidenceFailure},
 };
+mod recovery;
 
 #[cfg(test)]
 pub(super) fn initialize_in_transaction(tx: &Connection) -> Result<()> {
@@ -66,6 +67,43 @@ PRAGMA user_version=14;")?;
 pub struct BalanceSupport {
     pub observation: BalanceObservation,
     pub checkpoint: Option<Anchor>,
+}
+
+/// Derived nonce dispositions are useful only as intrinsically valid tuples.
+/// Optional support bytes remain audit data, not a second source of authority.
+fn decode_resolution(
+    row: &rusqlite::Row<'_>,
+    valid_before: u64,
+) -> rusqlite::Result<Option<(crate::rotation::base::AuthorizationOutcome, Anchor, u64)>> {
+    use crate::rotation::base::AuthorizationOutcome;
+    let (outcome, height, hash, block_time) = (
+        row.get_ref(0)?,
+        row.get_ref(1)?,
+        row.get_ref(2)?,
+        row.get_ref(3)?,
+    );
+    Ok((|| {
+        let outcome = match outcome.as_str().ok()? {
+            "USED" => AuthorizationOutcome::Used,
+            "EXPIRED_UNUSED" => AuthorizationOutcome::ExpiredUnused,
+            _ => return None,
+        };
+        let height = u64::try_from(height.as_i64().ok()?).ok()?;
+        let hash = hash.as_str().ok()?;
+        hash.parse::<alloy_primitives::B256>().ok()?;
+        let block_time = u64::try_from(block_time.as_i64().ok()?).ok()?;
+        if outcome == AuthorizationOutcome::ExpiredUnused && block_time <= valid_before {
+            return None;
+        }
+        Some((
+            outcome,
+            Anchor {
+                height,
+                hash: hash.into(),
+            },
+            block_time,
+        ))
+    })())
 }
 
 pub(super) fn exposure(db: &Connection, wallet: &str) -> Result<U256> {
@@ -205,6 +243,7 @@ mod tests {
         use serde_json::{Value, json};
         let state = std::sync::Arc::new(std::sync::Mutex::new((100u64, 100u64)));
         let rpc_state = state.clone();
+        let timestamp = now().unwrap();
         let app = Router::new().route("/",post(move |Json(request):Json<Value>| {
             let state = rpc_state.clone();
             async move {
@@ -213,8 +252,8 @@ mod tests {
                     "eth_chainId" => json!("0x2105"),
                     "eth_getBlockByNumber" => {
                         let tag = request["params"][0].as_str().unwrap();
-                        let height = if tag == "latest" {head} else {u64::from_str_radix(&tag[2..],16).unwrap()};
-                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                        let height = if matches!(tag, "latest" | "finalized") {head} else {u64::from_str_radix(&tag[2..],16).unwrap()};
+                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                     }
                     "eth_call" => { assert_eq!(request["params"][1]["requireCanonical"],true);
                         let value = if request["params"][0]["data"].as_str().unwrap().starts_with("0x70a08231") {amount} else {1};
@@ -428,13 +467,11 @@ mod tests {
         let query = store
             .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
             .unwrap();
-        assert_eq!(
-            store
-                .publish_scoped_evidence(&pool, rpc.view(query).await.unwrap())
-                .unwrap_err()
-                .downcast_ref::<EvidenceFailure>(),
-            Some(&EvidenceFailure::AmountContradiction)
-        );
+        // The current canonical read is independent of the stale admission
+        // balance retained above; that historical blob is audit data.
+        store
+            .publish_scoped_evidence(&pool, rpc.view(query).await.unwrap())
+            .unwrap();
         let repair: Option<String> = store
             .db
             .query_row(
@@ -449,7 +486,9 @@ mod tests {
         );
         assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::ZERO);
         assert_eq!(checkpoint(&store.db, &wallet).unwrap(), Some(anchor(128)));
-        *state.lock().unwrap() = (140, 80);
+        // Historical admission support varies below; the canonical balance at
+        // these unchanged block hashes remains the already accepted value 70.
+        *state.lock().unwrap() = (140, 70);
         let mut wrong_height = durable_support.clone();
         wrong_height.observation.confirmed.anchor.height += 1;
         wrong_height.observation.latest.anchor.height += 1;
@@ -458,34 +497,33 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("address");
-        for (support, failure) in [
-            (
-                serde_json::to_string(&wrong_height).unwrap(),
-                EvidenceFailure::AmountContradiction,
-            ),
-            ("{broken".into(), EvidenceFailure::MalformedSupport),
-            ("{}".into(), EvidenceFailure::MalformedSupport),
-            (
-                missing_address.to_string(),
-                EvidenceFailure::MalformedSupport,
-            ),
+        for support in [
+            serde_json::to_string(&wrong_height).unwrap(),
+            "{broken".into(),
+            "{}".into(),
+            missing_address.to_string(),
         ] {
-            store.db.execute("UPDATE payment_admission_evidence SET support=?1 WHERE attempt_id='history-proof'",[support]).unwrap();
+            store.db.execute("UPDATE payment_admission_evidence SET support=?1 WHERE attempt_id='history-proof'",[&support]).unwrap();
             let query = store
                 .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
                 .unwrap();
+            store
+                .publish_scoped_evidence(&pool, rpc.view(query).await.unwrap())
+                .unwrap();
             assert_eq!(
-                store
-                    .publish_scoped_evidence(&pool, rpc.view(query).await.unwrap())
-                    .unwrap_err()
-                    .downcast_ref::<EvidenceFailure>(),
-                Some(&failure)
+                store.db.query_row(
+                    "SELECT support FROM payment_admission_evidence WHERE attempt_id='history-proof'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                ).unwrap(),
+                support,
+                "historical support remains unchanged audit data"
             );
             assert_eq!(exposure(&store.db, &wallet).unwrap(), U256::ZERO);
             assert_eq!(checkpoint(&store.db, &wallet).unwrap(), Some(anchor(128)));
         }
-        // Modern balance support has no local validity field. A faithful
-        // same-block record remains usable after historical contradiction checks.
+        // Current support has no legacy observation validity field. A faithful
+        // same-block record must remain usable after cache eviction/restart.
         store
             .db
             .execute(
@@ -499,6 +537,19 @@ mod tests {
         store
             .publish_scoped_evidence(&pool, rpc.view(query).await.unwrap())
             .unwrap();
+        store.db.execute("UPDATE payment_admission_evidence SET support='{broken' WHERE attempt_id='history-proof'",[]).unwrap();
+        *state.lock().unwrap() = (160, 80);
+        let query = store
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+            .unwrap();
+        store
+            .publish_scoped_evidence(&pool, rpc.view(query).await.unwrap())
+            .unwrap();
+        assert_eq!(
+            exposure(&store.db, &wallet).unwrap(),
+            U256::ZERO,
+            "optional malformed history cannot veto later canonical evidence"
+        );
         server.abort();
     }
 
@@ -634,6 +685,7 @@ mod tests {
 }
 
 pub(super) fn initialize_runtime(db: &Connection) -> Result<()> {
+    recovery::initialize_history(db)?;
     db.execute_batch("CREATE TEMP TABLE evidence_generations(kind TEXT NOT NULL,scope TEXT NOT NULL,generation INTEGER NOT NULL,PRIMARY KEY(kind,scope));")?;
     Ok(())
 }
@@ -674,6 +726,7 @@ impl Store {
         &self,
         wallet: &str,
     ) -> Result<crate::rotation::base::EvidenceCapture> {
+        self.recover_derived_evidence(wallet)?;
         let endpoints = self
             .db
             .prepare("SELECT scope,generation FROM evidence_generations WHERE kind='endpoint'")?
@@ -681,7 +734,6 @@ impl Store {
             .collect::<rusqlite::Result<std::collections::BTreeMap<_, _>>>()?;
         let checkpoint = checkpoint(&self.db, wallet)?;
         Ok(crate::rotation::base::EvidenceCapture {
-            durable_balance_anchors: Vec::new(),
             previous_confirmed_covered: false,
             namespace: self.evidence_namespace,
             wallet: wallet.into(),
@@ -697,62 +749,24 @@ impl Store {
     ) -> Result<crate::rotation::base::EvidenceCapture> {
         let mut capture = self.capture_authorization(wallet)?;
         let checkpoint = &capture.checkpoint;
-        let previous_confirmed_covered =
-            self.evidence_cache
-                .get(wallet)
-                .is_some_and(|(_, certificate)| {
-                    checkpoint.as_ref().is_some_and(|checkpoint| {
-                        certificate.observation().confirmed.anchor.height <= checkpoint.height
-                            && certificate.compatible(Some(checkpoint))
-                    })
-                });
-        let mut durable_balance_anchors = Vec::new();
-        let retired: Option<(String, Option<String>)> = self
-            .db
-            .query_row(
-                "SELECT support,disputed FROM wallet_retirements WHERE wallet_id=?1",
-                [wallet],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+        let previous = self.evidence_cache.get(wallet).filter(|(_, certificate)| {
+            check_capture(
+                &self.db,
+                self.evidence_namespace,
+                certificate.capture(),
+                &certificate.observation().endpoint,
+                certificate.endpoint_generation(),
             )
-            .optional()?;
-        if let Some((retired, disputed)) = retired {
-            let support: BalanceSupport =
-                serde_json::from_str(&retired).map_err(|_| EvidenceFailure::MalformedSupport)?;
-            support.observation.validate()?;
-            ensure!(
-                support.observation.wallet == wallet,
-                EvidenceFailure::ScopeMismatch
-            );
-            let address: String =
-                self.db
-                    .query_row("SELECT address FROM wallets WHERE id=?1", [wallet], |row| {
-                        row.get(0)
-                    })?;
-            ensure!(
-                support
-                    .observation
-                    .address
-                    .parse::<alloy_primitives::Address>()?
-                    == address.parse::<alloy_primitives::Address>()?,
-                EvidenceFailure::ScopeMismatch
-            );
-            // A known-disputed historical balance is retained for review, not
-            // a dependency of fresh capacity. Financial checkpoints are captured
-            // independently above and remain mandatory even at the same anchor.
-            if disputed.is_none() {
-                durable_balance_anchors.push(support.observation.confirmed.anchor);
-                durable_balance_anchors.push(support.observation.latest.anchor);
-                if let Some(anchor) = support.checkpoint {
-                    durable_balance_anchors.push(anchor);
-                }
-            }
-        }
-        capture.durable_balance_anchors = durable_balance_anchors;
+            .is_ok()
+        });
+        let previous_confirmed_covered = previous.is_some_and(|(_, certificate)| {
+            checkpoint.as_ref().is_some_and(|checkpoint| {
+                certificate.observation().confirmed.anchor.height <= checkpoint.height
+                    && certificate.compatible(Some(checkpoint))
+            })
+        });
         capture.previous_confirmed_covered = previous_confirmed_covered;
-        capture.previous = self
-            .evidence_cache
-            .get(wallet)
-            .map(|(_, certificate)| certificate.observation().clone());
+        capture.previous = previous.map(|(_, certificate)| certificate.observation().clone());
         Ok(capture)
     }
 }
@@ -770,18 +784,6 @@ pub(super) fn check_capture(
             && endpoint_generation == generation(db, "endpoint", endpoint)?,
         EvidenceFailure::Invalidated
     );
-    let repair: Option<String> = db.query_row(
-        "SELECT evidence_repair FROM wallets WHERE id=?1",
-        [&capture.wallet],
-        |row| row.get(0),
-    )?;
-    if let Some(reason) = repair {
-        anyhow::bail!(if reason == "evidence_repair_required" {
-            EvidenceFailure::EvidenceRepairRequired
-        } else {
-            EvidenceFailure::ChainRepairRequired
-        });
-    }
     Ok(())
 }
 pub(super) fn check_balance_integrity(
@@ -962,60 +964,6 @@ pub(super) fn advance_checkpoint(
     Ok(())
 }
 
-/// Six fixed indexed lookups shared by every publication. Building their JSON
-/// predicates once keeps statement construction out of the serialized hot path.
-fn balance_support_queries() -> &'static [String; 6] {
-    static QUERIES: std::sync::LazyLock<[String; 6]> = std::sync::LazyLock::new(|| {
-        let required = [
-            ("observation.wallet", "text"),
-            ("observation.address", "text"),
-            ("observation.network", "text"),
-            ("observation.asset", "text"),
-            ("observation.endpoint", "text"),
-            ("observation.confirmations", "integer"),
-            ("observation.confirmed.amount", "text"),
-            ("observation.confirmed.anchor.height", "integer"),
-            ("observation.confirmed.anchor.hash", "text"),
-            ("observation.latest.amount", "text"),
-            ("observation.latest.anchor.height", "integer"),
-            ("observation.latest.anchor.hash", "text"),
-        ]
-        .into_iter()
-        .map(|(field, kind)| format!("json_type(e.support,'$.{field}') IS NOT '{kind}'"))
-        .collect::<Vec<_>>()
-        .join(" OR ");
-        let malformed = format!(
-            "({required} OR (json_type(e.support,'$.checkpoint') IS NOT 'null' AND json_type(e.support,'$.checkpoint') IS NOT 'object') OR (json_type(e.support,'$.checkpoint')='object' AND (json_type(e.support,'$.checkpoint.height') IS NOT 'integer' OR json_type(e.support,'$.checkpoint.hash') IS NOT 'text')))"
-        );
-        let sources = [
-            (
-                "payment_admission_evidence e JOIN payment_attempts a ON a.id=e.attempt_id",
-                "a.wallet_id",
-                0,
-            ),
-            (
-                "(SELECT wallet_id,readiness_support AS support,readiness_hash AS block_hash,readiness_latest_hash AS latest_hash FROM funding_jobs) e",
-                "e.wallet_id",
-                1,
-            ),
-            (
-                "(SELECT wallet_id,support,confirmed_hash AS block_hash,latest_hash FROM wallet_retirements) e",
-                "e.wallet_id",
-                1,
-            ),
-        ];
-        std::array::from_fn(|index| {
-            let (column, path) =
-                [("block_hash", "confirmed"), ("latest_hash", "latest")][index / 3];
-            let (source, owner, missing) = sources[index % 3];
-            format!(
-                "SELECT COALESCE(e.support,''),CASE WHEN json_valid(e.support) THEN {malformed} ELSE 1 END FROM {source} WHERE {owner}=?1 AND e.{column}=?2 AND CASE WHEN e.support IS NULL THEN {missing} WHEN NOT json_valid(e.support) THEN 1 ELSE {malformed} OR json_extract(e.support,'$.observation.{path}.amount') IS NOT ?3 OR json_extract(e.support,'$.observation.{path}.anchor.height') IS NOT ?4 OR json_extract(e.support,'$.observation.{path}.anchor.hash') IS NOT ?2 END LIMIT 1"
-            )
-        })
-    });
-    &QUERIES
-}
-
 impl Store {
     /// A conflicting durable nonce proof invalidates its original wallet anchor.
     fn check_resolution_or_invalidate(
@@ -1024,14 +972,22 @@ impl Store {
         certificate: &crate::rotation::base::ResolutionCertificate,
     ) -> Result<bool> {
         check_resolution(&self.db, self.evidence_namespace, certificate)?;
-        let existing:Option<(String,i64,String,u64)> = self.db.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id=?1",[attempt],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
-        if let Some((outcome, height, hash, block_time)) = existing {
-            let expected =
-                if *certificate.outcome() == crate::rotation::base::AuthorizationOutcome::Used {
-                    "USED"
-                } else {
-                    "EXPIRED_UNUSED"
-                };
+        let existing = self.db.query_row(
+            "SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id=?1",
+            [attempt], |row| decode_resolution(row, certificate.authorization().valid_before),
+        ).optional()?;
+        if matches!(existing, Some(None)) {
+            // An encountered broken disposition is derived state. Reopen the
+            // original liabilities atomically and let the normal owner retry.
+            let wallet = &certificate.authorization().wallet;
+            let tx = self.db.transaction()?;
+            recovery::reopen_authorizations(&tx, wallet)?;
+            bump_generation(&tx, "wallet", wallet)?;
+            tx.commit()?;
+            self.evidence_cache.remove(wallet);
+            anyhow::bail!(EvidenceFailure::InvalidTuple);
+        }
+        if let Some(Some((outcome, anchor, block_time))) = existing {
             // A second canonical observation is not a second disposition. Its
             // height is an observation anchor, not the transaction's inclusion
             // height. Preserve the first proof and never release exposure twice.
@@ -1041,23 +997,19 @@ impl Store {
                 |r| r.get(0),
             )?;
             if resolved
-                && outcome == expected
-                && height != i64::try_from(certificate.anchor().height)?
-                && hash != certificate.anchor().hash
+                && outcome == *certificate.outcome()
+                && anchor.height != certificate.anchor().height
+                && anchor.hash != certificate.anchor().hash
             {
                 return Ok(true);
             }
-            if outcome != expected
-                || height != i64::try_from(certificate.anchor().height)?
-                || hash != certificate.anchor().hash
+            if outcome != *certificate.outcome()
+                || anchor != *certificate.anchor()
                 || block_time != certificate.block_time()
             {
                 self.invalidate_wallet_evidence(
                     &certificate.authorization().wallet,
-                    &Anchor {
-                        height: height.try_into()?,
-                        hash,
-                    },
+                    &anchor,
                     true,
                     false,
                 )?;
@@ -1065,47 +1017,6 @@ impl Store {
             }
         }
         Ok(false)
-    }
-
-    fn check_journal_support_or_invalidate(
-        &mut self,
-        wallet: &str,
-        observation: &BalanceObservation,
-    ) -> Result<()> {
-        // Journal support survives cache eviction. Indexed hash lookups return
-        // only a conflicting record; ordinary acquisition never enumerates history.
-        for point in [&observation.confirmed, &observation.latest] {
-            let encoded = serde_json::to_value(point.amount)?;
-            let amount_text = encoded.as_str().context("invalid encoded balance amount")?;
-            // SQLite flattens the funding/retirement projections so each
-            // lookup retains its dedicated hash index and malformed-JSON guard.
-            for sql in balance_support_queries() {
-                let conflicting: Option<(String, bool)> = self
-                    .db
-                    .prepare_cached(sql)?
-                    .query_row(
-                        params![
-                            wallet,
-                            point.anchor.hash,
-                            amount_text,
-                            i64::try_from(point.anchor.height)?
-                        ],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .optional()?;
-                if let Some((support, malformed)) = conflicting {
-                    let exact = serde_json::from_str::<BalanceSupport>(&support)
-                        .ok()
-                        .filter(|support| support.observation.validate().is_ok());
-                    self.invalidate_wallet_evidence(wallet, &point.anchor, false, true)?;
-                    if malformed || exact.is_none() {
-                        anyhow::bail!(EvidenceFailure::MalformedSupport);
-                    }
-                    anyhow::bail!(EvidenceFailure::AmountContradiction);
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Cached contradictions invalidate only the anchor supporting the failure.
@@ -1196,9 +1107,22 @@ impl Store {
                 "balance_certificate_binding_mismatch"
             );
             check_balance_integrity(&self.db, self.evidence_namespace, incoming)?;
-            self.check_journal_support_or_invalidate(wallet, observation)?;
 
-            if let Some((_, saved)) = self.evidence_cache.get(wallet).cloned() {
+            let saved = self
+                .evidence_cache
+                .get(wallet)
+                .filter(|(_, certificate)| {
+                    check_capture(
+                        &self.db,
+                        self.evidence_namespace,
+                        certificate.capture(),
+                        &certificate.observation().endpoint,
+                        certificate.endpoint_generation(),
+                    )
+                    .is_ok()
+                })
+                .cloned();
+            if let Some((_, saved)) = saved {
                 let order = self.compare_cached_balance_or_invalidate(
                     wallet,
                     observation,
@@ -1263,18 +1187,10 @@ impl Store {
         } else {
             tx.query_row("SELECT EXISTS(SELECT 1 FROM payment_resolutions r JOIN payment_attempts a ON a.id=r.attempt_id WHERE a.wallet_id=?1 AND r.hash=?2)",params![wallet,anchor.hash],|row|row.get(0))?
         };
-        if financial_checkpoint || dependent {
-            tx.execute(
-                "UPDATE wallets SET evidence_repair=?2 WHERE id=?1",
-                params![
-                    wallet,
-                    if amount_conflict {
-                        "evidence_repair_required"
-                    } else {
-                        "chain_repair_required"
-                    }
-                ],
-            )?;
+        let current_checkpoint =
+            financial_checkpoint && checkpoint(&tx, wallet)?.as_ref() == Some(anchor);
+        if current_checkpoint || dependent {
+            recovery::reopen_authorizations(&tx, wallet)?;
         }
         super::capacity::dispute_support(
             &tx,

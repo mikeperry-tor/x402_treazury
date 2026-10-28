@@ -9,6 +9,9 @@ struct Fixture {
     rpc: BaseRpc,
     // Head, balance, optional replacement block height.
     chain: Arc<Mutex<(u64, u64, Option<u64>)>>,
+    nonce: Arc<std::sync::atomic::AtomicU64>,
+    lagging_finality: Arc<std::sync::atomic::AtomicBool>,
+    stamp: Arc<std::sync::atomic::AtomicU64>,
     wallets: Vec<String>,
     pool: String,
     server: tokio::task::JoinHandle<()>,
@@ -23,21 +26,32 @@ impl Fixture {
     async fn new() -> Self {
         let chain = Arc::new(Mutex::new((100u64, 100u64, None)));
         let state = chain.clone();
+        let nonce = Arc::new(std::sync::atomic::AtomicU64::new(1));
+        let stamp = Arc::new(std::sync::atomic::AtomicU64::new(now().unwrap()));
+        let lagging_finality = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let finality_state = lagging_finality.clone();
+        let (nonce_state, stamp_state) = (nonce.clone(), stamp.clone());
         let app = Router::new().route("/", post(move |Json(request): Json<Value>| {
             let state = state.clone();
+            let (nonce,stamp)=(nonce_state.clone(),stamp_state.clone());
+            let finality = finality_state.clone();
             async move {
                 let (head, amount, replacement) = *state.lock().unwrap();
                 let result = match request["method"].as_str().unwrap() {
                     "eth_chainId" => json!("0x2105"),
                     "eth_getBlockByNumber" => {
                         let tag = request["params"][0].as_str().unwrap();
-                        let height = if tag == "latest" { head } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
+                        let height = if tag == "finalized" && finality.load(std::sync::atomic::Ordering::SeqCst) { 88 } else if matches!(tag, "latest" | "finalized") { head } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
                         let hash = height + if replacement == Some(height) { 1000 } else { 0 };
-                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{:x}",stamp.load(std::sync::atomic::Ordering::SeqCst))})
                     }
                     "eth_call" => {
                         assert_eq!(request["params"][1]["requireCanonical"], true);
-                        let value = if request["params"][0]["data"].as_str().unwrap().starts_with("0x70a08231") { amount } else { 1 };
+                        let value = if request["params"][0]["data"].as_str().unwrap().starts_with("0x70a08231") {
+                            let hash = request["params"][1]["blockHash"].as_str().unwrap();
+                            let height = u64::from_str_radix(&hash[2..], 16).unwrap();
+                            if finality.load(std::sync::atomic::Ordering::SeqCst) && height <= 100 { 0 } else { amount }
+                        } else { nonce.load(std::sync::atomic::Ordering::SeqCst) };
                         json!(format!("0x{value:064x}"))
                     }
                     _ => panic!("unexpected RPC mutation"),
@@ -77,6 +91,9 @@ impl Fixture {
             store,
             rpc,
             chain,
+            nonce,
+            lagging_finality,
+            stamp,
             wallets,
             pool,
             server,
@@ -116,7 +133,7 @@ impl Fixture {
         self.store.db.execute("INSERT INTO payment_resolutions(attempt_id,outcome,height,hash,block_time) VALUES('proof',?1,?2,?3,?4)",params![outcome,i64::try_from(anchor.height).unwrap(),anchor.hash,i64::try_from(block_time).unwrap()]).unwrap();
     }
 
-    fn assert_local_invalidation(&self, sibling: &BalanceObservation, repair: Option<&str>) {
+    fn assert_local_invalidation(&self, sibling: &BalanceObservation, archived: bool) {
         assert!(!self.store.evidence_cache.contains_key(&self.wallets[0]));
         assert_eq!(
             self.store.evidence_cache[&self.wallets[1]].1.observation(),
@@ -144,7 +161,15 @@ impl Fixture {
                     .unwrap()
             })
             .collect();
-        assert_eq!(reasons, [repair.map(str::to_owned), None]);
+        assert_eq!(reasons, [None, None]);
+        assert_eq!(
+            self.store
+                .db
+                .query_row("SELECT COUNT(*) FROM payment_resolution_history", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            i64::from(archived)
+        );
         assert_eq!(
             exposure(&self.store.db, &self.wallets[0]).unwrap(),
             U256::from(7)
@@ -207,10 +232,7 @@ async fn cached_replacement_invalidates_only_its_saved_anchor_and_wallet() {
                 .retain(|wallet, _| wallet == &fixture.wallets[0]);
             let error = fixture.store.prepare_evidence_view(changed).err().unwrap();
             assert_eq!(error.downcast_ref::<EvidenceFailure>(), Some(&failure));
-            fixture.assert_local_invalidation(
-                &saved.observations[&fixture.wallets[1]],
-                dependent.then_some("chain_repair_required"),
-            );
+            fixture.assert_local_invalidation(&saved.observations[&fixture.wallets[1]], dependent);
         }
     }
 }
@@ -220,6 +242,12 @@ async fn conflicting_resolution_rejects_each_changed_field_before_balance_public
     for field in ["outcome", "height", "hash", "block_time"] {
         let mut fixture = Fixture::new().await;
         let authorization = fixture.authorization();
+        // Both outcomes must be intrinsically possible at the saved block time;
+        // impossible expiry tuples are repaired as malformed derived evidence.
+        fixture.stamp.store(
+            authorization.valid_before + 1,
+            std::sync::atomic::Ordering::SeqCst,
+        );
         let captured = fixture.query();
         let saved = fixture.rpc.view(captured).await.unwrap();
         fixture.store.prepare_evidence_view(saved.clone()).unwrap();
@@ -267,10 +295,7 @@ async fn conflicting_resolution_rejects_each_changed_field_before_balance_public
             "{field}"
         );
         assert_eq!(fixture.store.evidence_order, order);
-        fixture.assert_local_invalidation(
-            &saved.observations[&fixture.wallets[1]],
-            Some("chain_repair_required"),
-        );
+        fixture.assert_local_invalidation(&saved.observations[&fixture.wallets[1]], true);
         for wallet in &fixture.wallets {
             let dispute: Option<String> = fixture
                 .store
@@ -286,7 +311,7 @@ async fn conflicting_resolution_rejects_each_changed_field_before_balance_public
                 "a chain conflict cannot reopen the initial claim"
             );
         }
-        let retained: (String, i64, String, u64) = fixture.store.db.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id='proof'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,sql_u64(r,3)?))).unwrap();
+        let retained: (String, i64, String, u64) = fixture.store.db.query_row("SELECT outcome,height,hash,block_time FROM payment_resolution_history WHERE attempt_id='proof'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,sql_u64(r,3)?))).unwrap();
         assert_eq!(
             retained,
             (
@@ -612,6 +637,209 @@ async fn malformed_resolution_bindings_cannot_invalidate_financial_evidence() {
         let (proofs, repairs): (i64,i64) = fixture.store.db.query_row("SELECT (SELECT COUNT(*) FROM payment_resolutions),(SELECT COUNT(*) FROM wallets WHERE evidence_repair IS NOT NULL)",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
         assert_eq!((proofs, repairs), (0, 0));
     }
+}
+
+#[path = "reorg_tests.rs"]
+mod reorg_tests;
+
+#[tokio::test]
+async fn historical_balance_support_is_audit_only_and_cannot_veto_canonical_proof() {
+    let mut fixture = Fixture::new().await;
+    let original = fixture.authorization();
+    fixture.store.db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state,payer,nonce,valid_before,reconciliation_sequence) SELECT 'later-proof',pool_id,wallet_id,generation,amount,requirements_hash,state,payer,?1,valid_before,2 FROM payment_attempts WHERE id='proof'", [format!("0x{:064x}", 2)]).unwrap();
+    let wallet = original.wallet.clone();
+    let initial = fixture.rpc.view(fixture.query()).await.unwrap();
+    let observation = initial.observations[&wallet].clone();
+    let mut contradiction = BalanceSupport {
+        observation: observation.clone(),
+        checkpoint: None,
+    };
+    contradiction.observation.confirmed.amount += U256::from(1);
+    let valid_conflict = serde_json::to_string(&contradiction).unwrap();
+    for (attempt, support) in [
+        ("proof", "{broken"),
+        ("later-proof", valid_conflict.as_str()),
+    ] {
+        fixture.store.db.execute("INSERT INTO payment_admission_evidence(attempt_id,block_height,block_hash,balance,reserved_before,support,latest_height,latest_hash,endpoint,payer_role) VALUES(?1,?2,?3,'100','0',?4,?5,?6,?7,'RETAINED')", params![attempt,i64::try_from(observation.confirmed.anchor.height).unwrap(),observation.confirmed.anchor.hash,support,i64::try_from(observation.latest.anchor.height).unwrap(),observation.latest.anchor.hash,observation.endpoint]).unwrap();
+    }
+    fixture
+        .store
+        .publish_scoped_evidence(&fixture.pool, initial)
+        .unwrap();
+    assert_eq!(
+        exposure(&fixture.store.db, &wallet).unwrap(),
+        U256::from(14)
+    );
+    assert_eq!(generation(&fixture.store.db, "wallet", &wallet).unwrap(), 0);
+    let stored: Vec<String> = fixture
+        .store
+        .db
+        .prepare("SELECT support FROM payment_admission_evidence ORDER BY rowid")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(stored, vec!["{broken".to_owned(), valid_conflict]);
+
+    // With only malformed optional history, the very same canonical block is
+    // immediately usable. Neither an advancing head nor repeated invalidation
+    // is needed, and every original authorization stays potentially chargeable.
+    fixture.store.db.execute("UPDATE payment_admission_evidence SET support='{also broken' WHERE attempt_id='later-proof'", []).unwrap();
+    fixture.store.db.execute("UPDATE funding_jobs SET readiness_support='{broken funding history',readiness_hash=?2,readiness_latest_hash=?3 WHERE wallet_id=?1", params![wallet,observation.confirmed.anchor.hash,observation.latest.anchor.hash]).unwrap();
+    for _ in 0..2 {
+        let view = fixture.rpc.view(fixture.query()).await.unwrap();
+        assert_eq!(view.observations[&wallet], observation);
+        fixture
+            .store
+            .publish_scoped_evidence(&fixture.pool, view)
+            .unwrap();
+    }
+    assert_eq!(generation(&fixture.store.db, "wallet", &wallet).unwrap(), 0);
+    assert_eq!(
+        exposure(&fixture.store.db, &wallet).unwrap(),
+        U256::from(14)
+    );
+    assert_eq!(
+        fixture
+            .store
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM payment_attempts WHERE state='POSSIBLY_SUBMITTED'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        2
+    );
+    for table in [
+        "payment_resolutions",
+        "payment_resolution_history",
+        "outgoing",
+        "operation_network",
+        "wallet_retirements",
+    ] {
+        assert_eq!(
+            fixture
+                .store
+                .db
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0,
+            "forbidden side effect in {table}"
+        );
+    }
+    let stored: Vec<String> = fixture
+        .store
+        .db
+        .prepare("SELECT support FROM payment_admission_evidence ORDER BY rowid")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(stored, vec!["{broken", "{also broken"]);
+    let funding_history: (String, Option<String>) = fixture
+        .store
+        .db
+        .query_row(
+            "SELECT readiness_support,readiness_disputed FROM funding_jobs WHERE wallet_id=?1",
+            [&wallet],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(funding_history, ("{broken funding history".into(), None));
+}
+
+#[tokio::test]
+async fn newer_latest_credit_prevents_retirement_during_finality_lag_and_late_publication() {
+    let mut f = Fixture::new().await;
+    let job_id: String = f
+        .store
+        .db
+        .query_row(
+            "SELECT id FROM funding_jobs WHERE allocation_kind='large'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let job = f.store.funding_job(&job_id).unwrap().unwrap();
+    // An observed external first credit consumes this claim; removing its large
+    // reserve creates a retained wallet eligible at a one-unit tolerance.
+    f.store
+        .record_funding_balance(
+            &job.id,
+            &job.operation_id,
+            &job.wallet_id,
+            &job.recipient,
+            U256::from(1),
+        )
+        .unwrap();
+    f.store
+        .configure_capacity_group(
+            &f.pool,
+            Some(U256::from(100_000_000)),
+            1,
+            &crate::rotation::store::test_support::reserves("1"),
+        )
+        .unwrap();
+    assert!(
+        f.store
+            .retirement_eligible(&f.pool, &job.wallet_id)
+            .unwrap()
+    );
+    f.lagging_finality
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    *f.chain.lock().unwrap() = (100, 0, None);
+    let query = f
+        .store
+        .scoped_chain_query(&f.pool, vec![job.wallet_id.clone()], vec![])
+        .unwrap();
+    let old = f.rpc.view(query.clone()).await.unwrap();
+    *f.chain.lock().unwrap() = (101, 7, None);
+    let newer = f.rpc.view(query).await.unwrap();
+    assert_eq!(
+        old.observations[&job.wallet_id].confirmed,
+        newer.observations[&job.wallet_id].confirmed
+    );
+    assert_eq!(
+        newer.observations[&job.wallet_id].latest.amount,
+        U256::from(7)
+    );
+    // Cache publication is independent of the later retirement transaction.
+    // Seed the old zero certificate so an Equal comparison would reuse it.
+    f.store.prepare_evidence_view(old.clone()).unwrap();
+    f.store
+        .publish_scoped_evidence(&f.pool, newer.clone())
+        .unwrap();
+    let published = f.store.publish_scoped_view(&f.pool, old).unwrap();
+    assert_eq!(
+        published.observations[&job.wallet_id],
+        newer.observations[&job.wallet_id]
+    );
+    assert_eq!(
+        f.store
+            .db
+            .query_row(
+                "SELECT role FROM wallets WHERE id=?1",
+                [&job.wallet_id],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "RETAINED"
+    );
+    assert_eq!(
+        f.store
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM wallet_retirements WHERE wallet_id=?1",
+                [&job.wallet_id],
+                |r| r.get::<_, u32>(0)
+            )
+            .unwrap(),
+        0
+    );
 }
 
 #[tokio::test]

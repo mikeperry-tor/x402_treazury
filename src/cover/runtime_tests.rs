@@ -77,7 +77,7 @@ async fn paid_fixture() {
             let result=match v["method"].as_str().unwrap(){
                 "eth_chainId"=>json!("0x2105"),
                 "eth_getBlockByNumber"=>{
-                    let height=if v["params"][0]=="latest" {112} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()};
+                    let height=if matches!(v["params"][0].as_str(),Some("latest"|"finalized")) {112} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()};
                     json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{block_timestamp:x}")})
                 },
                 "eth_call"=>{let data=v["params"][0]["data"].as_str().unwrap();let value=if data.starts_with("0x70a08231"){let key=format!("0x{}",&data[data.len()-40..]).to_lowercase();*balances.lock().unwrap().get(&key).unwrap_or(&0)}else{0};json!(format!("0x{value:064x}"))},

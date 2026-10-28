@@ -179,6 +179,10 @@ async fn rpc(
                 }
                 chain.latest = next;
                 next
+            } else if v["params"][0] == "finalized" {
+                // Finality observes the current synthetic chain without mining
+                // another block or changing its historical balance snapshots.
+                chain.latest
             } else {
                 u64::from_str_radix(
                     v["params"][0].as_str().unwrap().trim_start_matches("0x"),

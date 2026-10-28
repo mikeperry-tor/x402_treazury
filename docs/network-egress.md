@@ -339,8 +339,14 @@ requested transaction hash to promote; a missing or mismatched hash still return
 pending but cannot promote. Remaining receipt fields, including transfer and
 authorization events, are checked when evaluating a confirmed receipt. Pending
 observations trigger no additional proof reads and establish no transfer proof.
-Canonical proof and configured whole-view fallback remain independent. Block age, confirmations and canonical block
-rechecks still determine whether evidence is usable. Base RPC response collection
+Canonical proof and configured whole-view fallback remain independent. Canonical
+Base proofs use the lower of the finalized height and latest height minus the
+configured confirmation depth. Block-hash-pinned contract reads and canonical
+rechecks bind balances/nonces to that view; receipt inclusion obeys the same bound.
+Unsupported, missing or incoherent finalized evidence remains pending or uses a
+configured fresh-view fallback, never a depth-only downgrade. Scalar advisory
+latest reads retain their existing contract. Finality, confirmations
+and canonical block rechecks determine whether evidence is usable. Base RPC response collection
 has a fixed 16 MiB byte bound to protect memory before JSON decoding, including
 chunked and lengthless bodies. Oversized responses produce a redacted typed failure
 without retrying that endpoint. Configured fallback discards the partial view and
@@ -474,6 +480,11 @@ group publication gate across remote I/O. Retirement uses the same identity-boun
 Base transport, public-destination and Tor/no-direct-fallback policies. Store-only
 serving requires no Zcash SDK or NEAR capability for this work. Qualification's
 full-pool traversal remains separately authorized.
+Changed historical anchors cause scoped reconstruction of derived checkpoints
+and original authorization resolutions through these same owners and transports.
+Old captures cannot publish after the atomic invalidation. Historical proofs are
+retained for inspection without requiring the orphaned anchor to become canonical
+again. Recovery adds no client, network lane, timeout or replay authority.
 Help coalesces requests for the same document without blocking other resources.
 Strict catalog loading requires complete selected results; its unsigned-serving
 loader can omit explicitly optional remote failures. Ordinary deployment serving
@@ -795,7 +806,7 @@ financial or qualification authority.
 | Endpoint catalog readiness: `servers.NAME.wait_for_catalogs`, default true | Waits without an overall deadline for the endpoint's own configured catalogs to publish before serving MCP HTTP. Sockets bind and funding/discovery run first. Required failure closes only affected waiting endpoints with ERROR; optional failure omits that source. False permits incremental availability. No additional network attempts, funding authority or transport timeout. See [catalog startup](configuration.md#multiple-mcp-ports-from-one-configuration). |
 | Foreground work owners: 128 | MCP tool calls and direct paid-client workflows retain the same permit through response construction, including cheap/unsigned tools; nested work reuses it. Saturation emits WARN `foreground_work_busy` and rejects before retaining new work or signing. |
 | Store/treasury command queues: 32 / 8 | Full-queue submission emits DEBUG `store_queue_full` / `treasury_queue_full` and waits with the original command; no new timeout, replay or authority. Accepted work retains its existing cancellation/shutdown contract. |
-| Advisory and retirement maintenance: four wallet acquisitions per group | One finite startup inventory pass, requested scalar refreshes and eligible retained-candidate retirement work. Shared per-wallet acquisitions retain the 60-second completion floor and independent error backoff up to 300 seconds; scalar success and retirement completion remain separate. Candidate authorization pages contain at most 64 rows each without a total-history cap. Store-lifetime eligibility/pending markers survive disposable result/cache eviction; latest above tolerance finishes demand even with a low saved minimum. Confirmed-high/latest-low, valid unused authorizations and transient failures retain scoped work. Ineligible or malformed candidates stop locally; unrelated wakes do not recreate completed demand. Accepted acquisition/publication owners survive waiter cancellation. Local metadata pages discover relevant eligibility changes; the five-second scheduler cadence grants no faster network reads. Startup follows the SOCKS prerequisite; explicit sync makes one finite attempt. Actual capacity deferral logs DEBUG; ordinary cooldown does not warn. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
+| Advisory and retirement maintenance: four wallet acquisitions per group | One finite startup inventory pass, requested scalar refreshes and eligible retained-candidate retirement work. Shared per-wallet acquisitions retain the 60-second completion floor and independent error backoff up to 300 seconds; scalar success and retirement completion remain separate. Candidate authorization pages contain at most 64 rows each without a total-history cap. Store-lifetime eligibility/pending markers survive disposable result/cache eviction; latest above tolerance finishes demand even with a low saved minimum. Confirmed-high/latest-low, valid unused authorizations and transient failures retain scoped work. Ineligible candidates and unrecoverable original-record corruption stop locally; canonical-history changes retain scoped reconstruction work without a new lane or timer. Unrelated wakes do not recreate completed demand. Accepted acquisition/publication owners survive waiter cancellation. Local metadata pages discover relevant eligibility changes; the five-second scheduler cadence grants no faster network reads. Startup follows the SOCKS prerequisite; explicit sync makes one finite attempt. Actual capacity deferral logs DEBUG; ordinary cooldown does not warn. See [wallet observation policy](wallet-rotation.md#wallet-observation-policy). |
 | Managed payer selection | Indexed saved hints select among existing eligible identities, without RPC or historical repair. Insufficient-funds traversal captures the existing inventory and visits each identity once; it never allocates or waits for funding. |
 | Runtime price hints: 24-hour receipt lifetime, 65,535 entries | Shares the API catalog disk-cache default lifetime. Bounded process memory for trusted operation/group/transport keys. Access and late validation never renew receipt age. Hints guide selection only; expiry or eviction triggers no HTTP, probe or authority renewal. Capacity eviction/drop logs DEBUG; normal expiry is silent. See [local resource limits](local-resource-limits.md). |
 | Quote deadline and Zcash transaction block expiry | External delivery/consensus constraints. Requested quote window defaults to two hours and is a preference; the returned deadline governs. The local 300-second margin and internal shielding wall expiry are removed. Consensus expiry remains inclusive at height N; zero has no expiry. The chain-specific 1Click arrival/confirmation/late-refund contract remains unresolved; broadcast acceptance is not settlement. |

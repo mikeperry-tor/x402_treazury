@@ -82,9 +82,18 @@ impl BalanceObservation {
         {
             return Err(EvidenceFailure::InvalidTuple);
         }
+        if (self.confirmed.anchor.height == self.latest.anchor.height)
+            != (self.confirmed.anchor.hash == self.latest.anchor.hash)
+        {
+            return Err(EvidenceFailure::InvalidTuple);
+        }
         if self.confirmations == 0
-            || self.latest.anchor.height.checked_sub(self.confirmations)
-                != Some(self.confirmed.anchor.height)
+            || self
+                .latest
+                .anchor
+                .height
+                .checked_sub(self.confirmations)
+                .is_none_or(|height| self.confirmed.anchor.height > height)
         {
             return Err(EvidenceFailure::InvalidTuple);
         }
@@ -126,7 +135,13 @@ impl BalanceObservation {
             .confirmed
             .anchor
             .height
-            .cmp(&previous.confirmed.anchor.height))
+            .cmp(&previous.confirmed.anchor.height)
+            .then_with(|| {
+                self.latest
+                    .anchor
+                    .height
+                    .cmp(&previous.latest.anchor.height)
+            }))
     }
 }
 
@@ -192,8 +207,35 @@ mod tests {
         changed.confirmations = 1;
         assert_eq!(
             changed.compare(&original),
-            Err(EvidenceFailure::InvalidTuple)
+            Err(EvidenceFailure::ScopeMismatch)
         );
+    }
+    #[test]
+    fn minimum_depth_allows_finality_lag_but_rejects_shallow_evidence() {
+        let mut value = observation(20, 8, 3);
+        value.confirmed.anchor = Anchor {
+            height: 19,
+            hash: format!("0x{:064x}", 19),
+        };
+        value.validate().unwrap();
+        value.confirmed.anchor = Anchor {
+            height: 21,
+            hash: format!("0x{:064x}", 21),
+        };
+        assert_eq!(value.validate(), Err(EvidenceFailure::InvalidTuple));
+    }
+    #[test]
+    fn latest_progress_orders_balances_while_finalized_head_is_unchanged() {
+        let older = observation(20, 0, 0);
+        let mut newer = older.clone();
+        newer.latest.anchor = Anchor {
+            height: 33,
+            hash: format!("0x{:064x}", 33),
+        };
+        newer.latest.amount = U256::from(7);
+        assert_eq!(newer.compare(&older), Ok(std::cmp::Ordering::Greater));
+        assert_eq!(older.compare(&newer), Ok(std::cmp::Ordering::Less));
+        assert_eq!(newer.remainder(), U256::from(7));
     }
     #[test]
     fn lower_newer_balance_is_usable() {

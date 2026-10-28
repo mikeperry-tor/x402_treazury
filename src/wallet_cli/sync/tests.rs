@@ -253,6 +253,7 @@ async fn finite_sync_applies_group_tolerance_and_retires_without_a_funding_owner
         let wallet = state.funding_job(&job).unwrap().unwrap().wallet_id;
         let head = Arc::new(std::sync::atomic::AtomicU64::new(100));
         let current = head.clone();
+        let timestamp = crate::rotation::base::now().unwrap();
         let app = Router::new().route("/", post(move |Json(request):Json<serde_json::Value>| {
             let head = current.load(std::sync::atomic::Ordering::SeqCst);
             async move {
@@ -260,8 +261,8 @@ async fn finite_sync_applies_group_tolerance_and_retires_without_a_funding_owner
                     "eth_chainId" => json!("0x2105"),
                     "eth_getBlockByNumber" => {
                         let tag = request["params"][0].as_str().unwrap();
-                        let height = if tag=="latest" {head} else {u64::from_str_radix(&tag[2..],16).unwrap()};
-                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
+                        let height = if matches!(tag,"latest"|"finalized") {head} else {u64::from_str_radix(&tag[2..],16).unwrap()};
+                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                     },
                     "eth_call" => json!(format!("0x{:064x}", if head==100 {2_000_000} else {1_000})),
                     method => panic!("unexpected mutation {method}"),

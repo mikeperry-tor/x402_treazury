@@ -385,11 +385,12 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     assert!(commands.test_is_empty());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let rpc = |axum::Json(v): axum::Json<serde_json::Value>| async move {
+    let timestamp = now().unwrap();
+    let rpc = move |axum::Json(v): axum::Json<serde_json::Value>| async move {
         let result = match v["method"].as_str().unwrap() {
             "eth_chainId" => json!("0x2105"),
             "eth_getBlockByNumber" => {
-                let height = if v["params"][0] == "latest" {
+                let height = if matches!(v["params"][0].as_str(), Some("latest" | "finalized")) {
                     100
                 } else {
                     u64::from_str_radix(
@@ -398,7 +399,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
                     )
                     .unwrap()
                 };
-                json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
             }
             "eth_call" => json!(format!("0x{:064x}", 5000000)),
             _ => panic!("unexpected RPC"),

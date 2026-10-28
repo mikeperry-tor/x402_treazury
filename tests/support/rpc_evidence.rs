@@ -19,6 +19,9 @@ pub async fn acquire(query: ChainQuery, amounts: BTreeMap<String, u64>, head: u6
             )
         })
         .collect();
+    // This server represents one immutable chain snapshot. Block time is not
+    // the service time of each latest/finalized/confirmed RPC response.
+    let timestamp = now().unwrap();
     let app = Router::new().route("/",post(move |Json(request): Json<Value>| {
         let balances = balances.clone();
         async move {
@@ -26,10 +29,10 @@ pub async fn acquire(query: ChainQuery, amounts: BTreeMap<String, u64>, head: u6
                 "eth_chainId" => json!("0x2105"),
                 "eth_getBlockByNumber" => {
                     let tag = request["params"][0].as_str().unwrap();
-                    let height = if tag == "latest" { head } else {
+                    let height = if matches!(tag, "latest" | "finalized") { head } else {
                         u64::from_str_radix(tag.strip_prefix("0x").unwrap(),16).unwrap()
                     };
-                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                 },
                 "eth_call" => {
                     assert_eq!(request["params"][1]["requireCanonical"],true);

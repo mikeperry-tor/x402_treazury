@@ -29,6 +29,7 @@ async fn sync_cli_explains_pending_retirement_and_preserves_failed_wallet_result
         let failed_payer = Arc::new(Mutex::new(String::new()));
         let rpc_head = head.clone();
         let rpc_payer = failed_payer.clone();
+        let timestamp = now().unwrap();
         let app = Router::new().route("/", post(move |Json(request): Json<Value>| {
             let head = rpc_head.load(Ordering::SeqCst);
             let failed_payer = rpc_payer.lock().unwrap().clone();
@@ -37,8 +38,8 @@ async fn sync_cli_explains_pending_retirement_and_preserves_failed_wallet_result
                     "eth_chainId" => json!("0x2105"),
                     "eth_getBlockByNumber" => {
                         let tag = request["params"][0].as_str().unwrap();
-                        let height = if tag == "latest" { head } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
-                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}", now().unwrap())})
+                        let height = if matches!(tag, "latest" | "finalized") { head } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
+                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                     }
                     "eth_call" => {
                         let data = request["params"][0]["data"].as_str().unwrap();

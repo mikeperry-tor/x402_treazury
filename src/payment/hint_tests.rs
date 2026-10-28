@@ -51,6 +51,7 @@ async fn fixture() -> Fixture {
     let signed = Arc::new(AtomicUsize::new(0));
     let rpc = Arc::new(AtomicUsize::new(0));
     let balance = Arc::new(AtomicUsize::new(10_000));
+    let timestamp = crate::rotation::base::now().unwrap();
     let app=Router::new().route("/items",get({
         let (replies,unsigned,signed)=(replies.clone(),unsigned.clone(),signed.clone());
         move |headers:HeaderMap| {
@@ -87,8 +88,8 @@ async fn fixture() -> Fixture {
                 "eth_chainId"=>json!("0x2105"),
                 "eth_getBlockByNumber"=>{
                     let tag=v["params"][0].as_str().unwrap();
-                    let height=if tag=="latest"{if balance.load(Ordering::SeqCst)>0 {100} else {124}}else{u64::from_str_radix(&tag[2..],16).unwrap()};
-                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
+                    let height=if matches!(tag,"latest"|"finalized"){if balance.load(Ordering::SeqCst)>0 {100} else {124}}else{u64::from_str_radix(&tag[2..],16).unwrap()};
+                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                 },
                 "eth_call"=>{
                     let amount=if v["params"][1]=="latest" {balance.load(Ordering::SeqCst)} else {10_000};

@@ -139,7 +139,7 @@ async fn endpoint(
         "eth_chainId" => json!("0x2105"),
         "eth_getBlockByNumber" => {
             let tag = q["params"][0].as_str().unwrap();
-            let height = if tag == "latest" {
+            let height = if matches!(tag, "latest" | "finalized") {
                 100
             } else {
                 u64::from_str_radix(&tag[2..], 16).unwrap()
@@ -344,7 +344,8 @@ async fn tor_base_ownership_child() {
             _ => {
                 assert_eq!(result.unwrap().unwrap().amount_atomic, "7000");
                 assert!(!Arc::ptr_eq(&before, &after));
-                assert_eq!(f.count(path, "eth_getBlockByNumber"), 4);
+                // Four acquisition reads plus three distinct pinned-height rechecks.
+                assert_eq!(f.count(path, "eth_getBlockByNumber"), 7);
             }
         }
     }

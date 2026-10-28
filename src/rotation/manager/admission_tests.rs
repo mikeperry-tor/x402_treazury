@@ -158,13 +158,14 @@ async fn fixture_with_held_response(hold: bool) -> Fixture {
             (StatusCode::PAYMENT_REQUIRED,[("payment-required",STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
         }
     }));
-    let app = app.route("/rpc", post(|Json(request): Json<Value>| async move {
+    let timestamp = now().unwrap();
+    let app = app.route("/rpc", post(move |Json(request): Json<Value>| async move {
         let result = match request["method"].as_str().unwrap() {
             "eth_chainId" => serde_json::json!("0x2105"),
             "eth_getBlockByNumber" => {
                 let tag = request["params"][0].as_str().unwrap();
-                let height = if tag == "latest" { 100 } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
-                serde_json::json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                let height = if matches!(tag, "latest" | "finalized") { 100 } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
+                serde_json::json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
             },
             "eth_call" => {
                 let value = if request["params"][0]["data"].as_str().unwrap().starts_with("0x70a08231") { 0 } else { 1 };

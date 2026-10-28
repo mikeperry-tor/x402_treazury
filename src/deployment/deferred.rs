@@ -1076,12 +1076,15 @@ wait_for_catalogs=false
             let (store, worker) = StoreHandle::spawn(state);
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}", listener.local_addr().unwrap());
+            let timestamp = crate::rotation::base::now().unwrap();
             let rpc = tokio::spawn(async move {
                 axum::serve(
                     listener,
                     Router::new().route(
                         "/",
-                        axum::routing::post(crate::discovery_relay::readiness_tests::rpc),
+                        axum::routing::post(move |request| {
+                            crate::discovery_relay::readiness_tests::rpc(timestamp, request)
+                        }),
                     ),
                 )
                 .await

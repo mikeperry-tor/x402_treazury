@@ -37,6 +37,7 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
     // one exact retired observation, never fabricate a financial certificate.
     let state = Arc::new(Mutex::new((100u64, false, false, false)));
     let rpc_state = state.clone();
+    let timestamp = now().unwrap();
     let app = Router::new().route("/", post(move |Json(v): Json<Value>| {
         let state = rpc_state.clone();
         async move {
@@ -45,9 +46,9 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
                 "eth_chainId" => json!(if wrong_chain { "0x1" } else { "0x2105" }),
                 "eth_getBlockByNumber" => {
                     let tag = v["params"][0].as_str().unwrap();
-                    let height = if tag == "latest" { head } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
+                    let height = if matches!(tag, "latest" | "finalized") { head } else { u64::from_str_radix(&tag[2..], 16).unwrap() };
                     let hash = if hash_conflict && height == 188 { 999 } else { height };
-                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{:x}",now().unwrap())})
+                    json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{timestamp:x}")})
                 },
                 "eth_call" => {
                     assert!(v["params"][0]["data"].as_str().unwrap().starts_with("0x70a08231"));
@@ -191,19 +192,6 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
         &treasury,
     )
     .unwrap();
-    let capture = store.capture_evidence(&wallet).unwrap();
-    assert!(
-        capture
-            .durable_balance_anchors
-            .iter()
-            .any(|anchor| anchor.height == 188)
-    );
-    assert!(
-        capture
-            .durable_balance_anchors
-            .iter()
-            .any(|anchor| anchor.height == 200)
-    );
     state.lock().unwrap().1 = true;
     let query = store
         .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
@@ -261,6 +249,73 @@ async fn retirement_keeps_exact_support_after_reopen_and_never_reactivates_on_di
         original
     );
     assert_eq!(store.funding_jobs().unwrap().len(), 1);
+    // Reuse the original retirement anchors: malformed optional history must
+    // not require a later finalized block before fresh proof can publish.
+    *state.lock().unwrap() = (200, false, false, false);
+    store.evidence_cache.remove(&wallet);
+    let original_support: super::BalanceSupport = serde_json::from_str(&original).unwrap();
+    let mut bad_checkpoint = serde_json::to_value(&original_support).unwrap();
+    bad_checkpoint["checkpoint"] = json!({"height":1,"hash":"invalid derived checkpoint"});
+    for (support, previous_dispute) in [
+        (
+            "{malformed derived history".to_owned(),
+            Some("canonical_evidence_replaced"),
+        ),
+        ("{malformed derived history".to_owned(), None),
+        (bad_checkpoint.to_string(), None),
+    ] {
+        store
+            .db
+            .execute(
+                "UPDATE wallet_retirements SET support=?2,disputed=?3 WHERE wallet_id=?1",
+                params![wallet, support, previous_dispute],
+            )
+            .unwrap();
+        let query = store
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+            .unwrap();
+        let view = rpc.view(query).await.unwrap();
+        assert_eq!(view.observations[&wallet], original_support.observation);
+        store.publish_scoped_evidence(&pool, view).unwrap();
+        assert_eq!(role(&store, &wallet), "RETIRED");
+        let (stored, disputed): (String, bool) = store
+            .db
+            .query_row(
+                "SELECT support,disputed IS NOT NULL FROM wallet_retirements WHERE wallet_id=?1",
+                [&wallet],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(stored, support);
+        assert_eq!(disputed, previous_dispute.is_some());
+    }
+    // SQL type damage is optional history too, rather than an original wallet
+    // identity failure. Preserve non-text bytes through capture and publication.
+    let malformed_blob = vec![0xff_u8];
+    store
+        .db
+        .execute(
+            "UPDATE wallet_retirements SET support=?2,disputed=NULL WHERE wallet_id=?1",
+            params![wallet, malformed_blob],
+        )
+        .unwrap();
+    let query = store
+        .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+        .unwrap();
+    let view = rpc.view(query).await.unwrap();
+    assert_eq!(view.observations[&wallet], original_support.observation);
+    store.publish_scoped_evidence(&pool, view).unwrap();
+    let (stored, disputed): (Vec<u8>, bool) = store
+        .db
+        .query_row(
+            "SELECT support,disputed IS NOT NULL FROM wallet_retirements WHERE wallet_id=?1",
+            [&wallet],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stored, malformed_blob);
+    assert!(!disputed);
+    assert_eq!(role(&store, &wallet), "RETIRED");
     server.abort();
 }
 fn role(store: &Store, wallet: &str) -> String {

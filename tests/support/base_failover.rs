@@ -35,7 +35,7 @@ pub async fn fixture() -> (std::net::SocketAddr, Requests, tokio::task::JoinHand
             let result = match method {
                 "eth_chainId" => json!(if mode == "wrong-chain" {"0x1"} else if mode == "malformed-chain" {"not-a-quantity"} else {"0x2105"}),
                 "eth_getBlockByNumber" => {
-                    let height = if v["params"][0] == "latest" {100} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"), 16).unwrap()};
+                    let height = if matches!(v["params"][0].as_str(), Some("latest" | "finalized")) {100} else {u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"), 16).unwrap()};
                     let hash = if mode == "conflict" {999} else {height};
                     let timestamp = if mode == "history-stale" {block_time-1000} else {block_time};
                     json!({"number":format!("0x{height:x}"),"hash":format!("0x{hash:064x}"),"timestamp":format!("0x{timestamp:x}")})

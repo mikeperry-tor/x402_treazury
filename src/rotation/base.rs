@@ -1,5 +1,4 @@
 //! Trusted Base RPC evidence at pinned blocks; no vendor response releases exposure.
-use super::error::AdmissionError;
 use crate::payment::USDC;
 use alloy_primitives::{Address, B256, U256, keccak256};
 use anyhow::{Context, Result, ensure};
@@ -199,6 +198,7 @@ pub fn secure_endpoint(text: &str) -> Result<reqwest::Url> {
 }
 struct ViewHeaders {
     latest: Anchor,
+    finalized: Anchor,
     confirmed: Anchor,
     confirmed_time: u64,
 }
@@ -272,6 +272,7 @@ impl BaseRpc {
     async fn verify_capture(
         &self,
         capture: &EvidenceCapture,
+        latest_height: u64,
         endpoint: &str,
         progress: &ViewProgress,
         rechecked: &mut BTreeMap<u64, Anchor>,
@@ -296,12 +297,17 @@ impl BaseRpc {
                 ))
                 .or_insert((true, false));
         }
-        for anchor in &capture.durable_balance_anchors {
-            anchors
-                .entry((anchor.height, anchor.hash.clone()))
-                .or_insert((false, false));
-        }
         for ((height, hash), (latest_only, financial_checkpoint)) in anchors {
+            if height > latest_height {
+                return Err(EvidenceConflict {
+                    wallet: capture.wallet.clone(),
+                    endpoint: endpoint.into(),
+                    anchor: Anchor { height, hash },
+                    latest_only,
+                    financial_checkpoint,
+                }
+                .into());
+            }
             let canonical = self
                 .recheck_anchor(height, rechecked, progress, "wallet_checkpoint")
                 .await?;
@@ -344,8 +350,8 @@ impl BaseRpc {
             let hash = hash.parse::<B256>().map_err(|_| malformed())?;
             // Preserve the caller's canonical-conflict classification for an
             // unexpected height, without selecting that response's transport.
-            let matches_request =
-                tag == "latest" || quantity(&json!(tag)).is_ok_and(|requested| requested == height);
+            let matches_request = matches!(tag, "latest" | "finalized")
+                || quantity(&json!(tag)).is_ok_and(|requested| requested == height);
             Ok((
                 (
                     Anchor {
@@ -426,8 +432,7 @@ impl BaseRpc {
         let count = self.fallbacks.len() + 1;
         let wallet_count = query.wallets.len();
         let pending_count = query.pending.len();
-        let expected_rpc_calls = 5usize
-            .saturating_add(usize::from(query.anchor.is_some()))
+        let expected_rpc_calls = 7usize
             .saturating_add(wallet_count.saturating_mul(2))
             .saturating_add(pending_count);
         for (index, endpoint) in std::iter::once(self).chain(&self.fallbacks).enumerate() {
@@ -478,7 +483,7 @@ impl BaseRpc {
         unreachable!("primary Base RPC endpoint always exists")
     }
     async fn view_inner(&self, query: ChainQuery, progress: &ViewProgress) -> Result<ChainView> {
-        let headers = self.initial_view_headers(&query, progress).await?;
+        let headers = self.initial_view_headers(progress).await?;
         let endpoint = self.endpoint_id();
         let read_history = !query.pending.is_empty();
         let ResolvedHistory {
@@ -496,8 +501,17 @@ impl BaseRpc {
             .await?;
         // Historical resolution and fresh admission retain distinct anchors.
         let resolution_anchor = headers.confirmed.clone();
+        let resolution_finalized = headers.finalized.clone();
         let mut rechecked = BTreeMap::new();
         if query.wallets.is_empty() {
+            self.recheck_view_anchors(
+                &[&resolution_finalized],
+                &query.captures,
+                &endpoint,
+                progress,
+                &mut rechecked,
+            )
+            .await?;
             self.verify_history_anchor(
                 &resolution_anchor,
                 &query.captures,
@@ -509,8 +523,14 @@ impl BaseRpc {
             for capture in query.captures.values() {
                 let mut historical = capture.clone();
                 historical.previous = None;
-                self.verify_capture(&historical, &endpoint, progress, &mut rechecked)
-                    .await?;
+                self.verify_capture(
+                    &historical,
+                    headers.latest.height,
+                    &endpoint,
+                    progress,
+                    &mut rechecked,
+                )
+                .await?;
             }
             return Ok(ChainView {
                 anchor: resolution_anchor,
@@ -535,7 +555,13 @@ impl BaseRpc {
             .balance_observations(&query.wallets, &headers, &endpoint, progress)
             .await?;
         self.recheck_view_anchors(
-            [&resolution_anchor, &headers.confirmed, &headers.latest],
+            &[
+                &resolution_anchor,
+                &headers.confirmed,
+                &headers.latest,
+                &resolution_finalized,
+                &headers.finalized,
+            ],
             &query.captures,
             &endpoint,
             progress,
@@ -545,8 +571,14 @@ impl BaseRpc {
         // The financial checkpoint and captured same-wallet facts must still be
         // canonical on the very endpoint that supplied these exact reads.
         for capture in query.captures.values() {
-            self.verify_capture(capture, &endpoint, progress, &mut rechecked)
-                .await?;
+            self.verify_capture(
+                capture,
+                headers.latest.height,
+                &endpoint,
+                progress,
+                &mut rechecked,
+            )
+            .await?;
         }
         let balance_certificates = observations
             .iter()
@@ -579,11 +611,7 @@ impl BaseRpc {
             resolutions,
         })
     }
-    async fn initial_view_headers(
-        &self,
-        query: &ChainQuery,
-        progress: &ViewProgress,
-    ) -> Result<ViewHeaders> {
+    async fn initial_view_headers(&self, progress: &ViewProgress) -> Result<ViewHeaders> {
         progress
             .step(
                 "chain_id",
@@ -598,38 +626,61 @@ impl BaseRpc {
                 }),
             )
             .await?;
-        if let Some(previous) = &query.anchor {
-            let (canonical, _) = progress
-                .step(
-                    "previous_anchor",
-                    self.block(&format!("0x{:x}", previous.height)),
-                )
-                .await?;
-            ensure!(
-                canonical.height == previous.height && canonical.hash == previous.hash,
-                AdmissionError::ChainRecoveryRequired("confirmed anchor changed")
-            );
-        }
+        // Legacy pool anchors are audit data. Wallet-scoped captures own the
+        // canonicality check and can be reconciled after a chain replacement.
+        self.canonical_headers(progress).await
+    }
+    /// Financial facts require both the configured depth and chain finality.
+    /// Finality is never inferred from elapsed local time or a depth-only read.
+    async fn canonical_headers(&self, progress: &ViewProgress) -> Result<ViewHeaders> {
         let (latest, timestamp) = progress
             .step("latest_block", self.block("latest"))
             .await
             .context(VerificationStage("latest block"))?;
-        let height = latest
+        self.finalized_headers(latest, timestamp, progress).await
+    }
+    async fn finalized_headers(
+        &self,
+        latest: Anchor,
+        timestamp: u64,
+        progress: &ViewProgress,
+    ) -> Result<ViewHeaders> {
+        let depth_height = latest
             .height
             .checked_sub(self.confirmations)
             .context("insufficient Base confirmations")?;
+        let (finalized, finalized_time) = progress
+            .step("finalized_block", self.block("finalized"))
+            .await
+            .context(VerificationStage("finalized block"))?;
+        ensure!(
+            finalized.height <= latest.height && finalized_time <= timestamp,
+            RpcFailure::malformed("eth_getBlockByNumber")
+        );
+        let height = depth_height.min(finalized.height);
         let (confirmed, confirmed_time) = progress
             .step("confirmed_block", self.block(&format!("0x{height:x}")))
             .await
             .context(VerificationStage("confirmed block"))?;
         ensure!(
             confirmed.height == height
-                && confirmed_time <= timestamp
-                && query.anchor.as_ref().is_none_or(|a| height >= a.height),
+                && confirmed_time <= finalized_time
+                && (confirmed.height != finalized.height || confirmed.hash == finalized.hash),
             "invalid confirmed block"
         );
+        for (left, right) in [
+            (&latest, &finalized),
+            (&latest, &confirmed),
+            (&finalized, &confirmed),
+        ] {
+            ensure!(
+                (left.height == right.height) == (left.hash == right.hash),
+                RpcFailure::malformed("eth_getBlockByNumber")
+            );
+        }
         Ok(ViewHeaders {
             latest,
+            finalized,
             confirmed,
             confirmed_time,
         })
@@ -719,10 +770,10 @@ impl BaseRpc {
             )
             .await?;
         if canonical != *resolution_anchor {
-            if let Some(capture) = captures.values().find(|capture| {
-                capture.checkpoint.as_ref() == Some(resolution_anchor)
-                    || capture.durable_balance_anchors.contains(resolution_anchor)
-            }) {
+            if let Some(capture) = captures
+                .values()
+                .find(|capture| capture.checkpoint.as_ref() == Some(resolution_anchor))
+            {
                 let financial_checkpoint = capture.checkpoint.as_ref() == Some(resolution_anchor);
                 return Err(EvidenceConflict {
                     wallet: capture.wallet.clone(),
@@ -742,30 +793,12 @@ impl BaseRpc {
         resolution_anchor: &Anchor,
         progress: &ViewProgress,
     ) -> Result<ViewHeaders> {
-        let (latest, timestamp) = progress
-            .step("admission_latest_block", self.block("latest"))
-            .await?;
-        let height = latest
-            .height
-            .checked_sub(self.confirmations)
-            .context("insufficient Base confirmations")?;
-        let (confirmed, confirmed_time) = progress
-            .step(
-                "admission_confirmed_block",
-                self.block(&format!("0x{height:x}")),
-            )
-            .await?;
+        let headers = self.canonical_headers(progress).await?;
         ensure!(
-            confirmed.height == height
-                && confirmed_time <= timestamp
-                && confirmed.height >= resolution_anchor.height,
+            headers.confirmed.height >= resolution_anchor.height,
             "invalid admission block"
         );
-        Ok(ViewHeaders {
-            latest,
-            confirmed,
-            confirmed_time,
-        })
+        Ok(headers)
     }
     async fn balance_observations(
         &self,
@@ -823,13 +856,13 @@ impl BaseRpc {
     }
     async fn recheck_view_anchors(
         &self,
-        anchors: [&Anchor; 3],
+        anchors: &[&Anchor],
         captures: &BTreeMap<String, EvidenceCapture>,
         endpoint: &str,
         progress: &ViewProgress,
         rechecked: &mut BTreeMap<u64, Anchor>,
     ) -> Result<()> {
-        for anchor in anchors {
+        for &anchor in anchors {
             let end = self
                 .recheck_anchor(anchor.height, rechecked, progress, "anchor_recheck")
                 .await?;
@@ -846,8 +879,7 @@ impl BaseRpc {
                         .previous
                         .as_ref()
                         .is_some_and(|observation| &observation.latest.anchor == anchor);
-                    let durable = capture.durable_balance_anchors.contains(anchor);
-                    if financial_checkpoint || previous_confirmed || previous_latest || durable {
+                    if financial_checkpoint || previous_confirmed || previous_latest {
                         return Err(EvidenceConflict {
                             wallet: capture.wallet.clone(),
                             endpoint: endpoint.to_owned(),
@@ -950,3 +982,6 @@ mod tests {
 
 #[cfg(test)]
 mod view_tests;
+
+#[cfg(test)]
+mod finality_tests;

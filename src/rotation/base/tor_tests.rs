@@ -93,7 +93,7 @@ async fn handler(
     let result = || match method {
         "eth_chainId" => json!("0x2105"),
         "eth_getBlockByNumber" => {
-            let height = if payload["params"][0] == "latest" {
+            let height = if matches!(payload["params"][0].as_str(), Some("latest" | "finalized")) {
                 100
             } else {
                 u64::from_str_radix(
@@ -495,8 +495,8 @@ async fn fallback_and_validation(f: &Fixture) {
         .position(|(path, _)| path == "/view-b")
         .unwrap();
     assert_eq!(
-        boundary, 6,
-        "A chain and two headers precede its three isolated balance failures"
+        boundary, 7,
+        "A chain and three headers precede its three isolated balance failures"
     );
     assert_eq!(requests[boundary].1["method"], "eth_chainId");
     assert!(
@@ -540,6 +540,9 @@ async fn fallback_and_validation(f: &Fixture) {
             Step::Result(
                 json!({"number":"0x64","timestamp":"0x2","hash":format!("0x{:064x}",100)}),
             ),
+            Step::Result(
+                json!({"number":"0x64","timestamp":"0x2","hash":format!("0x{:064x}",100)}),
+            ),
             Step::Status(403),
             Step::Result(json!({"number":"0x59","timestamp":"0x1","hash":format!("0x{:064x}",89)})),
         ],
@@ -553,7 +556,7 @@ async fn fallback_and_validation(f: &Fixture) {
     assert!(error.to_string().contains("confirmed block"), "{error}");
     assert!(error.downcast_ref::<RpcFailure>().is_none());
     assert!(Arc::ptr_eq(&before, &selected(&owner, &endpoint)));
-    assert_eq!(f.requests().len(), 4); // chain ID, latest, rejected confirmed, wrong confirmed
+    assert_eq!(f.requests().len(), 5); // chain ID, latest, finalized, rejected confirmed, wrong confirmed
     f.reset();
     let endpoint = url("/invalid-nonce");
     let payer = address(3010);

@@ -9,17 +9,17 @@ use axum::{Json, Router, routing::post};
 use serde_json::{Value, json};
 use std::{sync::atomic::Ordering, time::Duration};
 
-pub(crate) async fn rpc(Json(v): Json<Value>) -> Json<Value> {
+pub(crate) async fn rpc(timestamp: u64, Json(v): Json<Value>) -> Json<Value> {
     let result = match v["method"].as_str().unwrap() {
         "eth_chainId" => json!("0x2105"),
         "eth_getBlockByNumber" => {
             let tag = v["params"][0].as_str().unwrap();
-            let h = if tag == "latest" {
+            let h = if matches!(tag, "latest" | "finalized") {
                 100
             } else {
                 u64::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap()
             };
-            json!({"number":format!("0x{h:x}"),"hash":format!("0x{h:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
+            json!({"number":format!("0x{h:x}"),"hash":format!("0x{h:064x}"),"timestamp":format!("0x{timestamp:x}")})
         }
         "eth_call" => json!(format!(
             "0x{:064x}",
@@ -56,10 +56,14 @@ async fn empty_relay_payer_waits_without_attempts_and_same_owner_resumes_after_e
     let (store, worker) = StoreHandle::spawn(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
+    let timestamp = crate::rotation::base::now().unwrap();
     let rpc_task = tokio::spawn(async move {
-        axum::serve(listener, Router::new().route("/", post(rpc)))
-            .await
-            .unwrap()
+        axum::serve(
+            listener,
+            Router::new().route("/", post(move |request| rpc(timestamp, request))),
+        )
+        .await
+        .unwrap()
     });
     let manager = Arc::new(
         ManagedPool::new(

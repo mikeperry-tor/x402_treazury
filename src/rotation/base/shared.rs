@@ -173,7 +173,7 @@ mod tests {
                         },
                         "eth_getBlockByNumber" => {
                             let tag = value["params"][0].as_str().unwrap();
-                            let height = if tag == "latest" {100} else {u64::from_str_radix(&tag[2..],16).unwrap()};
+                            let height = if matches!(tag, "latest" | "finalized") {100} else {u64::from_str_radix(&tag[2..],16).unwrap()};
                             json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                         },
                         "eth_call" => json!(format!("0x{:064x}", 5_000_000)),

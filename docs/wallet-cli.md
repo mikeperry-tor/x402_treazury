@@ -48,6 +48,9 @@ inventory or retirement-configuration entries;
 successful reads can coexist with pending or unavailable canonical retirement.
 The error category preserves an observation failure ahead of pending work from a
 later wallet, while independent wallets continue through the finite pass.
+Pending Base proof work includes unavailable finalized evidence and automatic
+reconciliation after a canonical-history change. Rerunning sync or resuming
+serving continues the original work without replaying a payment or deposit.
 
 Stop `serve` before running `wallet sync`: it acquires the same exclusive treasury
 ownership. Explicit sync performs one ZEC scan and one pass over existing eligible
@@ -684,11 +687,17 @@ base_rpc_fallback_url_envs = ["BASE_RPC_SECONDARY", "BASE_RPC_TERTIARY"]
 
 Failover restarts the **entire read-only chain view** on one endpoint, including
 chain ID, persisted anchor, confirmed/latest balances, authorization nonces and
-final canonical-block checks. Partial evidence is discarded. HTTP 403/408/429,
+final canonical-block checks. Canonical balances, nonces and receipt proofs require
+both the provider's finalized chain and `funding.base_confirmations`; scalar
+latest-balance observations remain advisory. Unsupported or unavailable finalized
+evidence cannot fall back to a depth-only proof. Partial evidence is discarded. HTTP 403/408/429,
 500/502/503/504, availability transport failures and RPC -32005/-32016/-32601
 permit fallback. Malformed JSON/envelopes/results, oversized responses and TLS
 validation failures may also use configured fallback, always acquiring a complete
-fresh view. Wrong chain and conflicting canonical evidence remain terminal.
+fresh view. Wrong chain and conflicting canonical evidence reject the current
+view; recoverable historical contradictions retain scoped reconciliation work.
+RPC -32602 permits fallback only for `eth_getBlockByNumber`, including an
+unsupported finalized tag; it does not grant generic invalid-parameter retries.
 Only Tor TLS failures earn fresh-scope retries; trust checks remain enforced. Paid requests and Zcash
 submissions are never replayed by this mechanism. Payer SOCKS identities and the
 configured Tor-only network policy remain unchanged.
@@ -890,7 +899,10 @@ Historical automatic-retirement records remain readable with their original
 canonical evidence. Ordinary serving and finite sync use candidate-scoped canonical
 proofs; the scalar estimate alone cannot retire a wallet. Both confirmed and latest
 balances must meet the group's tolerance, with their maximum recorded as the
-remainder. Never-credited predecessors remain retained for possible late credit.
+remainder. Never-credited predecessors remain retained for possible late credit
+unless their completed job's every original current/archived source operation
+has proven expiry or never accepted calculation/submission. Source confirmation,
+completion labels and refunds alone cannot establish that closure.
 Low-balance traversal rotates payment selection without deleting keys or funds.
 
 Production storage preflight rejects unsupported legacy schemas without changing

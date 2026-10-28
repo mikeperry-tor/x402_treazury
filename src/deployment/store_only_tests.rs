@@ -20,18 +20,19 @@ use std::sync::{
 struct Fixture {
     signed: Arc<AtomicUsize>,
     signer: String,
+    timestamp: u64,
 }
-async fn rpc(Json(v): Json<Value>) -> Json<Value> {
+async fn rpc(State(f): State<Fixture>, Json(v): Json<Value>) -> Json<Value> {
     let result = match v["method"].as_str().unwrap() {
         "eth_chainId" => json!("0x2105"),
         "eth_getBlockByNumber" => {
             let tag = v["params"][0].as_str().unwrap();
-            let height = if tag == "latest" {
+            let height = if matches!(tag, "latest" | "finalized") {
                 100
             } else {
                 u64::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap()
             };
-            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
+            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",f.timestamp)})
         }
         "eth_call" => {
             assert!(v["params"][1] == "latest" || v["params"][1]["requireCanonical"] == true);
@@ -128,6 +129,7 @@ async fn base_service(fault: &str, relay_enabled: bool) {
     let f = Fixture {
         signed: Arc::default(),
         signer: jobs[0].recipient.clone(),
+        timestamp: crate::rotation::base::now().unwrap(),
     };
     let before = store.snapshot().unwrap();
     drop(store);

@@ -45,7 +45,7 @@ async fn base(State(f): State<Endpoints>, Json(v): Json<Value>) -> Json<Value> {
         "eth_chainId" => json!("0x2105"),
         "eth_getBlockByNumber" => {
             let tag = v["params"][0].as_str().unwrap();
-            let height = if tag == "latest" {
+            let height = if matches!(tag, "latest" | "finalized") {
                 100
             } else {
                 u64::from_str_radix(tag.trim_start_matches("0x"), 16).unwrap()

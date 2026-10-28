@@ -1,6 +1,6 @@
 #[path = "support/base_failover.rs"]
 mod fixture;
-use x402_treazury::rotation::base::{Anchor, BaseRpc};
+use x402_treazury::rotation::base::BaseRpc;
 
 #[tokio::test]
 async fn availability_failure_discards_partial_evidence_and_restarts_the_entire_view() {
@@ -13,6 +13,7 @@ async fn availability_failure_discards_partial_evidence_and_restarts_the_entire_
         "malformed",
         "malformed-chain",
         "oversized",
+        "conflict", // One hash at distinct heights is a malformed provider tuple.
     ] {
         logs.lock().unwrap().clear();
         let rpc = BaseRpc::with_fallbacks(
@@ -49,9 +50,9 @@ async fn availability_failure_discards_partial_evidence_and_restarts_the_entire_
 }
 
 #[tokio::test]
-async fn invalid_evidence_never_shops_for_a_more_favorable_provider() {
+async fn identity_and_authorization_failures_do_not_use_a_fallback() {
     let (address, logs, server) = fixture::fixture().await;
-    for mode in ["wrong-chain", "conflict", "401"] {
+    for mode in ["wrong-chain", "401"] {
         logs.lock().unwrap().clear();
         let rpc = BaseRpc::with_fallbacks(
             &[
@@ -61,15 +62,10 @@ async fn invalid_evidence_never_shops_for_a_more_favorable_provider() {
             12,
         )
         .unwrap();
-        let mut query = fixture::query();
-        query.anchor = Some(Anchor {
-            height: 88,
-            hash: format!("0x{:064x}", 88),
-        });
-        assert!(rpc.view(query).await.is_err());
+        assert!(rpc.view(fixture::query()).await.is_err());
         assert!(logs.lock().unwrap().iter().all(|(seen, _)| seen == mode));
     }
-    // A fallback must independently honor the previously persisted anchor too.
+    // A configured fallback must supply its own internally coherent headers.
     let rpc = BaseRpc::with_fallbacks(
         &[
             format!("http://{address}/403"),
@@ -78,12 +74,7 @@ async fn invalid_evidence_never_shops_for_a_more_favorable_provider() {
         12,
     )
     .unwrap();
-    let mut query = fixture::query();
-    query.anchor = Some(Anchor {
-        height: 88,
-        hash: format!("0x{:064x}", 88),
-    });
-    assert!(rpc.view(query).await.is_err());
+    assert!(rpc.view(fixture::query()).await.is_err());
     server.abort();
 }
 
@@ -169,9 +160,9 @@ async fn progressing_complete_view_survives_former_deadline_without_fallback() {
     assert!(started.elapsed() > std::time::Duration::from_secs(15));
     assert_eq!(view.balances.len(), 2);
     let calls = logs.lock().unwrap();
-    // Chain identity, one latest/confirmed pair, four wallet balance reads,
+    // Chain identity, latest/finalized/confirmed headers, four wallet balance reads,
     // and two distinct post-state canonical anchor rechecks.
-    assert_eq!(calls.len(), 9);
+    assert_eq!(calls.len(), 10);
     assert!(calls.iter().all(|(mode, _)| mode == "slow"));
     server.abort();
 }

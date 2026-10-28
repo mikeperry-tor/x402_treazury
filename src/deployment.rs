@@ -2193,6 +2193,7 @@ bearer_token_env="TOKEN"
         let seen = reads.clone();
         let rpc = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let rpc_url = format!("http://{}", rpc.local_addr().unwrap());
+        let timestamp = crate::rotation::base::now().unwrap();
         let rpc_task = tokio::spawn(async move {
             let app = axum::Router::new().route("/",post(move |Json(v):Json<Value>| {
                 let seen = seen.clone();
@@ -2200,10 +2201,10 @@ bearer_token_env="TOKEN"
                     let result = match v["method"].as_str().unwrap() {
                         "eth_chainId" => json!("0x2105"),
                         "eth_getBlockByNumber" => {
-                            let height = if v["params"][0] == "latest" {100} else {
+                            let height = if matches!(v["params"][0].as_str(), Some("latest" | "finalized")) {100} else {
                                 u64::from_str_radix(v["params"][0].as_str().unwrap().trim_start_matches("0x"),16).unwrap()
                             };
-                            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
+                            json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{timestamp:x}")})
                         },
                         "eth_call" => { seen.add_permits(1); json!(format!("0x{:064x}",5_000_000)) },
                         _ => panic!("unexpected RPC"),

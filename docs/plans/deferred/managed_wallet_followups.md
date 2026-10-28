@@ -67,26 +67,32 @@ Until this work is separately designed and qualified, retain the existing reject
 Ordinary serving and finite explicit sync invoke candidate-scoped canonical
 retirement under the configured per-group tolerance, default 0.001 USDC. See
 [automatic retirement](../../wallet-rotation.md#automatic-retirement).
-Never-credited predecessors retain their destination guard. Evidence-backed
-closure of original delivery obligations remains future work; a completed or
-abandoned label or source confirmation alone cannot prove delivery or loss.
+Never-credited predecessors retain their destination guard while original delivery
+remains possible. A completed job can close it only when every current and archived
+operation has proven source expiry or never accepted calculation/submission; a
+completed or abandoned label, refund or source confirmation alone proves neither
+delivery nor loss. The maintained guide describes the implemented proof boundary.
 There is no manual retirement CLI. Any future manual command needs explicit
 wallet selection, fresh dual balance evidence, unresolved-liability and destination
 checks, and durable audit support. It must not sweep funds or infer replacement
 funding authority.
 
-Specialized abandonment, contradictory-evidence assessment and fork repair remain
-incident-specific operator work. Serving maintenance can clear a wallet-level
-chain repair block only through [complete original-evidence revalidation](../../wallet-rotation.md);
-ordinary recovery never rewrites historical anchors or adopts uncertain liabilities. A future utility needs
-an exact reviewed source shape and preserved original bytes/support. Ordinary
-recovery cannot manufacture missing immutable destination-readiness evidence.
+Specialized abandonment and unreconstructible original-record corruption remain
+incident-specific operator work. Ordinary serving automatically rebuilds derived
+chain checkpoints and current authorization dispositions from original identities
+and fresh canonical evidence, retaining replaced proofs as history; see
+[reconciliation policy](../../wallet-rotation.md#recovery-and-reconciliation-policy).
+A future incident utility needs an exact reviewed source shape and preserved
+original bytes/support. Recovery cannot manufacture missing accepted bytes or
+immutable authorization identities.
 There is no general-purpose migration or proof override.
 
 ## Related boundaries
 
-Deep finalized-chain recovery remains an explicit operator investigation, not a
-promise of automatic repair. Live treasury exhaustion, arbitrary paid media routes
+Canonical chain replacement retains automatic reconstruction work even when old
+evidence was finalized; it grants no replay or replacement funding authority.
+Unrecoverable original records still require scoped operator investigation.
+Live treasury exhaustion, arbitrary paid media routes
 and mainnet crash injection were not established by the public experiment; existing
 offline tests and dated reports state the evidence. Reusable live scenarios belong
 to [the live integration runner](../../../tests/live/INTEGRATION.md), not to automatic

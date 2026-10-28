@@ -495,8 +495,15 @@ reporting. Base RPC attempts and successful provider failover are DEBUG events
 with provider ordinals, including an exhausted view acquisition. The requesting
 workflow owns its outcome: retrying retirement reports a meaningful delay at INFO,
 while an operator-required stop warns once with the affected wallet/group and a
-safe record-failure category. It preserves obligations and asks for inspection;
+safe record-failure category for unreconstructible original records or authority.
+Recoverable canonical-history changes and derived checkpoints continue through
+the existing observation schedule; they do not request manual repair.
+A true record failure preserves obligations and asks for inspection;
 later checks of the same stopped request do not repeat the warning.
+Malformed optional historical balance support is retained as disputed audit data;
+fresh canonical proof can replace its current role without an operator-only stop.
+Diagnostics must distinguish that recovery from malformed original authorization
+identities or missing accepted bytes, which current chain reads cannot recreate.
 Configured discovery relay selection and meaningful paid-recovery transitions
 use INFO at the owning operation. Individual relay exchanges, unsigned relay
 failures and payment completion use DEBUG. Other unsigned API and catalog/pricing

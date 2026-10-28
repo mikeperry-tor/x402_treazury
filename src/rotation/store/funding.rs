@@ -821,7 +821,22 @@ fn legacy_readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<bool
 /// destination is closed; an uncertain/failed attempt cannot use that exception.
 pub fn destination_obligation_pending(db: &Connection, wallet: &str) -> Result<bool> {
     if !initial_credit_recorded(db, wallet)? {
-        return Ok(true);
+        // Completion/provider/refund labels do not prove non-delivery. Original
+        // signed work must instead have the existing exact-input expiry proof,
+        // or this code must never have accepted its calculation at all. Every
+        // archived attempt matters; one confirmed deposit can still deliver.
+        return Ok(db.query_row("WITH operations AS (
+            SELECT j.operation_id FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1
+            UNION SELECT r.operation_id FROM funding_jobs f JOIN funding_recovery r ON r.job_id=f.id WHERE f.wallet_id=?1)
+            SELECT NOT EXISTS(SELECT 1 FROM operations)
+                OR EXISTS(SELECT 1 FROM funding_jobs WHERE wallet_id=?1 AND state!='COMPLETE')
+                OR EXISTS(SELECT 1 FROM operations o WHERE
+                EXISTS(SELECT 1 FROM operation_network n WHERE n.operation_id=o.operation_id AND n.preparation IS NOT NULL)
+                OR EXISTS(SELECT 1 FROM treasury_operations t WHERE t.id=o.operation_id AND t.submission='CONFIRMED')
+                OR NOT (
+                    (EXISTS(SELECT 1 FROM expired_operations e JOIN outgoing x ON x.id=e.id WHERE e.id=o.operation_id AND x.state='RESOLVED'))
+                    OR (NOT EXISTS(SELECT 1 FROM outgoing x WHERE x.id=o.operation_id) AND NOT EXISTS(SELECT 1 FROM treasury_operations t WHERE t.id=o.operation_id))))",
+            [wallet], |r|r.get(0))?);
     }
     // Irreversible retirement must retain this known incoming source work. It
     // neither constrains signing nor recreates a consumed initial funding claim.
