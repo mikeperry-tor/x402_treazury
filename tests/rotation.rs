@@ -1026,7 +1026,7 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
 }
 
 #[tokio::test]
-async fn canonical_depletion_warns_without_an_sdk_balance_admission_gate() {
+async fn canonical_depletion_is_debug_without_an_sdk_balance_admission_gate() {
     // Isolate tracing's callsite interest cache from concurrent tests that emit
     // the same event without a subscriber.
     const CHILD: &str = "TREAZURY_TEST_TREASURY_WARNING_CHILD";
@@ -1034,7 +1034,7 @@ async fn canonical_depletion_warns_without_an_sdk_balance_admission_gate() {
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "canonical_depletion_warns_without_an_sdk_balance_admission_gate",
+                "canonical_depletion_is_debug_without_an_sdk_balance_admission_gate",
                 "--nocapture",
             ])
             .env(CHILD, "1")
@@ -1063,11 +1063,16 @@ async fn canonical_depletion_warns_without_an_sdk_balance_admission_gate() {
     }
     let capture = Capture(Arc::default());
     let sink = capture.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .without_time()
-        .with_ansi(false)
-        .with_writer(move || sink.clone())
-        .finish();
+    use tracing_subscriber::prelude::*;
+    let subscriber = tracing_subscriber::registry().with(
+        tracing_subscriber::fmt::layer()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
+                metadata.target() == "x402_treazury::rotation::store"
+            })),
+    );
     let _guard = tracing::subscriber::set_default(subscriber);
     let dir = tempfile::tempdir().unwrap();
     let mut store = create(dir.path());
@@ -1157,6 +1162,7 @@ async fn canonical_depletion_warns_without_an_sdk_balance_admission_gate() {
     store.reconcile_pool(&pool, view).unwrap();
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
     assert_eq!(logs.matches("evm_wallet_depleted").count(), 1);
+    assert!(logs.contains("DEBUG") && !logs.contains("WARN") && !logs.contains("ERROR"));
     assert!(logs.contains(&wallets[0].id));
     assert!(logs.contains(&pool));
     capture.0.lock().unwrap().clear();
@@ -1164,5 +1170,6 @@ async fn canonical_depletion_warns_without_an_sdk_balance_admission_gate() {
     store.reconcile_pool(&pool, view).unwrap();
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
     assert_eq!(logs.matches("evm_wallet_depleted").count(), 1);
+    assert!(logs.contains("DEBUG") && !logs.contains("WARN") && !logs.contains("ERROR"));
     assert!(logs.contains(&wallets[1].id));
 }

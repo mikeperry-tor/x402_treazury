@@ -653,12 +653,19 @@ pub(super) fn checkpoint(db: &Connection, wallet: &str) -> Result<Option<Anchor>
     )?;
     match (height, hash) {
         (None, None) => Ok(None),
-        (Some(height), Some(hash)) => Ok(Some(Anchor {
-            height: height.try_into()?,
-            hash,
-        })),
-        _ => anyhow::bail!("incomplete financial checkpoint"),
+        (Some(height), Some(hash)) => (|| -> Result<_> {
+            let height = height
+                .try_into()
+                .map_err(|_| EvidenceFailure::MalformedSupport)?;
+            hash.parse::<alloy_primitives::B256>()
+                .map_err(|_| EvidenceFailure::MalformedSupport)?;
+            Ok(Some(Anchor { height, hash }))
+        })(),
+        _ => Err(EvidenceFailure::MalformedSupport.into()),
     }
+    .context(crate::rotation::base::VerificationStage(
+        "stored financial checkpoint",
+    ))
 }
 impl Store {
     pub(crate) fn capture_authorization(
@@ -904,7 +911,7 @@ pub(super) fn check_resolution(
                 auth.nonce.clone(),
                 auth.valid_before
             ),
-        "authorization_evidence_binding_mismatch"
+        EvidenceFailure::MalformedSupport
     );
     if *certificate.outcome() == crate::rotation::base::AuthorizationOutcome::ExpiredUnused {
         ensure!(

@@ -1,4 +1,4 @@
-//! Endpoint chatter stays at debug; an exhausted complete view remains a warning.
+//! View acquisition details stay at debug; the requesting workflow owns failure severity.
 use super::*;
 use axum::http::StatusCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -84,9 +84,9 @@ async fn balance_fallback_is_quiet_at_info_and_has_safe_provider_context_at_debu
 }
 
 #[tokio::test]
-async fn view_warns_only_when_no_configured_provider_can_complete_verification() {
+async fn view_failure_stays_at_debug_for_the_requesting_workflow() {
     if crate::test_log_capture::run_in_child(
-        "rotation::base::view_tests::logging::view_warns_only_when_no_configured_provider_can_complete_verification",
+        "rotation::base::view_tests::logging::view_failure_stays_at_debug_for_the_requesting_workflow",
     ) {
         return;
     }
@@ -105,17 +105,15 @@ async fn view_warns_only_when_no_configured_provider_can_complete_verification()
         let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_ansi(false)
-            .with_max_level(tracing::Level::INFO)
+            .with_env_filter("warn,x402_treazury::rotation::base=debug")
             .with_writer(move || writer.clone())
             .finish();
         let result = rpc.view(query(false)).with_subscriber(subscriber).await;
         assert_eq!(result.is_ok(), healthy_fallback);
         assert_eq!(rejected.load(Ordering::SeqCst), 1);
         let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
-        if healthy_fallback {
-            assert!(!logged.contains("WARN"), "{logged}");
-        } else {
-            assert_eq!(logged.matches("WARN").count(), 1, "{logged}");
+        assert!(!logged.contains("WARN"), "{logged}");
+        if !healthy_fallback {
             for field in [
                 "provider_index=2",
                 "provider_count=2",

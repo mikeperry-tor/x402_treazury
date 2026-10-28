@@ -825,7 +825,7 @@ pub fn destination_obligation_pending(db: &Connection, wallet: &str) -> Result<b
     }
     // Irreversible retirement must retain this known incoming source work. It
     // neither constrains signing nor recreates a consumed initial funding claim.
-    Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN outgoing x ON x.id=j.operation_id WHERE f.wallet_id=?1 AND x.state='PREPARED') OR EXISTS(SELECT 1 FROM funding_jobs f JOIN funding_recovery r ON r.job_id=f.id JOIN outgoing x ON x.id=r.operation_id WHERE f.wallet_id=?1 AND x.state='PREPARED')",[wallet],|r|r.get(0))?)
+    Ok(db.query_row("WITH operations AS (SELECT j.operation_id FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id WHERE f.wallet_id=?1 UNION SELECT r.operation_id FROM funding_jobs f JOIN funding_recovery r ON r.job_id=f.id WHERE f.wallet_id=?1) SELECT EXISTS(SELECT 1 FROM operations o JOIN outgoing x ON x.id=o.operation_id WHERE x.state='PREPARED') OR EXISTS(SELECT 1 FROM operations o JOIN operation_network n ON n.operation_id=o.operation_id WHERE n.preparation IS NOT NULL)",[wallet],|r|r.get(0))?)
 }
 
 fn completed_error(error: Option<&str>) -> Option<&str> {

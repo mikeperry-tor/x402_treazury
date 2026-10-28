@@ -229,6 +229,7 @@ async fn held_pending_read_allows_full_live_inventory_and_retains_a_new_failure(
         tokio::task::yield_now().await;
     }
     f.fixture.wait_completion().await;
+    f.fixture.finish_observations(U256::from(17)).await;
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(60)).await;
     loop {

@@ -1,5 +1,7 @@
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
+#[path = "treasury_sync/retirement.rs"]
+mod retirement;
 use axum::{
     body::Bytes,
     extract::State,

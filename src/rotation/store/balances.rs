@@ -32,6 +32,7 @@ impl Store {
         self.notify_capacity_changed(pool);
         Ok(())
     }
+    #[cfg(test)]
     pub(crate) fn pending_balances(
         &self,
         pool: &str,
@@ -115,6 +116,9 @@ impl Store {
             }
         }
         tx.commit()?;
+        if result.is_some() {
+            self.request_retirement_after_scalar(wallet);
+        }
         self.notify_capacity_changed(pool);
         Ok(())
     }

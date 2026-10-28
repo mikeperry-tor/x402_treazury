@@ -639,6 +639,11 @@ mod tests {
 
     #[tokio::test]
     async fn direct_near_header_timeout_warns_without_private_url() {
+        if crate::test_log_capture::run_in_child(
+            "rotation::near::tests::direct_near_header_timeout_warns_without_private_url",
+        ) {
+            return;
+        }
         use tracing::instrument::WithSubscriber;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!(

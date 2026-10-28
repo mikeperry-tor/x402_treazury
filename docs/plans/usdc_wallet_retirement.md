@@ -151,9 +151,12 @@ A verified latest-above-tolerance result completes even with a low saved minimum
 
 The existing group reconciliation owner schedules work. A spawned wallet owner
 retains the whole authorization-page/balance/publication stage through waiter
-cancellation, sharing wallet serialization with scalar reads. Its completion-based
-60-second floor and existing error-backoff shape do not stack with scalar cooldowns;
-proof failure does not replace a successful advisory scalar outcome. No group
+cancellation, sharing wallet serialization with scalar reads. Proof demand owns
+its completion-based 60-second floor and existing error-backoff shape separately
+from scalar result state. Neither lane changes the other's due time, outcome or
+failure streak, and a proof retry never waits sequentially on both schedules.
+This separation resolves the independent implementation review's finding that a
+proof-only cooldown on an evicted scalar result could fabricate advisory failure. No group
 publication gate spans remote I/O. Local reevaluation uses the existing maintenance
 cadence, including source changes without capacity notifications.
 

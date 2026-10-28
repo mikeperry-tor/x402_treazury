@@ -310,14 +310,26 @@ I/O do not hold a group turn to stabilize advisory balances.
 
 ## Automatic retirement
 
-The retained canonical-publication path may retire only a RETAINED wallet in an
-enabled group using compatible confirmed and latest balances. Ordinary advisory
-refresh does not collect these proofs or invoke permanent retirement. Both must be at or below
+Ordinary serving and finite explicit sync consider only eligible RETAINED wallets
+in enabled groups for canonical retirement. Low saved estimates select candidate
+work; they neither prove retirement nor exclude an otherwise permitted payer.
+Retirement requires compatible confirmed and latest balances. Both must be at or below
 `max_retirement_remainder_usdc`: the recorded bound is their maximum, not their
 minimum. The default `"0.001"` permits at most 1,000 atomic units per wallet;
 each group can override it, and explicit `"0"` requires both observations to be zero. Pending
-payment exposure, a current enabled reserve claim, an actual pending source operation or conflicting canonical retirement evidence
-prevents retirement.
+payment exposure, a current enabled reserve claim, an accepted source calculation or pending signed source operation or conflicting canonical retirement evidence
+prevents retirement. Never-credited wallets remain protected, including abandoned
+reserve predecessors whose source transaction is confirmed: source completion
+does not prove destination delivery or permanent loss. Later original credit
+remains usable under the retained wallet's existing identity.
+
+Candidate work pages only that wallet's original outstanding authorizations, then
+publishes its dual balance proof through the existing canonical transaction. A
+used nonce or confirmed-chain-time expiry with an unused nonce resolves its
+original authorization; local time, seller receipts and request failures cannot.
+More than 64 authorizations continue through pages without a total-history cap or
+reads of unrelated wallets. Publication rechecks current role, reserve claim,
+source obligations and exact evidence after remote acquisition.
 
 Retirement records exact amounts, anchors, endpoint and supporting evidence in the
 same transaction that changes the role. It removes the wallet from routine balance
@@ -353,10 +365,11 @@ or an expired authorization proven unused can release its reservation through th
 store's canonical reconciliation transaction. An unused but still-valid signature
 remains a liability. Reorg contradictions cannot silently reset accounting.
 
-Ordinary maintenance performs scalar unsigned latest `balanceOf` reads. It does
-not acquire confirmed/latest proof pairs or scan historical authorizations.
-Canonical historical proofs remain available for separately authorized qualification
-and reports; their balance, exposure and repair fields do not gate current signing.
+Ordinary advisory refresh performs scalar unsigned latest `balanceOf` reads.
+Eligible retained-wallet retirement separately acquires candidate-scoped canonical
+authorization and dual balance proofs. It does not run qualification's full-pool
+historical traversal. Historical balance, exposure and repair fields do not gate
+current signing; advisory RPC failure policy is unchanged.
 Retired wallets remain retired. Original attempts and canonical proof records stay
 readable without a historical capacity-repair pass.
 
@@ -549,9 +562,9 @@ affected operation's ownership without requiring agreement among advisory record
 Regression coverage should show established recovery completing, genuine
 liabilities remaining owned, and independent work continuing without redundant I/O.
 
-The [ordinary retirement plan](plans/usdc_wallet_retirement.md) applies this policy
-to the proposed destination-obligation closure and runtime retirement integration;
-those paths are not yet implemented.
+Ordinary retirement preserves the never-credited destination guard. Evidence-backed
+closure of a never-credited original delivery obligation remains future work;
+completion, abandonment or source confirmation alone does not close it.
 
 ## Refunds, state and recovery
 
@@ -676,9 +689,10 @@ The observation scope, cadence and completion rule belong to the work requesting
 | Enabled initial-funding demand waiting for capital or confirmations | Shared ZEC scans; each recurring scan starts at least 90 seconds after the previous scan completes | Stop when no enabled unfilled claim can advance and no validated accepted transaction needs observation; a new claim wakes discovery |
 | Accepted initial funding without positive destination credit | Shared Base recipient acquisition when due; each repeated read starts at least 60 seconds after the previous read completes | First positive credit permanently finishes that claim's credit lane; source recovery remains independent |
 | Recognized signed-payment insufficient funds | Asynchronous scalar Base refresh when due, coalesced per wallet; each repeated read starts at least 60 seconds after the previous read completes | Success, including zero, finishes the captured request. Failure or a notification arriving during the read retains follow-up work |
+| Eligible retained-wallet retirement | Candidate-scoped canonical authorization pages and dual balance proof under the existing per-wallet owner, 60-second completion floor and error backoff | Retired or verified latest above tolerance finishes captured demand; confirmed above tolerance with latest low, valid unused authorization or transient failure retains work. Ineligible or malformed work stops locally |
 | Validated pending source or shielding transaction | Shared ZEC scans with a 90-second completion-based floor; operation observations retain their own 60-second floor | Canonical confirmation or exact consensus-expiry/input recovery resolves that obligation, including after destination credit, disablement, removal or restart |
 | Submitted swap awaiting provider outcome | NEAR status observations; each recurring check starts at least 60 seconds after the previous check completes | Existing provider outcome/recovery rules stop that lane; status alone cannot release source inputs |
-| Explicit `wallet sync` | One requested ZEC scan and configured managed-USDC pass, including outstanding accepted funding recipients | Report each asset's completion, failure or inapplicability; create no background watcher and require serving to be stopped |
+| Explicit `wallet sync` | One requested ZEC scan and configured managed-USDC pass, including outstanding accepted funding recipients and one eligible-retirement attempt | Report asset results and unresolved retirement work; create no background watcher and require serving to be stopped |
 | Completed-result publication or SDK reconstruction | Existing local owner retries after 60 seconds, independently of scan scheduling | Publish the identical result or reconstruct the SDK; this work alone requests no network scan or new calculation |
 | Fully funded idle serving without requested refresh or accepted observation work | No recurring Base or ZEC balance discovery | Relevant new work requests observation again |
 
@@ -690,7 +704,7 @@ several requests. Recurring failures retain independent backoff bounded by
 cannot shorten that work's interval or clear its failure. Configured local polling
 and healthy handoffs do not change these network observation floors.
 
-Store-only serving retains Base startup discovery when its configuration is usable.
+Store-only serving retains Base startup discovery and eligible retirement when its configuration is usable.
 It has no SDK/source capability and cannot perform startup ZEC discovery or source
 observation; the reported capability failure requires correction and restart.
 Accepted obligations remain durable. This existing degraded-serving boundary does
@@ -739,6 +753,43 @@ results when no acquisition or waiter owns them. Failed observations retain thei
 consecutive backoff while the wallet remains live; retired-wallet failures can be
 discarded after their existing cooldown. Cleanup never drops active ownership or
 changes durable claims, estimates or financial journals.
+
+Retirement demand has separate completion from scalar refresh. A Store-lifetime
+marker remembers local eligibility and pending demand independently of disposable
+scalar results and canonical certificates. Committed retirement discards its marker;
+late observation completions cannot recreate it. Committed retirement reports its
+lifecycle change without an additional generic delay-recovery message. Finite startup
+evaluation, fresh low
+scalar observations and transitions into eligibility request work. Local metadata
+pages reevaluate retained roles, claims and source blockers; unrelated wakes and
+canonical minimum publication do not recreate completed demand. A verified latest
+balance above tolerance stops work even when the saved minimum remains low. The
+opposite disagreement retains confirmation progress. Never-credited or
+source-obstructed wallets request no retirement-driven balance polling.
+Completion follows the effective evidence committed by publication, including a
+newer compatible canonical observation published concurrently by a library caller;
+an older acquisition cannot finish or renew that newer observation's work.
+
+The existing reconciliation owner schedules each candidate under shared wallet
+serialization. Accepted page acquisition and publication survive disconnected
+waiters; no group publication gate spans remote I/O. Demand arriving during an
+acquisition remains pending. Retirement uses the existing 60-second floor and
+independent error backoff without stacking scalar and proof delays or replacing
+a successful scalar outcome with a proof failure. Owner replacement retains
+unfinished work; reopening derives a fresh finite evaluation from durable facts.
+Malformed required records preserve obligations, report the affected operator
+requirement and stop proofs that cannot repair them while siblings continue.
+Malformed stored retirement tolerances, checkpoint tuples, hashes, wallet addresses and authorization
+bindings are local record failures, not RPC outages. They stop the affected
+request without consuming network retry work; transient database failures retain
+their existing retry behavior.
+An operator-required stop warns once with its safe failure category and affected
+wallet/group. Recoverable proof outages report delay transitions at INFO and
+individual attempts at DEBUG; retry attempts do not warn as terminal failures.
+Finite reconciliation keeps reporting an eligible operator-stopped request as
+failed without repeating its proofs or warning. Fresh eligible scalar demand can
+request another attempt on the existing schedule; a successfully evaluated change
+to an ineligible role, claim or group makes that old retirement stop irrelevant.
 
 Before accepting a new initial-funding calculation, the treasury first obtains an
 SDK proposal using actual spendable funds and validates its inputs and fee. It then

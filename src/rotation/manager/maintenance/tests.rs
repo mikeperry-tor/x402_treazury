@@ -36,6 +36,30 @@ struct Fixture {
     rpc: Rpc,
 }
 impl Fixture {
+    /// Join client publication, including the retained proof stage, before a
+    /// fixture advances virtual time. Server handler counters are insufficient.
+    async fn finish_observations(&self, expected: U256) {
+        let ids = {
+            let db =
+                rusqlite::Connection::open(self.dir.path().join("state/state.sqlite")).unwrap();
+            db.prepare("SELECT id FROM wallets ORDER BY sequence")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        for wallet in ids {
+            assert_eq!(
+                self.store
+                    .observe_balance(self.group.clone(), wallet.clone(), self.pool.base.clone())
+                    .await
+                    .unwrap(),
+                expected
+            );
+            assert!(self.pool.retire_wallet(wallet).await.unwrap());
+        }
+    }
     async fn wait_completion(&self) {
         while self.store.balance_due(&self.wallet).await <= Instant::now() {
             tokio::task::yield_now().await;
@@ -460,6 +484,7 @@ async fn zero_refresh_completes_and_idle_wallet_has_no_recurring_reads() {
     }
     f.wait_completion().await;
     assert!(!f.status().await.low_balance);
+    f.finish_observations(U256::ZERO).await;
     let calls = f.rpc.calls.load(Ordering::SeqCst);
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(600)).await;

@@ -511,8 +511,13 @@ including partial credit. Disabling a slot retains accepted source ownership.
 `max_retirement_remainder_usdc` is a finite nonnegative micro-USDC amount, default
 `"0.001"` (1,000 atomic units) independently per managed group. Explicit `"0"`
 requires exact zero. It authorizes eligible retained-wallet retirement on the
-canonical-publication path, independently of `auto_fund`, vacancies and treasury capacity. Ordinary
-advisory refresh does not collect those canonical proofs or retire wallets. Retirement leaves
+canonical-publication path, independently of `auto_fund`, vacancies and treasury
+capacity. Ordinary serving considers low-estimate retained candidates through
+scoped authorization resolution and compatible confirmed/latest balances; both
+must satisfy the group's tolerance. Active, ready, disabled-group, current-claim
+and never-credited wallets cannot retire. Explicit sync attempts eligible
+candidates once without starting a watcher. Qualification funding permits confer
+no retirement authority. Retirement leaves
 funds and keys at their address, stops routine polling/selection, transfers nothing
 and never releases financial obligations. Positive tolerance trades purchasing
 power for less observation work; it does not bound cumulative stranded capital.
@@ -522,8 +527,8 @@ reservations, liabilities and fees. Displayed total balance is not spendable
 capacity. Adding spendable ZEC restores capacity without another aggregate-budget
 setting. `auto_fund=false` pauses new funding. Enabled unfilled reserve claims
 keep discovering later ZEC deposits and confirmations through the shared treasury
-owner; fully funded idle serving does not watch for incoming funds. Ordinary scalar
-maintenance does not invoke permanent retirement. Keep group
+owner; fully funded idle serving does not watch for incoming funds. Retirement
+continues only while its own unresolved candidate work remains. Keep group
 payment caps, per-operation ZEC/output/fee safeguards, explicit funding controls
 and separately authorized qualification-run limits.
 

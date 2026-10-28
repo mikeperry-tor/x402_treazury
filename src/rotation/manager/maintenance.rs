@@ -1,4 +1,4 @@
-//! One retained advisory refresh owner per Store/group. No payment-history repair.
+//! One retained observation owner per Store/group; historical proofs stay wallet scoped.
 use super::*;
 use crate::rotation::store::{history::PAGE_SIZE, inventory::read_result};
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
@@ -18,6 +18,14 @@ impl std::fmt::Display for ReconciliationInProgress {
     }
 }
 impl std::error::Error for ReconciliationInProgress {}
+#[derive(Debug)]
+struct RetirementObservation;
+impl std::fmt::Display for RetirementObservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("wallet retirement observation unavailable")
+    }
+}
+impl std::error::Error for RetirementObservation {}
 struct Completion {
     id: Option<String>,
     result: Result<()>,
@@ -103,7 +111,7 @@ impl ManagedPool {
             while startup_ready && !startup_complete && active.len() < BALANCE_READS {
                 if let Some((sequence, id)) = page.pop_front() {
                     cursor = sequence;
-                    self.schedule_balance(id, &mut active, &mut reads, &mut first_error);
+                    self.schedule_balance(id, true, &mut active, &mut reads, &mut first_error);
                     continue;
                 }
                 let pool = self.pool.clone();
@@ -128,7 +136,7 @@ impl ManagedPool {
                 let pool = self.pool.clone();
                 let pending = read_result(
                     self.store
-                        .call(move |s| s.pending_balances(&pool, pending_cursor))
+                        .call(move |s| s.observation_page(&pool, pending_cursor))
                         .await,
                     &mut first_error,
                 )?
@@ -138,25 +146,50 @@ impl ManagedPool {
                     pending_cursor = -1;
                 }
                 let mut pending = pending.into_iter();
-                while let Some((sequence, id)) = pending.next() {
+                while let Some(row) = pending.next() {
+                    let (sequence, id) = (row.sequence, row.wallet);
+                    let Some(work) = row.work else {
+                        pending_cursor = sequence;
+                        continue;
+                    };
                     if active.len() == BALANCE_READS {
                         capacity_deferred |= std::iter::once(&id)
-                            .chain(pending.as_slice().iter().map(|(_, id)| id))
+                            .chain(
+                                pending
+                                    .as_slice()
+                                    .iter()
+                                    .filter(|row| row.work.is_some())
+                                    .map(|row| &row.wallet),
+                            )
                             .any(|id| id.as_ref().is_none_or(|wallet| !active.contains(wallet)));
                         break;
                     }
                     pending_cursor = sequence;
+                    let mut scalar = work.scalar_requested;
                     if let Some(wallet) = &id {
                         if active.contains(wallet) {
                             continue;
                         }
-                        let due = self.store.balance_due(wallet).await;
+                        let scalar_due = if work.scalar_requested {
+                            Some(self.store.balance_due(wallet).await)
+                        } else {
+                            None
+                        };
+                        let proof_due = if startup_ready {
+                            work.retirement_due
+                        } else {
+                            None
+                        };
+                        let Some(due) = scalar_due.into_iter().chain(proof_due).min() else {
+                            continue;
+                        };
+                        scalar = scalar_due == Some(due);
                         if due > Instant::now() {
                             wake = wake.min(due);
                             continue;
                         }
                     }
-                    self.schedule_balance(id, &mut active, &mut reads, &mut first_error);
+                    self.schedule_balance(id, scalar, &mut active, &mut reads, &mut first_error);
                 }
                 if more && active.len() < BALANCE_READS {
                     wake = Instant::now();
@@ -183,16 +216,33 @@ impl ManagedPool {
                 );
             }
             if one_pass && startup_complete && reads.is_empty() {
+                let pool = self.pool.clone();
+                let pending = self
+                    .store
+                    .call(move |s| s.retirement_unfinished(&pool))
+                    .await?;
+                if pending {
+                    first_error.get_or_insert_with(|| {
+                        anyhow::anyhow!(
+                            "wallet retirement remains pending; original obligations are retained"
+                        )
+                    });
+                }
                 return first_error.map_or(Ok(()), Err);
             }
             tokio::select! {
                 _=stop.cancelled()=>break,
-                _=&mut socks, if !startup_ready && !startup_complete => startup_ready=true,
+                _=&mut socks, if !startup_ready => startup_ready=true,
                 _=&mut changed=>{},
                 Some(done)=reads.next(),if !reads.is_empty()=>{
-                    if let Some(id)=done.id { active.remove(&id); }
+                    if let Some(id)=&done.id { active.remove(id); }
                     else { qualification_active=false; qualification_due=Instant::now()+CADENCE; }
                     if let Err(error)=done.result {
+                        if error.is::<RetirementObservation>() {
+                            tracing::debug!(pool=%self.pool, wallet=?done.id, category=%super::super::base::safe_diagnostic(&error), "Wallet retirement proof attempt did not complete; financial obligations remain owned");
+                            first_error.get_or_insert(error);
+                            continue;
+                        }
                         if error.downcast_ref::<rusqlite::Error>().is_some() && !crate::rotation::store::inventory::transient_read(&error) { return Err(error); }
                         tracing::warn!(category=%super::super::base::safe_diagnostic(&error),"advisory balance observation unavailable; independent payment service continues");
                         first_error.get_or_insert(error);
@@ -206,6 +256,7 @@ impl ManagedPool {
     fn schedule_balance<'a>(
         &'a self,
         id: Option<String>,
+        scalar: bool,
         active: &mut BTreeSet<String>,
         reads: &mut FuturesUnordered<BoxFuture<'a, Completion>>,
         first_error: &mut Option<anyhow::Error>,
@@ -221,7 +272,24 @@ impl ManagedPool {
             return;
         };
         if active.insert(id.clone()) {
-            reads.push(self.read_balance(id).boxed());
+            reads.push(
+                async move {
+                    if scalar {
+                        self.read_balance(id).await
+                    } else {
+                        let result = self
+                            .retire_wallet(id.clone())
+                            .await
+                            .map(|_| ())
+                            .map_err(|error| error.context(RetirementObservation));
+                        Completion {
+                            id: Some(id),
+                            result,
+                        }
+                    }
+                }
+                .boxed(),
+            );
         }
     }
     async fn read_balance(&self, id: String) -> Completion {
@@ -230,6 +298,12 @@ impl ManagedPool {
             .observe_balance(self.pool.clone(), id.clone(), self.base.clone())
             .await
             .map(|_| ());
+        let retirement = self
+            .retire_wallet(id.clone())
+            .await
+            .map(|_| ())
+            .map_err(|error| error.context(RetirementObservation));
+        let result = result.and(retirement);
         Completion {
             id: Some(id),
             result,
@@ -268,7 +342,7 @@ impl ManagedPool {
                     .store
                     .call(move |s| s.scoped_chain_query(&pool, vec![], pending))
                     .await?;
-                let view = self.acquire_view(query, false).await?;
+                let view = self.acquire_view(query).await?;
                 let pool = self.pool.clone();
                 let guard = Arc::new(self.gate.clone().lock_owned().await);
                 self.store
@@ -303,7 +377,7 @@ impl ManagedPool {
                         )
                     })
                     .await?;
-                let view = self.acquire_view(query, false).await?;
+                let view = self.acquire_view(query).await?;
                 ensure!(
                     anchor.as_ref().is_none_or(|saved| saved == &view.anchor),
                     "qualification_full_inventory_anchor_changed"

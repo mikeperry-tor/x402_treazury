@@ -42,11 +42,20 @@ observation. Sync prints independent asset results even on partial failure and
 returns a nonzero exit code if either applicable scope fails. Status returns the
 saved state object. `wallet addresses` continues to return JSON.
 Progress logs remain on stderr in both modes.
+Normal sync output also prints observation failure or pending-retirement details,
+even when logging is disabled. USDC counts include scalar balance reads and rejected
+inventory or retirement-configuration entries;
+successful reads can coexist with pending or unavailable canonical retirement.
+The error category preserves an observation failure ahead of pending work from a
+later wallet, while independent wallets continue through the finite pass.
 
 Stop `serve` before running `wallet sync`: it acquires the same exclusive treasury
 ownership. Explicit sync performs one ZEC scan and one pass over existing eligible
 configured managed-USDC wallets plus outstanding accepted initial-funding
-recipients, including removed profiles. It neither allocates wallets nor starts
+recipients, including removed profiles, and attempts eligible retained-wallet
+retirement once. It reports unresolved authorization, confirmation or proof work
+without waiting for another observation interval; rerun sync or resume serving
+to continue it. Retirement remains available with `auto_fund=false`. It neither allocates wallets nor starts
 funding or a background watcher. A failed ZEC pass logs `automatic_retry=false`;
 rerun `wallet sync` to try again. Serving instead reports the existing retry
 backoff and retries while sync is needed. ZEC and Base run independently: a failed endpoint
@@ -770,7 +779,10 @@ target can be attempted by an eligible wallet under that payment cap.
 `max_retirement_remainder_usdc` defaults to `"0.001"` (1,000 atomic USDC units)
 independently per managed group; explicit `"0"` requires exact zero. Retired funds
 remain owned at their addresses, and positive tolerance has no cumulative
-stranded-funds cap. `max_attempts` defaults to 3.
+stranded-funds cap. `max_attempts` defaults to 3. Finite sync applies valid
+retirement tolerances only to existing configured groups. Invalid retirement
+configuration reports that group's unavailable retirement work while scalar
+observations continue; accepted recipients of removed groups remain scalar-only.
 See [configuration](configuration.md) for exact syntax, rejected aggregate settings,
 reopen-only changes, initial inventory and legacy-state rejection.
 Static-wallet payment defaults remain unchanged. Payment admission has no total timeout. Legacy
@@ -875,7 +887,10 @@ Unsupported legacy provenance has null totals/counts rather than invented zeros.
 owner fills permitted vacancies under current auto-funding and qualification authority.
 
 Historical automatic-retirement records remain readable with their original
-canonical evidence; advisory balance refresh does not manufacture retirement proofs.
+canonical evidence. Ordinary serving and finite sync use candidate-scoped canonical
+proofs; the scalar estimate alone cannot retire a wallet. Both confirmed and latest
+balances must meet the group's tolerance, with their maximum recorded as the
+remainder. Never-credited predecessors remain retained for possible late credit.
 Low-balance traversal rotates payment selection without deleting keys or funds.
 
 Production storage preflight rejects unsupported legacy schemas without changing

@@ -64,10 +64,12 @@ Until this work is separately designed and qualified, retain the existing reject
 
 ## Manual retirement and incident repair
 
-Canonical retirement checks exist under the configured per-wallet tolerance, but
-ordinary serving and explicit sync currently collect only scalar balances and do
-not invoke them. [Ordinary USDC retirement integration](../usdc_wallet_retirement.md)
-plans the missing runtime path and a configurable default tolerance of 0.001 USDC.
+Ordinary serving and finite explicit sync invoke candidate-scoped canonical
+retirement under the configured per-group tolerance, default 0.001 USDC. See
+[automatic retirement](../../wallet-rotation.md#automatic-retirement).
+Never-credited predecessors retain their destination guard. Evidence-backed
+closure of original delivery obligations remains future work; a completed or
+abandoned label or source confirmation alone cannot prove delivery or loss.
 There is no manual retirement CLI. Any future manual command needs explicit
 wallet selection, fresh dual balance evidence, unresolved-liability and destination
 checks, and durable audit support. It must not sweep funds or infer replacement

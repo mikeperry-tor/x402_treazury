@@ -13,6 +13,15 @@ pub(crate) struct BalanceObservation {
 }
 
 pub(crate) const CADENCE: Duration = Duration::from_secs(60);
+pub(super) fn retry_delay(failures: u32) -> Duration {
+    Duration::from_secs(
+        CADENCE
+            .as_secs()
+            .saturating_mul(1u64 << failures.saturating_sub(1).min(3))
+            .min(300),
+    )
+}
+
 /// Storage/ownership failure cannot be treated as an unavailable advisory RPC.
 #[derive(Debug)]
 pub(crate) struct BalanceStoreUnavailable;
@@ -36,15 +45,15 @@ enum Outcome {
 #[cfg(test)]
 mod tests;
 #[derive(Default)]
-pub(super) struct Observation {
+pub(crate) struct Observation {
     due: Option<Instant>,
     failures: u32,
     outcome: Outcome,
 }
-type Owner = Arc<tokio::sync::Mutex<Observation>>;
+pub(crate) type Owner = Arc<tokio::sync::Mutex<Observation>>;
 pub(super) type Observers = Arc<Mutex<BTreeMap<String, Owner>>>;
 impl StoreHandle {
-    async fn balance_acquisition_owner(&self, wallet: &str) -> Owner {
+    pub(crate) async fn balance_acquisition_owner(&self, wallet: &str) -> Owner {
         let (owner, expired_failures) = {
             let mut observers = self.balance_observers.lock().expect("balance observers");
             let mut expired_failures = Vec::new();
@@ -175,15 +184,7 @@ impl StoreHandle {
             } else {
                 observation.failures.saturating_add(1)
             };
-            let seconds = if observation.failures == 0 {
-                CADENCE.as_secs()
-            } else {
-                CADENCE
-                    .as_secs()
-                    .saturating_mul(1u64 << observation.failures.saturating_sub(1).min(3))
-                    .min(300)
-            };
-            observation.due = Some(Instant::now() + Duration::from_secs(seconds));
+            observation.due = Some(Instant::now() + retry_delay(observation.failures));
             observation.outcome = if published.is_err()
                 || result
                     .as_ref()

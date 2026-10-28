@@ -8,6 +8,7 @@ pub(crate) mod observation;
 mod preflight;
 #[cfg(test)]
 mod query_tests;
+pub(crate) mod retirement;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]
@@ -213,6 +214,7 @@ pub struct Store {
     evidence_namespace: Uuid,
     evidence_cache: std::collections::BTreeMap<String, (u64, super::base::BalanceCertificate)>,
     evidence_order: u64,
+    retirement_work: std::collections::BTreeMap<String, retirement::Demand>,
     // Diagnostic freshness only: never spending authority. Historical shortages
     // must be retried by this owner before they can obstruct startup.
     funding_conditions:
@@ -448,6 +450,7 @@ impl Store {
             evidence_cache: Default::default(),
             evidence_order: 0,
             funding_conditions: Default::default(),
+            retirement_work: Default::default(),
             #[cfg(test)]
             inventory_failure: Default::default(),
             group_gates: Default::default(),
@@ -509,6 +512,7 @@ impl Store {
             evidence_cache: Default::default(),
             evidence_order: 0,
             funding_conditions: Default::default(),
+            retirement_work: Default::default(),
             #[cfg(test)]
             inventory_failure: Default::default(),
             group_gates: Default::default(),
@@ -1378,7 +1382,7 @@ impl Store {
             true,
             retirement_allowed,
         )?;
-        commit_chain_view(tx, pool, &view, &depleted)?;
+        commit_chain_view(tx, pool, &view, &depleted, &mut self.retirement_work)?;
         Ok(())
     }
     /// Capture a bounded explicit wallet or authorization page. Historical work
@@ -1397,11 +1401,15 @@ impl Store {
         let wallets = wallets
             .into_iter()
             .map(|wallet| {
-                let address = self.db.query_row(
+                let address: String = self.db.query_row(
                     "SELECT address FROM wallets WHERE id=?1 AND pool_id=?2",
                     params![wallet, pool],
                     |row| row.get(0),
                 )?;
+                address
+                    .parse::<alloy_primitives::Address>()
+                    .map_err(|_| super::base::evidence::EvidenceFailure::MalformedSupport)
+                    .context(super::base::VerificationStage("stored wallet address"))?;
                 Ok((wallet, address))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -1434,6 +1442,16 @@ impl Store {
         pool: &str,
         view: super::base::ChainView,
     ) -> Result<()> {
+        self.publish_scoped_view(pool, view).map(|_| ())
+    }
+
+    /// Return the effective committed evidence, which may supersede the incoming
+    /// view with a compatible newer observation published by another caller.
+    pub(crate) fn publish_scoped_view(
+        &mut self,
+        pool: &str,
+        view: super::base::ChainView,
+    ) -> Result<super::base::ChainView> {
         let retirement_allowed = self.automatic_retirement_allowed();
         let view = self.prepare_evidence_view(view)?;
         let tx = self
@@ -1447,9 +1465,9 @@ impl Store {
             false,
             retirement_allowed,
         )?;
-        commit_chain_view(tx, pool, &view, &depleted)?;
+        commit_chain_view(tx, pool, &view, &depleted, &mut self.retirement_work)?;
         self.notify_capacity_changed(pool);
-        Ok(())
+        Ok(view)
     }
 
     /// Bind an operation's network identity before calculation; bindings are immutable.
@@ -1756,7 +1774,7 @@ impl Store {
 #[derive(Default)]
 struct ChainPublication {
     depleted: Vec<String>,
-    retired_remainders: Vec<(U256, U256)>,
+    retired_remainders: Vec<(String, U256, U256, U256)>,
 }
 
 /// Emit depletion only after reconciliation has durably committed. Reservations
@@ -1766,10 +1784,16 @@ fn commit_chain_view(
     pool: &str,
     view: &super::base::ChainView,
     depleted: &ChainPublication,
+    retirement_work: &mut std::collections::BTreeMap<String, retirement::Demand>,
 ) -> Result<()> {
     tx.commit()?;
+    // Irreversible retirement needs no completed-demand marker. Remove only
+    // committed transitions, including publication outside the maintenance owner.
+    for (wallet, _, _, _) in &depleted.retired_remainders {
+        retirement_work.remove(wallet);
+    }
     for wallet in &depleted.depleted {
-        tracing::warn!(
+        tracing::debug!(
             category = "evm_wallet_depleted",
             pool,
             wallet,
@@ -1778,8 +1802,8 @@ fn commit_chain_view(
             "EVM wallet observed USDC balance reached zero; saved estimate updated"
         );
     }
-    for (confirmed, latest) in &depleted.retired_remainders {
-        tracing::warn!(reason="automatic_retirement", confirmed_atomic=%confirmed, latest_atomic=%latest, "retained wallet retired with an observed remainder; keys and accounting remain available");
+    for (wallet, confirmed, latest, tolerance) in &depleted.retired_remainders {
+        tracing::info!(reason="automatic_retirement", pool, wallet, confirmed_atomic=%confirmed, latest_atomic=%latest, remainder_atomic=%confirmed.max(latest), tolerance_atomic=%tolerance, "Retained wallet retired; remaining USDC stays owned at its address and keys remain available");
     }
     Ok(())
 }
@@ -1987,13 +2011,18 @@ fn publish_chain_balances(
             if funding::record_initial_credit(tx, id, support.observation.available())? {
                 funding::publish_initial_credit(tx, id)?;
             }
-            if retire
-                && capacity::retire_with_support(tx, pool, id, &support, super::base::now()?)?
-                && support.observation.remainder() > U256::ZERO
+            if retire && capacity::retire_with_support(tx, pool, id, &support, super::base::now()?)?
             {
+                let tolerance: String = tx.query_row(
+                    "SELECT retirement_tolerance FROM pools WHERE id=?1",
+                    [pool],
+                    |r| r.get(0),
+                )?;
                 depleted.retired_remainders.push((
+                    id.clone(),
                     support.observation.confirmed.amount,
                     support.observation.latest.amount,
+                    amount(&tolerance)?,
                 ));
             }
         }

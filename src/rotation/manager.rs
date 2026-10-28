@@ -53,6 +53,7 @@ pub(crate) struct AdmissionObservation<'a> {
 #[cfg(test)]
 mod admission_tests;
 mod maintenance;
+mod retirement;
 mod selection;
 
 #[cfg(test)]
@@ -150,19 +151,11 @@ impl ManagedPool {
     pub(crate) fn hint_group_scope(&self) -> (uuid::Uuid, &str) {
         (self.store.runtime_namespace(), &self.pool)
     }
-    async fn acquire_view(
-        &self,
-        query: super::base::ChainQuery,
-        foreground: bool,
-    ) -> Result<super::base::ChainView> {
-        // Foreground reads belong to this call; background reads can share an owner.
-        let result = if foreground {
-            self.base.view(query).await
-        } else {
-            self.base
-                .shared_balance_view(query, self.store.clone())
-                .await
-        };
+    async fn acquire_view(&self, query: super::base::ChainQuery) -> Result<super::base::ChainView> {
+        let result = self
+            .base
+            .shared_balance_view(query, self.store.clone())
+            .await;
         match result {
             Ok(view) => Ok(view),
             Err(error) => {

@@ -6,10 +6,10 @@ use crate::{
     treasury::{OpenedTreasury, Treasury},
 };
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use tokio_util::sync::CancellationToken;
 
-type BalanceScope = BTreeSet<(String, String)>;
+type BalanceScope = BTreeMap<(String, String), bool>;
 
 #[derive(Serialize)]
 struct AssetObservation {
@@ -29,6 +29,34 @@ impl AssetObservation {
             failed: 0,
             error: Some(error),
         }
+    }
+
+    fn record_error(&mut self, error: &'static str) {
+        // Pending retirement must not hide a failed observation from another wallet.
+        if self.error.is_none() || self.error == Some("usdc_retirement_pending") {
+            self.error = Some(error);
+        }
+    }
+
+    fn inventory(malformed: usize) -> Self {
+        Self {
+            status: "inapplicable",
+            attempted: malformed,
+            completed: 0,
+            failed: malformed,
+            error: (malformed > 0).then_some("usdc_inventory_unavailable"),
+        }
+    }
+
+    fn detail(&self) -> Option<&'static str> {
+        self.error.map(|error| match error {
+            "usdc_retirement_pending" => "Retirement remains pending; original obligations are retained. Rerun sync or resume serving to continue.",
+            "usdc_retirement_unavailable" => "Retirement could not be verified; original obligations are retained. Check the reported failure before rerunning sync.",
+            "usdc_balance_unavailable" => "A managed USDC balance could not be observed; the previous estimate is retained. Rerun sync to try again.",
+            "usdc_inventory_unavailable" => "Some managed USDC wallets or retirement settings could not be inspected. Check the configuration and wallet records.",
+            "cancelled" => "Synchronization was cancelled; unfinished obligations are retained.",
+            other => other,
+        })
     }
 }
 #[derive(Serialize)]
@@ -138,13 +166,21 @@ pub(super) async fn run(
             }))?
         );
     } else {
+        let details = [
+            ("ZEC", observed.zec.detail()),
+            ("Managed USDC", observed.usdc.detail()),
+        ]
+        .into_iter()
+        .filter_map(|(asset, detail)| detail.map(|detail| format!("\n{asset} detail: {detail}")))
+        .collect::<String>();
         println!(
-            "Wallet synchronization: ZEC {}; managed USDC {} ({} attempted, {} completed, {} failed).\n\n{}\nPrimary ZEC address:\n{}",
+            "Wallet synchronization: ZEC {}; managed USDC {} ({} attempted, {} completed, {} failed).{}\n\n{}\nPrimary ZEC address:\n{}",
             observed.zec.status,
             observed.usdc.status,
             observed.usdc.attempted,
             observed.usdc.completed,
             observed.usdc.failed,
+            details,
             output::status(&state),
             addresses
                 .get(0)
@@ -197,12 +233,33 @@ async fn observe_zec(
 /// Snapshot only existing rows; neither missing configured groups nor new source
 /// registrations create allocations. Accepted destinations survive removal.
 async fn scope(config: &MetaConfig, store: &StoreHandle) -> Result<(BalanceScope, usize)> {
-    let names = crate::rotation::assignment::managed_names(config);
-    store
-        .call(move |s| {
-            let mut wallets = BTreeSet::new();
+    let profiles = crate::rotation::assignment::managed_profiles(config)
+        .into_iter()
+        .filter_map(|(name, profile)| {
+            if let crate::rotation::config::WalletConfig::ZcashRotation {
+                max_retirement_remainder_usdc,
+                ..
+            } = profile
+            {
+                Some((name, max_retirement_remainder_usdc.clone()))
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
+    store.call(move |s| {
+            let mut wallets = BTreeMap::new();
             let mut malformed = 0;
-            for pool in s.advisory_pools(&names)? {
+            for (name, setting) in profiles {
+                let Some(pool) = s.advisory_pools(std::slice::from_ref(&name))?.into_iter().next() else {continue;};
+                let retirement = match crate::rotation::config::retirement_remainder(&setting) {
+                    Ok(tolerance) => {s.apply_retirement_tolerance(&name, tolerance)?; true},
+                    Err(_) => {
+                        tracing::warn!(pool, "Wallet retirement configuration is invalid; scalar synchronization continues and retirement for this group is skipped");
+                        malformed += 1;
+                        false
+                    }
+                };
                 let through = s.wallet_boundary(&pool)?;
                 let mut cursor = -1;
                 loop {
@@ -214,7 +271,7 @@ async fn scope(config: &MetaConfig, store: &StoreHandle) -> Result<(BalanceScope
                         cursor = sequence;
                         match wallet {
                             Some(wallet) => {
-                                wallets.insert((pool.clone(), wallet));
+                                wallets.insert((pool.clone(), wallet), retirement);
                             }
                             None => malformed += 1,
                         }
@@ -232,7 +289,7 @@ async fn scope(config: &MetaConfig, store: &StoreHandle) -> Result<(BalanceScope
                     cursor = id;
                     match work {
                         Ok(work) if work.facts.credit_needed() => {
-                            wallets.insert((work.job.pool_id, work.job.wallet_id));
+                            wallets.entry((work.job.pool_id, work.job.wallet_id)).or_insert(false);
                         }
                         Ok(_) => {}
                         Err(_) => malformed += 1,
@@ -253,13 +310,7 @@ async fn observe_usdc(
         Ok(scope) => scope,
         Err(_) => return AssetObservation::failed("usdc_inventory_unavailable"),
     };
-    let report = AssetObservation {
-        status: "inapplicable",
-        attempted: malformed,
-        completed: 0,
-        failed: malformed,
-        error: None,
-    };
+    let report = AssetObservation::inventory(malformed);
     if wallets.is_empty() && malformed == 0 {
         return report;
     }
@@ -287,15 +338,38 @@ async fn refresh_usdc(
     base: BaseRpc,
     stop: &CancellationToken,
 ) -> AssetObservation {
-    for (pool, wallet) in wallets {
+    for ((pool, wallet), retirement) in wallets {
         if stop.is_cancelled() {
             report.error = Some("cancelled");
             break;
         }
         report.attempted += 1;
-        match store.observe_balance(pool, wallet, base.clone()).await {
+        match store
+            .observe_balance(pool.clone(), wallet.clone(), base.clone())
+            .await
+        {
             Ok(_) => report.completed += 1,
-            Err(_) => report.failed += 1,
+            Err(_) => {
+                report.failed += 1;
+                report.record_error("usdc_balance_unavailable");
+            }
+        }
+        if !retirement {
+            continue;
+        }
+        let manager = crate::rotation::manager::ManagedPool::new(
+            store.clone(),
+            pool,
+            base.clone(),
+            crate::payment::SpendPolicy { max_atomic: None },
+        );
+        match manager {
+            Ok(manager) => match manager.retire_wallet(wallet).await {
+                Ok(true) => {}
+                Ok(false) => report.record_error("usdc_retirement_pending"),
+                Err(_) => report.record_error("usdc_retirement_unavailable"),
+            },
+            Err(_) => report.record_error("usdc_retirement_unavailable"),
         }
     }
     report.status = if report.failed > 0 || report.error.is_some() {

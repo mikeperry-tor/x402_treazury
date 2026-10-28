@@ -613,3 +613,99 @@ async fn malformed_resolution_bindings_cannot_invalidate_financial_evidence() {
         assert_eq!((proofs, repairs), (0, 0));
     }
 }
+
+#[tokio::test]
+async fn committed_retirement_discards_demand_from_each_publisher_and_late_completions() {
+    for scoped in [true, false] {
+        let mut f = Fixture::new().await;
+        let wallet = f.wallets[0].clone();
+        let sibling = f.wallets[1].clone();
+        for id in &f.wallets {
+            f.store.record_credit(id, "100", "fixture", 1).unwrap();
+        }
+        f.store
+            .db
+            .execute_batch("UPDATE reserve_claims SET enabled=0; UPDATE wallets SET role='RETAINED',balance='0';")
+            .unwrap();
+        for id in &f.wallets {
+            f.store.consider_retirement(&f.pool, id).unwrap();
+        }
+        assert!(f.store.begin_retirement(&f.pool, &wallet).unwrap());
+        f.store.finish_retirement(
+            &f.pool,
+            &sibling,
+            true,
+            true,
+            Some("canonical_observation_unavailable"),
+            None,
+        );
+        let sibling_due = f.store.retirement_due(&sibling);
+        // An independently reused payer keeps its existing marker until local
+        // eligibility reevaluation; retirement of another wallet cannot erase it.
+        f.store
+            .db
+            .execute("UPDATE wallets SET role='ACTIVE' WHERE id=?1", [&sibling])
+            .unwrap();
+        f.chain.lock().unwrap().1 = 0;
+        let query = if scoped {
+            f.store
+                .scoped_chain_query(&f.pool, vec![wallet.clone()], vec![])
+                .unwrap()
+        } else {
+            f.store.chain_query(&f.pool).unwrap()
+        };
+        let view = f.rpc.view(query).await.unwrap();
+        f.store.db.execute_batch("CREATE TRIGGER reject_retirement BEFORE INSERT ON wallet_retirements BEGIN SELECT RAISE(ABORT,'fixture retirement commit failure'); END;").unwrap();
+        let failed = if scoped {
+            f.store.publish_scoped_evidence(&f.pool, view.clone())
+        } else {
+            f.store.reconcile_pool(&f.pool, view.clone())
+        };
+        assert!(failed.is_err());
+        assert!(f.store.retirement_work.contains_key(&wallet));
+        assert_eq!(
+            f.store
+                .db
+                .query_row("SELECT role FROM wallets WHERE id=?1", [&wallet], |r| {
+                    r.get::<_, String>(0)
+                })
+                .unwrap(),
+            "RETAINED"
+        );
+        f.store
+            .db
+            .execute_batch("DROP TRIGGER reject_retirement")
+            .unwrap();
+        if scoped {
+            f.store.publish_scoped_evidence(&f.pool, view).unwrap();
+        } else {
+            f.store.reconcile_pool(&f.pool, view).unwrap();
+        }
+        assert_eq!(
+            f.store
+                .db
+                .query_row("SELECT role FROM wallets WHERE id=?1", [&wallet], |r| {
+                    r.get::<_, String>(0)
+                })
+                .unwrap(),
+            "RETIRED"
+        );
+        assert!(!f.store.retirement_work.contains_key(&wallet));
+        // The maintenance owner may finish after another canonical publisher.
+        f.store.finish_retirement(
+            &f.pool,
+            &wallet,
+            true,
+            true,
+            Some("canonical_observation_unavailable"),
+            None,
+        );
+        f.store
+            .finish_balance(&f.pool, &wallet, Some(U256::ZERO))
+            .unwrap();
+        f.store.consider_retirement(&f.pool, &wallet).unwrap();
+        assert!(!f.store.retirement_work.contains_key(&wallet));
+        assert!(f.store.retirement_requested(&sibling));
+        assert_eq!(f.store.retirement_due(&sibling), sibling_due);
+    }
+}

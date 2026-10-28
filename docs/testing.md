@@ -267,6 +267,26 @@ funding correlations, readiness support and first-error order, including existin
 schema permissiveness. These structural validators certify recorded evidence;
 passing their synthetic fixtures does not qualify live settlement.
 
+Ordinary retirement changes require fixtures through the serving or finite-sync
+producer and canonical publication path, rather than only direct mutation tests.
+Cover independent per-group defaults/overrides, inclusive integer thresholds and
+both directions of confirmed/latest disagreement. Candidate authorization paging
+must cross 64 records, preserve still-valid unused signatures, use confirmed chain
+time for expiry and avoid unrelated history reads or payment replay. Preserve
+never-credited predecessors, late usable credit, current/archived source blockers,
+reserve generations and exact atomic evidence through races and reopen.
+
+Scheduling evidence must count RPCs across idle wakes and disposable cache eviction:
+latest-high completes even with a low saved minimum, whereas confirmed-high/latest-low
+retains progress. Exercise independent backoff, demand during acquisition, cancelled
+waiters, owner replacement, restart and unrelated concurrent work. Include finite
+sync with unresolved work, paused auto-funding, Store-only serving, disabled groups,
+qualification mutation denial and the startup SOCKS prerequisite with no direct
+fallback. Isolated diagnostics must show committed zero/dust retirement at INFO,
+safe blocker visibility and no repeated reminder on each poll. These unfunded
+local fixtures establish ownership and scheduling contracts, not live settlement,
+Tor privacy or the permanent absence of future external credit.
+
 Catalog input matrices compare complete schemas, routes, body-name mappings and
 body presence. They preserve duplicate-parameter behavior, collision error order,
 required alternatives and recursive sanitization; public routing fixtures check

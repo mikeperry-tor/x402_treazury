@@ -4,7 +4,7 @@ use crate::deployment::MetaConfig;
 use alloy_primitives::U256;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub const AUTO_PREFIX: &str = "auto_v1_";
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -66,17 +66,17 @@ impl Scope {
 /// Project observation scope without validating spending or serving settings.
 /// Only existing Store pools are read by the caller; this never grants allocation
 /// authority. Broken unrelated bindings do not hide independent managed pools.
-pub(crate) fn managed_names(config: &MetaConfig) -> Vec<String> {
+pub(crate) fn managed_profiles(config: &MetaConfig) -> BTreeMap<String, &WalletConfig> {
     let mut names = config
         .wallets
         .iter()
-        .filter_map(|(name, wallet)| wallet.managed().then_some(name.clone()))
-        .collect::<BTreeSet<_>>();
+        .filter_map(|(name, wallet)| wallet.managed().then_some((name.clone(), wallet)))
+        .collect::<BTreeMap<_, _>>();
     if let Some(assignment) = &config.wallet_assignment
-        && config
+        && let Some(template) = config
             .wallet_templates
             .get(&assignment.template)
-            .is_some_and(WalletConfig::managed)
+            .filter(|profile| profile.managed())
     {
         let graph = crate::deployment::routing::EffectiveBindings::project(config);
         for (server_name, sources) in &graph.0 {
@@ -86,12 +86,14 @@ pub(crate) fn managed_names(config: &MetaConfig) -> Vec<String> {
                     continue;
                 };
                 if source.wallet.is_none() && server.wallet.is_none() {
-                    names.insert(assignment.scope.identity(server_name, source_name));
+                    names
+                        .entry(assignment.scope.identity(server_name, source_name))
+                        .or_insert(template);
                 }
             }
         }
     }
-    names.into_iter().collect()
+    names
 }
 
 pub fn resolve(config: &MetaConfig) -> Result<Resolution> {

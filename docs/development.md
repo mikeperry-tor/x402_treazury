@@ -492,7 +492,11 @@ One-pass `wallet sync` warnings report `automatic_retry=false` and instruct the
 operator to rerun the command. Pepper Sync fetch spans are debug-only and do not
 emit raw returned errors; the sanitized application diagnostic owns failure
 reporting. Base RPC attempts and successful provider failover are DEBUG events
-with provider ordinals; an exhausted complete verification remains WARN.
+with provider ordinals, including an exhausted view acquisition. The requesting
+workflow owns its outcome: retrying retirement reports a meaningful delay at INFO,
+while an operator-required stop warns once with the affected wallet/group and a
+safe record-failure category. It preserves obligations and asks for inspection;
+later checks of the same stopped request do not repeat the warning.
 Configured discovery relay selection and meaningful paid-recovery transitions
 use INFO at the owning operation. Individual relay exchanges, unsigned relay
 failures and payment completion use DEBUG. Other unsigned API and catalog/pricing

@@ -51,6 +51,23 @@ fn safe_reason(error: &anyhow::Error) -> String {
     if let Some(rpc) = error.downcast_ref::<RpcFailure>() {
         return rpc.to_string();
     }
+    if let Some(reason) = error
+        .downcast_ref::<rusqlite::Error>()
+        .and_then(|error| match error {
+            rusqlite::Error::InvalidColumnType(..) => {
+                Some("stored wallet record has an invalid column type")
+            }
+            rusqlite::Error::IntegralValueOutOfRange(..) => {
+                Some("stored wallet number is out of range")
+            }
+            rusqlite::Error::FromSqlConversionFailure(..) => {
+                Some("stored wallet record cannot be decoded")
+            }
+            _ => None,
+        })
+    {
+        return reason.into();
+    }
     for cause in error.chain() {
         let message = cause.to_string();
         if matches!(
@@ -447,7 +464,7 @@ impl BaseRpc {
                             failover, elapsed_ms = started.elapsed().as_millis() as u64,
                             "Base verification provider failed; trying configured fallback with a fresh view");
                     } else {
-                        tracing::warn!(view_sequence, verification_stage, stage_elapsed_ms, completed_rpc_calls, expected_rpc_calls,
+                        tracing::debug!(view_sequence, verification_stage, stage_elapsed_ms, completed_rpc_calls, expected_rpc_calls,
                             wallet_count, pending_count, category = %safe_diagnostic(&error), provider_index = index + 1, provider_count = count,
                             failover, elapsed_ms = started.elapsed().as_millis() as u64,
                             "Base credit/payment chain verification failed; no usable configured fallback");
@@ -916,7 +933,7 @@ mod tests {
             let server = tokio::spawn(async move {axum::serve(listener,app).await.unwrap()});
             let logs = Logs::default();
             let writer = logs.clone();
-            let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false).with_writer(move ||writer.clone()).finish();
+            let subscriber = tracing_subscriber::fmt().without_time().with_ansi(false).with_env_filter("warn,x402_treazury::rotation::base=debug").with_writer(move ||writer.clone()).finish();
             let rpc = BaseRpc::new(&url, 12).unwrap();
             let error = rpc.view(ChainQuery{wallets:vec![],pending:vec![],anchor:None,captures:Default::default()}).with_subscriber(subscriber).await.err().unwrap();
             let public = safe_diagnostic(&error);

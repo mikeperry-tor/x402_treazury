@@ -267,7 +267,9 @@ fn observation_retains_known_groups_despite_unrelated_invalid_bindings() {
     let cfg = config(&value);
     assert!(EffectiveBindings::resolve(&cfg).is_err());
     assert_eq!(
-        assignment::managed_names(&cfg),
+        assignment::managed_profiles(&cfg)
+            .into_keys()
+            .collect::<Vec<_>>(),
         ["auto_v1_binding_3_one_alias", "explicit"]
     );
 }

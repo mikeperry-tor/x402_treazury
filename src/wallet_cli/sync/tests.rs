@@ -5,7 +5,10 @@ use crate::rotation::{
 };
 use alloy_primitives::U256;
 use serde_json::json;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, Mutex},
+};
 
 fn config() -> MetaConfig {
     serde_json::from_value(json!({"version":1,"servers":{},"sources":{"unused":{"spec":"/missing/provider.toml","api_key_env":"UNRELATED_MISSING_KEY"}},
@@ -67,6 +70,8 @@ async fn scope_ignores_unrelated_validation_and_retains_generated_and_accepted_r
         template["max_api_payment_usdc"] = json!("invalid");
         template["max_funding_spend_zec"] = json!("invalid");
         value["wallets"]["not_allocated"] = template.clone();
+        value["wallets"]["not_allocated"]["max_retirement_remainder_usdc"] =
+            json!("invalid-unused-tolerance");
         value["wallet_templates"] = json!({"default":template,"unused":template});
         value["wallets"]["configured"]["reserves"]["small"]["funding_amount_usdc"] =
             json!("invalid");
@@ -87,7 +92,7 @@ async fn scope_ignores_unrelated_validation_and_retains_generated_and_accepted_r
         assert_eq!(observed.len(), 3);
         assert_eq!(
             observed
-                .iter()
+                .keys()
                 .map(|(pool, _)| pool.clone())
                 .collect::<BTreeSet<_>>(),
             BTreeSet::from([configured, accepted, generated])
@@ -101,7 +106,7 @@ async fn scope_ignores_unrelated_validation_and_retains_generated_and_accepted_r
         let (observed, malformed) = scope(&config, &store).await.unwrap();
         assert_eq!(malformed, 0);
         assert_eq!(observed.len(), 2);
-        assert!(observed.contains(&(job.pool_id, job.wallet_id)));
+        assert!(observed.contains_key(&(job.pool_id, job.wallet_id)));
         drop(store);
         worker.await.unwrap();
     }
@@ -178,6 +183,7 @@ async fn one_pass_refreshes_independent_wallets_without_near_credentials_or_sour
         (report.attempted, report.completed, report.failed),
         (2, 1, 1)
     );
+    assert_eq!(report.error, Some("usdc_balance_unavailable"));
     assert_eq!(calls.lock().unwrap().len(), 2);
     let balances = db
         .prepare("SELECT id,balance FROM wallets WHERE pool_id=?1 ORDER BY sequence")
@@ -213,6 +219,189 @@ async fn one_pass_refreshes_independent_wallets_without_near_credentials_or_sour
         1
     );
     drop(db);
+    drop(store);
+    worker.await.unwrap();
+    server.abort();
+}
+
+#[tokio::test]
+async fn finite_sync_applies_group_tolerance_and_retires_without_a_funding_owner() {
+    use crate::rotation::config::{ReserveConfig, ReservesConfig};
+    use axum::{Json, Router, routing::post};
+    for tolerance in ["0.001", "0"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = state(dir.path());
+        let reserve = ReserveConfig {
+            funding_amount_usdc: "2".into(),
+            max_funding_amount_usdc: None,
+        };
+        let pool = state
+            .ensure_capacity_group(
+                "configured",
+                &ReservesConfig {
+                    small: reserve.clone(),
+                    large: Some(reserve.clone()),
+                },
+                Some(U256::from(1_000_000)),
+                0,
+            )
+            .unwrap();
+        let job = state
+            .allocate_capacity_kind(&pool, AllocationKind::Large, true)
+            .unwrap()
+            .unwrap();
+        let wallet = state.funding_job(&job).unwrap().unwrap().wallet_id;
+        let head = Arc::new(std::sync::atomic::AtomicU64::new(100));
+        let current = head.clone();
+        let app = Router::new().route("/", post(move |Json(request):Json<serde_json::Value>| {
+            let head = current.load(std::sync::atomic::Ordering::SeqCst);
+            async move {
+                let result = match request["method"].as_str().unwrap() {
+                    "eth_chainId" => json!("0x2105"),
+                    "eth_getBlockByNumber" => {
+                        let tag = request["params"][0].as_str().unwrap();
+                        let height = if tag=="latest" {head} else {u64::from_str_radix(&tag[2..],16).unwrap()};
+                        json!({"number":format!("0x{height:x}"),"hash":format!("0x{height:064x}"),"timestamp":format!("0x{:x}",crate::rotation::base::now().unwrap())})
+                    },
+                    "eth_call" => json!(format!("0x{:064x}", if head==100 {2_000_000} else {1_000})),
+                    method => panic!("unexpected mutation {method}"),
+                };
+                Json(json!({"jsonrpc":"2.0","id":request["id"],"result":result}))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base =
+            BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let query = state
+            .scoped_chain_query(&pool, vec![wallet.clone()], vec![])
+            .unwrap();
+        state
+            .record_verified_credit(&wallet, base.view(query).await.unwrap())
+            .unwrap();
+        state
+            .configure_capacity_group(
+                &pool,
+                Some(U256::from(1_000_000)),
+                0,
+                &ReservesConfig {
+                    small: reserve,
+                    large: None,
+                },
+            )
+            .unwrap();
+        state.pause_new_funding();
+        head.store(200, std::sync::atomic::Ordering::SeqCst);
+        let (store, worker) = StoreHandle::spawn(state);
+        let mut settings = config();
+        if let crate::rotation::config::WalletConfig::ZcashRotation {
+            max_retirement_remainder_usdc,
+            ..
+        } = settings.wallets.get_mut("configured").unwrap()
+        {
+            *max_retirement_remainder_usdc = tolerance.into();
+        }
+        let (wallets, malformed) = scope(&settings, &store).await.unwrap();
+        assert_eq!(malformed, 0);
+        let report = refresh_usdc(
+            store.clone(),
+            wallets,
+            AssetObservation {
+                status: "inapplicable",
+                attempted: 0,
+                completed: 0,
+                failed: 0,
+                error: None,
+            },
+            base,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(report.status, "completed");
+        assert_eq!(
+            (report.attempted, report.completed, report.failed),
+            (1, 1, 0)
+        );
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        let role: String = db
+            .query_row("SELECT role FROM wallets WHERE id=?1", [wallet], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            role,
+            if tolerance == "0.001" {
+                "RETIRED"
+            } else {
+                "RETAINED"
+            }
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM treasury_operations", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(db);
+        drop(store);
+        worker.await.unwrap();
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn invalid_existing_retirement_policy_keeps_scalar_sync_and_saved_authority() {
+    use axum::{Json, Router, routing::post};
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = state(dir.path());
+    let pool = allocate(&mut state, "configured");
+    let job = state.funding_jobs().unwrap().remove(0);
+    state
+        .record_credit(&job.wallet_id, "7", "fixture", 1)
+        .unwrap();
+    let mut settings = config();
+    if let crate::rotation::config::WalletConfig::ZcashRotation {
+        max_retirement_remainder_usdc,
+        ..
+    } = settings.wallets.get_mut("configured").unwrap()
+    {
+        *max_retirement_remainder_usdc = "invalid".into();
+    }
+    let (store, worker) = StoreHandle::spawn(state);
+    let (wallets, malformed) = scope(&settings, &store).await.unwrap();
+    assert_eq!(malformed, 1);
+    assert_eq!(wallets.get(&(pool, job.wallet_id)), Some(&false));
+    let app = Router::new().route(
+        "/",
+        post(|Json(request): Json<serde_json::Value>| async move {
+            assert_eq!(request["method"], "eth_call");
+            assert_eq!(request["params"][1], "latest");
+            Json(json!({"jsonrpc":"2.0","id":request["id"],"result":format!("0x{:064x}",17)}))
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 12).unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let report = refresh_usdc(
+        store.clone(),
+        wallets,
+        AssetObservation::inventory(malformed),
+        base,
+        &CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(report.status, "failed");
+    assert_eq!(
+        (report.attempted, report.completed, report.failed),
+        (2, 1, 1)
+    );
+    assert_eq!(report.error, Some("usdc_inventory_unavailable"));
+    let status = store.call(|s| s.status()).await.unwrap();
+    assert_eq!(status.pools[0].addresses[0].confirmed_balance, "17");
+    assert_eq!(
+        status.pools[0].retirement_tolerance_atomic.as_deref(),
+        Some("0")
+    );
     drop(store);
     worker.await.unwrap();
     server.abort();

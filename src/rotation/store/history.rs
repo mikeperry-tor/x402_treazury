@@ -54,12 +54,12 @@ impl Store {
                     && payer == auth.payer
                     && nonce == auth.nonce
                     && valid_before == auth.valid_before,
-                "authorization_evidence_binding_mismatch"
+                super::super::base::evidence::EvidenceFailure::MalformedSupport
             );
             match (state.as_str(), resolved) {
                 ("POSSIBLY_SUBMITTED", false) => current.push(auth),
                 ("RESOLVED", true) => {}
-                _ => anyhow::bail!("inconsistent_authorization_resolution_state"),
+                _ => anyhow::bail!(super::super::base::evidence::EvidenceFailure::MalformedSupport),
             }
         }
         Ok(current)
