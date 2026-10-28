@@ -181,6 +181,9 @@ extends = "../../providers/botsmith.toml"
 send_tools = [
   # Keep probabilistic model questions outside this research deployment; inline schemas replace help.
   { to = "exclude", tools = ["help", "jev"] },
+  # Share X search with web to replace the X component of Otto filtered_news.
+  # First-page posts/metrics are qualified; returned-cursor pagination is not.
+  { to = ["web", "social"], tools = ["x_search"] },
   # Route financial research families before the primary fallback.
   { to = "finance", tools = ["polymarket_*"] },
   { to = "social" },
@@ -207,7 +210,7 @@ send_tools = [
 extends = "../../providers/lonestar.toml"
 send_tools = [
   { to = "exclude", tools = [
-    "read_read", # Superseded by Otto web_extract: preserves lists and long-document content lost by this reader, at the same $0.005.
+    "read_read", # NetIntel web_extract preserves structure and reports the final URL; StableEnrich Firecrawl handles rendering.
     "sanctions_screen", # Superseded by AgOSINT sanctions: dated OFAC/EU/UK evidence versus OFAC only; $0.015 versus $0.05.
     "funding_extremes", # Same-price subset of funding_rates; ranks the same asset/venue rates.
     "funding_signal", # Same-price signal already included in funding_rates.
@@ -287,15 +290,25 @@ send_tools = [
   { to = "finance" },
 ]
 
-# Retain equity, macro, on-chain, news, social, network and weather research.
+# Retain distinct equity, macro, on-chain, curated social and weather research.
 # Omit generative and model workflows, aggregate mega reports and video generation.
 [sources.otto]
 extends = "../../providers/otto.toml"
 send_tools = [
   # Direct Exa returned more primary sources in both sampled searches and exposes filters/content controls.
   { to = "exclude", tools = ["web_search"] }, # Superseded by Exa search; $0.007 sampled versus $0.009 for this Exa wrapper.
-  # Superseded by AgOSINT domain ($0.015 versus $0.02); Otto dns_lookup retains the email-auth/DKIM fields.
+  # AgOSINT covers domain enrichment; NetIntel supplies DNS and RDAP dates.
   { to = "exclude", tools = ["domain_report"] },
+  # Qualified replacements: NetIntel reads expose redirects; StableEnrich supplies
+  # rendered Markdown and cited answers. AgentUtility adds static JSON/links below.
+  { to = "exclude", tools = ["web_extract", "web_answer"] },
+  # Replace topical news and prepared recaps with Exa news discovery + synthesis;
+  # shared botsmith_x_search covers filtered_news's X component. crypto_news stays.
+  { to = "exclude", tools = ["filtered_news", "news_recaps"] },
+  # NetIntel returns DNS records/SPF/DMARC and registration dates for derived age.
+  # DKIM remains nullable; this does not promise complete selector discovery.
+  { to = "exclude", tools = ["dns_lookup", "whois_lookup", "domain_age"] },
+  { to = "exclude", tools = ["tweet_search"] }, # Botsmith supplies matching posts and metrics.
   { to = "exclude", tools = [        # Expensive low-value LLM calls
     "generate_meme",
     "llm_research",
@@ -318,12 +331,13 @@ send_tools = [
     "insider_trades",
     "institutional_holdings",
   ] },
-  # Route security research families before the primary fallback.
-  { to = "security", tools = ["dns_lookup", "domain_*", "whois_lookup"] },
   # Route social research families before the primary fallback.
-  { to = "social", tools = ["kol_sentiment", "tweet_search", "twitter_summary"] },
+  { to = "social", tools = ["kol_sentiment", "twitter_summary"] },
   # Route web research families before the primary fallback.
-  { to = "web", tools = ["filtered_news", "news_recaps", "web_*"] },
+  # Keep web_json_extract/web_links for their distinct browser-dependent contract.
+  # Static alternatives below do not qualify all JS-generated fields/links; check
+  # Otto freshness/degradation and destination rather than trusting HTTP success.
+  { to = "web", tools = ["web_*"] },
   # Route world research families before the primary fallback.
   { to = "world", tools = ["weather"] },
   { to = "finance" },
@@ -407,12 +421,12 @@ send_tools = [
 [sources.stableenrich]
 extends = "../../providers/stableenrich.toml"
 send_tools = [
+  # Preserve the qualified cited-answer tool before excluding other Exa wrappers.
+  { to = "web", tools = ["exa_answer"] },
   { to = "exclude", tools = [
     "exa_*",               # Use exa directly instead
-    # Vaaya exposes the same Firecrawl/Serper workflows with fuller scrape/news controls.
-    "firecrawl_scrape",
-    "firecrawl_search",
-    "serper_news",
+    "firecrawl_search",    # Direct Exa supplies web discovery; Firecrawl scrape remains enabled.
+    "serper_news",         # Upstream credit failure; use Exa's news category and date filters.
     "pdl_people_enrich",   # Use PDL directly instead
     # Prefer solar_building_insights for directly usable structured results.
     # These imagery layers require extra asset retrieval and processing or viewing.
@@ -438,6 +452,16 @@ send_tools = [
     "whitepages_person_search",
   ] },
   { to = "web" },
+]
+
+# Qualified static-page JSON/links, without enabling the full utility catalog.
+# These fetch HTML rather than rendering JS. The browser-render alternative failed
+# qualification; Otto's distinct browser-dependent tools remain available above.
+[sources.agentutility]
+extends = "../../providers/agentutility/provider.toml"
+send_tools = [
+  { to = "web", tools = ["scrape_to_json", "link_extract"] },
+  { to = "exclude" },
 ]
 
 # Market families and project trend feeds are available on the finance endpoint.
@@ -563,6 +587,9 @@ send_tools = [
 [sources.netintel]
 extends = "../../providers/netintel.toml"
 send_tools = [
+  # Plain-page/PDF reader with final URL, HTTP status and visible truncation.
+  # Match before web_* below; rendered pages use StableEnrich Firecrawl on web.
+  { to = "web", tools = ["web_extract"] },
   { to = "exclude", tools = [
     # Model gateways and text processing: outside the selected infrastructure research scope.
     "api_*",
@@ -579,18 +606,16 @@ send_tools = [
     "wallet_*",
     "weather_*",
     # Domain bundles/acquisition/watch tools add overlapping summaries or separate monitoring workflows.
-    # Otto supplies DNS/registration; AgOSINT supplies domain/company enrichment; targeted checks remain enabled.
+    # DNS and RDAP stay enabled; AgOSINT supplies domain/company enrichment.
     "domain_*",
-    "dns_lookup", # Otto DNS costs $0.001 versus $0.002 and includes parsed email-auth posture.
-    "whois_rdap_lookup", # Otto supplies core RDAP fields for $0.001 versus $0.003; extra grading is lower priority.
     "ip_geo_locate", # Prefer IPIntel's $0.003 enrichment with PTR and proxy/mobile/hosting flags over $0.002 geo alone.
     "asn_lookup_analyze", # IPIntel covers basic ASN; AgOSINT adds prefixes/RPKI for $0.015 versus $0.03 here.
     "ssl_cert", # Prefer richer ssl_analyze ($0.007); AgOSINT domain also includes basic TLS facts.
     "url_safety_full", # $0.15 bundle overlaps enabled targeted URL, TLS and header checks.
     "ip_risk_score", # Overlaps retained full IP report; narrower IPIntel/reputation/blacklist checks also available.
-    # Email checks overlap Otto email-auth DNS and social's email-validation tools; skip additional bundles.
+    # Email bundles overlap the retained DNS SPF/DMARC fields and social's validation tools.
     "email_*",
-    # Calendar/event extraction and general web/search tools are outside this security selection.
+    # General web/search tools are outside this security selection except web_extract above.
     "event_*",
     "exa_*",
     "web_*",
@@ -646,15 +671,15 @@ extends = "../../providers/ipintel.toml"
 send_tools = [
   { to = "exclude", tools = [
     "base64_*", # Prefer local encoding/decoding over paid remote computation.
-    "domain_*", # Health overlaps Otto DNS; availability deliberately omitted from this deployment.
-    "dns_lookup", # Otto costs the same $0.001 and adds CNAME/parsed email-auth; CAA/types alone do not justify duplication.
+    "domain_*", # Health overlaps NetIntel DNS; availability deliberately omitted from this deployment.
+    "dns_lookup", # NetIntel supplies CNAME, parsed SPF/DMARC and resolver consistency; omit the duplicate.
     "email_validate", # Social already exposes email validation; this is DNS-level, not mailbox confirmation.
     "help", # Inline schemas cover the selected IP and satellite tools.
     "http_latency", # Cloudflare-edge HTTP timing, not caller latency; lower-priority diagnostic.
     "json_schema_validator", # Prefer local validation over paid remote computation.
     "jwt_decode", # Prefer local decoding; remote decoding exposes token contents and does not verify signatures.
     "reverse_dns", # PTR is already included in ipintel_ip_lookup.
-    "whois_lookup", # Otto supplies core registration fields for $0.001 versus $0.005; redaction/server fields are lower priority.
+    "whois_lookup", # NetIntel supplies core registration fields; redaction/server fields are lower priority.
   ] },
   # Geographic scene observations belong with physical-world conditions.
   { to = "world", tools = ["satellite"] },
@@ -923,7 +948,7 @@ send_tools = [
   { to = "world", tools = ["aviation_*", "airport_*", "flight_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
   # Legal, political and occupational records remain on business.
   { to = "business", tools = ["law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
-  # Exa/Otto/Vaaya cover search, retrieval, news and paper search; PDL/Deepline cover contacts.
+  # Exa, NetIntel, StableEnrich and AgentUtility cover web research; PDL/Deepline cover contacts.
   # Existing finance providers cover quotes, filings and crypto; AgOSINT covers routine company/LEI lookups.
   # Parsing/validation belongs locally. Model/media gateways, commerce, entertainment, trip planning,
   # remote infrastructure and provider feedback/diagnostics are outside this research selection.
@@ -948,7 +973,7 @@ send_tools = [
   ] },
   # AgOSINT supplies routine CZ/NO/GB/FR/FI/US/DE company lookups; Brazilayer supplies CNPJ.
   # Maxwell supplies CA/CH/PL/SK records. Retain the additional jurisdictions and scoped KYB tools above.
-  # Exa/Otto/Vaaya cover web/papers, existing finance providers cover markets, and Otto/AgOSINT cover DNS/domain checks.
+  # Selected web/science tools cover web/papers, finance covers markets, and NetIntel/AgOSINT cover DNS/domains.
   # Prefer selected component calls over overlapping solutions_* bundles; parsing/validation belongs locally.
   # Content generation, document processing and account/provider diagnostics are outside this selection.
   { to = "exclude" },
@@ -968,7 +993,7 @@ send_tools = [
   { to = "science", tools = ["openfda_drug_label", "openfda_drug_event"] },
   { to = "business", tools = ["gov_*"] },
   # x402stock/AgentFund/Otto cover SEC, macro and market data; Vaaya covers court search and patents.
-  # AgOSINT supplies broader sanctions lists; Otto supplies RDAP and ordinary forecasts.
+  # AgOSINT supplies broader sanctions lists; NetIntel supplies RDAP and Otto combined forecasts.
   # 2s supplies direct CVE/package evidence; existing recall tools cover the omitted FDA recall searches.
   # Ski/menu/trip planning, model calls and provider-mediated test purchases are separate workflows.
   # Provider diagnostics/help add no selected research data; inline schemas cover the tools above.
@@ -982,9 +1007,9 @@ send_tools = [
   { to = "security", tools = ["injection_scan"] },
   { to = "world", tools = ["geocode", "route_matrix"] },
   { to = "business", tools = ["hs_classify"] },
-  # Otto/AgOSINT cover DNS/domain/mail posture; IPIntel/NetIntel cover IP and network checks.
+  # NetIntel/AgOSINT cover DNS/domain/mail posture; IPIntel/NetIntel cover IP and network checks.
   # Social already has email validation; AgOSINT covers VAT/sanctions; LoneStar covers ensemble weather.
-  # SocialFetch/Vaaya cover page capture and extraction; selected web tools cover news and source discovery.
+  # Web retains page capture; qualified readers/extractors cover pages and Exa covers source discovery.
   # Prefer local text/secret/PII parsing and statistical calculations over additional remote utilities.
   # Site audits, agent-access assessments and provider trust diagnostics are outside this selection.
   { to = "exclude" },
@@ -1009,7 +1034,7 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, pages, news, archives, keyword trends, image/reverse-image search and shopping. Prefer exa_search for general search and vaaya_serper_news for news links. Read ordinary pages with otto_web_extract; use exa_contents for freshness or historical controls, socialfetch_web_markdown for selectors/scrolling, vaaya_firecrawl_scrape for rendering/actions, vaaya_brightdata_unblock for blocked pages and Diffbot for typed extraction. Use google_trends_trend_over_time for interest timelines. Use science for academic papers, citations and research identities. Strale inspects C2PA media credentials; GDELT provides news-coverage timelines; Wayback provides archived pages."
+instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Read pages with netintel_web_extract; exa_contents adds freshness/history controls. Use stableenrich_firecrawl_scrape for rendered pages and stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON and static HTML links. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use botsmith_x_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA; GDELT covers news timelines and Wayback covers archives."
 
 [servers.science]
 listen = "127.0.0.1:3011"

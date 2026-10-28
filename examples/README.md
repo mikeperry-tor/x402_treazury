@@ -25,16 +25,34 @@ instructions, capabilities and wallet references. See
 [source tool distribution](../docs/configuration.md#source-tool-distribution) for
 matching, potential bindings and `config check --explain-routing` inspection.
 
-The research desk prefers Exa for general search, Otto for ordinary page reads,
-and Vaaya for Firecrawl and Serper News; duplicate StableEnrich wrappers are
-excluded here, not in the reusable provider. Exa retains explicit freshness and
-historical controls; SocialFetch retains selector, scrolling and cache controls.
+The research desk prefers Exa for general/news search, NetIntel for ordinary page
+reads, and StableEnrich for rendered Firecrawl reads and cited Exa answers.
+AgentUtility supplies static HTML links and schema-based static-page JSON; the
+agent supplies news synthesis, with Botsmith X search shared across web/social.
+NetIntel DNS/RDAP replaces Otto's DNS, registration and derived domain-age reads.
+Its DKIM field is nullable and does not establish complete selector discovery.
+Exa retains explicit freshness/history controls. SocialFetch and Vaaya retain
+distinct APIs, but their payment/lookup failures remain unresolved; they are no
+longer the preferred general reading/news paths. Selections belong here, not in
+the reusable providers.
+
+Otto's browser-dependent JSON/link tools remain available because static HTML
+alternatives do not establish equivalent JavaScript coverage. Inspect freshness,
+degradation, truncation and final destination before relying on a result; a
+successful extraction or quality grade does not prove the intended page was read.
+AgentUtility browser rendering and Strale extraction did not qualify, and 2s
+structured extraction returned unknown fields on the JavaScript test page.
+Otto's remaining financial, owned-account, chain-specific and curated APIs retain
+distinct contracts; overlapping endpoint names alone do not justify removing them.
 Google Trends uses `trend_over_time` for all windows, including `2004_present`.
 Concordance's catalog is shared with business/finance so series IDs remain
 resolvable. Exa, Trends and Concordance vendor help tools are omitted here;
 complete input schemas and inline guidance cover the selected calls without
-HTTP setup instructions or unavailable follow-ups. These are capability-based selections, not claims of identical
-upstream results or comparative live qualification.
+HTTP setup instructions or unavailable follow-ups. Focused public-page probes
+support the selected reading, rendering, static extraction, DNS/RDAP and first-page
+X-search workflows; they do not establish universal availability, identical
+outputs or complete pagination. Botsmith returned a cursor longer than its
+declared input limit, so its continuation remains unqualified.
 
 The desk also selects direct scientific and public-record datasets from 2s,
 additional national registries and scoped ownership/insolvency evidence from Strale,

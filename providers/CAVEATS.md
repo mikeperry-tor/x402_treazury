@@ -213,6 +213,11 @@ and `size` hints. Tool schemas are closed via `additional_properties = false`.
 
 ## botsmith.toml — x402.botsmith.dev
 
+X search can return a continuation cursor longer than the catalog's declared
+input limit. First-page posts and metrics are usable; continuation remains
+unqualified. Do not truncate the returned cursor or treat a first page as a
+complete result set.
+
 Market-signal API for trading agents (X/Twitter intel, Polymarket, perp
 funding/OI, stablecoin pegs). All routes are flat-price GETs ($0.015/call at
 the time of writing). No `pricing_key` is configured, so structured display prices
