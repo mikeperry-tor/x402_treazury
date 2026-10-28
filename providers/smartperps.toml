@@ -1,0 +1,35 @@
+description = "Read-only Hyperliquid perpetual-futures cohort positioning, long/short bias, notional flows, market scans and public wallet positions."
+spec = "https://smartperps.agentgate.workers.dev/openapi.json"
+name = "SmartPerps by AgentGate"
+base_url = "https://smartperps.agentgate.workers.dev"
+prefix = "smartperps"
+include = ["/v1", ""]
+pricing_key = "x-payment-info"
+# The documented API root publishes route prices, source coverage and methodology.
+help_url = "https://smartperps.agentgate.workers.dev/"
+instructions_text = "Preserve snapshot age, cohort coverage, confidence and sources_failed. Cohort bias describes sampled public Hyperliquid perp positions; it is not a prediction and omits spot hedges and other venues."
+
+[overrides.smartperps_lite]
+description = "Read cohort positioning for symbol, such as BTC: long/short trader counts, notional, bias and 1h/24h net flows. Uses snapshots refreshed about every five minutes; preserve freshness, coverage and confidence."
+
+[overrides.smartperps_coin]
+description = "Read detailed cohort positioning for symbol: 1h/4h/24h flows, entry prices, leverage, unrealized PnL, liquidation bands and top ten positions with truncated addresses. Bias is descriptive, not predictive."
+
+[overrides.smartperps_scan]
+description = "Rank Hyperliquid coins by cohort net long/short positioning, concentration and 24h flows. Set limit for rows per list and min_traders for minimum participating accounts. Preserve snapshot coverage and confidence."
+
+[overrides.smartperps_scan.params]
+limit = "Rows per ranking list, 1-25; defaults to 10."
+min_traders = "Minimum cohort accounts holding a coin, 2-50; defaults to 3."
+
+[overrides.smartperps_wallet]
+description = "Read the public Hyperliquid account at address: equity, leverage, margin usage, up to 25 positions, whole-percent distance to liquidation and a 30-day fills summary. Preserve last_30d.truncated when assessing completeness. Account data does not include spot hedges or positions on other venues."
+
+[overrides.smartperps_wallet.params]
+address = "Public Hyperliquid account address: 0x followed by 40 hexadecimal characters."
+
+[overrides.smartperps_preview]
+description = "Preview cohort bias and long/short trader counts for symbol, with snapshot age, coverage and confidence. Omits notional, flows and individual positions. Free; limited to ten requests per minute per IP."
+
+[overrides.smartperps_help]
+description = "Read SmartPerps route prices, public data sources, cohort methodology, freshness rules and coverage limits."

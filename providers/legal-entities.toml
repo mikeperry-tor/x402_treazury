@@ -1,0 +1,20 @@
+description = "GLEIF global company name search, Legal Entity Identifiers (LEIs), entity registration and accounting-consolidation parent relationships through x402 Atlas."
+spec = "https://legal-entities.use.x402atlas.com/openapi.json"
+name = "Global Legal Entities (x402 Atlas)"
+base_url = "https://legal-entities.use.x402atlas.com"
+prefix = "legal_entities"
+pricing_key = "x-payment-info"
+help_url = "https://legal-entities.use.x402atlas.com/llms.txt"
+instructions_text = "Search company names to obtain LEIs for entity and parent lookups. Preserve entity status separately from LEI registration status; accounting-consolidation parents do not establish natural-person beneficial ownership."
+
+[overrides.legal_entities_search]
+description = "Find company legal names, LEIs, jurisdictions and registration status using nonempty query and optional page. Returns up to ten matches per page. Omitted or empty query returns a fixed paid sample, not a live search."
+
+[overrides.legal_entities_entity_lei]
+description = "Retrieve a legal entity's registration profile using its 20-character uppercase LEI with valid checksum. Returns legal name, jurisdiction, registration ID and update/renewal dates. Entity status and LEI registration status are separate facts."
+
+[overrides.legal_entities_parent_companies_lei]
+description = "Retrieve reported direct and ultimate accounting-consolidation parents for lei, with relationship statuses or reporting exceptions and up to ten records per parent category. These are accounting relationships, not a complete beneficial-ownership tree."
+
+[overrides.legal_entities_help]
+description = "Read the legal-entity bridge's request examples, search pagination and registration/parent response guide."

@@ -1,0 +1,33 @@
+description = "Public social profiles, posts, captions and engagement; shopping, product prices, reviews and recalls from SiteCheck."
+spec = "https://api.shopsocial-api.workers.dev/openapi.json"
+name = "SiteCheck Shop & Social"
+base_url = "https://api.shopsocial-api.workers.dev"
+prefix = "shopsocial"
+include = ["/api", ""]
+pricing_key = "x-payment-info"
+help_url = "https://api.shopsocial-api.workers.dev/llms.txt"
+instructions_text = "Preserve source URLs, observation dates, public-view coverage, unavailable fields and per-item failures. Public feeds and page previews do not establish complete history, hidden contacts or private content."
+
+[overrides.shopsocial_help]
+description = "Read SiteCheck's social and shopping endpoint guide, prices and public-source coverage. Use exposed schemas for exact inputs. Vendor billing/retry statements do not establish settlement or authorize repeating a failed paid call."
+
+[overrides.shopsocial_social_instagram_reel]
+description = "Read recent reels/videos among a public account's 12 newest grid posts and newest IGTV items, including captions, times, views, engagement and duration. Does not cover the complete reels tab or single-reel lookup; throttling can return 503 and unknown users 404."
+
+[overrides.shopsocial_social_instagram]
+description = "Read public Instagram engagement over the 12 newest posts: follower/post counts, per-post engagement rates, averages, median likes, best post and posting frequency. Comment counts only; hidden likes are null. Throttling can return 503 and unknown users 404."
+
+[overrides.shopsocial_social_instagram_contact]
+description = "Read publicly displayed Instagram business email, phone, address, contact method, category, website/bio links and contact-like bio text. Does not reveal hidden contacts; throttling can return 503 and unknown users 404."
+
+[overrides.shopsocial_social_instagram_posts]
+description = "Read the 12 newest public Instagram grid posts with URLs, captions, times, engagement, media, duration and location. No pagination or comment text; private accounts return empty lists, throttling can return 503 and unknown users 404."
+
+[overrides.shopsocial_social_instagram_profile]
+description = "Read public Instagram identity, bio/links, verification/privacy/business flags, category, profile picture and follower/following/post/reel/highlight counts. Upstream throttling can return 503, some business profiles 502 and unknown users 404."
+
+[overrides.shopsocial_social_instagram_related_profiles]
+description = "Read Instagram's suggested related accounts with IDs, names, verification/privacy flags and pictures. No related-account follower counts; empty suggestions are valid, throttling can return 503 and unknown users 404."
+
+[overrides.shopsocial_social_youtube_transcript]
+description = "Read YouTube caption languages and a chosen track as timed segments plus joined text, title/channel and duration. Human captions are preferred; videos without captions return empty segments, private/removed videos 404 and bot checks 503."

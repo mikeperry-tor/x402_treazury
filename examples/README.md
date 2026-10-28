@@ -86,8 +86,8 @@ and a 72-document index for US application 11627892, and bibliography, six famil
 publications and 50 legal events for EP1000000. The family included EP, AT, DE,
 NL and US publications. Legal rows were unsorted and often lacked jurisdiction;
 complete worldwide coverage and current status were not established.
-Other gaps include GitHub profiles/trending, GDELT timelines, employer/customer
-reviews, TheirStack technographics and buying intent, licensed Tako data cards and
+Other gaps include GitHub profiles/trending, GDELT timelines, Glassdoor employer
+reviews and customer-review sources beyond the qualified Trustpilot sample, TheirStack technographics and buying intent, licensed Tako data cards and
 SocialFetch's long tail of social platforms. Do not silently substitute ordinary
 web search for those structured datasets. The bundled FreeQ provider is available
 for discovery: static Markdown worked, JavaScript-generated content did not; it is
@@ -109,6 +109,40 @@ issuer-level ISIN list may include bonds rather than identify the input share.
 Strale MiCA checks reported unavailable registers despite HTTP success; they
 remain excluded. 2s HICP returned 2025-12 as latest in October 2026 and remains
 unselected. Neither payment success nor a false match field proves data coverage.
+
+Seven further bundled providers add narrow, qualified selections. Atlas Biomedical
+Grants supplies all seven NIH research operations on science, sharing project
+search/details and organization funding with business. Atlas Legal Entities adds
+GLEIF search, registration and accounting parents on business; this is gateway
+redundancy, not independent ownership evidence. SmartPerps adds a free preview
+and paid Hyperliquid cohort lite/detail/scan reads on finance. Public wallet
+lookup remains unqualified and unselected. Preserve snapshot coverage and age.
+
+SiteCheck ShopSocial adds Instagram/TikTok profiles, YouTube channel feeds,
+transcripts/comments, Facebook Page Plugin facts, Threads profile/posts,
+Pinterest pins and public Telegram channel previews on social. AgData remains
+selected alongside it. CompanyRecords adds LinkedIn company facts shared with
+social/business and Trustpilot reviews on business. This fills sampled structured
+reviews and additional-platform gaps; it does not qualify Glassdoor, complete
+comment histories, private content or every reusable operation. Review disclosures
+and verification markers remain part of the evidence.
+
+HealthTravel adds Numbeo city-price observations and Rome2Rio intercity options
+on travel, and EMA supply-shortage records on science. Preserve raw price text
+when normalized currency is missing, partial route previews and resolved versus
+active shortage statuses. Its Google Flights sample returned no fares; Wikivoyage
+failed upstream 503. Both remain excluded. WebIntel adds news aggregation and
+GDELT Context article matches on web; the sample had a Google timeout alongside
+Bing/GDELT results. It does not supply general GDELT volume/tone timelines.
+
+The four SiteCheck Workers catalogs share an operator contact and payment wallet,
+so they do not establish four independent fallback vendors. Their primary schemas,
+guides and sampled paid operations were live; the Workers hostname itself does
+not establish durability. Radar's shared-recipient activity is not endpoint-level
+paid-delivery proof. Full reusable catalogs stay available through local-provider
+discovery, while research_desk enables only the sampled useful operations. No
+new wallet profile is introduced. See [provider caveats](../providers/CAVEATS.md)
+for source provenance, qualification boundaries and observed failures.
 
 The bundled-provider catalog was audited for candidate alternatives; this was not
 an exhaustive paid test of every provider or every endpoint. The selected narrow

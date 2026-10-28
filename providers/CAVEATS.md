@@ -1674,8 +1674,10 @@ are ordinary Base USDC exact offers, not an unsupported transfer type. Managed
 selection formerly rejected the legacy field's presence; v2 now preserves it as
 opaque metadata while signing and capping only `amount`. This removes that local
 pre-sign rejection. A subsequent static link-extraction call returned 26 IANA
-links and reported settlement at $0.0324. Other Strale operations still require
-separate delivery qualification.
+links and reported settlement at $0.0324. UK charity lookup subsequently returned
+registration and dated financial facts; both MiCA checks reported unavailable
+registers despite HTTP success. Other operations still need separate delivery
+qualification.
 The Finnish Patent and Registration Office lookup is a company registry, not a
 patent search. The reviewed catalog has no patent-research operation.
 
@@ -1899,3 +1901,110 @@ not retrieved. Some application-detail arrays were empty despite other records
 being present. EPO family coverage varies, and returned legal events were unsorted
 and lacked jurisdiction on many rows. Neither response establishes complete
 coverage or current legal status; preserve source identifiers and dates.
+
+## Atlas biomedical grants and legal entities
+
+`biomedical-grants.toml` and `legal-entities.toml` use their complete primary
+`https://biomedical-grants.use.x402atlas.com/openapi.json` and
+`https://legal-entities.use.x402atlas.com/openapi.json` schemas. They are Atlas
+gateways, not NIH/GLEIF-operated services. All seven NIH operations delivered
+records in sampled nonempty queries: search, project history/abstract, PubMed
+links, investigator and organization funding, recent awards and fiscal trends.
+Counts and amounts represent fiscal-year records; aggregate retrieval caps at
+500 and marks partial coverage. An incomplete trend sum of zero means omitted
+funding, not no funding. Empty-query sample behavior is explicit in tool guidance.
+NIH recent awards can contain contract numbers that do not match the schema's
+grant-style project-detail pattern; that follow-up is not qualified. Preserve
+source dates, name variants, profile IDs, partial flags and publication linkage.
+
+All three legal-entity operations delivered GLEIF records: nonempty company
+search, a Bloomberg Finance LEI profile and direct/ultimate accounting-parent
+relationships. These add gateway redundancy to existing GLEIF access, not an
+independent corporate source. Entity activity differs from LEI registration
+status; accounting parents do not prove natural-person beneficial ownership.
+The parent API may return reporting exceptions rather than relationships.
+
+Both Atlas 402radar pages showed identical shared-recipient payment activity.
+Recipient transfers and provider-wide directory metrics do not establish that
+each listed API delivered paid data. The deployment selections rest on the
+sampled calls above, not those aggregate metrics.
+
+## SmartPerps by AgentGate
+
+`smartperps.toml` uses the complete primary
+`https://smartperps.agentgate.workers.dev/openapi.json`. Four paid GET/POST
+twins describe equivalent read-only inputs/results; default POST selection
+retains lite, coin, scan and wallet plus the free preview. Wallet results expose
+at most 25 positions and may truncate fills; preserve last_30d.truncated. There is no trade
+execution, key custody or account funding in this catalog. The documented API
+root supplies route prices and methodology; `/llms.txt` was unavailable.
+
+The free preview and paid BTC lite/coin plus a one-row-per-ranking scan delivered
+snapshots with 100% reported coverage of a 120-account cohort, high confidence
+and no failed sources. The wallet lookup remains unqualified and unselected in
+research_desk. Cohort selection favors recent public PnL and omits spot hedges
+and other venues; bias is descriptive, not predictive. Preserve snapshot age,
+coverage, confidence, withheld bands and failed sources. Older/fallback cohort
+metadata remains relevant even when the snapshot is fresh.
+
+Unsigned challenge inspection found a v2 PAYMENT-REQUIRED header and legacy v1
+body; the header is authoritative and the sampled Base amounts agreed. Paid
+delivery worked through the normal managed payer. The public landing/source
+metadata names AgentGate/YourAITools, a contact and a source mirror; this is
+provenance, not an uptime commitment. Radar activity shares an AgentGate payment
+recipient and is not endpoint-specific settlement evidence.
+
+## SiteCheck public-data catalogs
+
+`shopsocial.toml`, `companyrecords.toml`, `healthtravel.toml` and `webintel.toml`
+use the complete official `/openapi.json` on their respective
+`api.<catalog>-api.workers.dev` hosts. Each uses `/api` as a naming anchor with
+a root fallback, `x-payment-info` prices and `/llms.txt` help. The four catalogs
+share the published contact `hello@offerastudio.com` and a Base payment recipient.
+They are related services, not four independent fallback operators. Public
+catalogs and paid delivery were observed on 2026-10-28; a Cloudflare Workers
+hostname neither proves ephemerality nor promises durability. Radar's listings
+were largely unverified, and recipient transfers may include non-x402 commerce.
+
+ShopSocial delivered NASA Instagram/TikTok profiles, a YouTube channel feed and
+Facebook Page Plugin facts, plus a timed transcript and 20 public comments for
+`jNQXAC9IVRw`. Further probes delivered a NASA Threads profile/post and Pinterest
+pin, and public Telegram channel posts. These are bounded public views, not
+complete histories or private content. The Facebook plugin and AgData returned
+different page identifiers for the same named page; preserve source URLs and
+identifiers rather than asserting identifier equivalence. Public age/view-count
+text and missing fields should remain explicit.
+
+CompanyRecords delivered Microsoft LinkedIn company facts and a page of Apify
+Trustpilot reviews with dates, ratings, review URLs and verification markers.
+The review sample contains invited/incentivized disclosures; it is not a
+representative satisfaction survey. Public LinkedIn company data does not include
+people, followers or posts. Other company/social modes remain unqualified.
+
+HealthTravel delivered Reykjavik Numbeo observations, four London–Paris Rome2Rio
+options from a headline ten, and EMA insulin shortage records. Numbeo's normalized
+currency was null while priceText retained `kr`; preserve the original text.
+Rome2Rio is a public-page preview, not a full route inventory or booking quote.
+EMA matches included resolved shortages and discontinued medicines, not solely
+active shortages. The Google Flights JFK–LHR sample returned no fare rows, which
+does not qualify flight coverage or establish no flights. Wikivoyage returned
+upstream HTTP 503 after authorization; no automatic replay occurred. Its upstream
+claim that nothing was charged does not prove settlement or authorize retry.
+These two travel operations remain unselected.
+
+WebIntel delivered news aggregation and GDELT Context article/sentence matches.
+Aggregation explicitly reported a Google News timeout while Bing and GDELT
+returned results. Preserve per-engine status and do not present partial output
+as a complete three-engine search. GDELT Context matches do not provide general
+volume/tone timelines. Other search, commerce, health, registry and security
+operations remain available in the reusable definitions but are not implied
+to be qualified by these samples. These upstream fetch failures do not establish
+a Tor-specific cause or show that API relay would repair the provider's internal
+fetch. A potentially signed failure still grants no automatic relay replay.
+
+SiteCheck Instagram/transcript descriptions advertised unverified free failures
+and, for transcripts, retry advice. Focused description overrides preserve input
+and coverage contracts while removing those claims. Cached SSL Labs operations
+clarify that a missing report is an error, not permission to replay a paid call.
+Vendor help remains source-authored content; its billing claims do not establish
+settlement or authorize repeating failed paid work.

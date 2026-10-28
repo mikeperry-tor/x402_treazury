@@ -75,6 +75,13 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Genuine Good Grants | `genuinegood.toml` | POST grant research; search/detail recommendations; bearer pass excluded |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
 | Google Trends | `google-trends.toml` | Vendor OpenAPI |
+| Biomedical Grants (x402 Atlas) | `biomedical-grants.toml` | Full NIH RePORTER search, project, publication and funding-aggregate catalog |
+| Global Legal Entities (x402 Atlas) | `legal-entities.toml` | Full GLEIF search, registration and accounting-parent catalog |
+| SmartPerps (AgentGate) | `smartperps.toml` | Read-only Hyperliquid cohort analytics and public wallet data; POST twins |
+| SiteCheck Shop & Social | `shopsocial.toml` | Full public social and shopping catalog |
+| SiteCheck Company Records | `companyrecords.toml` | Full public company, government and B2B catalog |
+| SiteCheck Health & Travel | `healthtravel.toml` | Full public health, travel, transport and vehicle catalog |
+| SiteCheck Web Intel | `webintel.toml` | Full news, web, scholarly and security catalog |
 | Google Patents (x402 Atlas) | `google-patents.toml` | Full two-operation search/details catalog; claims and family data |
 | IPIntel.ai | `ipintel.toml` | Domain/DNS/IP, satellite and developer tools; core lookup recommendations |
 | Kronos | `kronos.toml` | Market data plus public status/methodology; existing names preserved |

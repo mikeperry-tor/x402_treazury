@@ -1,0 +1,18 @@
+description = "Public health and drug datasets, provider records, flights, hotels, transport and vehicle research from SiteCheck."
+spec = "https://api.healthtravel-api.workers.dev/openapi.json"
+name = "SiteCheck Health & Travel"
+base_url = "https://api.healthtravel-api.workers.dev"
+prefix = "healthtravel"
+include = ["/api", ""]
+pricing_key = "x-payment-info"
+help_url = "https://api.healthtravel-api.workers.dev/llms.txt"
+instructions_text = "Preserve source dates, identifiers, currencies and coverage. Displayed travel prices are observations, not booking quotes; health datasets retain their source populations, units and publication lags."
+
+[overrides.healthtravel_help]
+description = "Read SiteCheck's health, travel and transport endpoint guide, prices and source coverage. Use exposed schemas for exact inputs. Vendor billing/retry statements do not establish settlement or authorize repeating a failed paid call."
+
+[overrides.healthtravel_health_ema_shortages_safety]
+description = "Search EMA medicine supply-shortage records by medicine or INN words. Supply shortages only; no safety-signal or pharmacovigilance data. Returns status, forms, alternatives, update dates and source links. Results can include resolved shortages and discontinued medicines; a match does not mean an active shortage today."
+
+[overrides.healthtravel_travel_numbeo]
+description = "Read crowd-sourced cost-of-living item prices for city. Preserve priceText and its currency symbol when normalized currency is unavailable. These are user-submitted observations, not official prices or booking quotes."

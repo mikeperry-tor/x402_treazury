@@ -1,0 +1,18 @@
+description = "News search, GDELT, article extraction, scholarly metadata, DNS and public threat, vulnerability and web intelligence from SiteCheck."
+spec = "https://api.webintel-api.workers.dev/openapi.json"
+name = "SiteCheck Web Intel"
+base_url = "https://api.webintel-api.workers.dev"
+prefix = "webintel"
+include = ["/api", ""]
+pricing_key = "x-payment-info"
+help_url = "https://api.webintel-api.workers.dev/llms.txt"
+instructions_text = "Preserve timestamps, source URLs, feed failures, truncation and cached coverage. Missing threat indicators do not prove safety; news snippets and citation metadata do not replace full text."
+
+[overrides.webintel_help]
+description = "Read SiteCheck's news, web and security endpoint guide, prices and source coverage. Use exposed schemas for exact inputs. Vendor billing/retry statements do not establish settlement or authorize repeating a failed paid call."
+
+[overrides.webintel_security_ssl_cert_chain]
+description = "Read a host's cached Qualys SSL Labs certificate-chain and cipher audit: grade, chain length, trust store, TLS versions, weak ciphers, Heartbleed/POODLE/BEAST flags and HSTS. Returns an error when no cached report exists; does not start a scan."
+
+[overrides.webintel_security_tls_cipher_enum]
+description = "Read a host's cached Qualys SSL Labs TLS versions and cipher-suite strength, including deprecated protocols, suite counts, weak suites and forward secrecy. Returns an error when no cached report exists; does not start a scan."

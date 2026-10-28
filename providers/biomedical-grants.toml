@@ -1,0 +1,38 @@
+description = "NIH RePORTER biomedical grants, investigator and organization funding, project histories, linked publications and fiscal-year trends through x402 Atlas."
+spec = "https://biomedical-grants.use.x402atlas.com/openapi.json"
+name = "US Biomedical Grants (NIH, x402 Atlas)"
+base_url = "https://biomedical-grants.use.x402atlas.com"
+prefix = "biomedical_grants"
+pricing_key = "x-payment-info"
+help_url = "https://biomedical-grants.use.x402atlas.com/llms.txt"
+instructions_text = "Use supported grant-style project numbers from search to retrieve funding history or linked publications. Preserve fiscal years, source dates, partial and completeness markers; one search record represents one project's fiscal year, not its lifetime funding."
+
+[overrides.biomedical_grants_investigator]
+description = "Summarize NIH funding for investigator name, optionally filtered by fiscal_year. Returns totals, yearly/institute/mechanism breakdowns and recent awards. Check investigators and profile IDs for merged names; totals cover at most 500 records and partial marks incomplete coverage."
+
+[overrides.biomedical_grants_organization]
+description = "Summarize NIH funding for organization name, optionally filtered by fiscal_year. Check matched organization variants and partial: totals cover at most 500 fiscal-year records, so large institutions may need narrower years."
+
+[overrides.biomedical_grants_project_number]
+description = "Retrieve an NIH project by core or full project number, including abstract, investigators, organization, dates and funding history with lifetime total. Unknown numbers return 404."
+
+[overrides.biomedical_grants_project_number_publications]
+description = "List PubMed IDs, application IDs and links that NIH associates with a project number. Page with page and limit. Titles and authors are not included; recent papers may lag and papers can link to several grants."
+
+[overrides.biomedical_grants_recent]
+description = "List recently added NIH awards for agency, with optional days, activity_code and mechanism filters. Page with page and limit. Contract numbers may not match the project-detail input pattern. RePORTER refreshes weekly and new awards may lag budget start by 7-10 days."
+
+[overrides.biomedical_grants_search]
+description = "Search NIH projects with nonempty query words, optionally filtered by fiscal year, institute, organization, state, mechanism or award size. Page with page and limit; rows are fiscal-year awards. An empty query returns a sample rather than a live search."
+
+[overrides.biomedical_grants_search.params]
+query = "Nonempty words to match in title, abstract or research terms; all words must match. Empty input returns a sample."
+
+[overrides.biomedical_grants_trend]
+description = "Compare NIH project counts and awarded amounts for nonempty query across fiscal years from through to, optionally filtered by institute, activity_code or mechanism. If a year's complete is false, its awarded value of 0 means an omitted sum, not zero funding. Empty query returns a sample."
+
+[overrides.biomedical_grants_trend.params]
+query = "Nonempty topic words; all must match title, abstract or research terms. Empty input returns a sample."
+
+[overrides.biomedical_grants_help]
+description = "Read the NIH bridge's request guide, examples, funding interpretation and coverage limits."

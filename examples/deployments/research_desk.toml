@@ -945,6 +945,71 @@ send_tools = [
   { to = "exclude" },
 ]
 
+# Atlas grant details, publication joins and funding aggregates returned NIH records.
+[sources.biomedical_grants]
+extends = "../../providers/biomedical-grants.toml"
+send_tools = [
+  { to = ["science", "business"], tools = ["search", "organization", "project_number"] },
+  { to = "science", tools = ["investigator", "project_number_publications", "recent", "trend"] },
+  { to = "exclude" },
+]
+
+# GLEIF gateway redundancy; accounting parents are not beneficial owners.
+[sources.legal_entities]
+extends = "../../providers/legal-entities.toml"
+send_tools = [
+  { to = "business", tools = ["search", "entity_lei", "parent_companies_lei"] },
+  { to = "exclude" },
+]
+
+# Read-only cohort snapshots; no execution or wallet custody.
+[sources.smartperps]
+extends = "../../providers/smartperps.toml"
+send_tools = [
+  { to = "finance", tools = ["preview", "lite", "coin", "scan"] },
+  { to = "exclude" },
+]
+
+# These four SiteCheck catalogs share an operator and payment wallet.
+# Enable only sampled useful reads; related catalogs do not provide independent redundancy.
+[sources.shopsocial]
+extends = "../../providers/shopsocial.toml"
+send_tools = [
+  { to = "social", tools = [
+    "social_instagram_profile", "social_tiktok_profile", "social_youtube",
+    "social_facebook_pages", "social_youtube_transcript", "social_youtube_comments",
+    "social_threads_profile", "social_pinterest", "social_telegram_channel",
+  ] },
+  { to = "exclude" },
+]
+
+[sources.companyrecords]
+extends = "../../providers/companyrecords.toml"
+send_tools = [
+  { to = ["business", "social"], tools = ["b2b_linkedin_company_profiles"] },
+  { to = "business", tools = ["b2b_trustpilot_reviews"] },
+  { to = "exclude" },
+]
+
+[sources.healthtravel]
+extends = "../../providers/healthtravel.toml"
+send_tools = [
+  { to = "travel", tools = ["travel_numbeo", "travel_rome2rio"] },
+  { to = "science", tools = ["health_ema_shortages_safety"] },
+  # Wikivoyage failed upstream HTTP 503; Google Flights returned no fare data.
+  # No successful flight retrieval or complete catalog qualification is implied.
+  { to = "exclude" },
+]
+
+[sources.webintel]
+extends = "../../providers/webintel.toml"
+send_tools = [
+  # News aggregation delivered Bing/GDELT results with an explicit Google timeout.
+  # GDELT Context results are article/sentence matches, not volume/tone timelines.
+  { to = "web", tools = ["search_news_across_the_web", "search_gdelt_news"] },
+  { to = "exclude" },
+]
+
 # --- Listeners ---------------------------------------------------------------
 
 [servers.web]
@@ -952,7 +1017,7 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use otto_web_answer or stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON, static HTML links and closest dated archive snapshots. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use botsmith_x_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA media credentials."
+instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use otto_web_answer or stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON, static HTML links and closest dated archive snapshots. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use botsmith_x_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA media credentials. WebIntel adds news aggregation with per-engine errors and GDELT article/sentence matches; these are not tone or volume timelines."
 
 [servers.science]
 listen = "127.0.0.1:3011"
@@ -961,7 +1026,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
 discover_on_demand = true
 instructions_text = "Academic, scientific and health research: papers, citations, researchers, institutions, grants, biological and chemical references, clinical trials, drug/device records and public-health datasets. Preserve publication and observation dates, study status, identifiers and coverage. Use web for general search and page retrieval; business retains investment-oriented pharma catalysts and general product recalls."
-discovery_search_tool_instructions_text = "Science keywords: academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, APEX, arXiv, PubMed, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central, x402stock, Maxwell, 2s, twos."
+discovery_search_tool_instructions_text = "Science keywords: biomedical grants, NIH project funding history, grant-linked publications, investigator funding, organization grants, fiscal-year funding trends, x402 Atlas, EMA medicine shortages, discontinued medicines, academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, APEX, arXiv, PubMed, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central, x402stock, Maxwell, 2s, twos."
 
 [servers.social]
 listen = "127.0.0.1:3012"
@@ -970,7 +1035,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "social"
 discover_on_demand = true
 instructions_text = "Social-platform, GitHub repository metadata, person, public-profile and business-contact research, including email lookup and validation. Search by platform, repository or person. Preserve platform, date and partial-result markers; missing posts do not prove absence."
-discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, GitHub repository metadata, Agent402, Hacker News, APEX research search, 2s HN search, stories, comments, feeds and users, Instagram posts, TikTok videos, YouTube channel videos, Facebook page details, Twitter, X, Botsmith posts and profiles, Otto curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, contact phone, company phone, LinkedIn company enrichment, AgData."
+discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, GitHub repository metadata, Agent402, Hacker News, APEX research search, 2s HN search, stories, comments, feeds and users, Instagram posts, TikTok videos, YouTube channel videos, Facebook page details, Twitter, X, Botsmith posts and profiles, Otto curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, contact phone, company phone, LinkedIn company enrichment, AgData, SiteCheck, ShopSocial, CompanyRecords, Threads profiles and posts, Pinterest pins, Telegram public channels, YouTube transcripts and comments."
 
 [servers.business]
 listen = "127.0.0.1:3013"
@@ -979,7 +1044,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
 instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic and health datasets."
-discovery_search_tool_instructions_text = "Business keywords: state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, x402 Atlas, EPO, 2s patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+discovery_search_tool_instructions_text = "Business keywords: NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, CompanyRecords, GLEIF, LEI, accounting-consolidation parent companies, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, x402 Atlas, EPO, 2s patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
 
 [servers.finance]
 listen = "127.0.0.1:3014"
@@ -988,7 +1053,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
 instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, DeFi, derivatives and prediction markets. Use business for organizations and filings; use property for parcel and site records."
-discovery_search_tool_instructions_text = "Finance keywords: FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
+discovery_search_tool_instructions_text = "Finance keywords: SmartPerps, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
 
 [servers.property]
 listen = "127.0.0.1:3015"
@@ -1037,5 +1102,5 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
 discover_on_demand = true
-instructions_text = "Destination references, travel advisories, visa requirements, ski resorts, published lift-ticket prices and resort conditions. Preserve source dates, seasons, currencies, forecast times and unavailable components. Visa reference data is community-maintained; verify entry requirements with the destination authority. Published prices do not establish live ticket availability. World retains flights, airports and route matrices."
-discovery_search_tool_instructions_text = "Travel keywords: destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski, skiing, snow, resort, lift ticket, ski pass, season prices, base and summit forecast, lift status, Maxwell, 2s, twos."
+instructions_text = "Destination references, travel advisories, visa requirements, ski resorts, published lift-ticket prices, resort conditions, city cost-of-living observations and intercity transport options. Preserve source dates, seasons, currencies, forecast times and unavailable components. Visa reference data is community-maintained; verify entry requirements with the destination authority. Published prices do not establish live ticket availability. World retains flights, airports and route matrices."
+discovery_search_tool_instructions_text = "Travel keywords: SiteCheck, HealthTravel, Numbeo, city cost of living, Rome2Rio, intercity transport, route options, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski, skiing, snow, resort, lift ticket, ski pass, season prices, base and summit forecast, lift status, Maxwell, 2s, twos."
