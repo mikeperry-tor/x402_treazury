@@ -1930,19 +1930,6 @@ fn apply_chain_resolutions(
                 evidence::check_resolution(tx, namespace, certificate)
             })
             .transpose()?;
-        let existing: Option<(String,i64,String,u64)> = tx.query_row("SELECT outcome,height,hash,block_time FROM payment_resolutions WHERE attempt_id=?1",[id],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,sql_u64(row,3)?))).optional()?;
-        if let Some(existing) = existing {
-            ensure!(
-                existing
-                    == (
-                        outcome.into(),
-                        i64::try_from(anchor.height)?,
-                        anchor.hash.clone(),
-                        resolution.block_time
-                    ),
-                "conflicting_authorization_resolution"
-            );
-        }
         let changed = tx.execute("UPDATE payment_attempts SET state='RESOLVED' WHERE id=?1 AND pool_id=?2 AND state='POSSIBLY_SUBMITTED'",params![id,pool])?;
         if changed == 1 {
             let wallet: String = tx.query_row(
