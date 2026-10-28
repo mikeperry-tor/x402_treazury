@@ -181,7 +181,7 @@ extends = "../../providers/botsmith.toml"
 send_tools = [
   # Keep probabilistic model questions outside this research deployment; inline schemas replace help.
   { to = "exclude", tools = ["help", "jev"] },
-  # Share X search with web to replace the X component of Otto filtered_news.
+  # Share source-level X search with web alongside Otto topical synthesis.
   # First-page posts/metrics are qualified; returned-cursor pagination is not.
   { to = ["web", "social"], tools = ["x_search"] },
   # Route financial research families before the primary fallback.
@@ -210,7 +210,7 @@ send_tools = [
 extends = "../../providers/lonestar.toml"
 send_tools = [
   { to = "exclude", tools = [
-    "read_read", # NetIntel web_extract preserves structure and reports the final URL; StableEnrich Firecrawl handles rendering.
+    "read_read", # Otto web_extract and StableEnrich Firecrawl supply rendered page reads.
     "sanctions_screen", # Superseded by AgOSINT sanctions: dated OFAC/EU/UK evidence versus OFAC only; $0.015 versus $0.05.
     "funding_extremes", # Same-price subset of funding_rates; ranks the same asset/venue rates.
     "funding_signal", # Same-price signal already included in funding_rates.
@@ -299,15 +299,10 @@ send_tools = [
   { to = "exclude", tools = ["web_search"] }, # Superseded by Exa search; $0.007 sampled versus $0.009 for this Exa wrapper.
   # AgOSINT covers domain enrichment; NetIntel supplies DNS and RDAP dates.
   { to = "exclude", tools = ["domain_report"] },
-  # Qualified replacements: NetIntel reads expose redirects; StableEnrich supplies
-  # rendered Markdown and cited answers. AgentUtility adds static JSON/links below.
-  { to = "exclude", tools = ["web_extract", "web_answer"] },
-  # Replace topical news and prepared recaps with Exa news discovery + synthesis;
-  # shared botsmith_x_search covers filtered_news's X component. crypto_news stays.
-  { to = "exclude", tools = ["filtered_news", "news_recaps"] },
-  # NetIntel returns DNS records/SPF/DMARC and registration dates for derived age.
-  # DKIM remains nullable; this does not promise complete selector discovery.
-  { to = "exclude", tools = ["dns_lookup", "whois_lookup", "domain_age"] },
+  # Keep complementary crypto briefings alongside Exa's source-level news search.
+  { to = "web", tools = ["filtered_news", "news_recaps"] },
+  # These fresh domain reads matched the alternatives and retain distinct fields.
+  { to = "security", tools = ["dns_lookup", "whois_lookup", "domain_age"] },
   { to = "exclude", tools = ["tweet_search"] }, # Botsmith supplies matching posts and metrics.
   { to = "exclude", tools = [        # Expensive low-value LLM calls
     "generate_meme",
@@ -334,7 +329,7 @@ send_tools = [
   # Route social research families before the primary fallback.
   { to = "social", tools = ["kol_sentiment", "twitter_summary"] },
   # Route web research families before the primary fallback.
-  # Keep web_json_extract/web_links for their distinct browser-dependent contract.
+  # Keep rendered reading, cited answers and browser-dependent JSON/links.
   # Static alternatives below do not qualify all JS-generated fields/links; check
   # Otto freshness/degradation and destination rather than trusting HTTP success.
   { to = "web", tools = ["web_*"] },
@@ -587,9 +582,6 @@ send_tools = [
 [sources.netintel]
 extends = "../../providers/netintel.toml"
 send_tools = [
-  # Plain-page/PDF reader with final URL, HTTP status and visible truncation.
-  # Match before web_* below; rendered pages use StableEnrich Firecrawl on web.
-  { to = "web", tools = ["web_extract"] },
   { to = "exclude", tools = [
     # Model gateways and text processing: outside the selected infrastructure research scope.
     "api_*",
@@ -615,7 +607,7 @@ send_tools = [
     "ip_risk_score", # Overlaps retained full IP report; narrower IPIntel/reputation/blacklist checks also available.
     # Email bundles overlap the retained DNS SPF/DMARC fields and social's validation tools.
     "email_*",
-    # General web/search tools are outside this security selection except web_extract above.
+    # General web/search tools are outside this security selection. Otto and Firecrawl render pages.
     "event_*",
     "exa_*",
     "web_*",
@@ -948,7 +940,7 @@ send_tools = [
   { to = "world", tools = ["aviation_*", "airport_*", "flight_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
   # Legal, political and occupational records remain on business.
   { to = "business", tools = ["law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
-  # Exa, NetIntel, StableEnrich and AgentUtility cover web research; PDL/Deepline cover contacts.
+  # Exa, Otto, StableEnrich and AgentUtility cover web research; PDL/Deepline cover contacts.
   # Existing finance providers cover quotes, filings and crypto; AgOSINT covers routine company/LEI lookups.
   # Parsing/validation belongs locally. Model/media gateways, commerce, entertainment, trip planning,
   # remote infrastructure and provider feedback/diagnostics are outside this research selection.
@@ -1034,7 +1026,7 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Read pages with netintel_web_extract; exa_contents adds freshness/history controls. Use stableenrich_firecrawl_scrape for rendered pages and stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON and static HTML links. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use botsmith_x_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA; GDELT covers news timelines and Wayback covers archives."
+instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract or stableenrich_firecrawl_scrape; exa_contents adds freshness/history controls. Use otto_web_answer or stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON and static HTML links. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use botsmith_x_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA; GDELT covers news timelines and Wayback covers archives."
 
 [servers.science]
 listen = "127.0.0.1:3011"

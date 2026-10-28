@@ -25,12 +25,16 @@ instructions, capabilities and wallet references. See
 [source tool distribution](../docs/configuration.md#source-tool-distribution) for
 matching, potential bindings and `config check --explain-routing` inspection.
 
-The research desk prefers Exa for general/news search, NetIntel for ordinary page
-reads, and StableEnrich for rendered Firecrawl reads and cited Exa answers.
-AgentUtility supplies static HTML links and schema-based static-page JSON; the
-agent supplies news synthesis, with Botsmith X search shared across web/social.
-NetIntel DNS/RDAP replaces Otto's DNS, registration and derived domain-age reads.
-Its DKIM field is nullable and does not establish complete selector discovery.
+The research desk prefers Exa for general/news search and retains Otto's topical
+crypto news and linked market recaps as complementary coverage. Topical reports
+lack citations; recap generation time can be newer than the underlying news window.
+Otto and StableEnrich supply rendered page reads and cited answers. NetIntel's
+page reader is excluded because it did not retrieve JavaScript-generated content.
+AgentUtility supplies static HTML links and schema-based static-page JSON, with
+Botsmith X search shared across web/social. Otto DNS, WHOIS and domain age remain
+available alongside NetIntel DNS/RDAP on security; matching sampled data did not
+establish an advantage from removing Otto. NetIntel's DKIM field is nullable and
+does not establish complete selector discovery.
 Exa retains explicit freshness/history controls. SocialFetch and Vaaya retain
 distinct APIs, but their payment/lookup failures remain unresolved; they are no
 longer the preferred general reading/news paths. Selections belong here, not in
