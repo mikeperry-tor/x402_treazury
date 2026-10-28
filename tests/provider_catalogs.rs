@@ -2651,3 +2651,103 @@ async fn horizonpulse_free_write_exemption_atomic_price_and_screenshot_mapping()
     assert_eq!(metadata["title"], "Fixture screenshot");
     assert_eq!(metadata["imageBase64"]["treazury_attachment"], 1);
 }
+
+#[tokio::test]
+async fn apexfaucet_repairs_documented_inputs_without_exposing_owned_purchases() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/apexfaucet.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("../providers/apexfaucet-openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "apexfaucet").unwrap();
+    for (path, payload) in [
+        (
+            "/api/x402/chat-completions",
+            json!({"messages":[{"role":"user","content":"Hello"}],"max_tokens":16}),
+        ),
+        (
+            "/api/x402/token-verdict",
+            json!({"tokenAddress":"0x1111111111111111111111111111111111111111","chain":"base"}),
+        ),
+        (
+            "/api/x402/base-token-verdict",
+            json!({"tokenAddress":"0x1111111111111111111111111111111111111111"}),
+        ),
+    ] {
+        assert!(doc["paths"][path].get("get").is_none());
+        let tool = tools.iter().find(|tool| tool.path == path).unwrap();
+        let request = tool
+            .route(
+                cfg.base_url.as_deref().unwrap(),
+                payload.as_object().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.body, Some(payload));
+        assert!(request.query.is_empty());
+    }
+    let image = tools
+        .iter()
+        .find(|tool| tool.path == "/api/x402/image-generate")
+        .unwrap();
+    let request = image
+        .route(
+            cfg.base_url.as_deref().unwrap(),
+            json!({"prompt":"A lighthouse","steps":2})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(request.method, "GET");
+    assert!(request.body.is_none());
+    assert_eq!(request.query["prompt"], json!("A lighthouse"));
+    assert_eq!(request.query["steps"], json!(2));
+    for (path, payload) in [
+        (
+            "/api/x402/agent-trust",
+            json!({"url":"https://public.example/api"}),
+        ),
+        ("/api/x402/agent-trust", json!({"agent":1})),
+        (
+            "/api/x402/arc-read",
+            json!({"address":"0x1111111111111111111111111111111111111111","fn":"function balanceOf(address) view returns (uint256)","args":"[\"0x2222222222222222222222222222222222222222\"]","block":123}),
+        ),
+    ] {
+        let tool = tools.iter().find(|tool| tool.path == path).unwrap();
+        let request = tool
+            .route(
+                cfg.base_url.as_deref().unwrap(),
+                payload.as_object().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(request.method, "GET");
+        assert!(request.body.is_none());
+        for (name, value) in payload.as_object().unwrap() {
+            assert_eq!(&request.query[name], value);
+        }
+    }
+    for path in [
+        "/api/x402/arc-passport",
+        "/api/x402/x1-passport",
+        "/api/x402/market-feature",
+        "/api/x402/room-meal",
+        "/api/x402/room-upgrade",
+    ] {
+        assert!(doc["paths"].get(path).is_some());
+        assert!(!tools.iter().any(|tool| tool.path == path));
+    }
+    for path in [
+        "/api/x402/page-extract",
+        "/api/x402/research-search",
+        "/api/x402/market-search",
+        "/api/x402/arc-read",
+        "/api/x402/trade-rail-quote",
+        "/api/x402/bloodstream-call",
+    ] {
+        assert!(tools.iter().any(|tool| tool.path == path), "hidden: {path}");
+    }
+}

@@ -35,10 +35,40 @@ Botsmith X search shared across web/social. Otto DNS, WHOIS and domain age remai
 available alongside NetIntel DNS/RDAP on security; matching sampled data did not
 establish an advantage from removing Otto. NetIntel's DKIM field is nullable and
 does not establish complete selector discovery.
-Exa retains explicit freshness/history controls. SocialFetch and Vaaya retain
-distinct APIs, but their payment/lookup failures remain unresolved; they are no
-longer the preferred general reading/news paths. Selections belong here, not in
-the reusable providers.
+Exa retains explicit freshness/history controls. Vaaya and SocialFetch are fully
+excluded in this deployment after cross-family settlement/lookup failures. On
+2026-10-28, the latest Base settlements listed by
+[402radar for Vaaya](https://402radar.io/vaaya.ai) were 18 days old and
+[SocialFetch](https://402radar.io/api.socialfetch.dev) three days old. The operator
+had observed at least 14 days without Vaaya payments. These are dated external
+observations, not proof of universal outage or the settlement outcome of our
+calls. Reusable provider definitions remain available for deliberate retesting.
+Selections belong here, not in the reusable providers.
+
+APEX's two rendered readers retrieved the JavaScript test page, and its research
+search returned credited OpenAlex and Hacker News results. Research search is
+shared with science/social; it does not replace full paper retrieval or discussion
+threads. AgData company enrichment returned the requested LinkedIn company.
+AgentUtility closest-date archive lookup and 2s Hacker News search also succeeded.
+2s scholarly search returned PubMed results with an explicit arXiv failure; preserve
+per-source errors. These narrow workflows are enabled, rather than whole catalogs.
+
+| Excluded research | Selected alternatives | Coverage limits |
+| --- | --- | --- |
+| Web/news and rendering | Exa, Otto, StableEnrich, APEX; AgentUtility JSON/links | Preserve source dates, final destination and partial results. |
+| Papers | 2s scholarly search/citations, APEX OpenAlex search, existing science tools | No complete OpenAlex author/work API or guaranteed full text. |
+| SEC, court records, rules, nonprofits and recalls | Existing x402stock and 2s APIs | Different query/pagination contracts; US recalls do not replace six-authority international coverage. |
+| Archives | AgentUtility `archive_snapshot` | Closest snapshot lookup; no full CDX inventory or qualified archived-text read. |
+| Social and company evidence | Botsmith X, StableEnrich Reddit, HireScrape TikTok, 2s HN, AgData LinkedIn company, existing contact providers | No complete SocialFetch platform or endpoint parity. |
+| Patents | Existing x402stock patent/company tools | AgentUtility keyword search failed upstream 403; broad keyword coverage remains a gap. |
+
+The 2s GitHub replacement failed upstream authentication and remains excluded.
+Other gaps include GitHub profiles/trending, GDELT timelines, employer/customer
+reviews, TheirStack technographics and buying intent, licensed Tako data cards and
+SocialFetch's long tail of social platforms. Do not silently substitute ordinary
+web search for those structured datasets. The bundled FreeQ provider is available
+for discovery: static Markdown worked, JavaScript-generated content did not; it is
+not selected as another rendered-reader replacement.
 
 Otto's browser-dependent JSON/link tools remain available because static HTML
 alternatives do not establish equivalent JavaScript coverage. Inspect freshness,

@@ -58,6 +58,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | RelayShield phone | `relayshield/phone-reputation.toml` | Authored vendor-omitted request contract |
 | AgentFund | `agentfund.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | AgentUtility | `agentutility/provider.toml` | Full supported aliases/catalog; advisory research recommendations; enriched provenance |
+| APEX Faucet | `apexfaucet.toml` | Authored full catalog with documented POST/input repairs; persistent identity and owned purchases excluded |
 | Arkham | `arkham.toml` | Vendor OpenAPI |
 | AX1 Verdict | `ax1/provider.toml` | External request projection; token Verdict submission and free public receipt |
 | BlockRun | `blockrun.toml` | Synchronous catalog with fixed-symbol reads; async jobs/ownership excluded |
@@ -70,6 +71,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Deepline | `deepline.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | Degenscan Intel | `degenscan.toml` | Event intelligence, keyless Carry reads and public forecast submit/poll |
 | Exa | `exa.toml` | Vendor OpenAPI; Search, Contents and lazy help only |
+| FreeQ | `freeq.toml` | Remote REST catalog; pending completion, credential ownership, webhook lifecycles and gift-card purchases excluded |
 | Genuine Good Grants | `genuinegood.toml` | POST grant research; search/detail recommendations; bearer pass excluded |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
 | Google Trends | `google-trends.toml` | Vendor OpenAPI |

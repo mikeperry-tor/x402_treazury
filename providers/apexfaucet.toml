@@ -1,0 +1,54 @@
+description = "Rendered web pages, open-source research, company records and public blockchain intelligence."
+spec = "apexfaucet-openapi.json"
+name = "APEX Faucet"
+base_url = "https://apexfaucet.xyz"
+prefix = "apexfaucet"
+include = ["/api/x402", ""]
+# Identity assets and persistent purchases need an owner beyond a rotating payer.
+exclude_operations = ["GET /api/x402/arc-passport", "GET /api/x402/x1-passport", "GET /api/x402/market-feature", "GET /api/x402/room-meal", "GET /api/x402/room-upgrade"]
+pricing_key = "x-payment-info"
+help_url = "https://apexfaucet.xyz/llms.txt"
+recommended_tools = ["apexfaucet_page_extract", "apexfaucet_page_markdown", "apexfaucet_web_read", "apexfaucet_pdf_text", "apexfaucet_site_extract", "apexfaucet_site_map", "apexfaucet_research_search", "apexfaucet_company_check", "apexfaucet_help"]
+instructions_text = "Preserve final URLs, truncation, source errors and observation times. Successful extraction does not establish that the requested document was retrieved. Some purchases can deliver a promotional NFT to the paying address on Arc; no extra action is required."
+
+[overrides.apexfaucet_page_extract]
+description = "Read a public page after JavaScript rendering, including visible text, headings and resolved links. Returns final URL, HTTP status and truncation. Set full=1; programmatic calls may charge without it. Bot walls fail explicitly. Cost: ~$0.009/call [spec]."
+
+[overrides.apexfaucet_page_markdown]
+description = "Read a public page as Markdown after JavaScript rendering, with main-content headings, lists, links, code and tables. Returns final URL, HTTP status and truncation. Bot walls and empty renders fail explicitly. Base USDC only. Cost: ~$0.002/call [spec]."
+
+[overrides.apexfaucet_web_read]
+description = "Read up to ten comma-separated URLs as plain-fetch text, with final URL, content type, byte count and truncation. Does not execute JavaScript; thin or empty content is marked. Per URL: 2 MB, four redirects and 12-second fetch timeout. Cost: ~$0.003/call [spec]."
+
+[overrides.apexfaucet_site_extract]
+description = "Render up to 25 same-host pages after JavaScript execution. Obeys robots.txt and names skipped or failed pages. Set full=1; programs may charge without it. Poor-yield crawls fail explicitly. Cost: ~$0.14/call [spec]."
+
+[overrides.apexfaucet_site_map]
+description = "Discover URLs from robots.txt and nested or gzipped sitemaps, up to 5,000 URLs with lastmod. Lists unreadable files. A missing sitemap is answered before payment. Cost: ~$0.003/call [spec]."
+
+[overrides.apexfaucet_pdf_text]
+description = "Extract a public PDF's text layer page by page, with page count and file size. Up to 15 MB and 200 pages. Scans without text, invalid PDFs and unreadable files are refused before payment. Cost: ~$0.003/call [spec]."
+
+[overrides.apexfaucet_research_search]
+description = "Search selected open research sources, returning credited titles, links, excerpts, dates and source facts. Choose sources and limit per source; preserve each source's errors and licence. This returns ranked results, not full articles or comments. Cost: ~$0.003/call [spec]."
+
+[overrides.apexfaucet_company_check]
+description = "Resolve company identity using GLEIF and SEC EDGAR by name, LEI or US ticker. Returns registration facts, reported parents and eight recent filings. Nonexact names are flagged; absent companies are answered before payment. Not sanctions or credit screening. Cost: ~$0.005/call [spec]."
+
+[overrides.apexfaucet_web_search]
+description = "Search the live web for q (3-200 characters). Dispatcher uses an available x402Atlas or AgentBIT backend and identifies it with its upstream payment receipt. No available backend is refused before payment. Cost: ~$0.015/call [spec]."
+
+[overrides.apexfaucet_chat_completions]
+description = "Generate a completed OpenAI-compatible chat response with messages, optional model, max_tokens, temperature and tools. Up to about 4,000 input and 1,024 output tokens; no streaming. Supports gpt-oss, Llama and Qwen models listed in model. Cost: ~$0.002/call [spec]."
+
+[overrides.apexfaucet_image_generate]
+description = "Generate a 1024x1024 JPEG from prompt using FLUX.1 schnell, optionally steps=1-8. Returns base64 inside JSON; no copy is kept by the provider. Sexual content, minors and graphic violence are refused before payment. Cost: ~$0.01/call [spec]."
+
+[overrides.apexfaucet_bloodstream_call]
+description = "Record a HEALTHY or INFECTED prediction for an open cell under the paying wallet's identity. Scored one hour later against the sell test; creates a persistent public reputation record. No stake or payout. Cost: ~$0.001/call [spec]."
+
+[overrides.apexfaucet_ask_flux]
+description = "Ask Flux about Arc, tokens, agents, x402 or building on Arc. Returns an answer also published on chain in G2 with the question's hash, not its text. Cost: ~$0.02/call [spec]."
+
+[overrides.apexfaucet_help]
+description = "Read APEX's service and payment guide. It also describes unsupported identity purchases and external wallet workflows; use exposed tool schemas."

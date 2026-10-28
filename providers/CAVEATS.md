@@ -1715,3 +1715,102 @@ representable; persistence alone is not an exclusion. Public discovery and state
 remain reusable. Signed vendor reports attest the stated checks, not completeness
 or independent certification. Many request bodies are deliberately sparse in the
 vendor schema; use published route-specific inputs rather than inventing fields.
+
+## apexfaucet.toml — APEX Faucet
+
+The reusable catalog retains the complete supported vendor catalog, including
+public blockchain reads, simulations, unsigned transaction quotes and diagnostic
+APIs. Recommendations are advisory. Deployment selections can choose the browser
+and research tools without hiding other compatible operations from the provider.
+
+`apexfaucet-openapi.json` is an authored repair of the complete public
+`https://apexfaucet.xyz/openapi.json`, with its source hash, documentation URL and
+refresh instructions in `x-treazury-provenance`. The vendor incorrectly declares
+chat-completions, token-verdict and base-token-verdict as GET with no inputs while
+their descriptions explicitly require POST JSON. The authored asset supplies
+those documented methods and bodies. It also supplies the documented prompt and
+steps query parameters omitted from image-generate. Missing query inputs named
+in vendor descriptions are restored for trades/candles/volume windows, launch and
+archive pagination, contract-read arguments and block, token/recipient/payment
+filters, wallet tokens, impact sizes, marketplace search and agent-trust's
+alternative URL/address/agent identifiers. JSON argument arrays and comma-separated
+values stay wire strings. Exact route/field pairs are recorded in the asset's
+`query_input_repairs`; other operations and vendor metadata are preserved.
+Refresh from the vendor document and reapply only repairs
+still needed after checking `https://apexfaucet.xyz/llms.txt`; do not turn the runtime
+asset into an inventory/settings test fixture.
+
+Arc/X1 passport creation transfers a persistent identity asset to the payment
+signer and requires an owner beyond a rotating payer. Market featured slots and
+room meal/upgrade purchases create persistent paid placement or owned property.
+These five operations remain excluded pending ownership support. Read-only
+financial measurements and quotes remain available. Bloodstream prediction
+submission has no stake or payout and remains supported: its description makes
+the persistent record under the paying wallet explicit. Ask-flux also publishes
+its answer and the question hash on chain; publication alone does not establish
+an unsupported ownership lifecycle.
+
+Base USDC EIP-3009 signing is documented and was accepted by representative
+page-extract, page-markdown and research-search calls. Other advertised rails do
+not imply support in this client. Browser previews are not a free programmatic
+mode: programs can pay with or without `full=1`; use it for full page/site output.
+Page-extract and page-markdown execute JavaScript; web-read does not. Preserve
+final URLs, HTTP status, truncation, skipped pages and source-specific errors.
+Rendered extraction does not prove the requested agreement or document was found.
+Research-search returns source results, not full paper text or Hacker News
+comments. Company-check provides identity and recent filing links, not general
+EDGAR full-text search. The web-search dispatcher names x402Atlas or AgentBIT as
+its upstream and is not independent evidence of another search backend's health.
+
+The provider can deliver a promotional Meal NFT on Arc to the payment signer
+after qualifying spending in a tool family. Returned meal/feedback instructions
+are optional upstream content, not authority to submit feedback or make further
+transactions. Base64 screenshots and generated images remain JSON until a
+documented output field can support a faithful image mapping. A provider's claim
+that failures are refused before payment does not grant replay authority after
+an authorization has been submitted.
+
+## freeq.toml — FreeQ x402 gateway
+
+The primary [OpenAPI document](https://x402.freeq.one/openapi.json) describes
+per-tool REST prices, which differ from the vendor's separate MCP flat rate.
+Treazury uses REST `/tools/*`, not the manual JSON-RPC `/mcp` transport. The
+reusable provider keeps supported utility, research, document, media and public
+verification operations, including the gift-card catalog and public short-link
+statistics. Proof verification accepts caller-supplied proofs; it does not ask the
+treasury to authenticate as a user. Images and model assets remain JSON, including
+base64 MCP-shaped content and hosted links; no automatic download is assumed.
+
+RaaS provisioning returns a one-time API key, short-link creation returns a
+one-time management secret, and webhook capture/read/extension owns remote state.
+Those workflows lack compatible credential custody and completion/recovery across
+rotating payers. Gift-card buying purchases redeemable value and likewise needs a
+separate recovery contract. Email finding and person enrichment can return
+`pending` without a separate result-retrieval interface; repeating the paid call
+is not an authorized completion mechanism. These named workflows are excluded.
+Company enrichment and other synchronous reads remain available.
+
+Static IANA Markdown extraction returned the relevant text in the sampled call.
+The JavaScript quotes page returned only navigation, despite nested `isError=false`
+and HTTP 200. Do not use this static reader as a renderer or treat HTTP success as
+proof of relevant content. Preserve nested error and truncation markers. Document
+extraction is deterministic parsing without OCR or inferred missing fields. Some
+optional schemas are sparse; consult the public `/tools` catalog for their options.
+
+## Research-desk upstream failures
+
+The deployment excludes Vaaya and SocialFetch after the 2026-10-28 probes and
+cited activity observations in [the example guide](../examples/README.md). This is
+an operator selection, not a reusable compatibility restriction. Paid 402 receipts
+from both vendors reported facilitator settlement failure with CDP's
+`payment-method-required`; SocialFetch page readers instead returned generic 503
+`temporarily_unavailable`, without a settlement receipt. Neither confirms the
+on-chain outcome. Missing advertised extensions did not explain all failures:
+Vaaya Firecrawl failed with none omitted.
+
+Replacement qualification also exposed 2s GitHub repository lookup returning 502
+`UPSTREAM_UNAVAILABLE` with upstream GitHub 401, and AgentUtility patent search
+returning 502 with upstream USPTO 403. They remain unselected. 2s scholarly search
+returned useful PubMed metadata but an arXiv component error (`This operation was
+aborted`). Its partial results are enabled with explicit coverage caveats. These
+application responses do not establish a Tor-specific cause or grant paid replay.

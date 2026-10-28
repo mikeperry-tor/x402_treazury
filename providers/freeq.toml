@@ -1,0 +1,23 @@
+description = "Web and document extraction, search and SEO data, company enrichment, on-chain reads and supported media utilities."
+spec = "https://x402.freeq.one/openapi.json"
+name = "FreeQ"
+base_url = "https://x402.freeq.one"
+prefix = "freeq"
+include = ["/tools", ""]
+pricing_key = "x-payment-info"
+help_url = "https://x402.freeq.one/llms.txt"
+# Manual JSON-RPC transport, one-time credential custody, wallet-owned remote
+# resources and redeemable-value purchases need separate completion/recovery.
+exclude = ["/mcp", "/tools/raas_project_provision", "/tools/shortlink_create", "/tools/webhook_catch", "/tools/giftcard/api/buy"]
+# These can return pending without a separate result-retrieval contract.
+exclude_operations = ["POST /tools/find_email", "POST /tools/enrich_person"]
+instructions_text = "Preserve nested isError, ok, partial and truncation markers; HTTP success does not establish tool success. Media stays JSON, including encoded images and hosted asset links. Document extraction is deterministic parsing without OCR or inferred fields."
+
+[overrides.freeq_markdown]
+description = "Extract a public page's main static HTML content as Markdown, text or JSON. options controls css_selector, output_format, max_length, include_links and include_images. Does not render JavaScript; inspect content before treating the page as retrieved. Cost: ~$0.002/call [spec]."
+
+[overrides.freeq_health]
+description = "Read gateway health. Free."
+
+[overrides.freeq_root]
+description = "Read the public tool and parameter catalog. Free."

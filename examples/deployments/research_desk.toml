@@ -70,7 +70,7 @@ funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00"
 
 # Business, finance, property and security research share this payer pool.
-# Arkham lookups, TheirStack company search and x402stock research can exceed $0.50.
+# Arkham lookups and x402stock research can exceed $0.50.
 [wallets.financials]
 mode = "zcash_rotation"
 max_api_payment_usdc = "1.00"
@@ -119,16 +119,13 @@ send_tools = [
   { to = "web" },
 ]
 
-# Reddit, GitHub trends/profiles/repositories and web fetchers provide
-# complementary platform research and retrieval. Exa supplies canonical web search.
+# Disabled after failed paid settlement/lookup probes on 2026-10-28.
+# 402radar's latest listed Base payment was 3 days old at review:
+# https://402radar.io/api.socialfetch.dev
+# Activity is an external observation, not proof of settlement or universal outage.
 [sources.socialfetch]
 extends = "../../providers/socialfetch.toml"
-send_tools = [
-  { to = "exclude", tools = ["web_search"] }, # Prefer direct Exa search; comparative coverage remains unverified.
-  # Route web research families before the primary fallback.
-  { to = "web", tools = ["web_*"] },
-  { to = "social" },
-]
+send_tools = [{ to = "exclude" }]
 
 [sources.pdl]
 extends = "../../providers/pdl.toml"
@@ -455,7 +452,7 @@ send_tools = [
 [sources.agentutility]
 extends = "../../providers/agentutility/provider.toml"
 send_tools = [
-  { to = "web", tools = ["scrape_to_json", "link_extract"] },
+  { to = "web", tools = ["scrape_to_json", "link_extract", "archive_snapshot"] },
   { to = "exclude" },
 ]
 
@@ -523,8 +520,7 @@ extends = "../../providers/hirescrape.toml"
 send_tools = [
   { to = "exclude", tools = [
     "help",
-    # These are redundant to socialfetch and have SIWX async
-    # options that we currently do not support
+    # SIWX asynchronous completion remains unsupported for these workflows.
     "instagram",
     "linkedin",
     "tiktok_shop",
@@ -641,7 +637,7 @@ send_tools = [
     # Lower-priority standalone utilities and metadata; omit to keep discovery focused.
     "breach_check_password", # Uploads a password to this vendor; local HIBP prefix checks are preferable.
     "bulk_domain_check", # Domain-acquisition workflow; availability can be wrong when RDAP/DNS are unreachable.
-    "github_intel_analyze", # Public repo metadata overlaps social's GitHub coverage; not a code/security audit.
+    "github_intel_analyze", # General repository metadata is outside this security selection; not a code/security audit.
     "npm_intel_analyze", # Package metadata/activity scoring, not a vulnerability or malware scan.
     "redirect_trace", # Narrow redirect-chain utility; lower priority than selected threat checks.
     "health", # Provider diagnostic, not research data.
@@ -678,141 +674,13 @@ send_tools = [
   { to = "security" },
 ]
 
-# Vaaya web research, company evidence and contact lookups follow endpoint categories.
+# Disabled after cross-family facilitator settlement failures on 2026-10-28.
+# 402radar's latest listed Base payment was 18 days old at review (operator saw >=14):
+# https://402radar.io/vaaya.ai
+# Inactivity supports this deployment choice; it does not establish the failure cause.
 [sources.vaaya]
 extends = "../../providers/vaaya.toml"
-send_tools = [
-  { to = "exclude", tools = [
-    # Selected research sources and price-comparison candidates are routed below.
-    "apex_*",
-    "aviationstack_*",
-    "brave_*",
-    "cloro_*",
-    "contactout_*",
-    "crw_*",
-    # Crawl/extract completion remains unqualified; map is redundant with existing discovery.
-    "firecrawl_crawl",
-    "firecrawl_extract",
-    "firecrawl_map",
-    # Keep focused timeline enrichment; ordinary news search has selected alternatives.
-    "gdelt_news",
-    "govlaws_*",
-    "jina_*",
-    "kicksdb_*",
-    "linkup_*",
-    "mapquest_*",
-    "olostep_*",
-    "openai_*",
-    "openfunnel_*",
-    # Other OpenWebNinja finance, commerce, maps and image tools overlap existing endpoints or remain out of scope.
-    "openwebninja_balance_sheet",
-    "openwebninja_cash_flow",
-    "openwebninja_currency_exchange_rate",
-    "openwebninja_event_details",
-    "openwebninja_events_search",
-    "openwebninja_finance_search",
-    "openwebninja_image_objects",
-    "openwebninja_image_ocr",
-    "openwebninja_image_search",
-    "openwebninja_income_statement",
-    "openwebninja_market_trends",
-    "openwebninja_play_store_app",
-    "openwebninja_play_store_reviews",
-    "openwebninja_play_store_search",
-    "openwebninja_product_details",
-    "openwebninja_product_offers",
-    "openwebninja_product_price_history",
-    "openwebninja_product_reviews",
-    "openwebninja_product_search",
-    "openwebninja_reverse_image",
-    "openwebninja_social_links",
-    "openwebninja_stock_news",
-    "openwebninja_stock_overview",
-    "openwebninja_stock_quote",
-    "openwebninja_stock_time_series",
-    "openwebninja_website_contacts",
-    "openwebninja_yelp_business",
-    "openwebninja_yelp_reviews",
-    "openwebninja_yelp_search",
-    "openwebninja_zillow_agent_search",
-    "openwebninja_zillow_property",
-    "openwebninja_zillow_property_details",
-    "openwebninja_zillow_search",
-    "openwebninja_zillow_search_coordinates",
-    "openwebninja_zillow_zestimate",
-    "realestateapi_*",
-    "rentcast_*",
-    "rxatlas_*",
-    "sarvam_*",
-    "scrapedo_*",
-    "scrapingant_*",
-    "serper_search",
-    "tavily_*",
-    # Other contact APIs remain excluded pending a distinct coverage or quality benefit.
-    "tomba_author_finder",
-    "tomba_domain_search",
-    "tomba_email_finder",
-    "tomba_email_verifier",
-    "tomba_enrich",
-    "trialbase_*",
-    # General web search overlaps selected engines; academic excerpts are the distinct addition.
-    "valyu_search",
-    "wikidata_*",
-    "wikipedia_*",
-    "akta_job_posts",
-    "akta_social_posts",
-    "anthropic_messages",
-    "autoexchange_search",
-    "consult",
-    "cueframe_validate",
-    "dripstack_post",
-    "exa_search",
-    "fundable_deal_investors",
-    "fundable_industry_search",
-    "fundable_investor_search",
-    "fundable_location_search",
-    "fundable_person_search",
-    "help",
-    "martin_estate_catalog",
-    "onefind",
-    "onesearch",
-    "openrouter_chat",
-    "oxylabs_scrape",
-    "papercut_github_profile",
-    "parallel_search",
-    "perplexity_search",
-    "postalform_validate",
-    "root",
-    "sayer_and_stone_catalog",
-    "signalbase_companies",
-    "signalbase_hiring",
-    "signalbase_investors",
-    "signalbase_job_changes",
-    "signalbase_people",
-    "supersearch",
-    "tako_thinviz_create",
-    "tako_visualize",
-  ] },
-  { to = "science", tools = ["openalex_*", "valyu_academic"] },
-  # Route business research families before the primary fallback.
-  { to = "business", tools = [
-    "akta_*",
-    "courtlistener_*",
-    "edgar_*",
-    "fedreg_*",
-    "fundable_*",
-    "openwebninja_*",
-    "propublica_*",
-    "recallradar_*",
-    "signalbase_*",
-    "tako_*",
-    "theirstack_*",
-    "uspto_*",
-  ] },
-  # Route social research families before the primary fallback.
-  { to = "social", tools = ["tomba_*"] },
-  { to = "web" },
-]
+send_tools = [{ to = "exclude" }]
 
 [sources.locus]
 extends = "../../providers/locus/provider.toml"
@@ -935,9 +803,11 @@ send_tools = [
   ] },
   { to = "security", tools = ["security_*"] },
   { to = "property", tools = ["property_*", "soil_*", "geo_flood_zone", "gov_epa_facilities", "gov_fair_market_rent", "gov_income_limits", "gov_nfip_claims", "gov_risk_index", "gov_uk_crime"] },
-  { to = "science", tools = ["paper_doi_lookup", "papers_citations", "research_*", "bio_*", "chem_*", "clinical_*", "health_*", "medical_*", "nutrition_*", "gov_fda_*"] },
+  { to = "science", tools = ["paper_doi_lookup", "papers_citations", "papers_search", "research_*", "bio_*", "chem_*", "clinical_*", "health_*", "medical_*", "nutrition_*", "gov_fda_*"] },
   { to = "finance", tools = ["bank_*", "bls_*", "econ_*", "worldbank_*", "treasury_*", "tax_*", "gov_bea_gdp"] },
   { to = "world", tools = ["aviation_*", "airport_*", "flight_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
+  # HN search returned dated story links and discussion counts; GitHub failed upstream authentication.
+  { to = "social", tools = ["news_hn_search"] },
   # Legal, political and occupational records remain on business.
   { to = "business", tools = ["law_*", "gov_*", "labor_*", "occupation_*", "license_*", "nonprofit_*", "census_*", "edu_*", "job_*"] },
   # Exa, Otto, StableEnrich and AgentUtility cover web research; PDL/Deepline cover contacts.
@@ -984,7 +854,7 @@ send_tools = [
   { to = "world", tools = ["weather_alerts_by_state", "weather_discussion", "weather_gridpoint"] },
   { to = "science", tools = ["openfda_drug_label", "openfda_drug_event"] },
   { to = "business", tools = ["gov_*"] },
-  # x402stock/AgentFund/Otto cover SEC, macro and market data; Vaaya covers court search and patents.
+  # x402stock/AgentFund/Otto cover SEC, macro and markets; 2s covers court search and x402stock company patents.
   # AgOSINT supplies broader sanctions lists; NetIntel supplies RDAP and Otto combined forecasts.
   # 2s supplies direct CVE/package evidence; existing recall tools cover the omitted FDA recall searches.
   # Ski/menu/trip planning, model calls and provider-mediated test purchases are separate workflows.
@@ -1019,6 +889,24 @@ send_tools = [
   { to = "exclude" },
 ]
 
+# Qualified rendered readers and source-specific research search, not the full catalog.
+[sources.apexfaucet]
+extends = "../../providers/apexfaucet.toml"
+send_tools = [
+  { to = "web", tools = ["page_extract", "page_markdown"] },
+  { to = ["science", "social"], tools = ["research_search"] },
+  { to = "exclude" },
+]
+
+# Company-page enrichment returned the requested company and source identity.
+# Other social-platform workflows remain candidates, not qualified replacements.
+[sources.agdata]
+extends = "../../providers/agdata.toml"
+send_tools = [
+  { to = ["business", "social"], tools = ["linkedin_company"] },
+  { to = "exclude" },
+]
+
 # --- Listeners ---------------------------------------------------------------
 
 [servers.web]
@@ -1026,7 +914,7 @@ listen = "127.0.0.1:3010"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
-instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract or stableenrich_firecrawl_scrape; exa_contents adds freshness/history controls. Use otto_web_answer or stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON and static HTML links. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use botsmith_x_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA; GDELT covers news timelines and Wayback covers archives."
+instructions_text = "Web search, pages, news, archives, trends, images and shopping. Prefer exa_search for web/news discovery; category and publication-date filters focus news. Otto filtered_news and news_recaps add curated crypto briefings; verify topical claims against sources and check the underlying news window. Read rendered pages with otto_web_extract, stableenrich_firecrawl_scrape or apexfaucet_page_markdown; exa_contents adds freshness/history controls. Use otto_web_answer or stableenrich_exa_answer for cited answers. AgentUtility supplies schema-based static-page JSON, static HTML links and closest dated archive snapshots. Otto's browser-dependent JSON/links remain available; check freshness, degradation and destination before relying on results. Use botsmith_x_search for X posts and google_trends_trend_over_time for interest timelines. Science owns papers; Strale inspects C2PA media credentials."
 
 [servers.science]
 listen = "127.0.0.1:3011"
@@ -1035,7 +923,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
 discover_on_demand = true
 instructions_text = "Academic, scientific and health research: papers, citations, researchers, institutions, grants, biological and chemical references, clinical trials, drug/device records and public-health datasets. Preserve publication and observation dates, study status, identifiers and coverage. Use web for general search and page retrieval; business retains investment-oriented pharma catalysts and general product recalls."
-discovery_search_tool_instructions_text = "Science keywords: academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Valyu, arXiv, PubMed, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central, x402stock, Maxwell, 2s, twos."
+discovery_search_tool_instructions_text = "Science keywords: academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, APEX, arXiv, PubMed, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central, x402stock, Maxwell, 2s, twos."
 
 [servers.social]
 listen = "127.0.0.1:3012"
@@ -1044,7 +932,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "social"
 discover_on_demand = true
 instructions_text = "Social-platform, person, public-profile and business-contact research, including email lookup and validation. Search by platform or person. Preserve platform, date and partial-result markers; missing posts do not prove absence."
-discovery_search_tool_instructions_text = "Social keywords: reddit, github, bluesky, facebook, hackernews, instagram, linkedin, tiktok, trend charts, popular creators, popular songs, popular videos, popular hashtags, HireScrape, twitter, x, youtube, telegram, person, profile, headshot, enrichment, employer, title, seniority, location, phone, mobile phone, address, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, Tomba, LinkedIn email, contact phone, company phone, Threads, Pinterest, Snapchat, Twitch, Rumble, Truth Social, SoundCloud, Spotify, Apple Music, Linktree, Yelp, Amazon Shop, Google Ad Transparency, LinkedIn jobs and organizations."
+discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, Hacker News, APEX research search, 2s HN search, HireScrape TikTok, Twitter, X, Botsmith posts and profiles, Otto curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, contact phone, company phone, LinkedIn company enrichment, AgData."
 
 [servers.business]
 listen = "127.0.0.1:3013"
@@ -1052,8 +940,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Business, public-record, funding, jobs, grants and filing research, including decision-makers, employment changes, employee/customer reviews, compensation, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic and health datasets."
-discovery_search_tool_instructions_text = "Business keywords: registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, headcount, technographics, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, Glassdoor, Trustpilot, employee reviews, customer reviews, salaries, interviews, compensation, JSearch, Google Jobs, TheirStack, buying intent, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+instructions_text = "Business, public-record, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic and health datasets."
+discovery_search_tool_instructions_text = "Business keywords: registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
 
 [servers.finance]
 listen = "127.0.0.1:3014"
