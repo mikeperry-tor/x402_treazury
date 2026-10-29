@@ -810,7 +810,10 @@ meta-config serving handle SIGINT/SIGTERM by stopping listeners and allowing
 accepted calls to finish without a fixed drain deadline. Stderr announces the drain
 and reports stages, call counts and elapsed time every ten seconds. A second
 SIGINT/SIGTERM forces exit with an unknown-outcome warning; it never releases
-reservations or replays signed work. MCP client disconnect and stdio EOF stop
+reservations or replays signed work. The same registered signal streams remain
+owned across cancellation and drain, so the second signal is retained during
+that handoff. Windows uses Ctrl-C for both steps. After EOF or supervisor shutdown,
+the first subsequent operator signal forces exit. MCP client disconnect and stdio EOF stop
 response delivery without abandoning application-owned calls. Funding and
 reconciliation remain available until accepted deployment calls finish. A listener failure also stops its
 siblings. Catalog startup failure instead disables only dependent waiting endpoints

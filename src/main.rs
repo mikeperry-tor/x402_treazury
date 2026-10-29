@@ -9,7 +9,8 @@ use std::{collections::BTreeMap, time::Duration};
 use x402_treazury::{
     catalog::{self, Config},
     payment::{PaidClient, Payer, SpendPolicy},
-    server::{Server, serve_http},
+    server::{Server, serve_http_with_signals},
+    shutdown::ShutdownSignals,
 };
 
 mod cli;
@@ -268,9 +269,10 @@ async fn run_standalone(args: Args, env: BTreeMap<String, String>) -> Result<()>
             .filter(|s| !s.is_empty())
             .context("HTTP transport requires X402_MCP_BEARER_TOKEN or --bearer-token; use --no-auth to explicitly disable authentication")?)
         };
+        let signals = ShutdownSignals::new()?;
         let listener = tokio::net::TcpListener::bind((args.host.as_str(), args.port)).await?;
         tracing::info!(address = %listener.local_addr()?, "MCP listening at /mcp");
-        serve_http(listener, server, token, shutdown_signal()).await?;
+        serve_http_with_signals(listener, server, token, signals).await?;
     }
     Ok(())
 }
@@ -377,6 +379,7 @@ fn mcp_initialization_error(error: rmcp::service::ServerInitializeError) -> anyh
 }
 
 async fn serve_standalone_stdio(server: Server) -> Result<()> {
+    let mut signals = ShutdownSignals::new()?;
     let work = server.work.clone();
     let service = server
         .serve(stdio::transport()?)
@@ -387,26 +390,26 @@ async fn serve_standalone_stdio(server: Server) -> Result<()> {
     tokio::pin!(waiting);
     let result = tokio::select! {
         result = &mut waiting => Some(result),
-        signal = shutdown_signal() => { signal?; None }
+        signal = signals.recv() => { signal?; None }
     };
     work.close();
     cancel.cancel();
     tracing::info!("Stdio stopping: draining accepted calls; signal to force exit");
-    if let Some(engine) = &x402_treazury::network::global().cover {
-        engine.stop_ranges().await;
-    }
     let result = tokio::select! {
         result = async {
+            if let Some(engine) = &x402_treazury::network::global().cover {
+                engine.stop_ranges().await;
+            }
             let (result, ()) = tokio::join!(async {
                 match result { Some(result) => result, None => waiting.await }
             }, work.drain());
             result
         } => result,
-        signal = x402_treazury::server::force_signal() => { signal?; anyhow::bail!(x402_treazury::server::ForcedShutdown); }
+        signal = signals.recv() => { signal?; anyhow::bail!(x402_treazury::server::ForcedShutdown); }
     };
     result?;
     if let Some(engine) = &x402_treazury::network::global().cover {
-        engine.shutdown().await;
+        engine.emit_summary();
     }
     Ok(())
 }
@@ -646,6 +649,7 @@ async fn serve_deployment(
     running: x402_treazury::deployment::RunningDeployment,
     parent: &mut x402_treazury::supervision::Parent,
 ) -> Result<()> {
+    let mut signals = ShutdownSignals::new()?;
     let shutdown = tokio_util::sync::CancellationToken::new();
     let serving = running.serve(shutdown.clone());
     tokio::pin!(serving);
@@ -655,16 +659,16 @@ async fn serve_deployment(
             shutdown.cancel();
             let result = tokio::select! {
                 result = &mut serving => result,
-                force = x402_treazury::server::force_signal() => { force?; anyhow::bail!(x402_treazury::server::ForcedShutdown); }
+                force = signals.recv() => { force?; anyhow::bail!(x402_treazury::server::ForcedShutdown); }
             };
             closed?;
             result
         }
-        signal = shutdown_signal() => {
+        signal = signals.recv() => {
             shutdown.cancel();
             let result = tokio::select! {
                 result = &mut serving => result,
-                force = x402_treazury::server::force_signal() => {
+                force = signals.recv() => {
                     force?;
                     anyhow::bail!(x402_treazury::server::ForcedShutdown);
                 }
@@ -750,17 +754,6 @@ async fn standalone_config(args: &Args, env: &BTreeMap<String, String>) -> Resul
     }
     x402_treazury::config::validate(&cfg)?;
     Ok(cfg)
-}
-
-async fn shutdown_signal() -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! { result = tokio::signal::ctrl_c() => result?, _ = term.recv() => {} }
-    }
-    #[cfg(not(unix))]
-    tokio::signal::ctrl_c().await?;
-    Ok(())
 }
 
 #[cfg(test)]

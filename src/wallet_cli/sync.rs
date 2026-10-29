@@ -109,6 +109,7 @@ pub(super) async fn run(
             (None, store, Some(worker))
         }
     };
+    let mut signals = crate::shutdown::ShutdownSignals::new()?;
     tracing::info!("wallet sync: wallet opened; starting synchronization");
     let stop = CancellationToken::new();
     let observed = {
@@ -137,14 +138,14 @@ pub(super) async fn run(
             closed = parent.closed() => {
                 eprintln!("treasury sync supervisor stopped: deliberately cancelling and checkpointing for wallet safety");
                 stop.cancel();
-                crate::server::drain_or_force("wallet_sync", work).await?;
+                crate::server::drain_or_force("wallet_sync", work, &mut signals).await?;
                 closed.and_then(|()| anyhow::bail!("treasury sync cancelled by supervisor"))
             }
             result = &mut work => result,
-            signal = shutdown_signal() => {
+            signal = signals.recv() => {
                 eprintln!("treasury sync interrupted: deliberately cancelling and checkpointing for wallet safety");
                 stop.cancel();
-                let result = crate::server::drain_or_force("wallet_command", work).await;
+                let result = crate::server::drain_or_force("wallet_command", work, &mut signals).await;
                 signal?;
                 result
             }

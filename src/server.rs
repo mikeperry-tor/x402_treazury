@@ -411,12 +411,41 @@ pub(crate) fn log_http_shutdown() {
     );
 }
 
-/// Stop admission and retain accepted calls until their work finishes.
+/// Stop admission on an external trigger and retain accepted calls until done.
+/// Operator force signals are registered after that trigger completes. For an
+/// uninterrupted first/second operator-signal handoff, use `serve_http_with_signals`.
 pub async fn serve_http(
     listener: tokio::net::TcpListener,
     server: Server,
     token: Option<String>,
     shutdown: impl std::future::Future<Output = std::io::Result<()>>,
+) -> Result<()> {
+    serve_http_inner(listener, server, token, shutdown, None).await
+}
+
+/// Serve with one operator-signal subscription across shutdown and drain.
+pub async fn serve_http_with_signals(
+    listener: tokio::net::TcpListener,
+    server: Server,
+    token: Option<String>,
+    signals: crate::shutdown::ShutdownSignals,
+) -> Result<()> {
+    serve_http_inner(
+        listener,
+        server,
+        token,
+        std::future::pending(),
+        Some(signals),
+    )
+    .await
+}
+
+async fn serve_http_inner(
+    listener: tokio::net::TcpListener,
+    server: Server,
+    token: Option<String>,
+    shutdown: impl std::future::Future<Output = std::io::Result<()>>,
+    mut signals: Option<crate::shutdown::ShutdownSignals>,
 ) -> Result<()> {
     use anyhow::Context;
     use std::future::IntoFuture;
@@ -429,20 +458,40 @@ pub async fn serve_http(
     tokio::pin!(serving);
     let signal = tokio::select! {
         result = &mut serving => return Ok(result?),
-        signal = shutdown => signal,
+        signal = async {
+            match signals.as_mut() {
+                Some(signals) => signals.recv().await,
+                None => shutdown.await,
+            }
+        } => signal,
+    };
+    let signals = match signals {
+        Some(signals) => Ok(signals),
+        None => crate::shutdown::ShutdownSignals::new(),
     };
     log_http_shutdown();
     work.close();
     stop.cancel();
-    if let Some(engine) = &crate::network::global().cover {
-        engine.stop_ranges().await;
-    }
+    // Registration errors still close admission and request graceful shutdown.
+    // Accepted calls retain their independent work owner on this error path.
+    let mut signals = match signals {
+        Ok(signals) => signals,
+        Err(error) => {
+            if let Some(engine) = &crate::network::global().cover {
+                engine.stop_ranges().await;
+            }
+            return Err(error.into());
+        }
+    };
     tokio::select! {
         result = async {
+            if let Some(engine) = &crate::network::global().cover {
+                engine.stop_ranges().await;
+            }
             let (result, ()) = tokio::join!(wait_with_progress("http_transport", serving), work.drain());
             result
         } => result?,
-        signal = force_signal() => { signal?; anyhow::bail!(ForcedShutdown); }
+        signal = signals.recv() => { signal?; anyhow::bail!(ForcedShutdown); }
     }
     if let Some(engine) = &crate::network::global().cover {
         engine.emit_summary();
@@ -472,6 +521,7 @@ pub(crate) async fn wait_with_progress<T>(
 pub(crate) async fn drain_or_force<T>(
     stage: &'static str,
     work: impl std::future::Future<Output = Result<T>>,
+    signals: &mut crate::shutdown::ShutdownSignals,
 ) -> Result<T> {
     tracing::info!(
         stage,
@@ -479,20 +529,15 @@ pub(crate) async fn drain_or_force<T>(
     );
     tokio::select! {
         result = wait_with_progress(stage, work) => result,
-        signal = force_signal() => { signal?; anyhow::bail!(ForcedShutdown); }
+        signal = signals.recv() => { signal?; anyhow::bail!(ForcedShutdown); }
     }
 }
 
 /// A second operator signal is explicit force, independent of network progress.
+/// This one-shot compatibility helper creates a new subscription; owners that
+/// handle successive signals should retain `ShutdownSignals` instead.
 pub async fn force_signal() -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! { result = tokio::signal::ctrl_c() => result?, _ = term.recv() => {} }
-    }
-    #[cfg(not(unix))]
-    tokio::signal::ctrl_c().await?;
-    Ok(())
+    crate::shutdown::ShutdownSignals::new()?.recv().await
 }
 
 #[cfg(test)]

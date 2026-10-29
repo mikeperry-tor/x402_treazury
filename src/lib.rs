@@ -12,6 +12,7 @@ pub mod qualification;
 mod relevance;
 pub mod rotation;
 pub mod server;
+pub mod shutdown;
 pub mod treasury;
 pub mod wallet_cli;
 

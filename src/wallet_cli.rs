@@ -789,16 +789,7 @@ async fn reconcile(
             }
             anyhow::Ok(())
         };
-        tokio::pin!(work);
-        tokio::select! {
-            result = &mut work => result,
-            signal = shutdown_signal() => {
-                stop.cancel();
-                let result = crate::server::drain_or_force("wallet_command", work).await;
-                signal?;
-                result
-            }
-        }
+        finish_on_shutdown("wallet_command", &stop, work).await
     };
     if let Err(error) = result {
         if error.is::<crate::server::ForcedShutdown>() {
@@ -887,17 +878,6 @@ async fn init(
     crate::treasury::Treasury::create(state_dir, key_file, birthday, seed).await
 }
 
-pub(crate) async fn shutdown_signal() -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! { result = tokio::signal::ctrl_c() => result?, _ = term.recv() => {} }
-    }
-    #[cfg(not(unix))]
-    tokio::signal::ctrl_c().await?;
-    Ok(())
-}
-
 async fn configured(
     path: &std::path::Path,
     network: crate::rotation::store::TreasuryNetwork,
@@ -935,10 +915,11 @@ pub(crate) async fn finish_on_shutdown<T>(
     stop: &tokio_util::sync::CancellationToken,
     work: impl std::future::Future<Output = Result<T>>,
 ) -> Result<T> {
+    let mut signals = crate::shutdown::ShutdownSignals::new()?;
     tokio::pin!(work);
     tokio::select! {
         result = &mut work => result,
-        signal = shutdown_signal() => { stop.cancel(); let result = crate::server::drain_or_force(stage, work).await; signal?; result }
+        signal = signals.recv() => { stop.cancel(); let result = crate::server::drain_or_force(stage, work, &mut signals).await; signal?; result }
     }
 }
 
@@ -975,22 +956,57 @@ mod shutdown_tests {
         let directory = PathBuf::from(directory);
         let stage = match std::env::var("X402_TEST_DRAIN_STAGE").unwrap().as_str() {
             "bootstrap" => "bootstrap",
+            "signal_handoff" => "signal_handoff",
             _ => "wallet_command",
         };
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let result = runtime.block_on(async {
+            // A separate runtime worker witnesses signal delivery while the
+            // drain work deliberately holds its current poll behind stdin.
+            let mut witness =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+            let witness_directory = directory.clone();
+            tokio::spawn(async move {
+                for marker in ["first_observed", "second_observed"] {
+                    witness.recv().await.unwrap();
+                    std::fs::write(witness_directory.join(marker), "observed").unwrap();
+                }
+            });
             let stop = tokio_util::sync::CancellationToken::new();
             let (_retain, receive) = std::sync::mpsc::channel::<()>();
             let blocked = tokio::task::spawn_blocking(move || {
                 let _ = receive.recv();
             });
+            if stage == "signal_handoff" {
+                let mut signals = crate::shutdown::ShutdownSignals::new()?;
+                std::fs::write(directory.join("ready"), "ready").unwrap();
+                signals.recv().await?;
+                std::fs::write(directory.join("draining"), "accepted work retained").unwrap();
+                // Hold the handoff before the force receiver's first poll.
+                // The witness proves that the second signal was broadcast,
+                // rather than merely sent, before the parent releases us.
+                use std::io::Read as _;
+                std::io::stdin().read_exact(&mut [0]).unwrap();
+                return crate::server::drain_or_force(
+                    stage,
+                    async {
+                        blocked.await.unwrap();
+                        Ok(())
+                    },
+                    &mut signals,
+                )
+                .await;
+            }
             finish_on_shutdown(stage, &stop, async {
-                // First poll installs the production signal handling in the
-                // sibling select branch before the parent sends any signal.
-                tokio::task::yield_now().await;
+                // Production registration precedes even the first work poll.
                 std::fs::write(directory.join("ready"), "ready").unwrap();
                 stop.cancelled().await;
                 std::fs::write(directory.join("draining"), "accepted work retained").unwrap();
+                // The parent sends the second signal and confirms its broadcast
+                // before allowing this poll to return. Re-registering a force
+                // receiver after this point would miss that signal.
+                use std::io::Read as _;
+                std::io::stdin().read_exact(&mut [0]).unwrap();
                 blocked.await.unwrap();
                 Ok(())
             })
@@ -1006,7 +1022,8 @@ mod shutdown_tests {
     #[tokio::test]
     async fn wallet_and_bootstrap_drain_accept_a_second_signal() {
         use std::{process::Stdio, time::Duration};
-        for stage in ["wallet_command", "bootstrap"] {
+        use tokio::io::AsyncWriteExt;
+        for stage in ["wallet_command", "bootstrap", "signal_handoff"] {
             let dir = tempfile::tempdir().unwrap();
             let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -1016,12 +1033,18 @@ mod shutdown_tests {
                 ])
                 .env("X402_TEST_WALLET_DRAIN", dir.path())
                 .env("X402_TEST_DRAIN_STAGE", stage)
+                .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true)
                 .spawn()
                 .unwrap();
-            for marker in ["ready", "draining"] {
+            for (marker, send_signal) in [
+                ("ready", true),
+                ("first_observed", false),
+                ("draining", true),
+                ("second_observed", false),
+            ] {
                 tokio::time::timeout(Duration::from_secs(5), async {
                     while !dir.path().join(marker).exists() {
                         assert!(
@@ -1033,14 +1056,17 @@ mod shutdown_tests {
                 })
                 .await
                 .unwrap();
-                assert!(
-                    std::process::Command::new("/bin/kill")
-                        .args(["-TERM", &child.id().unwrap().to_string()])
-                        .status()
-                        .unwrap()
-                        .success()
-                );
+                if send_signal {
+                    assert!(
+                        std::process::Command::new("/bin/kill")
+                            .args(["-TERM", &child.id().unwrap().to_string()])
+                            .status()
+                            .unwrap()
+                            .success()
+                    );
+                }
             }
+            child.stdin.take().unwrap().write_all(b"x").await.unwrap();
             let output = tokio::time::timeout(Duration::from_secs(5), child.wait_with_output())
                 .await
                 .unwrap()

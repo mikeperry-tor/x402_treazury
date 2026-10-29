@@ -327,7 +327,11 @@ Saturated-stream fixtures verify sibling traffic cannot renew readiness and
 cancelled calls cannot dispatch when capacity returns. A subprocess test exercises explicit force with a live blocking
 worker, independently of the static-wallet HTTP shutdown fixtures. Wallet and
 bootstrap drain subprocesses exercise the shared first-signal cancellation and
-second-signal force path. Deployment fixtures keep listeners and Base reconciliation
+second-signal force path. A Unix handoff fixture holds drain before its first
+force-receive poll: an independent signal witness confirms the second SIGTERM was
+broadcast before the parent releases the barrier. The retained receiver must
+still force exit, with the existing five-second fixture assertions unchanged.
+Deployment fixtures keep listeners and Base reconciliation
 available after a funding stop; optional remote catalog fixtures isolate missing
 or invalid inferred base URLs while keeping authored URL errors fatal.
 Real-process shutdown fixtures exercise responses beyond the old

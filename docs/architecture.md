@@ -322,6 +322,16 @@ Accepted calls live in `server/work.rs` independently of response-delivery futur
 Disconnect and stdio EOF cannot abandon them. Graceful shutdown closes admission,
 drains accepted calls with periodic progress, then stops financial workers; a second
 signal returns typed `ForcedShutdown` from serving, wallet or bootstrap drains.
+Each owner registers one `ShutdownSignals` before polling its work and retains
+the same streams through cancellation and drain. Linux/macOS use SIGINT and
+SIGTERM; Windows uses Ctrl-C. Signals delivered during the handoff remain
+observable, without a new subscription or a background watcher. After EOF or
+supervisor shutdown, the first subsequent operator signal forces the drain.
+Optional cover-task cleanup runs inside that same force-interruptible drain.
+Standalone HTTP uses `serve_http_with_signals`. The existing library `serve_http`
+API retains its external-trigger contract and registers operator force handling
+after that trigger; embedders needing continuous operator-signal handling use
+the persistent-signal entry point.
 The executable exits immediately without joining blocking workers or releasing
 liabilities; library embedders own their process-level force behavior. Stdio input uses a
 bounded dedicated reader so an open parent pipe cannot hold Tokio runtime shutdown
