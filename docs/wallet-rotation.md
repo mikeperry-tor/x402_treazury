@@ -724,6 +724,16 @@ delivery, release another attempt's inputs, or authorize another deposit. Genuin
 conflicting execution/ownership evidence or unrecoverable required facts warrant
 scoped investigation; they do not justify halting unrelated work.
 
+For an existing signed Zcash operation, transaction identity and expiry come from
+the authenticated original bytes. Saved plaintext txid/expiry fields are reporting
+projections: stale, missing or malformed values cannot veto confirmation, delay
+signed-expiry recovery or extend broadcast eligibility. Operational reads derive
+them before scheduling and protocol-validity decisions without rewriting the
+journal. Amount, fee, accepted deadline and input/operation ownership retain their
+original checks; corrupt original bytes or missing required authority are not
+reconstructed from projections. Strict status inspection can still report damaged
+saved metadata independently of canonical recovery.
+
 Before adding a financial gate or consistency check, identify the concrete
 authority, liability or external contract it protects and existing enforcement.
 First assess whether correcting derived state or removing duplicate responsibility

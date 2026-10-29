@@ -98,9 +98,19 @@ impl Fixture {
             .unwrap();
         let wallet = state.funding_job(&job).unwrap().unwrap().wallet_id;
         if accepted_source {
-            let operation = state.funding_job(&job).unwrap().unwrap().operation_id;
+            let source = state.funding_job(&job).unwrap().unwrap();
             state
-                .accept_preparation(&operation, Some(&group), 60, None)
+                .save_funding_quote(
+                    &job,
+                    &crate::test_funding_quote::bound(
+                        &source.target,
+                        &source.recipient,
+                        "accepted source",
+                    ),
+                )
+                .unwrap();
+            state
+                .accept_preparation(&source.operation_id, Some(&group), 60, None)
                 .unwrap();
         }
         if credited {
@@ -159,9 +169,9 @@ impl Fixture {
                     &original.operation_id,
                     revision,
                     b"next",
-                    b"private-fixture-signed-bytes",
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                     Some(crate::rotation::transaction::TransactionFacts {
-                        txid: "fixture".into(),
+                        txid: crate::rotation::store::test_support::transaction_txid(100),
                         expiry_height: 100,
                         amount_zatoshis: 50,
                         fee_zatoshis: 10,
@@ -203,7 +213,7 @@ impl Fixture {
                     .prepared_bytes(&original.operation_id)
                     .unwrap()
                     .as_slice(),
-                b"private-fixture-signed-bytes"
+                crate::rotation::store::test_support::transaction_raw(100).as_slice()
             );
         }
         // Pausing ordinary funding grants no new transfer authority and must not
@@ -1396,7 +1406,14 @@ async fn restart_rederives_unfinished_original_authorization_then_preserves_exac
 
 #[tokio::test]
 async fn accepted_current_and_archived_source_calculations_block_retirement_after_credit() {
-    for archived in [false, true] {
+    for (archived, terminal) in [
+        (false, crate::rotation::near::SwapStatus::Success),
+        (false, crate::rotation::near::SwapStatus::Failed),
+        (false, crate::rotation::near::SwapStatus::Refunded),
+        (true, crate::rotation::near::SwapStatus::Success),
+        (true, crate::rotation::near::SwapStatus::Failed),
+        (true, crate::rotation::near::SwapStatus::Refunded),
+    ] {
         let f = Fixture::with_accepted_source(1_000, true, true, 0, false, true).await;
         let (job, operation): (String, String) = f
             .db()
@@ -1407,7 +1424,7 @@ async fn accepted_current_and_archived_source_calculations_block_retirement_afte
             )
             .unwrap();
         if archived {
-            f.db().execute("INSERT INTO funding_recovery(operation_id,job_id,phase) VALUES(?1,?2,'\"COMPLETE\"')", rusqlite::params![operation,job]).unwrap();
+            f.db().execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,accepted_output,accepted_recipient) SELECT operation_id,job_id,'\"COMPLETE\"',quote,accepted_output,accepted_recipient FROM funding_progress WHERE job_id=?1", [&job]).unwrap();
             f.db().execute("UPDATE funding_progress SET operation_id='fresh-unstarted-source' WHERE job_id=?1", [&job]).unwrap();
         }
         let accepted: bool = f
@@ -1444,9 +1461,9 @@ async fn accepted_current_and_archived_source_calculations_block_retirement_afte
                     &op,
                     revision,
                     b"source-finished",
-                    b"original-source-signed-bytes",
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                     Some(crate::rotation::transaction::TransactionFacts {
-                        txid: "original-source".into(),
+                        txid: crate::rotation::store::test_support::transaction_txid(100),
                         expiry_height: 100,
                         amount_zatoshis: 50,
                         fee_zatoshis: 10,
@@ -1460,6 +1477,22 @@ async fn accepted_current_and_archived_source_calculations_block_retirement_afte
             .await
             .unwrap();
         assert!(f.pool.retire_wallet(f.wallet.clone()).await.unwrap());
+        assert_eq!(
+            f.role(),
+            "RETAINED",
+            "native confirmation does not establish the swap's delivery outcome"
+        );
+        let group = f.pool.pool.clone();
+        let op = operation.clone();
+        f.store
+            .call(move |s| {
+                s.record_provider_outcome(&job, &op, &terminal, 1_000)?;
+                let through = s.wallet_boundary(&group)?;
+                s.retirement_page(&group, -1, through).map(|_| ())
+            })
+            .await
+            .unwrap();
+        assert!(f.pool.retire_wallet(f.wallet.clone()).await.unwrap());
         assert_eq!(f.role(), "RETIRED");
         let op = operation.clone();
         assert_eq!(
@@ -1467,7 +1500,7 @@ async fn accepted_current_and_archived_source_calculations_block_retirement_afte
                 .call(move |s| Ok(s.prepared_bytes(&op)?.to_vec()))
                 .await
                 .unwrap(),
-            b"original-source-signed-bytes"
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
         assert_eq!(
             f.db()

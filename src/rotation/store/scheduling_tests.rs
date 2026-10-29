@@ -39,9 +39,9 @@ fn jobless_prepared_owner_stays_observable_when_new_submission_is_disabled() {
             &id,
             revision,
             b"next",
-            b"original bytes",
+            crate::rotation::store::test_support::transaction_raw(100).as_slice(),
             Some(TransactionFacts {
-                txid: "fixture".into(),
+                txid: crate::rotation::store::test_support::transaction_txid(100),
                 expiry_height: 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
@@ -61,7 +61,7 @@ fn jobless_prepared_owner_stays_observable_when_new_submission_is_disabled() {
         );
         assert_eq!(
             store.prepared_bytes(&id).unwrap().as_slice(),
-            b"original bytes"
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
         assert_eq!(store.operation(&id).unwrap().attempts, 0);
     }
@@ -100,9 +100,9 @@ fn partial_credit_after_preparation_forbids_first_deposit_and_retains_incoming_o
             &job.operation_id,
             revision,
             b"next",
-            b"initial bytes",
+            crate::rotation::store::test_support::transaction_raw(100).as_slice(),
             Some(TransactionFacts {
-                txid: "fixture".into(),
+                txid: crate::rotation::store::test_support::transaction_txid(100),
                 expiry_height: 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
@@ -129,7 +129,7 @@ fn partial_credit_after_preparation_forbids_first_deposit_and_retains_incoming_o
     assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 0);
     assert_eq!(
         store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-        b"initial bytes"
+        crate::rotation::store::test_support::transaction_raw(100).as_slice()
     );
 }
 
@@ -282,9 +282,9 @@ fn optional_provider_and_disclosure_metadata_do_not_block_inventory() {
                     &job.operation_id,
                     1,
                     b"next",
-                    b"exact original bytes",
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                     Some(TransactionFacts {
-                        txid: "original".into(),
+                        txid: crate::rotation::store::test_support::transaction_txid(100),
                         expiry_height: 100,
                         amount_zatoshis: 50,
                         fee_zatoshis: 10,
@@ -326,7 +326,7 @@ fn optional_provider_and_disclosure_metadata_do_not_block_inventory() {
             assert!(store.operation(&job.operation_id).is_err());
             assert_eq!(
                 store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-                b"exact original bytes"
+                crate::rotation::store::test_support::transaction_raw(100).as_slice()
             );
             assert!(store.operation_pending(&job.operation_id).unwrap());
         } else {
@@ -608,9 +608,9 @@ fn damaged_disclosure_sequence_is_observe_only_and_never_rewritten() {
                 &job.operation_id,
                 1,
                 b"prepared SDK",
-                b"exact original bytes",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                 Some(TransactionFacts {
-                    txid: "original".into(),
+                    txid: crate::rotation::store::test_support::transaction_txid(100),
                     expiry_height: 100,
                     amount_zatoshis: 50,
                     fee_zatoshis: 10,
@@ -662,7 +662,7 @@ fn damaged_disclosure_sequence_is_observe_only_and_never_rewritten() {
         assert_eq!(saved, (submission, attempts.clone()));
         assert_eq!(
             store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-            b"exact original bytes"
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
         store.confirm_spend(&job.operation_id).unwrap();
         let confirmed = store.observation_operation(&job.operation_id).unwrap();
@@ -714,5 +714,153 @@ fn expiry_label_preserves_native_disclosure_evidence() {
             })
             .unwrap();
         assert_eq!(observed, (Some(expected_status.into()), expected_count));
+    }
+}
+
+#[test]
+fn expired_signed_original_cannot_gain_first_disclosure_from_stale_projection() {
+    for projected_expiry in [0, 10_000] {
+        let (_dir, mut store) = fixture();
+        let id = "expired-first-disclosure";
+        store
+            .bind_operation_recipient(id, &format!("0x{:040x}", 1))
+            .unwrap();
+        store.accept_preparation(id, None, 60, None).unwrap();
+        let raw = crate::rotation::store::test_support::transaction_raw(100);
+        store
+            .prepare_with_facts(
+                id,
+                1,
+                b"calculated",
+                &raw,
+                Some(TransactionFacts {
+                    txid: crate::rotation::store::test_support::transaction_txid(100),
+                    expiry_height: 100,
+                    amount_zatoshis: 50,
+                    fee_zatoshis: 10,
+                    deadline: Some(10_000),
+                }),
+            )
+            .unwrap();
+        store.db.execute(
+            "UPDATE treasury_operations SET facts=json_set(facts,'$.expiry_height',?2,'$.txid','stale projection') WHERE id=?1",
+            params![id, projected_expiry],
+        ).unwrap();
+        let encrypted: Vec<u8> = store
+            .db
+            .query_row("SELECT raw FROM outgoing WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let error = crate::rotation::transaction::BroadcastTransaction::request(
+            &mut store, id, 1, 100, false,
+        )
+        .err()
+        .expect("expired original cannot mint a submission capability");
+        assert!(error.to_string().contains("transaction_expired"));
+        assert_eq!(store.operation(id).unwrap().attempts, 0);
+        assert_eq!(store.operation(id).unwrap().submission, "PREPARED");
+        assert!(store.operation_pending(id).unwrap());
+        assert_eq!(store.prepared_bytes(id).unwrap().as_slice(), raw);
+        let retained: Vec<u8> = store
+            .db
+            .query_row("SELECT raw FROM outgoing WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(retained, encrypted);
+        assert_eq!(store.db.query_row("SELECT json_extract(facts,'$.expiry_height') FROM treasury_operations WHERE id=?1", [id], |row| row.get::<_,u32>(0)).unwrap(), projected_expiry);
+    }
+}
+
+#[test]
+fn authoritative_raw_and_required_facts_failures_stay_scoped_to_the_original() {
+    for damage in ["ciphertext", "required_object", "required_amount"] {
+        let (_dir, mut store) = fixture();
+        let raw = crate::rotation::store::test_support::transaction_raw(100);
+        for id in ["damaged", "sibling"] {
+            store
+                .bind_operation_recipient(id, &format!("0x{:040x}", 1))
+                .unwrap();
+            store.accept_preparation(id, None, 60, None).unwrap();
+            store
+                .prepare_with_facts(
+                    id,
+                    store.snapshot().unwrap().0,
+                    b"calculated",
+                    &raw,
+                    Some(TransactionFacts {
+                        txid: crate::rotation::store::test_support::transaction_txid(100),
+                        expiry_height: 100,
+                        amount_zatoshis: 50,
+                        fee_zatoshis: 10,
+                        deadline: Some(10_000),
+                    }),
+                )
+                .unwrap();
+            if id == "damaged" {
+                // Finish this original before preparing the sibling. Later
+                // damage to its retained evidence must not veto sibling work.
+                store.confirm_spend(id).unwrap();
+            }
+        }
+        match damage {
+            "ciphertext" => {
+                store
+                    .db
+                    .execute("UPDATE outgoing SET raw=x'00' WHERE id='damaged'", [])
+                    .unwrap();
+            }
+            "required_object" => {
+                store
+                    .db
+                    .execute(
+                        "UPDATE treasury_operations SET facts='[]' WHERE id='damaged'",
+                        [],
+                    )
+                    .unwrap();
+            }
+            "required_amount" => {
+                store.db.execute("UPDATE treasury_operations SET facts=json_set(facts,'$.amount_zatoshis','invalid') WHERE id='damaged'", []).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let retained: Vec<u8> = store
+            .db
+            .query_row("SELECT raw FROM outgoing WHERE id='damaged'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let error = store.observation_operation("damaged").err().unwrap();
+        if damage != "ciphertext" {
+            assert!(error.is::<super::scheduling::FundingDecodeFailure>());
+        }
+        assert!(store.request_broadcast("damaged", 1, 1, false).is_err());
+        let sibling =
+            crate::rotation::transaction::PreparedTransaction::load(&store, "sibling").unwrap();
+        assert_eq!(sibling.bytes(), raw);
+        assert_eq!(sibling.facts().unwrap().expiry_height, 100);
+        store.confirm_spend("sibling").unwrap();
+        assert!(!store.operation_pending("sibling").unwrap());
+        assert!(!store.operation_pending("damaged").unwrap());
+        assert_eq!(
+            store
+                .db
+                .query_row(
+                    "SELECT attempts FROM treasury_operations WHERE id='damaged'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .db
+                .query_row("SELECT raw FROM outgoing WHERE id='damaged'", [], |row| row
+                    .get::<_, Vec<u8>>(0))
+                .unwrap(),
+            retained
+        );
     }
 }

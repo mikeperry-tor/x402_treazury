@@ -48,6 +48,14 @@ fabrication. Exercise settlement before acceptance, during calculation, before
 disclosure and after a disclosed request; accepted calculations and I/O retain
 their original completion owners.
 
+Actual SDK confirmation and signed-expiry fixtures also damage saved plaintext
+txid/expiry projections, including missing fields, wrong types, zero and far-future
+expiry. Recovery must use authenticated original bytes without rewriting the
+journal, replaying a send or altering original authority. Scheduler tests exercise
+the same distinction before routing; first disclosure of an expired original
+must fail despite a permissive projection. Corrupt ciphertext and required facts
+remain scoped failures while a sibling original can still be observed.
+
 | Coverage | Test | Evidence and limits |
 | --- | --- | --- |
 | Bootstrap → payment → promotion → pending refill → restart → ready replacement | `managed::lifecycle::bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation` | Real payment admission, EVM signing, durable journals and Base RPC adapter. Deterministic funding backend; proves five distinct sends for two bootstrapped pools plus one refill, with stable operation identity across restart. |

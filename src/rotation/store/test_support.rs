@@ -24,3 +24,7 @@ pub(crate) fn declare_two_reserves(
     store.allocate_capacity_kind(&pool, AllocationKind::Large, true)?;
     Ok(pool)
 }
+
+#[path = "../../../tests/support/zcash_transaction.rs"]
+mod zcash_transaction;
+pub(crate) use zcash_transaction::{raw as transaction_raw, txid as transaction_txid};

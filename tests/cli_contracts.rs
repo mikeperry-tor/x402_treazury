@@ -7,6 +7,8 @@ mod quote_fixture;
 mod rpc_evidence;
 #[path = "support/socks.rs"]
 mod socks;
+#[path = "support/zcash_transaction.rs"]
+mod zcash_transaction;
 use serde_json::{Value, json};
 use std::{path::Path, process::Output};
 use x402_treazury::rotation::store::{Store, funding::FundingPhase};
@@ -1778,9 +1780,9 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
             "unrelated-original",
             revision,
             &sdk,
-            b"exact pending original",
+            zcash_transaction::raw(2_000_100).as_slice(),
             Some(x402_treazury::rotation::transaction::TransactionFacts {
-                txid: "unrelated".into(),
+                txid: zcash_transaction::txid(2_000_100),
                 expiry_height: 2_000_100,
                 amount_zatoshis: 0,
                 fee_zatoshis: 10,
@@ -1820,7 +1822,7 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
             .prepared_bytes("unrelated-original")
             .unwrap()
             .as_slice(),
-        b"exact pending original"
+        zcash_transaction::raw(2_000_100).as_slice()
     );
     assert_eq!(
         db.query_row::<String, _, _>(

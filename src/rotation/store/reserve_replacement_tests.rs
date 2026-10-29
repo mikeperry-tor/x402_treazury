@@ -44,9 +44,9 @@ fn prepare(store: &mut Store, job: &FundingJob) {
             &job.operation_id,
             revision,
             b"next",
-            b"exact signed bytes",
+            crate::rotation::store::test_support::transaction_raw(100).as_slice(),
             Some(TransactionFacts {
-                txid: "fixture".into(),
+                txid: crate::rotation::store::test_support::transaction_txid(100),
                 expiry_height: 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
@@ -137,7 +137,7 @@ fn original_source_must_resolve_before_replacement_and_signed_bytes_survive() {
     assert_eq!(binding(&store, &job), before);
     assert_eq!(
         store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-        b"exact signed bytes"
+        crate::rotation::store::test_support::transaction_raw(100).as_slice()
     );
     assert!(store.status().unwrap().pools[0].funding_degraded);
     store.confirm_spend(&job.operation_id).unwrap();
@@ -150,7 +150,7 @@ fn original_source_must_resolve_before_replacement_and_signed_bytes_survive() {
     );
     assert_eq!(
         store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-        b"exact signed bytes"
+        crate::rotation::store::test_support::transaction_raw(100).as_slice()
     );
 }
 
@@ -260,7 +260,7 @@ fn blocked_small_source_does_not_hold_completed_large_reserve() {
     );
     assert_eq!(
         store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-        b"exact signed bytes"
+        crate::rotation::store::test_support::transaction_raw(100).as_slice()
     );
 }
 
@@ -294,7 +294,7 @@ fn proven_expired_source_can_be_replaced_without_erasing_expiry_or_bytes() {
     );
     assert_eq!(
         store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-        b"exact signed bytes"
+        crate::rotation::store::test_support::transaction_raw(100).as_slice()
     );
 }
 
@@ -473,7 +473,7 @@ fn resolved_signed_record_without_confirmation_or_expiry_keeps_slot() {
     assert_eq!(binding(&store, &job), before);
     assert_eq!(
         store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-        b"exact signed bytes"
+        crate::rotation::store::test_support::transaction_raw(100).as_slice()
     );
 }
 

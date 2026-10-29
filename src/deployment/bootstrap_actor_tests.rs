@@ -136,9 +136,9 @@ async fn occupied_treasury_sync_does_not_block_proven_funding_completion() {
                 &original.operation_id,
                 revision,
                 &snapshot,
-                b"unfunded-original-prepared-bytes",
+                crate::rotation::store::test_support::transaction_raw(3_000_000).as_slice(),
                 Some(TransactionFacts {
-                    txid: "fixture-source".into(),
+                    txid: crate::rotation::store::test_support::transaction_txid(3_000_000),
                     expiry_height: 3_000_000,
                     amount_zatoshis: 100_000,
                     fee_zatoshis: 10_000,
@@ -243,7 +243,7 @@ async fn occupied_treasury_sync_does_not_block_proven_funding_completion() {
             assert!(PreparedTransaction::load(s, &original.operation_id).is_err());
             assert_eq!(
                 s.prepared_bytes(&original.operation_id)?.as_slice(),
-                b"unfunded-original-prepared-bytes"
+                crate::rotation::store::test_support::transaction_raw(3_000_000).as_slice()
             );
             assert_eq!(
                 s.funding_job(&pending.id)?.unwrap().phase,
@@ -292,7 +292,7 @@ async fn occupied_treasury_sync_does_not_block_proven_funding_completion() {
             .prepared_bytes(&first.operation_id)
             .unwrap()
             .as_slice(),
-        b"unfunded-original-prepared-bytes"
+        crate::rotation::store::test_support::transaction_raw(3_000_000).as_slice()
     );
     assert_eq!(reopened.operation(&first.operation_id).unwrap().attempts, 1);
     assert_eq!(

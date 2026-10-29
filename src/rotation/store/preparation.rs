@@ -230,7 +230,7 @@ mod tests {
         let mut store = Store::open(&state, &key, &owner)?;
         store.deny_new_funding();
         let facts = TransactionFacts {
-            txid: "original".into(),
+            txid: crate::rotation::store::test_support::transaction_txid(0),
             expiry_height: 0,
             amount_zatoshis: 50,
             fee_zatoshis: 10,
@@ -241,13 +241,19 @@ mod tests {
                 "operation",
                 1,
                 b"calculated",
-                b"exact",
+                crate::rotation::store::test_support::transaction_raw(0).as_slice(),
                 Some(facts.clone())
             )?,
             2
         );
         assert_eq!(
-            store.prepare_with_facts("operation", 1, b"calculated", b"exact", Some(facts))?,
+            store.prepare_with_facts(
+                "operation",
+                1,
+                b"calculated",
+                crate::rotation::store::test_support::transaction_raw(0).as_slice(),
+                Some(facts)
+            )?,
             2
         );
         assert_eq!(store.prepared_inputs("operation")?, manifest.inputs);
@@ -298,9 +304,9 @@ mod shielding_identity_tests {
             "shield",
             1,
             b"next",
-            b"exact",
+            crate::rotation::store::test_support::transaction_raw(100).as_slice(),
             Some(TransactionFacts {
-                txid: "shield".into(),
+                txid: crate::rotation::store::test_support::transaction_txid(100),
                 expiry_height: 100,
                 amount_zatoshis: 0,
                 fee_zatoshis: 100,
@@ -322,7 +328,10 @@ mod shielding_identity_tests {
             crate::network::IsolationId::evm(&recipient)?
         );
         assert_ne!(explicit.network_identity()?, original);
-        assert_eq!(explicit.bytes(), b"exact");
+        assert_eq!(
+            explicit.bytes(),
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
+        );
         Ok(())
     }
 }

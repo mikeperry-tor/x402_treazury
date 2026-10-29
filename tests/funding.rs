@@ -1,3 +1,5 @@
+#[path = "support/zcash_transaction.rs"]
+mod zcash_transaction;
 use anyhow::Result;
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
@@ -161,9 +163,9 @@ impl FundingBackend for Fake {
                     &id,
                     revision,
                     b"next",
-                    b"signed",
+                    zcash_transaction::raw(100).as_slice(),
                     Some(TransactionFacts {
-                        txid: "test".into(),
+                        txid: zcash_transaction::txid(100),
                         expiry_height: 100,
                         amount_zatoshis: 50,
                         fee_zatoshis: 10,
@@ -381,9 +383,9 @@ async fn base_credit_before_source_confirmation_does_not_strand_the_outbox() {
         &job.operation_id,
         1,
         b"next",
-        b"signed",
+        zcash_transaction::raw(100).as_slice(),
         Some(TransactionFacts {
-            txid: "test".into(),
+            txid: zcash_transaction::txid(100),
             expiry_height: 100,
             amount_zatoshis: 50,
             fee_zatoshis: 10,
@@ -1632,7 +1634,10 @@ async fn assert_due_source_observations(
     worker
         .store
         .call(move |s| {
-            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), b"signed");
+            assert_eq!(
+                s.prepared_bytes(&operation)?.as_slice(),
+                zcash_transaction::raw(100).as_slice()
+            );
             assert_eq!(s.funding_recovery_count(&s.funding_jobs()?[0].id)?, 0);
             Ok(())
         })

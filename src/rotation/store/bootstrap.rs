@@ -512,9 +512,9 @@ mod tests {
                 &job.operation_id,
                 revision,
                 b"snapshot",
-                b"original signed bytes",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                 Some(TransactionFacts {
-                    txid: "original".into(),
+                    txid: crate::rotation::store::test_support::transaction_txid(100),
                     expiry_height: 100,
                     amount_zatoshis: 50,
                     fee_zatoshis: 10,
@@ -590,9 +590,9 @@ mod tests {
                 &old.operation_id,
                 1,
                 b"original SDK",
-                b"original raw",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                 Some(TransactionFacts {
-                    txid: "original".into(),
+                    txid: crate::rotation::store::test_support::transaction_txid(100),
                     expiry_height: 100,
                     amount_zatoshis: 50,
                     fee_zatoshis: 10,

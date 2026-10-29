@@ -49,9 +49,14 @@ fn prepare_original(store: &mut Store, job: &FundingJob, disclose: bool) {
             &job.operation_id,
             revision,
             b"calculated",
-            job.operation_id.as_bytes(),
+            crate::rotation::store::test_support::transaction_raw(
+                u32::try_from(height).unwrap() + 100,
+            )
+            .as_slice(),
             Some(TransactionFacts {
-                txid: job.operation_id.clone(),
+                txid: crate::rotation::store::test_support::transaction_txid(
+                    u32::try_from(height).unwrap() + 100,
+                ),
                 expiry_height: u32::try_from(height).unwrap() + 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
@@ -164,7 +169,17 @@ fn archived_status_pages_keep_each_original_under_one_job_across_restart() {
                     .prepared_bytes(&original.operation_id)
                     .unwrap()
                     .as_slice(),
-                original.operation_id.as_bytes()
+                crate::rotation::store::test_support::transaction_raw(
+                    101 + 102
+                        * u32::try_from(
+                            originals
+                                .iter()
+                                .position(|job| job.operation_id == original.operation_id)
+                                .unwrap()
+                        )
+                        .unwrap()
+                )
+                .as_slice()
             );
         }
     }
@@ -377,7 +392,7 @@ async fn held_archived_success_stops_private_replacement_but_preserves_disclosed
                 } else {
                     assert_eq!(
                         s.prepared_bytes(&current_before.operation_id)?.as_slice(),
-                        current_before.operation_id.as_bytes()
+                        crate::rotation::store::test_support::transaction_raw(203).as_slice()
                     );
                 }
                 Ok(())
@@ -433,13 +448,13 @@ async fn held_archived_success_stops_private_replacement_but_preserves_disclosed
                     );
                     assert_eq!(
                         s.prepared_bytes(&current_check.operation_id)?.as_slice(),
-                        current_check.operation_id.as_bytes()
+                        crate::rotation::store::test_support::transaction_raw(203).as_slice()
                     );
                     assert_eq!(s.operation_pending(&current_check.operation_id)?, disclosed);
                 }
                 assert_eq!(
                     s.prepared_bytes(&original_check.operation_id)?.as_slice(),
-                    original_check.operation_id.as_bytes()
+                    crate::rotation::store::test_support::transaction_raw(101).as_slice()
                 );
                 assert_eq!(s.operation(&original_check.operation_id)?.attempts, 1);
                 if disclosed {
@@ -477,7 +492,7 @@ async fn held_archived_success_stops_private_replacement_but_preserves_disclosed
                     assert_eq!(s.operation(&current_check.operation_id)?.attempts, 1);
                     assert_eq!(
                         s.prepared_bytes(&current_check.operation_id)?.as_slice(),
-                        current_check.operation_id.as_bytes()
+                        crate::rotation::store::test_support::transaction_raw(203).as_slice()
                     );
                     Ok(())
                 })
@@ -507,7 +522,7 @@ async fn held_archived_success_stops_private_replacement_but_preserves_disclosed
                 .prepared_bytes(&original.operation_id)
                 .unwrap()
                 .as_slice(),
-            original.operation_id.as_bytes()
+            crate::rotation::store::test_support::transaction_raw(101).as_slice()
         );
     }
 }
@@ -606,7 +621,7 @@ async fn archived_processing_status_keeps_its_own_completion_floor_after_rollove
             .prepared_bytes(&original.operation_id)
             .unwrap()
             .as_slice(),
-        original.operation_id.as_bytes()
+        crate::rotation::store::test_support::transaction_raw(101).as_slice()
     );
 }
 
@@ -641,7 +656,7 @@ fn archived_success_closes_legacy_raw_and_preserves_explicit_disclosed_retry() {
                 .prepared_bytes(&original.operation_id)
                 .unwrap()
                 .as_slice(),
-            original.operation_id.as_bytes()
+            crate::rotation::store::test_support::transaction_raw(101).as_slice()
         );
         assert_eq!(store.operation(&original.operation_id).unwrap().attempts, 1);
         assert_eq!(
@@ -672,7 +687,7 @@ fn archived_success_closes_legacy_raw_and_preserves_explicit_disclosed_retry() {
                 .prepared_bytes(&current.operation_id)
                 .unwrap()
                 .as_slice(),
-            current.operation_id.as_bytes()
+            crate::rotation::store::test_support::transaction_raw(203).as_slice()
         );
     }
 }
@@ -739,7 +754,7 @@ fn archived_success_never_hides_orphan_facts_or_ambiguous_job_binding() {
                 .prepared_bytes(&original.operation_id)
                 .unwrap()
                 .as_slice(),
-            original.operation_id.as_bytes()
+            crate::rotation::store::test_support::transaction_raw(101).as_slice()
         );
         assert_eq!(store.operation(&original.operation_id).unwrap().attempts, 1);
     }

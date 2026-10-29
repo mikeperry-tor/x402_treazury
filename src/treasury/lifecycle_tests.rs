@@ -92,6 +92,35 @@ fn accounting(state: &Path, prepared: &PreparedTransaction, confirmed: bool) {
     assert!(prepared.facts().unwrap().fee_zatoshis > 0);
 }
 
+fn damage_projections(
+    db: &rusqlite::Connection,
+    operation: &str,
+    expiry: Option<serde_json::Value>,
+) -> String {
+    let saved: String = db
+        .query_row(
+            "SELECT facts FROM treasury_operations WHERE id=?1",
+            [operation],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let mut facts: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    facts["txid"] = serde_json::json!({"stale":true});
+    match expiry {
+        Some(expiry) => facts["expiry_height"] = expiry,
+        None => {
+            facts.as_object_mut().unwrap().remove("expiry_height");
+        }
+    }
+    let damaged = facts.to_string();
+    db.execute(
+        "UPDATE treasury_operations SET facts=?2 WHERE id=?1",
+        rusqlite::params![operation, damaged],
+    )
+    .unwrap();
+    damaged
+}
+
 // Pause after durable intent, while retaining the real production sender.
 struct GatedSubmission {
     sender: submission::GrpcSubmission,
@@ -268,7 +297,11 @@ async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
             panic!("canonical expiry proof needs no external inclusion corroboration");
         }
     }
-    for (malformed_sequencing, warm_cached) in [(false, false), (true, false), (true, true)] {
+    for (malformed_sequencing, warm_cached, projected_expiry) in [
+        (false, false, serde_json::json!(0)),
+        (true, false, serde_json::json!(u32::MAX)),
+        (true, true, serde_json::json!("invalid")),
+    ] {
         let (dir, net, mut owner, _endpoint) = funded_fixture(2).await;
         let pool = owner
             .ensure_capacity_group(
@@ -300,6 +333,7 @@ async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
             owner.sync_once(&CancellationToken::new()).await.unwrap();
         }
         let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        let damaged_facts = damage_projections(&db, &job.operation_id, Some(projected_expiry));
         db.execute_batch(
             "CREATE TABLE fixture_completed_scans(observation TEXT NOT NULL);
             CREATE TRIGGER record_completed_scan AFTER INSERT ON treasury_sync
@@ -403,6 +437,16 @@ async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
                 )
             },
             "canonical expiry closes ownership without rewriting sequencing reports"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT facts FROM treasury_operations WHERE id=?1",
+                [&original_operation],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            damaged_facts,
+            "recovery reads signed projections without rewriting the original journal"
         );
         owner.close().await.unwrap();
     }
@@ -1176,6 +1220,7 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
             net.chain.write().await.mine_block(vec![canonical]);
         }
         let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        let damaged_facts = damage_projections(&db, &job.operation_id, None);
         if malformed_sequencing {
             db.execute_batch("PRAGMA ignore_check_constraints=ON")
                 .unwrap();
@@ -1265,6 +1310,15 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
                 rusqlite::types::Value::Integer(i64::from(journaled_submission))
             },
             "canonical confirmation never repairs or resets disclosure counts"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT facts FROM treasury_operations WHERE id=?1",
+                [&original_operation],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            damaged_facts
         );
         drop(store);
         owner.close().await.unwrap();

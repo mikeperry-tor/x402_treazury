@@ -88,9 +88,9 @@ mod tests {
                 &job.operation_id,
                 revision,
                 b"next",
-                b"exact bytes",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                 valid.then(|| TransactionFacts {
-                    txid: "fixture".into(),
+                    txid: crate::rotation::store::test_support::transaction_txid(100),
                     expiry_height: 100,
                     amount_zatoshis: 50,
                     fee_zatoshis: 10,
@@ -163,7 +163,7 @@ mod tests {
         assert!(store.treasury_observation_needed(&[]).unwrap());
         assert_eq!(
             store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-            b"exact bytes"
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
         store.confirm_spend(&job.operation_id).unwrap();
         assert!(!store.treasury_observation_needed(&groups).unwrap());
@@ -268,7 +268,7 @@ mod tests {
         assert!(store.treasury_observation_needed(&[]).unwrap());
         assert_eq!(
             store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-            b"exact bytes"
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
     }
     #[test]

@@ -26,7 +26,7 @@ impl std::fmt::Display for RecoveryEvidenceError {
             Self::TipLag => "expiry recovery requires zero observed tip lag; synchronize again before releasing reservations",
             Self::StaleSync => "expiry recovery sync stale",
             Self::ChainChanged => "expiry recovery chain changed",
-            Self::TransactionMismatch => "confirmed transaction bytes mismatch",
+            Self::TransactionMismatch => "wallet transaction identity differs from the authenticated original",
             Self::ConfirmationMismatch => "confirmation disagrees with wallet sync",
             Self::ConfirmationPending => "treasury_confirmation_pending",
         })

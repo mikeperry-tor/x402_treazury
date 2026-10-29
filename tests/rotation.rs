@@ -2,6 +2,8 @@
 mod capacity_fixture;
 #[path = "support/funding_quote.rs"]
 mod quote_fixture;
+#[path = "support/zcash_transaction.rs"]
+mod zcash_transaction;
 use std::path::Path;
 #[path = "support/consume_reserve.rs"]
 mod consume_reserve;
@@ -638,7 +640,7 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = create(dir.path());
     let facts = TransactionFacts {
-        txid: "a".repeat(64),
+        txid: zcash_transaction::txid(500),
         expiry_height: 500,
         amount_zatoshis: 50,
         fee_zatoshis: 10,
@@ -648,13 +650,25 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
     let mut too_large = facts.clone();
     too_large.fee_zatoshis = 60;
     assert!(
-        s.prepare_with_facts("op", 1, b"post-calculation", b"signed", Some(too_large))
-            .is_err()
+        s.prepare_with_facts(
+            "op",
+            1,
+            b"post-calculation",
+            zcash_transaction::raw(500).as_slice(),
+            Some(too_large)
+        )
+        .is_err()
     );
     assert_eq!(s.snapshot().unwrap().0, 1);
     assert!(!s.operation_pending("op").unwrap());
-    s.prepare_with_facts("op", 1, b"post-calculation", b"signed", Some(facts.clone()))
-        .unwrap();
+    s.prepare_with_facts(
+        "op",
+        1,
+        b"post-calculation",
+        zcash_transaction::raw(500).as_slice(),
+        Some(facts.clone()),
+    )
+    .unwrap();
     assert_eq!(s.operation("op").unwrap().facts, facts);
     assert!(s.accept_preparation("other", None, 40, None).is_err());
     assert!(s.abandon_unprepared("op").is_err());
@@ -669,7 +683,7 @@ fn durable_submission_attempts_preserve_ambiguous_exposure_and_exact_bytes() {
     assert_eq!(s.operation("op").unwrap().submission, "BROADCAST_REQUESTED");
     assert!(s.request_broadcast("op", 101, 499, false).is_err());
     let saved = PreparedTransaction::load(&s, "op").unwrap();
-    assert_eq!(saved.bytes(), b"signed");
+    assert_eq!(saved.bytes(), zcash_transaction::raw(500));
     assert_eq!(s.request_broadcast("op", 101, 499, true).unwrap(), 2);
     assert!(s.broadcast_result("op", 1, true).is_err()); // stale response
     s.broadcast_result("op", 2, false).unwrap();
@@ -892,9 +906,9 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
         &job.operation_id,
         2,
         b"prepared snapshot",
-        b"immutable signed bytes",
+        zcash_transaction::raw(100).as_slice(),
         Some(TransactionFacts {
-            txid: "fixture".into(),
+            txid: zcash_transaction::txid(100),
             expiry_height: 100,
             amount_zatoshis: 80,
             fee_zatoshis: 20,
@@ -937,7 +951,7 @@ fn operation_and_refund_identity_survive_promotion_and_reopen() {
     .unwrap();
     let original = PreparedTransaction::load(&s, &job.operation_id).unwrap();
     assert_eq!(original.network_identity().unwrap(), expected);
-    assert_eq!(original.bytes(), b"immutable signed bytes");
+    assert_eq!(original.bytes(), zcash_transaction::raw(100).as_slice());
     assert_eq!(
         s.refund_address(&job.id).unwrap().as_deref(),
         Some("fixture-refund-address")

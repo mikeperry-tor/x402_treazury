@@ -199,9 +199,9 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
                 &j.operation_id,
                 revision,
                 b"next",
-                b"signed fixture",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                 Some(TransactionFacts {
-                    txid: "fixture".into(),
+                    txid: crate::rotation::store::test_support::transaction_txid(100),
                     expiry_height: 100,
                     amount_zatoshis: 100000,
                     fee_zatoshis: 10000,

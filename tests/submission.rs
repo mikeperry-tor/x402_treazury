@@ -39,16 +39,8 @@ fn number(tag: u8, n: u64) -> Vec<u8> {
 fn frame(v: Vec<u8>) -> Vec<u8> {
     [vec![0], (v.len() as u32).to_be_bytes().to_vec(), v].concat()
 }
-// Syntactically valid empty V5 encoding, not a funded/consensus-valid payment.
-// The mock accepts it solely to exercise raw transport and identity checks.
-fn raw() -> Vec<u8> {
-    let mut v = vec![];
-    for n in [0x80000005u32, 0x26a7270a, 0xc2d6d0b4, 0, 500] {
-        v.extend(n.to_le_bytes());
-    }
-    v.extend([0, 0, 0, 0, 0]);
-    v
-}
+#[path = "support/zcash_transaction.rs"]
+mod zcash_transaction;
 #[derive(Clone)]
 struct Mock {
     tip_unavailable: Arc<AtomicBool>,
@@ -157,7 +149,7 @@ async fn rpc(State(s): State<Mock>, uri: Uri, body: Bytes) -> impl IntoResponse 
 }
 #[tokio::test]
 async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retries() {
-    let raw = raw();
+    let raw = zcash_transaction::raw(500);
     let tx = Transaction::read(raw.as_slice(), BranchId::Nu5).unwrap();
     let state = Mock {
         tip_unavailable: Arc::new(AtomicBool::new(false)),
@@ -166,7 +158,7 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
         blocks: Arc::new(AtomicUsize::new(0)),
         sends: Arc::new(Mutex::new(vec![])),
         raw: raw.clone(),
-        txid: tx.txid().to_string(),
+        txid: zcash_transaction::txid(500),
         hash: tx.txid().as_ref().to_vec(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -188,7 +180,7 @@ async fn explicit_sender_checks_identity_network_expiry_and_lookup_without_retri
         .unwrap();
     store.accept_preparation("op", None, 60, None).unwrap();
     let facts = TransactionFacts {
-        txid: tx.txid().to_string(),
+        txid: zcash_transaction::txid(500),
         expiry_height: 500,
         amount_zatoshis: 50,
         fee_zatoshis: 10,

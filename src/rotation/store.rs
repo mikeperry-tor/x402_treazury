@@ -1711,6 +1711,24 @@ fn observation_disclosure(
 }
 
 impl Store {
+    /// Signed identity and expiry are projections, not separate authority. Read
+    /// them from the authenticated original before scheduling or disclosure.
+    fn decoded_operation_facts(&self, id: &str, saved: &str) -> Result<TransactionFacts> {
+        let transaction = crate::treasury::submission::decode(&self.prepared_bytes(id)?)?;
+        let mut facts: serde_json::Value =
+            serde_json::from_str(saved).context(scheduling::FundingDecodeFailure)?;
+        let fields = facts
+            .as_object_mut()
+            .context("operation facts must be an object")
+            .context(scheduling::FundingDecodeFailure)?;
+        fields.insert("txid".into(), transaction.txid().to_string().into());
+        fields.insert(
+            "expiry_height".into(),
+            u32::from(transaction.expiry_height()).into(),
+        );
+        serde_json::from_value(facts).context(scheduling::FundingDecodeFailure)
+    }
+
     pub(crate) fn operation_facts(
         &self,
         id: &str,
@@ -1724,7 +1742,7 @@ impl Store {
             )
             .optional()?;
         facts
-            .map(|facts| serde_json::from_str(&facts).map_err(Into::into))
+            .map(|facts| self.decoded_operation_facts(id, &facts))
             .transpose()
     }
 
@@ -1735,7 +1753,7 @@ impl Store {
         ).optional()?.context("operation metadata missing")?;
         Ok(OperationStatus {
             operation_id: id.into(),
-            facts: serde_json::from_str(&facts).context(scheduling::FundingDecodeFailure)?,
+            facts: self.decoded_operation_facts(id, &facts)?,
             submission: submission.unwrap_or_else(|| "UNKNOWN".into()),
             attempts,
         })
@@ -1761,7 +1779,7 @@ impl Store {
         );
         Ok(OperationStatus {
             operation_id: id.to_owned(),
-            facts: serde_json::from_str(&facts).context(scheduling::FundingDecodeFailure)?,
+            facts: self.decoded_operation_facts(id, &facts)?,
             submission,
             attempts,
         })

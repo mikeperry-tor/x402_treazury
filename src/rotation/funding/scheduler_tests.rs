@@ -783,9 +783,9 @@ fn submitted(store: &mut Store, job: &FundingJob) {
             &job.operation_id,
             revision,
             b"next",
-            b"signed",
+            crate::rotation::store::test_support::transaction_raw(100).as_slice(),
             Some(TransactionFacts {
-                txid: job.id.clone(),
+                txid: crate::rotation::store::test_support::transaction_txid(100),
                 expiry_height: 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
@@ -1842,7 +1842,7 @@ async fn fatal_store_error_retains_active_source_lease_and_signed_liability() {
             .prepared_bytes(&job.operation_id)
             .unwrap()
             .as_slice(),
-        b"signed"
+        crate::rotation::store::test_support::transaction_raw(100).as_slice()
     );
     assert!(reopened.operation_pending(&job.operation_id).unwrap());
     let operation = reopened.operation(&job.operation_id).unwrap();
@@ -2079,7 +2079,10 @@ async fn captured_inventory_excludes_new_rows_until_a_continuous_pass() {
                         1
                     );
                     assert!(!s.operation_pending(&job.operation_id)?);
-                    assert_eq!(s.prepared_bytes(&job.operation_id)?.as_slice(), b"signed");
+                    assert_eq!(
+                        s.prepared_bytes(&job.operation_id)?.as_slice(),
+                        crate::rotation::store::test_support::transaction_raw(100).as_slice()
+                    );
                     Ok(())
                 })
                 .await
@@ -2250,7 +2253,7 @@ async fn advisory_inventory_and_post_capture_fields_preserve_sources_and_drain_s
                         .prepared_bytes(&job.operation_id)
                         .unwrap()
                         .as_slice(),
-                    b"signed"
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice()
                 );
             }
             let page = reopened
@@ -2443,7 +2446,7 @@ async fn transient_funding_inventory_preserves_source_owner_and_lane_progress() 
                         .prepared_bytes(&job.operation_id)
                         .unwrap()
                         .as_slice(),
-                    b"signed"
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice()
                 );
             }
             assert!(reopened.operation_pending(&jobs[1].operation_id).unwrap());
@@ -2651,7 +2654,10 @@ async fn scheduler_replacement_waits_for_retained_source_and_preserves_backoff()
         let operation = job.operation_id.clone();
         store
             .call(move |s| {
-                assert_eq!(s.prepared_bytes(&operation)?.as_slice(), b"signed");
+                assert_eq!(
+                    s.prepared_bytes(&operation)?.as_slice(),
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice()
+                );
                 assert!(s.operation_pending(&operation)?);
                 assert_eq!(s.operation(&operation)?.attempts, 1);
                 Ok(())
@@ -2891,9 +2897,9 @@ impl FundingBackend for LocalHandoff {
                     &job.operation_id,
                     revision,
                     b"next",
-                    b"signed",
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                     Some(TransactionFacts {
-                        txid: job.id.clone(),
+                        txid: crate::rotation::store::test_support::transaction_txid(100),
                         expiry_height: 100,
                         amount_zatoshis: 50,
                         fee_zatoshis: 10,
@@ -3148,7 +3154,7 @@ impl FundingBackend for ExpiryDecision {
 #[tokio::test]
 async fn submitted_finite_expiry_runs_recovery_without_timeout_or_error_health() {
     use crate::rotation::store::{SyncObservation, SyncPhase};
-    for height in [101, 102] {
+    for (height, projected_expiry) in [(101, 100), (101, 1), (102, 0), (102, 10_000)] {
         let dir = tempfile::tempdir().unwrap();
         let mut raw = Store::create(
             &dir.path().join("state"),
@@ -3167,6 +3173,13 @@ async fn submitted_finite_expiry_runs_recovery_without_timeout_or_error_health()
         .unwrap();
         let job = raw.funding_jobs().unwrap().remove(0);
         submitted(&mut raw, &job);
+        // Only public projections are damaged: the encrypted original still
+        // carries expiry100. Scheduler routing must consume that signed value.
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        db.execute(
+            "UPDATE treasury_operations SET facts=json_set(facts,'$.expiry_height',?2,'$.txid','stale projection') WHERE id=?1",
+            rusqlite::params![job.operation_id, projected_expiry],
+        ).unwrap();
         let job = raw.funding_job(&job.id).unwrap().unwrap();
         assert!(!job.timed_out && job.error_streak == 0);
         assert!(!crate::treasury::recovery::needs_recovery(&job));
@@ -3219,6 +3232,31 @@ async fn submitted_finite_expiry_runs_recovery_without_timeout_or_error_health()
             usize::from(height == 101)
         );
         let operation = job.operation_id.clone();
+        let inspected_job = job.clone();
+        store
+            .call(move |s| {
+                assert_eq!(s.operation(&inspected_job.operation_id)?.attempts, 1);
+                assert_eq!(s.funding_jobs()?.len(), 2, "no replacement allocation");
+                assert_eq!(
+                    s.status()?.treasury_operations.len(),
+                    1,
+                    "no new source journal"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let stored_expiry: u32 = db
+            .query_row(
+                "SELECT json_extract(facts,'$.expiry_height') FROM treasury_operations WHERE id=?1",
+                [&job.operation_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored_expiry, projected_expiry,
+            "observation does not rewrite audit projections"
+        );
         assert_eq!(
             store
                 .call(move |s| s.prepared_bytes(&operation))

@@ -47,9 +47,9 @@ mod tests {
             id,
             store.snapshot()?.0,
             b"original SDK",
-            b"original signed bytes",
+            crate::rotation::store::test_support::transaction_raw(20).as_slice(),
             Some(TransactionFacts {
-                txid: "fixture".into(),
+                txid: crate::rotation::store::test_support::transaction_txid(20),
                 expiry_height: 20,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,

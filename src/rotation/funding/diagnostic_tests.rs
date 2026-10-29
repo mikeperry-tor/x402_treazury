@@ -527,7 +527,10 @@ async fn retained_request_debug_matches_actual_status_acquisitions_without_short
     store
         .call(move |s| {
             assert_eq!(s.operation(&operation)?.attempts, 1);
-            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), b"signed");
+            assert_eq!(
+                s.prepared_bytes(&operation)?.as_slice(),
+                crate::rotation::store::test_support::transaction_raw(100).as_slice()
+            );
             Ok(())
         })
         .await

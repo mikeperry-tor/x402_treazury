@@ -2,6 +2,8 @@
 mod capacity_fixture;
 #[path = "treasury_sync/retirement.rs"]
 mod retirement;
+#[path = "support/zcash_transaction.rs"]
+mod zcash_transaction;
 use axum::{
     body::Bytes,
     extract::State,
@@ -1762,16 +1764,7 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
     // Syntactically valid empty V5 transaction, used only for immutable journal
     // identity and observation; no consensus-valid payment or submission occurs.
     let expiry = TIP as u32 + 100;
-    let mut raw = Vec::new();
-    for value in [0x80000005u32, 0x26a7270a, 0xc2d6d0b4, 0, expiry] {
-        raw.extend(value.to_le_bytes());
-    }
-    raw.extend([0, 0, 0, 0, 0]);
-    let original = zcash_primitives::transaction::Transaction::read(
-        raw.as_slice(),
-        zcash_protocol::consensus::BranchId::Nu5,
-    )
-    .unwrap();
+    let raw = zcash_transaction::raw(expiry);
     let mut store = Store::open(&state, &key, &id).unwrap();
     let (revision, snapshot) = store.snapshot().unwrap();
     store
@@ -1784,7 +1777,7 @@ async fn actor_observes_jobless_original_bytes_with_disabled_funding_and_drains_
             &snapshot,
             &raw,
             Some(TransactionFacts {
-                txid: original.txid().to_string(),
+                txid: zcash_transaction::txid(expiry),
                 expiry_height: expiry,
                 amount_zatoshis: 80,
                 fee_zatoshis: 20,

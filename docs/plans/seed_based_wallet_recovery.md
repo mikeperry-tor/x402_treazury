@@ -182,49 +182,18 @@ the existing random Base keys. It does not depend on choosing HD or ratcheting.
    work requires retained obligations or a separately reviewed explicit authority
    workflow; changing an EVM transaction nonce does not cancel ERC3009 grants.
 
-## Independent TransactionMismatch simplification
-
-Proceed with this small cleanup independently of the seed decision. HD does not
-repair plaintext projections of an existing accepted transaction, and it cannot
-restore missing original transaction authority.
-
-At baseline, `src/treasury/send.rs` compares recorded `TransactionFacts.txid` and
-expiry with the authenticated prepared raw transaction; recovery maps
-`TransactionMismatch` to operator repair. Derive those two observations from the
-original authenticated raw bytes, or repair their projections under existing
-ownership/CAS checks. Prefer removing parallel projection checks when callers can
-read the authoritative values directly. Do not infer amount, fees, selected-input
-authority or new expiry, relabel the original operation, consume another attempt,
-re-sign, rebroadcast or invent a zero expiry. Distinguish genuine SDK transaction
-identity failure from stale metadata; do not blanket-remove the error category.
-Correct misleading “confirmed transaction bytes mismatch” wording where identity,
-rather than exact authorization-byte equality, is the actual contract.
-
-Inventory every consumer before changing the guard: `source_step` schedules from
-`operation_facts` expiry, `recovery_inner` selects waits from observation facts,
-`reconcile_scanned` uses expiry for hint suppression, and `Store::request_broadcast`
-checks protocol validity from saved facts. Derive from authenticated raw or repair
-the projections **before** these scheduling/validity decisions. Removing only the
-mismatch comparison could leave a false far-future expiry causing indefinite
-waiting, or admit first disclosure of an actually expired transaction. Acceptance
-must include ordinary scheduled recovery after the real expiry is buried while
-stored expiry is far in the future, and refusal to first-broadcast an expired
-original despite a false future projection. Preserve signed deadlines and the
-other original authority checks throughout.
-
 ## Ordered commits and acceptance evidence
 
 Before substantive code, an independent reviewer challenges necessity, complete
 call chains, and opportunities to delete responsibilities. Resolve material
 findings before building on the decision. IDs below are stable plan boundaries;
 the gate may select independent keys and cancel the HD-specific commits.
-R0 is independent of S1–S4. S1 precedes S2; S3 can proceed independently after its
-own SDK/NEAR design review, without waiting for S1/S2. S4 integrates whichever
-recovery scope was selected. Keep stable IDs when that dependency order changes.
+S1 precedes S2. S3 can proceed independently after its own SDK/NEAR design review,
+without waiting for S1/S2. S4 integrates whichever recovery scope was selected.
+Keep stable IDs when that dependency order changes.
 
 | ID | Coherent change and consumers | Acceptance evidence and permanent documentation |
 | --- | --- | --- |
-| R0 | Derive/repair authenticated raw transaction identity/expiry observations; preserve genuine corrupt or missing authority errors. Consumers: treasury send/recovery, retained funding and shielding. | Cover confirmation and finite expiry with only plaintext projections damaged; authentic ciphertext/identity failures remain scoped; sibling progress, no broadcast, unchanged bytes/operation/attempt count. Update wallet rotation, wallet CLI and recovery diagnostics together. |
 | S1 | Decide recovery versus erasure; if HD chosen, introduce versioned derivation/root storage and explicit recovery descriptor using existing encryption/ownership. No managed allocation switches yet. | Independent design review; standard vectors and exact addresses/signatures, passphrase behavior, wrong-root/network rejection, backup/restore interoperability and dependency assessment. Update wallet CLI backup/seed contract, configuration and wallet rotation; current random-key behavior remains accurately described. |
 | S2 | Enable atomic future Base allocation and mixed legacy/HD restore, with its complete backup/frontier path in the same commit. Consumers: capacity, assignment, funding, payer loading, backup/CLI. | Concurrent allocations across pools, crash before/after commit/disclosure, no disclosed index reuse, stale-backup/seed restore cannot allocate over a higher issued-but-unfunded index, explicit cloned-root ownership scope, migration preserving legacy keys and accepted journals byte-for-byte, multiple pools/restores without UUID-derived paths. Update wallet rotation, wallet CLI and configuration. |
 | S3 | Replace new transparent refund generation with qualified shielded UAs and provide legacy index-range recovery. Keep existing accepted refund bindings and legacy shielding. | Real SDK shielded refund receipt restored from phrase/birthday at a distant UA ordinal without address metadata; legacy receipt after more than 20 unused transparent addresses recovered by explicit range; old quotes unchanged; source deposits still enforce their actual format. Update Zingo integration, wallet rotation and wallet CLI. |
@@ -236,14 +205,11 @@ authority or actual liability; derived state should be reconstructed instead.
 
 ## Review gates, validation and handoff
 
-- **G0 after R0:** independently review exact SHA, send/recovery/funding/shielding
-  consumers and prior branch fixups concerning evidence versus local projections.
-  Check that metadata repair did not become new signing or replay authority.
 - **G1 before S2, after S1:** independently settle the key-lifecycle choice, path,
   discovery coverage, backup rollback/frontier semantics, legacy migration and
-  dependency API qualification. Review R0/S1 and their fixups together. If the
-  choice remains open, stop HD rollout here; R0 can ship independently.
-- **G2 after S3:** review R0–S3, all fixups, complete allocation/disclosure,
+  dependency API qualification. Review S1 and its fixups alongside the existing recovery call chains. If the
+  choice remains open, stop HD rollout here; Zcash refund work can proceed independently.
+- **G2 after S3:** review all selected S1–S3 changes and fixups, complete allocation/disclosure,
   backup/restore, NEAR quote/refund and SDK scan/shielding chains. Compare actual
   pinned reference implementations. Repeated fixups require identifying the
   mistaken assumption and deciding whether a wider simplification/audit is needed.
@@ -268,8 +234,8 @@ complexity review, production compiler, all-target Clippy and compatibility chec
 precede broader runtime stages. Run focused meaningful SDK/lifecycle tests for
 changed behavior; verify they are actually wired and execute. Coordinate builds
 and preserve source/executable evidence. Funded or Docker qualification needs its
-own authorization. This research/docs task does not rerun the already completed
-test suite and does not claim implementation validation.
+own authorization. Do not rerun an unchanged full suite merely for research or
+documentation; changed runtime behavior requires its focused acceptance evidence.
 
 Each implementation commit updates the owning permanent guides listed above;
 tests and complexity evidence belong under ignored `target/`, not plan archives.

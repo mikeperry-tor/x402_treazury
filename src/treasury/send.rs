@@ -582,12 +582,6 @@ impl Treasury {
         prepared: &PreparedTransaction,
     ) -> Result<Option<u64>> {
         let signed = super::submission::decode(prepared.bytes())?;
-        let facts = prepared.facts().context("operation facts missing")?;
-        ensure!(
-            signed.txid().to_string() == facts.txid
-                && u32::from(signed.expiry_height()) == facts.expiry_height,
-            crate::rotation::transaction::RecoveryEvidenceError::TransactionMismatch
-        );
         let wallet = self
             .client
             .as_ref()

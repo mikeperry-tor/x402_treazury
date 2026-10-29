@@ -1,5 +1,7 @@
 //! Real payment admission/signing/RPC plus a deterministic funding adapter.
 //! Consensus calculation, shielding and expiry are qualified separately in regtest.
+#[path = "zcash_transaction.rs"]
+mod zcash_transaction;
 use super::*;
 use anyhow::Result;
 use x402_treazury::rotation::{
@@ -133,9 +135,9 @@ impl FundingBackend for Funding {
                     &job.operation_id,
                     revision,
                     b"calculated fixture",
-                    job.operation_id.as_bytes(),
+                    zcash_transaction::raw(100).as_slice(),
                     Some(TransactionFacts {
-                        txid: job.operation_id.clone(),
+                        txid: zcash_transaction::txid(100),
                         expiry_height: 100,
                         amount_zatoshis: 80,
                         fee_zatoshis: 20,
@@ -484,7 +486,7 @@ async fn failed_swap_retains_original_source_terms_while_another_pool_serves() {
         .treasury_operations
         .iter()
         .map(|operation| {
-            assert_eq!(operation.facts.txid, operation.operation_id);
+            assert_eq!(operation.facts.txid, zcash_transaction::txid(100));
             assert_eq!(operation.facts.amount_zatoshis, 80);
             assert_eq!(operation.facts.fee_zatoshis, 20);
             assert_eq!(operation.facts.expiry_height, 100);
@@ -510,7 +512,7 @@ async fn failed_swap_retains_original_source_terms_while_another_pool_serves() {
             for operation in originals {
                 assert_eq!(
                     s.prepared_bytes(&operation)?.as_slice(),
-                    operation.as_bytes()
+                    zcash_transaction::raw(100).as_slice()
                 );
                 assert!(!s.operation_pending(&operation)?);
             }

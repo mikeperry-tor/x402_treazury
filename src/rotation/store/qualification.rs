@@ -498,7 +498,7 @@ mod tests {
             .accept_preparation("operation", None, 100, None)
             .unwrap();
         let facts = TransactionFacts {
-            txid: "fixture-tx".into(),
+            txid: crate::rotation::store::test_support::transaction_txid(200),
             expiry_height: 200,
             amount_zatoshis: 90,
             fee_zatoshis: 10,
@@ -509,7 +509,7 @@ mod tests {
                 "operation",
                 1,
                 b"prepared-wallet",
-                b"private-signed-fixture",
+                crate::rotation::store::test_support::transaction_raw(200).as_slice(),
                 Some(facts.clone()),
             )
             .unwrap();
@@ -520,7 +520,9 @@ mod tests {
             operation["prepared_record_sha256"].as_str().unwrap().len(),
             64
         );
-        assert!(!before.to_string().contains("private-signed-fixture"));
+        assert!(!before.to_string().contains(&alloy_primitives::hex::encode(
+            crate::rotation::store::test_support::transaction_raw(200)
+        )));
         drop(store);
         let store = Store::open(&state, &key, &id).unwrap();
         assert_eq!(store.qualification_lifecycle().unwrap(), before);

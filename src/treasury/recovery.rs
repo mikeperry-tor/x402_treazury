@@ -687,9 +687,9 @@ mod tests {
                         &selected.operation_id,
                         s.snapshot()?.0,
                         &sdk,
-                        b"exact original signed bytes",
+                        crate::rotation::store::test_support::transaction_raw(2_000_100).as_slice(),
                         Some(TransactionFacts {
-                            txid: "confirmed original fixture".into(),
+                            txid: crate::rotation::store::test_support::transaction_txid(2_000_100),
                             expiry_height: 2_000_100,
                             amount_zatoshis: 50,
                             fee_zatoshis: 10,
@@ -739,7 +739,7 @@ mod tests {
                     assert_eq!(s.operation(&original)?.attempts, 1);
                     assert_eq!(
                         s.prepared_bytes(&original)?.as_slice(),
-                        b"exact original signed bytes"
+                        crate::rotation::store::test_support::transaction_raw(2_000_100).as_slice()
                     );
                     assert!(!s.operation_pending(&original)?);
                     Ok(())
@@ -764,9 +764,9 @@ mod tests {
                     &selected.operation_id,
                     revision,
                     b"fixture snapshot",
-                    b"original bytes",
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                     Some(crate::rotation::transaction::TransactionFacts {
-                        txid: "fixture".into(),
+                        txid: crate::rotation::store::test_support::transaction_txid(100),
                         expiry_height: 100,
                         amount_zatoshis: 50,
                         fee_zatoshis: 10,

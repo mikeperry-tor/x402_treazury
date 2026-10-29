@@ -609,7 +609,11 @@ x402_treazury wallet reconcile --config servers.toml --operation-id UUID --rebro
 ```
 
 Confirmation uses the original computed transaction identity and the configured
-depth from a coherent SDK scan. Indexer disagreement retains observation work;
+depth from a coherent SDK scan. Observation and broadcast eligibility derive txid
+and signed expiry from authenticated original bytes, even when their saved
+plaintext projections are stale or malformed. This does not rewrite the journal
+or repair missing original transaction, amount, fee or accepted authority.
+Indexer disagreement retains observation work;
 it does not veto sufficient SDK confirmation. Verified finite expiry or bound
 NEAR SUCCESS can close source work under the
 [recovery policy](wallet-rotation.md#recovery-and-reconciliation-policy).

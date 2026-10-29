@@ -82,15 +82,9 @@ impl TransactionSubmission for GrpcSubmission {
         _rebroadcast: bool,
     ) -> Result<()> {
         self.ready = None;
-        let raw = decode(transaction.bytes())?;
         let facts = transaction
             .facts()
             .context("durable transaction metadata missing")?;
-        ensure!(
-            facts.txid == raw.txid().to_string()
-                && facts.expiry_height == u32::from(raw.expiry_height()),
-            "durable transaction identity mismatch"
-        );
         let mut client = self
             .connect(&self.submission, &transaction.network_identity()?)
             .await?;
@@ -111,10 +105,6 @@ impl TransactionSubmission for GrpcSubmission {
         let facts = transaction
             .facts()
             .context("durable transaction metadata missing")?;
-        ensure!(
-            facts.txid == expected && facts.expiry_height == u32::from(raw.expiry_height()),
-            "durable transaction identity mismatch"
-        );
         let result: Result<_> = async {
             // Normal treasury submission preflights before minting intent. Keep
             // the legacy direct trait entry conservative if it has no preflight.

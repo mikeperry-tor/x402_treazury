@@ -123,14 +123,20 @@ fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
     s.accept_preparation("accepted", Some(&pool), 100, None)
         .unwrap();
     let facts = TransactionFacts {
-        txid: "existing".into(),
+        txid: crate::rotation::store::test_support::transaction_txid(100),
         expiry_height: 100,
         amount_zatoshis: 80,
         fee_zatoshis: 20,
         deadline: Some(1000),
     };
-    s.prepare_with_facts("accepted", 1, b"saved", b"saved bytes", Some(facts.clone()))
-        .unwrap();
+    s.prepare_with_facts(
+        "accepted",
+        1,
+        b"saved",
+        crate::rotation::store::test_support::transaction_raw(100).as_slice(),
+        Some(facts.clone()),
+    )
+    .unwrap();
     drop(s);
     let mut s = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     s.deny_new_funding(); // Supervisor must do this on EVERY launch.
@@ -141,13 +147,19 @@ fn restriction_keeps_prepared_evidence_and_reconciliation_across_reopen() {
             .is_err()
     );
     assert_eq!(
-        s.prepare_with_facts("accepted", 1, b"saved", b"saved bytes", Some(facts))
-            .unwrap(),
+        s.prepare_with_facts(
+            "accepted",
+            1,
+            b"saved",
+            crate::rotation::store::test_support::transaction_raw(100).as_slice(),
+            Some(facts)
+        )
+        .unwrap(),
         2
     );
     assert_eq!(
         s.prepared_bytes("accepted").unwrap().as_slice(),
-        b"saved bytes"
+        crate::rotation::store::test_support::transaction_raw(100).as_slice()
     );
     // Prepared bytes remain observable, but no first submission is authorized.
     denied(s.request_broadcast("accepted", 1, 1, false));
@@ -519,7 +531,7 @@ fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_su
     let (_dir, mut store, _) = fixture();
     let address = "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F";
     let facts = TransactionFacts {
-        txid: "shield fixture".into(),
+        txid: crate::rotation::store::test_support::transaction_txid(100),
         expiry_height: 100,
         amount_zatoshis: 0,
         fee_zatoshis: 100,
@@ -539,7 +551,13 @@ fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_su
         .unwrap();
     assert!(store.automatic_shielding_available().unwrap());
     store
-        .prepare_with_facts("shield", 1, b"next", b"exact shield", Some(facts))
+        .prepare_with_facts(
+            "shield",
+            1,
+            b"next",
+            crate::rotation::store::test_support::transaction_raw(100).as_slice(),
+            Some(facts),
+        )
         .unwrap();
     assert!(store.automatic_shielding_submission("shield", 100).unwrap());
     assert!(!store.automatic_shielding_submission("shield", 99).unwrap());
@@ -568,7 +586,10 @@ fn jobless_shielding_retains_bytes_but_job_permits_cannot_authorize_its_first_su
     denied(store.request_broadcast("shield", 1, 1, false));
     assert_eq!(store.operation("shield").unwrap().attempts, 0);
     let retained = PreparedTransaction::load(&store, "shield").unwrap();
-    assert_eq!(retained.bytes(), b"exact shield");
+    assert_eq!(
+        retained.bytes(),
+        crate::rotation::store::test_support::transaction_raw(100).as_slice()
+    );
     assert_eq!(retained.network_identity().unwrap(), identity);
     assert!(
         store

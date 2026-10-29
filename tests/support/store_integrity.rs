@@ -40,10 +40,10 @@ fn populated(dir: &Path) -> Store {
             &job.operation_id,
             revision,
             format!("prepared-{i}").as_bytes(),
-            format!("signed-{i}").as_bytes(),
+            crate::rotation::store::test_support::transaction_raw(100 + i as u32).as_slice(),
             Some(TransactionFacts {
-                txid: format!("tx-{i}"),
-                expiry_height: 100,
+                txid: crate::rotation::store::test_support::transaction_txid(100 + i as u32),
+                expiry_height: 100 + i as u32,
                 amount_zatoshis: 80,
                 fee_zatoshis: 20,
                 deadline: Some(1000),
@@ -380,7 +380,7 @@ fn future_schema_is_refused_and_referenced_snapshots_survive_repeated_saves() {
     for (i, job) in jobs.iter().enumerate() {
         assert_eq!(
             s.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-            format!("signed-{i}").as_bytes()
+            crate::rotation::store::test_support::transaction_raw(100 + i as u32).as_slice()
         );
         assert_eq!(
             s.prepared_snapshot(&job.operation_id).unwrap().as_slice(),
@@ -449,9 +449,9 @@ fn preparation_write_failures_roll_back_through_reopen() {
                 &job.operation_id,
                 1,
                 b"calculated",
-                b"signed",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                 Some(TransactionFacts {
-                    txid: "tx".into(),
+                    txid: crate::rotation::store::test_support::transaction_txid(100),
                     expiry_height: 100,
                     amount_zatoshis: 70,
                     fee_zatoshis: 20,
@@ -471,9 +471,9 @@ fn preparation_write_failures_roll_back_through_reopen() {
             &job.operation_id,
             1,
             b"calculated",
-            b"signed",
+            crate::rotation::store::test_support::transaction_raw(100).as_slice(),
             Some(TransactionFacts {
-                txid: "tx".into(),
+                txid: crate::rotation::store::test_support::transaction_txid(100),
                 expiry_height: 100,
                 amount_zatoshis: 70,
                 fee_zatoshis: 20,

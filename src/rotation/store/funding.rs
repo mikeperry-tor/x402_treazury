@@ -2192,9 +2192,9 @@ mod completion_tests {
                         &job.operation_id,
                         revision,
                         b"snapshot",
-                        b"exact signed bytes",
+                        crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                         Some(TransactionFacts {
-                            txid: "transaction".into(),
+                            txid: crate::rotation::store::test_support::transaction_txid(100),
                             expiry_height: 100,
                             amount_zatoshis: 50,
                             fee_zatoshis: 10,
@@ -2204,7 +2204,7 @@ mod completion_tests {
                     .unwrap();
                 assert_eq!(
                     store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-                    b"exact signed bytes"
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice()
                 );
                 assert!(
                     store
@@ -2214,7 +2214,7 @@ mod completion_tests {
                 assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 0);
                 assert_eq!(
                     store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-                    b"exact signed bytes"
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice()
                 );
             }
         }
@@ -2556,9 +2556,9 @@ mod completion_tests {
                         &job.operation_id,
                         revision,
                         b"snapshot",
-                        b"exact signed bytes",
+                        crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                         Some(TransactionFacts {
-                            txid: "transaction".into(),
+                            txid: crate::rotation::store::test_support::transaction_txid(100),
                             expiry_height: 100,
                             amount_zatoshis: 50,
                             fee_zatoshis: 10,
@@ -2583,7 +2583,7 @@ mod completion_tests {
             if with_bytes {
                 assert_eq!(
                     store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-                    b"exact signed bytes"
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice()
                 );
                 assert_eq!(store.operation(&job.operation_id).unwrap().attempts, 0);
             }
@@ -2763,14 +2763,20 @@ mod completion_tests {
             .accept_preparation(&job.operation_id, Some(&job.pool_id), 100, None)
             .unwrap();
         let facts = TransactionFacts {
-            txid: "source".into(),
+            txid: crate::rotation::store::test_support::transaction_txid(100),
             expiry_height: 100,
             amount_zatoshis: 90,
             fee_zatoshis: 10,
             deadline: Some(u64::MAX),
         };
         store
-            .prepare_with_facts(&job.operation_id, 1, b"snapshot", b"source", Some(facts))
+            .prepare_with_facts(
+                &job.operation_id,
+                1,
+                b"snapshot",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
+                Some(facts),
+            )
             .unwrap();
         store
             .record_destination_readiness(&job.id, "10", "block", 1)
@@ -2837,9 +2843,9 @@ mod completion_tests {
                 &job.operation_id,
                 revision,
                 b"snapshot",
-                b"signed fixture bytes",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                 Some(TransactionFacts {
-                    txid: "transaction".into(),
+                    txid: crate::rotation::store::test_support::transaction_txid(100),
                     expiry_height: 100,
                     amount_zatoshis: 50,
                     fee_zatoshis: 10,
@@ -3238,7 +3244,7 @@ mod completion_tests {
         // consume this late result's preserved input/identity binding.
         assert_eq!(store.snapshot().unwrap().0, expected);
         let facts = TransactionFacts {
-            txid: "original".into(),
+            txid: crate::rotation::store::test_support::transaction_txid(100),
             expiry_height: 100,
             amount_zatoshis: 50,
             fee_zatoshis: 10,
@@ -3249,7 +3255,7 @@ mod completion_tests {
                 &job.operation_id,
                 expected,
                 b"late accepted SDK",
-                b"exact late signed bytes",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                 Some(facts.clone()),
             )
             .unwrap();
@@ -3259,7 +3265,7 @@ mod completion_tests {
                     &job.operation_id,
                     expected,
                     b"late accepted SDK",
-                    b"exact late signed bytes",
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                     Some(facts)
                 )
                 .unwrap(),
@@ -3267,7 +3273,7 @@ mod completion_tests {
         );
         assert_eq!(
             store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-            b"exact late signed bytes"
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
         assert_eq!(
             store.prepared_inputs(&job.operation_id).unwrap(),
@@ -3331,7 +3337,7 @@ mod completion_tests {
                     .unwrap();
             }
             let facts = TransactionFacts {
-                txid: "original".into(),
+                txid: crate::rotation::store::test_support::transaction_txid(100),
                 expiry_height: 100,
                 amount_zatoshis: 50,
                 fee_zatoshis: 10,
@@ -3343,7 +3349,7 @@ mod completion_tests {
                         &job.operation_id,
                         store.snapshot().unwrap().0,
                         b"accepted SDK",
-                        b"exact original",
+                        crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                         Some(facts.clone()),
                     )
                     .unwrap();
@@ -3389,14 +3395,14 @@ mod completion_tests {
                             &job.operation_id,
                             store.snapshot().unwrap().0,
                             b"accepted SDK",
-                            b"exact original",
+                            crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                             Some(facts),
                         )
                         .unwrap();
                 }
                 assert_eq!(
                     store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-                    b"exact original"
+                    crate::rotation::store::test_support::transaction_raw(100).as_slice()
                 );
                 assert!(!store.operation_pending(&job.operation_id).unwrap());
                 assert!(
@@ -3665,9 +3671,9 @@ mod completion_tests {
                 &job.operation_id,
                 1,
                 b"prepared SDK",
-                b"never disclosed original",
+                crate::rotation::store::test_support::transaction_raw(100).as_slice(),
                 Some(TransactionFacts {
-                    txid: "original".into(),
+                    txid: crate::rotation::store::test_support::transaction_txid(100),
                     expiry_height: 100,
                     amount_zatoshis: 50,
                     fee_zatoshis: 10,
@@ -3733,7 +3739,7 @@ mod completion_tests {
         );
         assert_eq!(
             store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
-            b"never disclosed original"
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
     }
 

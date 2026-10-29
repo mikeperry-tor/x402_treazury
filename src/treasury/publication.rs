@@ -109,7 +109,7 @@ mod tests {
         db.execute_batch("CREATE TRIGGER reject_completed BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture publication failure'); END;").unwrap();
         treasury.healthy = false;
         let facts = TransactionFacts {
-            txid: "original".into(),
+            txid: crate::rotation::store::test_support::transaction_txid(100),
             expiry_height: 100,
             amount_zatoshis: 50,
             fee_zatoshis: 10,
@@ -119,7 +119,7 @@ mod tests {
             treasury
                 .retain_calculation(
                     "completed".into(),
-                    Zeroizing::new(b"exact completed bytes".to_vec()),
+                    Zeroizing::new(crate::rotation::store::test_support::transaction_raw(100)),
                     if valid {
                         Ok(facts)
                     } else {
@@ -174,7 +174,10 @@ mod tests {
             .await
             .unwrap_err();
         let saved = treasury.publish_completed().await.unwrap();
-        assert_eq!(saved.bytes(), b"exact completed bytes");
+        assert_eq!(
+            saved.bytes(),
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
+        );
         assert_eq!(treasury.revision, 2);
         assert!(treasury.completed.is_none() && treasury.healthy);
         assert!(
@@ -191,7 +194,10 @@ mod tests {
         let (_dir, mut treasury, db) = fixture(false).await;
         db.execute_batch("DROP TRIGGER reject_completed;").unwrap();
         let prepared = treasury.publish_completed().await.unwrap();
-        assert_eq!(prepared.bytes(), b"exact completed bytes");
+        assert_eq!(
+            prepared.bytes(),
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
+        );
         assert!(prepared.facts().is_none());
         assert!(treasury.completed.is_none() && !treasury.healthy);
         assert!(
@@ -252,7 +258,7 @@ mod tests {
                 .await
                 .unwrap()
                 .as_slice(),
-            b"exact completed bytes"
+            crate::rotation::store::test_support::transaction_raw(100).as_slice()
         );
         let id = store.call(|s| Ok(s.id().to_owned())).await.unwrap();
         drop(store);
@@ -264,7 +270,7 @@ mod tests {
                 {
                     assert_eq!(
                         store.prepared_bytes("completed").unwrap().as_slice(),
-                        b"exact completed bytes"
+                        crate::rotation::store::test_support::transaction_raw(100).as_slice()
                     );
                     break;
                 }
