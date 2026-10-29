@@ -22,16 +22,29 @@ async fn run() -> Result<()> {
         /// Print bounded public API diagnostics for this synthetic dry request.
         #[arg(long)]
         diagnose: bool,
+        /// Public mainnet refund address to check with an unfunded diagnostic request.
+        #[arg(long, requires = "diagnose")]
+        refund_address: Option<String>,
     }
     let args = <Args as clap::Parser>::parse();
     if let Some(path) = &args.network_config {
         x402_treazury::network::install(x402_treazury::network::NetworkPolicy::load(path)?)?;
     }
+    if let Some(address) = &args.refund_address {
+        anyhow::ensure!(
+            zcash_keys::address::Address::decode(
+                &zcash_protocol::consensus::Network::MainNetwork,
+                address,
+            )
+            .is_some(),
+            "refund address must be a valid mainnet Zcash address"
+        );
+    }
     let amount = x402_treazury::rotation::config::positive_usdc(&args.amount_usdc)?;
     let client = NearClient::new(None)?;
     let assets = client.assets().await?;
     let instant = now()?;
-    let request = request(
+    let mut request = request(
         &assets,
         "0x0000000000000000000000000000000000000001",
         "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F",
@@ -41,6 +54,11 @@ async fn run() -> Result<()> {
         instant + 1800,
         true,
     )?;
+    if let Some(address) = &args.refund_address {
+        // Probe provider format support independently of the production codec.
+        // The public recipient, dry=true and all other quote fields stay fixed.
+        request["refundTo"] = serde_json::json!(address);
+    }
     if args.diagnose {
         let origin = "https://1click.chaindefuser.com/v0/quote";
         let http = x402_treazury::network::global().http(

@@ -18,6 +18,11 @@ same arrangement with source beside its qualification inputs and runbooks.
 | `diagnose_credit` | `diagnostics/diagnose_credit.rs`: read-only canonical Base credit checks; see the [wallet guide](../docs/wallet-cli.md). |
 | `quote_near` | `diagnostics/quote_near.rs`: credential-free dry quotes using public test identities; see [preflight](../tests/live/README.md). |
 
+`quote_near --diagnose --refund-address ADDRESS` checks a public mainnet Zcash
+refund address against the provider's input format. It always uses `dry=true`,
+without credentials, wallet state or funding. Use published test identities only;
+quote acceptance does not qualify funded refund delivery.
+
 Networked utilities use the shared network factory and accept `--network-config`.
 `snapshot_agentutility` consumes reviewed local files only. Utilities never change
 ordinary serving's authority. Maintenance and qualification sources
