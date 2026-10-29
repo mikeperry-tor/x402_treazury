@@ -89,3 +89,29 @@ impl std::fmt::Display for TreasuryDepositAddress {
     }
 }
 impl std::error::Error for TreasuryDepositAddress {}
+
+/// Presentation of an SDK rejection, never funding or retry authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TreasuryFunds {
+    Waiting,
+    Shortfall,
+    Unavailable,
+}
+impl TreasuryFunds {
+    pub(crate) fn from_error(error: &anyhow::Error) -> Self {
+        error
+            .downcast_ref::<Self>()
+            .copied()
+            .unwrap_or(Self::Unavailable)
+    }
+}
+impl std::fmt::Display for TreasuryFunds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Waiting => "existing ZEC is not yet spendable",
+            Self::Shortfall => "observed ZEC is insufficient",
+            Self::Unavailable => "ZEC funding assessment unavailable",
+        })
+    }
+}
+impl std::error::Error for TreasuryFunds {}

@@ -395,6 +395,8 @@ impl<B: FundingBackend> FundingWorker<B> {
                 .map(|()| Observation::None);
         }
         if !self.store.call(|s| s.funding_source_ready()).await? {
+            tracing::debug!(wallet=%job.pool_name,operation=%job.operation_id,
+                "Further wallet funding is waiting for an existing ZEC transaction to resolve; checks continue automatically");
             return Ok(Observation::None);
         }
         self.backend.lock().await.ready(job, &quote).await?;
@@ -950,7 +952,18 @@ fn safe_error_category(error: &anyhow::Error, phase: &FundingPhase) -> &'static 
     if error.downcast_ref::<super::error::FundingCondition>()
         == Some(&super::error::FundingCondition::InsufficientFunds)
     {
-        return "treasury_insufficient_spendable_funds; waiting for confirmed spendable ZEC; run wallet status --config FILE with the same deployment file as serve to see your shielded receive address, saved balances and sync progress; send ZEC to that address and allow confirmations; while serve is running, deposits are synced and funding retries automatically";
+        use super::error::TreasuryFunds;
+        return match TreasuryFunds::from_error(error) {
+            TreasuryFunds::Waiting => {
+                "treasury_insufficient_spendable_funds; existing ZEC is not yet spendable; pending funds may still be insufficient; inspect saved balances and outgoing transactions with wallet status --config FILE; synchronization and funding retry automatically"
+            }
+            TreasuryFunds::Shortfall => {
+                "treasury_insufficient_spendable_funds; observed ZEC is insufficient for the next deposit and fee; add ZEC to the shielded receive address shown by wallet status --config FILE and allow confirmations; while serve is running, synchronization and funding retry automatically"
+            }
+            TreasuryFunds::Unavailable => {
+                "treasury_insufficient_spendable_funds; treasury funds could not be assessed from a completed current-owner scan; inspect wallet status --config FILE for saved balances and sync progress; synchronization and funding retry automatically"
+            }
+        };
     }
     if error.is::<super::transaction::PreparationDeferred>() {
         return "treasury_preparation_deferred; transaction preparation could not proceed; existing work retained and checks will retry";

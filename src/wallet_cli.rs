@@ -557,15 +557,16 @@ async fn show_status(state_dir: PathBuf, key_file: PathBuf, json: bool) -> Resul
     let inspected = crate::treasury::Treasury::inspect_status(state_dir.clone(), key_file, None)
         .await
         .ok();
-    let (status, addresses) = match inspected {
+    let (status, addresses, balances) = match inspected {
         Some(inspected) => inspected,
         None => (
             tokio::task::spawn_blocking(move || crate::rotation::store::status(&state_dir))
                 .await??,
             serde_json::Value::Null,
+            None,
         ),
     };
-    print!("{}", output::status(&status));
+    print!("{}", output::status(&status, balances.as_ref()));
     if let Some(address) = addresses[0]["encoded_address"].as_str() {
         println!("\nPrimary shielded ZEC receive address:\n{address}");
     } else {

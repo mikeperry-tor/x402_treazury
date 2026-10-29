@@ -1,4 +1,6 @@
 //! Human-readable summaries of saved observations; no wallet or network access.
+#[cfg(test)]
+mod tests;
 use crate::rotation::store::{Status, SyncPhase};
 use std::fmt::Write;
 
@@ -14,6 +16,18 @@ fn height(value: Option<u64>) -> String {
     value.map_or_else(|| "unknown".into(), |v| v.to_string())
 }
 
+fn saved_zec(value: Option<u64>) -> String {
+    value.map_or_else(|| "unknown (snapshot balance unavailable)".into(), zec)
+}
+
+fn usdc(value: &str) -> String {
+    Some(value)
+        .filter(|value| !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|value| alloy_primitives::U256::from_str_radix(value, 10).ok())
+        .and_then(|value| alloy_primitives::utils::format_units(value, 6).ok())
+        .map_or_else(|| "unknown".into(), |value| format!("{value} USDC"))
+}
+
 fn timestamp(value: Option<u64>) -> String {
     value
         .and_then(|v| i64::try_from(v).ok())
@@ -24,7 +38,10 @@ fn timestamp(value: Option<u64>) -> String {
         )
 }
 
-pub(super) fn status(status: &Status) -> String {
+pub(super) fn status(
+    status: &Status,
+    balances: Option<&crate::treasury::SnapshotBalances>,
+) -> String {
     let mut text = format!(
         "Zcash wallet status\nTreasury ID: {}\nBirthday block: {}\nWallet snapshot revision: {}\n",
         status.treasury_id, status.birthday, status.snapshot_revision
@@ -53,7 +70,6 @@ pub(super) fn status(status: &Status) -> String {
         .unwrap();
         writeln!(text, "Scan target: {}", height(sync.target_height)).unwrap();
         writeln!(text, "Blocks scanned: {}", sync.scanned_blocks).unwrap();
-        writeln!(text, "Observation time: {}", timestamp(sync.checked_at)).unwrap();
         writeln!(
             text,
             "Checkpoint time: {}",
@@ -64,21 +80,48 @@ pub(super) fn status(status: &Status) -> String {
         if sync.checked_at.is_some() && sync.height.is_some() {
             writeln!(
                 text,
-                "\nSaved confirmed shielded balance: {}",
-                zec(sync.confirmed_shielded_zatoshis)
+                "\nSaved ZEC observations (snapshot revision {})\nLast completed observation: {}\nSaved scanned height: {}",
+                status.snapshot_revision,
+                timestamp(sync.checked_at),
+                height(sync.height)
             )
             .unwrap();
+            for (label, amount) in [
+                (
+                    "Saved confirmed shielded balance (excluding reserved inputs)",
+                    balances.map_or(Some(sync.confirmed_shielded_zatoshis), |b| {
+                        b.confirmed_shielded
+                    }),
+                ),
+                (
+                    "Saved pending shielded incoming/change",
+                    balances.and_then(|b| b.pending_shielded),
+                ),
+                (
+                    "Saved spendable shielded balance",
+                    balances.map_or(Some(sync.spendable_shielded_zatoshis), |b| {
+                        b.spendable_shielded
+                    }),
+                ),
+                (
+                    "Saved confirmed transparent balance",
+                    balances.and_then(|b| b.confirmed_transparent),
+                ),
+                (
+                    "Saved pending transparent balance",
+                    balances.and_then(|b| b.pending_transparent),
+                ),
+            ] {
+                writeln!(text, "{label}: {}", saved_zec(amount)).unwrap();
+            }
             writeln!(
                 text,
-                "Saved spendable shielded balance: {}",
-                zec(sync.spendable_shielded_zatoshis)
+                "These SDK balances exclude reserved inputs; shielded balances also exclude dust. Selected inputs can leave the confirmed balance before broadcast; incoming funds and change may remain pending.\nSpendable funds require sufficient confirmations and usable inputs. Transparent funds may need maturity and shielding. Available funds are checked again before spending."
             )
             .unwrap();
-            writeln!(
-                text,
-                "Balances reflect the last saved sync; available funds are checked again before spending."
-            )
-            .unwrap();
+            if balances.is_none() {
+                writeln!(text, "Wallet snapshot balances unavailable; confirmed and spendable shielded amounts above are from the last saved sync.").unwrap();
+            }
         } else {
             writeln!(
                 text,
@@ -102,6 +145,51 @@ pub(super) fn status(status: &Status) -> String {
         if status.outgoing_pending { "yes" } else { "no" }
     )
     .unwrap();
+    for operation in &status.treasury_operations {
+        let source = match operation.submission.as_str() {
+            "PREPARED" => "prepared",
+            "BROADCAST_REQUESTED" => "broadcast requested; outcome not yet recorded",
+            "BROADCAST" => "broadcast; awaiting confirmation",
+            "UNKNOWN" => "broadcast outcome unknown",
+            "CONFIRMED" => "confirmed",
+            "EXPIRED" => "expired",
+            _ => "unknown; inspect JSON status",
+        };
+        writeln!(
+            text,
+            "\nZEC source transaction {}: {} (fee: {})\n  Saved source status: {source}",
+            operation.operation_id,
+            zec(operation.facts.amount_zatoshis),
+            zec(operation.facts.fee_zatoshis)
+        )
+        .unwrap();
+    }
+    for job in &status.funding_jobs {
+        use crate::rotation::store::funding::FundingPhase;
+        let progress = match job.phase {
+            FundingPhase::Allocated => "awaiting quote",
+            FundingPhase::Quoted => "quoted; awaiting deposit preparation",
+            FundingPhase::Preparing => "preparing deposit",
+            FundingPhase::Prepared => "deposit prepared",
+            FundingPhase::DepositPending => "awaiting deposit confirmation",
+            FundingPhase::Swapping => "awaiting settlement",
+            FundingPhase::VerifyingCredit => "awaiting destination credit",
+            FundingPhase::Complete => "complete",
+            FundingPhase::RefundPending => "refund pending",
+            FundingPhase::RecoveryRequired => "reconciling original work",
+        };
+        writeln!(
+            text,
+            "Saved swap progress for {} (operation {}): {progress}; target: {}",
+            job.pool_name,
+            job.operation_id,
+            usdc(&job.target)
+        )
+        .unwrap();
+    }
+    if !status.treasury_operations.is_empty() {
+        writeln!(text, "Transaction amounts and pending change describe overlapping funds; do not add them to the balances above.").unwrap();
+    }
     writeln!(text, "Managed wallet pools: {}", status.pools.len()).unwrap();
     for pool in &status.pools {
         writeln!(
@@ -124,11 +212,7 @@ pub(super) fn status(status: &Status) -> String {
             .iter()
             .filter(|wallet| wallet.role != "RETIRED")
         {
-            let balance = Some(wallet.confirmed_balance.as_str())
-                .filter(|value| !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
-                .and_then(|value| alloy_primitives::U256::from_str_radix(value, 10).ok())
-                .and_then(|value| alloy_primitives::utils::format_units(value, 6).ok())
-                .map_or_else(|| "unknown".into(), |value| format!("{value} USDC"));
+            let balance = usdc(&wallet.confirmed_balance);
             writeln!(text, "    {}: estimated balance: {balance}", wallet.address).unwrap();
         }
         let retired = pool

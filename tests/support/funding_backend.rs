@@ -858,10 +858,9 @@ fn funding_preparation_diagnostics_distinguish_shortage_from_other_deferrals() {
     );
     assert_eq!(shortage, wrapped_shortage);
     assert!(shortage.starts_with("treasury_insufficient_spendable_funds;"));
-    assert!(shortage.contains("waiting for confirmed spendable ZEC"));
-    assert!(shortage.contains("shielded receive address"));
-    assert!(shortage.contains("while serve is running"));
-    assert!(shortage.contains("funding retries automatically"));
+    assert!(shortage.contains("treasury funds could not be assessed"));
+    assert!(!shortage.contains("add ZEC"));
+    assert!(shortage.contains("funding retry automatically"));
     assert!(shortage.contains("wallet status --config FILE"));
     for excluded in [
         "sync unavailable",

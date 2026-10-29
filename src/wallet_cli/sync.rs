@@ -125,7 +125,11 @@ pub(super) async fn run(
             };
             let (zec, usdc) = tokio::join!(zec, observe_usdc(&config, store.clone(), &stop),);
             let state = store.call(|store| store.status()).await.context("wallet synchronization may have completed; journals preserved; status report unavailable")?;
-            Ok((Observations { zec, usdc }, state, addresses))
+            let balances = match treasury.as_ref() {
+                Some(treasury) => treasury.snapshot_balances().await.ok(),
+                None => None,
+            };
+            Ok((Observations { zec, usdc }, state, addresses, balances))
         };
         tokio::pin!(work);
         tokio::select! {
@@ -157,7 +161,7 @@ pub(super) async fn run(
             worker.await?;
         }
     }
-    let (observed, state, addresses) = observed?;
+    let (observed, state, addresses, balances) = observed?;
     if json {
         println!(
             "{}",
@@ -181,7 +185,7 @@ pub(super) async fn run(
             observed.usdc.completed,
             observed.usdc.failed,
             details,
-            output::status(&state),
+            output::status(&state, balances.as_ref()),
             addresses
                 .get(0)
                 .and_then(|address| address["encoded_address"].as_str())

@@ -29,6 +29,25 @@ x402_treazury wallet sync --config examples/deployments/managed.local.toml
 `wallet init` prints the primary ZEC receive address and a prompt to send ZEC to
 it. `wallet sync` and `wallet status` show readable summaries by default, with
 saved balance observations distinguished from current spending authority.
+The human summary computes ZEC balances from the existing saved SDK snapshot,
+using the same read that supplies receive addresses. It groups them with the
+snapshot revision, last completed observation time and saved scanned height:
+local transaction changes can follow that observation. Confirmed shielded balance is labeled **excluding
+reserved inputs**; pending shielded incoming funds/change, spendable shielded
+balance, confirmed transparent balance and pending transparent balance appear
+separately. SDK confirmed and pending shielded account balances exclude reserved
+inputs and dust. Transparent amounts include dust; confirmed transparent funds
+also include immature coinbase outputs and can still need maturity or shielding.
+An outgoing transaction can therefore leave both confirmed and spendable shielded
+balances at zero while its change is pending. If the key or SDK snapshot is
+unavailable, the summary explicitly falls back to saved sync amounts for confirmed
+and spendable shielded balances; the additional amounts display `unknown`.
+Outgoing treasury operations show the
+principal and fee from existing transaction facts and saved source status
+separately from cross-chain swap progress. Swap amounts show the existing USDC
+target, not received or available funds. These overlapping observations are never
+added into a total or treated as spending authority. The human summary adds no
+durable balance fields, schema changes, network requests or polling.
 For each managed wallet group, the human summary lists every non-retired wallet's
 address and saved estimated balance in USDC (or `unknown`), followed by the number
 of retired wallets.
@@ -323,8 +342,12 @@ scan state. Old unreferenced snapshots are pruned, retaining the current snapsho
 and every snapshot referenced by an outgoing operation.
 
 `wallet status` reports the last persisted sync phase, checkpoint time, scan target
-and scanned-block count, last successful tip height/time, confirmed and spendable
-shielded balances in zatoshis, and any last sync error. `sync_complete` reports a
+and scanned-block count, last successful tip height/time, and any last sync error.
+Its human summary also computes confirmed, pending and spendable shielded balances
+and confirmed and pending transparent balances from the existing saved SDK
+snapshot. JSON retains the existing cached state contract, including its confirmed
+and spendable shielded balance fields in zatoshis; these fields do not acquire the
+additional human-summary observations. `sync_complete` reports a
 completed scan bound to the current snapshot revision; it is independent of host
 clock age. Cached amounts are observations. SDK input selection, exact pending
 input ownership and current operation permission govern new spending. Reopening

@@ -348,10 +348,18 @@ impl Treasury {
         let proposal = match proposal {
             Ok(proposal) => proposal,
             Err(zingolib::wallet::error::ProposeSendError::Proposal(
-                zcash_client_backend::data_api::error::Error::InsufficientFunds { .. },
+                zcash_client_backend::data_api::error::Error::InsufficientFunds {
+                    required, ..
+                },
             )) => {
+                let assessment = super::balances::funding_assessment(
+                    &*client.wallet().read().await,
+                    self.reusable_sync_revision == Some(self.revision),
+                    required.into_u64(),
+                );
                 let mut error =
-                    anyhow::Error::new(crate::rotation::error::FundingCondition::InsufficientFunds);
+                    anyhow::Error::new(crate::rotation::error::FundingCondition::InsufficientFunds)
+                        .context(assessment);
                 if let Ok(addresses) = super::address_info(client).await
                     && let Some(address) = addresses
                         .get(0)

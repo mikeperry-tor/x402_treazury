@@ -493,10 +493,18 @@ cleanup and safe resource labels.
 An unexpected balance reconciliation task exit reports its pending retry at INFO
 with the affected pool; routine observation attempts remain DEBUG.
 
-Waiting for confirmed spendable ZEC and funding deferred by a reported treasury
-sync failure use INFO for meaningful state changes; repetitive observations belong
-at DEBUG. On a new capital shortage, the funding message includes the existing
-shielded receive address and asks the operator to add ZEC and allow confirmations.
+Waiting for existing ZEC to become spendable and preparation deferred by unresolved
+source work use DEBUG. After an insufficient-funds rejection from SDK input
+selection, an incomplete current-owner scan reports at INFO that funds could not
+be assessed, without deposit advice. Pending SDK transactions produce a DEBUG
+wait; they do not establish that enough funds will become available. Otherwise,
+SDK-observed confirmed funds, including dust and unreserved transparent funds
+(also immature confirmed coinbase outputs), at least equal to the SDK's required
+amount produce a DEBUG spendability wait. Only an observed
+shortage produces an INFO message with the existing shielded receive address,
+asking the operator to add ZEC and allow confirmations. Identical repeated
+assessment failures and shortages remain DEBUG. These explanations add no new
+spending checks or polling; SDK input selection remains the spending authority.
 If receive information is unavailable, it directs the operator to `wallet status`
 with the serving configuration. Address lookup does not derive a new address or
 change funding authority; the address is not added to persisted failure categories.

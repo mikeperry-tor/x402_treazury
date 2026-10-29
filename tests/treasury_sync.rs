@@ -552,6 +552,14 @@ spec="nonexistent.json"
     ));
     assert!(human.contains("Scanned height: 2000000"));
     assert!(human.contains("Saved spendable shielded balance: 0.00000000 ZEC"));
+    assert!(
+        human.contains(
+            "Saved confirmed shielded balance (excluding reserved inputs): 0.00000000 ZEC"
+        )
+    );
+    assert!(human.contains("Saved pending shielded incoming/change: 0.00000000 ZEC"));
+    assert!(human.contains("Saved confirmed transparent balance: 0.00000000 ZEC"));
+    assert!(human.contains("Saved pending transparent balance: 0.00000000 ZEC"));
     assert!(human.contains("Primary ZEC address:"));
     assert!(
         output.status.success(),

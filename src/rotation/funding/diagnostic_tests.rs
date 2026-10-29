@@ -1,6 +1,9 @@
 //! Log severity must not change retry health or persisted funding conditions.
 use super::*;
-use crate::rotation::{error::FundingCondition, transaction::PreparationDeferred};
+use crate::rotation::{
+    error::{FundingCondition, TreasuryFunds},
+    transaction::PreparationDeferred,
+};
 use tracing::instrument::WithSubscriber;
 
 #[tokio::test]
@@ -13,6 +16,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
     let cases = [
         (
             anyhow::Error::new(FundingCondition::InsufficientFunds)
+                .context(TreasuryFunds::Shortfall)
                 .context(crate::rotation::error::TreasuryDepositAddress(
                     "public-receive-address".into(),
                 ))
@@ -22,9 +26,16 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
         ),
         (
             anyhow::Error::new(FundingCondition::InsufficientFunds)
+                .context(TreasuryFunds::Waiting)
+                .context("private upstream shortage"),
+            "DEBUG",
+            "waiting for existing ZEC to become spendable",
+        ),
+        (
+            anyhow::Error::new(FundingCondition::InsufficientFunds)
                 .context("private upstream shortage"),
             "INFO",
-            "waiting for confirmed spendable ZEC",
+            "Treasury funds could not be assessed",
         ),
         (
             anyhow::anyhow!("indexer connection failed")
@@ -86,6 +97,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
             .unwrap();
         let job = raw.funding_job(&job.id).unwrap().unwrap();
         let condition = funding_condition(&error);
+        let assessment = TreasuryFunds::from_error(&error);
         let category = safe_error(&error, &job.phase);
 
         let (store, owner) = StoreHandle::spawn(raw);
@@ -154,6 +166,16 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
         if level != "WARN" {
             assert!(!logged.contains("WARN"), "{logged}");
         }
+        if level == "DEBUG" {
+            // Independent lifecycle progress can still be INFO. The waiting
+            // diagnostic itself must remain DEBUG.
+            assert!(
+                !logged
+                    .lines()
+                    .any(|line| line.contains("INFO") && line.contains(message)),
+                "{logged}"
+            );
+        }
         if level == "WARN" {
             assert!(logged.contains("lookup_height=100"), "{logged}");
             assert!(logged.contains("wallet_height="), "{logged}");
@@ -215,12 +237,18 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                 logged.contains("synchronization and funding retry automatically"),
                 "{logged}"
             );
-            if !logged.contains("public-receive-address") {
+            if assessment != TreasuryFunds::Waiting && !logged.contains("public-receive-address") {
                 assert!(logged.contains("wallet status --config FILE"), "{logged}");
             }
-            let repeated = anyhow::Error::new(FundingCondition::InsufficientFunds).context(
-                crate::rotation::error::TreasuryDepositAddress("public-receive-address".into()),
-            );
+            if assessment != TreasuryFunds::Shortfall {
+                assert!(!logged.contains("add ZEC"), "{logged}");
+                assert!(!category.contains("add ZEC"), "{category}");
+            }
+            let repeated = anyhow::Error::new(FundingCondition::InsufficientFunds)
+                .context(assessment)
+                .context(crate::rotation::error::TreasuryDepositAddress(
+                    "public-receive-address".into(),
+                ));
             tracing::dispatcher::with_default(&subscriber, || {
                 report_observation_failure(
                     &job,

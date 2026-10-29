@@ -1,5 +1,7 @@
 //! Embedded treasury with encrypted sync and explicit durable transaction operations.
 pub mod actor;
+mod balances;
+pub(crate) use balances::SnapshotBalances;
 pub mod birthday;
 mod coverage;
 pub(crate) mod diagnostics;
@@ -308,7 +310,7 @@ impl Treasury {
         key: PathBuf,
         expected_id: Option<String>,
     ) -> Result<serde_json::Value> {
-        let (state, addresses) = Self::inspect_status(dir, key, expected_id).await?;
+        let (state, addresses, _) = Self::inspect_status(dir, key, expected_id).await?;
         Ok(serde_json::json!({"state": state, "receive_addresses": addresses}))
     }
     /// Read saved status and receive addresses from one authenticated, offline snapshot.
@@ -316,7 +318,7 @@ impl Treasury {
         dir: PathBuf,
         key: PathBuf,
         expected_id: Option<String>,
-    ) -> Result<(Status, serde_json::Value)> {
+    ) -> Result<(Status, serde_json::Value, Option<SnapshotBalances>)> {
         let (state, bytes) = tokio::task::spawn_blocking(move || -> Result<_> {
             crate::rotation::store::inspect_wallet_snapshot(&dir, &key, expected_id.as_deref())
         })
@@ -332,7 +334,13 @@ impl Treasury {
             client.indexer_uri().is_none(),
             "offline treasury must not connect to an indexer"
         );
-        Ok((state, address_info(&client).await?))
+        let balances = SnapshotBalances::read(&*client.wallet().read().await);
+        Ok((state, address_info(&client).await?, Some(balances)))
+    }
+    pub(crate) async fn snapshot_balances(&self) -> Result<SnapshotBalances> {
+        ensure!(self.healthy, "saved treasury snapshot unavailable");
+        let client = self.client.as_ref().context("treasury unavailable")?;
+        Ok(SnapshotBalances::read(&*client.wallet().read().await))
     }
     pub async fn derive_address(&mut self) -> Result<serde_json::Value> {
         ensure!(
@@ -797,6 +805,21 @@ async fn address_info(client: &LightClient) -> Result<serde_json::Value> {
 #[cfg(test)]
 mod initialization_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn status_balances_do_not_present_unpersisted_sdk_changes_as_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut treasury = Treasury::create(dir.path().join("state"), dir.path().join("key"), 2_000_000,
+            Some(zeroize::Zeroizing::new("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".into()))).await.unwrap();
+        let revision = treasury.status().await.unwrap().snapshot_revision;
+        assert!(treasury.snapshot_balances().await.is_ok());
+        // Failed publication leaves the SDK poisoned until reopened. Inspection
+        // can still show saved metadata, but must not label the live SDK as saved.
+        treasury.healthy = false;
+        assert!(treasury.snapshot_balances().await.is_err());
+        assert_eq!(treasury.status().await.unwrap().snapshot_revision, revision);
+        treasury.close().await.unwrap();
+    }
 
     #[tokio::test]
     async fn sdk_reconstruction_failure_retains_authenticated_store_and_exclusive_ownership() {
