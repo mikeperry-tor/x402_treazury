@@ -23,6 +23,9 @@ and CLI usage. Maintained implementation and operational explanations live here:
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
+The [seed recovery plan](plans/seed_based_wallet_recovery.md) covers derivation,
+discovery, retained financial obligations and the choice between root recovery and
+discarding retired keys.
 The maintained
 [checkout ledger](../vendor/README.md#checkout-retirement-tracking) tracks complete
 removal blockers and upstream/candidate follow-up.
