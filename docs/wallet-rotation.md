@@ -579,7 +579,12 @@ or signed data. Admission deferral and ordinary current-swap polls remain DEBUG.
 
 One retained funding owner schedules independent status, credit and prerequisite-
 complete unsigned quote observations in bounded lanes, alongside serialized treasury
-commands. Per-operation/kind backoff cannot stall another group's observations.
+commands. DEBUG source-step start/finish messages identify the wallet, job,
+operation, starting phase, elapsed seconds and whether the step returned success;
+step success does not establish swap settlement. An unmatched start narrows the
+investigation but can also reflect incomplete logs, process exit or a panic.
+Repeated capacity diagnostics include the active source operation. They can
+include candidates not yet due and do not establish that funding failed. Per-operation/kind backoff cannot stall another group's observations.
 Advisory reads cannot restore a consumed initial claim. Completion storage failures still
 stop the shared owner; rejected proofs never release liabilities or authorize retries.
 Historical work uses captured boundaries and keyset pages, not full reporting

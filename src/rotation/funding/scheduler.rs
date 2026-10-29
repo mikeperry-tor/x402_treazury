@@ -756,7 +756,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                             epoch,
                             started: tokio::time::Instant::now(),
                         };
+                        tracing::debug!(wallet=%job.pool_name,job_id=%job.id,operation=%job.operation_id,phase=?job.phase,
+                            "ZEC funding source step started");
                         let result = worker.source_step(&job, &source_clock).await;
+                        tracing::debug!(wallet=%job.pool_name,job_id=%job.id,operation=%job.operation_id,phase=?job.phase,
+                            elapsed_seconds=source_clock.started.elapsed().as_secs(),successful=result.is_ok(),
+                            "ZEC funding source step finished");
                         Completion { job, kind, result }
                     });
                     flight.reads.push(
@@ -781,6 +786,11 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 credit_deferred = capacity_deferred[Kind::Credit as usize],
                 status_deferred = capacity_deferred[Kind::Status as usize],
                 source_deferred = capacity_deferred[Kind::Source as usize],
+                source_operation = flight
+                    .active
+                    .iter()
+                    .find(|key| key.kind == Kind::Source)
+                    .map(|key| key.operation.as_str()),
                 quote_deferred = capacity_deferred[Kind::Quote as usize],
                 metadata_deferred,
                 "Funding observation capacity reached; pending work retained for a later pass"
