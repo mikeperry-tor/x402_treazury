@@ -575,6 +575,7 @@ async fn refunds_run(cli: bool) -> Result<()> {
         let jid = job.id.clone();
         let deadline = now()? + 3600;
         let quote = serde_json::to_vec(&crate::rotation::near::Quote {
+            sizing_preview: None,
             request: serde_json::json!({"amount":job.target,"recipient":job.recipient}),
             response: serde_json::json!({}),
             input: 50_000,

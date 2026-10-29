@@ -1,4 +1,4 @@
-//! Explicit public or confidential foreign-chain EXACT_OUTPUT swaps. No signer or wallet keys enter
+//! Explicit public or confidential foreign-chain swaps. No signer or wallet keys enter
 //! this client. Its credential cannot follow redirects or reach another origin.
 /// HTTP response class, without provider prose or credentials.
 #[derive(Debug)]
@@ -36,6 +36,38 @@ pub struct Quote {
     pub input: u64,
     pub deadline: u64,
     pub deposit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sizing_preview: Option<SizingPreview>,
+}
+/// Exact provider inputs used to size a fixed-input swap, retained with its quote.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SizingPreview {
+    pub request: Value,
+    pub response: Value,
+}
+impl Quote {
+    pub fn output_atomic(&self) -> Result<u64> {
+        let value = if self.request["swapType"] == "EXACT_INPUT" {
+            &self.response["quote"]["amountOut"]
+        } else {
+            &self.request["amount"]
+        };
+        atomic(value.as_str().context("missing output amount")?)
+    }
+    pub fn sizing_output_atomic(&self) -> Result<u64> {
+        if self.request["swapType"] == "EXACT_INPUT" {
+            atomic(
+                self.sizing_preview
+                    .as_ref()
+                    .context("missing sizing preview")?
+                    .request["amount"]
+                    .as_str()
+                    .context("missing sizing output amount")?,
+            )
+        } else {
+            self.output_atomic()
+        }
+    }
 }
 #[derive(Clone)]
 pub struct Limits {
@@ -59,7 +91,7 @@ pub enum SwapStatus {
 struct BridgeMinimum(u64);
 impl std::fmt::Display for BridgeMinimum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "near_bridge_minimum_output_atomic:{}", self.0)
+        write!(f, "near_bridge_minimum_atomic:{}", self.0)
     }
 }
 impl std::error::Error for BridgeMinimum {}
@@ -136,6 +168,59 @@ impl NearClient {
         now: u64,
     ) -> Result<Quote> {
         validate_quote_on(self.address_network, request, response, limits, now)
+    }
+    pub(crate) fn validate_saved_quote(
+        &self,
+        quote: &Quote,
+        limits: &Limits,
+        now: u64,
+    ) -> Result<Quote> {
+        let mut checked =
+            self.validate_quote(quote.request.clone(), quote.response.clone(), limits, now)?;
+        ensure!(
+            checked.input == quote.input
+                && checked.deadline == quote.deadline
+                && checked.deposit == quote.deposit,
+            "saved quote facts mismatch"
+        );
+        if checked.request["swapType"] == "EXACT_INPUT" {
+            let preview = quote
+                .sizing_preview
+                .as_ref()
+                .context("missing sizing preview")?;
+            ensure!(
+                preview.request["dry"] == true
+                    && preview.request["swapType"] == "EXACT_OUTPUT"
+                    && preview.request["slippageTolerance"] == 0,
+                "invalid sizing preview policy"
+            );
+            // This unsigned historical preview supplies sizing provenance, not a
+            // second deadline for the accepted executable quote.
+            let preview_time = timestamp(&preview.request["deadline"])?.saturating_sub(1);
+            let sizing = validate_quote_structure(
+                self.address_network,
+                preview.request.clone(),
+                preview.response.clone(),
+                preview_time,
+            )?;
+            ensure!(
+                sizing.output_atomic()? <= limits.max_output,
+                super::error::FundingCondition::AmountLimit
+            );
+            let mut expected = sizing.request.clone();
+            expected["dry"] = json!(false);
+            expected["swapType"] = json!("EXACT_INPUT");
+            expected["amount"] = json!(sizing.input.to_string());
+            expected["slippageTolerance"] = checked.request["slippageTolerance"].clone();
+            ensure!(
+                expected == checked.request,
+                "executable quote differs from sizing preview"
+            );
+            checked.sizing_preview = Some(preview.clone());
+        } else {
+            ensure!(quote.sizing_preview.is_none(), "unexpected sizing preview");
+        }
+        Ok(checked)
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn request(
@@ -290,13 +375,59 @@ impl NearClient {
                     .headers(self.headers.clone())
                     .json(&request),
             )
-            .await?;
-        self.validate_quote(
+            .await
+            .inspect_err(|error| {
+                if let Some(minimum) = error.downcast_ref::<BridgeMinimum>() {
+                    tracing::debug!(
+                        swap_type = if request["swapType"] == "EXACT_INPUT" {
+                            "EXACT_INPUT"
+                        } else {
+                            "EXACT_OUTPUT"
+                        },
+                        minimum_atomic = minimum.0,
+                        minimum_unit = if request["swapType"] == "EXACT_INPUT" {
+                            "zatoshi"
+                        } else {
+                            "usdc_atomic"
+                        },
+                        "NEAR rejected the quote below its route minimum; no funds submitted"
+                    );
+                }
+            })?;
+        let quote = self.validate_quote(
             request,
             response,
             limits,
             now.saturating_add(started.elapsed().as_secs()),
-        )
+        )?;
+        log_quote(&quote, "acquisition");
+        Ok(quote)
+    }
+    /// Size ZEC through an unsigned output preview, then obtain a fixed-input
+    /// offer. Slippage is applied only to the executable offer.
+    pub async fn quote_exact_input(
+        &self,
+        mut request: Value,
+        limits: &Limits,
+        now: u64,
+        slippage: u32,
+    ) -> Result<Quote> {
+        let started = std::time::Instant::now();
+        request["dry"] = json!(true);
+        request["slippageTolerance"] = json!(0);
+        let preview = self.quote_with_minimum(request, limits, now).await?;
+        let mut request = preview.request.clone();
+        request["dry"] = json!(false);
+        request["swapType"] = json!("EXACT_INPUT");
+        request["amount"] = json!(preview.input.to_string());
+        request["slippageTolerance"] = json!(slippage);
+        let now = now.saturating_add(started.elapsed().as_secs());
+        let mut quote = self.quote(request, limits, now).await?;
+        quote.sizing_preview = Some(SizingPreview {
+            request: preview.request,
+            response: preview.response,
+        });
+        self.validate_saved_quote(&quote, limits, now)
     }
     /// Only rejected, unsigned quotes may adjust output; every accepted quote
     /// still passes the complete route, echo, input-cost and fee-cap validation.
@@ -348,7 +479,7 @@ impl NearClient {
                             "near_bridge_minimum_unstable: three quote attempts exhausted; no funds submitted"
                         );
                     }
-                    tracing::warn!(
+                    tracing::debug!(
                         previous_atomic = previous,
                         minimum_atomic = minimum.0,
                         "NEAR bridge minimum increased wallet funding target; source and fee caps still apply"
@@ -377,7 +508,7 @@ impl NearClient {
             "status deposit mismatch"
         );
         check_echo(&quote.request, &v["quoteResponse"]["quoteRequest"])?;
-        Ok(match v["status"].as_str() {
+        let status = match v["status"].as_str() {
             Some("PENDING_DEPOSIT") => SwapStatus::PendingDeposit,
             Some("KNOWN_DEPOSIT_TX") => SwapStatus::KnownDeposit,
             Some("INCOMPLETE_DEPOSIT") => SwapStatus::IncompleteDeposit,
@@ -386,7 +517,9 @@ impl NearClient {
             Some("REFUNDED") => SwapStatus::Refunded,
             Some("FAILED") => SwapStatus::Failed,
             _ => SwapStatus::Unknown,
-        })
+        };
+        log_status(&v, status);
+        Ok(status)
     }
 }
 pub fn validate_assets(v: &Value) -> Result<Assets> {
@@ -536,13 +669,23 @@ fn validate_quote_on(
     limits: &Limits,
     now: u64,
 ) -> Result<Quote> {
+    let quote = validate_quote_structure(network, request, response, now)?;
+    validate_quote_costs(&quote, limits)?;
+    Ok(quote)
+}
+fn validate_quote_structure(
+    network: AddressNetwork,
+    request: Value,
+    response: Value,
+    now: u64,
+) -> Result<Quote> {
     // Rebuild policy even when validating persisted data, not just fresh requests.
     let assets = Assets {
         origin: ZEC.into(),
         destination: USDC.into(),
     };
     let text = |k| request[k].as_str().context("missing quote binding");
-    let rebuilt = request_on(
+    let mut rebuilt = request_on(
         network,
         &assets,
         text("recipient")?,
@@ -557,25 +700,89 @@ fn validate_quote_on(
         timestamp(&request["deadline"])?,
         request["dry"].as_bool().context("missing dry flag")?,
     )?;
+    let exact_input = request["swapType"] == "EXACT_INPUT";
+    if exact_input {
+        rebuilt["swapType"] = json!("EXACT_INPUT");
+    }
     ensure!(rebuilt == request, "unsupported quote request");
     check_echo(&request, &response["quoteRequest"])?;
     let q = &response["quote"];
     let input = atomic(q["amountIn"].as_str().context("missing input")?)?;
-    let target = atomic(text("amount")?)?;
+    let amount = atomic(text("amount")?)?;
+    let target = atomic(q["amountOut"].as_str().context("missing output")?)?;
+    ensure!(target > 0, "zero quote output");
+    if exact_input {
+        ensure!(input == amount, "quote input mismatch");
+        let minimum = atomic(
+            q["minAmountOut"]
+                .as_str()
+                .context("missing minimum output")?,
+        )?;
+        let slippage = request["slippageTolerance"]
+            .as_u64()
+            .context("missing slippage")?;
+        let floor = u128::from(target) * u128::from(10000 - slippage) / 10000;
+        ensure!(
+            minimum > 0 && minimum <= target && u128::from(minimum) >= floor,
+            "quote minimum output exceeds slippage"
+        );
+    } else {
+        ensure!(target == amount, "quote output mismatch");
+    }
+    ensure!(input > 0, "zero quote input");
     ensure!(
-        target <= limits.max_output,
-        super::error::FundingCondition::AmountLimit
+        q.get("depositMemo").is_none_or(Value::is_null),
+        "deposit memo unsupported"
     );
+    let dry = request["dry"] == true;
+    let deadline = if dry {
+        timestamp(&request["deadline"])?
+    } else {
+        timestamp(&q["deadline"])?
+    };
+    // The provider can keep the deposit address active longer than requested.
+    ensure!(deadline > now, QuoteWindowExpired);
+    let deposit = if dry {
+        ensure!(
+            q.get("depositAddress").is_none_or(Value::is_null),
+            "dry quote allocated deposit"
+        );
+        None
+    } else {
+        let address = q["depositAddress"].as_str().context("missing deposit")?;
+        network.transparent(address)?;
+        Some(address.into())
+    };
+    Ok(Quote {
+        request,
+        response,
+        input,
+        deadline,
+        deposit,
+        sizing_preview: None,
+    })
+}
+
+/// Current spending policy belongs to the executable quote. Historical sizing
+/// previews retain their bindings and nominal amount, not a second price gate.
+fn validate_quote_costs(quote: &Quote, limits: &Limits) -> Result<()> {
+    let request = &quote.request;
+    let response = &quote.response;
+    let q = &response["quote"];
+    let input = quote.input;
+    let target = quote.output_atomic()?;
+    if request["swapType"] == "EXACT_OUTPUT" {
+        ensure!(
+            target <= limits.max_output,
+            super::error::FundingCondition::AmountLimit
+        );
+    }
     ensure!(
         input > 0
             && input
                 .checked_add(limits.max_fee)
                 .is_some_and(|n| n <= limits.max_input),
         super::error::FundingCondition::InputLimit
-    );
-    ensure!(
-        atomic(q["amountOut"].as_str().context("missing output")?)? == target,
-        "quote output mismatch"
     );
     // USD uses exact rational arithmetic (up to 18 fractional digits), never f64.
     let usd = q["amountInUsd"].as_str().context("missing USD input")?;
@@ -607,18 +814,6 @@ fn validate_quote_on(
         limits.max_fee_bps <= 10000 && left <= right,
         "quote overhead limit"
     );
-    ensure!(
-        q.get("depositMemo").is_none_or(Value::is_null),
-        "deposit memo unsupported"
-    );
-    let dry = request["dry"] == true;
-    let deadline = if dry {
-        timestamp(&request["deadline"])?
-    } else {
-        timestamp(&q["deadline"])?
-    };
-    // The provider can keep the deposit address active longer than requested.
-    ensure!(deadline > now, QuoteWindowExpired);
     if let Some(fees) = response["quoteRequest"]["appFees"].as_array() {
         let total: u64 = fees
             .iter()
@@ -629,24 +824,77 @@ fn validate_quote_on(
             "platform fee exceeds overhead cap"
         );
     }
-    let deposit = if dry {
-        ensure!(
-            q.get("depositAddress").is_none_or(Value::is_null),
-            "dry quote allocated deposit"
-        );
-        None
-    } else {
-        let address = q["depositAddress"].as_str().context("missing deposit")?;
-        network.transparent(address)?;
-        Some(address.into())
-    };
-    Ok(Quote {
-        request,
-        response,
-        input,
-        deadline,
-        deposit,
+    Ok(())
+}
+
+fn diagnostic_atomic(value: &Value) -> Option<u64> {
+    atomic(value.as_str()?).ok()
+}
+fn diagnostic_id(value: &Value) -> Option<String> {
+    uuid::Uuid::parse_str(value.as_str()?)
+        .ok()
+        .map(|id| id.to_string())
+}
+fn diagnostic_time(value: &Value) -> Option<String> {
+    chrono::DateTime::parse_from_rfc3339(value.as_str()?)
+        .ok()
+        .map(|time| time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+}
+fn refund_reason(value: &Value) -> Option<&'static str> {
+    Some(match value.as_str()? {
+        "AMOUNT_LESS_THAN_MIN_AMOUNT_OUT" => "AMOUNT_LESS_THAN_MIN_AMOUNT_OUT",
+        "AMOUNT_MORE_THAN_BALANCE" => "AMOUNT_MORE_THAN_BALANCE",
+        "INTENT_SUBMIT_FAILED" => "INTENT_SUBMIT_FAILED",
+        "PARTIAL_DEPOSIT" => "PARTIAL_DEPOSIT",
+        "CIRCUIT_BREAKER_BLOCKED" => "CIRCUIT_BREAKER_BLOCKED",
+        "FEE_ESTIMATION_FAILED" => "FEE_ESTIMATION_FAILED",
+        "NO_LIQUIDITY" => "NO_LIQUIDITY",
+        "AMOUNT_LESS_THAN_MIN_WITHDRAWABLE" => "AMOUNT_LESS_THAN_MIN_WITHDRAWABLE",
+        "INSUFFICIENT_BALANCE" => "INSUFFICIENT_BALANCE",
+        "REFUND_ADD_FAILED" => "REFUND_ADD_FAILED",
+        _ => "UNKNOWN",
     })
+}
+pub(crate) fn log_quote(quote: &Quote, stage: &'static str) {
+    let response = &quote.response;
+    let q = &response["quote"];
+    let age = timestamp(&response["timestamp"]).ok().map(|time| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|now| now.as_secs().saturating_sub(time))
+            .unwrap_or(0)
+    });
+    tracing::debug!(
+        stage,
+        correlation_id = ?diagnostic_id(&response["correlationId"]),
+        provider_timestamp = ?diagnostic_time(&response["timestamp"]),
+        requested_deadline = ?diagnostic_time(&quote.request["deadline"]),
+        provider_deadline = ?diagnostic_time(&q["deadline"]),
+        inactive_at = ?diagnostic_time(&q["timeWhenInactive"]),
+        refund_fee_zatoshi = ?diagnostic_atomic(&q["refundFee"]),
+        withdrawal_fee_usdc_atomic = ?diagnostic_atomic(&q["withdrawFee"]),
+        quote_age_seconds = ?age,
+        swap_type = if quote.request["swapType"] == "EXACT_INPUT" {"EXACT_INPUT"} else {"EXACT_OUTPUT"},
+        dry = quote.request["dry"] == true,
+        input_zatoshi = quote.input,
+        output_usdc_atomic = ?diagnostic_atomic(&q["amountOut"]),
+        minimum_output_usdc_atomic = ?diagnostic_atomic(&q["minAmountOut"]),
+        slippage_bps = ?quote.request["slippageTolerance"].as_u64(),
+        estimated_seconds = ?q["timeEstimate"].as_u64(),
+        "NEAR quote response validated"
+    );
+}
+fn log_status(response: &Value, status: SwapStatus) {
+    let details = &response["swapDetails"];
+    tracing::debug!(
+        near_status = ?status,
+        correlation_id = ?diagnostic_id(&response["quoteResponse"]["correlationId"]),
+        provider_updated_at = ?diagnostic_time(&response["updatedAt"]),
+        refund_reason = ?refund_reason(&details["refundReason"]),
+        deposited_zatoshi = ?diagnostic_atomic(&details["depositedAmount"]),
+        refunded_zatoshi = ?diagnostic_atomic(&details["refundedAmount"]),
+        "NEAR provider status and refund diagnostics validated"
+    );
 }
 
 #[cfg(test)]
@@ -953,6 +1201,325 @@ mod tests {
                 max_fee_bps: 500,
             },
         )
+    }
+
+    fn input_fixture() -> (Quote, Limits) {
+        let (mut request, mut response, mut limits) = fixture(true);
+        request["slippageTolerance"] = json!(0);
+        response["quoteRequest"] = request.clone();
+        limits.max_output = 5_000_000;
+        let preview = SizingPreview {
+            request: request.clone(),
+            response,
+        };
+        request["swapType"] = json!("EXACT_INPUT");
+        request["dry"] = json!(false);
+        request["amount"] = json!("100000");
+        request["slippageTolerance"] = json!(250);
+        let response = json!({"quoteRequest":request,"quote":{
+            "amountIn":"100000","amountOut":"5000000","minAmountOut":"4875000",
+            "amountInUsd":"5.25","depositAddress":"t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F",
+            "deadline":request["deadline"]}});
+        let mut quote = validate_quote(request, response, &limits, 2_000_000_000).unwrap();
+        quote.sizing_preview = Some(preview);
+        (quote, limits)
+    }
+
+    #[test]
+    fn input_quotes_preserve_sizing_and_apply_slippage_once() {
+        let client = NearClient::new(None).unwrap();
+        let (quote, limits) = input_fixture();
+        let checked = client
+            .validate_saved_quote(&quote, &limits, 2_000_000_000)
+            .unwrap();
+        assert_eq!(checked.output_atomic().unwrap(), 5_000_000);
+        assert_eq!(checked.sizing_output_atomic().unwrap(), 5_000_000);
+        assert_eq!(checked.input, 100000);
+        let mut better = quote.clone();
+        better.response["quote"]["amountOut"] = json!("6000000");
+        better.response["quote"]["minAmountOut"] = json!("5850000");
+        assert!(
+            client
+                .validate_saved_quote(&better, &limits, 2_000_000_000)
+                .is_ok(),
+            "more USDC for the same authorized ZEC does not exceed sizing authority"
+        );
+        for (pointer, value) in [
+            ("/response/quote/amountIn", json!("100001")),
+            ("/response/quote/minAmountOut", json!("4874999")),
+            ("/response/quote/minAmountOut", json!("5000001")),
+            ("/response/quote/minAmountOut", Value::Null),
+            ("/sizing_preview/request/amount", json!("6000000")),
+            ("/sizing_preview/request/slippageTolerance", json!(250)),
+        ] {
+            let mut bad = serde_json::to_value(&quote).unwrap();
+            *bad.pointer_mut(pointer).unwrap() = value;
+            let bad = serde_json::from_value(bad).unwrap();
+            assert!(
+                client
+                    .validate_saved_quote(&bad, &limits, 2_000_000_000)
+                    .is_err(),
+                "{pointer}"
+            );
+        }
+        let mut missing = quote;
+        missing.sizing_preview = None;
+        assert!(
+            client
+                .validate_saved_quote(&missing, &limits, 2_000_000_000)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn sizing_preview_does_not_extend_or_shorten_executable_authority() {
+        let client = NearClient::new(None).unwrap();
+        let (mut quote, limits) = input_fixture();
+        let extended = 2_000_002_000;
+        quote.response["quote"]["deadline"] = json!(
+            chrono::DateTime::from_timestamp(extended, 0)
+                .unwrap()
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        );
+        quote.deadline = extended as u64;
+        assert!(
+            client
+                .validate_saved_quote(&quote, &limits, 2_000_001_500)
+                .is_ok()
+        );
+        assert!(
+            client
+                .validate_saved_quote(&quote, &limits, extended as u64)
+                .is_err()
+        );
+        let (request, response, limits) = fixture(false);
+        let old = validate_quote(request, response, &limits, 2_000_000_000).unwrap();
+        let value = serde_json::to_value(&old).unwrap();
+        assert!(value.get("sizing_preview").is_none());
+        let recovered: Quote = serde_json::from_value(value).unwrap();
+        let checked = client
+            .validate_saved_quote(&recovered, &limits, 2_000_000_000)
+            .unwrap();
+        assert_eq!(checked.request["slippageTolerance"], 100);
+        assert_eq!(checked.request["swapType"], "EXACT_OUTPUT");
+    }
+
+    #[test]
+    fn historical_sizing_cost_does_not_override_current_executable_policy() {
+        let (mut quote, mut limits) = input_fixture();
+        quote.sizing_preview.as_mut().unwrap().response["quoteRequest"]["appFees"] = json!([{
+            "recipient":"5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+            "fee":500
+        }]);
+        // The preview cost 5.25 USD for 5 USDC under the former 5% policy.
+        // The same fixed ZEC now returns 6 USDC and meets the current 3% policy.
+        quote.response["quote"]["amountOut"] = json!("6000000");
+        quote.response["quote"]["minAmountOut"] = json!("5850000");
+        limits.max_fee_bps = 300;
+        let client = NearClient::new(None).unwrap();
+        assert!(
+            client
+                .validate_saved_quote(&quote, &limits, 2_000_000_000)
+                .is_ok()
+        );
+        let mut bad = quote.clone();
+        bad.response["quote"]["amountInUsd"] = json!("6.1800001");
+        assert!(
+            client
+                .validate_saved_quote(&bad, &limits, 2_000_000_000)
+                .is_err()
+        );
+        let mut bad = quote;
+        bad.response["quoteRequest"]["appFees"] = json!([{
+            "recipient":"5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+            "fee":301
+        }]);
+        assert!(
+            client
+                .validate_saved_quote(&bad, &limits, 2_000_000_000)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn optional_diagnostics_are_typed_and_cannot_change_quote_authority() {
+        let (mut quote, limits) = input_fixture();
+        quote.response["correlationId"] = json!("PRIVATE_PROVIDER_TEXT");
+        quote.response["timestamp"] = json!("PRIVATE_PROVIDER_TEXT");
+        quote.response["quote"]["timeEstimate"] = json!("PRIVATE_PROVIDER_TEXT");
+        assert!(
+            NearClient::new(None)
+                .unwrap()
+                .validate_saved_quote(&quote, &limits, 2_000_000_000)
+                .is_ok()
+        );
+        assert!(diagnostic_id(&quote.response["correlationId"]).is_none());
+        assert!(diagnostic_time(&quote.response["timestamp"]).is_none());
+        assert!(diagnostic_atomic(&json!("PRIVATE_PROVIDER_TEXT")).is_none());
+        assert_eq!(
+            refund_reason(&json!("PRIVATE_PROVIDER_TEXT")),
+            Some("UNKNOWN")
+        );
+        assert_eq!(refund_reason(&json!("NO_LIQUIDITY")), Some("NO_LIQUIDITY"));
+        assert_eq!(refund_reason(&Value::Null), None);
+    }
+
+    #[test]
+    fn provider_diagnostics_log_safe_refund_codes_without_provider_prose() {
+        if crate::test_log_capture::run_in_child(
+            "rotation::near::tests::provider_diagnostics_log_safe_refund_codes_without_provider_prose",
+        ) {
+            return;
+        }
+        let logs = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(logs.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let (mut quote, _) = input_fixture();
+            quote.response["correlationId"] = json!("PRIVATE_PROVIDER_TEXT");
+            quote.response["timestamp"] = json!("PRIVATE_PROVIDER_TEXT");
+            quote.response["quote"]["timeEstimate"] = json!("PRIVATE_PROVIDER_TEXT");
+            log_quote(&quote, "acquisition");
+            let mut response = json!({"updatedAt":"PRIVATE_PROVIDER_TEXT","swapDetails":{
+                "refundReason":"NO_LIQUIDITY","refundedAmount":"321000","depositedAmount":"321000",
+                "refundAddress":"PRIVATE_PROVIDER_ADDRESS","refundTx":"PRIVATE_PROVIDER_TEXT"}});
+            log_status(&response, SwapStatus::Refunded);
+            response["swapDetails"]["refundReason"] = json!("PRIVATE_PROVIDER_TEXT");
+            log_status(&response, SwapStatus::Refunded);
+        });
+        let text = std::fs::read_to_string(logs.path()).unwrap();
+        assert!(text.contains("NO_LIQUIDITY"));
+        assert!(text.contains("UNKNOWN"));
+        assert!(text.contains("321000"));
+        assert!(!text.contains("PRIVATE_PROVIDER"));
+        assert!(!text.contains("t1XVX"));
+        assert!(!text.contains(" WARN ") && !text.contains(" ERROR "));
+    }
+
+    #[tokio::test]
+    async fn input_quote_sizes_each_offer_from_an_unbuffered_provider_preview() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let requests = seen.clone();
+        let app = axum::Router::new().route(
+            "/v0/quote",
+            axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
+                requests.lock().unwrap().push(request.clone());
+                async move {
+                    let mut response = json!({"quoteRequest":request,"quote":{
+                        "amountIn":"321000","amountOut":request["amount"],"amountInUsd":"5.0"}});
+                    if request["dry"] == false {
+                        response["quote"]["amountOut"] = json!("4990000");
+                        response["quote"]["minAmountOut"] = json!("4865250");
+                        response["quote"]["depositAddress"] =
+                            json!("t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F");
+                        response["quote"]["deadline"] = request["deadline"].clone();
+                    }
+                    axum::Json(response)
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client =
+            NearClient::test_at(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (request, _, mut limits) = fixture(false);
+        limits.max_input = 400000;
+        let quote = client
+            .quote_exact_input(request, &limits, 2_000_000_000, 250)
+            .await
+            .unwrap();
+        assert_eq!(quote.input, 321000);
+        assert_eq!(quote.output_atomic().unwrap(), 4990000);
+        assert_eq!(quote.sizing_output_atomic().unwrap(), 5000000);
+        let requests = seen.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0]["swapType"], "EXACT_OUTPUT");
+        assert_eq!(requests[0]["dry"], true);
+        assert_eq!(requests[0]["amount"], "5000000");
+        assert_eq!(requests[0]["slippageTolerance"], 0);
+        assert_eq!(requests[1]["swapType"], "EXACT_INPUT");
+        assert_eq!(requests[1]["dry"], false);
+        assert_eq!(requests[1]["amount"], "321000");
+        assert_eq!(requests[1]["slippageTolerance"], 250);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn input_minimum_rejection_never_reinterprets_zatoshi_as_a_usdc_target() {
+        if crate::test_log_capture::run_in_child(
+            "rotation::near::tests::input_minimum_rejection_never_reinterprets_zatoshi_as_a_usdc_target",
+        ) {
+            return;
+        }
+        use tracing::instrument::WithSubscriber;
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let requests = seen.clone();
+        let app = axum::Router::new().route(
+            "/v0/quote",
+            axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
+                requests.lock().unwrap().push(request.clone());
+                async move {
+                    if request["swapType"] == "EXACT_INPUT" {
+                        return (
+                            axum::http::StatusCode::BAD_REQUEST,
+                            axum::Json(json!({
+                                "message":"Amount is too low for bridge, try at least 400000",
+                                "detail":"PRIVATE_PROVIDER_TEXT"
+                            })),
+                        );
+                    }
+                    (
+                        axum::http::StatusCode::OK,
+                        axum::Json(json!({"quoteRequest":request,"quote":{
+                            "amountIn":"321000","amountOut":request["amount"],"amountInUsd":"5.0"
+                        }})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client =
+            NearClient::test_at(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let logs = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(logs.reopen().unwrap())
+            .finish();
+        let (request, _, mut limits) = fixture(false);
+        limits.max_input = 500000;
+        let error = client
+            .quote_exact_input(request, &limits, 2_000_000_000, 250)
+            .with_subscriber(subscriber)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.downcast_ref::<BridgeMinimum>().unwrap().0, 400000);
+        assert!(!error.to_string().contains("output"));
+        let requests = seen.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            2,
+            "a rejected input offer cannot retry with a new USDC amount or allocate another deposit"
+        );
+        assert_eq!(requests[0]["dry"], true);
+        assert_eq!(requests[0]["amount"], "5000000");
+        assert_eq!(requests[1]["amount"], "321000");
+        assert_eq!(requests[1]["swapType"], "EXACT_INPUT");
+        let text = std::fs::read_to_string(logs.path()).unwrap();
+        assert!(
+            text.contains("EXACT_INPUT") && text.contains("zatoshi") && text.contains("400000")
+        );
+        assert!(text.contains("no funds submitted"));
+        assert!(!text.contains("PRIVATE_PROVIDER_TEXT"));
+        assert!(!text.contains(" WARN ") && !text.contains(" ERROR "));
+        server.abort();
     }
 
     #[test]

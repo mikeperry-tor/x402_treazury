@@ -498,7 +498,7 @@ and targets above the cap are valid; neither arrangement authorizes extra fundin
 
 `reserves.small` is required. `reserves.large` is optional and must have a target
 at least as large as small; equal targets are valid. Each slot requires a positive
-exact micro-USDC target. Its optional output ceiling must be at least its target;
+exact micro-USDC target. Its optional nominal sizing ceiling must be at least its target;
 omission permits no increase above target. New groups fund only the enabled slots,
 with no separate active allocation. The first journaled payment promotes its READY
 payer to ACTIVE and opens that slot for refill. Vacancies allocate small-first,
@@ -507,6 +507,17 @@ Consumed reserve wallets become active, previous active wallets become retained,
 and retained wallets remain usable without automatic top-ups or slot reassignment.
 First positive external credit permanently consumes the initial funding claim,
 including partial credit. Disabling a slot retains accepted source ownership.
+
+Each new operation sizes its ZEC principal from a dry `EXACT_OUTPUT` preview with
+zero slippage. Structured route-minimum retries can raise the nominal USDC target
+only within the slot's `max_funding_amount_usdc`; that ceiling does not reject
+beneficial extra execution output. The executable `EXACT_INPUT` quote fixes that
+NEAR-priced ZEC principal and applies `funding.slippage_bps` (default 250 basis
+points, range 0–1000) once to its expected output. Its `minAmountOut` is the execution floor,
+not the route's minimum supported size. Existing ZEC principal/transaction-fee
+and conversion-overhead safeguards still apply. No external exchange-rate oracle
+or mutable balance tracking is introduced. Accepted older `EXACT_OUTPUT` work
+retains its original terms; configuration changes govern new quotes.
 
 `max_retirement_remainder_usdc` is a finite nonnegative micro-USDC amount, default
 `"0.001"` (1,000 atomic units) independently per managed group. Explicit `"0"`

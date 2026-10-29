@@ -11,6 +11,7 @@ use super::{
 use anyhow::{Context, Result, ensure};
 use std::future::Future;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 
 pub(crate) mod scheduler;
 use scheduler::Observation;
@@ -601,12 +602,7 @@ impl FundingBackend for Backend {
             .context("funding output exceeds route amount range")?;
         let checked = self
             .near
-            .validate_quote(
-                quote.request.clone(),
-                quote.response.clone(),
-                &limits,
-                now()?,
-            )
+            .validate_saved_quote(quote, &limits, now()?)
             .map_err(|error| {
                 // Quote expiry here precedes the treasury command and input acceptance.
                 if error.is::<super::near::QuoteWindowExpired>() {
@@ -620,6 +616,8 @@ impl FundingBackend for Backend {
                 && checked.request["confidentiality"] == self.funding.confidentiality,
             "persisted funding binding mismatch"
         );
+        tracing::debug_span!("funding_quote", wallet=%job.pool_name, job_id=%job.id, operation=%job.operation_id)
+            .in_scope(|| super::near::log_quote(&checked, "source_preparation"));
         self.treasury
             .prepare_funding(
                 super::transaction::PrepareRequest {
@@ -675,6 +673,8 @@ impl FundingBackend for Backend {
                 .is_some_and(|n| n <= limits.max_input),
             "prepared source exceeds current input cap"
         );
+        tracing::debug_span!("funding_quote", wallet=%job.pool_name, job_id=%job.id, operation=%job.operation_id)
+            .in_scope(|| super::near::log_quote(&quote, "source_submission_requested"));
         self.treasury
             .submit(job.operation_id.clone(), false)
             .await?;
@@ -761,14 +761,23 @@ impl FundingObservations for Observations {
             &request.refund,
             &request.target,
             &request.confidentiality,
-            request.slippage_bps,
+            0,
             instant
                 .checked_add(request.deadline_seconds)
                 .context("deadline overflow")?,
-            false,
+            true,
         )?;
         self.near
-            .quote_with_minimum(quote_request, &request.limits, instant)
+            .quote_exact_input(
+                quote_request,
+                &request.limits,
+                instant,
+                request.slippage_bps,
+            )
+            .instrument(
+                tracing::debug_span!("funding_quote", wallet=%request.job.pool_name,
+                job_id=%request.job.id, operation=%request.job.operation_id),
+            )
             .await
             .context(NearStage("quote"))
     }

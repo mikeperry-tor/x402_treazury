@@ -88,6 +88,7 @@ fn quote(job: &crate::rotation::store::funding::FundingJob, now: u64) -> Quote {
     .unwrap();
     let response = json!({"quoteRequest":request,"quote":{"amountIn":"100000","amountOut":job.target,"amountInUsd":"5","depositAddress":"t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F","deadline":request["deadline"]}});
     Quote {
+        sizing_preview: None,
         request,
         response,
         input: 100_000,

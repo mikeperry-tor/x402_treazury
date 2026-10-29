@@ -118,6 +118,7 @@ impl FundingBackend for Funding {
             .call(move |s| s.select_quote_terms(&id, &operation, &target, &target))
             .await?;
         Ok(Quote {
+            sizing_preview: None,
             request: json!({"recipient":job.recipient,"target":job.target,"amount":job.target,"pool":job.pool_name}),
             response: json!({}),
             input: 80,

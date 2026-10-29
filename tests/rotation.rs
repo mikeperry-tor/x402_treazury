@@ -1012,6 +1012,7 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
     let job = s.funding_jobs().unwrap()[0].clone();
     let quote = |target: &str| {
         serde_json::to_vec(&Quote {
+            sizing_preview: None,
             request: serde_json::json!({"amount":target,"recipient":job.recipient}),
             response: serde_json::json!({}),
             input: 100000,

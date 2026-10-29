@@ -366,6 +366,7 @@ async fn production_credit_uses_shared_failure_schedule_without_recounting_cache
         .unwrap();
     let job = state.funding_jobs().unwrap().remove(0);
     let quote = Quote {
+        sizing_preview: None,
         request: json!({"amount":job.target,"recipient":job.recipient}),
         response: json!({}),
         input: 50,

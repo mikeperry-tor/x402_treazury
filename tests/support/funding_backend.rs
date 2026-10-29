@@ -59,6 +59,7 @@ async fn concrete_backend_validates_persisted_bindings_before_command_dispatch()
     .unwrap();
     let response = json!({"quoteRequest":request,"quote":{"amountIn":"100000","amountOut":job.target,"amountInUsd":"5.25","depositAddress":"t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F","deadline":request["deadline"]}});
     let quote = Quote {
+        sizing_preview: None,
         request,
         response,
         input: 100000,
@@ -735,7 +736,14 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
         let calls = calls.clone();
         move |Json(request): Json<serde_json::Value>| { let calls = calls.clone(); async move {
             calls.fetch_add(1, Ordering::SeqCst);
-            Json(json!({"quoteRequest":request,"quote":{"amountIn":"100000","amountOut":request["amount"],"amountInUsd":"5.25","depositAddress":"t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F","deadline":request["deadline"]}}))
+            let mut response = json!({"quoteRequest":request,"quote":{"amountIn":"100000","amountOut":"5000000","minAmountOut":"4875000","amountInUsd":"5.25"}});
+            if request["dry"] == false {
+                assert_eq!(request["swapType"], "EXACT_INPUT");
+                assert_eq!(request["amount"], "100000");
+                response["quote"]["depositAddress"] = json!("t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F");
+                response["quote"]["deadline"] = request["deadline"].clone();
+            }
+            Json(response)
         }}
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -797,11 +805,16 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
     .unwrap()
     .unwrap();
     assert_eq!(quote.request["recipient"], expected.recipient);
-    assert_eq!(quote.request["amount"], expected.target);
+    assert_eq!(quote.request["amount"], "100000");
+    assert_eq!(
+        quote.sizing_output_atomic().unwrap().to_string(),
+        expected.target
+    );
+    assert_eq!(quote.output_atomic().unwrap().to_string(), expected.target);
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        2,
-        "one asset read and one quote while source backend remains owned"
+        3,
+        "one asset read, dry sizing preview and executable quote while source backend remains owned"
     );
     let (id, operation) = (expected.id.clone(), expected.operation_id.clone());
     let encoded = serde_json::to_vec(&quote).unwrap();
@@ -814,7 +827,7 @@ async fn quote_http_is_independent_only_after_the_owned_refund_prerequisite() {
         observations.quote(request).await.is_err(),
         "completed prerequisite cannot replay quote acquisition after acceptance"
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
     let status = store.call(|s| s.status()).await.unwrap();
     assert!(status.treasury_operations.is_empty());
     assert!(!status.outgoing_pending);

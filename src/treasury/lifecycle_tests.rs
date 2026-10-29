@@ -50,6 +50,7 @@ async fn save_quotes(store: &StoreHandle, jobs: Vec<FundingJob>, deadline: u64) 
                 // Bridge evidence is supplied by this fixture; production quote validation
                 // remains independently covered. The owner checks this exact binding.
                 let quote = Quote {
+                    sizing_preview: None,
                     request: serde_json::json!({"amount":job.target,"recipient":job.recipient}),
                     response: serde_json::json!({}),
                     input: 50_000,

@@ -712,7 +712,10 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                                         job_id=%request.id,operation=%request.operation_id,
                                         "Checking an earlier funding request that still awaits a final provider outcome; possible late credit keeps wallet retirement deferred");
                                 }
-                                reader.status(quote).await
+                                reader.status(quote)
+                                    .instrument(tracing::debug_span!("funding_status", wallet=%request.pool_name,
+                                        job_id=%request.id, operation=%request.operation_id))
+                                    .await
                             }
                             .await;
                             Completed::Status { request, result }
@@ -960,10 +963,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 self.store
                     .call(move |s| {
                         ensure!(quote.deposit.is_some(), "cannot fund from dry quote");
-                        let target = quote.request["amount"]
-                            .as_str()
-                            .context("funding quote missing output target")?
-                            .to_owned();
+                        let target = quote.output_atomic()?.to_string();
                         s.save_funding_quote_for_operation(
                             &id,
                             &operation,

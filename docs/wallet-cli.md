@@ -595,7 +595,12 @@ original signed transaction. Unpublished calculations recover through the existi
 exclusive SDK reconstruction and guarded recovery path; no manual abandonment
 is required for an ordinary pre-journal crash.
 
-`rotation/near.rs` supports public and confidential foreign-chain EXACT_OUTPUT swaps.
+`rotation/near.rs` sizes each new operation with a zero-slippage dry `EXACT_OUTPUT`
+preview for its nominal USDC target, then requests an executable `EXACT_INPUT`
+quote with that NEAR-priced ZEC principal fixed. `funding.slippage_bps` (default
+250, range 0–1000) applies once to the live quote's expected output. Its
+`minAmountOut` is an execution floor, distinct from a route's minimum supported
+swap size. This does not guarantee smaller swaps, faster execution or no refunds.
 The demo configurations explicitly select `funding.confidentiality = "public"`:
 no NEAR key, account signup or application commission is needed. This keeps the
 Zcash treasury shielded but uses public NEAR settlement. `basic` and `advanced`
@@ -618,7 +623,11 @@ execution requires an initialized treasury, chain endpoint settings and delibera
 authenticated confidential execution remains unqualified.
 
 Quote validation checks assets, request bindings, mainnet transparent deposits,
-exact output and integer cost caps. Timestamp normalization is accepted only for
+fixed input, output floor and integer cost caps. The sizing preview can be retained
+immutably within the encrypted quote; it adds no database fields or balance
+tracking. Preview expiry does not invalidate an accepted executable quote. Old
+accepted `EXACT_OUTPUT` operations keep their original request, response, slippage
+and bytes across restart. Timestamp normalization is accepted only for
 the same instant. An extended provider deposit deadline never extends the local
 send deadline. The echoed platform fee is allowed only for the captured 1Click
 collector, with its rate and USD overhead bounded by `max_conversion_overhead_percent`; requests never
@@ -697,11 +706,13 @@ and key are not interchangeable backups.
 Managed groups persist exact enabled small/large reserve claims. Each new group
 starts with one wallet per enabled slot; the first payment promotes its payer and
 allows that slot to refill. Reserve targets are explicit funding preferences. An unsigned NEAR
-quote can raise accepted output to a bridge minimum only within that slot's explicit
+preview can raise its nominal sizing target to a bridge minimum only within that slot's explicit
 maximum (omission permits no increase); original allocation target and identity stay
 immutable. Source-input and fee safeguards still apply, with actual spendable treasury
-funds limiting ordinary funding. Each quote negotiation allows at most three requests;
-other failures do not authorize amount changes or payment retries.
+funds limiting ordinary funding. Each dry sizing negotiation allows at most three
+requests before requesting the executable fixed-input quote;
+other failures do not authorize amount changes or payment retries. Beneficial
+extra execution output is not capped by the nominal USDC sizing maximum.
 
 A READY payment atomically retains the prior active, activates its exact payer and
 vacates only the consumed claim generation. Selection allocates nothing. The independent

@@ -138,6 +138,7 @@ impl FundingBackend for Fake {
             .await?;
         Ok((
             Quote {
+                sizing_preview: None,
                 request: serde_json::json!({"amount":self.minimum.as_ref().unwrap_or(&job.target),"recipient":job.recipient}),
                 response: serde_json::json!({}),
                 input: 50,

@@ -94,6 +94,7 @@ impl FundingBackend for Source {
 }
 fn quote(job: &FundingJob) -> Quote {
     Quote {
+        sizing_preview: None,
         request: serde_json::json!({"amount":job.target,"recipient":job.recipient,"fixture_job":job.id}),
         response: serde_json::json!({}),
         input: 50,

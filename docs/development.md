@@ -500,7 +500,11 @@ its operation correlation. Observation unavailable/recovered transitions use INF
 and existing job records; repeated failures remain DEBUG. Terminal provider
 outcomes log only after persistence. `FAILED` does not prove no funds were
 received, and `REFUNDED` is a provider claim, not an SDK-observed refund receipt.
-Do not log unparsed refund amounts or remote prose. These diagnostics add no
+Quote diagnostics at DEBUG may include validated quote IDs, swap mode, amounts,
+execution floor, slippage, estimated completion time and quote age. Status refund
+reasons use a fixed whitelist. Neither estimated time nor a quoted output floor
+establishes faster execution, a smaller route minimum or refund-free settlement.
+Do not log unparsed refund amounts, addresses or remote prose. These diagnostics add no
 persisted state, polling work or financial authority.
 
 Waiting for existing ZEC to become spendable and preparation deferred by unresolved

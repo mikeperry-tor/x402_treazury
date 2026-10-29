@@ -46,6 +46,7 @@ migration rules are in [managed configuration](configuration.md).
 ```toml
 [funding]
 auto_fund = true
+slippage_bps = 250
 
 [wallets.research]
 mode = "zcash_rotation"
@@ -66,7 +67,7 @@ funding_amount_usdc = "10.00"
 | --- | --- |
 | `reserves.small.funding_amount_usdc` | Required positive target for the small reserve. |
 | `reserves.large.funding_amount_usdc` | Optional large target, at least as large as small. |
-| Slot `max_funding_amount_usdc` | Maximum accepted output after a bridge-minimum increase; omission permits no increase above that slot's target. |
+| Slot `max_funding_amount_usdc` | Maximum nominal sizing target after a bridge-minimum increase; omission permits no increase above that slot's target. Beneficial extra execution output is not capped. |
 | `max_api_payment_usdc` | Required explicit cap for each payment by every group wallet, independently of reserve sizes. |
 | `max_retirement_remainder_usdc` | Nonnegative automatic-retirement tolerance, default $0.001 per group; it never authorizes transfers or replacement allocation. |
 | `max_conversion_overhead_percent` | Integer percentage (0–100) by which quoted USD input valuation may exceed output; the Zcash transaction fee has its own safeguard. |
@@ -241,8 +242,16 @@ large reserve has its own target. Each allocation commits independently. A faile
 large fill cannot roll back successful small funding. Destination credit makes a
 wallet usable independently of source accounting and provider completion.
 
-The funding adapter validates an exact-output quote and accepts a bridge-minimum
-increase only within that slot's explicit `max_funding_amount_usdc`. Original
+For each operation, the funding adapter obtains a dry `EXACT_OUTPUT` sizing
+preview with zero slippage for the USDC target. Its existing structured route-minimum
+retry may increase the nominal target only within that slot's explicit
+`max_funding_amount_usdc`. The preview's NEAR-priced ZEC principal then becomes
+the fixed input of the executable `EXACT_INPUT` quote. Configured slippage
+(`funding.slippage_bps`, default 250 basis points, range 0–1000) applies once to
+that live quote's expected output.
+`minAmountOut` is its execution floor, not the route's minimum supported swap
+size. There is no fixed ZEC conversion or external rate oracle, and this mode
+does not promise smaller swaps, faster execution or absence of refunds. Original
 allocation targets remain immutable, accepted quote terms remain bound to their
 operation, and configuration changes govern new work. Actual spendable treasury
 funds, outstanding liabilities, per-operation safeguards and explicit qualification
@@ -455,6 +464,11 @@ qualified without partner authentication. Confidential settings exist but funded
 authenticated confidential execution remains unqualified; there is no fallback
 from confidential to public mode. Current requests do not add application
 commissions. Do not infer a commercial partner agreement from an API key.
+An optional immutable sizing preview travels inside the encrypted quote as
+accepted-input provenance, without new database fields or mutable balance
+tracking. An accepted executable quote uses its own deadline; expiry of its dry
+preview cannot invalidate it. Existing accepted `EXACT_OUTPUT` operations retain
+their original request, response, slippage and signed bytes across restart.
 
 The SDK selects available confirmed inputs and calculates standard fees. The
 application checks exact output/fee and current operation/run permission, then

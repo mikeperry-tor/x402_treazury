@@ -40,9 +40,18 @@ struct DestinationChain {
     credits: BTreeMap<String, u64>,
 }
 async fn quote(State(f): State<Bridge>, Json(request): Json<Value>) -> Json<Value> {
+    if request["dry"] == true {
+        assert_eq!(request["swapType"], "EXACT_OUTPUT");
+        assert_eq!(request["slippageTolerance"], 0);
+        return Json(
+            json!({"quoteRequest":request,"quote":{"amountIn":"50000","amountOut":request["amount"],"amountInUsd":"5"}}),
+        );
+    }
+    assert_eq!(request["swapType"], "EXACT_INPUT");
+    assert_eq!(request["amount"], "50000");
     let index = f.quote_count.fetch_add(1, Ordering::SeqCst);
     let deposit = &f.deposits[index];
-    let response = json!({"quoteRequest":request,"quote":{"amountIn":"50000","amountOut":request["amount"],"amountInUsd":"5","depositAddress":deposit,"deadline":request["deadline"]}});
+    let response = json!({"quoteRequest":request,"quote":{"amountIn":"50000","amountOut":"5000000","minAmountOut":"4875000","amountInUsd":"5","depositAddress":deposit,"deadline":request["deadline"]}});
     assert!(
         f.quotes
             .lock()
@@ -557,6 +566,7 @@ async fn production_preparation_scans_new_deposit_without_a_readiness_balance_ga
         max_network_fee: 30_000,
     };
     let quote = Quote {
+        sizing_preview: None,
         request: json!({}),
         response: json!({}),
         input: 50_000,

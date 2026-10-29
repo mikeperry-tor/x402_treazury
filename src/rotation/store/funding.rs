@@ -3,6 +3,27 @@
 pub(super) const RECOVERY_COUNT_SQL: &str = "SELECT COUNT(*) FROM funding_recovery r WHERE job_id=?1 AND NOT EXISTS(SELECT 1 FROM funding_quote_refreshes q WHERE q.operation_id=r.operation_id)";
 
 use super::*;
+
+/// Keep the USDC result separate from the nominal sizing authority. Legacy
+/// output quotes (including pre-mode journals) use the same amount for both.
+fn quote_amounts(value: &serde_json::Value) -> Result<(String, String)> {
+    match value["request"]["swapType"].as_str() {
+        Some("EXACT_INPUT") => {
+            let quote: crate::rotation::near::Quote = serde_json::from_value(value.clone())?;
+            Ok((
+                quote.output_atomic()?.to_string(),
+                quote.sizing_output_atomic()?.to_string(),
+            ))
+        }
+        None | Some("EXACT_OUTPUT") => {
+            let output = value["request"]["amount"]
+                .as_str()
+                .context("accepted output missing")?;
+            Ok((output.to_owned(), output.to_owned()))
+        }
+        _ => anyhow::bail!("unsupported accepted quote mode"),
+    }
+}
 // The current schema journals acceptance before any SDK calculation. A missing
 // accepted intent AND outgoing journal proves that this code never calculated.
 pub(crate) fn safely_unprepared(facts: &FundingFacts) -> bool {
@@ -417,13 +438,11 @@ impl Store {
         operation: &str,
     ) -> Result<bool> {
         let claim = self.current_funding_claim(job)?;
-        let output: String = self.db.query_row(
-            "SELECT accepted_output FROM funding_progress WHERE job_id=?1 AND operation_id=?2",
-            params![job, operation],
-            |r| r.get(0),
-        )?;
-        let output = amount(&output)?;
-        Ok(output >= claim.target && output <= claim.maximum_output)
+        let quote: serde_json::Value =
+            serde_json::from_slice(&self.funding_quote_for_operation(job, operation)?)?;
+        let (_, sizing) = quote_amounts(&quote)?;
+        let sizing = amount(&sizing)?;
+        Ok(sizing >= claim.target && sizing <= claim.maximum_output)
     }
 
     /// Validate the current process policy at the serialized source owner. Exact
@@ -1346,7 +1365,10 @@ impl Store {
         target: &str,
     ) -> Result<()> {
         let parsed: crate::rotation::near::Quote = serde_json::from_slice(quote)?;
-        ensure!(parsed.request["amount"] == target, "quote target mismatch");
+        ensure!(
+            parsed.output_atomic()?.to_string() == target,
+            "quote target mismatch"
+        );
         self.save_quote(id, quote, Some(target), None)
     }
     pub fn save_funding_quote_for_operation(
@@ -1357,7 +1379,10 @@ impl Store {
         target: &str,
     ) -> Result<()> {
         let parsed: crate::rotation::near::Quote = serde_json::from_slice(quote)?;
-        ensure!(parsed.request["amount"] == target, "quote target mismatch");
+        ensure!(
+            parsed.output_atomic()?.to_string() == target,
+            "quote target mismatch"
+        );
         self.save_quote(id, quote, Some(target), Some(operation))
     }
     fn save_quote(
@@ -1394,14 +1419,12 @@ impl Store {
             );
             let parsed: serde_json::Value =
                 serde_json::from_slice(quote).context("invalid accepted funding quote")?;
-            let output = parsed["request"]["amount"]
-                .as_str()
-                .context("accepted output missing")?;
+            let (output, sizing) = quote_amounts(&parsed)?;
             let recipient = parsed["request"]["recipient"]
                 .as_str()
                 .context("accepted recipient missing")?;
             ensure!(
-                amount(output)? > U256::ZERO && target.is_none_or(|target| target == output),
+                amount(&output)? > U256::ZERO && target.is_none_or(|target| target == output),
                 "quote target mismatch"
             );
             let (_wallet, address, enabled, ready, pending): (String,String,bool,bool,bool) = tx.query_row(
@@ -1419,7 +1442,7 @@ impl Store {
             let claim = super::capacity::current_funding_claim(&tx, id)?
                 .context("funding claim disabled or changed")?;
             ensure!(
-                amount(output)? >= claim.target && amount(output)? <= claim.maximum_output,
+                amount(&sizing)? >= claim.target && amount(&sizing)? <= claim.maximum_output,
                 "funding quote outside current terms"
             );
             let (selected, ceiling): (Option<String>, Option<String>) = tx.query_row(
@@ -1431,7 +1454,7 @@ impl Store {
                 let selected = selected.context("funding quote terms missing")?;
                 let ceiling = ceiling.context("funding quote ceiling missing")?;
                 ensure!(
-                    amount(output)? >= amount(&selected)? && amount(output)? <= amount(&ceiling)?,
+                    amount(&sizing)? >= amount(&selected)? && amount(&sizing)? <= amount(&ceiling)?,
                     "funding quote outside selected terms"
                 );
             }
@@ -1856,6 +1879,122 @@ mod completion_tests {
         .unwrap();
         let job = store.funding_jobs().unwrap().remove(0);
         (dir, store, job)
+    }
+
+    #[test]
+    fn input_quote_journals_usdc_and_preserves_nominal_authority_across_restart() {
+        for output in ["9", "12"] {
+            let (dir, mut store, job) = fixture();
+            store
+                .select_quote_terms(&job.id, &job.operation_id, "10", "10")
+                .unwrap();
+            let mut quote = crate::rotation::near::Quote {
+                request: serde_json::json!({"swapType":"EXACT_INPUT","amount":"50000","recipient":job.recipient}),
+                response: serde_json::json!({"quote":{"amountOut":output}}),
+                input: 50_000,
+                deadline: 1000,
+                deposit: Some("fixture-deposit".into()),
+                sizing_preview: Some(crate::rotation::near::SizingPreview {
+                    request: serde_json::json!({"swapType":"EXACT_OUTPUT","amount":"10","dry":true,"slippageTolerance":0}),
+                    response: serde_json::json!({"quote":{"amountIn":"50000","amountOut":"10"}}),
+                }),
+            };
+            let invalid = |s: &mut Store, quote: &crate::rotation::near::Quote, target: &str| {
+                assert!(
+                    s.save_funding_quote_for_operation(
+                        &job.id,
+                        &job.operation_id,
+                        &serde_json::to_vec(quote).unwrap(),
+                        target
+                    )
+                    .is_err()
+                );
+                assert_eq!(
+                    s.funding_job(&job.id).unwrap().unwrap().phase,
+                    FundingPhase::Allocated
+                );
+                assert!(s.operation(&job.operation_id).is_err());
+            };
+            invalid(&mut store, &quote, "50000");
+            quote.sizing_preview.as_mut().unwrap().request["amount"] = serde_json::json!("11");
+            invalid(&mut store, &quote, output);
+            quote.sizing_preview.as_mut().unwrap().request["amount"] = serde_json::json!("10");
+            let encoded = serde_json::to_vec(&quote).unwrap();
+            store
+                .save_funding_quote_for_operation(&job.id, &job.operation_id, &encoded, output)
+                .unwrap();
+            let identity = store.id().to_owned();
+            drop(store);
+            let mut store = Store::open(
+                &dir.path().join("state"),
+                &dir.path().join("key"),
+                &identity,
+            )
+            .unwrap();
+            assert_eq!(store.funding_quote(&job.id).unwrap().as_slice(), encoded);
+            assert!(
+                store
+                    .accepted_quote_suits_current_claim(&job.id, &job.operation_id)
+                    .unwrap()
+            );
+            let accepted: String = store
+                .db
+                .query_row(
+                    "SELECT accepted_output FROM funding_progress WHERE job_id=?1",
+                    [&job.id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                accepted, output,
+                "source zatoshis must never become the USDC readiness requirement"
+            );
+            for projection in ["50000", "stale"] {
+                store
+                    .db
+                    .execute(
+                        "UPDATE funding_progress SET accepted_output=?2 WHERE job_id=?1",
+                        params![job.id, projection],
+                    )
+                    .unwrap();
+                assert!(
+                    store
+                        .accepted_quote_suits_current_claim(&job.id, &job.operation_id)
+                        .unwrap(),
+                    "a derived projection cannot veto immutable sizing authority"
+                );
+                assert_eq!(store.funding_quote(&job.id).unwrap().as_slice(), encoded);
+            }
+            store
+                .db
+                .execute(
+                    "UPDATE reserve_claims SET target='11',maximum_output='11' WHERE wallet_id=?1",
+                    [&job.wallet_id],
+                )
+                .unwrap();
+            assert!(
+                !store
+                    .accepted_quote_suits_current_claim(&job.id, &job.operation_id)
+                    .unwrap(),
+                "a genuinely changed claim still governs unprepared work"
+            );
+            store
+                .db
+                .execute(
+                    "UPDATE reserve_claims SET target='10',maximum_output='10' WHERE wallet_id=?1",
+                    [&job.wallet_id],
+                )
+                .unwrap();
+            store
+                .record_destination_readiness(&job.id, "1", "partial-credit", 1)
+                .unwrap();
+            assert!(
+                store.current_funding_claim(&job.id).is_err(),
+                "any positive receipt consumes the initial claim"
+            );
+            assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
+            assert!(store.operation(&job.operation_id).is_err());
+        }
     }
 
     #[test]
@@ -2300,6 +2439,7 @@ mod completion_tests {
     fn source_preparation_binds_the_original_pool_and_exact_accepted_source_terms() {
         let (_dir, mut store, job) = fixture();
         let quote = crate::rotation::near::Quote {
+            sizing_preview: None,
             request: serde_json::json!({"amount":job.target,"recipient":job.recipient}),
             response: serde_json::json!({}),
             input: 50,
