@@ -598,7 +598,7 @@ is required for an ordinary pre-journal crash.
 `rotation/near.rs` sizes each new operation with a zero-slippage dry `EXACT_OUTPUT`
 preview for its nominal USDC target, then requests an executable `EXACT_INPUT`
 quote with that NEAR-priced ZEC principal fixed. `funding.slippage_bps` (default
-250, range 0–1000) applies once to the live quote's expected output. Its
+500, range 0–1000) applies once to the live quote's expected output. Its
 `minAmountOut` is an execution floor, distinct from a route's minimum supported
 swap size. This does not guarantee smaller swaps, faster execution or no refunds.
 The demo configurations explicitly select `funding.confidentiality = "public"`:

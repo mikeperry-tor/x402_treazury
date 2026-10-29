@@ -512,7 +512,7 @@ Each new operation sizes its ZEC principal from a dry `EXACT_OUTPUT` preview wit
 zero slippage. Structured route-minimum retries can raise the nominal USDC target
 only within the slot's `max_funding_amount_usdc`; that ceiling does not reject
 beneficial extra execution output. The executable `EXACT_INPUT` quote fixes that
-NEAR-priced ZEC principal and applies `funding.slippage_bps` (default 250 basis
+NEAR-priced ZEC principal and applies `funding.slippage_bps` (default 500 basis
 points, range 0–1000) once to its expected output. Its `minAmountOut` is the execution floor,
 not the route's minimum supported size. Existing ZEC principal/transaction-fee
 and conversion-overhead safeguards still apply. No external exchange-rate oracle

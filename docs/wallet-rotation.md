@@ -46,7 +46,7 @@ migration rules are in [managed configuration](configuration.md).
 ```toml
 [funding]
 auto_fund = true
-slippage_bps = 250
+slippage_bps = 500
 
 [wallets.research]
 mode = "zcash_rotation"
@@ -247,7 +247,7 @@ preview with zero slippage for the USDC target. Its existing structured route-mi
 retry may increase the nominal target only within that slot's explicit
 `max_funding_amount_usdc`. The preview's NEAR-priced ZEC principal then becomes
 the fixed input of the executable `EXACT_INPUT` quote. Configured slippage
-(`funding.slippage_bps`, default 250 basis points, range 0–1000) applies once to
+(`funding.slippage_bps`, default 500 basis points, range 0–1000) applies once to
 that live quote's expected output.
 `minAmountOut` is its execution floor, not the route's minimum supported swap
 size. There is no fixed ZEC conversion or external rate oracle, and this mode

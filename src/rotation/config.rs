@@ -38,7 +38,7 @@ fn confidentiality() -> String {
     "basic".into()
 }
 fn slippage() -> u32 {
-    250
+    500
 }
 fn poll() -> u64 {
     5
