@@ -447,6 +447,19 @@ async fn malformed_advisory_row_does_not_hide_independent_wallet_observations() 
 
 #[tokio::test]
 async fn exited_reconciliation_task_reacquires_same_gate_and_stops_without_another_owner() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::manager::maintenance::tests::exited_reconciliation_task_reacquires_same_gate_and_stops_without_another_owner",
+    ) {
+        return;
+    }
+    use tracing::instrument::WithSubscriber;
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(log.reopen().unwrap())
+        .finish();
     let f = fixture(false, false).await;
     let (entered, mut owners) = tokio::sync::mpsc::unbounded_channel();
     let first = Arc::new(AtomicBool::new(true));
@@ -457,7 +470,9 @@ async fn exited_reconciliation_task_reacquires_same_gate_and_stops_without_anoth
     }));
     let stop = CancellationToken::new();
     let stopped = stop.clone();
-    let running = tokio::spawn(async move { pool.run_reconciliation(stopped).await });
+    let running = tokio::spawn(
+        async move { pool.run_reconciliation(stopped).await }.with_subscriber(subscriber),
+    );
     let original = owners.recv().await.unwrap();
     let replacement = tokio::time::timeout(Duration::from_secs(10), owners.recv())
         .await
@@ -468,6 +483,22 @@ async fn exited_reconciliation_task_reacquires_same_gate_and_stops_without_anoth
     running.await.unwrap().unwrap();
     assert!(owners.try_recv().is_err());
     assert!(f.pool.reconciliation.try_lock().is_ok());
+    let logs = std::fs::read_to_string(log.path()).unwrap();
+    let restarts: Vec<_> = logs
+        .lines()
+        .filter(|line| line.contains("reconciliation_owner_restart_pending"))
+        .collect();
+    assert_eq!(restarts.len(), 1, "{logs}");
+    let restart = restarts[0];
+    assert!(restart.contains("INFO"), "{restart}");
+    assert!(
+        restart.contains(
+            "Wallet balance reconciliation stopped unexpectedly; retrying in five seconds"
+        ),
+        "{restart}"
+    );
+    assert!(restart.contains(&format!("pool={}", f.group)), "{restart}");
+    assert!(!logs.contains("WARN") && !logs.contains("ERROR"), "{logs}");
     f.close().await;
 }
 

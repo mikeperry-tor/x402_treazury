@@ -59,9 +59,10 @@ impl ManagedPool {
             match owner.await {
                 Ok(result) => return result,
                 Err(_) if stop.is_cancelled() => return Ok(()),
-                Err(_) => tracing::warn!(
+                Err(_) => tracing::info!(
+                    pool = %self.pool,
                     category = "reconciliation_owner_restart_pending",
-                    "reconciliation owner exited; retrying existing ownership; payment journals remain unchanged"
+                    "Wallet balance reconciliation stopped unexpectedly; retrying in five seconds"
                 ),
             }
             tokio::select! { _=stop.cancelled()=>return Ok(()), _=tokio::time::sleep(CADENCE)=>{} }

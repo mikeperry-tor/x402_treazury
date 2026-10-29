@@ -490,6 +490,9 @@ not establish failure of an agent operation. See
 [cover diagnostics](cover-traffic.md#cover-diagnostics) for fields, deadline
 cleanup and safe resource labels.
 
+An unexpected balance reconciliation task exit reports its pending retry at INFO
+with the affected pool; routine observation attempts remain DEBUG.
+
 Waiting for confirmed spendable ZEC and funding deferred by a reported treasury
 sync failure use INFO for meaningful state changes; repetitive observations belong
 at DEBUG. On a new capital shortage, the funding message includes the existing
