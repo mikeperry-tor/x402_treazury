@@ -518,7 +518,7 @@ must satisfy the group's tolerance. Active, ready, disabled-group, current-claim
 and wallets with unresolved original delivery obligations cannot retire. A
 never-credited completed job can close that guard only when every current and
 archived accepted swap has its bound NEAR terminal outcome and no unresolved
-source work remains, or the operation never accepted a calculation/submission.
+source work remains, or nondisclosure is proven and any private source work is closed.
 Source confirmation or expiry alone does not close a disclosed bridge obligation.
 A preserved intent for a fulfilled swap does not keep that guard open.
 Explicit sync attempts eligible

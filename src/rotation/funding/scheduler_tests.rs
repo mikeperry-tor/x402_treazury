@@ -1,4 +1,6 @@
 //! Exercise the retained worker against actual durable funding operations.
+#[path = "archive_status_tests.rs"]
+mod archive_status;
 use super::*;
 use crate::rotation::{store::Store, transaction::TransactionFacts};
 use std::sync::{
@@ -147,7 +149,7 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
                     operation: job.operation_id.clone(),
                     kind
                 },
-                &job,
+                Some(&job.phase),
                 100,
                 &active
             ),
@@ -155,14 +157,21 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
         );
     }
     state.complete(
-        &job,
+        (&job.id, &job.operation_id),
         Kind::Source,
         100,
-        RetrySchedule::Poll(10),
+        RetrySchedule::Poll(10, false),
         Some("shortage".into()),
         Some(FundingCondition::InsufficientFunds),
     );
-    state.complete(&job, Kind::Credit, 101, RetrySchedule::Poll(10), None, None);
+    state.complete(
+        (&job.id, &job.operation_id),
+        Kind::Credit,
+        101,
+        RetrySchedule::Poll(10, false),
+        None,
+        None,
+    );
     assert_eq!(
         state.condition(&job.operation_id, [true; 4]),
         Some(FundingCondition::InsufficientFunds)
@@ -171,7 +180,14 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
     applicable[Kind::Source as usize] = false;
     assert_eq!(state.condition(&job.operation_id, applicable), None);
     assert_eq!(state.condition("another-operation", [true; 4]), None);
-    state.complete(&job, Kind::Source, 200, RetrySchedule::Poll(10), None, None);
+    state.complete(
+        (&job.id, &job.operation_id),
+        Kind::Source,
+        200,
+        RetrySchedule::Poll(10, false),
+        None,
+        None,
+    );
     assert_eq!(state.condition(&job.operation_id, [true; 4]), None);
 }
 
@@ -217,15 +233,18 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
                 operation: job.operation_id.clone(),
                 kind,
             };
-            assert_eq!(state.admit(&key, &job, 100, &active), Some(true));
+            assert_eq!(
+                state.admit(&key, Some(&job.phase), 100, &active),
+                Some(true)
+            );
             if n == 0 {
                 active.insert(key);
             } else {
                 state.complete(
-                    &job,
+                    (&job.id, &job.operation_id),
                     kind,
                     100,
-                    RetrySchedule::Poll(10),
+                    RetrySchedule::Poll(10, false),
                     Some("fixture outage".into()),
                     None,
                 );
@@ -236,7 +255,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
             operation: "next-operation".into(),
             kind,
         };
-        assert_eq!(state.admit(&next, &job, 100, &active), None);
+        assert_eq!(state.admit(&next, Some(&job.phase), 100, &active), None);
         let due = state
             .records
             .values()
@@ -251,18 +270,34 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
             operation: jobs[1].operation_id.clone(),
             kind,
         };
-        assert_eq!(state.admit(&retry, &jobs[1], due - 1, &active), Some(false));
-        assert_eq!(state.admit(&next, &job, due - 1, &active), None);
-        assert_eq!(state.admit(&next, &job, due, &active), Some(true));
+        assert_eq!(
+            state.admit(&retry, Some(&jobs[1].phase), due - 1, &active),
+            Some(false)
+        );
+        assert_eq!(state.admit(&next, Some(&job.phase), due - 1, &active), None);
+        assert_eq!(
+            state.admit(&next, Some(&job.phase), due, &active),
+            Some(true)
+        );
         assert!(
             state.records.contains_key(&protected),
             "active ownership cannot be evicted"
         );
         assert_eq!(state.records.len(), RECORDS);
         // Completion still finds the active record after eviction pressure.
-        state.complete(&jobs[0], kind, due, RetrySchedule::Poll(10), None, None);
+        state.complete(
+            (&jobs[0].id, &jobs[0].operation_id),
+            kind,
+            due,
+            RetrySchedule::Poll(10, false),
+            None,
+            None,
+        );
         active.remove(&protected);
-        assert_eq!(state.admit(&protected, &jobs[0], due, &active), Some(false));
+        assert_eq!(
+            state.admit(&protected, Some(&jobs[0].phase), due, &active),
+            Some(false)
+        );
         // A new operation on the same job has independent retry metadata.
         let mut replacement = jobs[0].clone();
         replacement.operation_id = "replacement".into();
@@ -271,7 +306,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
             kind,
         };
         assert_eq!(
-            state.admit(&replacement_key, &replacement, due, &active),
+            state.admit(&replacement_key, Some(&replacement.phase), due, &active),
             Some(true)
         );
         assert!(
@@ -355,7 +390,7 @@ async fn occupied_observation_lanes_report_once_per_pass_and_preserve_pending_wo
         kind: Kind::Quote,
     };
     flight.active.insert(quote_key.clone());
-    let mut duplicate = VecDeque::from([Pending {
+    let mut duplicate = VecDeque::from([Pending::Work {
         job: job.clone(),
         lane: Kind::Quote,
     }]);
@@ -369,9 +404,20 @@ async fn occupied_observation_lanes_report_once_per_pass_and_preserve_pending_wo
     flight.source_active = true;
     let mut pending: VecDeque<_> = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
         .into_iter()
-        .map(|lane| Pending {
-            job: job.clone(),
-            lane,
+        .map(|lane| {
+            if lane == Kind::Status {
+                Pending::Status(FundingStatusRequest {
+                    id: job.id.clone(),
+                    operation_id: job.operation_id.clone(),
+                    pool_name: job.pool_name.clone(),
+                    wallet_id: job.wallet_id.clone(),
+                })
+            } else {
+                Pending::Work {
+                    job: job.clone(),
+                    lane,
+                }
+            }
         })
         .collect();
     worker.dispatch_pending(&mut pending, &mut flight, &reads, &lease, &clock);
@@ -404,16 +450,17 @@ async fn occupied_observation_lanes_report_once_per_pass_and_preserve_pending_wo
             kind: Kind::Credit,
         };
         assert_eq!(
-            lease
-                .state
-                .lock()
-                .unwrap()
-                .admit(&key, &existing, clock.now(), &flight.active),
+            lease.state.lock().unwrap().admit(
+                &key,
+                Some(&existing.phase),
+                clock.now(),
+                &flight.active
+            ),
             Some(true)
         );
         flight.active.insert(key);
     }
-    pending.push_back(Pending {
+    pending.push_back(Pending::Work {
         job: job.clone(),
         lane: Kind::Credit,
     });
@@ -484,7 +531,6 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
     for (kind, result) in [
         (Kind::Quote, Ok(Observation::Quote(quote(&old)))),
         (Kind::Source, Ok(Observation::Prerequisite(quote(&old)))),
-        (Kind::Status, Ok(Observation::Status(SwapStatus::Success))),
         (Kind::Credit, Ok(Observation::None)),
         (
             Kind::Source,
@@ -510,6 +556,38 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
                 .is_none()
         );
     }
+    // Status keeps its captured request even after the current source ID changes.
+    let request = FundingStatusRequest {
+        id: old.id.clone(),
+        operation_id: old.operation_id.clone(),
+        pool_name: old.pool_name.clone(),
+        wallet_id: old.wallet_id.clone(),
+    };
+    let key = Key {
+        operation: old.operation_id.clone(),
+        kind: Kind::Status,
+    };
+    assert_eq!(
+        lease
+            .state
+            .lock()
+            .unwrap()
+            .admit(&key, None, 1000, &BTreeSet::new()),
+        Some(true)
+    );
+    worker
+        .publish_status(
+            &lease,
+            request,
+            Ok(SwapStatus::Success),
+            &TickClock {
+                epoch: 1000,
+                started: tokio::time::Instant::now(),
+            },
+        )
+        .await
+        .unwrap();
+    let old_operation = old.operation_id.clone();
     store
         .call(move |s| {
             let current = s.funding_job(&old.id)?.unwrap();
@@ -524,7 +602,16 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
         })
         .await
         .unwrap();
-    assert!(lease.state.lock().unwrap().records.is_empty());
+    {
+        let state = lease.state.lock().unwrap();
+        assert_eq!(state.records.len(), 1);
+        let rejected = &state.records[&Key {
+            operation: old_operation,
+            kind: Kind::Status,
+        }];
+        assert!(rejected.error.is_some());
+        assert!(rejected.due >= 1060);
+    }
     drop(lease);
     drop(worker);
     drop(store);
@@ -910,15 +997,15 @@ async fn completion_storage_failure_is_fatal() {
                     operation: job.operation_id.clone(),
                     kind: Kind::Source,
                 },
-                &job,
+                Some(&job.phase),
                 900,
                 &BTreeSet::new(),
             );
             state.complete(
-                &job,
+                (&job.id, &job.operation_id),
                 Kind::Source,
                 900,
-                RetrySchedule::Poll(1),
+                RetrySchedule::Poll(1, false),
                 Some("funding_quote_failed; fixture outage".into()),
                 None,
             );
@@ -932,25 +1019,49 @@ async fn completion_storage_failure_is_fatal() {
                 .state
                 .lock()
                 .unwrap()
-                .admit(&key, &job, 1000, &BTreeSet::new());
-            let result = worker
-                .publish_observation(
-                    &lease,
-                    Completion {
-                        job: job.clone(),
-                        kind,
-                        result: Ok(if kind == Kind::Source {
-                            Observation::Prerequisite(quote(&job))
-                        } else {
-                            Observation::None
-                        }),
-                    },
-                    &TickClock {
-                        epoch: 1000,
-                        started: tokio::time::Instant::now(),
-                    },
-                )
-                .await;
+                .admit(&key, Some(&job.phase), 1000, &BTreeSet::new());
+            let clock = TickClock {
+                epoch: 1000,
+                started: tokio::time::Instant::now(),
+            };
+            let result = if kind == Kind::Status {
+                let result = worker
+                    .publish_status(
+                        &lease,
+                        FundingStatusRequest {
+                            id: job.id.clone(),
+                            operation_id: job.operation_id.clone(),
+                            pool_name: job.pool_name.clone(),
+                            wallet_id: job.wallet_id.clone(),
+                        },
+                        Err(anyhow::anyhow!("fixture status outage")),
+                        &clock,
+                    )
+                    .await;
+                // Even failed optional current-job health publication cannot
+                // erase this exact accepted request's completed retry floor.
+                let state = lease.state.lock().unwrap();
+                assert!(state.records[&key].due >= 1060);
+                assert_eq!(state.records[&key].streak, 1);
+                result
+            } else {
+                worker
+                    .publish_observation(
+                        &lease,
+                        Completion {
+                            job: job.clone(),
+                            kind,
+                            result: Ok(if kind == Kind::Source {
+                                Observation::Prerequisite(quote(&job))
+                            } else {
+                                Observation::None
+                            }),
+                        },
+                        &clock,
+                    )
+                    .await
+                    .map(|_| ())
+            };
             assert!(result.err().unwrap().is::<rusqlite::Error>());
         }
         drop(lease);
@@ -2025,7 +2136,7 @@ fn sibling_observations_report_current_phase_once_per_operation() {
 }
 
 #[tokio::test]
-async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drain_siblings() {
+async fn advisory_inventory_and_post_capture_fields_preserve_sources_and_drain_siblings() {
     for (table, field, value) in [
         ("funding_progress", "phase", "'invalid'"),
         ("funding_health", "error_streak", "'invalid'"),
@@ -2105,19 +2216,12 @@ async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drai
                 corrupt();
                 resume.send(()).unwrap();
             }
-            let error = tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
+            tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
                 .await
                 .unwrap()
                 .unwrap()
-                .unwrap_err();
-            assert!(
-                error.is::<MalformedFunding>(),
-                "{field} after_capture={after_capture}: {error:#}"
-            );
-            assert_eq!(
-                credit_calls.load(Ordering::SeqCst),
-                if after_capture { 4 } else { 3 }
-            );
+                .unwrap();
+            assert_eq!(credit_calls.load(Ordering::SeqCst), 4);
             let mut observed = BTreeSet::new();
             while let Ok(id) = source_events.try_recv() {
                 assert_ne!(id, bad.id);
@@ -2126,10 +2230,9 @@ async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drai
             assert_eq!(observed.len(), 1);
             observed.clear();
             while let Ok(id) = status_events.try_recv() {
-                assert_ne!(id, bad.id);
                 observed.insert(id);
             }
-            assert_eq!(observed.len(), 3);
+            assert_eq!(observed.len(), 4);
             drop(db);
             drop(worker);
             drop(store);
@@ -2159,7 +2262,7 @@ async fn malformed_inventory_and_post_capture_payloads_preserve_sources_and_drai
                     .find(|(id, _)| id == &bad.id)
                     .unwrap()
                     .1
-                    .is_err()
+                    .is_ok()
             );
         }
     }
@@ -2672,11 +2775,27 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
             operation: job.operation_id.clone(),
             kind,
         };
-        assert_eq!(state.admit(&key, &job, 1000, &active), Some(true));
-        state.complete(&job, kind, 1000, RetrySchedule::Poll(1), None, None);
+        assert_eq!(
+            state.admit(&key, Some(&job.phase), 1000, &active),
+            Some(true)
+        );
+        state.complete(
+            (&job.id, &job.operation_id),
+            kind,
+            1000,
+            RetrySchedule::Poll(1, false),
+            None,
+            None,
+        );
         if kind != Kind::Quote {
-            assert_eq!(state.admit(&key, &job, 1059, &active), Some(false));
-            assert_eq!(state.admit(&key, &job, 1061, &active), Some(true));
+            assert_eq!(
+                state.admit(&key, Some(&job.phase), 1059, &active),
+                Some(false)
+            );
+            assert_eq!(
+                state.admit(&key, Some(&job.phase), 1061, &active),
+                Some(true)
+            );
         }
     }
     let source = Key {
@@ -2684,16 +2803,30 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
         kind: Kind::Source,
     };
     state.complete(
-        &job,
+        (&job.id, &job.operation_id),
         Kind::Source,
         1100,
-        RetrySchedule::Poll(100),
+        RetrySchedule::Poll(100, false),
         Some("source observation unavailable".into()),
         None,
     );
     let due = state.records[&source].due;
-    state.complete(&job, Kind::Status, 1101, RetrySchedule::Poll(1), None, None);
-    state.complete(&job, Kind::Quote, 1102, RetrySchedule::Poll(1), None, None);
+    state.complete(
+        (&job.id, &job.operation_id),
+        Kind::Status,
+        1101,
+        RetrySchedule::Poll(1, false),
+        None,
+        None,
+    );
+    state.complete(
+        (&job.id, &job.operation_id),
+        Kind::Quote,
+        1102,
+        RetrySchedule::Poll(1, false),
+        None,
+        None,
+    );
     state.advance_source(&job.operation_id, 1102);
     assert_eq!(state.records[&source].due, due);
     assert_eq!(state.records[&source].streak, 1);
@@ -2701,11 +2834,24 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
         state.records[&source].error.as_deref(),
         Some("source observation unavailable")
     );
-    assert_eq!(state.admit(&source, &job, due - 1, &active), Some(false));
+    assert_eq!(
+        state.admit(&source, Some(&job.phase), due - 1, &active),
+        Some(false)
+    );
     // Only a successful completion of this exact source clears its failure.
-    state.complete(&job, Kind::Source, due, RetrySchedule::Poll(1), None, None);
+    state.complete(
+        (&job.id, &job.operation_id),
+        Kind::Source,
+        due,
+        RetrySchedule::Poll(1, false),
+        None,
+        None,
+    );
     state.advance_source(&job.operation_id, due);
-    assert_eq!(state.admit(&source, &job, due, &active), Some(true));
+    assert_eq!(
+        state.admit(&source, Some(&job.phase), due, &active),
+        Some(true)
+    );
 }
 
 struct LocalHandoff {

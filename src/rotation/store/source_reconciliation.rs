@@ -3,9 +3,13 @@ use super::*;
 
 pub(crate) fn initialize(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(matches!(version, 21 | 22), "unsupported state schema");
+    ensure!(matches!(version, 21..=23), "unsupported state schema");
     let tx = db.unchecked_transaction()?;
-    tx.execute_batch("CREATE TABLE IF NOT EXISTS source_disposition_history(id TEXT NOT NULL REFERENCES outgoing(id), submission TEXT NOT NULL, height INTEGER, revision INTEGER REFERENCES snapshots(revision), PRIMARY KEY(id,submission,revision)); DROP INDEX IF EXISTS one_outgoing; DROP INDEX IF EXISTS one_calculation; PRAGMA user_version=22;")?;
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS source_disposition_history(id TEXT NOT NULL REFERENCES outgoing(id), submission TEXT NOT NULL, height INTEGER, revision INTEGER REFERENCES snapshots(revision), PRIMARY KEY(id,submission,revision)); DROP INDEX IF EXISTS one_outgoing; DROP INDEX IF EXISTS one_calculation; PRAGMA user_version=23;")?;
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS funding_progress_unsettled_requests ON funding_progress(job_id,operation_id) WHERE quote IS NOT NULL AND NOT(typeof(provider_success)='integer' AND provider_success!=0) AND NOT(typeof(provider_failed)='integer' AND provider_failed!=0) AND NOT(typeof(provider_refunded)='integer' AND provider_refunded!=0);CREATE INDEX IF NOT EXISTS funding_recovery_unsettled_requests ON funding_recovery(job_id,operation_id) WHERE quote IS NOT NULL AND NOT(typeof(provider_success)='integer' AND provider_success!=0) AND NOT(typeof(provider_failed)='integer' AND provider_failed!=0) AND NOT(typeof(provider_refunded)='integer' AND provider_refunded!=0);")?;
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS outgoing_pending ON outgoing(id) WHERE state='PREPARED';",
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -19,7 +23,7 @@ impl Store {
         )?)
     }
     pub(crate) fn unowned_pending_sources(&self, after: Option<&str>) -> Result<Vec<String>> {
-        let mut query = self.db.prepare("SELECT x.id FROM outgoing x WHERE x.state='PREPARED' AND NOT EXISTS(SELECT 1 FROM funding_progress j JOIN funding_jobs f ON f.id=j.job_id WHERE j.operation_id=x.id AND f.state!='COMPLETE') AND (?1 IS NULL OR x.id>?1) ORDER BY x.id LIMIT ?2")?;
+        let mut query = self.db.prepare("SELECT x.id FROM outgoing x WHERE x.state='PREPARED' AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.operation_id=x.id) AND (?1 IS NULL OR x.id>?1) ORDER BY x.id LIMIT ?2")?;
         Ok(query
             .query_map(params![after, scheduling::PAGE_SIZE as i64], |r| r.get(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?)
@@ -84,6 +88,17 @@ mod tests {
             s.unowned_pending_sources(None)?,
             vec!["legacy".to_owned(), "sibling".to_owned()]
         );
+        let indexes: Vec<(String, bool)> =
+            s.db.prepare("PRAGMA index_list('outgoing')")?
+                .query_map([], |r| Ok((r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+        assert!(
+            indexes
+                .iter()
+                .any(|(name, unique)| name == "outgoing_pending" && !unique)
+        );
+        let indexed:Vec<String>=s.db.prepare("SELECT id FROM outgoing INDEXED BY outgoing_pending WHERE state='PREPARED' ORDER BY id")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        assert_eq!(indexed, vec!["legacy".to_owned(), "sibling".to_owned()]);
         assert!(s.source_previously_closed("legacy")?);
         assert!(s.request_broadcast("legacy", 1, 1, false).is_err());
         assert!(!s.automatic_shielding_submission("legacy", 100)?);
@@ -104,92 +119,112 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn owned_schema21_upgrade_excludes_old_readers_without_rewriting_financial_records()
-    -> Result<()> {
-        let dir = tempfile::tempdir()?;
-        let state = dir.path().join("state");
-        let key = dir.path().join("key");
-        let mut store = Store::create(&state, &key, 1, b"initial")?;
-        prepare(&mut store, "original")?;
-        // A retained legacy intent and pending result are independently
-        // authenticated evidence; the upgrade must preserve both verbatim.
-        store.db.execute(
-            "UPDATE outgoing SET state='RESOLVED' WHERE id='original'",
-            [],
-        )?;
-        store.accept_preparation("retained-intent", None, 1, None)?;
-        store.db.execute(
-            "UPDATE outgoing SET state='PREPARED' WHERE id='original'",
-            [],
-        )?;
-        let intent: Vec<u8> = store.db.query_row(
-            "SELECT preparation FROM operation_network WHERE operation_id='retained-intent'",
-            [],
-            |r| r.get(0),
-        )?;
-        let identity = store.id().to_owned();
-        let outgoing: Vec<u8> =
-            store
+    fn owned_legacy_upgrade_excludes_old_readers_without_rewriting_financial_records() -> Result<()>
+    {
+        for old_version in [21, 22] {
+            let dir = tempfile::tempdir()?;
+            let state = dir.path().join("state");
+            let key = dir.path().join("key");
+            let mut store = Store::create(&state, &key, 1, b"initial")?;
+            prepare(&mut store, "original")?;
+            // A retained legacy intent and pending result are independently
+            // authenticated evidence; the upgrade must preserve both verbatim.
+            store.db.execute(
+                "UPDATE outgoing SET state='RESOLVED' WHERE id='original'",
+                [],
+            )?;
+            store.accept_preparation("retained-intent", None, 1, None)?;
+            store.db.execute(
+                "UPDATE outgoing SET state='PREPARED' WHERE id='original'",
+                [],
+            )?;
+            let intent: Vec<u8> = store.db.query_row(
+                "SELECT preparation FROM operation_network WHERE operation_id='retained-intent'",
+                [],
+                |r| r.get(0),
+            )?;
+            let identity = store.id().to_owned();
+            let outgoing: Vec<u8> =
+                store
+                    .db
+                    .query_row("SELECT raw FROM outgoing WHERE id='original'", [], |r| {
+                        r.get(0)
+                    })?;
+            let snapshots: Vec<(i64, Vec<u8>)> = store
                 .db
-                .query_row("SELECT raw FROM outgoing WHERE id='original'", [], |r| {
-                    r.get(0)
-                })?;
-        let snapshots: Vec<(i64, Vec<u8>)> = store
-            .db
-            .prepare("SELECT revision,bytes FROM snapshots ORDER BY revision")?
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?;
-        store.db.execute_batch("DROP TABLE source_disposition_history; CREATE UNIQUE INDEX one_outgoing ON outgoing((1)) WHERE state='PREPARED'; CREATE UNIQUE INDEX one_calculation ON operation_network((1)) WHERE preparation IS NOT NULL; PRAGMA user_version=21;")?;
-        drop(store);
-        // Read-only discovery/status never perform the owned upgrade.
-        assert_eq!(super::super::treasury_id(&state)?, identity);
-        assert_eq!(super::super::status(&state)?.state_schema_version, 21);
-        let readonly = Connection::open_with_flags(
-            state.join("state.sqlite"),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )?;
-        for name in ["one_outgoing", "one_calculation"] {
-            assert!(
-                readonly.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
-                    [name],
-                    |r| r.get::<_, bool>(0)
-                )?,
-                "readonly inspection must preserve {name}"
+                .prepare("SELECT revision,bytes FROM snapshots ORDER BY revision")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            if old_version == 21 {
+                store
+                    .db
+                    .execute_batch("DROP TABLE source_disposition_history;")?;
+            }
+            store.db.execute_batch(&format!("DROP INDEX outgoing_pending; DROP INDEX funding_progress_unsettled_requests; DROP INDEX funding_recovery_unsettled_requests; CREATE UNIQUE INDEX one_outgoing ON outgoing((1)) WHERE state='PREPARED'; CREATE UNIQUE INDEX one_calculation ON operation_network((1)) WHERE preparation IS NOT NULL; PRAGMA user_version={old_version};"))?;
+            drop(store);
+            // Read-only discovery/status never perform the owned upgrade.
+            assert_eq!(super::super::treasury_id(&state)?, identity);
+            assert_eq!(
+                super::super::status(&state)?.state_schema_version,
+                old_version
             );
-        }
-        drop(readonly);
-        let store = Store::open(&state, &key, &identity)?;
-        assert_eq!(
-            store
-                .db
-                .pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
-            22
-        );
-        for name in ["one_outgoing", "one_calculation"] {
-            assert!(
-                !store.db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
-                    [name],
+            let readonly = Connection::open_with_flags(
+                state.join("state.sqlite"),
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            for name in ["one_outgoing", "one_calculation"] {
+                assert!(
+                    readonly.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
+                        [name],
+                        |r| r.get::<_, bool>(0)
+                    )?,
+                    "readonly inspection must preserve {name}"
+                );
+            }
+            for index in [
+                "funding_progress_unsettled_requests",
+                "funding_recovery_unsettled_requests",
+                "outgoing_pending",
+            ] {
+                assert!(!readonly.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1)",
+                    [index],
                     |r| r.get::<_, bool>(0)
-                )?,
-                "owned upgrade must remove redundant {name}"
+                )?);
+            }
+            drop(readonly);
+            let store = Store::open(&state, &key, &identity)?;
+            assert_eq!(
+                store
+                    .db
+                    .pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))?,
+                23
             );
-        }
-        assert_eq!(
-            store
+            for name in ["one_outgoing", "one_calculation"] {
+                assert!(
+                    !store.db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1)",
+                        [name],
+                        |r| r.get::<_, bool>(0)
+                    )?,
+                    "owned upgrade must remove redundant {name}"
+                );
+            }
+            assert_eq!(
+                store
+                    .db
+                    .query_row("SELECT raw FROM outgoing WHERE id='original'", [], |r| r
+                        .get::<_, Vec<u8>>(0))?,
+                outgoing
+            );
+            let after: Vec<(i64, Vec<u8>)> = store
                 .db
-                .query_row("SELECT raw FROM outgoing WHERE id='original'", [], |r| r
-                    .get::<_, Vec<u8>>(0))?,
-            outgoing
-        );
-        let after: Vec<(i64, Vec<u8>)> = store
-            .db
-            .prepare("SELECT revision,bytes FROM snapshots ORDER BY revision")?
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?;
-        assert_eq!(after, snapshots);
-        assert_eq!(
+                .prepare("SELECT revision,bytes FROM snapshots ORDER BY revision")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            assert_eq!(after, snapshots);
+            assert_eq!(
             store.db.query_row(
                 "SELECT preparation FROM operation_network WHERE operation_id='retained-intent'",
                 [],
@@ -197,12 +232,20 @@ mod tests {
             )?,
             intent
         );
-        assert_eq!(
-            store.preparation_intent("retained-intent")?.cost_zatoshis,
-            1
-        );
-        assert_eq!(store.operation("original")?.attempts, 0);
-        assert!(store.operation_pending("original")?);
+            assert_eq!(
+                store.preparation_intent("retained-intent")?.cost_zatoshis,
+                1
+            );
+            assert_eq!(store.operation("original")?.attempts, 0);
+            assert!(store.operation_pending("original")?);
+            // The prior schema22 reader's preflight rejects this capability boundary
+            // before opening a writable database or touching source evidence.
+            let old_reader_version: u32 =
+                store
+                    .db
+                    .pragma_query_value(None, "user_version", |r| r.get(0))?;
+            assert!(!matches!(old_reader_version, 21 | 22));
+        }
         Ok(())
     }
 }

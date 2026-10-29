@@ -147,7 +147,7 @@ async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_resta
         .unwrap();
         use crate::treasury::recovery::RecoveryOutcome;
         for (allowed, expected) in [
-            (false, RecoveryOutcome::OperatorRequired("funding_disabled")),
+            (false, RecoveryOutcome::Waiting("funding_disabled")),
             (
                 true,
                 RecoveryOutcome::OperatorRequired("recovery_attempt_limit_reached"),
@@ -299,4 +299,144 @@ async fn fulfilled_source_work_survives_sdk_reorg_without_confirmation_or_credit
         .await
         .unwrap();
     owner.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_credit() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    struct ObserveOnly {
+        lookups: Arc<AtomicUsize>,
+    }
+    impl TransactionSubmission for ObserveOnly {
+        async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
+            panic!("observation cannot replay an original");
+        }
+        async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
+            self.lookups.fetch_add(1, Ordering::SeqCst);
+            Ok(TransactionPresence::Unknown)
+        }
+    }
+    let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
+    let stop = CancellationToken::new();
+    let (old, old_raw) = prepare(&mut owner).await;
+    {
+        let mut chain = net.chain.write().await;
+        let remaining = old_raw.facts().unwrap().expiry_height + 2 - chain.tip();
+        chain.mine_empty_blocks(remaining);
+    }
+    owner
+        .recover_expired(old.operation_id.clone(), &mut NoDisclosure, &stop)
+        .await
+        .unwrap();
+    let previous = old.clone();
+    let current = owner
+        .store
+        .call(move |s| {
+            s.reauthorize_closed_funding_for_operation(&previous.id, &previous.operation_id, 3)?;
+            Ok(s.funding_job(&previous.id)?.unwrap())
+        })
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&owner.store, vec![current.clone()], deadline).await;
+    let prepared = owner.prepare(request(&current, deadline)).await.unwrap();
+    let mut submitter = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint,
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    owner
+        .submit_prepared(current.operation_id.clone(), &mut submitter, false, &stop)
+        .await
+        .unwrap();
+    let (original, replacement) = (old.clone(), current.clone());
+    owner
+        .store
+        .call(move |s| {
+            s.record_provider_outcome(
+                &original.id,
+                &original.operation_id,
+                &crate::rotation::near::SwapStatus::Success,
+                1,
+            )?;
+            s.record_destination_readiness(&replacement.id, "1", "first positive credit", 1)?;
+            assert!(s.finish_funding_if_proven(&replacement.id, &replacement.operation_id)?);
+            assert!(s.operation_pending(&replacement.operation_id)?);
+            assert!(s.unowned_pending_sources(None)?.is_empty());
+            let work = s.funding_work_page("", s.funding_work_boundary()?)?;
+            assert_eq!(
+                work.len(),
+                1,
+                "the funding scheduler retains source ownership"
+            );
+            assert_eq!(work[0].0, replacement.id);
+            assert!(
+                !s.funding_facts(&replacement.id, &replacement.operation_id)?
+                    .provider_success
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let lookups = Arc::new(AtomicUsize::new(0));
+    let observer = ObserveOnly {
+        lookups: lookups.clone(),
+    };
+    let store = owner.store_handle();
+    // Start with a due source observation, independently of startup discovery.
+    owner.startup_discovery = false;
+    owner.observation = Default::default();
+    let (handle, commands) = actor::channel();
+    let task = tokio::spawn(owner.run_commands(commands, observer, stop.clone()));
+    let observed = handle
+        .recover_funding(current.id.clone(), 3, false)
+        .await
+        .unwrap();
+    assert!(
+        observed.source_observed,
+        "completed destination objective must not short-circuit native source observation"
+    );
+    let op = current.operation_id.clone();
+    assert!(store.call(move |s| s.operation_pending(&op)).await.unwrap());
+    // This independent command follows the actor's post-recovery maintenance.
+    // It must complete without a second lookup of the still-pending source.
+    handle.refund_address(current.id.clone()).await.unwrap();
+    assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_block(vec![prepared.bytes().to_vec()]);
+        chain.mine_empty_blocks(1);
+    }
+    handle.sync().await.unwrap();
+    let observed = handle
+        .recover_funding(current.id.clone(), 3, false)
+        .await
+        .unwrap();
+    assert!(observed.source_observed);
+    assert_eq!(observed.outcome, recovery::RecoveryOutcome::Recovered);
+    let original_bytes = prepared.bytes().to_vec();
+    store
+        .call(move |s| {
+            assert!(!s.operation_pending(&current.operation_id)?);
+            assert_eq!(s.operation(&current.operation_id)?.submission, "CONFIRMED");
+            assert_eq!(s.operation(&current.operation_id)?.attempts, 1);
+            assert_eq!(
+                s.prepared_bytes(&current.operation_id)?.as_slice(),
+                original_bytes.as_slice()
+            );
+            assert_eq!(s.funding_jobs()?.len(), 1);
+            assert_eq!(s.funding_recovery_count(&current.id)?, 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    stop.cancel();
+    drop(handle);
+    drop(store);
+    task.await.unwrap().unwrap();
 }

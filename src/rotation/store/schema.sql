@@ -1,4 +1,4 @@
--- Fresh schema22 only. Legacy conversion has a separate strict preflight.
+-- Fresh schema23 only. Legacy conversion has a separate strict preflight.
 -- Historical stores may retain unused payment_anchors and funding_progress.turn.
 -- They are never read/written by runtime code; no destructive cleanup is needed.
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
@@ -69,7 +69,7 @@ CREATE TRIGGER immutable_allocation BEFORE UPDATE OF pool_id,wallet_id,target,al
 CREATE TRIGGER allocation_binding BEFORE INSERT ON funding_jobs
  WHEN NOT EXISTS(SELECT 1 FROM wallets WHERE id=NEW.wallet_id AND pool_id=NEW.pool_id)
  BEGIN SELECT RAISE(ABORT,'invalid allocation binding'); END;
-PRAGMA user_version=22;
+PRAGMA user_version=23;
 
 -- Scoped operational lookups must not scan retired or unrelated financial history.
 CREATE INDEX wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
@@ -77,3 +77,8 @@ CREATE INDEX funding_claim_lookup ON funding_jobs(pool_id,allocation_kind,claim_
 CREATE INDEX funding_recovery_job ON funding_recovery(job_id,operation_id);
 
 CREATE INDEX wallet_pending_balance ON wallets(pool_id,sequence) WHERE refresh_pending=1 OR low_balance=1;
+
+-- Status polling visits unsettled exact requests, including archived originals.
+CREATE INDEX IF NOT EXISTS funding_progress_unsettled_requests ON funding_progress(job_id,operation_id) WHERE quote IS NOT NULL AND NOT(typeof(provider_success)='integer' AND provider_success!=0) AND NOT(typeof(provider_failed)='integer' AND provider_failed!=0) AND NOT(typeof(provider_refunded)='integer' AND provider_refunded!=0);
+CREATE INDEX IF NOT EXISTS funding_recovery_unsettled_requests ON funding_recovery(job_id,operation_id) WHERE quote IS NOT NULL AND NOT(typeof(provider_success)='integer' AND provider_success!=0) AND NOT(typeof(provider_failed)='integer' AND provider_failed!=0) AND NOT(typeof(provider_refunded)='integer' AND provider_refunded!=0);
+CREATE INDEX IF NOT EXISTS outgoing_pending ON outgoing(id) WHERE state='PREPARED';

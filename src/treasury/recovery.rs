@@ -159,7 +159,14 @@ impl Treasury {
         let completed_operation = job.operation_id.clone();
         if self
             .store
-            .call(move |s| s.finish_funding_if_proven(&completed_job, &completed_operation))
+            .call(move |s| {
+                Ok(
+                    s.finish_funding_if_proven(&completed_job, &completed_operation)?
+                        && !s
+                            .funding_facts(&completed_job, &completed_operation)?
+                            .source_pending,
+                )
+            })
             .await?
         {
             return Ok(Recovered);
@@ -195,6 +202,14 @@ impl Treasury {
                 })
                 .await?;
             if confirmed {
+                let (id, operation) = (job.id.clone(), job.operation_id.clone());
+                if self
+                    .store
+                    .call(move |s| s.finish_funding_if_proven(&id, &operation))
+                    .await?
+                {
+                    return Ok(Recovered);
+                }
                 return self
                     .reauthorize_recovery(&job, max_attempts, allow_new_attempt)
                     .await;
@@ -294,10 +309,16 @@ impl Treasury {
             .call(move |s| s.funding_retry_allowed(&id, &operation))
             .await?
         {
-            return Ok(Waiting("swap_outcome_pending"));
+            return Ok(Waiting(
+                if self.source_work_fulfilled(&job.operation_id).await? {
+                    "swap_fulfilled_waiting_for_credit"
+                } else {
+                    "swap_outcome_pending"
+                },
+            ));
         }
         if !allow_new_attempt {
-            return Ok(OperatorRequired("funding_disabled"));
+            return Ok(Waiting("funding_disabled"));
         }
         let id = job.id.clone();
         let expected_operation = job.operation_id.clone();
@@ -535,7 +556,7 @@ mod tests {
                 .recover_funding_job(job.id.clone(), 1, false, &mut NoNetwork, &stop)
                 .await
                 .unwrap(),
-            RecoveryOutcome::OperatorRequired("funding_disabled")
+            RecoveryOutcome::Waiting("funding_disabled")
         );
         let closed = owner
             .status()
@@ -1065,7 +1086,7 @@ mod tests {
                 if allowed {
                     RecoveryOutcome::Recovered
                 } else {
-                    RecoveryOutcome::OperatorRequired("funding_disabled")
+                    RecoveryOutcome::Waiting("funding_disabled")
                 }
             );
             let current = owner
@@ -1125,7 +1146,11 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 observation.outcome,
-                RecoveryOutcome::OperatorRequired(reason)
+                if allowed {
+                    RecoveryOutcome::OperatorRequired(reason)
+                } else {
+                    RecoveryOutcome::Waiting(reason)
+                }
             );
             assert!(!observation.source_observed);
             let id = job.id.clone();

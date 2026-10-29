@@ -32,6 +32,18 @@ impl std::fmt::Display for MalformedFunding {
 }
 impl std::error::Error for MalformedFunding {}
 pub(crate) type FundingEntry = (String, std::result::Result<FundingWork, MalformedFunding>);
+#[derive(Clone)]
+pub(crate) struct FundingStatusRequest {
+    pub id: String,
+    pub operation_id: String,
+    pub pool_name: String,
+    pub wallet_id: String,
+}
+
+pub(crate) type FundingStatusEntry = (
+    (String, String),
+    std::result::Result<Option<FundingStatusRequest>, MalformedFunding>,
+);
 
 #[cfg(test)]
 #[path = "scheduling_tests.rs"]
@@ -53,7 +65,7 @@ impl Store {
     pub(crate) fn funding_work_page(&self, after: &str, through: i64) -> Result<Vec<FundingEntry>> {
         #[cfg(test)]
         self.inventory_read_fault(super::inventory::Read::FundingPage)?;
-        let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_unfinished_jobs WHERE state!='COMPLETE' AND id>?1 AND rowid<=?2 UNION SELECT f.id FROM outgoing x JOIN funding_progress j ON j.operation_id=x.id JOIN funding_jobs f ON f.id=j.job_id WHERE x.state='PREPARED' AND f.id>?1 AND f.rowid<=?2 UNION SELECT f.id FROM operation_network n JOIN funding_progress j ON j.operation_id=n.operation_id JOIN funding_jobs f ON f.id=j.job_id WHERE n.preparation IS NOT NULL AND f.id>?1 AND f.rowid<=?2 ORDER BY id LIMIT ?3")?
+        let ids = self.db.prepare("SELECT id FROM funding_jobs INDEXED BY funding_unfinished_jobs WHERE state!='COMPLETE' AND id>?1 AND rowid<=?2 UNION SELECT f.id FROM outgoing x JOIN funding_progress j ON j.operation_id=x.id JOIN funding_jobs f ON f.id=j.job_id WHERE x.state='PREPARED' AND f.id>?1 AND f.rowid<=?2 ORDER BY id LIMIT ?3")?
             .query_map(params![after,through,PAGE_SIZE as i64], |r| r.get::<_,String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut jobs = Vec::with_capacity(ids.len());
@@ -72,6 +84,57 @@ impl Store {
             jobs.push((id, payload));
         }
         Ok(jobs)
+    }
+
+    /// Exact unsettled requests retain their own Status lane across source-ID
+    /// replacement and completed local funding jobs. Current copies win duplicates.
+    pub(crate) fn funding_status_page(
+        &self,
+        after: &(String, String),
+        through: i64,
+    ) -> Result<Vec<FundingStatusEntry>> {
+        #[cfg(test)]
+        self.inventory_read_fault(super::inventory::Read::FundingPage)?;
+        let mut query=self.db.prepare("WITH requests AS (
+            SELECT j.job_id,j.operation_id FROM funding_progress j WHERE j.quote IS NOT NULL AND NOT(typeof(j.provider_success)='integer' AND j.provider_success!=0) AND NOT(typeof(j.provider_failed)='integer' AND j.provider_failed!=0) AND NOT(typeof(j.provider_refunded)='integer' AND j.provider_refunded!=0)
+            UNION ALL SELECT r.job_id,r.operation_id FROM funding_recovery r WHERE r.quote IS NOT NULL AND (EXISTS(SELECT 1 FROM outgoing x WHERE x.id=r.operation_id) OR EXISTS(SELECT 1 FROM treasury_operations t WHERE t.id=r.operation_id)) AND NOT(typeof(r.provider_success)='integer' AND r.provider_success!=0) AND NOT(typeof(r.provider_failed)='integer' AND r.provider_failed!=0) AND NOT(typeof(r.provider_refunded)='integer' AND r.provider_refunded!=0) AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.job_id=r.job_id AND j.operation_id=r.operation_id))
+            SELECT x.job_id,x.operation_id FROM requests x JOIN funding_jobs f ON f.id=x.job_id WHERE f.rowid<=?3 AND (x.job_id>?1 OR (x.job_id=?1 AND x.operation_id>?2)) ORDER BY x.job_id,x.operation_id LIMIT ?4")?;
+        let ids = query
+            .query_map(params![after.0, after.1, through, PAGE_SIZE as i64], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut page = Vec::with_capacity(ids.len());
+        for (id, operation) in ids {
+            let result = (|| -> Result<Option<FundingStatusRequest>> {
+                // Status is an observational adapter. Mutable display phase and
+                // health cannot veto an exact accepted request's outcome.
+                let (request,current_operation)=self.db.query_row("SELECT f.id,p.name,f.wallet_id,j.operation_id FROM funding_jobs f JOIN pools p ON p.id=f.pool_id JOIN wallets w ON w.id=f.wallet_id AND w.pool_id=f.pool_id JOIN funding_progress j ON j.job_id=f.id WHERE f.id=?1",[&id],|r|Ok((FundingStatusRequest {
+                    id:r.get(0)?,pool_name:r.get(1)?,wallet_id:r.get(2)?,operation_id:operation.clone(),
+                },r.get::<_,String>(3)?)))?;
+                let wanted = if current_operation == operation {
+                    self.funding_facts(&id, &operation)?.status_needed()
+                } else {
+                    let (incomplete,(status,attempts),raw): (bool,_,bool)=self.db.query_row("SELECT r.provider_incomplete,t.submission,COALESCE(t.attempts,0),t.id IS NOT NULL,EXISTS(SELECT 1 FROM outgoing x WHERE x.id=r.operation_id),EXISTS(SELECT 1 FROM expired_operations e WHERE e.id=r.operation_id) FROM funding_recovery r LEFT JOIN treasury_operations t ON t.id=r.operation_id WHERE r.job_id=?1 AND r.operation_id=?2",params![id,operation],|r|Ok((super::funding::provider_flag(r,0)?,observation_disclosure(r,1,2,r.get::<_,bool>(3)? || r.get::<_,bool>(4)?,r.get(5)?)?,r.get(4)?)))?;
+                    (raw || status.is_some())
+                        && (attempts > 0 || status.as_deref() == Some("CONFIRMED") || incomplete)
+                };
+                if !wanted {
+                    return Ok(None);
+                }
+                Ok(Some(request))
+            })();
+            let result = match result {
+                Ok(job) => Ok(job),
+                Err(error) if error.is::<FundingDecodeFailure>() => Err(MalformedFunding {
+                    id: id.clone(),
+                    operation: operation.clone(),
+                }),
+                Err(error) => return Err(error),
+            };
+            page.push(((id, operation), result));
+        }
+        Ok(page)
     }
 
     /// A completion belongs to its captured operation even if inventory has

@@ -196,7 +196,11 @@ impl<B: FundingBackend> FundingWorker<B> {
         // Recovery owns the ordinary submitted-source observation when eligible,
         // including its single canonical expiry proof. Do not sync/lookup twice.
         let original = self.facts(job).await?;
-        if original.provider_success {
+        if original.provider_success
+            || (original.claim_fulfilled
+                && !original.source_pending
+                && original.source_submission.is_none())
+        {
             return Ok(Observation::None);
         }
         let (unsubmitted_expired, proof_due) =

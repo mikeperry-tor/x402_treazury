@@ -18,7 +18,7 @@ pub const ORIGIN: &str = "https://1click.chaindefuser.com";
 pub(crate) struct QuoteWindowExpired;
 impl std::fmt::Display for QuoteWindowExpired {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("quote deadline too close")
+        f.write_str("quote deadline has expired")
     }
 }
 impl std::error::Error for QuoteWindowExpired {}

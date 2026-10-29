@@ -76,7 +76,7 @@ impl Store {
             return Ok(());
         }
         ensure!(
-            !funding::provider_succeeded(&self.db, id)?,
+            !funding::claim_succeeded(&self.db, id)?,
             "swap already succeeded; new source calculation is closed"
         );
         self.funding_restriction

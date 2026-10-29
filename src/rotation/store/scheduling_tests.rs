@@ -1,5 +1,6 @@
 //! Coherent, bounded inventory reads retain exact operation provenance.
 use super::*;
+use crate::rotation::store::funding::FundingPhase;
 
 fn fixture() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().unwrap();
@@ -338,7 +339,7 @@ fn optional_provider_and_disclosure_metadata_do_not_block_inventory() {
 }
 
 #[test]
-fn malformed_page_advances_without_releasing_or_replacing_jobs() {
+fn malformed_phase_routes_recovery_without_releasing_or_replacing_jobs() {
     let (dir, mut store) = fixture();
     for i in 0..35 {
         allocate(&mut store, &format!("pool{i}"));
@@ -368,7 +369,10 @@ fn malformed_page_advances_without_releasing_or_replacing_jobs() {
         }
         let first = store.funding_work_page("", through).unwrap();
         assert_eq!(first.len(), PAGE_SIZE);
-        assert!(first.iter().all(|(_, work)| work.is_err()));
+        assert!(first.iter().all(|(_, work)| {
+            work.as_ref()
+                .is_ok_and(|work| work.job.phase == FundingPhase::RecoveryRequired)
+        }));
         let second = store
             .funding_work_page(&first.last().unwrap().0, through)
             .unwrap();
@@ -396,7 +400,8 @@ fn malformed_page_advances_without_releasing_or_replacing_jobs() {
         );
     }
     let job = &jobs[0];
-    // A payload fault cannot hide mismatched shared source ownership.
+    // An unpublished intent is preserved audit data, not a global inventory
+    // fence. Its existing accepted identity still cannot authorize recalculation.
     store
         .accept_preparation(&job.operation_id, None, 1, None)
         .unwrap_err();
@@ -418,7 +423,42 @@ fn malformed_page_advances_without_releasing_or_replacing_jobs() {
             params![job.operation_id, bad],
         )
         .unwrap();
-    assert!(store.funding_work_page("", through).is_err());
+    let work = store
+        .funding_work_page("", through)
+        .unwrap()
+        .into_iter()
+        .find(|(id, _)| id == &job.id)
+        .unwrap()
+        .1
+        .unwrap();
+    assert!(work.facts.preparation_accepted);
+    assert_eq!(work.job.operation_id, job.operation_id);
+    assert!(
+        store
+            .require_unstarted_preparation(&job.operation_id)
+            .is_err()
+    );
+    assert!(
+        store
+            .accept_preparation(&job.operation_id, Some(&job.pool_id), 1, None)
+            .is_err(),
+        "an existing accepted pool identity cannot be replaced"
+    );
+    assert!(
+        store
+            .scope_funding_decode_failure(&job.id, FundingDecodeFailure.into())
+            .is_err(),
+        "scoped required-payload failures still validate original source ownership"
+    );
+    let preserved: Vec<u8> = store
+        .db
+        .query_row(
+            "SELECT preparation FROM operation_network WHERE operation_id=?1",
+            [&job.operation_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(preserved, bad);
     store
         .db
         .execute(
@@ -438,7 +478,7 @@ fn malformed_page_advances_without_releasing_or_replacing_jobs() {
 }
 
 #[test]
-fn malformed_health_is_scoped_without_normalizing_values_or_hiding_sql_errors() {
+fn malformed_health_is_advisory_without_normalizing_values_or_hiding_sql_errors() {
     for (table, field, value) in [
         ("funding_health", "started_at", "'bad'"),
         ("funding_health", "started_at", "-1"),
@@ -446,6 +486,11 @@ fn malformed_health_is_scoped_without_normalizing_values_or_hiding_sql_errors() 
         ("funding_health", "timed_out", "'bad'"),
         ("funding_progress", "next_poll", "'bad'"),
         ("funding_progress", "next_poll", "-1"),
+        ("funding_progress", "attempts", "'bad'"),
+        ("funding_progress", "attempts", "-1"),
+        ("funding_progress", "last_error", "x'00'"),
+        ("funding_progress", "phase", "'invalid'"),
+        ("funding_progress", "phase", "x'00'"),
     ] {
         let (dir, mut store) = fixture();
         allocate(&mut store, "pool");
@@ -487,15 +532,35 @@ fn malformed_health_is_scoped_without_normalizing_values_or_hiding_sql_errors() 
                 .funding_work_page("", store.funding_work_boundary().unwrap())
                 .unwrap();
             assert_eq!(page.len(), 2);
-            assert_eq!(page.iter().filter(|(_, entry)| entry.is_ok()).count(), 1);
-            let fault = page
+            assert!(page.iter().all(|(_, entry)| entry.is_ok()));
+            let work = page
                 .into_iter()
                 .find(|(id, _)| id == &job.id)
                 .unwrap()
                 .1
-                .err()
                 .unwrap();
-            assert_eq!(fault.operation, job.operation_id);
+            assert_eq!(work.job.operation_id, job.operation_id);
+            if field == "phase" {
+                assert_eq!(work.job.phase, FundingPhase::RecoveryRequired);
+                assert!(
+                    store
+                        .refresh_unprepared_quote_for_operation(&job.id, &job.operation_id)
+                        .is_err(),
+                    "routing fallback cannot satisfy stored Quoted CAS"
+                );
+            }
+            assert!(store.funding_job(&job.id).unwrap().is_some());
+            assert_eq!(store.funding_jobs().unwrap().len(), 2);
+            assert!(
+                crate::rotation::store::funding::read_jobs(&store.db).is_err(),
+                "strict reporting preserves malformed-data visibility"
+            );
+            assert!(
+                store
+                    .request_broadcast(&job.operation_id, 1, 1, false)
+                    .is_err(),
+                "advisory health grants no submission authority"
+            );
             let after: rusqlite::types::Value = store
                 .db
                 .query_row(
@@ -508,10 +573,13 @@ fn malformed_health_is_scoped_without_normalizing_values_or_hiding_sql_errors() 
             assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
         }
         store.db.execute("DROP TABLE funding_health", []).unwrap();
+        let error = store
+            .funding_work_page("", store.funding_work_boundary().unwrap())
+            .err()
+            .unwrap();
         assert!(
-            store
-                .funding_work_page("", store.funding_work_boundary().unwrap())
-                .is_err()
+            error.is::<rusqlite::Error>(),
+            "SQL execution failures must remain visible: {error:#}"
         );
     }
 }

@@ -59,10 +59,16 @@ impl StartupPath {
             return DestinationReady;
         }
         let reset = self.facts.source_never_disclosed();
+        let expired = self.facts.source_closed
+            && self
+                .operation
+                .as_ref()
+                .is_some_and(|op| op.submission == "EXPIRED");
         // Original accepted bytes/outcomes remain observed even if permission to
         // start another attempt has since been disabled or exhausted.
-        if self.facts.provider_success
+        if self.facts.claim_fulfilled
             || (!reset
+                && !expired
                 && ((self.facts.provider_incomplete
                     && !self.facts.provider_failed
                     && !self.facts.provider_refunded)
@@ -76,8 +82,9 @@ impl StartupPath {
         {
             return Waiting;
         }
-        let terminal_recovery = (self.facts.provider_failed || self.facts.provider_refunded)
-            && funding::can_recover_facts(self.operation.as_ref(), &self.facts);
+        let terminal_recovery = expired
+            || (self.facts.provider_failed || self.facts.provider_refunded)
+                && funding::can_recover_facts(self.operation.as_ref(), &self.facts);
         if (self.facts.provider_failed || self.facts.provider_refunded) && !terminal_recovery {
             return Obstructed("funding_outcome_requires_review");
         }
@@ -116,7 +123,7 @@ impl StartupPath {
                 "treasury_insufficient_spendable_funds"
             }
             _ => {
-                return if !reset && (self.facts.accepted_quote || source_pending) {
+                return if !reset && !expired && (self.facts.accepted_quote || source_pending) {
                     Waiting
                 } else {
                     Actionable
@@ -548,7 +555,7 @@ mod tests {
         path.facts.source_closed = true;
         path.facts.source_pending = false;
         path.operation.as_mut().unwrap().submission = "EXPIRED".into();
-        assert_eq!(path.disposition(3, false), StartupDisposition::Waiting);
+        assert_eq!(path.disposition(3, false), StartupDisposition::Actionable);
         path.facts.source_pending = true;
         path.facts.source_closed = false;
         path.operation.as_mut().unwrap().submission = "UNKNOWN".into();
@@ -562,11 +569,62 @@ mod tests {
     }
 
     #[test]
+    fn archived_success_waits_for_credit_without_inventing_current_success_or_disabled_policy() {
+        use crate::rotation::{near::SwapStatus, transaction::TransactionFacts};
+        let (_dir, mut store, _pool) = fixture();
+        let old = store.funding_jobs().unwrap().remove(0);
+        store
+            .save_funding_quote(
+                &old.id,
+                &serde_json::to_vec(
+                    &serde_json::json!({"request":{"amount":old.target,"recipient":old.recipient}}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        store
+            .accept_preparation(&old.operation_id, Some(&old.pool_id), 60, None)
+            .unwrap();
+        store
+            .prepare_with_facts(
+                &old.operation_id,
+                1,
+                b"original SDK",
+                b"original raw",
+                Some(TransactionFacts {
+                    txid: "original".into(),
+                    expiry_height: 100,
+                    amount_zatoshis: 50,
+                    fee_zatoshis: 10,
+                    deadline: None,
+                }),
+            )
+            .unwrap();
+        store.confirm_spend(&old.operation_id).unwrap();
+        store
+            .record_provider_outcome(&old.id, &old.operation_id, &SwapStatus::Failed, 1)
+            .unwrap();
+        store
+            .reauthorize_closed_funding_for_operation(&old.id, &old.operation_id, 3)
+            .unwrap();
+        let current = store.funding_job(&old.id).unwrap().unwrap();
+        store
+            .record_provider_outcome(&old.id, &old.operation_id, &SwapStatus::Success, 2)
+            .unwrap();
+        let path = store.startup_path(&old.id).unwrap();
+        assert!(path.facts.claim_fulfilled && path.facts.credit_needed());
+        assert!(!path.facts.provider_success && !path.facts.new_funding_allowed);
+        assert_eq!(path.job.operation_id, current.operation_id);
+        assert_eq!(path.disposition(3, false), StartupDisposition::Waiting);
+        assert_eq!(store.funding_recovery_count(&old.id).unwrap(), 1);
+    }
+
+    #[test]
     fn current_status_contract_has_explicit_authority_and_claims() {
         let (_dir, store, _pool) = fixture();
         let value = serde_json::to_value(store.status().unwrap()).unwrap();
         assert_eq!(value["schema_version"], 5);
-        assert_eq!(value["state_schema_version"], 22);
+        assert_eq!(value["state_schema_version"], 23);
         let keys: Vec<_> = value["pools"][0]
             .as_object()
             .unwrap()

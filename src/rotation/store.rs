@@ -486,7 +486,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                matches!(version, 21 | 22),
+                matches!(version, 21..=23),
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -848,7 +848,7 @@ impl Store {
         tx.execute("INSERT INTO snapshots VALUES (?1,?2)", params![next, snap])?;
         // Settlement may arrive while the accepted SDK calculation is running.
         // Retain its exact result, but never disclose it after the swap succeeded.
-        let fulfilled = funding::provider_succeeded(&tx, id)?;
+        let fulfilled = funding::claim_succeeded(&tx, id)?;
         ensure!(tx.execute(
             "INSERT INTO outgoing(id,state,raw,revision,preparation) SELECT ?1,?4,?2,?3,preparation FROM operation_network WHERE operation_id=?1 AND preparation IS NOT NULL",
             params![id, encrypted, next, if fulfilled { "RESOLVED" } else { "PREPARED" }],
@@ -998,7 +998,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(schema, 21 | 22),
+        matches!(schema, 21..=23),
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1261,7 +1261,7 @@ impl StoreHandle {
 fn admission_schema(db: &Connection) -> Result<()> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21 | 22),
+        matches!(version, 21..=23),
         "unsupported state schema; private-state conversion requires separate authorization; a code rollback is not a state downgrade"
     );
     // Additive lookup optimization for existing schema16 stores; financial
@@ -1794,6 +1794,10 @@ impl Store {
             "swap already succeeded; source submission is closed"
         );
         let operation = self.operation(id)?;
+        ensure!(
+            operation.attempts > 0 || !funding::claim_succeeded(&self.db, id)?,
+            "initial funding claim already fulfilled; first source disclosure is closed"
+        );
         ensure!(
             operation.attempts > 0 || operation.submission == "PREPARED",
             "source disclosure history uncertain; observe original transaction"

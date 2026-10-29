@@ -3,7 +3,7 @@ use super::*;
 use crate::rotation::store::inventory::read_result;
 use crate::rotation::store::{
     funding::FundingFacts,
-    scheduling::{FundingWork, MalformedFunding},
+    scheduling::{FundingStatusRequest, FundingWork, MalformedFunding},
 };
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use std::{
@@ -34,7 +34,7 @@ struct Key {
     kind: Kind,
 }
 enum RetrySchedule {
-    Poll(u64),
+    Poll(u64, bool),
     At(u64),
 }
 struct Record {
@@ -68,7 +68,6 @@ impl std::error::Error for AlreadyOwned {}
 pub(super) enum Observation<Q> {
     None,
     Prepared,
-    Status(SwapStatus),
     Credit(CreditObservation),
     Prerequisite(Q),
     Quote(Quote),
@@ -78,6 +77,25 @@ struct Completion<Q> {
     kind: Kind,
     result: Result<Observation<Q>>,
 }
+enum Completed<Q> {
+    Work(Box<Completion<Q>>),
+    Status {
+        request: FundingStatusRequest,
+        result: Result<SwapStatus>,
+    },
+}
+impl<Q> Completed<Q> {
+    fn identity(&self) -> (&str, &str, Kind) {
+        match self {
+            Self::Work(completion) => (
+                &completion.job.id,
+                &completion.job.operation_id,
+                completion.kind,
+            ),
+            Self::Status { request, .. } => (&request.id, &request.operation_id, Kind::Status),
+        }
+    }
+}
 // Scheduling and health reporting evaluate the same current facts. The source
 // step includes quote prerequisites; the Quote kind is the subsequent HTTP read.
 fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
@@ -86,21 +104,19 @@ fn applicable_work(job: &FundingJob, facts: &FundingFacts) -> [bool; 4] {
         facts.status_needed(),
         !facts.provider_success
             && (facts.source_pending
-                || facts.preparation_accepted
-                || crate::treasury::recovery::needs_recovery(job)
-                || matches!(job.phase, FundingPhase::Preparing | FundingPhase::Prepared)
-                || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
-                    && (facts.new_funding_allowed || facts.initial_credit_recorded))),
+                || (!facts.claim_fulfilled
+                    && (facts.preparation_accepted
+                        || crate::treasury::recovery::needs_recovery(job)
+                        || matches!(job.phase, FundingPhase::Preparing | FundingPhase::Prepared)
+                        || (matches!(job.phase, FundingPhase::Allocated | FundingPhase::Quoted)
+                            && (facts.new_funding_allowed || facts.initial_credit_recorded))))),
         job.phase == FundingPhase::Allocated && facts.new_funding_allowed && !facts.accepted_quote,
     ]
 }
 
 fn report_decode_failure(fault: &MalformedFunding) {
-    tracing::warn!(
-        category = "malformed_funding_inventory",
-        "funding payload unavailable; original operation retained"
-    );
-    tracing::debug!(job=%fault.id, operation=%fault.operation, "malformed funding ownership");
+    tracing::warn!(job_id=%fault.id,operation=%fault.operation,category="malformed_funding_inventory",
+        "Saved wallet funding data could not be read; the affected operation is retained for inspection");
 }
 
 /// Report a new operator requirement once; polling details never change backoff.
@@ -117,14 +133,21 @@ fn report_observation_failure(
     let new_requirement = previous_error.and_then(|s| s.split("; treasury:").next())
         != category.split("; treasury:").next();
     if error.is::<RecoveryBlocked>() && new_requirement {
-        let message = if error.is::<super::super::transaction::ConfirmationObservation>() {
-            "Zcash deposit confirmation disagrees with the treasury wallet and requires operator review; existing work and reservations retained; observation checks continue"
-        } else {
-            "Wallet funding requires operator review; existing work and reservations retained; observation checks continue"
-        };
         tracing::warn!(wallet=%job.pool_name,size=wallet_type,observation=?kind,phase=?phase,
             operation=%job.operation_id,category,
-            "{message}");
+            "Wallet funding requires operator review; existing work and reservations retained; observation checks continue");
+    } else if new_requirement
+        && (matches!(
+            error.downcast_ref::<super::super::transaction::RecoveryEvidenceError>(),
+            Some(
+                super::super::transaction::RecoveryEvidenceError::ConfirmationMismatch
+                    | super::super::transaction::RecoveryEvidenceError::ChainChanged
+            )
+        ) || error.is::<super::super::transaction::ConfirmationObservation>())
+    {
+        tracing::info!(wallet=%job.pool_name,size=wallet_type,job_id=%job.id,
+            operation=%job.operation_id,category,
+            "Wallet funding observations disagree with current blockchain state; the original work remains owned and canonical resolution will retry automatically");
     } else if new_requirement
         && funding_condition(error)
             == Some(super::super::error::FundingCondition::InsufficientFunds)
@@ -155,17 +178,30 @@ fn report_observation_failure(
     category
 }
 
-struct Pending {
-    job: FundingJob,
-    // Quote inventory contains source-owned prerequisites, not quote HTTP reads.
-    lane: Kind,
+enum Pending {
+    Work { job: FundingJob, lane: Kind },
+    Status(FundingStatusRequest),
+}
+impl Pending {
+    fn lane(&self) -> Kind {
+        match self {
+            Self::Work { lane, .. } => *lane,
+            Self::Status(_) => Kind::Status,
+        }
+    }
+    fn operation(&self) -> &str {
+        match self {
+            Self::Work { job, .. } => &job.operation_id,
+            Self::Status(request) => &request.operation_id,
+        }
+    }
 }
 
 /// Each lane retains its own bounded inventory pass while sibling work runs.
 struct LaneInventory {
     kind: Kind,
     through: i64,
-    cursor: String,
+    cursor: (String, String),
     exhausted: bool,
     pass_due: u64,
     decode_failure: Option<MalformedFunding>,
@@ -176,7 +212,7 @@ impl LaneInventory {
         Self {
             kind,
             through,
-            cursor: String::new(),
+            cursor: (String::new(), String::new()),
             exhausted: false,
             pass_due,
             decode_failure: None,
@@ -188,7 +224,7 @@ impl LaneInventory {
 /// Accepted reads and their slots, including the source-to-quote handoff.
 /// The source task itself retains the lease independently of these read waiters.
 struct InFlight<Q> {
-    reads: FuturesUnordered<BoxFuture<'static, Completion<Q>>>,
+    reads: FuturesUnordered<BoxFuture<'static, Completed<Q>>>,
     active: BTreeSet<Key>,
     source_active: bool,
     credit_active: usize,
@@ -209,16 +245,17 @@ impl<Q> InFlight<Q> {
         }
     }
 
-    fn release(&mut self, completion: &Completion<Q>) {
-        match completion.kind {
+    fn release(&mut self, completion: &Completed<Q>) {
+        let (_, operation, kind) = completion.identity();
+        match kind {
             Kind::Credit => self.credit_active -= 1,
             Kind::Status => self.status_active -= 1,
             Kind::Source => self.source_active = false,
             Kind::Quote => self.quote_active -= 1,
         }
         self.active.remove(&Key {
-            operation: completion.job.operation_id.clone(),
-            kind: completion.kind,
+            operation: operation.to_owned(),
+            kind,
         });
     }
 }
@@ -381,7 +418,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             let needs_page = inventory.iter().any(|lane| {
                 !lane.exhausted
                     && clock.now() >= lane.pass_due
-                    && !pending.iter().any(|item| item.lane == lane.kind)
+                    && !pending.iter().any(|item| item.lane() == lane.kind)
             });
             let completion = if needs_page && !stopping {
                 flight.reads.next().now_or_never().flatten()
@@ -397,9 +434,18 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             };
             if let Some(completion) = completion {
                 flight.release(&completion);
-                let id = completion.job.id.clone();
-                let operation = completion.job.operation_id.clone();
-                match self.publish_observation(&lease, completion, &clock).await {
+                let (id, operation, _) = completion.identity();
+                let (id, operation) = (id.to_owned(), operation.to_owned());
+                let published = match completion {
+                    Completed::Work(completion) => {
+                        self.publish_observation(&lease, *completion, &clock).await
+                    }
+                    Completed::Status { request, result } => self
+                        .publish_status(&lease, request, result, &clock)
+                        .await
+                        .map(|()| None),
+                };
+                match published {
                     Ok(Some(ready)) => flight.quote_pending = Some(ready),
                     Ok(None) => {}
                     Err(error) => {
@@ -429,7 +475,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
     ) -> Result<()> {
         for lane in inventory {
             let kind = lane.kind;
-            let waiting = pending.iter().any(|item| item.lane == kind);
+            let waiting = pending.iter().any(|item| item.lane() == kind);
             if clock.now() < lane.pass_due {
                 continue;
             }
@@ -443,13 +489,47 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     continue;
                 };
                 lane.through = through;
-                lane.cursor.clear();
+                lane.cursor = (String::new(), String::new());
                 lane.exhausted = false;
             }
             if lane.exhausted || waiting {
                 continue;
             }
-            let after = lane.cursor.clone();
+            if kind == Kind::Status {
+                let after = lane.cursor.clone();
+                let upper = lane.through;
+                let page = self
+                    .store
+                    .call(move |s| s.funding_status_page(&after, upper))
+                    .await;
+                let Some(page) = read_result(page, &mut lane.read_failure)? else {
+                    lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                    lane.exhausted |= once;
+                    continue;
+                };
+                if page.is_empty() {
+                    lane.exhausted = true;
+                    lane.pass_due = clock.now().saturating_add(self.poll_seconds.max(1));
+                    continue;
+                }
+                #[cfg(test)]
+                if let Some(hook) = &self.inventory_test_hook {
+                    hook.captured(kind).await;
+                }
+                lane.cursor = page.last().unwrap().0.clone();
+                for (_, entry) in page {
+                    match entry {
+                        Ok(Some(request)) => pending.push_back(Pending::Status(request)),
+                        Ok(None) => {}
+                        Err(fault) => {
+                            report_decode_failure(&fault);
+                            lane.decode_failure.get_or_insert(fault);
+                        }
+                    }
+                }
+                continue;
+            }
+            let after = lane.cursor.0.clone();
             let upper = lane.through;
             let page = self
                 .store
@@ -469,7 +549,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             if let Some(hook) = &self.inventory_test_hook {
                 hook.captured(kind).await;
             }
-            lane.cursor = page.last().unwrap().0.clone();
+            lane.cursor = (page.last().unwrap().0.clone(), String::new());
             for (_, entry) in page {
                 let FundingWork { mut job, mut facts } = match entry {
                     Ok(work) => work,
@@ -511,7 +591,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     Kind::Quote => job.phase == FundingPhase::Allocated && source,
                 };
                 if wanted {
-                    pending.push_back(Pending { job, lane: kind });
+                    pending.push_back(Pending::Work { job, lane: kind });
                 }
             }
         }
@@ -530,15 +610,15 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let mut metadata_deferred = false;
         for _ in 0..pending.len() {
             let item = pending.pop_front().unwrap();
-            let kind = match item.lane {
+            let kind = match item.lane() {
                 Kind::Quote => Kind::Source,
                 kind => kind,
             };
-            if item.lane == Kind::Quote
+            if item.lane() == Kind::Quote
                 && (flight.quote_active == QUOTE_READS
                     || flight.quote_pending.is_some()
                     || flight.active.contains(&Key {
-                        operation: item.job.operation_id.clone(),
+                        operation: item.operation().to_owned(),
                         kind: Kind::Quote,
                     }))
             {
@@ -551,7 +631,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 continue;
             }
             let key = Key {
-                operation: item.job.operation_id.clone(),
+                operation: item.operation().to_owned(),
                 kind,
             };
             if flight.active.contains(&key) {
@@ -575,7 +655,15 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
             let ready = {
                 let mut state = lease.state.lock().expect("funding schedule lock");
-                state.admit(&key, &item.job, clock.now(), &flight.active)
+                state.admit(
+                    &key,
+                    match &item {
+                        Pending::Work { job, .. } => Some(&job.phase),
+                        Pending::Status(_) => None,
+                    },
+                    clock.now(),
+                    &flight.active,
+                )
             };
             match ready {
                 Some(false) => continue,
@@ -587,7 +675,37 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 Some(true) => {}
             }
             flight.active.insert(key);
-            let job = item.job;
+            if let Pending::Status(request) = item {
+                flight.status_active += 1;
+                let reader = reader.clone();
+                let store = self.store.clone();
+                flight.reads.push(
+                        async move {
+                            let (id, operation) = (request.id.clone(), request.operation_id.clone());
+                            let result = async {
+                                let (quote, retained) = store
+                                    .call(move |s| {
+                                        let (bytes, retained) = s.funding_status_request(&id, &operation)?;
+                                        Ok((serde_json::from_slice::<Quote>(&bytes)?, retained))
+                                    })
+                                    .await?;
+                                if retained {
+                                    tracing::debug!(wallet=%request.pool_name,wallet_id=%request.wallet_id,
+                                        job_id=%request.id,operation=%request.operation_id,
+                                        "Checking an earlier funding request that still awaits a final provider outcome; possible late credit keeps wallet retirement deferred");
+                                }
+                                reader.status(quote).await
+                            }
+                            .await;
+                            Completed::Status { request, result }
+                        }
+                        .boxed(),
+                    );
+                continue;
+            }
+            let Pending::Work { job, .. } = item else {
+                unreachable!()
+            };
             match kind {
                 Kind::Credit => {
                     flight.credit_active += 1;
@@ -597,34 +715,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                             let result = Ok(Observation::Credit(
                                 reader.credit_observation(job.clone()).await,
                             ));
-                            Completion { job, kind, result }
+                            Completed::Work(Box::new(Completion { job, kind, result }))
                         }
                         .boxed(),
                     );
                 }
-                Kind::Status => {
-                    flight.status_active += 1;
-                    let reader = reader.clone();
-                    let store = self.store.clone();
-                    flight.reads.push(
-                        async move {
-                            let (id, operation) = (job.id.clone(), job.operation_id.clone());
-                            let result = async {
-                                let quote = store
-                                    .call(move |s| {
-                                        Ok(serde_json::from_slice::<Quote>(
-                                            &s.funding_quote_for_operation(&id, &operation)?,
-                                        )?)
-                                    })
-                                    .await?;
-                                reader.status(quote).await.map(Observation::Status)
-                            }
-                            .await;
-                            Completion { job, kind, result }
-                        }
-                        .boxed(),
-                    );
-                }
+                Kind::Status => unreachable!(),
                 Kind::Quote => unreachable!(),
                 Kind::Source => {
                     flight.source_active = true;
@@ -643,7 +739,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         Completion { job, kind, result }
                     });
                     flight.reads.push(
-                        async move { task.await.expect("funding source owner panicked") }.boxed(),
+                        async move {
+                            Completed::Work(Box::new(
+                                task.await.expect("funding source owner panicked"),
+                            ))
+                        }
+                        .boxed(),
                     );
                 }
             }
@@ -688,7 +789,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             };
             let admitted = lease.state.lock().expect("funding schedule lock").admit(
                 &key,
-                &job,
+                Some(&job.phase),
                 clock.now(),
                 &flight.active,
             );
@@ -699,11 +800,11 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 flight.reads.push(
                     async move {
                         let result = reader.quote(request).await.map(Observation::Quote);
-                        Completion {
+                        Completed::Work(Box::new(Completion {
                             job,
                             kind: Kind::Quote,
                             result,
-                        }
+                        }))
                     }
                     .boxed(),
                 );
@@ -717,6 +818,67 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 flight.quote_pending = Some((job, request));
             }
         }
+    }
+
+    async fn publish_status(
+        &self,
+        lease: &Lease,
+        request: FundingStatusRequest,
+        result: Result<SwapStatus>,
+        clock: &TickClock,
+    ) -> Result<()> {
+        let instant = clock.now();
+        let result = match result {
+            Ok(status) => {
+                let (id, operation) = (request.id.clone(), request.operation_id.clone());
+                self.store
+                    .call(move |s| s.record_provider_outcome(&id, &operation, &status, instant))
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+        // Every accepted request completes its cadence before any current-job
+        // reporting. A rollover during publication cannot lose this request's floor.
+        let condition = result.as_ref().err().and_then(funding_condition);
+        let error = result.as_ref().err().map(|error| {
+            let category = safe_error(error, &FundingPhase::Swapping);
+            tracing::debug!(wallet=%request.pool_name,wallet_id=%request.wallet_id,
+                job_id=%request.id,operation=%request.operation_id,category,
+                "Wallet funding request observation unavailable; the accepted request is retained and checks will retry");
+            category
+        });
+        lease.state.lock().expect("funding schedule lock").complete(
+            (&request.id, &request.operation_id),
+            Kind::Status,
+            instant,
+            RetrySchedule::Poll(self.poll_seconds, false),
+            error,
+            condition,
+        );
+        let (id, operation) = (request.id.clone(), request.operation_id.clone());
+        let current = self
+            .store
+            .call(move |s| {
+                if s.funding_current_operation(&id)? != operation {
+                    return Ok(None);
+                }
+                s.finish_funding_if_proven(&id, &operation)?;
+                let job = s.funding_job(&id)?.context("funding job missing")?;
+                let facts = s.funding_facts(&id, &operation)?;
+                Ok(Some((job, facts)))
+            })
+            .await?;
+        if let Some((job, facts)) = current {
+            self.publish_health(
+                lease,
+                &job,
+                Kind::Status,
+                applicable_work(&job, &facts),
+                instant,
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     async fn publish_observation(
@@ -734,7 +896,10 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let Completion { job, kind, result } = completion;
         let id = job.id.clone();
         let current = self.store.call(move |s| s.funding_job(&id)).await?;
-        if current.is_none_or(|current| current.operation_id != job.operation_id) {
+        if current
+            .as_ref()
+            .is_none_or(|current| current.operation_id != job.operation_id)
+        {
             return Ok(None);
         }
 
@@ -748,12 +913,6 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 // time and count a cached failure again without a new acquisition.
                 credit_due = observation.next_due.map(|due| clock.ceil_epoch(due));
                 observation.result
-            }
-            Ok(Observation::Status(status)) => {
-                let (id, operation) = (job.id.clone(), job.operation_id.clone());
-                self.store
-                    .call(move |s| s.record_provider_outcome(&id, &operation, &status, instant))
-                    .await
             }
             Ok(Observation::None | Observation::Prepared) => Ok(()),
             Ok(Observation::Prerequisite(request)) => {
@@ -854,19 +1013,40 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
             None => None,
         };
-        let (next, streak, health, condition) = {
+        {
             let mut state = lease.state.lock().expect("funding schedule lock");
             state.complete(
-                &job,
+                (&job.id, &job.operation_id),
                 kind,
                 instant,
-                credit_due.map_or(RetrySchedule::Poll(self.poll_seconds), RetrySchedule::At),
+                credit_due.map_or(
+                    RetrySchedule::Poll(self.poll_seconds, job.timed_out),
+                    RetrySchedule::At,
+                ),
                 error,
                 condition,
             );
             if handoff {
                 state.advance_source(&job.operation_id, instant);
             }
+        }
+        self.publish_health(lease, &job, kind, applicable, instant)
+            .await?;
+        Ok(prerequisite)
+    }
+
+    /// Health is reporting for a current operation. The acquisition has already
+    /// completed its own cadence independently of this optional publication.
+    async fn publish_health(
+        &self,
+        lease: &Lease,
+        job: &FundingJob,
+        kind: Kind,
+        applicable: [bool; 4],
+        instant: u64,
+    ) -> Result<()> {
+        let (next, streak, health, condition) = {
+            let state = lease.state.lock().expect("funding schedule lock");
             let (next, streak, health) = state.health(&job.operation_id, instant, applicable);
             (
                 next,
@@ -879,10 +1059,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let phase = self
             .store
             .call(move |s| {
-                if !s
-                    .funding_job(&id)?
-                    .is_some_and(|job| job.operation_id == operation)
-                {
+                if s.funding_current_operation(&id)? != operation {
                     return Ok(None);
                 }
                 s.record_funding_observation_health(
@@ -910,7 +1087,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,kind=?kind,observed_phase=?phase,"Funding progress correlation");
             }
         }
-        Ok(prerequisite)
+        Ok(())
     }
 }
 
@@ -942,12 +1119,12 @@ impl State {
     fn admit(
         &mut self,
         key: &Key,
-        job: &FundingJob,
+        phase: Option<&FundingPhase>,
         now: u64,
         active: &BTreeSet<Key>,
     ) -> Option<bool> {
         if key.kind == Kind::Source
-            && job.phase == FundingPhase::Allocated
+            && phase == Some(&FundingPhase::Allocated)
             && self
                 .records
                 .get(&Key {
@@ -997,7 +1174,7 @@ impl State {
     }
     fn complete(
         &mut self,
-        job: &FundingJob,
+        identity: (&str, &str),
         kind: Kind,
         now: u64,
         schedule: RetrySchedule,
@@ -1005,7 +1182,7 @@ impl State {
         condition: Option<super::super::error::FundingCondition>,
     ) {
         let key = Key {
-            operation: job.operation_id.clone(),
+            operation: identity.1.to_owned(),
             kind,
         };
         let record = self
@@ -1019,19 +1196,19 @@ impl State {
         };
         record.due = match schedule {
             RetrySchedule::At(due) => due,
-            RetrySchedule::Poll(poll) => {
+            RetrySchedule::Poll(poll, timed_out) => {
                 let delay = poll
                     .saturating_mul(1u64 << record.streak.min(6))
                     .min(300)
                     .max(if kind != Kind::Quote {
                         OBSERVATION_POLL_SECONDS
-                    } else if job.timed_out {
+                    } else if timed_out {
                         60
                     } else {
                         1
                     });
                 let jitter =
-                    job.id.bytes().map(u64::from).sum::<u64>() % poll.saturating_add(1).max(1);
+                    identity.0.bytes().map(u64::from).sum::<u64>() % poll.saturating_add(1).max(1);
                 now.saturating_add(delay).saturating_add(jitter)
             }
         };

@@ -156,8 +156,10 @@ exit status. Add `--json` for the versioned machine-readable result, including
 completion of captured work (see [capacity output](#versioned-capacity-output)).
 Repeating the command resumes current incomplete claims, including eligible recovery. Signed
 source work closes after canonical confirmation or buried finite signed expiry
-with completed SDK coverage. Replacing a disclosed swap also needs its bound
-terminal NEAR failure/refund and separately revalidated funding authority.
+with completed SDK coverage. A confirmed deposit with unresolved settlement waits
+for its bound provider outcome; verified source expiry can permit a fresh attempt
+under separately revalidated current authority while the old NEAR request remains
+observed. A late bound SUCCESS stops a replacement not yet disclosed.
 Unpublished calculations recover automatically after exclusive offline SDK
 reconstruction. Corrupt or missing immutable records needed to resolve disclosed
 work still require scoped operator review; cancellation drains accepted financial
@@ -350,11 +352,12 @@ random EVM keys, pending payment authorizations or the rotation journal.
 
 The embedded Zingolib v7 SDK reads older wallet snapshots and writes SDK wallet
 format 45 on the next save, including the finite-sync and transparent-scan fields.
-Opening an owned schema-21 treasury upgrades its database additively to schema 22;
-earlier binaries reject that version. Existing source history and snapshot
+Opening an owned schema-21 or schema-22 treasury upgrades its database additively
+to schema 23. Earlier binaries reject that version: they cannot enforce archived
+swap fulfillment against replacement deposits. Existing source history and snapshot
 references remain preserved, including the guard against automatic disclosure of
 previously closed originals. Historical rows do not reopen settled swap workflows.
-Read-only status/identity inspection accepts schemas 21 and 22 without upgrading.
+Read-only status/identity inspection accepts schemas 21, 22 and 23 without upgrading.
 Encrypted records, identities and journaled transaction bytes retain their
 formats. Stop serving and take a complete
 backup before upgrading. Older v6 application binaries cannot reopen a format-45
@@ -375,18 +378,33 @@ A known pre-preparation failure can reset an eligible unprepared job. A signed
 operation retains its owner until canonical confirmation, verified finite expiry
 or bound NEAR SUCCESS; submitted or ambiguous operations are reconciled first,
 never automatically rebroadcast. Recovery archives and resets an eligible job
-under a new operation ID only with the required bridge terminal outcome and current
-funding authority. Run bootstrap after successful standalone recovery to continue
+under a new operation ID after proven nondisclosure, verified finite source expiry,
+or the required bridge terminal outcome, with current funding authority. Old
+accepted NEAR requests keep their exact-operation status observations after that
+reset. Run bootstrap after successful standalone recovery to continue
 funding.
 Recoverable SDK/indexer disagreement remains pending while observations continue;
 it does not require a manual reset. A fork beyond the SDK's upstream 100-block rolling
 history requires a full rescan; that history window is not consensus finality.
-Malformed immutable identities, missing accepted bytes and unavailable authority
-remain scoped operator requirements with diagnostic context.
+Original transaction identity that cannot be established from surviving
+authenticated evidence can still require scoped operator review. Disabled funding
+is an ordinary wait after safe source closure; enabling it can resume an eligible
+attempt without repairing state. Bound NEAR SUCCESS can settle its exact operation without the
+original source bytes; missing bytes are not a blanket recovery veto.
+An expired source's old `PENDING_DEPOSIT` request may remain unresolved without a
+provider terminal declaration. Automatic funding can continue under current
+authority, while cleanup of the affected signer waits; this is not an operator
+repair requirement. A quote deadline alone does not prove bridge delivery ended.
+Each actual retained-request status lookup emits DEBUG with its original identity
+and the unresolved-outcome reason, so these additional requests remain visible.
 Malformed submission counters or unknown source-status labels instead keep the
 original observe-only: canonical confirmation, finite expiry or bound settlement
 can close it without repairing those columns. Strict inspection can still report
 the damaged metadata; it never grants disclosure authority.
+Runtime recovery also ignores malformed advisory quote/polling health fields;
+an unrecognized phase routes through existing recovery rather than new preparation.
+Strict full-status inspection can still report these fields as unreadable. Reading
+them neither resets financial recovery counts nor rewrites stored history.
 SDK reorg recovery repairs spendability without reopening completed swap work.
 A validated bound NEAR SUCCESS closes source work regardless of its last observed
 Zcash status. A successful swap awaiting its first positive Base observation keeps

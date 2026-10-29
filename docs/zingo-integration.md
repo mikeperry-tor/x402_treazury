@@ -174,7 +174,10 @@ the configured depth. It does not reconstruct old SDK inputs or require current
 unspent/alternative-spender proofs. Pepper already expires pending originals and
 clears only their own spend links across all supported pools; confirmed competing
 spenders remain spent. Actual SDK spendability, bridge terminal outcome and new
-funding authority remain separate. Wallet format 45 and the public
+funding authority remain separate. Verified finite expiry can release an attempt
+under current authority without waiting for a negative bridge outcome; the old
+accepted request retains exact-operation status observation, and its later SUCCESS
+prevents an undisclosed replacement. Wallet format 45 and the public
 v6 read/save/reopen/next-address fixture remain documented in
 [wallet administration](wallet-cli.md). Server protocol 0.5.0 capability
 requirements are distinct from the Rust protocol crate version.
@@ -203,8 +206,10 @@ expiry (40 blocks before NU7, 120 afterward); shielding uses the backend's ordin
 finite default. No production zero-expiry constructor requires a parallel recovery
 framework.
 
-Schema-21 stores still upgrade additively to schema 22 under exclusive ownership;
-read-only status accepts both versions. Existing historical source dispositions,
+Schema-21/22 stores upgrade additively to schema 23 under exclusive ownership;
+read-only status accepts all three versions without migrating. Older binaries
+reject schema 23 because they cannot enforce archived fulfillment against a new
+attempt. Existing historical source dispositions,
 original bytes and snapshot references remain preserved. Historical rows do not
 reopen terminal work or authorize automatic disclosure; the exact-ID legacy guard
 prevents previously reopened originals from being sent automatically. Multiple

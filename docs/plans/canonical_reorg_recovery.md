@@ -91,6 +91,9 @@ Ordered coherent changes:
    Late archived SUCCESS must suppress a replacement not yet disclosed without
    fabricating SUCCESS for its identity; already-disclosed replacement work keeps
    its own liabilities. No new ledger, watcher or historical-source reorg audit.
+   Upgrade owned schema-21/22 stores additively to schema 23 so older binaries
+   cannot miss archived fulfillment and disclose a replacement. Preserve all
+   financial rows and encrypted formats; read-only discovery never migrates.
 
    Independent design review must approve the complete archive-to-observer handoff
    and late-success races before implementation. Commit observation projection

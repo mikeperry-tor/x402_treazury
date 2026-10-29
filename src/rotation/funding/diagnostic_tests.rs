@@ -5,6 +5,11 @@ use tracing::instrument::WithSubscriber;
 
 #[tokio::test]
 async fn retrying_observations_are_debug_and_operator_requirements_warn_without_changing_backoff() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::funding::scheduler::tests::diagnostics::retrying_observations_are_debug_and_operator_requirements_warn_without_changing_backoff",
+    ) {
+        return;
+    }
     let cases = [
         (
             anyhow::Error::new(FundingCondition::InsufficientFunds)
@@ -114,7 +119,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                 .state
                 .lock()
                 .unwrap()
-                .admit(&key, &job, 1000, &BTreeSet::new()),
+                .admit(&key, Some(&job.phase), 1000, &BTreeSet::new()),
             Some(true)
         );
         let log = tempfile::NamedTempFile::new().unwrap();
@@ -261,4 +266,273 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
         drop(store);
         owner.await.unwrap();
     }
+}
+
+#[test]
+fn canonical_disagreement_reports_automatic_resolution_once_per_error_episode() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::funding::scheduler::tests::diagnostics::canonical_disagreement_reports_automatic_resolution_once_per_error_episode",
+    ) {
+        return;
+    }
+    use crate::rotation::transaction::{ConfirmationObservation, RecoveryEvidenceError};
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut store,
+        "diagnostics",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let job = store.funding_jobs().unwrap().remove(0);
+    let phase = FundingPhase::DepositPending;
+    for (automatic_resolution, error) in [
+        (
+            true,
+            anyhow::Error::new(RecoveryEvidenceError::ConfirmationMismatch),
+        ),
+        (
+            true,
+            anyhow::Error::new(RecoveryEvidenceError::ChainChanged),
+        ),
+        // RecoveryObservation preserves these safe facts without the typed cause.
+        (
+            true,
+            anyhow::Error::new(ConfirmationObservation {
+                lookup_height: 100,
+                wallet_height: None,
+                scanned_height: Some(101),
+            }),
+        ),
+        (
+            false,
+            anyhow::Error::new(RecoveryEvidenceError::ConfirmationPending),
+        ),
+    ] {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let error = error
+                .context("source_reconciliation_failed")
+                .context("private upstream details");
+            let category =
+                report_observation_failure(&job, "small", Kind::Source, &phase, &error, None);
+            report_observation_failure(
+                &job,
+                "small",
+                Kind::Source,
+                &phase,
+                &error,
+                Some(&category),
+            );
+        });
+        let logged = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(
+            logged.lines().filter(|line| line.contains("INFO")).count(),
+            usize::from(automatic_resolution),
+            "{logged}"
+        );
+        if automatic_resolution {
+            assert!(
+                logged.contains("canonical resolution will retry automatically"),
+                "{logged}"
+            );
+        }
+        assert!(logged.contains("DEBUG"));
+        assert!(
+            !logged.contains("WARN") && !logged.contains("private"),
+            "{logged}"
+        );
+        assert!(logged.contains(&job.operation_id) && logged.contains(&job.id));
+    }
+}
+
+#[tokio::test]
+async fn retained_request_debug_matches_actual_status_acquisitions_without_shortening_cadence() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::funding::scheduler::tests::diagnostics::retained_request_debug_matches_actual_status_acquisitions_without_shortening_cadence",
+    ) {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    crate::rotation::store::test_support::declare_two_reserves(
+        &mut raw,
+        "diagnostics",
+        "5",
+        Some(alloy_primitives::U256::from(1_000_000)),
+        0,
+    )
+    .unwrap();
+    let job = raw.funding_jobs().unwrap().remove(0);
+    submitted(&mut raw, &job);
+    raw.disable_pool("diagnostics").unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let (store, actor) = StoreHandle::spawn(raw);
+    let (statuses, mut observed) = mpsc::unbounded_channel();
+    let (started, _source_events) = mpsc::unbounded_channel();
+    let worker = FundingWorker::new(
+        store.clone(),
+        Source {
+            store: store.clone(),
+            gate: Arc::new(Semaphore::new(100)),
+            started,
+            reads: Reads {
+                credits: Arc::new(Semaphore::new(100)),
+                credit_calls: Default::default(),
+                statuses,
+                status_gates: Default::default(),
+                failed_job: Default::default(),
+                processing: true,
+                quotes: None,
+            },
+        },
+        60,
+    );
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing::Dispatch::new(
+        tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(log.reopen().unwrap())
+            .finish(),
+    );
+    // The real application installs a global dispatcher. This exact child owns
+    // its only installation, including observations in the retained owner task.
+    tracing::dispatcher::set_global_default(subscriber.clone()).unwrap();
+    let message = "Checking an earlier funding request that still awaits a final provider outcome";
+    // Ordinary current-swap acquisition stays routine.
+    worker.tick(1000).await.unwrap();
+    assert_eq!(observed.try_recv().unwrap(), job.id);
+    assert!(
+        !std::fs::read_to_string(log.path())
+            .unwrap()
+            .contains(message)
+    );
+    // A retained copy of this exact request is presentation context, not authority.
+    db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote) SELECT operation_id,job_id,phase,quote FROM funding_progress WHERE job_id=?1",[&job.id]).unwrap();
+    let due = {
+        let lease = store.funding_owner().lock_owned().await;
+        let state = lease.state.lock().unwrap();
+        state.records[&Key {
+            operation: job.operation_id.clone(),
+            kind: Kind::Status,
+        }]
+            .due
+    };
+    assert!(due >= 1060);
+    worker.tick(due - 1).await.unwrap();
+    assert!(observed.try_recv().is_err());
+    assert!(
+        !std::fs::read_to_string(log.path())
+            .unwrap()
+            .contains(message)
+    );
+    worker.tick(due).await.unwrap();
+    assert_eq!(observed.try_recv().unwrap(), job.id);
+    let logged = std::fs::read_to_string(log.path()).unwrap();
+    let checks: Vec<_> = logged
+        .lines()
+        .filter(|line| line.contains(message))
+        .collect();
+    assert_eq!(checks.len(), 1, "{logged}");
+    assert!(
+        checks[0].contains("DEBUG")
+            && checks[0].contains(&job.operation_id)
+            && checks[0].contains(&job.id)
+    );
+    let next_due = {
+        let lease = store.funding_owner().lock_owned().await;
+        let state = lease.state.lock().unwrap();
+        state.records[&Key {
+            operation: job.operation_id.clone(),
+            kind: Kind::Status,
+        }]
+            .due
+    };
+    assert!(next_due >= due + 60);
+    worker.tick(next_due - 1).await.unwrap();
+    assert!(observed.try_recv().is_err());
+    assert_eq!(
+        std::fs::read_to_string(log.path())
+            .unwrap()
+            .matches(message)
+            .count(),
+        1
+    );
+    worker.tick(next_due).await.unwrap();
+    assert_eq!(observed.try_recv().unwrap(), job.id);
+    assert_eq!(
+        std::fs::read_to_string(log.path())
+            .unwrap()
+            .matches(message)
+            .count(),
+        2
+    );
+    assert!(
+        std::fs::read_to_string(log.path())
+            .unwrap()
+            .lines()
+            .filter(|line| line.contains(message))
+            .all(|line| line.contains("DEBUG") && !line.contains("INFO") && !line.contains("WARN"))
+    );
+    let terminal_due = {
+        let lease = store.funding_owner().lock_owned().await;
+        let state = lease.state.lock().unwrap();
+        state.records[&Key {
+            operation: job.operation_id.clone(),
+            kind: Kind::Status,
+        }]
+            .due
+    };
+    assert!(terminal_due >= next_due + 60);
+    let id = job.id.clone();
+    let operation = job.operation_id.clone();
+    store
+        .call(move |s| {
+            s.record_provider_outcome(&id, &operation, &SwapStatus::Failed, next_due + 1)
+        })
+        .await
+        .unwrap();
+    worker.tick(terminal_due).await.unwrap();
+    assert!(observed.try_recv().is_err());
+    assert_eq!(
+        std::fs::read_to_string(log.path())
+            .unwrap()
+            .matches(message)
+            .count(),
+        2
+    );
+    let operation = job.operation_id.clone();
+    store
+        .call(move |s| {
+            assert_eq!(s.operation(&operation)?.attempts, 1);
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), b"signed");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(worker);
+    drop(store);
+    actor.await.unwrap();
 }

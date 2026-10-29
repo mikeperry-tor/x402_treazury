@@ -315,6 +315,8 @@ async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
                 [&job.operation_id],
             )
             .unwrap();
+            db.execute("UPDATE funding_progress SET attempts='bad',next_poll='bad',last_error=x'00',phase='invalid' WHERE job_id=?1",[&job.id]).unwrap();
+            db.execute("INSERT INTO funding_health(job_id,started_at,error_streak,timed_out) VALUES(?1,'bad','bad','bad') ON CONFLICT(job_id) DO UPDATE SET started_at='bad',error_streak='bad',timed_out='bad'",[&job.id]).unwrap();
             db.execute_batch("PRAGMA ignore_check_constraints=OFF")
                 .unwrap();
         }
@@ -331,11 +333,7 @@ async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
                 )
                 .await
                 .unwrap(),
-            if malformed_sequencing {
-                recovery::RecoveryOutcome::Waiting("swap_outcome_pending")
-            } else {
-                recovery::RecoveryOutcome::OperatorRequired("funding_disabled")
-            }
+            recovery::RecoveryOutcome::Waiting("funding_disabled")
         );
         assert_eq!(
             db.query_row("SELECT count(*) FROM fixture_completed_scans", [], |row| {
@@ -370,6 +368,20 @@ async fn unsubmitted_funding_expiry_uses_only_its_one_proof_scan() {
             })
             .await
             .unwrap();
+        if malformed_sequencing {
+            let diagnostic: rusqlite::types::Value = db
+                .query_row(
+                    "SELECT attempts FROM funding_progress WHERE operation_id=?1",
+                    [&original_operation],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                diagnostic,
+                rusqlite::types::Value::Text("bad".into()),
+                "canonical recovery does not rewrite diagnostic counters"
+            );
+        }
         let sequencing: (rusqlite::types::Value, rusqlite::types::Value) = db
             .query_row(
                 "SELECT attempts,submission FROM treasury_operations WHERE id=?1",
@@ -1172,6 +1184,8 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
                 [&job.operation_id],
             )
             .unwrap();
+            db.execute("UPDATE funding_progress SET attempts='bad',next_poll='bad',last_error=x'00',phase='invalid' WHERE job_id=?1",[&job.id]).unwrap();
+            db.execute("INSERT INTO funding_health(job_id,started_at,error_streak,timed_out) VALUES(?1,'bad','bad','bad') ON CONFLICT(job_id) DO UPDATE SET started_at='bad',error_streak='bad',timed_out='bad'",[&job.id]).unwrap();
             db.execute_batch("PRAGMA ignore_check_constraints=OFF")
                 .unwrap();
         }
@@ -1222,6 +1236,20 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
             })
             .await
             .unwrap();
+        if malformed_sequencing {
+            let diagnostic: rusqlite::types::Value = db
+                .query_row(
+                    "SELECT attempts FROM funding_progress WHERE operation_id=?1",
+                    [&original_operation],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                diagnostic,
+                rusqlite::types::Value::Text("bad".into()),
+                "canonical recovery does not rewrite diagnostic counters"
+            );
+        }
         let count: rusqlite::types::Value = db
             .query_row(
                 "SELECT attempts FROM treasury_operations WHERE id=?1",
@@ -1411,7 +1439,7 @@ async fn buried_funding_expiry_ignores_stale_inclusion_hints_without_replay_or_n
             .unwrap();
         assert_eq!(
             outcome.outcome,
-            recovery::RecoveryOutcome::OperatorRequired("funding_disabled")
+            recovery::RecoveryOutcome::Waiting("funding_disabled")
         );
         assert_eq!(
             sender.lookups, 0,

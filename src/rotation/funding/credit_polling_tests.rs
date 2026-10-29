@@ -201,7 +201,10 @@ fn credit_failure_backoff_survives_sibling_success_and_uses_completion_time() {
         operation: job.operation_id.clone(),
         kind: Kind::Credit,
     };
-    assert_eq!(state.admit(&credit, &job, 1000, &active), Some(true));
+    assert_eq!(
+        state.admit(&credit, Some(&job.phase), 1000, &active),
+        Some(true)
+    );
     for kind in [Kind::Source, Kind::Status] {
         state
             .admit(
@@ -209,7 +212,7 @@ fn credit_failure_backoff_survives_sibling_success_and_uses_completion_time() {
                     operation: job.operation_id.clone(),
                     kind,
                 },
-                &job,
+                Some(&job.phase),
                 1000,
                 &active,
             )
@@ -219,10 +222,10 @@ fn credit_failure_backoff_survives_sibling_success_and_uses_completion_time() {
     for failure in 1..=7 {
         let completed = 1000 + failure * 1000;
         state.complete(
-            &job,
+            (&job.id, &job.operation_id),
             Kind::Credit,
             completed,
-            RetrySchedule::Poll(5),
+            RetrySchedule::Poll(5, false),
             Some("RPC unavailable".into()),
             None,
         );
@@ -230,23 +233,29 @@ fn credit_failure_backoff_survives_sibling_success_and_uses_completion_time() {
         let due = completed + delay + jitter;
         for kind in [Kind::Source, Kind::Status] {
             state.complete(
-                &job,
+                (&job.id, &job.operation_id),
                 kind,
                 completed + 1,
-                RetrySchedule::Poll(5),
+                RetrySchedule::Poll(5, false),
                 None,
                 None,
             );
         }
-        assert_eq!(state.admit(&credit, &job, due - 1, &active), Some(false));
-        assert_eq!(state.admit(&credit, &job, due, &active), Some(true));
+        assert_eq!(
+            state.admit(&credit, Some(&job.phase), due - 1, &active),
+            Some(false)
+        );
+        assert_eq!(
+            state.admit(&credit, Some(&job.phase), due, &active),
+            Some(true)
+        );
         assert_eq!(state.records[&credit].streak, failure as u32);
     }
     state.complete(
-        &job,
+        (&job.id, &job.operation_id),
         Kind::Credit,
         10000,
-        RetrySchedule::Poll(5),
+        RetrySchedule::Poll(5, false),
         None,
         None,
     );

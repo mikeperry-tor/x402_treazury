@@ -753,10 +753,7 @@ bearer_token_env="UNSET_LISTENER_TOKEN"
         )
         .await,
     );
-    assert_eq!(
-        report["recovery"][0]["outcome"]["status"],
-        "operator_required"
-    );
+    assert_eq!(report["recovery"][0]["outcome"]["status"], "waiting");
     assert_eq!(
         report["recovery"][0]["outcome"]["reason"],
         "funding_disabled"

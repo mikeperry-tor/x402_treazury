@@ -326,9 +326,10 @@ delivery obligation. Never-credited wallets remain protected while any original
 delivery obligation is unresolved, including abandoned reserve predecessors whose
 source transaction is confirmed. Source confirmation does not prove destination
 delivery or permanent loss. For a completed funding job, each current/archived
-accepted swap must have its exact bound NEAR terminal outcome, and no unfulfilled accepted
-calculation or pending source transaction may remain. Never-started operations
-have no source obligation. Source expiry alone does not prove terminal bridge
+possibly disclosed swap must have its exact bound NEAR terminal outcome, and no
+unfulfilled accepted calculation or pending source transaction may remain.
+Proven nondisclosure needs no bridge terminal result, including a privately held
+signed transaction after verified source closure. Source expiry alone does not prove terminal bridge
 outcome. Missing original provenance retains the guard. Closure creates no credit
 or funding authority; possible late credit stays attached to the original identity.
 
@@ -497,6 +498,14 @@ facts and signed bytes still require authentication. Inspection and disclosure
 remain strict: automatic first submission requires the original PREPARED label
 and a valid zero counter. An observation fallback never grants submission or
 rewrites missing history.
+Saved quote-observation counts, polling times and diagnostic health fields are
+also advisory. Their decoding cannot stop runtime recovery or authorize spending;
+unreadable values use ordinary unknown/default scheduling observations without
+rewriting fields merely on read. An unrecognized runtime phase routes to the
+existing recovery path; it does not authorize a new calculation, satisfy a phase
+mutation guard or invent a replacement state. Full inspection still reports
+malformed stored data. These fields are separate from original source disclosure history and the
+configured recovery authority enforced through archived operations.
 
 NEAR owns cross-chain swap settlement. A validated SUCCESS for the exact accepted
 quote/deposit binding closes local source work, without requiring local Zcash
@@ -518,9 +527,28 @@ Earlier negative reports cannot veto success or reopen the claim. FAILED/REFUNDE
 ends bridge-status observation; a genuinely pending original source transaction
 keeps its own confirmation/finite-expiry observation. Unknown, processing and
 incomplete bridge outcomes remain unresolved automatic waits; they do not
-manufacture an integrity error or operator-review requirement. Source expiry or receipt of returned
-coins cannot by itself prove the bridge has no delivery obligation. Another deposit
-requires current claim, funding, fee and attempt authority and SDK spendable funds.
+manufacture an integrity error or operator-review requirement. Source expiry or
+receipt of returned coins cannot by itself prove the bridge has no delivery
+obligation. A confirmed deposit with unresolved settlement waits for that outcome.
+Verified finite expiry can permit a fresh attempt under current unconsumed claim,
+funding, fee and recovery authority and actual SDK spendable funds. The old NEAR
+request remains independently observable until its own terminal outcome.
+
+Status observations retain each accepted request's exact operation and saved quote,
+including archived attempts after the funding job changes identity or completes.
+Their scheduler identity contains the accepted job, operation and wallet identifiers,
+without inventing a funding phase or borrowing replacement health. They share the
+existing independent status lane and cadence; one slow old request
+cannot serialize the newer request's observation. A late bound SUCCESS fulfills
+the same initial claim and prevents any replacement deposit not yet disclosed.
+It does not rewrite another operation's provider result or close that operation's
+already-disclosed source liability. Initial credit can finish the job regardless
+of which attempt was current when the scalar observation was saved; unresolved
+external requests and disclosed originals keep their existing observation owners.
+Each actual status lookup for a retained unresolved request emits DEBUG explaining
+that its final outcome is still unknown and additional checks continue. The log
+identifies the original job, operation and wallet; it does not log provider prose
+or signed data. Admission deferral and ordinary current-swap polls remain DEBUG.
 
 One retained funding owner schedules independent status, credit and prerequisite-
 complete unsigned quote observations in bounded lanes, alongside serialized treasury
@@ -582,6 +610,9 @@ requiring another lookup or agreement with its reported height.
 Diagnostics retain the
 lookup confirmation height, wallet confirmation height (or `unconfirmed`), and
 highest scanned block (or `unknown`); these facts do not establish a root cause.
+Entering a recoverable canonical-disagreement observation emits INFO with the
+safe rejection context. Unchanged checks and ordinary confirmation-depth waits
+remain DEBUG; a disagreement alone does not require operator repair.
 Existing work, inputs and reservations remain owned, and observations continue on
 their existing schedule. An observation discrepancy grants no replacement deposit;
 source confirmation still requires the configured depth. The SDK's upstream 100-block
@@ -626,10 +657,11 @@ expiry (40 blocks before NU7, 120 afterward), and shielding uses the finite back
 default. A genuinely retained zero-expiry original cannot use this expiry path;
 production does not construct one. Submitted/uncertain operations are observed,
 never automatically replayed. Closing source work does not close an unresolved
-bridge operation or authorize a replacement deposit. Disclosed swaps need bound
-NEAR failure/refund before another attempt, in addition to the existing current
-claim, funding, fee and attempt authority. Returned coins are ordinary SDK funds,
-without per-job refund attribution.
+bridge operation. A fresh attempt after expiry requires the original's stored
+canonical closure proof, not an EXPIRED label alone, plus current unconsumed claim,
+funding, fee and recovery authority. An unresolved NEAR request does not veto that
+source-expiry proof; it retains its own status observation. Returned coins are
+ordinary SDK funds, without per-job refund attribution.
 The profile's `max_attempts` bounds transaction recovery resets using durable
 history; neither process restart nor operation replacement erases this count.
 Replacement checks this allowance once, after idempotent archival in the Store
@@ -637,6 +669,10 @@ transaction. An archived original confirmed through the canonical-proof/Store
 boundary (including compatible library or legacy state) does not consume another
 entry for the same operation. Ordinary reconciliation remains pending-only;
 scanning a replacement chain does not reopen completed historical source journals.
+Disabled automatic funding is an ordinary wait after safe source closure, not a
+manual-repair warning; a later enabled configuration can resume eligible work.
+An exhausted recovery limit or qualification restriction still requires its
+separate authority before a new attempt.
 Proven never-disclosed resets, including untouched quote refreshes and unpublished
 calculations closed after offline reconstruction, are marked in durable history
 and excluded from that count. Historical unclassified records still count. Earlier binaries reject the newer state schema.
@@ -697,11 +733,18 @@ Regression coverage should show established recovery completing, genuine
 liabilities remaining owned, and independent work continuing without redundant I/O.
 
 Ordinary retirement preserves unresolved original delivery obligations. A
-never-credited completed job needs each accepted current/archived swap's bound
-NEAR terminal outcome and closed local source work, or proof that no calculation
-or submission was accepted. Completion, abandonment or source expiry/confirmation
+never-credited completed job needs each possibly disclosed current/archived swap's
+bound NEAR terminal outcome and closed local source work. Proven nondisclosure
+has no bridge obligation; any privately held source work must still close.
+Completion, abandonment or source expiry/confirmation
 alone does not establish bridge settlement. Observed returned coins alone are not
 a bound provider refund outcome. No credit or consumed claim is fabricated.
+An expired source with an unresolved `PENDING_DEPOSIT` request can therefore defer
+signer retirement indefinitely while other funding continues. This is automatic
+pending observation, not a manual-repair warning. The [1Click quote contract](https://docs.near-intents.org/api-reference/oneclick/request-a-swap-quote)
+defines its deadline as the start of refund handling; the [status contract](https://docs.near-intents.org/api-reference/oneclick/check-swap-execution-status)
+provides no terminal EXPIRED result. Neither a local deadline nor additional Zcash
+blocks can manufacture that service's final delivery outcome.
 
 ## Refunds, state and recovery
 
@@ -827,8 +870,8 @@ The observation scope, cadence and completion rule belong to the work requesting
 | Accepted initial funding without positive destination credit | Shared Base recipient acquisition when due; each repeated read starts at least 60 seconds after the previous read completes | First positive credit permanently finishes that claim's credit lane; source recovery remains independent |
 | Recognized signed-payment insufficient funds | Asynchronous scalar Base refresh when due, coalesced per wallet; each repeated read starts at least 60 seconds after the previous read completes | Success, including zero, finishes the captured request. Failure or a notification arriving during the read retains follow-up work |
 | Eligible retained-wallet retirement | Candidate-scoped canonical authorization pages and dual balance proof under the existing per-wallet owner, 60-second completion floor and error backoff | Retired or verified latest above tolerance finishes captured demand; confirmed above tolerance with latest low, valid unused authorization or transient failure retains work. Canonical-history changes retain reconstruction work; ineligible or unrecoverably corrupt original work stops locally |
-| Validated pending source or shielding transaction | Shared ZEC scans with a 90-second completion-based floor; operation observations retain their own 60-second floor | Bound NEAR SUCCESS closes swap source work; otherwise canonical confirmation or signed finite-expiry recovery resolves the source obligation, including after credit, disablement, removal or restart |
-| Submitted swap awaiting provider outcome | NEAR status observations; each recurring check starts at least 60 seconds after the previous check completes | Validated SUCCESS/FAILED/REFUNDED stops that lane; SUCCESS also closes swap source work, without creating spendable funds |
+| Validated pending source or shielding transaction | Shared ZEC scans with a 90-second completion-based floor; operation observations retain their own 60-second floor. The funding scheduler owns current operations even after job completion; treasury maintenance owns jobless and archived pending originals | Bound NEAR SUCCESS closes swap source work; otherwise canonical confirmation or signed finite-expiry recovery resolves the source obligation, including after credit, disablement, removal or restart |
+| Submitted swap awaiting provider outcome, including archived attempts | Independent exact-operation NEAR status observations; each recurring check starts at least 60 seconds after the previous check completes | Validated SUCCESS/FAILED/REFUNDED stops that operation's status work; SUCCESS closes its own source work and fulfills the initial claim, without creating spendable funds or releasing a different disclosed original |
 | Explicit `wallet sync` | One requested ZEC scan and configured managed-USDC pass, including outstanding accepted funding recipients and one eligible-retirement attempt | Report asset results and unresolved retirement work; create no background watcher and require serving to be stopped |
 | Completed-result publication or SDK reconstruction | Existing local owner retries after 60 seconds, independently of scan scheduling | Publish the identical result or reconstruct the SDK; this work alone requests no network scan or new calculation |
 | Fully funded idle serving without requested refresh or accepted observation work | No recurring Base or ZEC balance discovery | Relevant new work requests observation again |
@@ -1083,7 +1126,9 @@ Accepted calculations, exact selected inputs, signed bytes and submission intent
 survive cancellation and failed local acknowledgment. Source expiry recovery checks
 the exact authenticated original, buried finite inclusive consensus expiry and
 completed canonical SDK coverage; a refund is never proof
-of non-submission. Owned schema-21 stores upgrade additively to schema 22; unsupported state schemas
+of non-submission. Owned schema-21/22 stores upgrade additively to schema 23, preserving
+financial evidence and encrypted formats. Older binaries reject schema 23 because
+they cannot enforce archived fulfillment against a replacement deposit. Unsupported state schemas
 are rejected before mutation, without private-state conversion.
 
 Failed SDK capabilities reconstruct and exited funding/reconciliation tasks resume

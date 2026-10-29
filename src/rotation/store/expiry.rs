@@ -177,15 +177,20 @@ mod tests {
             job.operation_id
         );
         s.funding_restriction = super::super::super::restriction::FundingRestriction::Ordinary;
-        assert!(s.reauthorize_closed_funding(&job.id, 1).is_err());
+        s.reauthorize_closed_funding(&job.id, 1)?;
+        let replacement = s.funding_job(&job.id)?.unwrap().operation_id;
         s.record_provider_outcome(
             &job.id,
             &job.operation_id,
             &crate::rotation::near::SwapStatus::Failed,
             100,
         )?;
-        assert!(!s.funding_facts(&job.id, &job.operation_id)?.status_needed());
-        s.reauthorize_closed_funding(&job.id, 1)?;
+        assert!(s.db.query_row(
+            "SELECT provider_failed FROM funding_recovery WHERE job_id=?1 AND operation_id=?2",
+            params![job.id, job.operation_id],
+            |r| r.get::<_, bool>(0)
+        )?);
+        assert_eq!(s.funding_job(&job.id)?.unwrap().operation_id, replacement);
         assert_ne!(
             s.funding_job(&job.id)?.unwrap().operation_id,
             job.operation_id
