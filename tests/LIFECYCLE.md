@@ -62,6 +62,10 @@ fabrication. Exercise settlement before acceptance, during calculation, before
 disclosure and after a disclosed request; accepted calculations and I/O retain
 their original completion owners.
 
+The orphaned-input shielding expiry fixture counts completed scans across the
+post-reorg sync and automatic maintenance together, requiring one canonical scan
+while retaining original bytes, accepted inputs and the single submission attempt.
+
 Actual SDK confirmation and signed-expiry fixtures also damage saved plaintext
 txid/expiry projections, including missing fields, wrong types, zero and far-future
 expiry. Recovery must use authenticated original bytes without rewriting the

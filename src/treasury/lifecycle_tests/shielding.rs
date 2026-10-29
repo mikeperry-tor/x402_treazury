@@ -101,6 +101,16 @@ async fn automatic_shielding_expiry_closes_work_despite_orphaned_selected_input(
         let blocks = expiry + 2 - chain.tip();
         chain.mine_empty_blocks(blocks);
     }
+    // Count the completed reorg scan and the maintenance that consumes it;
+    // expiry must not require a second canonical scan from the same owner.
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE fixture_completed_scans (observation TEXT NOT NULL);
+        CREATE TRIGGER record_completed_scan AFTER INSERT ON treasury_sync
+        WHEN json_extract(NEW.observation,'$.phase')='ready'
+        BEGIN INSERT INTO fixture_completed_scans VALUES(NEW.observation); END;",
+    )
+    .unwrap();
     if owner.sync_once(&stop).await.is_err() {
         owner.sync_once(&stop).await.unwrap();
     }
@@ -121,15 +131,7 @@ async fn automatic_shielding_expiry_closes_work_despite_orphaned_selected_input(
     assert_eq!(load_pending(&owner).await.bytes(), prepared.bytes());
     assert_eq!(sender.attempts, 1);
 
-    // Exercise the automatic one-scan source closure, not a direct Store update.
-    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-    db.execute_batch(
-        "CREATE TABLE fixture_completed_scans (observation TEXT NOT NULL);
-        CREATE TRIGGER record_completed_scan AFTER INSERT ON treasury_sync
-        WHEN json_extract(NEW.observation,'$.phase')='ready'
-        BEGIN INSERT INTO fixture_completed_scans VALUES(NEW.observation); END;",
-    )
-    .unwrap();
+    // Exercise automatic source closure using that scan, not a direct Store update.
     owner
         .maintain_owned_transparent(&mut sender, &stop)
         .await
@@ -144,7 +146,7 @@ async fn automatic_shielding_expiry_closes_work_despite_orphaned_selected_input(
     assert_eq!(
         completed.len(),
         1,
-        "expiry performs one new completed canonical scan, not just checkpoints"
+        "expiry consumes the one completed reorg scan without another canonical scan"
     );
     assert!(
         completed
