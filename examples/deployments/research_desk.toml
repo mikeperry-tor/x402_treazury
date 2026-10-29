@@ -429,6 +429,9 @@ send_tools = [
   ] },
   # Match site-specific tools before general Google business-location tools.
   { to = "property", tools = ["google_maps_solar_*", "whitepages_property_search"] },
+  # Generic place discovery complements Maxwell; resort menus, lift proximity
+  # and ski-specific prices still need separate sources. Preserve business access.
+  { to = ["business", "travel"], tools = ["google_maps_nearby_search_partial", "google_maps_text_search_partial"] },
   # Route business research families before the primary fallback.
   { to = "business", tools = [
     "companyenrich_*",
@@ -436,7 +439,7 @@ send_tools = [
     "google_*",
   ] },
   # Share guidance or research across the relevant endpoints.
-  { to = ["business", "property", "social", "web"], tools = ["help"] },
+  { to = ["business", "property", "social", "web", "travel"], tools = ["help"] },
   # Route social research families before the primary fallback.
   { to = "social", tools = [
     "fullenrich_people_search",
@@ -829,7 +832,8 @@ send_tools = [
   { to = "science", tools = ["paper_doi_lookup", "papers_citations", "papers_search", "research_*", "bio_*", "chem_*"] },
   { to = "health", tools = ["clinical_*", "health_*", "medical_*", "nutrition_*", "gov_fda_*"] },
   { to = "finance", tools = ["finance_figi", "finance_security_resolve"] },
-  { to = "travel", tools = ["airport_*", "flight_*", "travel_advisory", "travel_visa"] },
+  # Generic OSM places are partial resort alternatives; the sample hit Overpass 502.
+  { to = "travel", tools = ["airport_*", "flight_*", "travel_advisory", "travel_visa", "poi_near"] },
   { to = ["property", "world"], tools = ["telecom_market_area"] },
   # CompanyRecords b2b_ny_business_entity matched the sampled NY record for less;
   # retain business_sos_search for CO/CT coverage and as the NY backup.
@@ -861,6 +865,10 @@ send_tools = [
     "estonian_company_data", "greek_company_data", "irish_company_data",
     "japanese_company_data", "latvian_company_data", "slovenian_company_data",
     "spanish_company_data", "au_company_data",
+    # Alternatives alongside Maxwell; Canada advertises $0.864, not Maxwell's $0.005.
+    # Polish/Slovak reads need registry IDs; EU search does not replace act-ID lookup.
+    "canadian_company_data", "swiss_company_data", "polish_company_data",
+    "slovak_company_data", "eu_regulation_search",
     # CompanyRecords b2b_bolagsverket_sweden_companies matched core facts for less,
     # but uses a weekly snapshot. Retain this direct lookup for fresher facts and backup.
     "swedish_company_data",
@@ -872,7 +880,7 @@ send_tools = [
   # MiCA vasp_verify and vasp_non_compliant_check reported unavailable registers,
   # despite HTTP success; neither qualifies a compliance verdict.
   # AgOSINT supplies routine CZ/NO/GB/FR/FI/US/DE company lookups; Brazilayer supplies CNPJ.
-  # Maxwell supplies CA/CH/PL/SK records. Retain the additional jurisdictions and scoped KYB tools above.
+  # Strale and CompanyRecords complement Maxwell registries; contracts and freshness differ.
   # Selected web/science tools cover web/papers, finance covers markets, and NetIntel/AgOSINT cover DNS/domains.
   # Prefer selected component calls over overlapping solutions_* bundles; parsing/validation belongs locally.
   # Content generation, document processing and account/provider diagnostics are outside this selection.
@@ -880,6 +888,9 @@ send_tools = [
 ]
 
 # International laws, open-data discovery and selected registries add jurisdictional coverage.
+# Maxwell currently has payment-facilitator problems: signed calls returned
+# payment_invalid with facilitatorStatus 502 / upstream_unreachable. It may need
+# removal if these problems persist; retain the alternatives alongside it for now.
 [sources.maxwell]
 extends = "../../providers/maxwell.toml"
 send_tools = [
@@ -1027,6 +1038,10 @@ send_tools = [
   { to = "business", tools = [
     "b2b_trustpilot_reviews", "b2b_ny_business_entity", "b2b_bolagsverket_sweden_companies",
     "gov_krs_poland", "gov_justia_case_law",
+    # Dataset keyword search only; no dedicated dataset-ID retrieval.
+    "gov_canada_open_data", "gov_australia_data_gov_au", "gov_govdata_germany",
+    "gov_data_gov_uk", "gov_data_gov",
+    "b2b_slovakia_rpo_companies", # Known ICO only; no company-name search.
   ] },
   # WebMD returned family-medicine listings; dentistry failed upstream HTTP 503.
   # ADA searches in New Orleans and Austin returned 404; leave ADA unselected.
@@ -1106,7 +1121,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
 instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic research; health for healthcare and clinical datasets."
-discovery_search_tool_instructions_text = "Business keywords: CompanyRecords NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, CompanyRecords, GLEIF, LEI, accounting-consolidation parent companies, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, x402 Atlas, EPO, 2s patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+discovery_search_tool_instructions_text = "Business keywords: Canadian federal corporations, Swiss Zefix, Slovak RPO, Strale, EU regulation search, open government datasets, Canada open data, Australia data.gov.au, Germany GovData, UK data.gov.uk, US Data.gov, CompanyRecords NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, CompanyRecords, GLEIF, LEI, accounting-consolidation parent companies, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, x402 Atlas, EPO, 2s patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
 
 [servers.finance]
 listen = "127.0.0.1:3015"
@@ -1151,8 +1166,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
 discover_on_demand = true
-instructions_text = "Trip planning: cash fares, cached airline-mileage awards, flight operations/history, airport references, route matrices, stays, dining, hiking, rail/transit, EV chargers, destination/visa references and ski travel. StableTravel Google Flights defaults to round trips requiring return_date; type string 2 selects one way. Seats.aero search returns availability IDs for trip details; preserve cache timestamps, mileage program, cabin and taxes. Resolve FlightAware identifiers before position/track/map calls; 2s shares that upstream. APEX fares are cached Aviasales deals with affiliate links. Hotel sample prices, published ski prices and booking links do not hold availability or issue tickets. Preserve source dates, currencies, unavailable components and partial coverage. Resort proximity is approximate, not a routed walking distance; Maxwell local tips presently cover Slovakia and advertise $1 per call. Hiking uses OpenStreetMap rather than AllTrails reviews; charger data is a directory rather than live occupancy. FlixBus/FlixTrain searches cover one adult one way; Rappi menus require a store ID or URL and do not search stores. Verify community-maintained visa references with the destination authority. World retains general/aviation weather, hazards and accidents; geocoding is shared."
-discovery_search_tool_instructions_text = "Travel keywords: flight search, airfare, cash fare, Google Flights, StableTravel, SerpAPI, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, departures, arrivals, IATA, ICAO, Seats.aero, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, APEX, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, SiteCheck, HealthTravel, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips, Maxwell, 2s, twos."
+instructions_text = "Trip planning: cash fares, cached airline-mileage awards, flight operations/history, airport references, route matrices, stays, dining, hiking, rail/transit, EV chargers, destination/visa references and ski travel. Google Places and 2s OSM searches add generic nearby places; resolve resort coordinates separately and do not infer lift proximity, menus or ski prices from place listings. StableTravel Google Flights defaults to round trips requiring return_date; type string 2 selects one way. Seats.aero search returns availability IDs for trip details; preserve cache timestamps, mileage program, cabin and taxes. Resolve FlightAware identifiers before position/track/map calls; 2s shares that upstream. APEX fares are cached Aviasales deals with affiliate links. Hotel sample prices, published ski prices and booking links do not hold availability or issue tickets. Preserve source dates, currencies, unavailable components and partial coverage. Resort proximity is approximate, not a routed walking distance; Maxwell local tips presently cover Slovakia and advertise $1 per call. Hiking uses OpenStreetMap rather than AllTrails reviews; charger data is a directory rather than live occupancy. FlixBus/FlixTrain searches cover one adult one way; Rappi menus require a store ID or URL and do not search stores. Verify community-maintained visa references with the destination authority. World retains general/aviation weather, hazards and accidents; geocoding is shared."
+discovery_search_tool_instructions_text = "Travel keywords: nearby places, OpenStreetMap POI, 2s poi_near, Google Places Nearby Search, Google Places Text Search, restaurants, bars, rental shops, ski schools, flight search, airfare, cash fare, Google Flights, StableTravel, SerpAPI, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, departures, arrivals, IATA, ICAO, Seats.aero, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, APEX, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, SiteCheck, HealthTravel, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips, Maxwell, 2s, twos."
 
 [servers.toolbox]
 listen = "127.0.0.1:3020"

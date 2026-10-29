@@ -3,6 +3,45 @@ use serde_json::Value;
 use std::path::Path;
 
 #[tokio::test]
+async fn strale_polish_lookup_describes_only_the_supported_krs_input() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let cfg = config::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("providers/strale.toml"))
+        .await
+        .unwrap()
+        .settings;
+    // Small captured contract: the vendor incorrectly advertises name lookup.
+    let doc = json!({"paths":{"/x402/v2/polish-company-data":{"get":{
+        "description":"Look up a Polish company by its 10-digit KRS number or name.",
+        "x-payment-info":{"price":{"mode":"fixed","currency":"USD","amount":"0.054000"}},
+        "parameters":[{"name":"krs_number","in":"query","required":true,
+            "description":"KRS number (10 digits) or company name",
+            "schema":{"type":"string"}}]
+    }}}});
+    let tools = catalog::build_tools(&cfg, &doc, "strale").unwrap();
+    let tool = tools
+        .iter()
+        .find(|tool| tool.name == "strale_polish_company_data")
+        .unwrap();
+    assert!(
+        tool.description
+            .contains("Company-name search is unavailable")
+    );
+    assert!(tool.description.contains("$0.054/call [spec]"));
+    assert!(
+        tool.input_schema["properties"]["krs_number"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("company names are unsupported")
+    );
+    let args = json!({"krs_number":"0000028860"});
+    let route = tool
+        .route(cfg.base_url.as_ref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.query["krs_number"], "0000028860");
+}
+
+#[tokio::test]
 async fn daedalus_materializes_identity_security_without_putting_identity_in_the_body() {
     use serde_json::json;
     use x402_treazury::{catalog, config};

@@ -131,6 +131,23 @@ Strale MiCA checks reported unavailable registers despite HTTP success; they
 remain excluded. 2s HICP returned 2025-12 as latest in October 2026 and remains
 unselected. Neither payment success nor a false match field proves data coverage.
 
+Maxwell remains selected alongside close and partial alternatives while its payment
+facilitator reports `upstream_unreachable`; persistent failures may warrant removal.
+Strale adds Canadian and Swiss company profiles, Polish and Slovak ID lookups and
+EU regulation search. Canada advertises $0.864 per call; other country contracts,
+prices and freshness differ. Polish name search failed despite the vendor schema,
+so caller guidance requires a KRS number. CompanyRecords adds keyword searches
+across Canadian, Australian, German, British and US dataset catalogues, plus Slovak
+ICO lookup. These do not replace dataset-ID retrieval or company-name discovery.
+
+Travel shares StableEnrich Google Places nearby/text search with business, and adds
+2s OSM POI search. Google returned nearby restaurants; the OSM sample failed at
+Overpass. These remain generic components, without Maxwell's resort resolution,
+lift relationships, stored menus or ski pricing. Existing FDA, weather, patent, CFR,
+route, lodging and Rappi selections already supply the other candidate alternatives;
+general weather remains on world. Sample delivery is not long-term reliability
+or full-contract equivalence. See the [provider caveats](../providers/CAVEATS.md).
+
 FindMyDirectDoctor adds its full read-only healthcare-access catalog on health:
 doctor and clinic directories, membership fees, hospital cash prices, HRSA community
 health centers, financial assistance and uninsured-care guides. Doctor search,

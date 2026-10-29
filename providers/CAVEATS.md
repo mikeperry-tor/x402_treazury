@@ -1705,6 +1705,13 @@ excluded. `/api/countdown/gif` returns unsupported animated GIF bytes. Other mod
 and utility calls remain reusable; research selections are editorial. Object-valued
 query filters are serialized as JSON, including OSHA initialPenalty bounds.
 
+Generic POI and Google Places calls are partial resort alternatives, not ski APIs.
+The 2s POI sample near Kitzbühel failed HTTP 502 from Overpass; StableEnrich partial
+Google Nearby Search returned three restaurants. The deployment deliberately
+selects 2s POI and shares StableEnrich nearby/text search and help with travel while
+preserving business access. Resolve coordinates independently; these tools do not
+supply Maxwell resort menus, lift distances, ticket prices or operating feeds.
+
 ## Strale (`strale.toml`)
 
 Use the actual `/x402/v2` paths in `https://api.strale.io/openapi.json`.
@@ -1721,8 +1728,19 @@ opaque metadata while signing and capping only `amount`. This removes that local
 pre-sign rejection. A subsequent static link-extraction call returned 26 IANA
 links and reported settlement at $0.0324. UK charity lookup subsequently returned
 registration and dated financial facts; both MiCA checks reported unavailable
-registers despite HTTP success. Other operations still need separate delivery
+registers despite HTTP success. Unexercised operations still need separate delivery
 qualification.
+Canadian and Swiss company lookups delivered profiles; Canadian lookup resolved
+SHOPIFY INC. to corporation 4261607 and advertised $0.864, versus Maxwell's $0.005
+hint. Slovak ICO lookup delivered ESET with representatives, but its underlying
+last-updated field was 2025-07-07 despite a fresh fetch. EU topic search returned
+2024 regulations including CELEX 32024R1689; it has no dedicated act-ID lookup.
+Polish company-name input failed HTTP 400: name search is unavailable despite the
+remote schema advertising it. The local tool/parameter descriptions require a
+10-digit KRS number and preserve the advertised price; the provider remains
+available for known-ID lookup. These alternatives are deliberately selected
+alongside Maxwell, without treating their contracts or freshness as identical.
+
 The Finnish Patent and Registration Office lookup is a company registry, not a
 patent search. The reviewed catalog has no patent-research operation.
 
@@ -1754,7 +1772,10 @@ SDK sets expiry at signing, so a firewall delay before signing does not consume
 that window. No signer, extension or generic relay workaround is established.
 Earlier failed authorizations remain potentially chargeable and were not replayed.
 Research desk prefers CompanyRecords court search while retaining Maxwell's
-additional government, travel and research contracts for separate evaluation.
+additional government, travel and research contracts for separate evaluation. It
+now enables the audited close/partial alternatives alongside those Maxwell tools;
+Maxwell may need removal if its facilitator failures persist. General place/weather
+components do not replace ski prices, lift status or resort-specific relationships.
 
 Most records come from a continuously refreshed cache. Preserve fetchedAt or
 generatedAt. A specific uncached item can return an uncharged 404 and queue retrieval;
@@ -2130,6 +2151,13 @@ Research desk selects CompanyRecords opinion search and explicitly excludes 2s a
 Maxwell search backups with comments; 2s docket, opinion-text and verification tools
 remain selected. Lower advertised prices favor the sampled core CompanyRecords
 reads but do not establish universal quality or freshness superiority.
+
+Keyword catalogue searches for Canada, Australia, Germany, Britain and the US
+each returned two dataset records with source metadata. They have no dedicated
+dataset-ID lookup contract. The US sample's title, modification date and download
+link matched the official Data.gov record; foreign records were not independently
+corroborated. Slovak RPO lookup is known-ICO only. Research desk selects these as
+partial alternatives while retaining Maxwell's broader contracts.
 
 WebMD family-medicine search returned 60 New Orleans records of a reported 1,108,
 including 10 other-specialty listings; 57 lacked office phones and three lacked

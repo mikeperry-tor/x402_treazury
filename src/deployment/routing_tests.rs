@@ -37,7 +37,14 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
         ("twos", "law_opinion", Some("business")),
         ("twos", "business_sos_search", Some("business")),
         ("strale", "swedish_company_data", Some("business")),
+        ("strale", "canadian_company_data", Some("business")),
+        ("strale", "swiss_company_data", Some("business")),
+        ("strale", "polish_company_data", Some("business")),
+        ("strale", "slovak_company_data", Some("business")),
+        ("strale", "eu_regulation_search", Some("business")),
+        ("twos", "poi_near", Some("travel")),
         ("maxwell", "courts_search", None),
+        ("maxwell", "ski_prices", Some("travel")),
         ("maxwell", "gov_pl_companies", Some("business")),
         ("maxwell", "openfda_drug_label", Some("health")),
         ("x402stock", "clinical_trials", Some("health")),
@@ -56,6 +63,20 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
             Some("business"),
         ),
         ("companyrecords", "gov_krs_poland", Some("business")),
+        ("companyrecords", "gov_canada_open_data", Some("business")),
+        (
+            "companyrecords",
+            "gov_australia_data_gov_au",
+            Some("business"),
+        ),
+        ("companyrecords", "gov_govdata_germany", Some("business")),
+        ("companyrecords", "gov_data_gov_uk", Some("business")),
+        ("companyrecords", "gov_data_gov", Some("business")),
+        (
+            "companyrecords",
+            "b2b_slovakia_rpo_companies",
+            Some("business"),
+        ),
         ("companyrecords", "gov_healthcare_gov", Some("health")),
         (
             "companyrecords",
@@ -72,6 +93,26 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
         assert_eq!(decision.targets, expected, "{source}/{suffix}");
         assert_eq!(decision.excluded, target.is_none(), "{source}/{suffix}");
     }
+    let rules = config.sources["stableenrich"].send_tools.as_ref().unwrap();
+    let compiled = CompiledRules::new(rules, "stableenrich").unwrap();
+    for name in [
+        "stableenrich_google_maps_nearby_search_partial",
+        "stableenrich_google_maps_text_search_partial",
+    ] {
+        assert_eq!(compiled.decision(name).targets, ["business", "travel"]);
+    }
+    // The specific shared rules must not redirect other Google business tools.
+    assert_eq!(
+        compiled.decision("stableenrich_google_search").targets,
+        ["business"]
+    );
+    assert!(
+        compiled
+            .decision("stableenrich_help")
+            .targets
+            .iter()
+            .any(|target| target == "travel")
+    );
 }
 fn rules(value: Value) -> Vec<SendToolsRule> {
     serde_json::from_value(value).unwrap()
