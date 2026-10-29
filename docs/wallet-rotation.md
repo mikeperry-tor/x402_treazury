@@ -748,9 +748,12 @@ blocks can manufacture that service's final delivery outcome.
 
 ## Refunds, state and recovery
 
-Each swap uses a persisted unique high-index transparent refund address derived
-from the treasury. Refund visibility does not make funds automatically spendable
-for another deposit. Serving and bootstrap with enabled automatic funding attempt per-address shielding
+Each swap uses a persisted unique external transparent refund address derived
+sequentially from treasury account zero. Snapshot recovery retains these addresses;
+mnemonic-only discovery can miss later receipts across unused address gaps, so a
+seed alone does not replace the complete backup. Refund visibility does not make
+funds automatically spendable for another deposit. Serving and bootstrap with
+enabled automatic funding attempt per-address shielding
 through the existing treasury owner. `auto_fund=false` and qualification restrictions
 prevent new shielding; existing prepared bytes remain observable. Positive
 qualification funding permits authorize jobs only and do not authorize automatic
