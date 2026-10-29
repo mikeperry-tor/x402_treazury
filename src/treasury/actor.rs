@@ -325,6 +325,20 @@ impl TreasuryCommands {
 mod tests {
     use super::*;
 
+    fn assert_shielded_refund(encoded: &str) {
+        let zcash_keys::address::Address::Unified(receivers) =
+            zcash_keys::address::Address::decode(
+                &zcash_protocol::consensus::Network::MainNetwork,
+                encoded,
+            )
+            .unwrap()
+        else {
+            panic!("refund must be a unified address");
+        };
+        assert!(receivers.orchard().is_some() && receivers.sapling().is_some());
+        assert!(receivers.transparent().is_none());
+    }
+
     #[tokio::test]
     async fn startup_socks_preserves_commands_and_failed_scan_cooldown() {
         let output = tokio::time::timeout(
@@ -745,7 +759,7 @@ mod tests {
             if stopped {
                 assert!(address.is_err());
             } else {
-                assert!(address.unwrap().unwrap().starts_with('t'));
+                assert_shielded_refund(&address.unwrap().unwrap());
             }
             stop.cancel();
             task.await.unwrap().unwrap();
@@ -815,7 +829,7 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
-        assert!(address.starts_with('t'));
+        assert_shielded_refund(&address);
         store
             .call(move |s| {
                 assert_eq!(s.refund_address(&job)?.as_deref(), Some(address.as_str()));

@@ -453,8 +453,14 @@ static wallets. Bounded qualification examples explicitly opt out. `near_api_key
 Tokens stay in environment variables and are sent only to the fixed NEAR origin.
 Session issuance/refresh and authenticated access still require qualification.
 
-The coordinator persists a unique transparent refund address and wallet derivation
-range before obtaining a quote. Unsigned quote failures use per-pass backoff,
+The coordinator persists a unique Sapling+Orchard unified refund address without a
+transparent receiver, along with the SDK snapshot, before obtaining a quote.
+Existing transparent refund addresses remain unchanged. Shielded receipts need
+ordinary wallet synchronization and confirmations, without an extra shielding
+transaction. `wallet shield-refunds --job-id UUID` finishes normally with an INFO
+message when its refund address is already shielded; it does not scan, calculate
+or broadcast. Legacy transparent refunds retain explicit and automatic shielding.
+Unsigned quote failures use per-pass backoff,
 without consuming `max_attempts` for transaction recovery. A quote refresh must
 prove no accepted calculation or outgoing record exists; it archives its old bindings, records
 a durable refresh marker and allocates a fresh operation/refund identity.

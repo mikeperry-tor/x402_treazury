@@ -758,11 +758,38 @@ blocks can manufacture that service's final delivery outcome.
 
 ## Refunds, state and recovery
 
-Each swap uses a persisted unique external transparent refund address derived
-sequentially from treasury account zero. Snapshot recovery retains these addresses;
-mnemonic-only discovery can miss later receipts across unused address gaps, so a
-seed alone does not replace the complete backup. Refund visibility does not make
-funds automatically spendable for another deposit. Serving and bootstrap with
+New swaps use a persisted unique shielded-only unified refund address, containing
+Sapling and Orchard receivers derived from treasury account zero. The same Zcash
+seed also derives transparent addresses and unified addresses with transparent
+receivers; no additional seed is needed. Compact-block scanning with the account's
+viewing keys discovers shielded receipts without enumerating every issued address.
+They become spendable under ordinary SDK confirmation rules without a separate
+shielding transaction. Address derivation and the exact job binding are saved
+atomically before a quote can disclose the address.
+Each new logical swap operation gets different Sapling and Orchard receivers. Ordinary
+restart preserves the SDK's address progression; observations and retries of the
+same accepted swap retain its exact refund binding. Replacement attempts and
+quote refreshes remove the old active binding before deriving another address.
+Unsigned quote acquisition retries for the same operation reuse its binding,
+including when a timed-out request may already have reached the provider; this
+does not promise a fresh address for every HTTP request.
+Distinct refund receivers prevent address-reuse linkage, not correlation through
+other request, session or network metadata.
+
+Existing transparent refund bindings and accepted quotes remain unchanged.
+Snapshot recovery retains their address ranges; mnemonic-only transparent discovery
+can miss later receipts across unused address gaps, so the seed alone does not
+replace the complete backup or recover off-chain obligations. A mnemonic-only
+rescan also cannot recover the issuance frontier of disclosed addresses that never
+received funds; recovering coins does not establish safe continuation of address
+issuance from an old or missing snapshot. The refund codec
+accepts network-correct transparent addresses and unified addresses with a
+transparent or Orchard receiver. A mixed unified address may receive transparently;
+new generation omits the transparent receiver to avoid that fallback. Source
+deposit addresses retain their separate transparent-only contract.
+
+Refund visibility does not make funds automatically spendable for another deposit.
+For legacy or other owned transparent funds, serving and bootstrap with
 enabled automatic funding attempt per-address shielding
 through the existing treasury owner. `auto_fund=false` and qualification restrictions
 prevent new shielding; existing prepared bytes remain observable. Positive
@@ -771,6 +798,9 @@ jobless shielding. Explicit shielding remains available while serving is stopped
 with its original job recipient network binding. Unattributed automatic shielding
 uses a stable per-address/network/treasury identity. Both paths retain observed
 inputs, fee caps and exact prepared-byte recovery.
+Explicit `wallet shield-refunds` reports that a shielded-only refund needs no
+shielding and finishes normally, without a scan, calculation or new operation.
+For mixed unified addresses, explicit shielding uses the owned transparent receiver.
 The remaining `funding_refunds` records store previously derived addresses for
 quote routing and explicit per-job administration. They store no returned amount
 or spendability. Automatic shielding does not consult refund attribution or

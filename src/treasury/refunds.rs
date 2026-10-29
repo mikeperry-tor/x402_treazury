@@ -14,6 +14,16 @@ use zcash_client_backend::{
 };
 use zcash_protocol::{ShieldedPool, value::Zatoshis};
 
+/// Expected result of asking to shield a refund that has no transparent receiver.
+#[derive(Debug)]
+pub struct NoShieldingRequired;
+impl std::fmt::Display for NoShieldingRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Refund address receives shielded funds; no transparent shielding is needed")
+    }
+}
+impl std::error::Error for NoShieldingRequired {}
+
 impl Treasury {
     /// Operator requested, one job/address per transaction. No broadcast here.
     pub async fn shield_refund(
@@ -22,7 +32,6 @@ impl Treasury {
         max_fee: u64,
         stop: &CancellationToken,
     ) -> Result<PreparedTransaction> {
-        self.sync_once(stop).await?;
         let (address, recipient) = self
             .store
             .call(move |s| {
@@ -33,6 +42,26 @@ impl Treasury {
                 Ok((address, funding.recipient))
             })
             .await?;
+        use zcash_keys::address::Address;
+        let receiver = match Address::decode(&self.network.chain(), &address)
+            .context("invalid refund address")?
+        {
+            Address::Transparent(receiver) => Some(receiver),
+            Address::Unified(address) => {
+                ensure!(
+                    address.transparent().is_some()
+                        || address.orchard().is_some()
+                        || address.sapling().is_some(),
+                    "unsupported refund address receivers"
+                );
+                address.transparent().copied()
+            }
+            Address::Sapling(_) => None,
+            Address::Tex(_) => anyhow::bail!("TEX addresses are unsupported for refunds"),
+        }
+        .ok_or(NoShieldingRequired)?;
+        let address = Address::Transparent(receiver).encode(&self.network.chain());
+        self.sync_once(stop).await?;
         self.shield_address(address, Some(recipient), max_fee, stop)
             .await
     }

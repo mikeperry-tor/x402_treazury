@@ -506,8 +506,32 @@ async fn refunds_run(cli: bool) -> Result<()> {
     }
     let jobs = treasury.store.call(|s| s.funding_jobs()).await?;
     let mut addresses = vec![];
+    // This consensus fixture deliberately retains legacy transparent refunds;
+    // normal new refund generation is shielded and needs no shielding step.
     for job in &jobs {
-        addresses.push(treasury.refund_address(job.id.clone()).await?);
+        let (_, receiver) = treasury
+            .client
+            .as_mut()
+            .context("treasury client missing")?
+            .generate_transparent_address(zip32::AccountId::ZERO, false)
+            .await?;
+        let address =
+            zcash_keys::address::Address::Transparent(receiver).encode(&treasury.network.chain());
+        let bytes = snapshot(
+            treasury
+                .client
+                .as_ref()
+                .context("treasury client missing")?,
+        )
+        .await?;
+        let revision = treasury.revision;
+        let (job_id, saved) = (job.id.clone(), address.clone());
+        treasury.revision = treasury
+            .store
+            .call(move |s| s.save_refund_address(&job_id, &saved, revision, &bytes))
+            .await?;
+        assert_eq!(treasury.refund_address(job.id.clone()).await?, address);
+        addresses.push(address);
     }
     assert_eq!(
         addresses

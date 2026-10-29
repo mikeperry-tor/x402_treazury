@@ -239,6 +239,32 @@ separately reviewed vendor patch, rather than a compatible lockfile update.
 The [release runner](reproducible-builds.md#prepare-inputs) separately
 verifies prefetched parameters and denies network access during qualification.
 
+## Refund receivers and seed recovery
+
+New refund derivation calls the pinned SDK's existing
+`generate_unified_address(ReceiverSelection::all_shielded(), AccountId::ZERO)`.
+The result contains Sapling and Orchard receivers without a transparent fallback.
+The application persists the SDK snapshot and exact job/address binding together
+before quote disclosure. Existing transparent bindings are returned unchanged;
+their SDK discovery and owned-fund shielding paths remain necessary.
+
+Compact-block trial decryption uses account viewing keys, so shielded receipt
+discovery does not depend on a sequential transparent-address gap scan.
+`treasury::lifecycle_tests::refund_addresses::distant_shielded_refund_is_spendable_after_seed_only_restore`
+receives at a later generated address, then recovers the actual note and spendable
+value into a fresh wallet using only the public test mnemonic and early birthday.
+It imports no original address list, jobs or snapshot. This synthetic-chain test
+does not validate consensus or live bridge delivery. See the maintained
+[refund contract](wallet-rotation.md#refunds-state-and-recovery) for legacy
+transparent recovery limits and financial-authority boundaries.
+
+The [NEAR native bridge implementation](https://github.com/Near-One/bridge-sdk-rs/blob/d1361ac1c68fa579ed1a498d30f2124bc16e09cc/bridge-sdk/connectors/omni-connector/src/zcash.rs#L612)
+constructs shielded refunds using an Orchard receiver. Zodl also supplies shielded
+UAs to 1Click. Public unfunded dry quotes accept Orchard-only and Sapling+Orchard
+refund UAs on our native-ZEC/Base-USDC route. These establish format compatibility,
+not funded settlement. Refund receiver validation is separate from the
+transparent-only source-deposit contract; mixed UAs may select a transparent path.
+
 ## Release descriptor inputs
 
 The upstream Git build derives its embedded descriptor from checkout revision,

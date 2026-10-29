@@ -90,7 +90,7 @@ enum Action {
         #[arg(long)]
         operation_id: String,
     },
-    /// Prepare shielding; does not broadcast.
+    /// Prepare transparent refund shielding; already-shielded refunds need no action.
     ShieldRefunds {
         #[arg(long)]
         job_id: String,
@@ -738,6 +738,12 @@ async fn shield_refunds(
     )
     .await;
     if let Err(error) = result {
+        if error.is::<crate::treasury::NoShieldingRequired>() {
+            tracing::info!(
+                "Refund address receives shielded funds; no transparent shielding is needed"
+            );
+            return Ok(treasury);
+        }
         if error.is::<crate::server::ForcedShutdown>() {
             return Err(error);
         }

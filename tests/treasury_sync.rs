@@ -848,6 +848,16 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
         .await
         .unwrap();
     let first = treasury.refund_address(jobs[0].id.clone()).await.unwrap();
+    let zcash_keys::address::Address::Unified(receivers) = zcash_keys::address::Address::decode(
+        &zcash_protocol::consensus::Network::MainNetwork,
+        &first,
+    )
+    .unwrap() else {
+        panic!("new refund must be a unified address");
+    };
+    assert!(receivers.orchard().is_some() && receivers.sapling().is_some());
+    assert!(receivers.transparent().is_none());
+
     assert_eq!(
         first,
         treasury.refund_address(jobs[0].id.clone()).await.unwrap()
@@ -862,7 +872,98 @@ async fn refund_address_and_derivation_range_survive_encrypted_reopen() {
     );
     let second = treasury.refund_address(jobs[1].id.clone()).await.unwrap();
     assert_ne!(first, second);
+    let zcash_keys::address::Address::Unified(second_receivers) =
+        zcash_keys::address::Address::decode(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            &second,
+        )
+        .unwrap()
+    else {
+        panic!("new refund must be a unified address");
+    };
+    assert_ne!(receivers.orchard(), second_receivers.orchard());
+    assert_ne!(receivers.sapling(), second_receivers.sapling());
+    assert!(second_receivers.transparent().is_none());
+    let (endpoint, calls, server, _) = mock("main").await;
+    treasury.configure_sync(SyncSettings::new(endpoint.clone(), 3).unwrap());
+    let before = treasury.status().await.unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+    let rows = || {
+        db.query_row(
+        "SELECT (SELECT COUNT(*) FROM operation_network),(SELECT COUNT(*) FROM outgoing),(SELECT COUNT(*) FROM treasury_operations)",
+        [], |row| Ok((row.get::<_,i64>(0)?,row.get::<_,i64>(1)?,row.get::<_,i64>(2)?)),
+    ).unwrap()
+    };
+    let before_rows = rows();
+    for job in &jobs {
+        let error = treasury
+            .shield_refund(job.id.clone(), 0, &CancellationToken::new())
+            .await
+            .err()
+            .expect("shielded refund needs no shielding transaction");
+        assert!(error.is::<x402_treazury::treasury::NoShieldingRequired>());
+    }
+    assert!(
+        calls.lock().unwrap().is_empty(),
+        "no scan, lookup or submission RPC"
+    );
+    let after = treasury.status().await.unwrap();
+    assert_eq!(after.snapshot_revision, before.snapshot_revision);
+    assert_eq!(after.outgoing_pending, before.outgoing_pending);
+    assert_eq!(
+        after.treasury_operations.len(),
+        before.treasury_operations.len()
+    );
+    assert_eq!(after.funding_jobs.len(), before.funding_jobs.len());
+    assert_eq!(
+        rows(),
+        before_rows,
+        "no UUID-backed owner or financial journal created"
+    );
     treasury.close().await.unwrap();
+    let config = dir.path().join("refunds.toml");
+    std::fs::write(&config, format!("version=1\nservers={{}}\n[treasury]\nstate_dir='state'\nkey_file='key'\nindexer_url='{endpoint}'\n")).unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .env_clear()
+        .envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+        .env("RUST_LOG", "info")
+        .args(["wallet", "shield-refunds", "--config"])
+        .arg(&config)
+        .args(["--job-id", &jobs[0].id])
+        .output()
+        .await
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("INFO") && stderr.contains("no transparent shielding is needed"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("WARN") && !stderr.contains("ERROR"),
+        "{stderr}"
+    );
+    assert!(
+        calls.lock().unwrap().is_empty(),
+        "CLI noop must not contact the indexer"
+    );
+    assert_eq!(rows(), before_rows);
+    let reopened = Treasury::open(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        before.treasury_id,
+    )
+    .await
+    .unwrap();
+    let status = reopened.status().await.unwrap();
+    assert_eq!(status.snapshot_revision, before.snapshot_revision);
+    assert_eq!(
+        status.treasury_operations.len(),
+        before.treasury_operations.len()
+    );
+    assert!(!status.outgoing_pending);
+    reopened.close().await.unwrap();
+    server.abort();
 }
 
 #[tokio::test]

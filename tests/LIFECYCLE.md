@@ -3,6 +3,20 @@
 These tests use public deterministic keys, localhost fixtures and isolated regtest
 chains. None spends mainnet funds or contacts NEAR's production API.
 
+`treasury::lifecycle_tests::refund_addresses` proves a distant shielded refund
+becomes SDK-spendable after restoring only its mnemonic and early birthday into a
+new wallet. No original snapshot, address metadata or financial workflow is
+imported. Binding/reopen tests preserve legacy transparent addresses and prove an
+explicit shielded-refund shielding request performs no RPC, calculation or new
+operation. Persisted mixed T+Orchard and T+Sapling bindings pass through
+`shield_refund` into real SDK shielding proposals and proofs, selecting only the
+funded owned transparent input while preserving the exact binding and leaving
+submission attempts at zero. Persisted TEX and invalid encodings reject before
+sync or preparation instead of reporting that shielding is unnecessary. The
+ignored Docker refund fixture still explicitly creates legacy transparent
+bindings to retain high-index discovery and per-address shielding coverage;
+ordinary new refund derivation emits shielded-only UAs.
+
 Expiry maintenance must consume its completed same-owner canonical scan without
 another indexer request. The shielding-expiry fixture makes the next indexer
 request fail after successful scanning and requires closure with the fault still
@@ -96,7 +110,7 @@ remain scoped failures while a sibling original can still be observed.
 | Exact preparation ownership and expiry journal | Store unit tests and `tests/rotation.rs` | No refund-credit ledger; accepted input ownership, retained publication, snapshot revision guards, expiry-proved operation replacement, backup/restore and crash recovery. |
 | Never-submitted source expiry | `treasury::lifecycle_tests::unsubmitted_funding_expiry_uses_only_its_one_proof_scan` | Actual SDK-managed source bytes with zero attempts expire through one fully completed canonical tip scan, without a preliminary forecast scan or redundant second scan. Original signed expiry burial and final unchanged Ready snapshot coverage remain required. Disabled reauthorization preserves original operation/bytes and performs no submission. Synthetic chain does not validate consensus. |
 | Deposit settlement and reorgs | `treasury::regtest::deposit_settlement_and_reorg_recovery` | Actual proofs, configured confirmation depth, same-byte rebroadcast and fail-closed reorg handling against pinned Zebra/Zaino. |
-| High-index refunds and shielding | `treasury::regtest::high_index_refunds_and_separate_shielding` | Derives 32 distinct refund addresses, restores the encrypted wallet, discovers the two high-index funded addresses and shields each independently. |
+| Legacy high-index refunds and shielding | `treasury::regtest::high_index_refunds_and_separate_shielding` | Derives 32 distinct legacy transparent refund addresses, restores the encrypted wallet, discovers the two high-index funded addresses and shields each independently. |
 | Expired ambiguous source operation | `treasury::regtest::expired_ambiguous_deposit_releases_only_after_chain_proof` | Crashes after send intent, rejects early release, then recovers using authenticated finite expiry and completed canonical SDK coverage at the configured depth. Current input disposition is SDK-owned; original journals remain preserved and old bytes cannot be broadcast again. |
 | Recovery CLI commands | `treasury::regtest::recovery_cli_lifecycle` | Test-only subprocess adapter drives the production parser/dispatcher: shielding, read-only reconciliation, explicit same-byte broadcast and successful expiry. Confirmed rebroadcast and early expiry refuse without changing accounting. |
 | Indexer ambiguity | `treasury::regtest::indexer_non_inclusion_response` | Pins Zaino's generic Internal response for a missing transaction; production lookup leaves it Unknown rather than inventing proof of absence. |

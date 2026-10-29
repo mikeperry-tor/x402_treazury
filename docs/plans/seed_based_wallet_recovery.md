@@ -52,17 +52,17 @@ owned and keys remain available. Retirement stops ordinary use/observation accor
 to its existing rules; it does not promise secret destruction or prove that nobody
 can send future funds to the public address.
 
-The treasury already imports a mnemonic through the SDK and derives account zero.
-`Treasury::refund_address` generates successive external transparent addresses and
-saves the SDK snapshot and refund binding before requesting a quote. There is no
-special high-offset refund branch. However, many unused addresses can separate
-receipts: Pepper's normal transparent discovery gap is 10, and recovery uses 20.
-Saved known addresses are queried independently of that discovery gap. Thus a
-snapshot restore and a mnemonic-only restore have materially different coverage.
+The treasury already imports a mnemonic and derives account zero. The maintained
+[refund contract](../wallet-rotation.md#refunds-state-and-recovery) uses shielded-only
+UAs for new quotes and preserves existing transparent bindings. Legacy transparent
+mnemonic-only recovery still has discovery gaps: Pepper normally stops after 10
+unused addresses, or 20 in recovery. Known snapshot addresses are queried
+independently. The remaining Zcash recovery work is explicit legacy range recovery
+and a complete CLI coverage contract, not another address derivation scheme.
 
 Pinned Zingolib is `bfb0a2156819ea7f75a9b09b1724abfd06c8925e`. Its existing
-`generate_unified_address` and transparent-address APIs are sufficient candidates
-for this work; qualify them before changing callers. `bip0039` is already used by
+`generate_unified_address` and transparent-address APIs supply both receiver types;
+legacy range recovery should reuse them. `bip0039` is already used by
 the application; `bip32` is locked transitively. Review its current backend/API
 before choosing a direct dependency. Enabling Alloy's optional mnemonic support
 could add another derivation stack. Do not vendor a dependency merely for this work.
@@ -160,19 +160,19 @@ the existing random Base keys. It does not depend on choosing HD or ratcheting.
    otherwise use a separately reviewed explicit new-root/namespace transition.
    Existing local store ownership does not coordinate cloned stores on separate
    machines. Do not add a distributed allocator to solve this implicitly.
-4. Prefer shielded-only UAs for **new ZEC refunds**, following Zodl's simpler
-   account-scanning model. Persist the address/binding before the quote as today.
-   Qualify NEAR acceptance and SDK receiver selection first. Change only refund
-   validation in `src/rotation/near.rs`; its transparent source-deposit validation
-   serves a different contract and must remain. Preserve observation/shielding of
-   legacy transparent funds. For legacy mnemonic-only recovery, support an
-   explicit external-index range prederivation before scanning; increasing the
-   ordinary discovery gap alone cannot guarantee completeness.
+4. For legacy transparent mnemonic-only recovery, support an explicit external-index
+   range prederivation before scanning. Increasing the ordinary discovery gap alone
+   cannot guarantee completeness. Preserve the current shielded-only refund model,
+   old quote bindings, owned-transparent shielding and separate source-deposit codec.
 5. Scan Zcash from a known birthday no later than relevant receipts. If unknown,
    use the supported network activation boundary rather than a recent tip. Let
    the SDK discover shielded notes by account keys, including fresh refund UAs
    whose ordinal was not saved. Retain existing automatic rollback/full-rescan
    behavior, accepted pending ownership and finite transaction expiry semantics.
+   Shielded coin recovery does not recover unused disclosed refund addresses or
+   their issuance frontier. Before resuming refund generation after seed-only or
+   stale-snapshot recovery, preserve receiver uniqueness through a complete
+   frontier or a separately reviewed fresh issuance namespace, as for Base above.
 6. Distinguish **fund/key recovery** from **resuming financial workflows**. The
    full backup remains necessary for legacy random keys, signed authorizations,
    exact original transactions, accepted NEAR requests and pool/claim ownership.
@@ -196,7 +196,7 @@ Keep stable IDs when that dependency order changes.
 | --- | --- | --- |
 | S1 | Decide recovery versus erasure; if HD chosen, introduce versioned derivation/root storage and explicit recovery descriptor using existing encryption/ownership. No managed allocation switches yet. | Independent design review; standard vectors and exact addresses/signatures, passphrase behavior, wrong-root/network rejection, backup/restore interoperability and dependency assessment. Update wallet CLI backup/seed contract, configuration and wallet rotation; current random-key behavior remains accurately described. |
 | S2 | Enable atomic future Base allocation and mixed legacy/HD restore, with its complete backup/frontier path in the same commit. Consumers: capacity, assignment, funding, payer loading, backup/CLI. | Concurrent allocations across pools, crash before/after commit/disclosure, no disclosed index reuse, stale-backup/seed restore cannot allocate over a higher issued-but-unfunded index, explicit cloned-root ownership scope, migration preserving legacy keys and accepted journals byte-for-byte, multiple pools/restores without UUID-derived paths. Update wallet rotation, wallet CLI and configuration. |
-| S3 | Replace new transparent refund generation with qualified shielded UAs and provide legacy index-range recovery. Keep existing accepted refund bindings and legacy shielding. | Real SDK shielded refund receipt restored from phrase/birthday at a distant UA ordinal without address metadata; legacy receipt after more than 20 unused transparent addresses recovered by explicit range; old quotes unchanged; source deposits still enforce their actual format. Update Zingo integration, wallet rotation and wallet CLI. |
+| S3 | Add explicit legacy transparent index-range recovery through existing SDK generation and import/scan APIs, preserving ordinary discovery and current refund bindings. | Recover a legacy receipt after more than 20 unused transparent addresses using an explicit range; report incomplete coverage when no range/frontier is known; preserve shielded account recovery, old quotes and strict source-deposit format. Update Zingo integration, wallet rotation and wallet CLI. |
 | S4 | Expose explicit fund/key recovery and coverage reporting, with no implicit financial resumption. Consumers: CLI, SDK import/scan, Base history, backup descriptor and network constructors. | Widely separated USDC indices, spent-to-zero history, token receipt at ETH nonce zero, stale/missing frontier, unknown birthday fallback, cancellation/restart, reorg/finality changes, partial provider outage and independent sibling progress. Assert no signatures, funding or broadcasts; report missing legacy keys/journals and incomplete ranges clearly. Update wallet CLI, configuration and relevant network/observation guides. |
 
 Do not add a generic operator-repair registry, workflow ledger, global readiness

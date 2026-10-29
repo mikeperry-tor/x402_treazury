@@ -88,18 +88,35 @@ enum AddressNetwork {
     Synthetic,
 }
 impl AddressNetwork {
-    fn transparent(self, address: &str) -> Result<()> {
-        let network = match self {
-            Self::Mainnet => zcash_protocol::consensus::Network::MainNetwork,
+    fn chain(self) -> zingolib::config::ChainType {
+        match self {
+            Self::Mainnet => crate::rotation::store::TreasuryNetwork::Mainnet.chain(),
             #[cfg(all(test, feature = "zcash-testutils"))]
-            Self::Synthetic => zcash_protocol::consensus::Network::TestNetwork,
-        };
+            Self::Synthetic => crate::rotation::store::TreasuryNetwork::Synthetic.chain(),
+        }
+    }
+    fn transparent(self, address: &str) -> Result<()> {
         ensure!(
             matches!(
-                zcash_keys::address::Address::decode(&network, address),
+                zcash_keys::address::Address::decode(&self.chain(), address),
                 Some(zcash_keys::address::Address::Transparent(_))
             ),
-            "requires mainnet transparent address"
+            "Zcash source deposit requires a transparent address on the configured network"
+        );
+        Ok(())
+    }
+    fn refund(self, address: &str) -> Result<()> {
+        use zcash_keys::address::Address;
+        let supported = match Address::decode(&self.chain(), address) {
+            Some(Address::Transparent(_)) => true,
+            Some(Address::Unified(address)) => {
+                address.orchard().is_some() || address.transparent().is_some()
+            }
+            _ => false,
+        };
+        ensure!(
+            supported,
+            "Zcash refund requires a transparent or Orchard receiver on the configured network"
         );
         Ok(())
     }
@@ -445,7 +462,7 @@ fn request_on(
     recipient
         .parse::<alloy_primitives::Address>()
         .context("invalid EVM recipient")?;
-    network.transparent(refund)?;
+    network.refund(refund)?;
     ensure!(
         atomic(amount)? > 0
             && matches!(confidentiality, "public" | "basic" | "advanced")
@@ -749,6 +766,40 @@ mod tests {
                 .is_err()
         );
         assert!(validate_quote(request, response, &limits, 2_000_000_000).is_err());
+        let addresses: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/state/sdk_v6_addresses.json"
+        ))
+        .unwrap();
+        let address = zcash_keys::address::Address::decode(
+            &zcash_protocol::consensus::Network::MainNetwork,
+            addresses["after_next"][1]["encoded_address"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let regtest = address.encode(&crate::rotation::store::TreasuryNetwork::Synthetic.chain());
+        let testnet = address.encode(&zcash_protocol::consensus::Network::TestNetwork);
+        for (client, refund, accepted) in [
+            (&synthetic, regtest.as_str(), true),
+            (&synthetic, testnet.as_str(), false),
+            (&ordinary, regtest.as_str(), false),
+        ] {
+            assert_eq!(
+                client
+                    .request(
+                        &assets,
+                        recipient,
+                        refund,
+                        "5000000",
+                        "public",
+                        100,
+                        2_000_007_200,
+                        false,
+                    )
+                    .is_ok(),
+                accepted,
+            );
+        }
     }
 
     #[test]
@@ -880,6 +931,82 @@ mod tests {
                 max_fee_bps: 500,
             },
         )
+    }
+
+    #[test]
+    fn refund_receivers_preserve_exact_quote_binding_and_transparent_deposits() {
+        use zcash_keys::address::{Address, UnifiedAddress};
+        use zcash_protocol::consensus::Network::{MainNetwork, TestNetwork};
+        let addresses: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/state/sdk_v6_addresses.json"
+        ))
+        .unwrap();
+        let shielded = addresses["after_next"][1]["encoded_address"]
+            .as_str()
+            .unwrap();
+        let Address::Unified(ua) = Address::decode(&MainNetwork, shielded).unwrap() else {
+            panic!("public unified fixture")
+        };
+        assert!(ua.orchard().is_some() && ua.sapling().is_some());
+        let orchard_only =
+            UnifiedAddress::from_receivers(ua.orchard().cloned(), None, None, None, None)
+                .unwrap()
+                .encode(&MainNetwork);
+        let transparent = "t1XVXWCvpMgBvUaed4XDqWtgQgJSu1Ghz7F";
+        let Address::Transparent(t) = Address::decode(&MainNetwork, transparent).unwrap() else {
+            panic!("public transparent fixture")
+        };
+        let mixed_orchard =
+            UnifiedAddress::from_receivers(ua.orchard().cloned(), None, Some(t), None, None)
+                .unwrap()
+                .encode_receiver_preserving(&MainNetwork);
+        let mixed_sapling =
+            UnifiedAddress::from_receivers(None, ua.sapling().cloned(), Some(t), None, None)
+                .unwrap()
+                .encode_receiver_preserving(&MainNetwork);
+        for mixed in [&mixed_orchard, &mixed_sapling] {
+            let Address::Unified(decoded) = Address::decode(&MainNetwork, mixed).unwrap() else {
+                panic!("mixed unified fixture")
+            };
+            assert_eq!(decoded.transparent(), Some(&t));
+        }
+        for refund in [
+            transparent,
+            orchard_only.as_str(),
+            shielded,
+            &mixed_orchard,
+            &mixed_sapling,
+        ] {
+            let (mut request, mut response, limits) = fixture(false);
+            request["refundTo"] = json!(refund);
+            response["quoteRequest"] = request.clone();
+            let quote = validate_quote(request.clone(), response.clone(), &limits, 2_000_000_000)
+                .unwrap_or_else(|error| panic!("public refund fixture {refund}: {error}"));
+            assert_eq!(quote.request, request);
+            let mut mismatched = response.clone();
+            mismatched["quoteRequest"]["refundTo"] = json!("different refund");
+            assert!(validate_quote(request.clone(), mismatched, &limits, 2_000_000_000).is_err());
+            response["quote"]["depositAddress"] = json!(shielded);
+            assert!(
+                validate_quote(request, response, &limits, 2_000_000_000).is_err(),
+                "shielded refund support cannot widen source deposits"
+            );
+        }
+        let sapling_only =
+            UnifiedAddress::from_receivers(None, ua.sapling().cloned(), None, None, None)
+                .unwrap()
+                .encode(&MainNetwork);
+        for unsupported in [
+            ua.encode(&TestNetwork),
+            Address::Sapling(Box::new(ua.sapling().cloned().unwrap())).encode(&MainNetwork),
+            sapling_only,
+            "invalid".into(),
+        ] {
+            let (mut request, mut response, limits) = fixture(false);
+            request["refundTo"] = json!(unsupported);
+            response["quoteRequest"] = request.clone();
+            assert!(validate_quote(request, response, &limits, 2_000_000_000).is_err());
+        }
     }
     #[test]
     fn quotes_fail_closed_on_cost_route_and_binding_changes() {

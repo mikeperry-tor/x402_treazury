@@ -13,6 +13,7 @@ mod publication;
 mod reconstruction;
 pub mod recovery;
 mod refunds;
+pub use refunds::NoShieldingRequired;
 #[cfg(all(test, feature = "zcash-regtest"))]
 mod regtest;
 mod send;
@@ -359,8 +360,8 @@ impl Treasury {
         self.healthy = true;
         self.addresses().await
     }
-    /// Persist the complete derivation range and its job binding before a quote
-    /// can expose this address to a remote service.
+    /// Persist a shielded receive address and its job binding before a quote
+    /// can expose it. Existing transparent refund bindings remain unchanged.
     pub async fn refund_address(&mut self, job: String) -> Result<String> {
         let lookup = job.clone();
         if let Some(address) = self.store.call(move |s| s.refund_address(&lookup)).await? {
@@ -373,11 +374,10 @@ impl Treasury {
             .as_mut()
             .context("treasury client unavailable")?;
         let (_, address) = client
-            .generate_transparent_address(zip32::AccountId::ZERO, false)
+            .generate_unified_address(ReceiverSelection::all_shielded(), zip32::AccountId::ZERO)
             .await
             .map_err(|_| anyhow::anyhow!("refund derivation failed"))?;
-        let address =
-            zcash_keys::address::Address::Transparent(address).encode(&self.network.chain());
+        let address = address.encode(&self.network.chain());
         let bytes = snapshot(client).await?;
         let expected = self.revision;
         let saved = address.clone();
