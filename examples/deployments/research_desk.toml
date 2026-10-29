@@ -151,9 +151,9 @@ send_tools = [
 # 402radar's latest listed Base payment was 3 days old at review:
 # https://402radar.io/api.socialfetch.dev
 # Activity is an external observation, not proof of settlement or universal outage.
-[sources.socialfetch]
-extends = "../../providers/socialfetch.toml"
-send_tools = [{ to = "exclude" }]
+# [sources.socialfetch]
+# extends = "../../providers/socialfetch.toml"
+# send_tools = [{ to = "exclude" }]
 
 [sources.pdl]
 extends = "../../providers/pdl.toml"
