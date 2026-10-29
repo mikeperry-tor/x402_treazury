@@ -2,6 +2,20 @@
 use super::*;
 use crate::test_funding_quote as quote_fixture;
 
+#[test]
+fn existing_wallet_directory_errors_do_not_suggest_initialization() {
+    let tmp = tempfile::tempdir().unwrap();
+    // An existing empty directory is not a new initialization destination.
+    let error = treasury_id(tmp.path()).unwrap_err();
+    assert!(!format!("{error:#}").contains("wallet init"));
+    // A file in place of the directory must retain the existing validation error.
+    let file = tmp.path().join("file");
+    fs::write(&file, b"").unwrap();
+    let error = treasury_id(&file).unwrap_err();
+    assert!(!format!("{error:#}").contains("wallet init"));
+    assert!(directory(&file).is_err());
+}
+
 fn populated(dir: &Path) -> Store {
     let mut s = Store::create(&dir.join("state"), &dir.join("key"), 1, b"initial").unwrap();
     let pool = crate::rotation::test_capacity::declare_and_allocate!(

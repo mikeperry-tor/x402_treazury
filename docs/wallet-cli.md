@@ -12,6 +12,9 @@ serving. Export `X402_TREAZURY_CONFIG` to use it by default; an explicit
 `--config FILE` overrides the environment path. Unset it before using standalone
 `--state-dir`, `--key-file` or `--treasury-id` options. `--meta-config` remains an alias for `--config`. Wallet commands do not
 fetch provider catalogs or require listener tokens.
+If `serve` cannot find the configured wallet directory, its error names the
+resolved path. If that is the intended directory for a new wallet, run
+`x402_treazury wallet init --config FILE` with the same deployment file.
 `wallet bootstrap` also consumes wallet assignments and funding settings to fund
 initial managed capacity; other administration commands do not start funding workers.
 

@@ -49,6 +49,69 @@ fn bad(output: Output) -> String {
 }
 
 #[tokio::test]
+async fn serve_missing_wallet_directory_names_resolved_path_and_suggests_init() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let config_dir = dir.join("configuration");
+    std::fs::create_dir(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("spec.json"),
+        r#"{"operations":[{"method":"GET","path":"/read"}]}"#,
+    )
+    .unwrap();
+    for identity in ["", "id='cba35c99-91ae-4ec8-b639-169f8b268e89'"] {
+        std::fs::write(
+            config_dir.join("deployment.toml"),
+            format!(
+                r#"version=1
+[treasury]
+{identity}
+state_dir='new-wallet'
+[funding]
+auto_fund=false
+base_rpc_url_env='BASE'
+base_rpc_fallback_url_envs=[]
+[wallets.web]
+mode='zcash_rotation'
+max_api_payment_usdc='1'
+reserves={{small={{funding_amount_usdc='1'}}}}
+max_funding_spend_zec='0.02'
+max_conversion_overhead_percent=5
+[sources.api]
+spec='spec.json'
+base_url='https://offline.invalid'
+[servers.web]
+listen='127.0.0.1:0'
+auth=false
+wallet='web'
+sources=['api']
+"#
+            ),
+        )
+        .unwrap();
+        let error = bad(run(
+            dir,
+            &["serve", "--config", "configuration/deployment.toml"],
+            &[("BASE", "http://127.0.0.1:1")],
+        )
+        .await);
+        let wallet_dir = Path::new("configuration").join("new-wallet");
+        assert!(
+            error.contains(&format!(
+                "wallet directory '{}' was not found",
+                wallet_dir.display()
+            )),
+            "{error}"
+        );
+        assert!(
+            error.contains("new wallet, run `wallet init` with the same configuration"),
+            "{error}"
+        );
+        assert!(!dir.join(wallet_dir).exists());
+    }
+}
+
+#[tokio::test]
 async fn deployment_routing_explanation_is_json_and_requires_deployment_input() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path();

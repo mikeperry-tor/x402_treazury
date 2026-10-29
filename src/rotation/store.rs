@@ -287,7 +287,17 @@ fn private_file(path: &Path, create: bool) -> Result<File> {
     Ok(file)
 }
 fn directory(path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        let message = if error.kind() == std::io::ErrorKind::NotFound {
+            format!(
+                "wallet directory '{}' was not found; if this is the directory you intend to use for a new wallet, run `wallet init` with the same configuration",
+                path.display()
+            )
+        } else {
+            format!("could not inspect wallet directory '{}'", path.display())
+        };
+        anyhow::Error::new(error).context(message)
+    })?;
     ensure!(
         metadata.file_type().is_dir(),
         "state directory must not be a symlink"
