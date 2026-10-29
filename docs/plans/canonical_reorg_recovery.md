@@ -10,8 +10,9 @@ The original review baseline remains `0a6dbb93` for accumulated complexity revie
 Preserve journal-before-disclosure, exact accepted inputs and original signed
 bytes, actual pending transaction ownership, first-positive-credit claim
 consumption, retired signer exclusion, configured payment/funding/fee authority,
-network isolation and existing observation owners. Never infer another deposit
-from refunds or source expiry. A provider operation may remain unresolved after
+network isolation and existing observation owners. Refunds never grant deposit
+authority; verified finite source expiry can release an attempt only under current
+unconsumed claim, funding, fee and recovery authority. A provider operation may remain unresolved after
 its source transaction expires. No new ledger, watcher, timer or zero-expiry
 framework is proposed. Production deposits already use ordinary SDK finite expiry.
 
@@ -72,7 +73,37 @@ Ordered coherent changes:
    pre-journal crashes, committed outgoing with lost acknowledgment, unrelated
    progress and preserved input evidence. Independently review this exact commit
    and all prior fixups, with complexity comparison, before final integration.
-4. **M3 Integration and documentation handoff.** Independently review the combined
+4. **M1c Observe original obligations without derived-history vetoes.** Proposed
+   behavior: keep immutable accepted inputs, signed bytes and operation bindings
+   strict, while observation treats malformed submission counters or unknown
+   status as possibly disclosed. Never repair original history by inventing a
+   counter. Keep disclosure mutations strict, including exact PREPARED/zero valid
+   attempts for first submission; canonical confirmation, verified finite expiry
+   and bound provider SUCCESS can finish observation without a valid counter.
+   Actual database execution failures retain their retry classification.
+
+   Distinguish confirmed sources with unresolved settlement from canonically
+   expired sources. A verified finite expiry may permit a fresh operation under
+   existing current authority without an additional NEAR-negative veto. Preserve
+   the old accepted external request: reuse existing recovery archives and Status
+   observations with exact operation/quote binding until provider terminality.
+   Inventory and publication must distinguish multiple operations for one job.
+   Late archived SUCCESS must suppress a replacement not yet disclosed without
+   fabricating SUCCESS for its identity; already-disclosed replacement work keeps
+   its own liabilities. No new ledger, watcher or historical-source reorg audit.
+
+   Independent design review must approve the complete archive-to-observer handoff
+   and late-success races before implementation. Commit observation projection
+   separately from the coherent expiry/archived-status handoff if independent;
+   never relax expiry retry without its required observer replacement. Update
+   wallet ownership, SDK/CLI guides and lifecycle tests with each behavior change.
+   Cover invalid status/counters without submission, preserved raw columns,
+   canonical closure, unrelated inventory progress, SQL execution faults, expired
+   old operation followed by fresh identity and late terminal observations, and
+   late SUCCESS during calculation, after journaling and before first disclosure.
+   Exact-SHA independent reviews and a combined complexity/call-chain gate follow
+   before dependent integration validation.
+5. **M3 Integration and documentation handoff.** Independently review the combined
    branch and all previous fixups against complete consumers. Remove this file
    only after maintained docs match actual behavior and validate the exact cleanup
    SHA and final combined branch.
