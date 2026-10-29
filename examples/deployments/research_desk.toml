@@ -2,7 +2,8 @@
 #
 # Endpoint   Scope                                             Wallet
 # web        Search, retrieval, news and archives              web
-# science    Academic, scientific and health research           web
+# science    Academic research, papers, funding, biology/chemistry web
+# health     Care access, clinical trials, drugs and public health social
 # social     People, contacts and platform content             social
 # business   Organizations, filings, jobs, funding, reviews     financials
 # finance    Equities, macro, crypto and derivatives            financials
@@ -60,7 +61,7 @@ max_conversion_overhead_percent = 5
 funding_amount_usdc = "2.00"
 max_funding_amount_usdc = "3.00"
 
-# People, contacts and social-platform research share this payer pool.
+# Health, people, contacts and social-platform research share this payer pool.
 [wallets.social]
 mode = "zcash_rotation"
 max_api_payment_usdc = "0.50"
@@ -146,7 +147,7 @@ send_tools = [
 [sources.x402stock]
 extends = "../../providers/x402stock.toml"
 send_tools = [
-  { to = "science", tools = ["clinical_trials", "fda", "fda_shortages"] },
+  { to = "health", tools = ["clinical_trials", "fda", "fda_shortages"] },
   # Route business research families before the primary fallback.
   { to = "business", tools = [
     "beneficial_ownership_ticker",
@@ -821,13 +822,17 @@ send_tools = [
     "security_http_headers",      # NetIntel already supplies structured header checks.
     "security_ip_*",              # IPIntel supplies IP enrichment; NetIntel supplies reputation and blacklist checks.
     "law_sanctions_check",        # AgOSINT covers OFAC, EU and UK lists; this lookup covers OFAC only.
+    "law_case_search", # CompanyRecords gov_justia_case_law matched all 20 sampled court records, added snippets and advertised a lower price. Keep 2s as a backup in its reusable provider.
   ] },
   { to = "security", tools = ["security_*"] },
   { to = "property", tools = ["property_*", "soil_*", "geo_flood_zone", "gov_epa_facilities", "gov_fair_market_rent", "gov_income_limits", "gov_nfip_claims", "gov_risk_index", "gov_uk_crime"] },
-  { to = "science", tools = ["paper_doi_lookup", "papers_citations", "papers_search", "research_*", "bio_*", "chem_*", "clinical_*", "health_*", "medical_*", "nutrition_*", "gov_fda_*"] },
+  { to = "science", tools = ["paper_doi_lookup", "papers_citations", "papers_search", "research_*", "bio_*", "chem_*"] },
+  { to = "health", tools = ["clinical_*", "health_*", "medical_*", "nutrition_*", "gov_fda_*"] },
   { to = "finance", tools = ["finance_figi", "finance_security_resolve"] },
   { to = "travel", tools = ["airport_*", "flight_*", "travel_advisory", "travel_visa"] },
   { to = ["property", "world"], tools = ["telecom_market_area"] },
+  # CompanyRecords b2b_ny_business_entity matched the sampled NY record for less;
+  # retain business_sos_search for CO/CT coverage and as the NY backup.
   { to = "business", tools = ["business_sos_search", "telecom_fcc_filings"] },
   { to = "finance", tools = ["bank_*", "bls_*", "econ_*", "worldbank_*", "treasury_*", "tax_*", "gov_bea_gdp"] },
   { to = "world", tools = ["aviation_*", "agriculture_*", "energy_*", "earth_*", "climate_*", "maritime_*", "space_*", "water_*", "weather_*", "geo_elevation", "country_*", "trade_*", "gov_disaster_*", "gov_hazard_mitigation", "gov_public_assistance", "gov_usgs_water"] },
@@ -855,7 +860,10 @@ send_tools = [
     "austrian_company_data", "belgian_company_data", "croatian_company_data",
     "estonian_company_data", "greek_company_data", "irish_company_data",
     "japanese_company_data", "latvian_company_data", "slovenian_company_data",
-    "spanish_company_data", "swedish_company_data", "au_company_data",
+    "spanish_company_data", "au_company_data",
+    # CompanyRecords b2b_bolagsverket_sweden_companies matched core facts for less,
+    # but uses a weekly snapshot. Retain this direct lookup for fresher facts and backup.
+    "swedish_company_data",
     "beneficial_ownership_lookup", "uk_companies_house_officers", "uk_disqualified_director_check",
     "french_insolvency_check", "fr_bodacc_lookup", "no_bankruptcy_check", "insolvency_check",
     "pep_check", "adverse_media_check", "country_tax_rates", "employment_cost_estimate",
@@ -880,16 +888,18 @@ send_tools = [
     "gov_cz_companies", # AgOSINT already supplies ARES registry lookups.
     "gov_fr_companies", # AgOSINT already supplies French company lookups.
     "gov_gb_companies", # AgOSINT already supplies Companies House lookups.
+    "courts_search", # CompanyRecords gov_justia_case_law adds sampled snippets and matched 2s records at a lower advertised price; Maxwell rejected payment. Retain as a backup in the reusable provider.
   ] },
   { to = "world", tools = ["weather_alerts_by_state", "weather_discussion", "weather_gridpoint"] },
-  { to = "science", tools = ["openfda_drug_label", "openfda_drug_event"] },
+  { to = "health", tools = ["openfda_drug_label", "openfda_drug_event"] },
   # Inventory/prices/conditions plus sampled lodging/access; other trip reads are contract-reviewed.
   { to = "travel", tools = [
     "ski_inventory", "ski_prices", "resort_conditions", "ski_resort", "ski_quote", "ski_operator",
     "food_menu", "food_near", "food_near_resort", "food_venues", "insider_info",
     "trip_attractions", "trip_bars", "trip_getting_there", "trip_lodging", "trip_rental",
   ] },
-  { to = "business", tools = ["courts_search"] },
+  # CompanyRecords gov_krs_poland delivered known-ID records while Maxwell rejected
+  # payment; retain gov_pl_companies within gov_* for its additional name-search contract.
   { to = "business", tools = ["gov_*"] },
   # A cached keyword query delivered ten USPTO records after the compatibility fix.
   # Preserve fetchedAt; not_cached queues retrieval but is not an empty search.
@@ -972,6 +982,12 @@ send_tools = [
   { to = "exclude" },
 ]
 
+# Doctor search, hospital prices, assistance and HRSA reads delivered records.
+# The full read-only catalog is selected; other operations remain unqualified.
+[sources.findmydirectdoctor]
+extends = "../../providers/findmydirectdoctor.toml"
+send_tools = [{ to = "health" }]
+
 # GLEIF gateway redundancy; accounting parents are not beneficial owners.
 [sources.legal_entities]
 extends = "../../providers/legal-entities.toml"
@@ -1008,7 +1024,13 @@ send_tools = [
 extends = "../../providers/companyrecords.toml"
 send_tools = [
   { to = ["business", "social"], tools = ["b2b_linkedin_company_profiles"] },
-  { to = "business", tools = ["b2b_trustpilot_reviews"] },
+  { to = "business", tools = [
+    "b2b_trustpilot_reviews", "b2b_ny_business_entity", "b2b_bolagsverket_sweden_companies",
+    "gov_krs_poland", "gov_justia_case_law",
+  ] },
+  # WebMD returned family-medicine listings; dentistry failed upstream HTTP 503.
+  # ADA searches in New Orleans and Austin returned 404; leave ADA unselected.
+  { to = "health", tools = ["b2b_webmd_healthcare_provider_directory", "gov_healthcare_gov"] },
   { to = "exclude" },
 ]
 
@@ -1026,7 +1048,7 @@ send_tools = [
     "travel_amtrak_train_tracker", "travel_hk_mtr_realtime", "travel_seat61_routes",
     "travel_mbta_realtime", "travel_septa_train_view", "travel_michelin_restaurant_guide",
   ] },
-  { to = "science", tools = ["health_ema_shortages_safety"] },
+  { to = "health", tools = ["health_ema_shortages_safety"] },
   # Wikivoyage failed upstream HTTP 503; Google Flights returned no fare data.
   # Aviation weather stays on world; cars, corporate data and other non-travel namespace reads stay omitted.
   { to = "exclude" },
@@ -1056,11 +1078,20 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "web"
 discover_on_demand = true
-instructions_text = "Academic, scientific and health research: papers, citations, researchers, institutions, grants, biological and chemical references, clinical trials, drug/device records and public-health datasets. Preserve publication and observation dates, study status, identifiers and coverage. Use web for general search and page retrieval; business retains investment-oriented pharma catalysts and general product recalls."
-discovery_search_tool_instructions_text = "Science keywords: biomedical grants, NIH project funding history, grant-linked publications, investigator funding, organization grants, fiscal-year funding trends, x402 Atlas, EMA medicine shortages, discontinued medicines, academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, APEX, arXiv, PubMed, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central, x402stock, Maxwell, 2s, twos."
+instructions_text = "Academic and scientific research: papers, citations, researchers, institutions, grants, and biological and chemical references. Preserve publication dates, identifiers and coverage. Use health for clinical trials, healthcare access, care costs, drug/device records and public-health datasets; web for general search and page retrieval."
+discovery_search_tool_instructions_text = "Science keywords: biomedical grants, NIH project funding history, grant-linked publications, investigator funding, organization grants, fiscal-year funding trends, x402 Atlas, academic research, scholarly literature, papers, journal, publication, abstract, full text, citation graph, DOI, Crossref, OpenAlex, Semantic Scholar, APEX, arXiv, PubMed, ORCID, ROR, researcher, author, institution, NIH RePORTER, grants, research funding, biology, gene, protein, species, NCBI, UniProt, GBIF, chemistry, PubChem, compound, genetics, 2s, twos."
+
+[servers.health]
+listen = "127.0.0.1:3012"
+allowed_hosts = ["host.docker.internal", "127.0.0.1"]
+bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
+wallet = "social"
+discover_on_demand = true
+instructions_text = "Health research and care access: doctor and clinic directories, hospital cash prices, insurance plans, financial assistance, clinical trials, drug/device records, nutrition and public-health datasets. Preserve source dates, identifiers, evidence grades and coverage. Listed offices, fees and availability need confirmation. Keep hospital facility prices, Medicare benchmarks, drug acquisition costs and pre-subsidy insurance premiums distinct. WebMD listings can include related specialties and incomplete contacts; dentistry delivery remains unqualified. Use science for papers and research funding; business for investment-oriented pharma catalysts and general product recalls."
+discovery_search_tool_instructions_text = "Health keywords: FindMyDirectDoctor, find a doctor, clinics, DPC, direct primary care, concierge medicine, cash-pay doctors, hospital cash prices, self-pay, membership fees, HRSA community health centers, sliding-scale clinics, charity care, financial assistance, uninsured care, medical bills, Medicaid screening, dental costs, medication cost benchmarks, CompanyRecords, WebMD, HealthCare.gov, ACA Marketplace, health insurance, plan premiums, deductibles, EMA medicine shortages, discontinued medicines, MedlinePlus, clinical trials, ClinicalTrials.gov, NCT, enrollment, phase, trial status, FDA, openFDA, drug approvals, drug labels, shortages, adverse events, FAERS, drug recalls, food safety, food recalls, veterinary, animal health, medical devices, 510k, PMA, MAUDE, UDI, GUDID, RxNorm, RxCUI, NADAC, ICD-10, NUCC, NPI, NPPES, CMS, hospitals, quality ratings, Medicare, Open Payments, CDC, disease surveillance, mortality, nutrition, USDA FoodData Central, x402stock, Maxwell, 2s, twos."
 
 [servers.social]
-listen = "127.0.0.1:3012"
+listen = "127.0.0.1:3013"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "social"
@@ -1069,16 +1100,16 @@ instructions_text = "Social-platform, GitHub repository metadata, person, public
 discovery_search_tool_instructions_text = "Social keywords: Reddit search and comments, GitHub repository metadata, Agent402, Hacker News, APEX research search, 2s HN search, stories, comments, feeds and users, Instagram posts, TikTok videos, YouTube channel videos, Facebook page details, Twitter, X, Botsmith posts and profiles, Otto curated social summaries, person, profile, enrichment, employer, title, seniority, work email, email validation, deliverability, catch-all, Deepline, ZeroBounce, Minerva, FullEnrich, Whitepages, contact phone, company phone, LinkedIn company enrichment, AgData, SiteCheck, ShopSocial, CompanyRecords, Threads profiles and posts, Pinterest pins, Telegram public channels, YouTube transcripts and comments."
 
 [servers.business]
-listen = "127.0.0.1:3013"
+listen = "127.0.0.1:3014"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic and health datasets."
-discovery_search_tool_instructions_text = "Business keywords: NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, CompanyRecords, GLEIF, LEI, accounting-consolidation parent companies, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, x402 Atlas, EPO, 2s patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
+instructions_text = "Business, public-record, patent search and claims, funding, jobs, grants and filing research, including decision-makers, employment changes, litigation, procurement, product recalls, nonprofit filings and international legislation. Resolve entity identity before enrichment. Missing records do not prove absence. Use property for parcels, local records and site research; science for academic research; health for healthcare and clinical datasets."
+discovery_search_tool_instructions_text = "Business keywords: CompanyRecords NY company records, Swedish registry snapshots, Polish KRS lookup, CourtListener opinions, NIH RePORTER project and company funding, Biomedical Grants, Trustpilot reviews and ratings, CompanyRecords, GLEIF, LEI, accounting-consolidation parent companies, Legal Entities, state company registrations, Secretary of State, NY, CO, CT, UK charities, Charity Commission, FCC ECFS proceedings and filings, patent keyword search, patent claims, Google Patents, x402 Atlas, EPO, 2s patents, registry, CNPJ, VAT, sanctions, funding, investors, jobs, personnel changes, job change, employment, decision maker, roles, seniority, Deepline, grants, SEC, EDGAR, patent, beneficial ownership, ecosystem, category, FullEnrich, RootData, citations, Federal Register, rulemaking, regulations, ProPublica, nonprofit, IRS 990, officer compensation, hiring signals, Google Maps, places, business locations, litigation, court cases, dockets, CourtListener, advertising, ad intelligence, procurement, government contracts, contract awards, pharma catalysts, acquisitions, product recalls, structured data repair, tabular conversion, Strale, Maxwell, 2s, twos, insolvency, BODACC, PEP, PSC, directors, legislation, law, legal research, statutes, case law, legal citations, EUR-Lex, eCFR, CFR, US Code, Congress, congressional bills, committees, hearings, roll-call votes, FEC, campaign finance, elections, FARA, lobbying, OSHA, MSHA, Census, demographics, HS code, customs classification."
 
 [servers.finance]
-listen = "127.0.0.1:3014"
+listen = "127.0.0.1:3015"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
@@ -1087,7 +1118,7 @@ instructions_text = "Financial and macro research: equities, options, forex, com
 discovery_search_tool_instructions_text = "Finance keywords: SmartPerps, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
 
 [servers.property]
-listen = "127.0.0.1:3015"
+listen = "127.0.0.1:3016"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
@@ -1096,7 +1127,7 @@ instructions_text = "Property, parcel, local-government, zoning, lease, environm
 discovery_search_tool_instructions_text = "Property keywords: FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, Locus, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, local legislation, ordinances, municipal code, city council, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, Whitepages, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD, income limits, Fair Market Rents, housing assistance, NFIP claims, flood insurance."
 
 [servers.security]
-listen = "127.0.0.1:3016"
+listen = "127.0.0.1:3017"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
@@ -1105,7 +1136,7 @@ instructions_text = "Threat, breach, LLM API-key exposure, network and complianc
 discovery_search_tool_instructions_text = "Security keywords: breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, LLM API keys, OpenAI, Anthropic, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting, 2s, twos, NVD, CISA KEV, EPSS, CWE, CAPEC, MITRE ATT&CK, OSV, OpenSSF, deps.dev, package vulnerabilities, exploit availability, ICS advisories, prompt injection, HALOWERK, Daedalus, static code audit, AI skill safety."
 
 [servers.world]
-listen = "127.0.0.1:3017"
+listen = "127.0.0.1:3018"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
@@ -1115,7 +1146,7 @@ discovery_search_tool_instructions_text = "World keywords: Hormuz, strait, shipp
 
 # Destination and leisure research shares the existing global payer pool.
 [servers.travel]
-listen = "127.0.0.1:3018"
+listen = "127.0.0.1:3019"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
@@ -1124,7 +1155,7 @@ instructions_text = "Trip planning: cash fares, cached airline-mileage awards, f
 discovery_search_tool_instructions_text = "Travel keywords: flight search, airfare, cash fare, Google Flights, StableTravel, SerpAPI, FlightAware, AeroAPI, flight status, tracking, position, flight history, disruptions, airport delays, flight schedule, airport lookup, departures, arrivals, IATA, ICAO, Seats.aero, award seats, points, miles, airline rewards, mileage programs, redemption, cabin, taxes, APEX, Aviasales, cached flight deals, route matrix, driving, cycling, walking, geocoding, travel time, SiteCheck, HealthTravel, hotel prices, lodging, accommodation, vacation rentals, hostel, Airbnb, Booking.com, Agoda, trivago, Google Travel, KAYAK, Skyscanner, Momondo, FlixBus, FlixTrain, bus tickets, Amtrak, rail, train tracker, Seat61, Hong Kong MTR, MBTA, SEPTA, public transit, EV chargers, PlugShare, Numbeo, cost of living, Rome2Rio, intercity transport, Grubhub, Rappi, delivery restaurants, Michelin, restaurant, dining, menu, nightlife, après-ski, hiking, trails, Waymarked Trails, OpenStreetMap, destination, passport, visa, entry requirements, travel advisory, State Department, Passport Index, ski resort, lift ticket, ski pass, season prices, resort conditions, ski school, rental, parking, ski bus, attractions, GOPASS, operator pass, local mountain tips, Maxwell, 2s, twos."
 
 [servers.toolbox]
-listen = "127.0.0.1:3019"
+listen = "127.0.0.1:3020"
 allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"

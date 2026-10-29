@@ -1,4 +1,4 @@
-description = "Company registries, government and court records, LinkedIn company facts, Trustpilot reviews and public B2B evidence from SiteCheck."
+description = "Company registries, government and court records, LinkedIn company facts, business reviews, healthcare-provider directories and ACA insurance plans from SiteCheck."
 spec = "https://api.companyrecords-api.workers.dev/openapi.json"
 name = "SiteCheck Company Records"
 base_url = "https://api.companyrecords-api.workers.dev"

@@ -158,6 +158,37 @@ async fn every_bundled_provider_validates_offline() {
     assert!(definitions > 0);
 }
 
+#[tokio::test]
+async fn research_desk_health_reuses_social_wallet_and_listener_ports_are_sequential() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/deployments/research_desk.toml");
+    let shown = Deployment::show_config(&path).await.unwrap();
+    for (index, name) in [
+        "web", "science", "health", "social", "business", "finance", "property", "security",
+        "world", "travel", "toolbox",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(
+            shown["servers"][name]["listen"],
+            format!("127.0.0.1:{}", 3010 + index)
+        );
+    }
+    for binding in shown["wallet_bindings"]["health"]
+        .as_object()
+        .unwrap()
+        .values()
+    {
+        assert_eq!(binding["wallet"], "social");
+        assert_eq!(binding["origin"], "servers.health.wallet");
+    }
+    assert_eq!(shown["wallet_summary"]["managed_pool_count"], 4);
+    assert_eq!(shown["servers"]["science"]["wallet"], "web");
+    assert!(shown["source_bindings"]["science"]["findmydirectdoctor"].is_null());
+    assert!(shown["source_bindings"]["health"]["findmydirectdoctor"].is_array());
+}
+
 fn deployment_text() -> &'static str {
     r#"
 version = 1

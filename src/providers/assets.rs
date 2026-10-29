@@ -26,6 +26,7 @@ macro_rules! provider_manifest {
             ("deepline", "providers/deepline.toml", None),
             ("degenscan", "providers/degenscan.toml", None),
             ("exa", "providers/exa.toml", None),
+            ("findmydirectdoctor", "providers/findmydirectdoctor.toml", None),
             ("freeq", "providers/freeq.toml", None),
             ("genuinegood", "providers/genuinegood.toml", None),
             ("glassnode", "providers/glassnode/provider.toml", Some("providers/glassnode/openapi.json")),

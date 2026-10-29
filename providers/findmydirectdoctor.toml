@@ -1,0 +1,15 @@
+description = "US doctor and clinic directories, DPC and concierge memberships, hospital self-pay prices, community health centers, financial assistance and uninsured-care guides."
+spec = "https://api.findmydirectdoctor.com/openapi.json"
+name = "FindMyDirectDoctor"
+base_url = "https://api.findmydirectdoctor.com"
+prefix = "findmydirectdoctor"
+include = ["/v1", ""]
+pricing_key = "x-payment-info"
+help_url = "https://api.findmydirectdoctor.com/llms.txt"
+instructions_text = "Preserve source dates, coverage and evidence grades. Missing prices or practice statements do not mean free care or unavailable services. Confirm prices and availability with the practice; hospital facility prices, Medicare benchmarks and drug acquisition costs describe different costs."
+
+[overrides.findmydirectdoctor_doctors_search]
+description = "Find US DPC, concierge and cash-pay doctors near a ZIP, coordinates or city and state. Filter by specialty, membership price, language, insurance stance or access needs. Returns clinicians, practices, contact details and published monthly fees. City lookup requires listed practices; use ZIP or coordinates otherwise. Page with next_cursor. Cost: ~$0.02/call [spec]."
+
+[overrides.findmydirectdoctor_help]
+description = "Read the directory's endpoint guide, examples and coverage notes. Use exposed schemas for exact inputs and per-tool prices; guide headline counts and prices can differ. Vendor no-charge claims do not establish settlement or authorize repeating a failed paid call."

@@ -14,8 +14,8 @@ It retains the `state/privacy` treasury, registry and operational identities of
 the original privacy template; renaming the template does not migrate state.
 
 [deployments/research_desk.toml](deployments/research_desk.toml) distributes
-its research sources across ten task-oriented endpoints using four topical
-wallet profiles: web for web and science; social; financials for business, finance,
+its research sources across eleven task-oriented endpoints using four topical
+wallet profiles: web for web and science; social for health and social; financials for business, finance,
 property and security;
 and global for world, travel and the toolbox. Ordered source `send_tools` rules group
 tool families, exclude editorial choices and express sharing with destination
@@ -108,7 +108,7 @@ web search for those structured datasets. The bundled FreeQ provider is availabl
 for discovery: static Markdown worked, JavaScript-generated content did not; it is
 not selected as another rendered-reader replacement.
 
-The travel listener at port 3018 shares the existing global wallet. Qualified
+The travel listener at port 3019 shares the existing global wallet. Qualified
 2s calls supply destination advisories and community-maintained visa references.
 Maxwell returned 354 Austrian resorts, 27 published 2026/27 ticket-price rows for
 Kitzbühel and dated base/summit forecasts; lift and station components may be
@@ -117,14 +117,27 @@ prices are not live inventory; entry requirements require destination-authority
 verification. Flight prices, operational lookups, airport references and route
 matrices also belong on travel; aviation weather and accident research stay on world.
 
-New business coverage includes Strale UK charity records, 2s NY/CO/CT state
-company records and FCC proceeding filings, plus Maxwell CourtListener search as
-a separately callable gateway to the same underlying legal source. 2s adds HN
+Business coverage includes Strale UK charity records, 2s NY/CO/CT state company
+records and FCC proceeding filings. CompanyRecords supplies NY registry records,
+Swedish weekly snapshots, known-ID Polish KRS extracts and CourtListener opinions.
+Its court search matched all 20 sampled 2s records and added snippets at a lower
+advertised price; 2s and Maxwell opinion searches remain explicitly excluded backups.
+2s retains CO/CT coverage, Strale retains fresher direct Swedish lookups, and Maxwell
+retains Polish name discovery. These broader contracts remain selected alongside
+CompanyRecords; Maxwell's current payment-service failure does not qualify delivery. 2s adds HN
 items/feeds/users, FCC spectrum geographies and FIGI/security resolution. Its
 issuer-level ISIN list may include bonds rather than identify the input share.
 Strale MiCA checks reported unavailable registers despite HTTP success; they
 remain excluded. 2s HICP returned 2025-12 as latest in October 2026 and remains
 unselected. Neither payment success nor a false match field proves data coverage.
+
+FindMyDirectDoctor adds its full read-only healthcare-access catalog on health:
+doctor and clinic directories, membership fees, hospital cash prices, HRSA community
+health centers, financial assistance and uninsured-care guides. Doctor search,
+hospital prices, financial assistance and health-center reads delivered records;
+those samples do not qualify every route or independently verify listing accuracy.
+See the [provider caveats](../providers/CAVEATS.md#findmydirectdoctor) for coverage
+and price interpretation.
 
 Seven further bundled providers add narrow, qualified selections. Atlas Biomedical
 Grants supplies all seven NIH research operations on science, sharing project
@@ -138,13 +151,17 @@ SiteCheck ShopSocial adds Instagram/TikTok profiles, YouTube channel feeds,
 transcripts/comments, Facebook Page Plugin facts, Threads profile/posts,
 Pinterest pins and public Telegram channel previews on social. AgData remains
 selected alongside it. CompanyRecords adds LinkedIn company facts shared with
-social/business and Trustpilot reviews on business. This fills sampled structured
-reviews and additional-platform gaps; it does not qualify Glassdoor, complete
-comment histories, private content or every reusable operation. Review disclosures
-and verification markers remain part of the evidence.
+social/business and Trustpilot reviews on business, alongside the registry and
+court reads above. WebMD provider search and HealthCare.gov ACA plan data belong
+on health. WebMD delivered family-medicine listings with missing contacts and
+related specialties; dentistry failed upstream, and ADA searches returned no
+records in two cities, so ADA remains unselected. ACA data preserves plan year,
+published age and premiums before subsidies. These samples do not qualify every
+reusable operation. Review disclosures and verification markers remain part of
+the evidence.
 
 HealthTravel adds Numbeo city-price observations and Rome2Rio intercity options
-on travel, and EMA supply-shortage records on science. Preserve raw price text
+on travel, and EMA supply-shortage records on health. Preserve raw price text
 when normalized currency is missing, partial route previews and resolved versus
 active shortage statuses. Its Google Flights sample returned no fares; Wikivoyage
 failed upstream 503. Both remain excluded. WebIntel adds news aggregation and
@@ -238,11 +255,12 @@ alternatives or explain why the remaining workflows are outside this research se
 Reusable provider definitions remain broader than these editorial selections.
 
 Science groups academic search and metadata, citations, researcher/institution
-identities, research funding, biological/chemical references, clinical trials,
-drug/device evidence and health datasets. It shares the web wallet and its
-per-payment authority. Investment-oriented pharma catalysts and general product
-recalls remain on business. Legal/government records retain their existing split
-across business, world, property and finance.
+identities, research funding and biological/chemical references; it shares the web
+wallet. Health groups clinical trials, drug/device evidence, public-health and
+nutrition datasets, healthcare access, care costs and insurance plans. Health
+shares the existing social wallet and its per-payment authority. Investment-oriented
+pharma catalysts and general product recalls remain on business. Legal/government
+records retain their existing split across business, world, property and finance.
 
 Travel groups trip planning: dated flight prices, operational flight data,
 airport references, route matrices, destination references and ski/leisure data.
@@ -250,9 +268,9 @@ World retains general weather, aviation weather/hazards and accident research;
 generic geocoding is shared. Sports data and generative/developer workflows
 remain available through bundled provider selection.
 
-The listener order and ports are web 3010, science 3011, social 3012, business 3013,
-finance 3014, property 3015, security 3016, world 3017, travel 3018 and toolbox
-3019. Connect each client to its listed port. Local deployment overrides remain
+The listener order and ports are web 3010, science 3011, health 3012, social 3013,
+business 3014, finance 3015, property 3016, security 3017, world 3018, travel 3019
+and toolbox 3020. Connect each client to its listed port. Local deployment overrides remain
 operator-owned.
 
 Published schemas and estimates do not establish comparative output quality,

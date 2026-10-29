@@ -1742,6 +1742,20 @@ charges each attempt, keeps unused price differences and may deliver no upstream
 result. Their nominal $0.01 metadata is not the total when a seller price is given.
 They are omitted from the research deployment.
 
+A later pair of paid Polish-registry and court searches returned HTTP 402
+`payment_invalid`. After the operator approved a local firewall rule, a fresh,
+distinct `copyright` court request failed in about nine seconds and disclosed
+`facilitatorStatus: 502` with `detail.error: upstream_unreachable`. This narrows the
+observed failure to the seller's verification/facilitator path; it does not prove
+an invalid signature, identify the failing downstream host or establish settlement.
+Unsigned documented court and Polish-company samples still returned records.
+The advertised Base offer was $0.005 with a 60-second authorization window; the
+SDK sets expiry at signing, so a firewall delay before signing does not consume
+that window. No signer, extension or generic relay workaround is established.
+Earlier failed authorizations remain potentially chargeable and were not replayed.
+Research desk prefers CompanyRecords court search while retaining Maxwell's
+additional government, travel and research contracts for separate evaluation.
+
 Most records come from a continuously refreshed cache. Preserve fetchedAt or
 generatedAt. A specific uncached item can return an uncharged 404 and queue retrieval;
 this is not a completed empty search. Completed searches with no matches can be
@@ -2097,6 +2111,38 @@ different page identifiers for the same named page; preserve source URLs and
 identifiers rather than asserting identifier equivalence. Public age/view-count
 text and missing fields should remain explicit.
 
+CompanyRecords NY company lookup matched 2s on IBM's DOS ID 30059, legal name,
+1911-06-16 filing date and service address. Its Swedish snapshot matched Strale's
+direct lookup on Volvo's organisation number 556012-5790, name, registration date,
+postal address and SNI code. CompanyRecords used an October 22 weekly snapshot;
+Strale fetched directly on October 29 and returned more normalized fields, but no
+representatives or beneficial owners. Preserve 2s for CO/CT and Strale for fresher
+Swedish facts rather than declaring those broader tools redundant. Known-ID KRS
+lookup returned record 0000006865, named CD PROJEKT RED SPÓŁKA AKCYJNA; Maxwell's
+matching request rejected payment. CompanyRecords lacks Maxwell's Polish name
+search, which remains selected with that payment limitation noted.
+
+Its `gov_justia_case_law` route actually uses CourtListener. It matched all 20
+sampled 2s opinion records on canonical URL, court, docket, filing date and citations,
+while supplying snippets where 2s returned null. 2s returned 20 rows despite limit 3.
+Shared source records demonstrate wrapper consistency, not independent corroboration.
+Research desk selects CompanyRecords opinion search and explicitly excludes 2s and
+Maxwell search backups with comments; 2s docket, opinion-text and verification tools
+remain selected. Lower advertised prices favor the sampled core CompanyRecords
+reads but do not establish universal quality or freshness superiority.
+
+WebMD family-medicine search returned 60 New Orleans records of a reported 1,108,
+including 10 other-specialty listings; 57 lacked office phones and three lacked
+offices. NPPES through 2s agreed on the first clinician's NPI, name and taxonomy,
+but returned a different office address. The separate dentistry request failed
+HTTP 503. ADA ZIP searches in New Orleans and Austin failed HTTP 404; neither
+proves no local dentists, and ADA remains unselected. HealthCare.gov returned three
+of 38 reported 2026 Orleans Parish plans for age 40. The linked insurer SBC confirmed
+the first plan's $9,900 deductible and $10,600 out-of-pocket limit, but premiums
+were supplied separately and not independently checked. Preserve federal-exchange
+state coverage, plan year, nearest published age and pre-subsidy pricing. Failed
+calls retain possible payment liability despite vendor no-charge/retry claims.
+
 CompanyRecords delivered Microsoft LinkedIn company facts and a page of Apify
 Trustpilot reviews with dates, ratings, review URLs and verification markers.
 The review sample contains invited/incentivized disclosures; it is not a
@@ -2130,3 +2176,36 @@ and coverage contracts while removing those claims. Cached SSL Labs operations
 clarify that a missing report is an error, not permission to replay a paid call.
 Vendor help remains source-authored content; its billing claims do not establish
 settlement or authorize repeating failed paid work.
+
+## FindMyDirectDoctor
+
+`findmydirectdoctor.toml` uses the complete published
+`https://api.findmydirectdoctor.com/openapi.json` and `/llms.txt` help. All reviewed
+operations are GET reads; no GET/POST twins, separate API-key requirements or
+owned asynchronous jobs were present. `/v1` is a naming anchor with a root fallback,
+so public info/schema/documentation routes remain available. Operation-level
+`x-payment-info` supplies fixed USD price hints (sampled $0.01–$0.05). Help headline
+counts and prices contradict its per-route details; use operation metadata and
+actual payment offers rather than the headline. Claims that errors or empty
+results are not charged do not establish settlement or authorize replay.
+
+The directory covers US DPC, concierge and cash-pay practices, not every clinician.
+City/state lookup resolves only cities with listed practices; ZIP or coordinates
+avoid that restriction. Results can contain duplicate clinician records and missing
+contact details or fees. Membership price filters omit practices without a monthly
+fee. Preserve identifiers, source grades, dates, pagination and missing values;
+practice statements are not independently verified credentials or current
+availability. Missing statements do not prove a service is absent.
+
+Hospital prices cover the facility portion only and retain each price file's date;
+a fresh response can contain older hospital files. Medicare payment benchmarks,
+NADAC drug acquisition costs, study figures and posted cash prices are distinct
+bases, not interchangeable patient quotes. Medicaid results are screening estimates,
+not eligibility decisions. HRSA site records include multiple locations and
+administrative sites; preserve HRSA attribution and ODbL licensing.
+
+Live calls on 2026-10-29 delivered Austin and New Orleans doctor searches, Austin
+brain-MRI hospital prices, New Orleans hospital assistance records and HRSA sites.
+These establish sampled delivery, not independent listing accuracy or full-catalog
+qualification. Research desk deliberately assigns the full read-only catalog,
+including help, to health for healthcare access and costs.

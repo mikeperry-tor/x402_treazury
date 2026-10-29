@@ -16,6 +16,63 @@ fn fixture() -> Value {
 fn config(value: &Value) -> MetaConfig {
     serde_json::from_value(value.clone()).unwrap()
 }
+
+#[test]
+fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
+    let config: MetaConfig = toml::from_str(include_str!(
+        "../../examples/deployments/research_desk.toml"
+    ))
+    .unwrap();
+    EffectiveBindings::resolve(&config).unwrap();
+    for (source, suffix, target) in [
+        ("twos", "papers_search", Some("science")),
+        ("twos", "bio_gene", Some("science")),
+        ("twos", "clinical_trials", Some("health")),
+        ("twos", "health_provider_profile", Some("health")),
+        ("twos", "medical_npi", Some("health")),
+        ("twos", "nutrition_food_search", Some("health")),
+        ("twos", "gov_fda_drugs", Some("health")),
+        ("twos", "law_case_search", None),
+        ("twos", "law_docket_search", Some("business")),
+        ("twos", "law_opinion", Some("business")),
+        ("twos", "business_sos_search", Some("business")),
+        ("strale", "swedish_company_data", Some("business")),
+        ("maxwell", "courts_search", None),
+        ("maxwell", "gov_pl_companies", Some("business")),
+        ("maxwell", "openfda_drug_label", Some("health")),
+        ("x402stock", "clinical_trials", Some("health")),
+        ("findmydirectdoctor", "doctors_search", Some("health")),
+        ("findmydirectdoctor", "help", Some("health")),
+        (
+            "healthtravel",
+            "health_ema_shortages_safety",
+            Some("health"),
+        ),
+        ("companyrecords", "gov_justia_case_law", Some("business")),
+        ("companyrecords", "b2b_ny_business_entity", Some("business")),
+        (
+            "companyrecords",
+            "b2b_bolagsverket_sweden_companies",
+            Some("business"),
+        ),
+        ("companyrecords", "gov_krs_poland", Some("business")),
+        ("companyrecords", "gov_healthcare_gov", Some("health")),
+        (
+            "companyrecords",
+            "b2b_webmd_healthcare_provider_directory",
+            Some("health"),
+        ),
+        ("companyrecords", "b2b_ada_find_a_dentist", None),
+    ] {
+        let rules = config.sources[source].send_tools.as_ref().unwrap();
+        let compiled = CompiledRules::new(rules, "test").unwrap();
+        let name = format!("test_{suffix}");
+        let decision = compiled.decision(&name);
+        let expected: Vec<_> = target.into_iter().collect();
+        assert_eq!(decision.targets, expected, "{source}/{suffix}");
+        assert_eq!(decision.excluded, target.is_none(), "{source}/{suffix}");
+    }
+}
 fn rules(value: Value) -> Vec<SendToolsRule> {
     serde_json::from_value(value).unwrap()
 }

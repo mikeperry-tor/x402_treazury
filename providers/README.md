@@ -71,6 +71,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Deepline | `deepline.toml` | Vendor OpenAPI; no additional compatibility restriction identified |
 | Degenscan Intel | `degenscan.toml` | Event intelligence, keyless Carry reads and public forecast submit/poll |
 | Exa | `exa.toml` | Vendor OpenAPI; Search, Contents and lazy help only |
+| FindMyDirectDoctor | `findmydirectdoctor.toml` | Full read-only doctor/clinic, hospital cash-price and healthcare-access catalog |
 | FreeQ | `freeq.toml` | Remote REST catalog; pending completion, credential ownership, webhook lifecycles and gift-card purchases excluded |
 | Genuine Good Grants | `genuinegood.toml` | POST grant research; search/detail recommendations; bearer pass excluded |
 | Glassnode | `glassnode/provider.toml` | Local `glassnode/openapi.json` |
@@ -79,7 +80,7 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | Global Legal Entities (x402 Atlas) | `legal-entities.toml` | Full GLEIF search, registration and accounting-parent catalog |
 | SmartPerps (AgentGate) | `smartperps.toml` | Read-only Hyperliquid cohort analytics and public wallet data; POST twins |
 | SiteCheck Shop & Social | `shopsocial.toml` | Full public social and shopping catalog |
-| SiteCheck Company Records | `companyrecords.toml` | Full public company, government and B2B catalog |
+| SiteCheck Company Records | `companyrecords.toml` | Full public company, government, B2B and healthcare-directory catalog |
 | SiteCheck Health & Travel | `healthtravel.toml` | Full public health, travel, transport and vehicle catalog |
 | SiteCheck Web Intel | `webintel.toml` | Full news, web, scholarly and security catalog |
 | Google Patents (x402 Atlas) | `google-patents.toml` | Full two-operation search/details catalog; claims and family data |
