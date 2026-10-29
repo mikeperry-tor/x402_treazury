@@ -3,6 +3,194 @@ use serde_json::Value;
 use std::path::Path;
 
 #[tokio::test]
+async fn banking_compliance_projects_typed_post_bodies_and_excludes_unmodeled_campaign() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/banking-compliance/provider.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("../providers/banking-compliance/openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "banking_compliance").unwrap();
+    assert_eq!(tools.len(), 3);
+    assert!(doc["paths"]["/api/campaign"]["post"].is_object());
+    assert!(!tools.iter().any(|tool| tool.path == "/api/campaign"));
+    for (name, payload, price) in [
+        (
+            "check",
+            json!({"text":"Earn 4.50% APY.","product_type":"savings_account",
+                "industry":"banking","include_warnings":false}),
+            "0.005",
+        ),
+        (
+            "lookup",
+            json!({"query":"APY","category":"required_disclosure",
+                "regulation":"Reg DD","product_type":"savings_account","limit":3}),
+            "0.003",
+        ),
+        (
+            "generate",
+            json!({"institution_name":"Example Credit Union","product_type":"savings_account",
+                "product_details":{"apy":"4.50%","fdic_insured":false,"is_credit_union":true},
+                "platform":"general","tone":"professional","quantity":2}),
+            "0.10",
+        ),
+    ] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == format!("banking_compliance_{name}"))
+            .unwrap();
+        let route = tool
+            .route(cfg.base_url.as_ref().unwrap(), payload.as_object().unwrap())
+            .unwrap();
+        assert_eq!(route.method, "POST");
+        assert_eq!(route.body, Some(payload));
+        assert!(route.query.is_empty());
+        assert_eq!(
+            doc["paths"][&tool.path]["post"]["x-payment-info"]["price"]["amount"],
+            price
+        );
+        assert!(tool.description.contains(&format!("${price}/call [spec]")));
+    }
+    let check = &tools.iter().find(|t| t.path == "/api/check").unwrap();
+    assert_eq!(check.input_schema["required"], json!(["text"]));
+    assert_eq!(check.input_schema["properties"]["text"]["minLength"], 1);
+    assert_eq!(
+        check.input_schema["properties"]["include_warnings"]["type"],
+        "boolean"
+    );
+    assert!(check.description.contains("misidentified subsections"));
+    let lookup = &tools.iter().find(|t| t.path == "/api/lookup").unwrap();
+    assert_eq!(lookup.input_schema["required"], json!(["query"]));
+    assert!(
+        lookup
+            .description
+            .contains("Reg DD filter returned no APY matches")
+    );
+    let generate = &tools.iter().find(|t| t.path == "/api/generate").unwrap();
+    assert_eq!(
+        generate.input_schema["required"],
+        json!(["institution_name", "product_details", "product_type"])
+    );
+    assert_eq!(
+        generate.input_schema["properties"]["product_details"]["properties"]["fdic_insured"]["type"],
+        "boolean"
+    );
+    assert!(generate.description.contains("fdic_insured=false"));
+    // MCP discovery documents options/ranges in prose, without structural enums or bounds.
+    for (tool, field) in [(lookup, "limit"), (generate, "quantity")] {
+        let schema = &tool.input_schema["properties"][field];
+        assert_eq!(schema["type"], "number");
+        assert!(schema.get("minimum").is_none());
+        assert!(schema.get("maximum").is_none());
+        assert!(schema.get("default").is_none());
+    }
+    for tool in &tools {
+        let schema = &tool.input_schema["properties"]["product_type"];
+        assert_eq!(schema["type"], "string");
+        assert!(schema.get("enum").is_none());
+    }
+}
+
+#[tokio::test]
+async fn blockchainmoneymap_keeps_namespace_names_public_fallback_and_usdc_prices() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/blockchainmoneymap.toml"))
+        .await
+        .unwrap()
+        .settings;
+    // Small captured request/pricing witnesses; the extra root route is synthetic
+    // to verify that naming anchors do not become editorial catalog restrictions.
+    let doc = json!({"paths":{
+        "/api/x402/wallet-snapshot":{"post":{
+            "description":"Wallet snapshot.",
+            "requestBody":{"required":true,"content":{"application/json":{"schema":{
+                "type":"object","required":["address"],"properties":{
+                    "address":{"type":"string","description":"Public EVM wallet or contract address."},
+                    "chain":{"type":"string","enum":["ethereum","base","polygon","arbitrum","optimism"],"default":"ethereum"}
+                }
+            }}}},
+            "x-payment-info":{"price":{"mode":"fixed","amount":"0.01","currency":"USDC",
+                "amountUsd":"0.01","displayCurrency":"USD","settlementCurrency":"USDC"}}
+        }},
+        "/api/devagentpal/revocation-propagation":{"post":{
+            "description":"Revocation propagation.",
+            "requestBody":{"required":true,"content":{"application/json":{"schema":{
+                "type":"object","required":["authorizationProof","revocation","targets","policy"],
+                "properties":{"authorizationProof":{"type":"object"},"revocation":{"type":"object"},
+                    "targets":{"type":"array","maxItems":25},"policy":{"type":"object"}}
+            }}}}
+        }},
+        "/api/x402/x402-failure-fact-classifier":{"post":{
+            "description":"Classify supplied failure facts.",
+            "x-payment-info":{"price":{"mode":"fixed","amount":"0.01","currency":"USDC",
+                "amountUsd":"0.01","displayCurrency":"USD","settlementCurrency":"USDC"}}
+        }},
+        "/api/agents/workflows/manifest":{"get":{"description":"Public workflow discovery."}},
+        "/public-future":{"get":{"description":"Synthetic future public discovery."}}
+    }});
+    let tools = catalog::build_tools(&cfg, &doc, "bmm").unwrap();
+    for (path, name) in [
+        ("/api/x402/wallet-snapshot", "bmm_wallet_snapshot"),
+        (
+            "/api/devagentpal/revocation-propagation",
+            "bmm_revocation_propagation",
+        ),
+        (
+            "/api/x402/x402-failure-fact-classifier",
+            "bmm_x402_failure_fact_classifier",
+        ),
+        ("/api/agents/workflows/manifest", "bmm_workflows_manifest"),
+        ("/public-future", "bmm_public_future"),
+    ] {
+        assert!(
+            tools
+                .iter()
+                .any(|tool| tool.path == path && tool.name == name)
+        );
+    }
+    let wallet = tools
+        .iter()
+        .find(|t| t.name == "bmm_wallet_snapshot")
+        .unwrap();
+    assert!(wallet.description.contains("$0.01/call [spec]"));
+    assert!(wallet.description.contains("partial response"));
+    let diagnostic = tools
+        .iter()
+        .find(|t| t.name == "bmm_x402_failure_fact_classifier")
+        .unwrap();
+    assert!(diagnostic.description.contains("Cost: ~$0.01/call [spec]."));
+    let payload = json!({"address":"0x0000000000000000000000000000000000000001","chain":"base"});
+    let route = wallet
+        .route(cfg.base_url.as_ref().unwrap(), payload.as_object().unwrap())
+        .unwrap();
+    assert_eq!(route.method, "POST");
+    assert_eq!(route.body, Some(payload));
+    assert!(route.query.is_empty());
+    let revocation = tools
+        .iter()
+        .find(|t| t.name == "bmm_revocation_propagation")
+        .unwrap();
+    assert!(
+        revocation
+            .description
+            .contains("separately supplied authorization proof")
+    );
+    assert_eq!(
+        revocation.input_schema["required"],
+        json!(["authorizationProof", "policy", "revocation", "targets"])
+    );
+    assert_eq!(
+        revocation.input_schema["properties"]["targets"]["maxItems"],
+        25
+    );
+}
+
+#[tokio::test]
 async fn strale_polish_lookup_describes_only_the_supported_krs_input() {
     use serde_json::json;
     use x402_treazury::{catalog, config};

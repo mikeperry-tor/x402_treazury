@@ -1,0 +1,24 @@
+description = "US banking marketing checks, regulatory rule lookup and social-post drafting."
+# Authored HTTP projection of public root discovery and /mcp tools/list.
+spec = "openapi.json"
+name = "Banking Compliance"
+base_url = "https://banking-compliance-production.up.railway.app"
+prefix = "banking_compliance"
+include = ["/api", ""]
+# Discovery advertises this paid route, but publishes no full request contract.
+# The free MCP preview schema does not establish the paid campaign body.
+exclude_operations = ["POST /api/campaign"]
+pricing_key = "x-payment-info"
+instructions_text = "Results reflect a limited US banking rules database. Verify cited requirements and current applicability before publishing financial promotions."
+
+[overrides.banking_compliance_check]
+description = "Check banking copy against 56 provider rules; returns violations, warnings and citations. Advisory screening only: sampled rules omitted legal conditions and misidentified subsections. Verify requirements against current authoritative text. Cost: ~$0.005/call [spec]."
+
+[overrides.banking_compliance_lookup]
+description = "Search 56 provider-authored US banking rules by keyword. Returns rule summaries and citations, which can be inaccurate; verify against authoritative text. The advertised Reg DD filter returned no APY matches while unfiltered search succeeded. Cost: ~$0.003/call [spec]."
+
+[overrides.banking_compliance_lookup.params]
+regulation = "Optional regulation filter. Advertised short name Reg DD yielded no APY matches in a sample; omit this filter if a keyword search unexpectedly returns none."
+
+[overrides.banking_compliance_generate]
+description = "Draft bank or credit-union product posts for review. A sample invented a website and claimed Member FDIC despite fdic_insured=false. Verify every claim, disclosure and placeholder before use; provider validation is not legal approval. Cost: ~$0.10/call [spec]."

@@ -84,6 +84,27 @@ fn research_desk_separates_health_and_preserves_registry_and_court_workflows() {
             Some("health"),
         ),
         ("companyrecords", "b2b_ada_find_a_dentist", None),
+        ("banking_compliance", "check", Some("finance")),
+        ("banking_compliance", "lookup", Some("finance")),
+        ("banking_compliance", "generate", None),
+        ("blockchainmoneymap", "wallet_snapshot", Some("finance")),
+        (
+            "blockchainmoneymap",
+            "batch_wallet_snapshot",
+            Some("finance"),
+        ),
+        ("blockchainmoneymap", "tx_status", Some("finance")),
+        ("blockchainmoneymap", "tx_decode", Some("finance")),
+        ("blockchainmoneymap", "saved_report", Some("finance")),
+        ("blockchainmoneymap", "wallet_audit", Some("security")),
+        ("blockchainmoneymap", "deep_wallet_report", None),
+        ("blockchainmoneymap", "x402_failure_fact_classifier", None),
+        ("blockchainmoneymap", "revocation_propagation", None),
+        (
+            "blockchainmoneymap",
+            "x402_response_provenance_notary",
+            None,
+        ),
     ] {
         let rules = config.sources[source].send_tools.as_ref().unwrap();
         let compiled = CompiledRules::new(rules, "test").unwrap();

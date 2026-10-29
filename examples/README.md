@@ -45,6 +45,18 @@ observations, not proof of universal outage or the settlement outcome of our
 calls. Reusable provider definitions remain available for deliberate retesting.
 Selections belong here, not in the reusable providers.
 
+Banking Compliance checks and rule lookup are advisory finance tools; business
+retains authoritative eCFR retrieval. Its sampled summaries had citation errors,
+and drafting invented a website and FDIC membership despite an explicit false
+insurance flag, so drafting is omitted from this desk (social would own it).
+Blockchain Money Map supplies finance wallet/transaction research and security
+wallet audits. Its sampled transaction status agreed with Arkham, whose richer
+labels and transfers remain useful. BMM diagnostics only analyze supplied facts
+and added no independent evidence about Maxwell, so toolbox does not select them.
+The reusable provider retains compatible diagnostic and operational tools. See
+[provider caveats](../providers/CAVEATS.md#blockchain-money-map) for sample limits,
+persistent report URLs and caller-owned notary secrets.
+
 APEX's two rendered readers retrieved the JavaScript test page, and its research
 search returned credited OpenAlex and Hacker News results. Research search is
 shared with science/social; it does not replace full paper retrieval or discussion

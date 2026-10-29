@@ -16,6 +16,74 @@ adding a root fallback for editorial omissions. Restrictions below describe
 concrete support boundaries. Price, diagnostics, overlap and hosted asset links
 alone do not establish incompatibility.
 
+## Banking Compliance
+
+`banking-compliance/openapi.json` is an authored HTTP projection, not vendor
+OpenAPI. Public [root discovery](https://banking-compliance-production.up.railway.app/)
+lists paid routes and prices; POST `/mcp` JSON-RPC `tools/list` provides the check,
+lookup and generation input schemas. The asset records source methods and
+transformations. Structural constraints are preserved without inferring enums,
+numeric bounds or defaults from prose. POST is established by the public tools
+and preview; middleware challenges on other methods do not establish handlers.
+The free MCP campaign preview advertises POST `/api/campaign` and $5 but supplies
+no complete paid request schema. Its deliberately generic placeholder is excluded
+by exact operation until that contract is published or otherwise verified.
+
+Paid samples on 2026-10-29 delivered checks, lookup and drafting. Keyword `APY`
+returned rules without a filter but no matches with the advertised `Reg DD`
+filter. The check flagged missing FDIC language but did not catch the full
+annual-percentage-yield wording requirement. Its rules cited 1030.8(a) for a
+requirement in (b), (b) for minimum balances in (c)(3), and (d) for date disclosure
+in (c)(2). The same-day 2s eCFR call returned full text as of 2026-10-27. Treat
+these 56 provider rules as advisory summaries; business's authoritative eCFR
+retrieval remains complementary, not redundant. Finance owns the selected banking
+copy checks/lookup because the subject is financial products, rather than general
+legal research.
+
+Draft generation returned `needs_review`, eight warnings, an invented website,
+and “Member FDIC” despite `fdic_insured=false` for a fictional institution. It
+remains available in the reusable provider with an explicit warning. It would
+belong on social, but the research desk omits it on information-quality grounds.
+No generated copy was published and the campaign was not purchased.
+
+## Blockchain Money Map
+
+The [vendor OpenAPI](https://api.blockchainmoneymap.com/openapi.json) and
+[guide](https://api.blockchainmoneymap.com/llms.txt) describe public EVM wallet
+research and agent-commerce analysis. Preserve all supported operations; the
+`/api/x402`, `/api/devagentpal` and `/api/agents` anchors determine names, with a
+root fallback for new routes. The inspected catalog had 113 operations and no
+same-path method twins. Live challenges govern prices.
+
+The research desk assigns snapshots, transaction reads/decoding and saved reports
+to finance, and wallet audit to security. A paid Base snapshot returned a native
+balance and NFT/activity data but `Partial`/low confidence with token data
+unavailable. Empty holdings do not establish zero balance. AgentFund's comparable
+portfolio call failed all four Base RPC balance reads; it was not repeated.
+For the same public transaction, $0.01 BMM status and $0.40 Arkham detail agreed
+on successful status, block 48796530, from/to addresses and gas 683352. Arkham added
+timestamp, precise fees, labels and token transfers; retain both. These samples
+do not qualify untested report, batch, decode or audit operations.
+
+The $0.01 failure classifier only classified supplied Maxwell error codes as
+`facilitator_rejected`; its response expressly disclaimed contacting targets or
+facilitators and proving settlement. Other diagnostics similarly require supplied
+evidence. The desk leaves these out of toolbox for lack of independent diagnostic
+value, rather than a compatibility failure. Seller-marketing analyses and
+operational notary/ledger/revocation workflows are also outside its research
+selection. The $5 deep report exceeds the existing financials cap.
+
+Saved/deep reports persist at unlisted URLs accessible to URL holders. Hash
+notaries/ledgers are synchronous JSON create/verify operations: callers own
+identifiers, idempotency inputs and one-time lookup secrets. Save those returned
+secrets; neither an idempotent response nor a missing result establishes safe
+repurchase or recovery. Revocation propagation accepts separate authorization
+proof and can contact verified opted-in targets when enabled by the provider.
+Payment grants no such authority. These expressible contracts remain in the
+reusable provider; no account session or local background owner is required.
+
+## Other provider contracts
+
 | Definition(s) | Boundary or integration contract |
 | --- | --- |
 | AGProxy | Root base URL overrides the schema’s `/v1` server; both `/x402` and `/mpp` aliases advertise x402 support. Fetch truncation, residential exit behavior and proxy credentials retain their documented meaning. |

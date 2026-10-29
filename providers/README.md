@@ -61,6 +61,8 @@ values. See the [configuration reference](../docs/configuration.md) for complete
 | APEX Faucet | `apexfaucet.toml` | Authored full catalog with documented POST/input repairs; persistent identity and owned purchases excluded |
 | Arkham | `arkham.toml` | Vendor OpenAPI |
 | AX1 Verdict | `ax1/provider.toml` | External request projection; token Verdict submission and free public receipt |
+| Banking Compliance | `banking-compliance/provider.toml` | Authored POST checks, rule lookup and drafts; campaign omitted pending its request contract |
+| Blockchain Money Map | `blockchainmoneymap.toml` | Full vendor wallet/transaction, evidence-analysis and agent-commerce catalog |
 | BlockRun | `blockrun.toml` | Synchronous catalog with fixed-symbol reads; async jobs/ownership excluded |
 | Claw402 | `claw402.toml` | Full catalog, advisory market reads, sparse RootData JSON bodies |
 | CoinMarketCap | `coinmarketcap/provider.toml` | Authored union of all public keyless routes and four x402 counterparts |

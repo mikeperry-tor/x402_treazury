@@ -1,0 +1,48 @@
+description = "Public EVM wallet snapshots, transaction status/decoding and risk reports, plus x402 evidence diagnostics and agent-commerce analysis."
+spec = "https://api.blockchainmoneymap.com/openapi.json"
+name = "Blockchain Money Map"
+base_url = "https://api.blockchainmoneymap.com"
+prefix = "bmm"
+include = ["/api/x402", "/api/devagentpal", "/api/agents", ""]
+pricing_key = "x-payment-info"
+help_url = "https://api.blockchainmoneymap.com/llms.txt"
+instructions_text = "Preserve confidence, dataSourceStatus, missing components and timestamps. Evidence diagnostics analyze supplied facts; they do not independently establish settlement, identity, authorization or safety. Reports can persist at unlisted URLs. Hash notary/ledger callers must save returned identifiers and one-time lookup secrets. Revocation propagation requires separate authority and opted-in targets; payment alone grants none."
+
+[overrides.bmm_wallet_snapshot]
+description = "Inspect a public EVM wallet's native balance, visible tokens/NFTs and recent activity. Returns confidence, missing-source notes and attention signals; empty holdings in a partial response do not establish zero balance. Cost: ~$0.01/call [spec]."
+
+[overrides.bmm_batch_wallet_snapshot]
+description = "Inspect up to ten public EVM wallets on one chain. Returns ordered snapshots and escalation candidates. Preserve each wallet's coverage and confidence; missing token data does not establish zero balance. Cost: ~$0.05/call [spec]."
+
+[overrides.bmm_tx_status]
+description = "Read a public EVM transaction's observed status, block, fee and lightweight method context. Preserve finality, confidence and missing fields; observed success does not prove a separate invoice or authorization was satisfied. Cost: ~$0.01/call [spec]."
+
+[overrides.bmm_tx_decode]
+description = "Explain a public EVM transaction using available status, value, gas and token-transfer fields. Provider labels are not a complete ABI/event-log decode or contract safety assessment. Cost: ~$0.25/call [spec]."
+
+[overrides.bmm_wallet_audit]
+description = "Research public EVM wallet flows, counterparties, token/NFT exposure and attention signals. Preserve confidence and unavailable components. May return a persistent unlisted report URL; this is not an AML clearance or safety certification. Cost: ~$1.00/call [spec]."
+
+[overrides.bmm_saved_report]
+description = "Generate a persistent unlisted report for a public EVM wallet and return its URL. Preserve source coverage and confidence; possession of the URL permits access. Cost: ~$1.00/call [spec]."
+
+[overrides.bmm_deep_wallet_report]
+description = "Generate a deeper public EVM wallet research report with a persistent unlisted URL. Preserve missing-source notes and confidence; a larger report can share the same upstream limitations. Cost: ~$5.00/call [spec]."
+
+[overrides.bmm_revocation_propagation]
+description = "Propagate a revocation to verified opted-in targets using separately supplied authorization proof. Can contact targets when enabled by the provider; payment does not grant revocation authority. Returns per-target results and completion status. Cost: ~$0.25/call [spec]."
+
+[overrides.bmm_x402_response_provenance_notary]
+description = "Create or verify persistent hash-only response-provenance records from supplied evidence. Save returned record IDs and one-time lookup secrets for verification; idempotency does not guarantee secret recovery. Does not prove settlement. Cost: ~$0.01/call [spec]."
+
+[overrides.bmm_x402_authorized_payee_rotation_notary]
+description = "Record or verify supplied hash-only payee-rotation evidence. Save returned record IDs and one-time lookup secrets; idempotency does not guarantee secret recovery. Recording evidence does not authorize a rotation. Cost: ~$0.01/call [spec]."
+
+[overrides.bmm_x402_paid_agent_response_completeness_drift_ledger]
+description = "Record and compare supplied hash-only response-completeness snapshots across releases. Save returned record IDs and one-time lookup secrets; idempotency does not guarantee secret recovery. Does not independently fetch responses. Cost: ~$0.01/call [spec]."
+
+[overrides.bmm_x402_mcp_operation_stability_ledger]
+description = "Record and compare supplied hash-only x402, OpenAPI and MCP operation facts. Save returned record IDs and one-time lookup secrets; idempotency does not guarantee secret recovery. Does not independently monitor services. Cost: ~$0.01/call [spec]."
+
+[overrides.bmm_x402_paid_tool_latency_sla_evidence_notary]
+description = "Create or verify persistent hash-only latency evidence supplied by the caller. Save returned record IDs and one-time lookup secrets; idempotency does not guarantee secret recovery. Does not measure live latency. Cost: ~$0.01/call [spec]."

@@ -187,6 +187,18 @@ async fn research_desk_health_reuses_social_wallet_and_listener_ports_are_sequen
     assert_eq!(shown["servers"]["science"]["wallet"], "web");
     assert!(shown["source_bindings"]["science"]["findmydirectdoctor"].is_null());
     assert!(shown["source_bindings"]["health"]["findmydirectdoctor"].is_array());
+    for (endpoint, source) in [
+        ("finance", "banking_compliance"),
+        ("finance", "blockchainmoneymap"),
+        ("security", "blockchainmoneymap"),
+    ] {
+        assert_eq!(
+            shown["wallet_bindings"][endpoint][source]["wallet"],
+            "financials"
+        );
+    }
+    assert!(shown["source_bindings"]["toolbox"]["blockchainmoneymap"].is_null());
+    assert!(shown["source_bindings"]["social"]["banking_compliance"].is_null());
 }
 
 fn deployment_text() -> &'static str {

@@ -104,6 +104,32 @@ max_funding_amount_usdc = "3.00"
 # One source per provider. Ordered send_tools rules assign generated tool families to endpoints.
 # A provider shared across categories is still downloaded only once.
 
+[sources.banking_compliance]
+extends = "../../providers/banking-compliance/provider.toml"
+send_tools = [
+  # Advisory copy screening complements business's authoritative 2s eCFR text.
+  { to = "finance", tools = ["check", "lookup"] },
+  # Drafting belongs on social, but a sample invented a website and claimed
+  # Member FDIC despite fdic_insured=false. Retain the provider tool for retesting.
+  # Campaign is provider-excluded because its paid request contract is unpublished.
+  { to = "exclude" },
+]
+
+[sources.blockchainmoneymap]
+extends = "../../providers/blockchainmoneymap.toml"
+send_tools = [
+  # $0.01 tx status agreed with Arkham; Arkham adds labels, time and transfers.
+  # Snapshot delivered partial token coverage. Saved reports persist at unlisted URLs.
+  { to = "finance", tools = ["wallet_snapshot", "batch_wallet_snapshot", "tx_status", "tx_decode", "saved_report"] },
+  { to = "security", tools = ["wallet_audit"] },
+  # Deep reports advertise $5, above the existing $1 financials cap.
+  # Caller-evidence diagnostics add no independent service/settlement verification;
+  # the tested failure classifier only restated the supplied Maxwell errors.
+  # Omit those from toolbox, plus operational notary/ledger/propagation workflows
+  # and seller-marketing analyses. Full compatible catalog remains in the provider.
+  { to = "exclude" },
+]
+
 [sources.exa]
 extends = "../../providers/exa.toml"
 send_tools = [
@@ -1129,8 +1155,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, DeFi, derivatives and prediction markets. Use business for organizations and filings; use property for parcel and site records."
-discovery_search_tool_instructions_text = "Finance keywords: SmartPerps, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
+instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, DeFi, derivatives and prediction markets. Banking copy checks and rule summaries are advisory; use business for authoritative eCFR text. Wallet research can return partial coverage and persistent unlisted reports. Use business for organizations and filings; use property for parcel and site records."
+discovery_search_tool_instructions_text = "Finance keywords: Banking Compliance, bank advertising, Reg DD, Reg Z, APY disclosures, banking copy checks, Blockchain Money Map, BMM, EVM wallet snapshot, transaction status, transaction decode, saved wallet report, SmartPerps, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
 
 [servers.property]
 listen = "127.0.0.1:3016"
@@ -1147,8 +1173,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Threat, breach, LLM API-key exposure, network and compliance intelligence. Preserve coverage, timestamps and degraded/unknown markers; a clean result is not proof of safety. Vulnerability records, package provenance and static code/instruction scans complement exposure checks."
-discovery_search_tool_instructions_text = "Security keywords: breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, LLM API keys, OpenAI, Anthropic, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting, 2s, twos, NVD, CISA KEV, EPSS, CWE, CAPEC, MITRE ATT&CK, OSV, OpenSSF, deps.dev, package vulnerabilities, exploit availability, ICS advisories, prompt injection, HALOWERK, Daedalus, static code audit, AI skill safety."
+instructions_text = "Threat, breach, LLM API-key exposure, network, compliance and public-wallet risk intelligence. BMM wallet audits report attention signals and missing-source coverage, not AML clearance. Preserve coverage, timestamps and degraded/unknown markers; a clean result is not proof of safety. Vulnerability records, package provenance and static code/instruction scans complement exposure checks."
+discovery_search_tool_instructions_text = "Security keywords: Blockchain Money Map, BMM wallet audit, EVM wallet flows, wallet counterparties, token exposure, breach, infostealer, ransomware, SIM swap, wallet risk, CVE, tech stack, IP reputation, ASN, AS number, autonomous system, network owner, announced prefixes, RPKI, abuse contact, phone, WHOIS, sanctions, KYA, IOC, malware, phishing lookalikes, typosquatting, homoglyphs, stolen session cookies, AiTM, OAuth, connected apps, credential exposure, LLM API keys, OpenAI, Anthropic, NHI, non-human identities, service accounts, CI/CD, agent bait, repository instructions, MCP server, registry risk, publisher, DNSBL, IP blacklist, certificate transparency, subdomains, TLS, SSL, certificate chain, weak keys, security headers, CSP, HSTS, URLhaus, malware URL, DNSSEC, DNS propagation, resolver consistency, secret scanning, public artifact exposure, supply chain, vendor risk, cloud, CDN, WAF, hosting, 2s, twos, NVD, CISA KEV, EPSS, CWE, CAPEC, MITRE ATT&CK, OSV, OpenSSF, deps.dev, package vulnerabilities, exploit availability, ICS advisories, prompt injection, HALOWERK, Daedalus, static code audit, AI skill safety."
 
 [servers.world]
 listen = "127.0.0.1:3018"
