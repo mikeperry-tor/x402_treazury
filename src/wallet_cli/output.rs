@@ -186,6 +186,18 @@ pub(super) fn status(
             usdc(&job.target)
         )
         .unwrap();
+        writeln!(
+            text,
+            "  Last validated NEAR response observed: {}",
+            timestamp(job.provider_observed_at)
+        )
+        .unwrap();
+        if job.timed_out {
+            writeln!(text, "  Local wait threshold exceeded; reconciliation continues. This does not establish NEAR's current status or a refund deadline.").unwrap();
+        }
+        if let Some(error) = &job.last_error {
+            writeln!(text, "  Saved funding diagnostic: {error}").unwrap();
+        }
     }
     if !status.treasury_operations.is_empty() {
         writeln!(text, "Transaction amounts and pending change describe overlapping funds; do not add them to the balances above.").unwrap();

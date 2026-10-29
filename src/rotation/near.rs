@@ -44,7 +44,7 @@ pub struct Limits {
     pub max_fee: u64,
     pub max_fee_bps: u32,
 }
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SwapStatus {
     PendingDeposit,
     KnownDeposit,

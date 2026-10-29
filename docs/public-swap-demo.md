@@ -169,10 +169,10 @@ This qualification cannot substitute for the treasury-funded test.
 | --- | --- |
 | Quote rejected, route unavailable or rate limited | Inspect the sanitized job error. Bounded retries/backoff are automatic; do not silently relax caps or select a confidential mode. |
 | Insufficient spendable shielded balance | Keep the active EVM wallet usable; fund/sync under the reviewed run authority. No signed operation is created by this wait. |
-| Swap timeout | Pool status becomes degraded; slower reconciliation continues with the same operation. Do not issue another deposit. |
+| Swap timeout | The local health threshold marks pool status degraded; reconciliation continues at its existing cadence with the same operation. This does not establish a provider timeout. Do not issue another deposit. |
 | Ambiguous source submission | Stop serving before `wallet reconcile --config FILE --operation-id UUID`. `--rebroadcast` explicitly permits only the same bytes while still valid. |
 | Expired source transaction | Use `wallet recover-expired`; it requires canonical synced unspent-input evidence. Refused recovery keeps the reservation. Never delete its journal. |
-| Failed/refunded swap | NEAR status does not credit funds. Sync discovers confirmed refund outputs and credits returned principal once. With serving stopped, use `wallet shield-refunds --config FILE --job-id UUID`, then explicitly submit the returned operation via `wallet reconcile --rebroadcast`. Refund jobs remain operator-visible; shielding does not automatically retry the failed swap. |
+| Failed/refunded swap | NEAR `FAILED` does not prove no receipt; `REFUNDED` is a provider claim, not an on-chain return. The SDK discovers owned return outputs and determines spendability. Shielded returns need no shielding; legacy transparent returns can use `wallet shield-refunds --config FILE --job-id UUID` with serving stopped, followed by explicit submission of any returned operation via `wallet reconcile --rebroadcast`. A refund does not authorize another deposit. |
 | Interrupted preparation with no signed bytes | `wallet recover-unprepared` archives old bindings and creates a fresh operation identity. It refuses every operation with signed bytes. |
 | Reorg of accounted source spend/refund/expiry evidence | Treasury readiness fails closed; retain state and investigate. Do not reset consumed accounting or run a restored copy alongside the original. |
 

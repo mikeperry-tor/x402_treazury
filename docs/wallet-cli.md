@@ -44,8 +44,11 @@ unavailable, the summary explicitly falls back to saved sync amounts for confirm
 and spendable shielded balances; the additional amounts display `unknown`.
 Outgoing treasury operations show the
 principal and fee from existing transaction facts and saved source status
-separately from cross-chain swap progress. Swap amounts show the existing USDC
-target, not received or available funds. These overlapping observations are never
+separately from cross-chain swap progress. Swap progress includes the last
+validated response's local observation time, last safe error, and `timed_out`
+health threshold. The observation time includes pending/unknown responses and is
+not the provider's `updatedAt`. Swap amounts show the existing USDC target, not
+received or available funds. These overlapping observations are never
 added into a total or treated as spending authority. The human summary adds no
 durable balance fields, schema changes, network requests or polling.
 For each managed wallet group, the human summary lists every non-retired wallet's
@@ -507,7 +510,8 @@ confirmation/expiry and first-positive credit retain their separate stop rules.
 `swap_timeout_seconds` is a health-warning threshold, default 1,800 seconds from
 the first durable broadcast intent, not an abort deadline. When exceeded,
 status shows `timed_out` and pool `funding_degraded`; reconciliation retains its
-existing minute floor. This never releases funds or stops a funded active wallet.
+existing cadence and minute floor. This local threshold does not establish a
+provider timeout and never releases funds or stops a funded active wallet.
 Each observation kind retains its own runtime error backoff, bounded by 300 seconds
 plus existing jitter, independently of quote retry counts. Saved health/`next_poll`
 fields report aggregate progress; they do not impose one kind's failure on another
@@ -971,6 +975,10 @@ not automatically detectable; a code rollback is not a state downgrade.
 Wallet status JSON uses `schema_version: 5`; bootstrap uses `schema_version: 3`. Status additionally
 reports `state_schema_version`. Historical qualification report files retain their
 original interpretation; none of these observations grants payment or retry authority.
+Each funding job's additive `provider_observed_at` field exposes the existing
+database observation timestamp for its last validated provider response, including
+pending/unknown responses; it is null if unavailable. It is not provider
+`updatedAt`. This presentation change adds no persisted fields or schema version.
 
 Bootstrap reports `serving_ready_groups`, `inventory_ready_groups`, and
 `captured_completed_groups` separately. The captured command waits only for its

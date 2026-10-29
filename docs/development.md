@@ -493,6 +493,16 @@ cleanup and safe resource labels.
 An unexpected balance reconciliation task exit reports its pending retry at INFO
 with the affected pool; routine observation attempts remain DEBUG.
 
+Each funding owner first logs a job's saved/current local phase explicitly as
+such; later phase changes use a separate progress message. Neither implies a
+fresh provider observation. Each validated NEAR status enum logs at DEBUG with
+its operation correlation. Observation unavailable/recovered transitions use INFO
+and existing job records; repeated failures remain DEBUG. Terminal provider
+outcomes log only after persistence. `FAILED` does not prove no funds were
+received, and `REFUNDED` is a provider claim, not an SDK-observed refund receipt.
+Do not log unparsed refund amounts or remote prose. These diagnostics add no
+persisted state, polling work or financial authority.
+
 Waiting for existing ZEC to become spendable and preparation deferred by unresolved
 source work use DEBUG. After an insufficient-funds rejection from SDK input
 selection, an incomplete current-owner scan reports at INFO that funds could not

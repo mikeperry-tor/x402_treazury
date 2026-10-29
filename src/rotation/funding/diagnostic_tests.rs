@@ -7,6 +7,207 @@ use crate::rotation::{
 use tracing::instrument::WithSubscriber;
 
 #[tokio::test]
+async fn status_diagnostics_distinguish_responses_publication_and_recovery() {
+    if crate::test_log_capture::run_in_child(
+        "rotation::funding::scheduler::tests::diagnostics::status_diagnostics_distinguish_responses_publication_and_recovery",
+    ) {
+        return;
+    }
+    for terminal in [
+        SwapStatus::Success,
+        SwapStatus::Failed,
+        SwapStatus::Refunded,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut raw = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        crate::rotation::store::test_support::declare_two_reserves(
+            &mut raw,
+            "diagnostics",
+            "5",
+            Some(alloy_primitives::U256::from(1_000_000)),
+            0,
+        )
+        .unwrap();
+        let job = raw.funding_jobs().unwrap().remove(0);
+        submitted(&mut raw, &job);
+        raw.disable_pool("diagnostics").unwrap();
+        let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
+        let (store, actor) = StoreHandle::spawn(raw);
+        let (statuses, _status_events) = mpsc::unbounded_channel();
+        let (started, mut source_events) = mpsc::unbounded_channel();
+        let worker = FundingWorker::new(
+            store.clone(),
+            Source {
+                store: store.clone(),
+                gate: Arc::new(Semaphore::new(0)),
+                started,
+                reads: Reads {
+                    credits: Arc::new(Semaphore::new(0)),
+                    credit_calls: Default::default(),
+                    statuses,
+                    status_gates: Default::default(),
+                    failed_job: Default::default(),
+                    processing: true,
+                    quotes: None,
+                },
+            },
+            60,
+        );
+        let lease = Arc::new(store.funding_owner().lock_owned().await);
+        let key = Key {
+            operation: job.operation_id.clone(),
+            kind: Kind::Status,
+        };
+        assert_eq!(
+            lease
+                .state
+                .lock()
+                .unwrap()
+                .admit(&key, Some(&job.phase), 1000, &BTreeSet::new()),
+            Some(true)
+        );
+        let request = FundingStatusRequest {
+            id: job.id.clone(),
+            operation_id: job.operation_id.clone(),
+            pool_name: job.pool_name.clone(),
+            wallet_id: job.wallet_id.clone(),
+        };
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(tracing::Level::DEBUG)
+                .with_writer(log.reopen().unwrap())
+                .finish(),
+        );
+        let unavailable = "NEAR swap status check could not complete";
+        let recovered = "NEAR swap status checks resumed successfully";
+        for n in 0..6 {
+            if n == 4 {
+                db.execute_batch("CREATE TRIGGER reject_provider_update BEFORE UPDATE OF provider_success ON funding_progress BEGIN SELECT RAISE(ABORT,'private storage failure'); END;").unwrap();
+            } else if n == 5 {
+                db.execute_batch("DROP TRIGGER reject_provider_update;")
+                    .unwrap();
+            }
+            let result = match n {
+                0 | 1 => Err(anyhow::anyhow!("private provider failure")),
+                2 => Ok(SwapStatus::Processing),
+                3 => Ok(SwapStatus::Unknown),
+                _ => Ok(terminal),
+            };
+            let instant = 1000 + n * 180;
+            worker
+                .publish_status(
+                    &lease,
+                    request.clone(),
+                    result,
+                    &TickClock {
+                        epoch: instant,
+                        started: tokio::time::Instant::now(),
+                    },
+                )
+                .with_subscriber(subscriber.clone())
+                .await
+                .unwrap();
+            let logged = std::fs::read_to_string(log.path()).unwrap();
+            assert!(
+                !logged.contains("private")
+                    && !logged.contains("WARN")
+                    && !logged.contains("ERROR"),
+                "{logged}"
+            );
+            assert_eq!(
+                logged.matches(unavailable).count(),
+                if n < 4 { 1 } else { 2 },
+                "{logged}"
+            );
+            assert_eq!(
+                logged.matches(recovered).count(),
+                if n < 2 {
+                    0
+                } else if n < 5 {
+                    1
+                } else {
+                    2
+                },
+                "{logged}"
+            );
+            assert_eq!(
+                logged.matches("NEAR reported").count(),
+                usize::from(n == 5),
+                "{logged}"
+            );
+            if n == 4 {
+                assert!(logged.contains("stage=\"publication\""), "{logged}");
+                assert!(
+                    logged.contains(&format!("near_status={terminal:?}")),
+                    "{logged}"
+                );
+            }
+            {
+                let state = lease.state.lock().unwrap();
+                let record = &state.records[&key];
+                assert!(record.due >= instant + 60);
+                assert_eq!(
+                    record.streak,
+                    match n {
+                        0 | 4 => 1,
+                        1 => 2,
+                        _ => 0,
+                    }
+                );
+            }
+            let id = job.id.clone();
+            let operation = job.operation_id.clone();
+            store
+                .call(move |s| {
+                    let saved = s.funding_job(&id)?.unwrap();
+                    let expected = match n {
+                        0 | 1 => None,
+                        2 => Some(1360),
+                        3 | 4 => Some(1540),
+                        _ => Some(1900),
+                    };
+                    assert_eq!(saved.provider_observed_at, expected);
+                    assert_eq!(s.operation(&operation)?.attempts, 1);
+                    assert_eq!(
+                        s.prepared_bytes(&operation)?.as_slice(),
+                        crate::rotation::store::test_support::transaction_raw(100).as_slice()
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        let logged = std::fs::read_to_string(log.path()).unwrap();
+        assert!(logged.contains("near_status=Unknown"), "{logged}");
+        assert!(
+            logged.contains("Current saved funding phase; NEAR status is checked separately"),
+            "{logged}"
+        );
+        assert!(
+            logged
+                .lines()
+                .filter(|line| line.contains("response validated"))
+                .all(|line| line.contains("DEBUG")),
+            "{logged}"
+        );
+        assert!(source_events.try_recv().is_err());
+        drop(lease);
+        drop(worker);
+        drop(store);
+        actor.await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn retrying_observations_are_debug_and_operator_requirements_warn_without_changing_backoff() {
     if crate::test_log_capture::run_in_child(
         "rotation::funding::scheduler::tests::diagnostics::retrying_observations_are_debug_and_operator_requirements_warn_without_changing_backoff",

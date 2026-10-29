@@ -44,6 +44,11 @@ struct Record {
     error: Option<String>,
     condition: Option<super::super::error::FundingCondition>,
 }
+#[derive(Debug, PartialEq, Eq)]
+enum PhaseReport {
+    Initial,
+    Changed,
+}
 #[derive(Default)]
 struct State {
     records: BTreeMap<Key, Record>,
@@ -841,6 +846,12 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         clock: &TickClock,
     ) -> Result<()> {
         let instant = clock.now();
+        let observed = result.as_ref().ok().copied();
+        if let Some(status) = observed {
+            tracing::debug!(wallet=%request.pool_name,job_id=%request.id,
+                operation=%request.operation_id,near_status=?status,
+                "NEAR swap status response validated");
+        }
         let result = match result {
             Ok(status) => {
                 let (id, operation) = (request.id.clone(), request.operation_id.clone());
@@ -860,14 +871,26 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 "Wallet funding request observation unavailable; the accepted request is retained and checks will retry");
             category
         });
-        lease.state.lock().expect("funding schedule lock").complete(
-            (&request.id, &request.operation_id),
-            Kind::Status,
-            instant,
-            RetrySchedule::Poll(self.poll_seconds, false),
-            error,
-            condition,
-        );
+        let previously_unavailable = {
+            let mut state = lease.state.lock().expect("funding schedule lock");
+            let previous = state
+                .records
+                .get(&Key {
+                    operation: request.operation_id.clone(),
+                    kind: Kind::Status,
+                })
+                .is_some_and(|record| record.error.is_some());
+            state.complete(
+                (&request.id, &request.operation_id),
+                Kind::Status,
+                instant,
+                RetrySchedule::Poll(self.poll_seconds, false),
+                error.clone(),
+                condition,
+            );
+            previous
+        };
+        report_status_result(&request, observed, error.as_deref(), previously_unavailable);
         let (id, operation) = (request.id.clone(), request.operation_id.clone());
         let current = self
             .store
@@ -1088,20 +1111,65 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             })
             .await?;
         if let Some((phase, wallet_type)) = phase {
-            let changed = lease
+            let report = lease
                 .state
                 .lock()
                 .expect("funding schedule lock")
                 .report_phase(&job.operation_id, &phase);
-            if changed {
+            if let Some(report) = report {
                 // This is a current-state observation, not a database transition.
                 // Sibling reads may have started with older job snapshots.
-                tracing::info!(wallet=%job.pool_name,size=%wallet_type,status=?phase,"Funding progress");
+                match report {
+                    PhaseReport::Initial => {
+                        tracing::info!(wallet=%job.pool_name,size=%wallet_type,status=?phase,
+                        "Current saved funding phase; NEAR status is checked separately")
+                    }
+                    PhaseReport::Changed => {
+                        tracing::info!(wallet=%job.pool_name,size=%wallet_type,status=?phase,"Funding progress")
+                    }
+                }
                 tracing::debug!(job_id=%job.id,pool_id=%job.pool_id,kind=?kind,observed_phase=?phase,"Funding progress correlation");
             }
         }
         Ok(())
     }
+}
+
+/// Report observation availability separately from the local workflow phase.
+/// Only a successfully saved response can announce recovery or a final outcome.
+fn report_status_result(
+    request: &FundingStatusRequest,
+    observed: Option<SwapStatus>,
+    error: Option<&str>,
+    previously_unavailable: bool,
+) {
+    if let Some(category) = error {
+        if !previously_unavailable {
+            let stage = if observed.is_some() {
+                "publication"
+            } else {
+                "acquisition"
+            };
+            tracing::info!(wallet=%request.pool_name,operation=%request.operation_id,stage,category,
+                "NEAR swap status check could not complete; the accepted request is retained and checks will retry");
+        }
+        return;
+    }
+    if previously_unavailable {
+        tracing::info!(wallet=%request.pool_name,operation=%request.operation_id,
+            "NEAR swap status checks resumed successfully");
+    }
+    let message = match observed {
+        Some(SwapStatus::Success) => {
+            "NEAR reported swap success; destination credit is verified separately"
+        }
+        Some(SwapStatus::Refunded) => "NEAR reported a refund; wallet scans reconcile returned ZEC",
+        Some(SwapStatus::Failed) => {
+            "NEAR reported swap failure; source and refund reconciliation continues"
+        }
+        _ => return,
+    };
+    tracing::info!(wallet=%request.pool_name,operation=%request.operation_id,"{message}");
 }
 
 impl State {
@@ -1117,16 +1185,23 @@ impl State {
             record.due = record.due.min(now);
         }
     }
-    fn report_phase(&mut self, operation: &str, phase: &FundingPhase) -> bool {
-        let changed = !self.records.iter().any(|(key, record)| {
-            key.operation == operation && record.reported_phase.as_ref() == Some(phase)
-        });
+    fn report_phase(&mut self, operation: &str, phase: &FundingPhase) -> Option<PhaseReport> {
+        let previous = self
+            .records
+            .iter()
+            .filter(|(key, _)| key.operation == operation)
+            .find_map(|(_, record)| record.reported_phase.as_ref());
+        let report = match previous {
+            Some(previous) if previous == phase => None,
+            Some(_) => Some(PhaseReport::Changed),
+            None => Some(PhaseReport::Initial),
+        };
         for (key, record) in &mut self.records {
             if key.operation == operation {
                 record.reported_phase = Some(phase.clone());
             }
         }
-        changed
+        report
     }
 
     fn admit(

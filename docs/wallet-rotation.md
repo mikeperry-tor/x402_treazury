@@ -584,11 +584,19 @@ independently while source work remains occupied. Focused scheduler tests use
 explicit completion barriers and the durable store to exercise these boundaries;
 they do not exhaust all possible async interleavings.
 
-Funding logs distinguish progress from failed checks. Entering deposit confirmation
+Funding logs distinguish saved local phase, progress and failed checks. The first
+phase message per owner explicitly reports saved/current local state; later phase
+changes use a separate progress message. Each validated NEAR status enum logs at
+DEBUG with the operation identity. Observation unavailable/recovered transitions
+log at INFO using existing job records, with repeated failures at DEBUG. Terminal
+provider outcomes log only after persistence: `FAILED` is not proof of no receipt,
+and `REFUNDED` is a provider claim, not an SDK-observed refund. No refund amount or
+detail is inferred from an unparsed response. These diagnostics add no state,
+polling or financial authority. Entering deposit confirmation
 emits an informational message; ordinary confirmation-depth and pending Base-credit
 polls log at debug level, clear stale error status and use the normal polling interval.
 They do not release reservations or authorize another deposit. Retained retryable
-observation failures (including sync, RPC and storage failures) and retained-owner
+observation attempts (including sync, RPC and storage failures) and retained-owner
 reacquisition attempts log at DEBUG with existing retry behavior. Meaningful transitions into delayed or degraded funding
 belong at INFO; operator-required outcomes belong at WARN and explain the required
 review while observation continues. Repeated observations of the same operator

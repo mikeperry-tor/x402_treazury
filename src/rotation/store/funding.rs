@@ -80,6 +80,10 @@ pub struct FundingJob {
     pub timed_out: bool,
     pub next_poll: u64,
     pub last_error: Option<String>,
+    /// Local time of the last committed, binding-validated NEAR response.
+    /// Advisory reporting only; not the provider's update time or current status.
+    #[serde(default)]
+    pub provider_observed_at: Option<u64>,
 }
 /// Exact persisted obligations for one attempt. This is a read snapshot of the
 /// existing journals, not another durable work state or source of authority.
@@ -1598,8 +1602,14 @@ pub(super) fn read_jobs(db: &Connection) -> Result<Vec<FundingJob>> {
 }
 fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Result<Vec<FundingJob>> {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    // Historical read-only schemas need not contain provider observation metadata.
+    let provider_observed_at = if version >= 21 {
+        "j.provider_observed_at"
+    } else {
+        "NULL"
+    };
     let query = format!(
-        "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,CASE WHEN {version}<15 AND f.state='COMPLETE' THEN '\"COMPLETE\"' ELSE j.phase END,j.operation_id,j.attempts,j.next_poll,j.last_error FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id"
+        "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,CASE WHEN {version}<15 AND f.state='COMPLETE' THEN '\"COMPLETE\"' ELSE j.phase END,j.operation_id,j.attempts,j.next_poll,j.last_error,{provider_observed_at} FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id"
     );
     let query = if job.is_some() {
         format!("{query} WHERE f.id=?1")
@@ -1632,6 +1642,11 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
             } else {
                 r.get::<_, Option<String>>(10).unwrap_or(None)
             },
+            // Optional reporting cannot obstruct accepted financial work.
+            r.get::<_, Option<i64>>(11)
+                .ok()
+                .flatten()
+                .and_then(|n| u64::try_from(n).ok()),
         ))
     })?;
     rows.map(|r| {
@@ -1647,31 +1662,43 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
             attempts,
             next_poll,
             last_error,
+            provider_observed_at,
         ) = r.context("missing or invalid funding operation journal")?;
         let (started_at, error_streak, timed_out): (Option<i64>, u32, bool) = if version >= 9 {
             // Keep execution/stepping failures outside the diagnostic-value fallback.
             db.query_row(
                 "SELECT started_at,error_streak,timed_out FROM funding_health WHERE job_id=?1",
                 [&id],
-                |r| Ok(if strict {
-                    (|| -> rusqlite::Result<_> { Ok((r.get(0)?, r.get(1)?, r.get(2)?)) })()
-                } else {
-                    Ok((
-                        r.get::<_, Option<i64>>(0).ok().flatten().filter(|n| *n >= 0),
-                        r.get::<_, u32>(1).unwrap_or(0),
-                        r.get::<_, bool>(2).unwrap_or(false),
-                    ))
-                }),
-            ).optional()?.unwrap_or(Ok((None, 0, false)))
-                .context(super::scheduling::FundingDecodeFailure)?
-        } else { (None, 0, false) };
+                |r| {
+                    Ok(if strict {
+                        (|| -> rusqlite::Result<_> { Ok((r.get(0)?, r.get(1)?, r.get(2)?)) })()
+                    } else {
+                        Ok((
+                            r.get::<_, Option<i64>>(0)
+                                .ok()
+                                .flatten()
+                                .filter(|n| *n >= 0),
+                            r.get::<_, u32>(1).unwrap_or(0),
+                            r.get::<_, bool>(2).unwrap_or(false),
+                        ))
+                    })
+                },
+            )
+            .optional()?
+            .unwrap_or(Ok((None, 0, false)))
+            .context(super::scheduling::FundingDecodeFailure)?
+        } else {
+            (None, 0, false)
+        };
         // Runtime routing may recover established work without trusting a damaged
         // display phase. Actual phase transitions still enforce their stored CAS.
         let parsed_phase: FundingPhase = if strict {
             serde_json::from_str(&phase.context(super::scheduling::FundingDecodeFailure)?)
                 .context(super::scheduling::FundingDecodeFailure)?
         } else {
-            phase.ok().and_then(|phase| serde_json::from_str(&phase).ok())
+            phase
+                .ok()
+                .and_then(|phase| serde_json::from_str(&phase).ok())
                 .unwrap_or(FundingPhase::RecoveryRequired)
         };
         // Also normalize historical completed rows for read-only wallet status.
@@ -1680,10 +1707,22 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
         } else {
             last_error
         };
-        let last_error = last_error.or_else(||timed_out.then(||"swap_timeout; slower reconciliation continues; inspect source and refund status".into()));
+        let last_error = last_error.or_else(|| {
+            timed_out.then(|| {
+                "swap_timeout; local wait threshold exceeded; reconciliation continues".into()
+            })
+        });
         Ok(FundingJob {
-            started_at: started_at.map(u64::try_from).transpose().context(super::scheduling::FundingDecodeFailure)?,
-            error_streak: if parsed_phase == FundingPhase::Complete && last_error.is_none() { 0 } else { error_streak },
+            provider_observed_at,
+            started_at: started_at
+                .map(u64::try_from)
+                .transpose()
+                .context(super::scheduling::FundingDecodeFailure)?,
+            error_streak: if parsed_phase == FundingPhase::Complete && last_error.is_none() {
+                0
+            } else {
+                error_streak
+            },
             timed_out,
             id,
             pool_id,
@@ -1694,7 +1733,8 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
             phase: parsed_phase,
             operation_id,
             attempts,
-            next_poll: u64::try_from(next_poll.context(super::scheduling::FundingDecodeFailure)?).context(super::scheduling::FundingDecodeFailure)?,
+            next_poll: u64::try_from(next_poll.context(super::scheduling::FundingDecodeFailure)?)
+                .context(super::scheduling::FundingDecodeFailure)?,
             last_error,
         })
     })
@@ -1704,6 +1744,42 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
 #[cfg(test)]
 mod completion_tests {
     use super::*;
+
+    #[test]
+    fn provider_observation_time_is_advisory_and_compatible_with_old_reports() {
+        let (_dir, store, job) = fixture();
+        for (value, expected) in [
+            ("NULL", None),
+            ("123", Some(123)),
+            ("-1", None),
+            ("'malformed'", None),
+        ] {
+            store
+                .db
+                .execute(
+                    &format!(
+                        "UPDATE funding_progress SET provider_observed_at={value} WHERE job_id=?1"
+                    ),
+                    [&job.id],
+                )
+                .unwrap();
+            assert_eq!(
+                store
+                    .funding_job(&job.id)
+                    .unwrap()
+                    .unwrap()
+                    .provider_observed_at,
+                expected
+            );
+            assert_eq!(
+                read_jobs(&store.db).unwrap()[0].provider_observed_at,
+                expected
+            );
+        }
+        // Older read-only status remains usable even without the column.
+        store.db.execute_batch("ALTER TABLE funding_progress DROP COLUMN provider_observed_at; PRAGMA user_version=20;").unwrap();
+        assert_eq!(read_jobs(&store.db).unwrap()[0].provider_observed_at, None);
+    }
 
     #[test]
     fn preparation_phase_and_input_owner_commit_together() {

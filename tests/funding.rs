@@ -323,6 +323,10 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
     );
     let logs = std::fs::read_to_string(log.path()).unwrap();
     assert!(
+        logs.contains("Current saved funding phase; NEAR status is checked separately wallet=a size=small status=Allocated"),
+        "{logs}"
+    );
+    assert!(
         logs.contains("Funding progress wallet=a size=small status=Quoted"),
         "{logs}"
     );
@@ -660,7 +664,8 @@ async fn insufficient_treasury_waits_and_unprepared_quote_refresh_preserves_reco
     );
     assert!(status.treasury_operations.is_empty());
     let message = status.funding_jobs[0].last_error.as_deref().unwrap();
-    assert!(message.contains("waiting for confirmed spendable ZEC"));
+    assert!(message.contains("treasury funds could not be assessed"));
+    assert!(!message.contains("add ZEC"));
     assert!(message.contains("wallet status --config FILE"));
     assert_eq!(worker.backend.lock().await.sends, 0);
     worker.backend.lock().await.funds_available = true;
@@ -1738,9 +1743,7 @@ async fn confirmation_conflicts_preserve_facts_and_ownership_in_ordinary_and_rec
             assert_eq!(
                 after.funding_jobs[0].last_error.as_deref(),
                 if via_recovery {
-                    Some(
-                        "swap_timeout; slower reconciliation continues; inspect source and refund status",
-                    )
+                    Some("swap_timeout; local wait threshold exceeded; reconciliation continues")
                 } else {
                     None
                 }

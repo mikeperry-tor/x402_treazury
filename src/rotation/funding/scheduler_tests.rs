@@ -139,6 +139,7 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
         timed_out: false,
         next_poll: 0,
         last_error: None,
+        provider_observed_at: None,
     };
     let mut state = State::default();
     let active = BTreeSet::new();
@@ -221,6 +222,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
         timed_out: false,
         next_poll: 0,
         last_error: None,
+        provider_observed_at: None,
     };
     for kind in [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote] {
         let mut state = State::default();
@@ -2111,7 +2113,10 @@ fn sibling_observations_report_current_phase_once_per_operation() {
         },
         record(),
     );
-    assert!(state.report_phase("first", &FundingPhase::Quoted));
+    assert_eq!(
+        state.report_phase("first", &FundingPhase::Quoted),
+        Some(PhaseReport::Initial)
+    );
     // A slower sibling starts/finishes with an old snapshot, but reports the
     // same durable phase; adding its record must not cause a duplicate message.
     state.records.insert(
@@ -2121,9 +2126,12 @@ fn sibling_observations_report_current_phase_once_per_operation() {
         },
         record(),
     );
-    assert!(!state.report_phase("first", &FundingPhase::Quoted));
-    assert!(state.report_phase("first", &FundingPhase::Prepared));
-    assert!(!state.report_phase("first", &FundingPhase::Prepared));
+    assert_eq!(state.report_phase("first", &FundingPhase::Quoted), None);
+    assert_eq!(
+        state.report_phase("first", &FundingPhase::Prepared),
+        Some(PhaseReport::Changed)
+    );
+    assert_eq!(state.report_phase("first", &FundingPhase::Prepared), None);
     state.records.insert(
         Key {
             operation: "replacement".into(),
@@ -2131,11 +2139,17 @@ fn sibling_observations_report_current_phase_once_per_operation() {
         },
         record(),
     );
-    assert!(state.report_phase("replacement", &FundingPhase::Quoted));
-    assert!(!state.report_phase("first", &FundingPhase::Prepared));
+    assert_eq!(
+        state.report_phase("replacement", &FundingPhase::Quoted),
+        Some(PhaseReport::Initial)
+    );
+    assert_eq!(state.report_phase("first", &FundingPhase::Prepared), None);
     // Real durable recovery changes remain visible; we do not impose a fake
     // monotonic ordering on the funding state machine just to tidy the logs.
-    assert!(state.report_phase("first", &FundingPhase::RecoveryRequired));
+    assert_eq!(
+        state.report_phase("first", &FundingPhase::RecoveryRequired),
+        Some(PhaseReport::Changed)
+    );
 }
 
 #[tokio::test]

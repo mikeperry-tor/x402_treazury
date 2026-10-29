@@ -483,7 +483,20 @@ async fn held_archived_success_stops_private_replacement_but_preserves_disclosed
             // Job completion is separate from this different disclosed original.
             // This mock proves scheduler demand; the SDK lifecycle case owns the
             // canonical closure assertion for the real recovery implementation.
-            worker.tick(1100).await.unwrap();
+            let due = {
+                let owner = store.funding_owner().lock_owned().await;
+                let state = owner.state.lock().unwrap();
+                state
+                    .records
+                    .get(&Key {
+                        operation: current.operation_id.clone(),
+                        kind: Kind::Source,
+                    })
+                    .expect("disclosed source retains its observation record")
+                    .due
+            };
+            // The existing UUID-based jitter can put this poll after 1100.
+            worker.tick(due.max(1100)).await.unwrap();
             assert_eq!(source_events.try_recv().unwrap(), current.id);
             let current_check = current.clone();
             store

@@ -57,10 +57,32 @@ fn saved_status_explains_zero_balances_and_unavailable_snapshot_amounts() {
             attempts: 1,
             started_at: Some(1000),
             error_streak: 0,
-            timed_out: false,
+            timed_out: true,
             next_poll: 0,
-            last_error: None,
+            last_error: Some(
+                "swap_timeout; local wait threshold exceeded; reconciliation continues".into(),
+            ),
+            provider_observed_at: Some(1120),
         });
+    let text = status(&saved, Some(&balances));
+    assert!(text.contains("Last validated NEAR response observed: 1970-01-01 00:18:40 UTC"));
+    assert!(text.contains("Local wait threshold exceeded; reconciliation continues."));
+    assert!(text.contains("Saved funding diagnostic: swap_timeout; local wait threshold exceeded"));
+    saved.funding_jobs[0].provider_observed_at = None;
+    assert!(
+        status(&saved, Some(&balances)).contains("Last validated NEAR response observed: unknown")
+    );
+    let mut historical = serde_json::to_value(&saved.funding_jobs[0]).unwrap();
+    historical
+        .as_object_mut()
+        .unwrap()
+        .remove("provider_observed_at");
+    assert_eq!(
+        serde_json::from_value::<crate::rotation::store::funding::FundingJob>(historical)
+            .unwrap()
+            .provider_observed_at,
+        None
+    );
     saved.treasury_operations.push(OperationStatus {
         operation_id: "original".into(),
         submission: "BROADCAST".into(),
