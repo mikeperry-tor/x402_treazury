@@ -158,8 +158,8 @@ impl Treasury {
                     _=stop.cancelled()=>break,
                     _=tokio::time::sleep(std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS))=>{}
                 }
-                if self.publish_completed().await.is_err() {
-                    Self::warn_publication_pending();
+                if let Err(error) = self.publish_completed().await {
+                    super::diagnostics::report_local_retry(&error, "transaction publication");
                 }
                 if self.completed.is_some() {
                     continue;
@@ -173,10 +173,7 @@ impl Treasury {
                     Ok(()) => {}
                     Err(_) if stop.is_cancelled() => break,
                     Err(error) if super::reconstruction::retryable(&error) => {
-                        tracing::warn!(
-                            category = "treasury_reconstruction_pending",
-                            "treasury SDK reconstruction deferred; independent Base service remains available"
-                        );
+                        super::diagnostics::report_local_retry(&error, "SDK reconstruction");
                         tokio::select! { _=stop.cancelled()=>break, _=tokio::time::sleep(std::time::Duration::from_secs(super::publication::MAINTENANCE_SECONDS))=>{} }
                         continue;
                     }

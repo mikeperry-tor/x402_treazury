@@ -205,7 +205,7 @@ impl NearClient {
     async fn response(&self, request: reqwest::RequestBuilder) -> Result<Value> {
         let mut response = request.send().await.map_err(|error| {
             if error.is_timeout() {
-                tracing::warn!(
+                tracing::debug!(
                     stage = "near_response_headers",
                     reason = if error.is_connect() {
                         "connection_timeout"
@@ -234,7 +234,7 @@ impl NearClient {
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|error| {
             if error.is_timeout() {
-                tracing::warn!(
+                tracing::debug!(
                     stage = "near_response_body",
                     reason = "read_inactivity",
                     "NEAR HTTP timeout; affected request failed"
@@ -655,49 +655,71 @@ mod tests {
     use crate::test_socks as socks;
 
     #[tokio::test]
-    async fn direct_near_header_timeout_warns_without_private_url() {
+    async fn direct_near_timeouts_log_debug_without_private_url() {
         if crate::test_log_capture::run_in_child(
-            "rotation::near::tests::direct_near_header_timeout_warns_without_private_url",
+            "rotation::near::tests::direct_near_timeouts_log_debug_without_private_url",
         ) {
             return;
         }
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tracing::instrument::WithSubscriber;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!(
-            "http://{}/PRIVATE_PATH?key=PRIVATE_KEY",
-            listener.local_addr().unwrap()
-        );
-        let server = tokio::spawn(async move {
-            let (_socket, _) = listener.accept().await.unwrap();
-            std::future::pending::<()>().await;
-        });
-        let client = NearClient::test_at(&url).unwrap();
-        let http = crate::network::discovery(&url, std::time::Duration::from_millis(20)).unwrap();
-        let logs = tempfile::NamedTempFile::new().unwrap();
-        let subscriber = tracing_subscriber::fmt()
-            .without_time()
-            .with_ansi(false)
-            .with_writer(logs.reopen().unwrap())
-            .finish();
-        let result = client
-            .response(http.get(&url))
-            .with_subscriber(subscriber)
-            .await;
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("near_unavailable: timeout")
-        );
-        let text = std::fs::read_to_string(logs.path()).unwrap();
-        assert!(
-            text.contains("WARN")
-                && text.contains("near_response_headers")
-                && text.contains("read_inactivity"),
-            "{text}"
-        );
-        assert!(!text.contains("PRIVATE_"), "{text}");
-        server.abort();
+        for body in [false, true] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!(
+                "http://{}/PRIVATE_PATH?key=PRIVATE_KEY",
+                listener.local_addr().unwrap()
+            );
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(socket.read_u8().await.unwrap());
+                }
+                if body {
+                    socket
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 99\r\n\r\n{")
+                        .await
+                        .unwrap();
+                }
+                std::future::pending::<()>().await;
+            });
+            let client = NearClient::test_at(&url).unwrap();
+            let http =
+                crate::network::discovery(&url, std::time::Duration::from_millis(100)).unwrap();
+            let logs = tempfile::NamedTempFile::new().unwrap();
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(tracing::Level::DEBUG)
+                .with_writer(logs.reopen().unwrap())
+                .finish();
+            let result = client
+                .response(http.get(&url))
+                .with_subscriber(subscriber)
+                .await;
+            let expected = if body {
+                "near_response_failed: timeout"
+            } else {
+                "near_unavailable: timeout"
+            };
+            assert!(result.unwrap_err().to_string().contains(expected));
+            let text = std::fs::read_to_string(logs.path()).unwrap();
+            let stage = if body {
+                "near_response_body"
+            } else {
+                "near_response_headers"
+            };
+            let event = text.lines().find(|line| line.contains(stage)).unwrap();
+            assert!(
+                event.contains("DEBUG") && event.contains("read_inactivity"),
+                "{text}"
+            );
+            assert!(
+                !text.contains("WARN") && !text.contains("PRIVATE_"),
+                "{text}"
+            );
+            server.abort();
+        }
     }
 
     #[cfg(feature = "zcash-testutils")]

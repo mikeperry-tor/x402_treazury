@@ -273,6 +273,85 @@ async fn failed_positive_credit_publication_blocks_preparation_through_cached_co
     check_destination(true, true).await;
 }
 
+#[tokio::test]
+async fn optional_destination_failure_logs_debug_and_prepares_once() {
+    if crate::test_log_capture::run_in_child(
+        "treasury::lifecycle_tests::discovery::optional_destination_failure_logs_debug_and_prepares_once",
+    ) {
+        return;
+    }
+    use tracing::instrument::WithSubscriber;
+    let (_dir, _net, mut owner, _endpoint) = funded_fixture(2).await;
+    let pool = owner
+        .ensure_capacity_group(
+            "optional_destination".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+    owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let job = owner
+        .store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&owner.store, vec![job.clone()], deadline).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = BaseRpc::new(&format!("http://{}/", listener.local_addr().unwrap()), 2).unwrap();
+    let app = Router::new().fallback(|| async {
+        (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "PRIVATE_UPSTREAM_BODY",
+        )
+    });
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let logs = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(logs.reopen().unwrap())
+        .finish();
+    let prepared = owner
+        .prepare_with_observation(
+            request(&job, deadline),
+            Some(base),
+            Some(&CancellationToken::new()),
+        )
+        .with_subscriber(subscriber)
+        .await
+        .unwrap();
+    let text = std::fs::read_to_string(logs.path()).unwrap();
+    let event = text
+        .lines()
+        .find(|line| line.contains("funding_destination_observation_unavailable"))
+        .unwrap();
+    assert!(event.contains("DEBUG"), "{text}");
+    assert!(
+        !text.contains("WARN") && !text.contains("PRIVATE_"),
+        "{text}"
+    );
+    owner
+        .store
+        .call(move |s| {
+            let original = PreparedTransaction::load(s, &job.operation_id)?;
+            assert_eq!(original.bytes(), prepared.bytes());
+            assert_eq!(s.operation(&job.operation_id)?.attempts, 0);
+            assert_eq!(s.status()?.treasury_operations.len(), 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    owner.close().await.unwrap();
+    server.abort();
+}
+
 async fn check_destination(funded: bool, publication_failure: bool) {
     let (dir, _net, owner, endpoint) =
         funded_fixture_amount(2, if funded { 1_000_000 } else { 10_000 }).await;

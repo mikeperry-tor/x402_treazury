@@ -553,8 +553,8 @@ impl Treasury {
     }
     async fn close_owned(mut self) -> Result<()> {
         while self.completed.is_some() {
-            if self.publish_completed().await.is_err() {
-                Self::warn_publication_pending();
+            if let Err(error) = self.publish_completed().await {
+                diagnostics::report_local_retry(&error, "transaction publication");
                 tokio::time::sleep(Duration::from_secs(publication::MAINTENANCE_SECONDS)).await;
             }
         }

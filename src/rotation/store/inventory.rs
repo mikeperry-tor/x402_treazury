@@ -17,7 +17,7 @@ pub(crate) fn read_result<T>(
     match result {
         Ok(value) => Ok(Some(value)),
         Err(error) if transient_read(&error) => {
-            tracing::warn!(
+            tracing::debug!(
                 category = "inventory_busy",
                 "inventory observation deferred; active work remains owned"
             );

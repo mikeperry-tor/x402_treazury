@@ -292,6 +292,32 @@ pub(crate) fn report_sync_failure(error: &anyhow::Error, retry_after: Option<std
     }
 }
 
+/// Retried local work has no authority to expose arbitrary storage/SDK prose.
+pub(crate) fn report_local_retry(error: &anyhow::Error, operation: &'static str) {
+    let sqlite = match error.downcast_ref::<rusqlite::Error>() {
+        Some(rusqlite::Error::SqliteFailure(error, _)) => Some(error),
+        _ => None,
+    };
+    let io = error.downcast_ref::<std::io::Error>();
+    let reason = if error.is::<super::SnapshotUnavailable>() {
+        "sdk_snapshot_unavailable"
+    } else if sqlite.is_some() {
+        "sqlite_failure"
+    } else if io.is_some() {
+        "io_failure"
+    } else {
+        "local_state_failure"
+    };
+    tracing::debug!(
+        operation,
+        reason,
+        sqlite_code = sqlite.map(|error| format!("{:?}", error.code)),
+        sqlite_extended_code = sqlite.map(|error| error.extended_code),
+        io_kind = io.map(|error| format!("{:?}", error.kind())),
+        "Treasury {operation} deferred; accepted work remains owned and local retry will continue"
+    );
+}
+
 pub(crate) fn report_shielding_failure(error: &anyhow::Error, operation_id: Option<&str>) {
     use super::recovery::RecoveryOutcome;
     let outcome = super::recovery::evidence_outcome(error);
@@ -391,6 +417,73 @@ pub(crate) fn sync_failure(error: &anyhow::Error) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_retries_report_typed_causes_without_private_prose_or_terminal_severity() {
+        if crate::test_log_capture::run_in_child(
+            "treasury::diagnostics::tests::local_retries_report_typed_causes_without_private_prose_or_terminal_severity",
+        ) {
+            return;
+        }
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            for operation in ["SDK reconstruction", "transaction publication"] {
+                for error in [
+                    anyhow::Error::new(super::super::SnapshotUnavailable),
+                    anyhow::Error::new(rusqlite::Error::SqliteFailure(
+                        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                        Some("private SQL and credential".into()),
+                    )),
+                    anyhow::Error::new(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "private path",
+                    )),
+                    anyhow::anyhow!("private upstream prose"),
+                ] {
+                    report_local_retry(&error.context("private outer context"), operation);
+                }
+            }
+            for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+                let mut retained = None;
+                let result = crate::rotation::store::inventory::read_result::<()>(
+                    Err(anyhow::Error::new(rusqlite::Error::SqliteFailure(
+                        rusqlite::ffi::Error::new(code),
+                        Some("private inventory data".into()),
+                    ))),
+                    &mut retained,
+                )
+                .unwrap();
+                assert!(result.is_none() && retained.is_some());
+            }
+        });
+        let logged = std::fs::read_to_string(log.path()).unwrap();
+        assert_eq!(logged.lines().count(), 10, "{logged}");
+        assert!(
+            logged
+                .lines()
+                .all(|line| line.contains("DEBUG") && line.contains("work remains owned"))
+        );
+        for expected in [
+            "sdk_snapshot_unavailable",
+            "sqlite_failure",
+            "sqlite_extended_code=5",
+            "DatabaseBusy",
+            "io_failure",
+            "PermissionDenied",
+            "local_state_failure",
+        ] {
+            assert!(logged.contains(expected), "{logged}");
+        }
+        for forbidden in ["WARN", "ERROR", "INFO", "private", "credential", "upstream"] {
+            assert!(!logged.contains(forbidden), "{logged}");
+        }
+    }
 
     #[tokio::test(start_paused = true)]
     async fn sync_diagnostics_distinguish_background_retries_from_one_pass_failures() {

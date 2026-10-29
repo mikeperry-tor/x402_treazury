@@ -208,7 +208,7 @@ impl Treasury {
                 client.clear_proposal().await;
                 return Err(error.context(crate::rotation::transaction::PreparationDeferred));
             }
-            tracing::warn!(
+            tracing::debug!(
                 category = "funding_destination_observation_unavailable",
                 "Initial funding destination observation unavailable; continuing with existing claim information"
             );

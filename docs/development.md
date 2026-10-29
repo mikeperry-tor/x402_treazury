@@ -267,6 +267,15 @@ keep repetitive attempt details at DEBUG/TRACE. Mere elapsed time or repetition
 does not promote a recoverable condition. The owner that knows the final outcome
 emits the terminal diagnostic; lower layers retain the safe facts needed to
 explain it without announcing each failed attempt as an operation failure.
+An optional initial Base destination read that fails while funding continues
+logs at DEBUG; failure to publish a positive observation still defers preparation.
+NEAR header/body timeout attempts also log at DEBUG with a safe stage and reason;
+the owning funding or CLI operation determines any terminal severity.
+
+Retried local SDK reconstruction and completed-transaction publication report
+individual failures at DEBUG, with fixed snapshot categories, SQLite error codes
+or I/O kinds when available. Arbitrary error prose is never logged. These
+retries preserve accepted work and do not imply an operator-required stop.
 
 Background treasury sync and shielding checks with automatic observation/retry
 remaining log failures at DEBUG, including fixed safe categories and available

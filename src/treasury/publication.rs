@@ -33,7 +33,7 @@ impl Treasury {
         let prepared = match self.publish_completed().await {
             Ok(value) => value,
             Err(error) => {
-                Self::warn_publication_pending();
+                diagnostics::report_local_retry(&error, "transaction publication");
                 return Err(error);
             }
         };
@@ -76,13 +76,6 @@ impl Treasury {
         self.completed = None;
         self.healthy = validated;
         Ok(prepared)
-    }
-
-    pub(super) fn warn_publication_pending() {
-        tracing::warn!(
-            category = "completed_transaction_publication_pending",
-            "completed transaction retained by treasury owner; local storage needs attention; SDK mutation paused"
-        );
     }
 }
 
