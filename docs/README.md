@@ -21,6 +21,7 @@ and CLI usage. Maintained implementation and operational explanations live here:
 
 [Plans](plans/) describe unfinished work, including artifact storage,
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
+[observed pricing in descriptions and results](plans/observed_pricing_details.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
 The [seed recovery plan](plans/seed_based_wallet_recovery.md) covers derivation,
