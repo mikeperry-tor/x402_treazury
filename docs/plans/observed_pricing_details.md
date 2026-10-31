@@ -6,6 +6,8 @@ Make observed API pricing available to agents through concise tool descriptions
 and a separate JSON text block in MCP call results. Review and clean up existing
 provider pricing prose first, so new observations replace generated pricing and
 do not accumulate alongside redundant credit conversions or uncertainty warnings.
+Then simplify agent-facing API errors to their error kind, actionable request
+correction where relevant, and retry properties before adding observed pricing.
 
 This is an implementation plan. Its creation does not implement these behaviors
 or authorize funded qualification. The starting revision is
@@ -120,6 +122,8 @@ data-quality facts because they contain words like `not guaranteed`.
 Runtime advisories about a particular accepted authorization, possible payment,
 uncertain retry or actual output omission remain intact. They describe the
 operation that occurred and are distinct from speculative provider boilerplate.
+Preserving that evidence does not require exposing its full diagnostic prose:
+the API-error presentation work below conveys the retry consequence once.
 
 Keep a reviewed audit inventory under ignored `target/`, with inspected surfaces,
 removed boilerplate, retained billing facts and any concrete unresolved cases.
@@ -258,9 +262,9 @@ documents.
 
 When a validated offer precedes admission, HTTP-body or output-conversion failure,
 retain the observation in a small typed error context and extract it when building
-the MCP error content. Preserve the original error category, useful diagnostics,
-qualification behavior and possible-payment context. The typed context must not
-introduce duplicate pricing prose through the existing `{error:#}` formatting.
+the MCP error content. Preserve the original error category, qualification behavior,
+possible-payment context and necessary internal diagnostics. Use P1E's concise
+API-error presentation rather than displaying the typed context or diagnostic chain.
 Review every early return after validation, not just the successful output path.
 Malformed/unvalidated challenges never produce a price observation.
 
@@ -284,6 +288,124 @@ Malformed/unvalidated challenges never produce a price observation.
 
 These omission rules constrain presentation only. They must not suppress API
 work, change which wallets are tried, add probes or weaken financial evidence.
+
+## Agent-facing API errors
+
+API errors should tell the agent what kind of failure occurred and what it can
+do next, retaining known HTTP status codes and identifying which service returned
+them. The agent is not responsible for diagnosing transport, SDK, contract or
+protocol implementation details. This is an API-error presentation change, not
+a repository-wide logging cleanup or universal error-system redesign.
+
+Replace the current model-facing dump of accumulated error contexts with a small
+shared presentation path for API execution failures, used by direct calls and
+the discovery call wrapper. Retain the typed error chain internally for existing
+classification, payment evidence, qualification and diagnostics. Do not replace
+internal errors with strings, or change all MCP errors to `error.to_string()`.
+Inspect API failures returned through raw calls and affected nested wrappers too.
+Apply the same presentation to API-failure text embedded within successful wrapper
+or aggregate envelopes; preserve sibling results and existing envelope/error flags.
+
+The presentation contract is:
+
+- Lead with the established error kind: for example, payment rejected, invalid
+  arguments, provider unavailable or response unavailable. Preserve useful
+  parameter names and accepted-value corrections for errors the agent can fix.
+  Use established local validation or recognized structured provider categories;
+  arbitrary upstream bodies do not supply trusted request corrections.
+- Include the provider API's actual HTTP status code and conventional status name
+  when a response was received. Distinguish, for example, HTTP 402, 403, 404, 429
+  and 503 instead of flattening them into a generic failure. Transport or body
+  failures without an observed status must not acquire an invented HTTP code.
+- Attribute each status to its source. A fetch provider's API HTTP response and
+  a destination HTTP response reported inside its result are separate outcomes.
+  A successful provider HTTP 200 containing a destination HTTP 404 is not a
+  provider API HTTP 404. If both statuses are known, preserve both and label them
+  `Provider API` and `Destination`; retain an established destination error kind
+  such as access denied or not found when useful.
+- Use actual outer HTTP response facts and existing documented response contracts
+  or explicit mappings to identify nested destination statuses. Do not search
+  arbitrary text for HTTP numbers, infer origin from a generic `status` field, or
+  add a provider-specific parsing framework. Where destination attribution is
+  not established, preserve the native provider result without inventing it.
+  Preserve provider result bodies and existing envelope/error flags: an embedded
+  destination failure is not automatically an MCP execution error.
+- State one concise retry instruction when needed, derived from existing typed
+  evidence and execution/replay rules. For potentially chargeable submitted work,
+  `Do not retry automatically.` is sufficient; do not repeat settlement,
+  authorization, execution and special-traversal explanations around it.
+- Keep omitted-extension details, nested contract/SDK traces, internal fallback
+  mechanics, empty object/null placeholders and repeated uncertainty disclaimers
+  out of the agent-facing API error. Do not include diagnostic material merely
+  because it was attached to an internal error context.
+- Keep concrete provider error kinds distinct from local wallet or treasury
+  conditions. A provider's insufficient-funds rejection does not establish a
+  local balance diagnosis. Classify recognized structured evidence; do not parse
+  arbitrary prose into new retry permission.
+- Do not describe an error as retryable merely because it is transient or no
+  signature was sent. Preserve the existing unsigned GET/POST and accepted-work
+  replay contracts. Where safe retry is not established, do not invite replay.
+- Preserve `isError`, existing ownership/recovery behavior and internal error
+  identity. Unknown/unclassified failures still produce a concise meaningful
+  failure kind and the applicable retry instruction, without leaking the whole
+  chain as a fallback. Use existing typed categories and minimal local matching;
+  do not create an error taxonomy framework or provider-specific string parsers.
+
+### Concrete payment-error example
+
+The motivating case is an API call marked as potentially chargeable, with a
+provider API HTTP 402 response whose error text includes `insufficient_funds`.
+The existing agent-facing message is:
+
+```text
+A payment may already have settled; an authorization may still charge or execute; do not automatically repeat this logical call: Managed payment omitted advertised x402 extensions; this does not establish the cause of failure. A submitted authorization may still charge. Only the built-in recognized insufficient-funds traversal may repeat the request: HTTP 402 Payment Required: "insufficient_funds: contract call failed: unable to call contract: execution reverted" {}
+```
+
+This combines the `PossiblePayment` context from `src/payment/submission.rs`,
+`OMITTED_EXTENSIONS` from `src/rotation/manager.rs`, and the `HttpFailure` detail
+built by `src/payment.rs::response_output`. `Server::call_tool_owned` currently
+exposes their combined chain with `{error:#}`. These are presentation layers,
+not evidence of multiple API executions.
+
+The example establishes a provider payment rejection and the local possible-payment
+marker. That marker is set before journal acceptance is acknowledged; it does not
+alone prove authorization submission or disclosure. The example also does not
+establish a shortage in the local wallet/treasury, settlement success, or exhaustion
+of all eligible wallets. The extension-omission
+observation does not identify the rejection's cause. Preserve the HTTP status and
+retry property without asking the agent to diagnose those internals.
+
+When the available structured evidence identifies insufficient funds, the intended
+agent text is:
+
+```text
+Provider API HTTP 402 Payment Required: insufficient funds. Do not retry automatically.
+```
+
+If only HTTP 402 and possible-payment evidence are established, use
+`Provider API HTTP 402 Payment Required: payment rejected. Do not retry automatically.`
+Do not infer an insufficient-funds category by searching arbitrary error prose,
+and do not describe every HTTP 402 as insufficient funds. Build synthetic fixtures
+for both cases, retaining internal typed evidence while asserting concise external
+output and unchanged dispatch/signature counts.
+
+For a fetch whose provider request succeeded but whose documented result reports
+a destination failure, the status distinction is:
+
+```text
+Provider API HTTP 200 OK; destination HTTP 404 Not Found.
+```
+
+The actual known failure and retry evidence determine the wording. Retry properties
+apply to repeating the provider tool call; a destination HTTP 429 or 503 does not
+by itself authorize another paid fetch. Preserve omitted-extension observations
+and contract diagnostics internally where existing consumers need them. Their
+retention does not require new logs, and credential-bearing upstream prose must
+not be logged.
+
+P2's pricing JSON remains a separate content block on these error results when
+the invocation observed a validated offer. It must not reintroduce diagnostic
+contexts or repeat the retry instruction in a second place.
 
 ## Ordered implementation commits
 
@@ -315,6 +437,45 @@ coverage and retained billing facts. Resolve discovered override/credit/truncati
 cases in the P2/P3 design before implementing affected paths. Exit when the added
 pricing can be represented without new provider parsers or redundant disclaimers.
 
+### P1E Concise API error kinds and retry properties
+
+After P1/G1 and before P2, inspect the full API execution-to-MCP error path. Start
+with `PossiblePayment`, `OMITTED_EXTENSIONS`, paid response-body failures, wallet
+exhaustion, `HttpFailure`, `AdmissionError` and `Server::call_tool_owned`. Separate
+internal error evidence from agent presentation as specified above, rather than
+merely shortening every context string and continuing to dump the whole chain.
+Carry an already observed outer HTTP status through body-read and output-render
+failures with a small typed handoff; do not reconstruct it from diagnostic text.
+Review the receipt/body projection in `src/payment/diagnostics/http.rs` and its
+comments, which currently describe upstream prose as private tool-error content.
+Align that contract with the new agent presentation without relocating raw upstream
+prose into logs or extending its lifetime unnecessarily.
+
+Implement and test the small shared API-error formatter and its direct/wrapper
+handoff in one coherent commit. Preserve existing typed causes, diagnostics,
+qualification categories, `isError` and retry enforcement. Avoid unrelated CLI or
+operator-log wording changes. Update `docs/architecture.md` output/error boundaries
+and `docs/agent-sources.md` with the agent-facing error-kind/retry contract; update
+affected diagnostic documentation only to clarify the internal/presentation split.
+
+Evidence: the concrete payment-error example in the API-error section becomes one
+short payment-rejection message with its
+HTTP 402 status; provider HTTP 403/404/429/503 remain distinguishable; successful
+provider responses reporting destination failures retain both layers without
+reclassifying the provider response or granting paid replay. Cover unavailable or
+ambiguous destination attribution without guessing. Omitted
+extensions, empty wrappers and contract traces are absent from agent content;
+actionable argument corrections remain; signed and unsigned transport/body failures
+produce the appropriate retry instruction; exhausted-wallet, relay and wrapper
+paths retain classification and liabilities. Assert unchanged dispatch/signature
+counts and no new retry rights. Use focused shared fixtures, not snapshots of all
+provider error prose.
+
+Independently review the exact P1E SHA and every fixup, including the full error
+chain and consumers. Resolve material findings before P2 uses the new presentation
+boundary. Include P1 and its fixups in this review and apply the complexity review
+discipline to the new formatter and affected existing dispatch hotspots.
+
 ### P2 Per-call observed pricing in MCP content
 
 Implement the typed observation, managed validation capture, output propagation,
@@ -323,6 +484,8 @@ typed error propagation and JSON content block together. Main owners are
 Inspect raw calls, media/projection, relay fallback, directory aggregation, help,
 qualification and direct Rust interfaces as consumers. Do not silently widen the
 existing cache's authority or scope to solve output propagation.
+Use P1E's concise agent-facing error presentation; observation metadata must not
+restore diagnostic-chain rendering on API failures.
 
 Add focused validation/error, concurrency, wallet-handoff, output-format and
 media tests with this commit. Update `docs/architecture.md` output boundaries and
@@ -343,7 +506,7 @@ catalog handoff. Update both cache inventories (`docs/local-resource-limits.md`
 and `docs/network-egress.md`) where they currently describe hints as selection-only;
 retain all existing bounds and lifetime semantics.
 
-**G2 Combined architecture gate, after P3:** inspect P1 through P3 and every fixup
+**G2 Combined architecture gate, after P3:** inspect P1, P1E, P2, P3 and every fixup
 as one implementation. Trace validation through success/error/MCP output and
 trusted bindings through cache lookup/description rendering/search pagination.
 Inspect preserved financial ownership, cancellation, network isolation, override
@@ -365,7 +528,7 @@ provider audit until now. Update affected permanent examples/docs with the same
 commit; add no unrelated production behavior to create an integration milestone.
 
 **G3 Integration gate, after P4:** independently inspect the entire accumulated
-branch, P1 audit dispositions, exact implementation/fixup SHAs, all prior gate
+branch, P1 audit dispositions, P1E error presentation, exact implementation/fixup SHAs, all prior gate
 decisions and complete consumers. Examine recurring fixup causes and assumptions;
 require wider targeted audit, simplification or regression coverage where a
 pattern warrants it. Confirm validation and documentation handoff before cleanup.
@@ -401,6 +564,7 @@ tests. Do not freeze full provider inventories or rewrite unrelated fixtures.
 | Exact amount | Decimal strings cover sub-cent values, integer amounts and large supported values without floating-point loss; text and JSON agree. |
 | Per-call ownership | Concurrent calls with different prices retain their own outputs even when receipts and completion order differ; no lookup of a newer shared hint at result time. |
 | Validation and failure | Malformed challenges omit pricing; valid observed offers survive admission/body/render failures without new signing or loss of original error/possible-payment context. |
+| Agent-facing API errors | Concise kind, observed HTTP status and applicable retry instruction; provider API versus reported destination status distinguished; no invented status/origin or changed success/error flags; useful request corrections retained; no diagnostic chain or duplicate warnings; direct, wrapper, raw, relay and known/unknown failures preserve typed evidence and replay rules. |
 | Wallet traversal | Existing eligible-wallet attempts and private-header restrictions remain unchanged; latest validated offer is identified without presenting a total or permitting replay. |
 | JSON and media | Original text is byte-for-byte preserved where the existing contract promises it; pricing is separately parseable; images, mappings, omissions and advisories survive. |
 | Internal consumers | `into_text`, helper/directory parsing, `structuredContent` and qualification behavior retain their contracts. |
