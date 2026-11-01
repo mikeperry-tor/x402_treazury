@@ -358,6 +358,12 @@ permissions, normalized destinations, circuit ownership, success counting and
 required-target completeness. Complete sanitized outputs and rejection order are
 checked; these fixtures establish evidence interpretation, not live isolation.
 
+`tests/foreground_capacity.rs` holds seller headers and bodies while saturating
+shared ownership across authenticated MCP listeners and direct calls. Disconnects
+must retain capacity through signing and body collection; completed work permits
+reuse. A failed body-phase wait records counts and already-completed synthetic
+caller outcomes without waiting on blocked bodies or draining retained owners.
+
 The [coverage map](../tests/COVERAGE.md) identifies regression boundaries and
 optional qualification methods.
 
