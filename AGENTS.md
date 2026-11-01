@@ -227,6 +227,9 @@ make clippy
 make fmt-check
 ```
 
+- Follow [testing efficiency](docs/testing.md#testing-efficiency): avoid validation
+  matrices, reuse valid evidence, consolidate expensive setup and prefer functional
+  assertions and deterministic synchronization.
 - Follow [validation order and continuation](docs/testing.md#validation-order-and-continuation):
   complete applicable design/complexity review and full all-target Clippy and
   compatibility checks before broad runtime suites; run affected cheap contract

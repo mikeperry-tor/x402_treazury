@@ -27,6 +27,45 @@ Preserve financial evidence. Provider existence neither requires paid qualificat
 nor establishes support or current upstream health. Qualification must explicitly
 identify its selected requests, caps, authority and unobserved outcomes.
 
+## Testing efficiency
+
+Keep ordinary validation on the pinned production compiler and maintained named
+stages. Do not build a cross product of compilers, feature combinations, profiles
+or coverage modes. A future matrix expansion needs an independently demonstrated
+contract and explicit user authorization. The pruning evaluation uses one isolated
+condition-coverage toolchain and test profile, with a default baseline/final pair
+and only focused financial supplements. Nightly analysis is outside `make test`
+and `make check`; it never changes production pins.
+
+Reuse passed evidence while its source, feature, profile and relevant inputs remain
+valid; resume unfinished stages after focused fixes. Reruns need changed inputs,
+an observed failure/flakiness investigation, or an explicit measurement/coverage
+goal. Do not add success caches or skip explicitly requested standalone commands.
+
+Consolidate expensive setup when scenarios share contract ownership. Prefer small
+immutable synthetic inputs and shared fixture builders. Keep fresh mutable stores,
+keys and authority for isolated cases; shared mutable financial state and global
+serialization are not shortcuts. Each separate heavyweight wallet, chain, server
+or subprocess fixture needs a named distinct boundary. Review what each scenario
+uniquely proves and whether existing setup can carry its assertions.
+
+Assert functionality first: results, exact requests, persisted transitions, counts
+and forbidden side effects. Preserve narrow privacy, severity, wire-output and
+user-guidance contracts, without full prose inventories or duplicate end-to-end
+logging scenarios. Put pure decisions and parser variants in cheap unit/contract
+tests; retain representative CLI/network/SDK boundaries and the recovery,
+concurrency and no-replay cases that need integration.
+
+Use paused/mock time for owned timer logic and barriers/notifications for ordering.
+Do not wait real seconds merely to let background work probably run. A real wait
+needs a named process, transport or external-clock invariant that mocked time cannot
+prove, with the smallest representative integration case. Tokio time does not
+control other processes, OS IO or independent clocks. Never change production
+cadence or add timeouts to accelerate tests. Document exceptions beside the owning
+test/helper and in review evidence. Use focused orchestration tests for selection
+and ordinary review for semantic duplication, rather than source-text bans,
+arbitrary duration caps or a new policy framework.
+
 ## Default development checks
 
 The application always includes Zcash. The [Makefile](../Makefile) verifies pinned Cargo
@@ -539,6 +578,10 @@ filters exclude external/vendor/test/example paths, although inline test helpers
 can still contribute to the application denominator. Compare identical feature
 sets and filters, and explain denominator changes before attributing a percentage
 change to better tests.
+
+The pruning baseline/final evaluation uses only the pinned
+[condition analysis workflow](../tests/COVERAGE.md#condition-analysis), including
+its focused financial supplement. It does not run the other coverage modes.
 
 Branch collection is an optional separate invocation using a compatible nightly
 compiler and matching LLVM tooling:

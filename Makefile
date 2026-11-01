@@ -35,7 +35,7 @@ endef
 .PHONY: build build-dev test check cargo-check run clippy fmt fmt-check toolchain \
         check-static check-clippy check-compat check-default check-proving \
         check-lifecycle check-codec \
-        coverage coverage-branch coverage-proving coverage-consensus help
+        coverage coverage-condition coverage-condition-financial coverage-branch coverage-proving coverage-consensus help
 
 build: toolchain
 	@$(build_arguments) \
@@ -126,6 +126,12 @@ check-codec: toolchain
 coverage:
 	scripts/coverage.sh
 
+coverage-condition:
+	scripts/coverage.sh --condition
+
+coverage-condition-financial:
+	scripts/coverage.sh --condition-financial
+
 coverage-branch:
 	scripts/coverage.sh --branch
 
@@ -155,6 +161,8 @@ help:
 	  'make fmt / fmt-check    Apply / check formatting' \
 	  'make toolchain          Verify pinned Rust and Cargo' \
 	  'make coverage           Default coverage report' \
+	  'make coverage-condition Pinned condition analysis of default suite' \
+	  'make coverage-condition-financial Focused condition financial supplement' \
 	  'make coverage-branch    Nightly branch coverage' \
 	  'make coverage-proving   Selected synthetic proving coverage' \
 	  'make coverage-consensus TEST=NAME  One named consensus test' \
