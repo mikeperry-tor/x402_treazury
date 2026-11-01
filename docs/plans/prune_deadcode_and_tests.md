@@ -18,9 +18,11 @@ support as recorded below. No application builds, runtime suites or fresh suite
 timing runs were performed for this plan. Findings are source evidence, not a measured
 speedup or a qualification claim. Unrelated local files remain outside scope.
 
-This request authorizes investigation and this plan. Implementation, Git commits,
-private-state conversion and live-funded qualification have not been performed.
-Commit identifiers below describe proposed boundaries, not existing commits.
+Implementation is authorized on `prune_deadcode_and_tests`. Checkout reassessment
+starts at `3ceb88f2e41038c4f6ef6959494c2f501373f1cd`: only this plan and its index
+link differ from the audited application baseline. Unrelated local files remain
+outside scope. Private-state conversion and live-funded qualification are not
+authorized. Commit identifiers below describe implementation boundaries.
 
 Read these owning guides before the corresponding implementation:
 
@@ -50,9 +52,11 @@ Keep distinct format domains distinct. At baseline the database is schema 23,
 `instance.version` and encrypted record/AAD are version 1, backup manifest format
 is 1, status JSON is version 5, bootstrap JSON is version 3, deployment TOML is
 version 1, and the current SDK wallet format is 45. These numbers are not evidence
-of obsolete support and need not match. Review the public output version policy
-when deleting fields such as `legacy_refunds`; document any intentional output
-break rather than silently reusing an incompatible output contract.
+of obsolete support and need not match. Removing `Status.legacy_refunds` requires
+status JSON version 6; retain bootstrap
+JSON version 3 with its nested current status. Lifecycle evidence has its own
+version 2 contract, independent of status JSON and database versions. Document
+these output boundaries rather than silently reusing an incompatible contract.
 
 Unsupported financial stores must fail before schema/data mutation. Keep complete
 private backups, exact accepted inputs, encrypted records, signed bytes, original
@@ -216,13 +220,32 @@ Qualification has another compatibility layer: `src/qualification/lifecycle.rs`
 contains the old promotion model beside current schema-2 reserve consumption;
 `lifecycle_restart.rs` branches on old role/phase rules; `lifecycle_estimate.rs`
 accepts unversioned balances and old inventory; `balance.rs` accepts historical
-unversioned admission evidence beside current evidence. Trace producers in
+unversioned admission evidence beside current evidence. The current producer
+incorrectly copies status JSON version 5 into lifecycle
+output, although reserve-model consumers recognize lifecycle version 2. Emit
+explicit lifecycle version 2 and test producer-to-consumer handoff in P2 alongside
+its status version 6 change, before deleting old branches in P4. At that same
+boundary, bootstrap readiness must consume current enabled inventory and
+`inventory_ready`/`serving_ready`, including eligible READY inventory; it must not
+retain an ACTIVE-only prerequisite from the old status model. Trace producers in
 `src/rotation/store/qualification.rs` and consumers in
 `tests/live/runner/execution_rotation.rs`, registry and integration-preparation
 tests, then remove obsolete reader branches and old synthetic inputs together.
 Do not assume the newest number is always the sole current format: exact chain
 observations use balance version 2 while advisory admission estimates use version
 3. Preserve both where currently produced, including their different authority.
+The producer also exports unversioned
+evidence for accepted journals with `valid_until` and missing `support`. Reject
+that unsupported qualification export without rewriting journals or impeding
+ordinary reconciliation; it must not be relabeled as current advisory evidence.
+
+Trace the complete runner handoff, including historical admission/ownership
+markers in `registry_application.rs` and the old budget/refund/anchored-wallet
+model in `accounting.rs`, `accounting_baseline.rs` and `accounting_attribution.rs`.
+Current payment intent marker 2 and ownership marker 1 are distinct from balance,
+lifecycle and status formats. Update execution/bootstrap, lifecycle registry and
+rotation-report consumers with their producers. Unsupported immutable evidence
+must not qualify new work or release execution reservations.
 
 Review the `legacy_single` prior-run settlement shortcut in
 `qualification/funding/registry_state.rs` with original-case/per-attempt evidence
@@ -366,16 +389,22 @@ combinations for two booleans, including `let conjunction = a && b;` and an
 Probe artifacts remain ignored under `target/coverage-support-probe/`; the source,
 per-mode compiler logs, profiles, exports and `summary.json` are local evidence,
 not application coverage results. Homebrew Rust 1.99.1 remains the ordinary compiler.
-The probe used rustc/LLVM directly; Cargo wrapper integration is not yet qualified.
-The installed cargo-llvm-cov version was 0.9.1. P0 must verify that the wrapper's
-actual compiler invocation retains condition instrumentation and that report
-export preserves the extra condition outcomes, without repeating the completed
-mode-comparison experiment or running a full suite to debug flag handling.
+The original probe used rustc/LLVM directly. P0's Cargo wrapper probe confirmed
+four condition locations/eight outcomes, but the original compiler then failed
+application compilation before tests with
+[Rust regression #165263](https://github.com/rust-lang/rust/issues/165263).
+The user explicitly authorized replacing only the analysis pin with
+`nightly-2026-10-31`, revision
+`92b5b8c87c61b20adc9001b41baf587634a74734` (compiler date 2026-10-29).
+Its installed manifest verifies archive date 2026-10-31 and matching LLVM 23.1.4.
+The replacement condition-only wrapper probe retained the same four locations /
+eight observed outcomes and the recursive async-drop reproducer compiled.
+Cargo-llvm-cov remains 0.9.1. These are narrow qualification probes, not
+application baseline results or a new validation dimension. Production pins stay
+unchanged; do not repeat the completed coverage-mode comparison.
 
-Record/pin the analysis toolchain that resolves to the verified compiler revision
-and its matching LLVM tools; verify any dated rustup archive instead of inferring
-its date from the compiler commit date. Extend the existing coverage workflow
-minimally, retaining provenance, nonempty selections, child-profile inventory and
+Pin and verify that analysis compiler revision and its matching LLVM tools.
+Keep the existing provenance, nonempty selections, child-profile inventory and
 failure-safe publication. Keep analysis artifacts separate from ordinary build
 artifacts. If condition collection breaks, resolve or report that specific blocker;
 do not silently substitute another mode or start testing a toolchain matrix.
@@ -406,7 +435,11 @@ unobservable/tooling-limited coverage with its reason. Correlate high-risk gaps
 with CogC/CycC and the existing test map. Keep the analysis denominator explicit:
 application code, operational runner/tools, inline helpers, dependencies and
 excluded tests have different scopes. Where the selected harnesses exercise
-runner/tools, export a separate view from the same collected profiles for P4/P7;
+runner/tools, export a separate view from the same collected profiles for P4/P7.
+The wrapper's default filters hide runner paths in test folders; use the
+condition-only `all-sources.json` export with those defaults disabled, selecting
+operational paths explicitly while retaining `full.json` and the application
+exclusions unchanged;
 otherwise mark them unobserved or out of scope. Do not add another suite run merely
 to populate that view or silently broaden the application denominator. Do not add
 unreachable input cases or trivial tests merely to raise percentages.
@@ -496,7 +529,7 @@ recovery later.
 | --- | --- | --- |
 | P0 | Establish runtime and condition-only coverage baselines; reuse the verified compiler/LLVM probe and qualify Cargo wrapper integration with exact analysis tools. Make minimal workflow extensions and add permanent efficiency/no-matrix rules with AGENTS links in testing/development/coverage/tooling guides. | One default condition baseline plus only necessary focused financial supplements, one test profile, verified condition exports, explicit unsupported MC/DC, scoped gaps and preserved publication. No additional coverage modes, compiler/feature/profile cross product or nightly dependency in ordinary checks. Independent design/tooling review before broad collection; no application pruning before baseline establishment. |
 | P1 | Canonical config/CLI only; simplify strict parsing; update examples, provider descriptions/caveats, configuration/network/wallet guides together. | Focused config/pricing/managed config/CLI layout and precedence tests, canonical authored examples, unchanged timeout functionality and no unexpected IO; reject obsolete input generically. |
-| P2 | Current database contract, canonical initialization and historical reporting/readiness/refund removal, with test-only converter/SQL fixture retirement and compact replacement safety tests. Update wallet CLI/rotation/Zingo/testing and state-fixture docs. | Current fresh/reopen/status/backup/inspection paths; unsupported old/future refusal before mutation; current corruption behavior; accepted bytes/identity/liability and no-replay preservation. Resolve schema-23 shape issue before deleting startup DDL. |
+| P2 | Current database contract, canonical initialization and historical reporting/readiness/refund removal, with test-only converter/SQL fixture retirement and compact replacement safety tests. Update wallet CLI/rotation/Zingo/testing, qualification output/readiness and state-fixture docs. Keep status6, lifecycle2 and database23 handoffs explicit, including READY inventory bootstrap. | Current fresh/reopen/status/backup/inspection paths; producer-to-current-consumer reserve/readiness assertions; unsupported old/future refusal before mutation; current corruption behavior; accepted bytes/identity/liability and no-replay preservation. Resolve schema-23 shape issue before deleting startup DDL. |
 | P3 | Remove obsolete wallet upgrade fixture/test, replace active address-fixture consumers and preserve current roundtrip coverage. Update Zingo/testing/state-fixture docs. | Current encrypted SDK/address/scan-target save/reopen and Near refund receiver/quote cases; no removed fixture references. |
 | P4 | Remove historical qualification report branches and prior-run shortcut where obsolete, updating producers, live runner fixtures/reference and qualification claims together. | Current schema-2 lifecycle and current balance-2/3 inputs, reserve consumption/vacant replacement, exact checkpoint/drained continuation, per-attempt prior-run correlation; unsupported report cannot grant authority. |
 | P5 | Remove registry receipt compatibility and redundant cache/default/decoder regressions; update agent-source/config/testing guides as affected. | Current registration/tombstone persistence, unsupported snapshot preservation, cache miss/refetch, request routing, conditional/identity/relay-age and adapter decision contracts. |
@@ -508,8 +541,8 @@ recovery later.
 **G1 — Storage/format architecture gate, after P2.** Review P0–P2 and every fixup,
 not just changed lines. Follow create/open/status/identity/backup and treasury
 consumers end to end. Resolve schema-23 initializer shape, read-only rejection,
-output versioning, corruption/reorg recovery, current history ownership and exact
-accepted-byte preservation. Exit requires no unresolved material finding and
+output versioning and status6/lifecycle2/bootstrap handoffs, corruption/reorg
+recovery, current history ownership and exact accepted-byte preservation. Exit requires no unresolved material finding and
 current storage safety tests actually executed.
 
 **G2 — Financial and catalog handoff gate, after P5.** Review P0–P5 and all fixups

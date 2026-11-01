@@ -265,7 +265,10 @@ else:
         script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text('#!/bin/sh\nexec python3 coverage-helper "$@"\n')
         script.chmod(0o755)
-        for target, args in [('coverage', []), ('coverage-branch', ['--branch']),
+        for target, args in [('coverage', []),
+                             ('coverage-condition', ['--condition']),
+                             ('coverage-condition-financial', ['--condition-financial']),
+                             ('coverage-branch', ['--branch']),
                              ('coverage-proving', ['--proving']),
                              ('coverage-consensus', ['--consensus', 'named-case'])]:
             _, calls = self.make(target, 'TEST=named-case')

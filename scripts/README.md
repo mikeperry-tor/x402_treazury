@@ -90,6 +90,8 @@ available directly.
 | `make check` / `make check-*` | Ordered full check / individual stages; selections and continuation rules in the [testing guide](../docs/testing.md#validation-order-and-continuation) |
 | `python3 scripts/complexity.py` | Pinned complexity metrics and advisory regressions against merge-base with `main`; Markdown and complete JSON/CSV under `target/complexity` |
 | `make coverage` | Default Zcash build coverage; HTML, JSON and text under `target/coverage` |
+| `make coverage-condition` | Pinned condition-only default analysis; `target/coverage-condition` |
+| `make coverage-condition-financial` | Sequential proving/lifecycle/codec condition supplement; `target/coverage-condition-financial` |
 | `make coverage-branch` | Nightly branch coverage; separate reports under `target/coverage-branch` |
 | `make coverage-proving` | Only the named synthetic proving test; `target/coverage-proving` |
 | `make coverage-consensus TEST=NAME` | One explicitly selected consensus test; `target/coverage-consensus-NAME` |
@@ -204,3 +206,14 @@ cargo clippy --locked -p treazury-complexity --target-dir target --all-targets -
 The opt-in `measure_startup_tor.py` runner compares unsigned startup time and
 per-process peak RSS through an existing, warmed Tor SOCKS endpoint. It retains
 the daemon and its learning state; see [startup qualification](../tests/STARTUP.md).
+
+The pruning evaluation uses only the pinned
+[condition analysis workflow](../tests/COVERAGE.md#condition-analysis), with one
+test profile and isolated target directories. The helper selects absolute nightly
+compiler and matching LLVM paths and verifies the compiler revision and wrapper
+version. It records tracked source hashes, per-filter listings and child profiles;
+failures preserve earlier reports. Do not multiply the normal check stages across
+analysis compilers, features, profiles or coverage modes. Follow
+[testing efficiency](../docs/testing.md#testing-efficiency) for evidence reuse,
+setup consolidation and deterministic synchronization. Existing optional coverage
+commands are separate capabilities, not additional evaluation requirements.

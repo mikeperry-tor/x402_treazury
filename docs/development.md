@@ -208,20 +208,14 @@ code; inline unit-test helpers can still count. Stable Rust reports line, region
 and function coverage, not branch coverage. Optional proving/Docker and live
 funded tests are outside this run. Reports contain local paths and are gitignored.
 
-Region coverage is already included in these reports. Branch coverage needs a
-fresh instrumented run with nightly Rust. With rustup installed and its binaries
-on PATH:
-
-```sh
-rustup toolchain install nightly --profile minimal --component llvm-tools-preview
-RUSTUP_TOOLCHAIN=nightly make coverage-branch
-```
-
-This writes HTML/JSON/text to `target/coverage-branch` and keeps its build/profiles
-separate from the stable run. It uses nightly's matching LLVM tools; unset any
-`LLVM_COV`/`LLVM_PROFDATA` overrides pointing at a different LLVM version. Production
-builds continue to use the existing stable compiler. Branch results measure the
-compiler's supported branch instrumentation, not every possible logical path.
+Use the isolated [condition analysis workflow](../tests/COVERAGE.md#condition-analysis)
+for the pruning baseline/final comparison. It pins the verified compiler revision,
+cargo-llvm-cov and matching LLVM tools, preserving condition outcomes and exact
+source hashes. Existing coverage entrypoints do not authorize collecting multiple
+modes. Follow [testing efficiency](testing.md#testing-efficiency); compare ordinary
+timings on unchanged inputs separately from instrumented runtime, and prefer
+focused profiles over a suite-wide per-test matrix. Production and normal check
+pins remain unchanged.
 
 ## Logging and diagnostics
 
