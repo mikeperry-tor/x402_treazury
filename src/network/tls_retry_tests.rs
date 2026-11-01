@@ -51,6 +51,7 @@ struct BodyFault {
     responses: AtomicUsize,
     status_first: AtomicUsize,
     headers: Semaphore,
+    probe_body: Semaphore,
     flipped: AtomicUsize,
 }
 impl Default for BodyFault {
@@ -61,6 +62,7 @@ impl Default for BodyFault {
             responses: AtomicUsize::new(0),
             status_first: AtomicUsize::new(0),
             headers: Semaphore::new(0),
+            probe_body: Semaphore::new(0),
             flipped: AtomicUsize::new(0),
         }
     }
@@ -297,8 +299,12 @@ async fn body_response(State(s): State<StateData>, uri: Uri, headers: HeaderMap)
     };
     let body = if take(&s.body.responses) {
         let state = s.body.clone();
+        let probe = uri.path() == "/body-probe";
         axum::body::Body::from_stream(futures_util::stream::once(async move {
             state.headers.acquire().await.unwrap().forget();
+            if probe {
+                state.probe_body.acquire().await.unwrap().forget();
+            }
             Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(body))
         }))
     } else {
@@ -324,6 +330,7 @@ async fn serve(
         .route("/base", post(base))
         .route("/signed", get(signed))
         .route("/body-free", get(body_response))
+        .route("/body-probe", get(body_response))
         .route("/body-challenge", get(body_response))
         .route("/body-catalog", get(body_response))
         .route("/body-base", post(body_response))
@@ -695,14 +702,14 @@ async fn body_cases(
     tor: bool,
     direct_port: u16,
 ) {
-    // Establish the client-side phase too: headers are accepted before the
-    // encrypted body fails. Consumer rows below therefore test body recovery.
+    // Establish the client-side body-read phase explicitly. A server write alone
+    // cannot prove that send() has returned before the TLS error arrives.
     state.body.connections.store(1, Ordering::SeqCst);
     state.body.responses.store(1, Ordering::SeqCst);
     state.body.skip.store(0, Ordering::SeqCst);
     state.body.status_first.store(0, Ordering::SeqCst);
     let probe = format!(
-        "https://spec.example.com:{}/body-free",
+        "https://spec.example.com:{}/body-probe",
         if tor { 19999 } else { direct_port }
     );
     let transport = global()
@@ -721,11 +728,14 @@ async fn body_cases(
         .await
         .expect("valid HTTP headers before corrupted TLS body");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
+    state.body.probe_body.add_permits(1);
     let error = response.bytes().await.unwrap_err();
     assert!(
         tls_failure(&error),
         "body decryption failure retains TLS evidence"
     );
+    // Consumer rows corrupt records after headers are sent; the client may see
+    // that error during dispatch or body collection. Both retain retry ownership.
     let cases = if tor {
         vec![
             ("free", 1, 0),
@@ -824,7 +834,7 @@ async fn body_cases(
         assert_eq!(
             state.body.flipped.load(Ordering::SeqCst) - flipped,
             failures.min(attempts.saturating_sub(status_first)),
-            "actual encrypted body records were corrupted after valid headers"
+            "actual encrypted body records were corrupted after headers were sent"
         );
         let calls = state.calls.lock().unwrap().clone();
         let signed = usize::from(consumer == "challenge" && expected_success);

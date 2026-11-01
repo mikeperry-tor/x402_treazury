@@ -162,6 +162,10 @@ fresh whole-view fallback, retained owners, cancellation and absent financial si
 effects. Direct transport fixtures remain in `rotation::base::transport::tests`.
 `network::tls_retry_tests` verifies TLS recovery and exhaustion in catalog,
 unsigned API and Base while retaining certificate checks and signed no-replay.
+Its body-read probe releases corrupt bytes only after the client accepts response
+headers; a semaphore establishes that transport phase without real-time waits.
+Consumer cases retain retry ownership with corruption after server-written headers,
+which can surface during dispatch or body collection.
 Manual POST/PUT/PATCH/DELETE and ordinary PUT cases distinguish failed-handshake
 recovery from an executed write whose first response TLS record is corrupted:
 the latter must fail after exactly one execution, without signing or replay.
