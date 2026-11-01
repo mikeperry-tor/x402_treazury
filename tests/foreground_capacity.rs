@@ -31,14 +31,13 @@ async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
     )
 }
-async fn until(mut predicate: impl FnMut() -> bool) {
+async fn until(mut predicate: impl FnMut() -> bool) -> Result<(), tokio::time::error::Elapsed> {
     tokio::time::timeout(Duration::from_secs(15), async {
         while !predicate() {
             tokio::task::yield_now().await;
         }
     })
     .await
-    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -117,7 +116,9 @@ async fn mcp_capacity_survives_disconnect_signing_and_body_reads_across_listener
                 .unwrap()
         }));
     }
-    until(|| unsigned.load(Ordering::SeqCst) == 128).await;
+    until(|| unsigned.load(Ordering::SeqCst) == 128)
+        .await
+        .unwrap();
     for waiter in waiters.iter().take(4) {
         waiter.abort();
     }
@@ -158,7 +159,27 @@ async fn mcp_capacity_survives_disconnect_signing_and_body_reads_across_listener
         );
         if phase == 0 {
             headers.add_permits(128);
-            until(|| reading.load(Ordering::SeqCst) == 128).await;
+            if let Err(error) = until(|| reading.load(Ordering::SeqCst) == 128).await {
+                let counts = (
+                    unsigned.load(Ordering::SeqCst),
+                    signed.load(Ordering::SeqCst),
+                    reading.load(Ordering::SeqCst),
+                );
+                let mut completed = Vec::new();
+                // Bodies remain blocked: inspect only completed callers, including
+                // the four intentional disconnects, without draining retained work.
+                for (n, waiter) in waiters.iter_mut().enumerate() {
+                    if waiter.is_finished() {
+                        let outcome = waiter.await;
+                        let intentional_disconnect =
+                            n < 4 && outcome.as_ref().is_err_and(|error| error.is_cancelled());
+                        completed.push((n, intentional_disconnect, outcome));
+                    }
+                }
+                panic!(
+                    "body phase: {error}; unsigned/signed/reading={counts:?}; completed (index, intentional disconnect, outcome)={completed:?}"
+                );
+            }
             assert_eq!(signed.load(Ordering::SeqCst), 64);
         }
     }
