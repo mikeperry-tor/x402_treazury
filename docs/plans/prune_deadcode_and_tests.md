@@ -13,8 +13,9 @@ The audited baseline is `59dbc8db55245bcc93a5d54855b08d6776ddcdb9`.
 Three independent read-only audits covered storage/wallet formats, config/catalog
 compatibility, and diagnostic tests/runtime. The coordinator also inspected
 qualification producers and consumers, historical reporting, CLI contracts and
-test orchestration. No application builds, runtime suites or fresh timing runs
-were performed for this plan. Findings are source evidence, not a measured
+test orchestration. A subsequent standalone compiler/LLVM probe verified coverage
+support as recorded below. No application builds, runtime suites or fresh suite
+timing runs were performed for this plan. Findings are source evidence, not a measured
 speedup or a qualification claim. Unrelated local files remain outside scope.
 
 This request authorizes investigation and this plan. Implementation, Git commits,
@@ -342,49 +343,61 @@ test selection and instrumentation match the proposed comparison. Coverage analy
 is required work in this plan, rather than an optional follow-up. It does not
 replace functional assertions, independent review or ordinary compiler checks.
 
-The repository already supports line, region and function reports through
-`make coverage`, and a separate nightly branch run through `make coverage-branch`.
-Extend the existing workflow only where needed; preserve its provenance, nonempty
-selection, child-profile inventory and failure-safe report publication contracts.
+Use **condition instrumentation only** for this evaluation:
+`-C instrument-coverage -Z coverage-options=condition`. Its exports already
+include line, region, function and branch information. Do not collect separate
+block-only, stable, branch-only or MC/DC application reports. Existing coverage
+entrypoints are not an instruction to execute every mode.
 
-| Detail | Analysis and limits |
+The completed socket-free probe used `rustc 1.101.0-nightly`, compiler revision
+`f9ceb4a4d45a471eed7bd8c40dddb7c38e749e21` (commit date 2026-10-31), on
+`aarch64-apple-darwin`, with its matching LLVM 23.1.4 `llvm-cov` and
+`llvm-profdata`. It compiled a standalone program and executed all four input
+combinations for two booleans, including `let conjunction = a && b;` and an
+`if a || b` decision, then merged profiles and exported JSON and annotated text.
+
+| Probe mode | Verified result; not additional application evaluation modes |
 | --- | --- |
-| Line/function | Locate untouched code and wholly unexecuted functions. A covered line or function does not establish all decisions were exercised. |
-| Region | Inspect source-span execution within lines and functions, including generic instantiations where useful. Preserve full export rather than only rounded aggregate percentages. |
-| Branch | Record taken/untaken outcomes, focusing on financial authority, error handling, cancellation, ownership and network isolation. Supported compiler constructs define the denominator; do not infer exhaustive path coverage. |
-| Condition | Qualify nightly `-Z coverage-options=condition` with the selected compiler and reporting tools. This includes branch instrumentation and adds some boolean expressions not directly used as branches. Review short-circuit decisions and missing true/false outcomes; it is not proof that every condition independently affects a decision. |
-| MC/DC | Check actual compiler support before proposing collection. Do not equate condition coverage with modified condition/decision coverage or promise MC/DC from an advertised wrapper flag. Record unsupported modes explicitly and use condition/branch evidence plus focused truth-table tests for important compound decisions. |
+| Standard instrumentation | Compilation, execution and export succeeded; line, region and function data present. |
+| Branch | Compilation, execution and export succeeded; 3 locations / 6 outcomes. |
+| Condition | Compilation, execution and export succeeded; 4 locations / 8 outcomes, all exercised. The extra location records the final operand of the assigned conjunction. |
+| MC/DC | Compiler rejected `coverage-options=mcdc`; accepted levels are block, branch and condition. No MC/DC collection is planned. |
 
-The [Rust unstable coverage options](https://doc.rust-lang.org/unstable-book/compiler-flags/coverage-options.html)
-currently list block, branch and condition levels. The
-[compiler's condition description](https://doc.rust-lang.org/beta/nightly-rustc/rustc_session/config/enum.CoverageLevel.html)
-describes additional boolean instrumentation and distinguishes it from full MC/DC.
-The [cargo-llvm-cov implementation](https://github.com/taiki-e/cargo-llvm-cov/blob/main/src/main.rs)
-still exposes an MC/DC path while noting removal of the compiler's unstable
-support. Therefore qualify the actual installed combination instead of relying on
-CLI help or assuming an old `--mcdc` invocation works. Recheck these upstream
-references during P0 because unstable tooling changes.
+Probe artifacts remain ignored under `target/coverage-support-probe/`; the source,
+per-mode compiler logs, profiles, exports and `summary.json` are local evidence,
+not application coverage results. Homebrew Rust 1.99.1 remains the ordinary compiler.
+The probe used rustc/LLVM directly; Cargo wrapper integration is not yet qualified.
+The installed cargo-llvm-cov version was 0.9.1. P0 must verify that the wrapper's
+actual compiler invocation retains condition instrumentation and that report
+export preserves the extra condition outcomes, without repeating the completed
+mode-comparison experiment or running a full suite to debug flag handling.
 
-P0 must choose and record an exact analysis nightly, cargo-llvm-cov version and
-matching LLVM tools, without changing the production toolchain/profile pins.
-First run small socket-free probes with known outcomes: an `if` with both arms,
-`a && b` and `a || b` short-circuit cases, and a boolean expression assigned before
-branching. Verify the exported counts/source mappings distinguish the expected
-outcomes and report unsupported syntax rather than treating missing records as
-covered. Select the strongest validated mode, preferably condition (which includes
-branch), to avoid separate full-suite branch and condition runs without a distinct
-analysis need. Keep stable and nightly reports separate; never merge profiles
-from different compilers or instrumentation levels. If condition collection is
-unavailable, establish branch evidence and document the precise limitation and
-remaining work; do not silently drop fine-grained analysis or weaken build pins.
+Record/pin the analysis toolchain that resolves to the verified compiler revision
+and its matching LLVM tools; verify any dated rustup archive instead of inferring
+its date from the compiler commit date. Extend the existing coverage workflow
+minimally, retaining provenance, nonempty selections, child-profile inventory and
+failure-safe publication. Keep analysis artifacts separate from ordinary build
+artifacts. If condition collection breaks, resolve or report that specific blocker;
+do not silently substitute another mode or start testing a toolchain matrix.
 
-Collect one complete default-suite baseline per selected configuration. Analyze
-separately selected synthetic proving/lifecycle/codec coverage for financial paths
-absent from default features; the existing proving coverage entrypoint selects
-only one proving test, so it cannot be described as covering all feature suites.
-Extend selection explicitly where needed and retain separate reports. No coverage
-command implicitly authorizes Docker, real Tor or funded transactions. Follow the
-usual static/design/warning/compatibility ordering before broad instrumented runs.
+Condition instrumentation includes branches and additional boolean expressions,
+as described in [Rust's coverage options](https://doc.rust-lang.org/unstable-book/compiler-flags/coverage-options.html).
+It does not establish MC/DC independence, exhaustive paths or every possible
+boolean construct. Inspect locations and missing true/false outcomes, alongside
+line/region/function data from the same run; use focused functional truth-table
+assertions where a compound authority decision needs stronger evidence.
+
+Collect one complete default-suite condition baseline and one matching final
+condition run. Use one ordinary test profile for both; no debug/release comparison.
+For financial paths absent from default features, add only the focused existing
+synthetic proving/lifecycle/codec selections needed to assess those paths, in their
+existing `zcash-testutils` configuration and the same condition mode/profile.
+Keep that supplement's scope explicit and compare it once before/after as needed;
+do not rerun all default tests under every feature combination. The existing
+proving coverage command selects only one test and must not be presented as
+coverage of all feature suites. No coverage command authorizes Docker, real Tor or
+funded transactions. Follow usual validation ordering before broad collection and
+reuse applicable completed checks instead of rerunning them for each report.
 
 Review file/function and branch/condition locations with complete call chains,
 not just repository percentages. Produce a concise gap disposition: obsolete code
@@ -392,8 +405,10 @@ to remove, retained reachable behavior needing a focused functional test, or
 unobservable/tooling-limited coverage with its reason. Correlate high-risk gaps
 with CogC/CycC and the existing test map. Keep the analysis denominator explicit:
 application code, operational runner/tools, inline helpers, dependencies and
-excluded tests have different scopes. Add a separate runner/tool view when reviewing
-P4/P7 instead of silently broadening the application denominator. Do not add
+excluded tests have different scopes. Where the selected harnesses exercise
+runner/tools, export a separate view from the same collected profiles for P4/P7;
+otherwise mark them unobserved or out of scope. Do not add another suite run merely
+to populate that view or silently broaden the application denominator. Do not add
 unreachable input cases or trivial tests merely to raise percentages.
 
 For candidate heavy-test consolidation, compare focused profiles only when the
@@ -403,8 +418,8 @@ the same branches while proving different bytes, ordering or forbidden side
 effects. Avoid a suite-wide per-test coverage matrix or repeatedly executing every
 test merely to find a mathematically minimal suite.
 
-At G3 compare the final retained suite with the baseline using the same selected
-toolchain, instrumentation, feature selections and exclusion rules. Match unchanged
+At G3 compare the final retained suite with the baseline using the same condition
+toolchain, instrumentation, scoped feature selections, test profile and exclusion rules. Match unchanged
 source and explicitly map changed functions; separate deleted code/denominator
 changes from newly lost coverage of retained behavior. Disposition lost outcomes
 and new gaps individually, restoring necessary assertions before completion.
@@ -421,11 +436,20 @@ AGENTS.md's commands/test guidance, with supporting coverage/time techniques in
 `docs/development.md`, `tests/COVERAGE.md` and `scripts/README.md`. These rules must
 survive plan removal and apply to new tests and subsequent agent workflows:
 
+- **Do not build a validation cross product.** Keep ordinary validation on the
+  existing pinned stable compiler and maintained stage selections. This evaluation
+  adds one isolated condition-coverage workflow, not stable/beta/nightly runs of
+  every test, alternate Rust compatibility cohorts, arbitrary feature combinations,
+  debug/release suites or every coverage mode. Existing named feature stages prove
+  distinct contracts; do not multiply each stage across those dimensions. Any
+  future matrix expansion needs an independently demonstrated contract and explicit
+  user authorization; this plan does not grant it. Nightly remains analysis-only,
+  outside normal `make test` / `make check` dependencies and production pins.
 - **Do not rerun passed tests without a reason.** Reuse valid source/feature/profile
   evidence and resume unfinished stages. Reruns need changed relevant inputs, an
   observed failure/flakiness investigation, or a stated measurement/coverage goal.
-  Different instrumented configurations have distinct purposes; merely repeating
-  ordinary execution in multiple stages does not. Do not create success caches
+  The scoped condition evaluation has a distinct purpose; merely repeating ordinary
+  execution in multiple stages does not. Do not create success caches
   that conceal stale evidence or skip explicitly requested standalone commands.
 - **Consolidate expensive setup.** Reuse small shared fixture builders and immutable
   synthetic inputs; combine scenarios that genuinely share setup and ownership.
@@ -470,7 +494,7 @@ recovery later.
 
 | ID | Coherent implementation and documentation | Acceptance evidence |
 | --- | --- | --- |
-| P0 | Establish runtime and fine-grained coverage baselines; qualify condition/branch probes and exact analysis tooling; make minimal coverage workflow extensions. Add permanent efficiency rules and AGENTS links in testing/development/coverage/tooling guides. | Nonempty source-matched default and applicable feature evidence, verified exports for the selected fine-grained mode and explicit condition/MC/DC limitations; scoped gap inventory and preserved publication behavior. Independent design/tooling review before broad collection, no application pruning before baseline establishment. |
+| P0 | Establish runtime and condition-only coverage baselines; reuse the verified compiler/LLVM probe and qualify Cargo wrapper integration with exact analysis tools. Make minimal workflow extensions and add permanent efficiency/no-matrix rules with AGENTS links in testing/development/coverage/tooling guides. | One default condition baseline plus only necessary focused financial supplements, one test profile, verified condition exports, explicit unsupported MC/DC, scoped gaps and preserved publication. No additional coverage modes, compiler/feature/profile cross product or nightly dependency in ordinary checks. Independent design/tooling review before broad collection; no application pruning before baseline establishment. |
 | P1 | Canonical config/CLI only; simplify strict parsing; update examples, provider descriptions/caveats, configuration/network/wallet guides together. | Focused config/pricing/managed config/CLI layout and precedence tests, canonical authored examples, unchanged timeout functionality and no unexpected IO; reject obsolete input generically. |
 | P2 | Current database contract, canonical initialization and historical reporting/readiness/refund removal, with test-only converter/SQL fixture retirement and compact replacement safety tests. Update wallet CLI/rotation/Zingo/testing and state-fixture docs. | Current fresh/reopen/status/backup/inspection paths; unsupported old/future refusal before mutation; current corruption behavior; accepted bytes/identity/liability and no-replay preservation. Resolve schema-23 shape issue before deleting startup DDL. |
 | P3 | Remove obsolete wallet upgrade fixture/test, replace active address-fixture consumers and preserve current roundtrip coverage. Update Zingo/testing/state-fixture docs. | Current encrypted SDK/address/scan-target save/reopen and Near refund receiver/quote cases; no removed fixture references. |
@@ -500,9 +524,10 @@ and fixup with all retained consumers, test selection, startup/shutdown and
 financial/network boundaries. Examine why fixups were needed and whether repeated
 assumptions require a wider audit, regression coverage or simpler design. Verify
 test consolidation preserves distinct failure boundaries and measured improvements
-do not depend on missing tests. Review final fine-grained coverage against P0,
+do not depend on missing tests. Review final condition-only coverage against P0,
 disposition lost outcomes of retained behavior, and verify permanent efficiency
-rules and AGENTS handoff. Per-commit approvals do not replace this gate.
+rules, absence of a new validation matrix and AGENTS handoff. Per-commit approvals
+do not replace this gate.
 
 Every exact committed SHA must receive independent review by someone other than
 its author. Address findings with `git commit --fixup=<introducing-SHA>`, independently
@@ -528,6 +553,12 @@ the complete default, proving, lifecycle and codec stages. For P7, validate both
 standalone stages and the composed partition; a manually filtered run does not
 establish full coverage. Use pinned Make entrypoints, inspect diagnostics as well
 as exit status, and verify filtered selections execute nonzero tests.
+
+Those are the existing ordinary validation stages, not dimensions of a matrix.
+Do not repeat them on nightly or in both debug and release. The separate
+condition-only baseline/final evaluation uses its one analysis toolchain and test
+profile, with only the scoped financial supplements described above. It does not
+become a prerequisite for normal testing or repeat at every commit/review gate.
 
 Coordinate all builds and freeze sources/executables during validation. Choose
 socket-capable execution up front for socket suites; retain ordinary sandbox use
