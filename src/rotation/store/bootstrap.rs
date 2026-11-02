@@ -574,6 +574,155 @@ mod tests {
     }
 
     #[test]
+    fn operation_backed_recovery_keeps_original_ownership_and_waits_for_terminal_provider_facts() {
+        use crate::rotation::{
+            near::SwapStatus,
+            store::preparation::{CalculationInputs, InputPool, OwnedInput},
+            transaction::TransactionFacts,
+        };
+        let (_dir, mut store, _pool) = fixture();
+        let jobs = store.funding_jobs().unwrap();
+        assert_eq!(jobs.len(), 2);
+        // Retain the exact original sources, accepted inputs and claim identities,
+        // including the unrelated job, around each read-only assessment.
+        let journal = |store: &Store| {
+            let mut query = store.db.prepare(
+                "SELECT f.*,j.*,x.*,o.*,n.*,c.* FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id LEFT JOIN outgoing x ON x.id=j.operation_id LEFT JOIN treasury_operations o ON o.id=j.operation_id LEFT JOIN operation_network n ON n.operation_id=j.operation_id LEFT JOIN reserve_claims c ON c.pool_id=f.pool_id AND c.slot=f.allocation_kind ORDER BY f.id",
+            ).unwrap();
+            let columns = query.column_count();
+            let rows = query
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|column| row.get::<_, rusqlite::types::Value>(column))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            let wallets: i64 = store
+                .db
+                .query_row("SELECT COUNT(*) FROM wallets", [], |row| row.get(0))
+                .unwrap();
+            (rows, wallets)
+        };
+        for (index, (job, terminal)) in jobs
+            .iter()
+            .zip([SwapStatus::Failed, SwapStatus::Refunded])
+            .enumerate()
+        {
+            let quote = serde_json::to_vec(&serde_json::json!({
+                "request":{"amount":job.target,"recipient":job.recipient}
+            }))
+            .unwrap();
+            let expiry = 100 + index as u32;
+            let raw = crate::rotation::store::test_support::transaction_raw(expiry);
+            store.save_funding_quote(&job.id, &quote).unwrap();
+            let selected = vec![OwnedInput {
+                pool: InputPool::Orchard,
+                txid: format!("{:064x}", index + 1),
+                output_index: 0,
+            }];
+            store
+                .accept_preparation(
+                    &job.operation_id,
+                    Some(&job.pool_id),
+                    60,
+                    Some(CalculationInputs {
+                        destination: "original deposit".into(),
+                        inputs: selected.clone(),
+                    }),
+                )
+                .unwrap();
+            let revision = store.snapshot().unwrap().0;
+            store
+                .prepare_with_facts(
+                    &job.operation_id,
+                    revision,
+                    b"snapshot",
+                    &raw,
+                    Some(TransactionFacts {
+                        txid: crate::rotation::store::test_support::transaction_txid(expiry),
+                        expiry_height: expiry,
+                        amount_zatoshis: 50,
+                        fee_zatoshis: 10,
+                        deadline: Some(u64::MAX),
+                    }),
+                )
+                .unwrap();
+            store
+                .request_broadcast(&job.operation_id, 1, 1, false)
+                .unwrap();
+            let assess =
+                |store: &mut Store, submission: &str, recoverable, retry_allowed, pending| {
+                    let before = journal(store);
+                    assert_eq!(store.prepared_inputs(&job.operation_id).unwrap(), selected);
+                    let path = store.startup_path(&job.id).unwrap();
+                    let operation = path.operation.as_ref().unwrap();
+                    assert_eq!(operation.operation_id, job.operation_id);
+                    assert_eq!(operation.submission, submission);
+                    assert_eq!(operation.attempts, 1);
+                    assert_eq!(path.recovery_count, 0);
+                    assert!(!path.facts.preparation_accepted && path.facts.accepted_quote);
+                    assert_eq!(path.facts.source_pending, pending);
+                    // Nonterminal originals wait before recovery classification.
+                    // Bound terminal facts permit worker recovery, while startup
+                    // still observes the accepted quote until that worker finishes.
+                    assert_eq!(
+                        funding::can_recover_facts(Some(operation), &path.facts),
+                        recoverable
+                    );
+                    assert_eq!(
+                        store
+                            .funding_retry_allowed(&job.id, &job.operation_id)
+                            .unwrap(),
+                        retry_allowed
+                    );
+                    assert_eq!(path.disposition(3, false), StartupDisposition::Waiting);
+                    assert_eq!(
+                        store.prepared_bytes(&job.operation_id).unwrap().as_slice(),
+                        raw.as_slice()
+                    );
+                    assert_eq!(
+                        store
+                            .funding_quote_for_operation(&job.id, &job.operation_id)
+                            .unwrap()
+                            .as_slice(),
+                        quote.as_slice()
+                    );
+                    assert!(
+                        store
+                            .require_unstarted_preparation(&job.operation_id)
+                            .is_err()
+                    );
+                    assert!(store.abandon_unprepared(&job.operation_id).is_err());
+                    assert_eq!(store.funding_jobs().unwrap().len(), jobs.len());
+                    assert_eq!(store.prepared_inputs(&job.operation_id).unwrap(), selected);
+                    assert_eq!(
+                        journal(store),
+                        before,
+                        "assessment changed original accepted work"
+                    );
+                };
+            assess(&mut store, "BROADCAST_REQUESTED", true, false, true);
+            store.confirm_spend(&job.operation_id).unwrap();
+            assess(&mut store, "CONFIRMED", false, false, false);
+            store
+                .record_provider_outcome(&job.id, &job.operation_id, &terminal, 2)
+                .unwrap();
+            let facts = store.funding_facts(&job.id, &job.operation_id).unwrap();
+            assert_eq!(
+                facts.provider_failed,
+                matches!(terminal, SwapStatus::Failed)
+            );
+            assert_eq!(
+                facts.provider_refunded,
+                matches!(terminal, SwapStatus::Refunded)
+            );
+            assess(&mut store, "CONFIRMED", true, true, false);
+        }
+    }
+
+    #[test]
     fn archived_success_waits_for_credit_without_inventing_current_success_or_disabled_policy() {
         use crate::rotation::{near::SwapStatus, transaction::TransactionFacts};
         let (_dir, mut store, _pool) = fixture();
