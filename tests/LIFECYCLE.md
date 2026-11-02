@@ -74,6 +74,19 @@ the same distinction before routing; first disclosure of an expired original
 must fail despite a permissive projection. Corrupt ciphertext and required facts
 remain scoped failures while a sibling original can still be observed.
 
+The saturated scheduler fixture keeps both inventories above the actual scheduling
+record threshold, held credit/source work, waiter cancellation and close/reopen
+assertions. Existing published health anchors virtual cooldown advancement: the
+first pass observes completed quote prerequisites, while the reopened pass needs
+new preparation-failure and credit completion evidence. Neither callback counts
+nor old saved health acknowledge a new pass. Store work runs with time resumed.
+
+The actor interruption fixture retains one real retry crossing into offline SDK
+reconstruction. Its command acknowledgement precedes the panic and retry-sleep
+registration; advancing from that acknowledgement would race the retained owner.
+Keep queued refund derivation, uncertain claims, exact-byte refusal, cancellation
+ownership and exclusive Store reopen together in that representative case.
+
 | Coverage | Test | Evidence and limits |
 | --- | --- | --- |
 | Bootstrap → payment → promotion → pending refill → restart → ready replacement | `managed::lifecycle::bootstrap_payment_promotion_pending_refill_restart_and_pool_isolation` | Real payment admission, EVM signing, durable journals and Base RPC adapter. Deterministic funding backend; proves five distinct sends for two bootstrapped pools plus one refill, with stable operation identity across restart. Qualification restart observations separately preserve the selected reserve slot, generation and wallet while allowing readiness and unrelated inventory progress. |

@@ -1085,6 +1085,64 @@ async fn wait_until(mut predicate: impl FnMut() -> bool) {
 
 #[tokio::test]
 async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
+    async fn wait_for_published_cooldowns(
+        store: &StoreHandle,
+        target: &str,
+        epoch: u64,
+        reopened: bool,
+        allowance: std::time::Duration,
+    ) {
+        tokio::time::timeout(allowance, async {
+            loop {
+                let target = target.to_owned();
+                let ready = store
+                    .call(move |store| {
+                        let jobs = store.funding_jobs()?;
+                        // The target's earlier status publication is not a credit ACK.
+                        let credits = jobs
+                            .iter()
+                            .filter(|job| {
+                                job.pool_name.starts_with("accepted")
+                                    && job.id != target
+                                    && job.next_poll > epoch
+                            })
+                            .count();
+                        let sources = jobs
+                            .iter()
+                            .filter(|job| {
+                                job.pool_name.starts_with("pool")
+                                    && job.phase == FundingPhase::Quoted
+                                    && if reopened {
+                                        // These jobs started Quoted: await actual prepare
+                                        // failure, not reporting left by the first pass.
+                                        job.next_poll > epoch
+                                            && job.error_streak > 0
+                                            && job.last_error.as_deref().is_some_and(|error| {
+                                                error.starts_with("funding_prepare_waiting")
+                                            })
+                                    } else {
+                                        // Quote dispatch follows prerequisite State::complete
+                                        // and health publication. A once-pass need not select
+                                        // the later prepare step from its Source inventory.
+                                        job.next_poll > 0
+                                    }
+                            })
+                            .count();
+                        // One slot can belong to the target. This completed tranche
+                        // supplies more expired records than the extra inventory needs.
+                        Ok(credits >= RECORDS - 1 && sources >= RECORDS - 1)
+                    })
+                    .await
+                    .unwrap();
+                if ready {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::create(
         &dir.path().join("state"),
@@ -1199,10 +1257,19 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
     assert_eq!(credit_calls.load(Ordering::SeqCst), 4);
     source_gate.add_permits(unsubmitted.len() + 1);
     credits.add_permits(jobs.len());
-    // More than RECORDS accepted credits must cross a minute cadence before
-    // completed scheduling records can be evicted. This is a fixture allowance
-    // for cache rollover, never a deadline for accepted runtime work.
+    // Health publication follows State::complete; callback counters do not
+    // anchor cooldowns. Keep the existing fixture allowance for the large Store
+    // publication tranche and final drain, never as a deadline for runtime work.
     let rollover_allowance = std::time::Duration::from_secs(OBSERVATION_POLL_SECONDS + 15);
+    wait_for_published_cooldowns(&store, &target.id, 1000, false, rollover_allowance).await;
+    tokio::time::pause();
+    tokio::time::advance(std::time::Duration::from_secs(
+        OBSERVATION_POLL_SECONDS + worker.poll_seconds,
+    ))
+    .await;
+    tokio::time::resume();
+    // Quote handoffs make Source records immediately evictable. Any remaining
+    // Quote completion may cross its own short cadence on running time.
     tokio::time::timeout(rollover_allowance, async {
         loop {
             if let Ok(lease) = store.funding_owner().try_lock_owned() {
@@ -1256,6 +1323,17 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
     assert!(facts.provider_success);
     assert_eq!(facts.source_attempts, 1);
     assert!(!facts.status_needed());
+    // A fresh worker ignores old aggregate reporting. Move the synthetic epoch
+    // beyond that reporting so only this pass can acknowledge new completions.
+    let reopened_epoch = reopened
+        .funding_jobs()
+        .unwrap()
+        .iter()
+        .map(|job| job.next_poll)
+        .max()
+        .unwrap()
+        .checked_add(1)
+        .unwrap();
     let (store, actor) = StoreHandle::spawn(reopened);
     let (statuses, mut observed_status) = mpsc::unbounded_channel();
     let (started, _source_events) = mpsc::unbounded_channel();
@@ -1278,8 +1356,21 @@ async fn saturated_inventory_survives_blocked_reads_and_cancelled_waiter() {
         },
         1,
     );
-    tokio::time::timeout(rollover_allowance, reopened_worker.tick(1001))
+    let reopened_waiter = tokio::spawn({
+        let worker = reopened_worker.clone();
+        async move { worker.tick(reopened_epoch).await }
+    });
+    wait_for_published_cooldowns(&store, &target.id, reopened_epoch, true, rollover_allowance)
+        .await;
+    tokio::time::pause();
+    tokio::time::advance(std::time::Duration::from_secs(
+        OBSERVATION_POLL_SECONDS + reopened_worker.poll_seconds,
+    ))
+    .await;
+    tokio::time::resume();
+    tokio::time::timeout(rollover_allowance, reopened_waiter)
         .await
+        .unwrap()
         .unwrap()
         .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), jobs.len());

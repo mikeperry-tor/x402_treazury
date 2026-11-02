@@ -821,6 +821,9 @@ mod tests {
         driver.abort();
         let _ = driver.await;
         drop(release);
+        // Keep this real recovery crossing: Interrupt's ACK precedes the panic,
+        // not registration of the retained owner's retry sleep. Advancing then
+        // would race that registration and offline SDK/Store reconstruction.
         let address = tokio::time::timeout(std::time::Duration::from_secs(75), reply)
             .await
             .unwrap()
