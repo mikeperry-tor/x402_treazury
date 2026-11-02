@@ -546,8 +546,10 @@ of `latest - base_confirmations` and the finalized height. A lagging finalized
 chain delays evidence; unsupported or unavailable finality retains pending work
 and may use a configured RPC fallback, without substituting depth-only evidence.
 Ordinary scalar balance estimates still read `latest`. Persisted support may
-therefore span more than the minimum depth. The owned schema upgrade also protects
-reorg recovery from older readers; see the [database rollback boundary](wallet-cli.md#treasury-and-managed-pools).
+therefore span more than the minimum depth. Current database schema 23 is required
+for owner opens and read-only inspection; older and future versions fail without
+source-state mutation. Retained histories protect original financial ownership; see
+the [database rollback boundary](wallet-cli.md#treasury-and-managed-pools).
 
 Funding capital comes from actual spendable treasury funds after confirmations,
 reservations, liabilities and fees. Displayed total balance is not spendable

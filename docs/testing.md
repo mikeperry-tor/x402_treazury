@@ -468,16 +468,22 @@ unique managed authorizations through concurrent calls, held range responses and
 store reopen; seller success and cover progress do not release payment exposure.
 These checks do not qualify a live funded restart or Tor privacy.
 
-Production storage preflight and historical-schema regressions cover rejection
-without mutation, private disposable recovery of committed WAL and hot rollback
-journals, and preservation of accepted obligations through failed legacy reopen.
-These checks cannot supply missing immutable destination-readiness evidence or
-qualify a live migration.
+Production storage preflight uses compact old/current/future boundary fixtures:
+schema 23 opens and older/future schemas reject without source mutation. Current
+fresh/reopen/status/backup fixtures cover interrupted empty-history completion
+without rewriting journals; current corruption tests preserve strict observation
+and transaction-fact failures. Private disposable recovery of committed WAL and
+hot rollback journals preserves accepted obligations through failed reopen. These
+checks cannot supply missing immutable destination-readiness evidence or qualify
+a private conversion or live migration.
 Funded lifecycle, privacy and combined cover/payment acceptance retain the limits
 listed under [qualification status](#qualification-status).
 
-Bootstrap readiness tests distinguish captured-claim completion from ordinary
-serving readiness, including paged vacant inventory, captured completion after
+Bootstrap readiness tests pass current Store-produced status 6 and lifecycle 2
+through readiness and restart consumers independently of database schema 23 and
+bootstrap summary 3. Eligible funded READY inventory needs no ACTIVE predecessor.
+They distinguish captured-claim completion from ordinary serving readiness,
+including paged vacant inventory, captured completion after
 current generations advance, durable recovery-count boundaries and assessment
 without writes. Store-level tests cover claim history and obstruction dispositions;
 owner tests cover cancellation and drain. These are complementary checks, not an

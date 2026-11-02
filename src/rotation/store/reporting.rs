@@ -39,7 +39,7 @@ pub struct RetirementAccounting {
     pub historical_unknown_count: usize,
 }
 impl RetirementAccounting {
-    pub(super) fn from_wallets(wallets: &[AddressStatus], schema: u32) -> Result<Self> {
+    pub(super) fn from_wallets(wallets: &[AddressStatus]) -> Result<Self> {
         let mut total = U256::ZERO;
         let mut automatic = 0;
         let mut unknown = 0;
@@ -54,10 +54,10 @@ impl RetirementAccounting {
             }
         }
         Ok(Self {
-            automatic_recorded_confirmed_atomic: (schema >= 16).then(|| total.to_string()),
-            automatic_count: (schema >= 16).then_some(automatic),
-            manual_recorded_confirmed_atomic: (schema >= 16).then(|| "0".into()),
-            manual_count: (schema >= 16).then_some(0),
+            automatic_recorded_confirmed_atomic: Some(total.to_string()),
+            automatic_count: Some(automatic),
+            manual_recorded_confirmed_atomic: Some("0".into()),
+            manual_count: Some(0),
             historical_unknown_count: unknown,
         })
     }
@@ -95,7 +95,7 @@ pub(super) fn runtime_status(store: &Store) -> Result<Status> {
 }
 
 // Persisted projections use the caller's connection and preserve its snapshot.
-pub(super) fn read_pools(db: &Connection, version: u32) -> Result<Vec<PoolStatus>> {
+pub(super) fn read_pools(db: &Connection) -> Result<Vec<PoolStatus>> {
     let mut stmt = db.prepare("SELECT id,name,generation,enabled FROM pools ORDER BY name")?;
     let rows = stmt.query_map([], |r| {
         Ok(PoolStatus {
@@ -119,10 +119,8 @@ pub(super) fn read_pools(db: &Connection, version: u32) -> Result<Vec<PoolStatus
     for row in rows {
         let mut pool = row?;
         pool.addresses = read_addresses(db, &pool.id)?;
-        if version >= 16 {
-            populate_current_pool(db, &mut pool)?;
-        }
-        pool.retirement_accounting = RetirementAccounting::from_wallets(&pool.addresses, version)?;
+        populate_current_pool(db, &mut pool)?;
+        pool.retirement_accounting = RetirementAccounting::from_wallets(&pool.addresses)?;
         pools.push(pool);
     }
     Ok(pools)
@@ -159,15 +157,12 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
         [&pool.id],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
     for wallet in &mut pool.addresses {
-        if version >= 18 {
-            (wallet.low_balance, wallet.balance_refresh_error) = db.query_row(
-                "SELECT low_balance,balance_refresh_error FROM wallets WHERE id=?1",
-                [&wallet.id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
-        }
+        (wallet.low_balance, wallet.balance_refresh_error) = db.query_row(
+            "SELECT low_balance,balance_refresh_error FROM wallets WHERE id=?1",
+            [&wallet.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
         wallet.signed_exposure_atomic = match evidence::exposure(db, &wallet.id) {
             Ok(value) => Some(value.to_string()),
             Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => None,
@@ -178,11 +173,7 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
             [&wallet.id],
             |r| r.get(0),
         )?;
-        wallet.destination_recorded = match funding::readiness_recorded_valid(db, &wallet.id) {
-            Ok(value) => value,
-            Err(error) if error.is::<super::super::base::evidence::EvidenceFailure>() => false,
-            Err(error) => return Err(error),
-        };
+        wallet.destination_recorded = funding::initial_credit_recorded(db, &wallet.id)?;
         wallet.destination_disputed = db.query_row(
             "SELECT readiness_disputed FROM funding_jobs WHERE wallet_id=?1",
             [&wallet.id],
@@ -232,40 +223,34 @@ fn populate_current_pool(db: &Connection, pool: &mut PoolStatus) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn read_operations(db: &Connection, version: u32) -> Result<Vec<OperationStatus>> {
-    if version >= 3 {
-        let mut stmt =
-            db.prepare("SELECT id,facts,submission,attempts FROM treasury_operations ORDER BY id")?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, i64>(3)?,
-            ))
-        })?;
-        rows.map(|row| -> Result<OperationStatus> {
-            let (operation_id, facts, mut submission, attempts) = row?;
-            if version >= 8
-                && db.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)",
-                    [&operation_id],
-                    |r| r.get::<_, bool>(0),
-                )?
-            {
-                submission = "EXPIRED".into();
-            }
-            Ok(OperationStatus {
-                operation_id,
-                facts: serde_json::from_str(&facts)?,
-                submission,
-                attempts,
-            })
+pub(super) fn read_operations(db: &Connection) -> Result<Vec<OperationStatus>> {
+    let mut stmt =
+        db.prepare("SELECT id,facts,submission,attempts FROM treasury_operations ORDER BY id")?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, i64>(3)?,
+        ))
+    })?;
+    rows.map(|row| -> Result<OperationStatus> {
+        let (operation_id, facts, mut submission, attempts) = row?;
+        if db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM expired_operations WHERE id=?1)",
+            [&operation_id],
+            |r| r.get::<_, bool>(0),
+        )? {
+            submission = "EXPIRED".into();
+        }
+        Ok(OperationStatus {
+            operation_id,
+            facts: serde_json::from_str(&facts)?,
+            submission,
+            attempts,
         })
-        .collect::<Result<Vec<_>>>()
-    } else {
-        Ok(vec![])
-    }
+    })
+    .collect::<Result<Vec<_>>>()
 }
 
 #[cfg(test)]
@@ -308,7 +293,7 @@ mod tests {
             retired(Some("5"), "9"),
             retired(None, "0"),
         ];
-        let totals = RetirementAccounting::from_wallets(&wallets, 16).unwrap();
+        let totals = RetirementAccounting::from_wallets(&wallets).unwrap();
         assert_eq!(
             totals.automatic_recorded_confirmed_atomic.as_deref(),
             Some("8")
@@ -320,20 +305,11 @@ mod tests {
             Some("0")
         );
         assert_eq!(totals.historical_unknown_count, 1);
-        let historical = RetirementAccounting::from_wallets(&[retired(None, "0")], 12).unwrap();
-        assert!(historical.automatic_recorded_confirmed_atomic.is_none());
-        assert!(historical.automatic_count.is_none());
-        assert!(historical.manual_recorded_confirmed_atomic.is_none());
-        assert!(historical.manual_count.is_none());
-        assert_eq!(historical.historical_unknown_count, 1);
         assert!(
-            RetirementAccounting::from_wallets(
-                &[
-                    retired(Some(&U256::MAX.to_string()), "0"),
-                    retired(Some("1"), "1")
-                ],
-                16
-            )
+            RetirementAccounting::from_wallets(&[
+                retired(Some(&U256::MAX.to_string()), "0"),
+                retired(Some("1"), "1")
+            ])
             .is_err()
         );
     }

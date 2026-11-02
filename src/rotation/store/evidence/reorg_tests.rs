@@ -280,6 +280,7 @@ async fn retired_authorizations_reopen_and_finish_in_existing_pages_across_resta
 #[tokio::test]
 async fn encountered_malformed_resolutions_reopen_and_finish_at_the_same_anchor() {
     for corruption in [
+        "UPDATE wallets SET financial_height=NULL,financial_hash=NULL,debit_height=NULL,debit_hash=NULL WHERE id=(SELECT wallet_id FROM payment_attempts WHERE id='proof')",
         "UPDATE payment_resolutions SET height='not-a-height'",
         "UPDATE payment_resolutions SET height=x'3838'",
         "UPDATE payment_resolutions SET height=-1",

@@ -206,14 +206,19 @@ expiry (40 blocks before NU7, 120 afterward); shielding uses the backend's ordin
 finite default. No production zero-expiry constructor requires a parallel recovery
 framework.
 
-Schema-21/22 stores upgrade additively to schema 23 under exclusive ownership;
-read-only status accepts all three versions without migrating. Older binaries
-reject schema 23 because they cannot enforce archived fulfillment against a new
-attempt. Existing historical source dispositions,
-original bytes and snapshot references remain preserved. Historical rows do not
-reopen terminal work or authorize automatic disclosure; the exact-ID legacy guard
-prevents previously reopened originals from being sent automatically. Multiple
-legacy pending rows remain compatible and continue through the existing owner.
+Application owner opens and read-only inspection accept database schema 23 only.
+Unsupported old or future schemas fail before changing source state; SDK codec
+compatibility does not authorize database conversion. Current fresh stores include
+source-disposition and payment-resolution histories; an interrupted schema-23
+initialization can finish their empty structures idempotently under exclusive
+ownership. Existing dispositions, original bytes and snapshot references remain
+preserved. Historical rows do not reopen terminal work or authorize automatic
+disclosure; the exact-ID history guard prevents previously closed originals from
+being sent automatically. Actual pending originals continue through their existing
+owner. Database schema 23 is independent of SDK wallet format 45 and public or
+encrypted record formats; see [versioned output](wallet-cli.md#versioned-capacity-output).
+No reader removal grants another deposit or permits rollback past accepted
+financial work.
 
 ## Build-time parameter downloads
 

@@ -475,10 +475,6 @@ async fn failed_swap_retains_original_source_terms_while_another_pool_serves() {
             .filter(|j| j.pool_name == "refund")
             .all(|j| j.phase == FundingPhase::RefundPending)
     );
-    assert!(
-        status.legacy_refunds.is_none(),
-        "API status must never manufacture on-chain refund credit"
-    );
     let db = rusqlite::Connection::open(&h.f.db).unwrap();
     // Accepted source terms are immutable audit data. Provider fulfillment
     // closes source work without fabricating an SDK confirmation for it.

@@ -1,162 +1,172 @@
-//! Read-only status uses the historical schema's actual available columns.
+//! Current read-only projections preserve journals and expose damaged evidence.
 use super::*;
 use serde_json::json;
 
-fn historical(version: u32) -> Connection {
-    let db = Connection::open_in_memory().unwrap();
-    let mut section = 0;
-    for line in include_str!("../../../tests/fixtures/state/historical.sql").lines() {
-        if let Some(number) = line.strip_prefix("-- version ") {
-            section = number.parse::<u32>().unwrap();
-        } else if !line.starts_with("--") && section <= version {
-            db.execute_batch(line).unwrap();
-        }
-    }
-    db.execute_batch(&format!(
-        "PRAGMA user_version={version}; PRAGMA foreign_keys=ON;
-        INSERT INTO instance VALUES ('fixture',1,123,'mainnet',0);
-        INSERT INTO snapshots VALUES (1,X'00');
-        INSERT INTO pools(id,name,target) VALUES ('z','zeta','5'),('a','alpha','5');
-        INSERT INTO wallets(id,pool_id,sequence,address,key,target,role,balance) VALUES
-        ('late','a',2,'late-address',X'00','5','RETIRED','7'),
-        ('first','a',1,'first-address',X'00','5','READY','5');
-        INSERT INTO budget_entries VALUES ('operation','a',1,1,10,10,0);
-        INSERT INTO outgoing VALUES ('operation','PREPARED',X'00',1);"
-    ))
+fn current() -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        123,
+        b"initial",
+    )
     .unwrap();
-    if version >= 3 {
-        let facts = json!({"txid":"fixture-tx","expiry_height":100,"amount_zatoshis":8,"fee_zatoshis":2,"deadline":1000});
-        db.execute(
-            "INSERT INTO treasury_operations VALUES ('operation',?1,'BROADCAST_REQUESTED',2)",
-            [facts.to_string()],
+    for name in ["zeta", "alpha"] {
+        super::super::test_support::declare_two_reserves(
+            &mut store,
+            name,
+            "0.000005",
+            Some(U256::from(10)),
+            0,
         )
         .unwrap();
     }
-    if version >= 4 {
-        db.execute_batch("INSERT INTO funding_jobs VALUES ('job','first','QUEUED','5');
-            INSERT INTO funding_progress(job_id,operation_id,phase) VALUES ('job','operation','\"RECOVERY_REQUIRED\"');").unwrap();
-    }
-    if version >= 7 {
-        db.execute_batch("INSERT INTO refund_outputs VALUES ('refund',0,'operation',3,50,0);")
-            .unwrap();
-    }
-    if version >= 8 {
-        db.execute_batch("INSERT INTO expired_operations VALUES ('operation',101,1);")
-            .unwrap();
-    }
-    db
+    store
+        .accept_preparation("operation", None, 10, None)
+        .unwrap();
+    store
+        .prepare_with_facts(
+            "operation",
+            store.snapshot().unwrap().0,
+            b"prepared",
+            super::super::test_support::transaction_raw(100).as_slice(),
+            Some(TransactionFacts {
+                txid: super::super::test_support::transaction_txid(100),
+                expiry_height: 100,
+                amount_zatoshis: 8,
+                fee_zatoshis: 2,
+                deadline: Some(1000),
+            }),
+        )
+        .unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO expired_operations VALUES ('operation',101,?1)",
+            [store.snapshot().unwrap().0],
+        )
+        .unwrap();
+    (dir, store)
 }
 
 #[test]
-fn historical_status_projects_available_fields_without_mutating_journals() {
-    for version in 0..=12 {
-        let db = historical(version);
-        db.execute_batch("PRAGMA query_only=ON").unwrap();
-        let changes = db.total_changes();
-        let report =
-            read_status(&db).unwrap_or_else(|error| panic!("version {version}: {error:#}"));
-        assert_eq!(report.state_schema_version, version);
-        assert_eq!(report.schema_version, 5);
-        assert_eq!(report.treasury_id, "fixture");
-        assert_eq!(report.birthday, 123);
-        assert_eq!(report.snapshot_revision, 1);
-        assert!(report.outgoing_pending);
-        assert!(report.sync.is_none());
-        assert!(!report.sync_complete);
-        assert_eq!(
-            report
-                .pools
-                .iter()
-                .map(|pool| pool.name.as_str())
-                .collect::<Vec<_>>(),
-            ["alpha", "zeta"]
-        );
-        let pool = &report.pools[0];
-        assert_eq!(
-            pool.addresses
-                .iter()
-                .map(|wallet| wallet.id.as_str())
-                .collect::<Vec<_>>(),
-            ["first", "late"]
-        );
-        assert!(!pool.serving_ready && !pool.inventory_ready);
-        assert!(pool.reserve_claims.is_empty());
-        assert!(pool.payment_limit_atomic.is_none());
-        assert!(pool.retirement_tolerance_atomic.is_none());
-        assert_eq!(pool.funding_degraded, version >= 4);
-        assert!(!report.pools[1].funding_degraded);
-        assert_eq!(pool.retirement_accounting.historical_unknown_count, 1);
-        assert!(pool.retirement_accounting.automatic_count.is_none());
-        for wallet in &pool.addresses {
-            assert!(wallet.signed_exposure_atomic.is_none());
-            assert!(!wallet.destination_recorded);
-            assert!(wallet.runtime_balance_evidence.is_none());
-        }
-        assert_eq!(report.funding_jobs.len(), usize::from(version >= 4));
-        assert_eq!(
-            report.legacy_refunds.as_ref().map_or(0, Vec::len),
-            usize::from(version >= 7)
-        );
-        assert_eq!(report.treasury_operations.len(), usize::from(version >= 3));
-        if version >= 3 {
-            let operation = &report.treasury_operations[0];
-            assert_eq!(operation.operation_id, "operation");
-            assert_eq!(operation.attempts, 2);
-            assert_eq!(operation.facts.amount_zatoshis, 8);
-            assert_eq!(
-                operation.submission,
-                if version >= 8 {
-                    "EXPIRED"
-                } else {
-                    "BROADCAST_REQUESTED"
-                }
-            );
-            let saved: String = db
-                .query_row("SELECT submission FROM treasury_operations", [], |row| {
-                    row.get(0)
-                })
-                .unwrap();
-            assert_eq!(saved, "BROADCAST_REQUESTED", "expiry is projection only");
-        }
-        if version >= 7 {
-            assert_eq!(report.legacy_refunds.as_ref().unwrap()[0].amount, 3);
-            assert_eq!(
-                report.legacy_refunds.as_ref().unwrap()[0].operation_id,
-                "operation"
-            );
-        }
-        assert_eq!(
-            serde_json::to_value(read_status(&db).unwrap()).unwrap(),
-            serde_json::to_value(report).unwrap()
-        );
-        assert_eq!(db.total_changes(), changes);
-    }
+fn current_status_projects_expiry_without_mutating_journals() {
+    let (_dir, store) = current();
+    let raw: Vec<u8> = store
+        .db
+        .query_row("SELECT raw FROM outgoing WHERE id='operation'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    store.db.execute_batch("PRAGMA query_only=ON").unwrap();
+    let changes = store.db.total_changes();
+    let report = read_status(&store.db).unwrap();
+    assert_eq!(report.schema_version, 6);
+    assert_eq!(report.state_schema_version, 23);
+    assert_eq!(report.treasury_id, store.id());
+    assert_eq!(report.birthday, 123);
+    assert_eq!(report.snapshot_revision, 2);
+    assert!(report.outgoing_pending);
+    assert!(report.sync.is_none());
+    assert!(!report.sync_complete);
+    assert_eq!(
+        report
+            .pools
+            .iter()
+            .map(|pool| pool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha", "zeta"]
+    );
+    assert_eq!(report.funding_jobs.len(), 4);
+    assert_eq!(report.treasury_operations.len(), 1);
+    let operation = &report.treasury_operations[0];
+    assert_eq!(operation.operation_id, "operation");
+    assert_eq!(operation.submission, "EXPIRED");
+    assert_eq!(operation.facts.amount_zatoshis, 8);
+    let saved: (String, Vec<u8>) = store.db.query_row(
+        "SELECT t.submission,o.raw FROM treasury_operations t JOIN outgoing o ON o.id=t.id WHERE t.id='operation'",
+        [], |row| Ok((row.get(0)?,row.get(1)?)),
+    ).unwrap();
+    assert_eq!(saved, ("PREPARED".into(), raw));
+    assert_eq!(
+        serde_json::to_value(read_status(&store.db).unwrap()).unwrap(),
+        serde_json::to_value(report).unwrap()
+    );
+    assert_eq!(store.db.total_changes(), changes);
 }
 
 #[test]
 fn malformed_status_observations_and_operation_facts_fail_without_repair() {
+    let (_dir, store) = current();
     for corrupt_sync in [true, false] {
-        let db = historical(3);
         let query = if corrupt_sync {
-            db.execute("INSERT INTO treasury_sync VALUES (1,'not-json')", [])
+            store
+                .db
+                .execute("INSERT INTO treasury_sync VALUES (1,'not-json')", [])
                 .unwrap();
             "SELECT observation FROM treasury_sync"
         } else {
-            db.execute("UPDATE treasury_operations SET facts='not-json'", [])
+            store.db.execute("DELETE FROM treasury_sync", []).unwrap();
+            store
+                .db
+                .execute("UPDATE treasury_operations SET facts='not-json'", [])
                 .unwrap();
             "SELECT facts FROM treasury_operations"
         };
-        db.execute_batch("PRAGMA query_only=ON").unwrap();
-        let changes = db.total_changes();
-        let error = read_status(&db)
+        store.db.execute_batch("PRAGMA query_only=ON").unwrap();
+        let changes = store.db.total_changes();
+        let error = read_status(&store.db)
             .err()
-            .expect("invalid persisted JSON cannot become a partial status");
+            .expect("invalid persisted JSON cannot become partial status");
         assert!(error.is::<serde_json::Error>());
         assert_eq!(
-            db.query_row(query, [], |row| row.get::<_, String>(0))
+            store
+                .db
+                .query_row(query, [], |row| row.get::<_, String>(0))
                 .unwrap(),
             "not-json"
         );
-        assert_eq!(db.total_changes(), changes);
+        assert_eq!(store.db.total_changes(), changes);
+        store.db.execute_batch("PRAGMA query_only=OFF").unwrap();
     }
+}
+
+#[test]
+fn malformed_exposure_is_unknown_only_for_affected_wallet_without_repair() {
+    let (_dir, store) = current();
+    let report = read_status(&store.db).unwrap();
+    let pool = &report.pools[0];
+    let damaged = &pool.addresses[0];
+    let sibling = &pool.addresses[1];
+    store.db.execute(
+        "INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) VALUES ('damaged',?1,?2,0,'not-an-amount','fixture','POSSIBLY_SUBMITTED')",
+        params![pool.id,damaged.id],
+    ).unwrap();
+    store.db.execute_batch("PRAGMA query_only=ON").unwrap();
+    let changes = store.db.total_changes();
+    let observed = read_status(&store.db).unwrap();
+    let wallets = &observed.pools[0].addresses;
+    assert_eq!(wallets.len(), 2);
+    assert_eq!(wallets[0].id, damaged.id);
+    assert!(wallets[0].signed_exposure_atomic.is_none());
+    assert_eq!(wallets[1].id, sibling.id);
+    assert_eq!(wallets[1].signed_exposure_atomic.as_deref(), Some("0"));
+    assert_eq!(observed.pools.len(), 2);
+    assert_eq!(
+        store
+            .db
+            .query_row(
+                "SELECT amount FROM payment_attempts WHERE id='damaged'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        "not-an-amount"
+    );
+    assert_eq!(store.db.total_changes(), changes);
+    let encoded = serde_json::to_value(observed).unwrap();
+    assert_eq!(
+        encoded["pools"][0]["addresses"][0]["signed_exposure_atomic"],
+        json!(null)
+    );
 }

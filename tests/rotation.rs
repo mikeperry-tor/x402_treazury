@@ -559,57 +559,6 @@ fn sync_checkpoints_are_atomic_without_a_local_capacity_gate() {
 }
 
 #[test]
-fn legacy_sync_schema_is_rejected_without_changing_wallet() {
-    let dir = tempfile::tempdir().unwrap();
-    let s = create(dir.path());
-    let id = s.id().to_owned();
-    drop(s);
-    let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
-    // Build an actual empty version-1 schema while retaining the encrypted identity
-    // and snapshot. Merely lowering user_version on schema16 is not a legacy fixture.
-    let tables: Vec<String> = db
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('instance','snapshots')")
-        .unwrap()
-        .query_map([], |row| row.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    for table in tables {
-        db.execute_batch(&format!("DROP TABLE \"{}\";", table.replace('"', "\"\"")))
-            .unwrap();
-    }
-    let mut version = 0;
-    for line in include_str!("fixtures/state/historical.sql").lines() {
-        if let Some(value) = line.strip_prefix("-- version ") {
-            version = value.parse::<u32>().unwrap();
-        } else if version <= 1
-            && line.starts_with("CREATE ")
-            && !line.starts_with("CREATE TABLE instance(")
-            && !line.starts_with("CREATE TABLE snapshots(")
-        {
-            db.execute_batch(line).unwrap();
-        }
-    }
-    db.execute_batch("PRAGMA user_version=1;").unwrap();
-    drop(db);
-    assert!(status(&dir.path().join("state")).unwrap().sync.is_none());
-    let saved = std::fs::read(dir.path().join("state/state.sqlite")).unwrap();
-    let error = Store::open(&dir.path().join("state"), &dir.path().join("key"), &id)
-        .err()
-        .unwrap();
-    assert!(
-        error
-            .to_string()
-            .contains("stopped-service conversion required")
-    );
-    assert_eq!(
-        std::fs::read(dir.path().join("state/state.sqlite")).unwrap(),
-        saved
-    );
-    assert!(status(&dir.path().join("state")).unwrap().sync.is_none());
-}
-
-#[test]
 fn submission_contract_only_accepts_durable_pending_bytes() {
     use x402_treazury::rotation::transaction::PreparedTransaction;
     let dir = tempfile::tempdir().unwrap();

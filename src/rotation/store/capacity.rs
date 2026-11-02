@@ -1188,7 +1188,7 @@ mod tests {
     }
 
     #[test]
-    fn reopening_schema16_adds_lookup_indexes_without_changing_inventory() {
+    fn current_lookup_indexes_preserve_inventory_through_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let key = dir.path().join("key");
@@ -1201,10 +1201,6 @@ mod tests {
             .allocate_capacity_kind(&pool, AllocationKind::Small, true)
             .unwrap();
         let before = serde_json::to_value(store.status().unwrap()).unwrap();
-        store
-            .db
-            .execute_batch("DROP INDEX wallet_role_sequence; DROP INDEX wallet_live_sequence; DROP INDEX funding_claim_lookup; DROP INDEX funding_recovery_job")
-            .unwrap();
         drop(store);
         for _ in 0..2 {
             let reopened = Store::open(&state, &key, &id).unwrap();

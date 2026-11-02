@@ -81,127 +81,80 @@ fn populated(dir: &Path) -> Store {
     s.db.execute("INSERT INTO funding_recovery(operation_id,job_id,phase,quote,refund) SELECT 'prior-operation',p.job_id,p.phase,p.quote,r.address FROM funding_progress p JOIN funding_refunds r ON r.job_id=p.job_id ORDER BY p.rowid LIMIT 1",[]).unwrap();
     s
 }
-// Frozen historical schemas still contain these fields. Populate them explicitly
-// in legacy donors instead of making current runtime schemas depend on them.
-fn add_obsolete_metadata(store: &Store) {
-    store.db.execute_batch("UPDATE operation_network SET recipient='0x0000000000000000000000000000000000000001' WHERE recipient IS NULL; CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT,day INTEGER,original_day INTEGER,requested INTEGER,reserved INTEGER,consumed INTEGER); INSERT INTO budget_entries SELECT n.operation_id,f.pool_id,0,0,100,CASE WHEN o.state='PREPARED' THEN 100 ELSE 0 END,CASE WHEN o.state='RESOLVED' THEN 100 ELSE 0 END FROM operation_network n JOIN funding_progress p ON p.operation_id=n.operation_id JOIN funding_jobs f ON f.id=p.job_id LEFT JOIN outgoing o ON o.id=n.operation_id; CREATE TABLE refund_outputs(txid TEXT,output_index INTEGER,operation_id TEXT,amount INTEGER,height INTEGER,credited INTEGER); CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY,height INTEGER NOT NULL,hash TEXT NOT NULL); ALTER TABLE funding_progress ADD COLUMN turn INTEGER NOT NULL DEFAULT 0; CREATE INDEX funding_schedule_turn ON funding_progress(turn); INSERT INTO payment_anchors SELECT id,100,'base-block' FROM pools;").unwrap();
+#[test]
+fn unsupported_schema_boundaries_reject_without_mutating_accepted_work() {
+    for version in [22, 24] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = populated(dir.path());
+        let id = store.id().to_owned();
+        store
+            .db
+            .pragma_update(None, "user_version", version)
+            .unwrap();
+        drop(store);
+        let state = dir.path().join("state");
+        let contents = || {
+            fs::read_dir(&state)
+                .unwrap()
+                .map(|entry| {
+                    let entry = entry.unwrap();
+                    (entry.file_name(), fs::read(entry.path()).unwrap())
+                })
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
+        let before = contents();
+        assert!(Store::open(&state, &dir.path().join("key"), &id).is_err());
+        let after_owner = contents();
+        assert!(
+            after_owner == before,
+            "owner rejection changed state directory entries: {:?}",
+            after_owner.keys().collect::<Vec<_>>()
+        );
+        assert!(status(&state).is_err());
+        assert!(treasury_id(&state).is_err());
+        assert!(static_ownership(&state).is_err());
+        assert!(inspect_wallet_snapshot(&state, &dir.path().join("key"), Some(&id)).is_err());
+        let after = contents();
+        // Live read-only WAL readers may create SQLite coordination files.
+        // Existing database and financial journals must remain exact.
+        for (name, bytes) in &before {
+            if name != "state.sqlite-shm" {
+                assert!(
+                    after.get(name) == Some(bytes),
+                    "inspection changed {name:?}"
+                );
+            }
+        }
+        for name in after.keys().filter(|name| !before.contains_key(*name)) {
+            assert!(
+                name == "state.sqlite-wal" || name == "state.sqlite-shm",
+                "inspection created {name:?}"
+            );
+            if name == "state.sqlite-wal" {
+                assert!(
+                    after[name].is_empty(),
+                    "inspection wrote a new financial journal"
+                );
+            }
+        }
+    }
 }
 
 #[test]
-fn populated_historical_schemas_require_explicit_conversion_without_mutation() {
-    let donor = tempfile::tempdir().unwrap();
-    let s = populated(donor.path());
-    add_obsolete_metadata(&s);
-    let id = s.id().to_owned();
-    drop(s);
-    for version in 0..=12 {
+fn invalid_or_ambiguous_runtime_identity_is_rejected_without_repair() {
+    for statement in [
+        "UPDATE instance SET id='invalid-uuid'",
+        "INSERT INTO instance SELECT '00000000-0000-0000-0000-000000000001',version,birthday,network,account FROM instance",
+    ] {
         let dir = tempfile::tempdir().unwrap();
+        let store = populated(dir.path());
+        store.db.execute_batch(statement).unwrap();
+        drop(store);
         let state = dir.path().join("state");
-        fs::create_dir(&state).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
-        }
-        fs::copy(donor.path().join("key"), dir.path().join("key")).unwrap();
-        private_file(&state.join("owner.lock"), true).unwrap();
-        private_file(&state.join("state.sqlite"), true).unwrap();
-        let db = Connection::open(state.join("state.sqlite")).unwrap();
-        let mut section = 0;
-        for line in include_str!("../fixtures/state/historical.sql").lines() {
-            if let Some(n) = line.strip_prefix("-- version ") {
-                section = n.parse::<u32>().unwrap();
-            } else if !line.starts_with("--") && section <= version {
-                db.execute_batch(line).unwrap();
-            }
-        }
-        db.execute(
-            "ATTACH DATABASE ?1 AS donor",
-            [donor.path().join("state/state.sqlite").to_str().unwrap()],
-        )
-        .unwrap();
-        let tables = db
-            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY rowid")
-            .unwrap()
-            .query_map([], |r| r.get::<_, String>(0))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        db.execute_batch("BEGIN;").unwrap();
-        for table in tables {
-            let columns = db
-                .prepare(&format!("PRAGMA main.table_info({table})"))
-                .unwrap()
-                .query_map([], |row| row.get::<_, String>(1))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap()
-                .join(",");
-            let projection = columns
-                .split(',')
-                .map(|column| match (table.as_str(), column) {
-                    ("pools", "target") => "'5000000' AS target",
-                    ("pools", "bootstrapped") => "1 AS bootstrapped",
-                    _ => column,
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            db.execute_batch(&format!(
-                "INSERT INTO main.{table}({columns}) SELECT {projection} FROM donor.{table};"
-            ))
-            .unwrap();
-        }
-        let violations = db
-            .prepare("PRAGMA foreign_key_check")
-            .unwrap()
-            .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        assert!(
-            violations.is_empty(),
-            "historical version {version}: {violations:?}"
-        );
-        db.execute_batch(&format!(
-            "PRAGMA user_version={version}; COMMIT; DETACH DATABASE donor;"
-        ))
-        .unwrap_or_else(|e| panic!("version {version}: {e}"));
-        drop(db);
         let before = fs::read(state.join("state.sqlite")).unwrap();
-        for _ in 0..2 {
-            let error = Store::open(&state, &dir.path().join("key"), &id)
-                .err()
-                .expect("occupied legacy state must require explicit conversion");
-            assert!(
-                error
-                    .to_string()
-                    .contains("stopped-service conversion required"),
-                "version {version}: {error}"
-            );
-            assert_eq!(fs::read(state.join("state.sqlite")).unwrap(), before);
-            let db = Connection::open_with_flags(
-                state.join("state.sqlite"),
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-            )
-            .unwrap();
-            assert_eq!(
-                db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
-                    .unwrap(),
-                version
-            );
-            assert_eq!(
-                db.query_row("SELECT SUM(reserved) FROM budget_entries", [], |r| r
-                    .get::<_, i64>(0))
-                    .unwrap(),
-                100
-            );
-        }
+        assert!(treasury_id(&state).is_err());
+        assert!(static_ownership(&state).is_err());
+        assert_eq!(fs::read(state.join("state.sqlite")).unwrap(), before);
     }
 }
 
@@ -496,7 +449,6 @@ fn preparation_write_failures_roll_back_through_reopen() {
         )
         .unwrap();
         s.confirm_spend(&job.operation_id).unwrap();
-        assert!(s.status().unwrap().legacy_refunds.is_none());
     }
 }
 
@@ -600,105 +552,15 @@ fn admission_skips_retired_balances_but_retains_their_authorizations() {
 }
 
 #[test]
-fn unsigned_queries_and_rejected_legacy_reopen_preserve_all_journals() {
-    let donor = tempfile::tempdir().unwrap();
-    let store = populated(donor.path());
-    add_obsolete_metadata(&store);
-    let id = store.id().to_owned();
+fn unsigned_queries_preserve_current_journals() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = populated(dir.path());
     let pool = store.status().unwrap().pools.remove(0).id;
+    let before = store.db.total_changes();
     store.chain_query(&pool).unwrap();
     store.payment_chain_query(&pool).unwrap();
-    assert_eq!(
-        store
-            .db
-            .query_row("SELECT COUNT(*) FROM payment_attempts", [], |r| r
-                .get::<_, i64>(0))
-            .unwrap(),
-        1
-    );
-    drop(store);
-
-    // Construct an actual frozen legacy database. Fresh schema16 deliberately
-    // cannot admit unsigned rows; never relax its CHECK to manufacture this case.
-    let dir = tempfile::tempdir().unwrap();
-    let state = dir.path().join("state");
-    fs::create_dir(&state).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
-    }
-    fs::copy(donor.path().join("key"), dir.path().join("key")).unwrap();
-    private_file(&state.join("owner.lock"), true).unwrap();
-    let database = state.join("state.sqlite");
-    private_file(&database, true).unwrap();
-    let db = Connection::open(&database).unwrap();
-    db.execute_batch(include_str!("../fixtures/state/historical.sql"))
-        .unwrap();
-    db.execute(
-        "ATTACH DATABASE ?1 AS donor",
-        [donor.path().join("state/state.sqlite").to_str().unwrap()],
-    )
-    .unwrap();
-    let tables = db
-        .prepare("SELECT name FROM main.sqlite_master WHERE type='table' ORDER BY rowid")
-        .unwrap()
-        .query_map([], |r| r.get::<_, String>(0))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
-    for table in tables {
-        let columns = db
-            .prepare(&format!("PRAGMA main.table_info({table})"))
-            .unwrap()
-            .query_map([], |r| r.get::<_, String>(1))
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap();
-        let projection = columns
-            .iter()
-            .map(|column| match (table.as_str(), column.as_str()) {
-                ("pools", "target") => "'5000000' AS target",
-                ("pools", "bootstrapped") => "1 AS bootstrapped",
-                _ => column.as_str(),
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        db.execute_batch(&format!(
-            "INSERT INTO main.{table}({}) SELECT {projection} FROM donor.{table}",
-            columns.join(",")
-        ))
-        .unwrap();
-    }
-    db.execute("INSERT INTO payment_attempts(id,pool_id,wallet_id,generation,amount,requirements_hash,state) SELECT 'unsigned',pool_id,wallet_id,generation,amount,requirements_hash,'ADMITTED' FROM payment_attempts WHERE id='payment'", []).unwrap();
-    db.execute_batch("PRAGMA user_version=12; DETACH DATABASE donor;")
-        .unwrap();
-    drop(db);
-    let before = fs::read(&database).unwrap();
-    let error = Store::open(&state, &dir.path().join("key"), &id)
-        .err()
-        .expect("legacy state requires explicit conversion");
-    assert!(
-        error
-            .to_string()
-            .contains("stopped-service conversion required")
-    );
-    assert_eq!(fs::read(&database).unwrap(), before);
-    let db = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-    let rows: Vec<(String, String)> = db
-        .prepare("SELECT id,state FROM payment_attempts ORDER BY id")
-        .unwrap()
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-        .unwrap()
-        .collect::<rusqlite::Result<_>>()
-        .unwrap();
-    assert_eq!(
-        rows,
-        vec![
-            ("payment".into(), "POSSIBLY_SUBMITTED".into()),
-            ("unsigned".into(), "ADMITTED".into())
-        ]
-    );
+    let after = store.db.total_changes();
+    assert_eq!(before, after);
 }
 
 #[tokio::test]
@@ -1036,35 +898,9 @@ fn obsolete_capacity_metadata_is_optional_and_never_rewritten() {
         resolutions: Default::default(),
     };
     store.publish_scoped_evidence(&pool, view()).unwrap();
-    // Reproduce the old schema16 layout with retained metadata. Opening and
-    // publishing new evidence must neither require nor rewrite these old fields.
-    store.db.execute_batch("UPDATE operation_network SET recipient='0x0000000000000000000000000000000000000001' WHERE recipient IS NULL; CREATE TABLE budget_entries(id TEXT PRIMARY KEY,pool_id TEXT,day INTEGER,original_day INTEGER,requested INTEGER,reserved INTEGER,consumed INTEGER); INSERT INTO budget_entries SELECT n.operation_id,f.pool_id,0,0,100,CASE WHEN o.state='PREPARED' THEN 100 ELSE 0 END,CASE WHEN o.state='RESOLVED' THEN 100 ELSE 0 END FROM operation_network n JOIN funding_progress p ON p.operation_id=n.operation_id JOIN funding_jobs f ON f.id=p.job_id LEFT JOIN outgoing o ON o.id=n.operation_id; CREATE TABLE refund_outputs(txid TEXT,output_index INTEGER,operation_id TEXT,amount INTEGER,height INTEGER,credited INTEGER); CREATE TABLE payment_anchors(pool_id TEXT PRIMARY KEY,height INTEGER NOT NULL,hash TEXT NOT NULL); ALTER TABLE funding_progress ADD COLUMN turn INTEGER NOT NULL DEFAULT 0; CREATE INDEX funding_schedule_turn ON funding_progress(turn); UPDATE funding_progress SET turn=7;").unwrap();
-    store
-        .db
-        .execute(
-            "INSERT INTO payment_anchors VALUES (?1,100,'original')",
-            [&pool],
-        )
-        .unwrap();
     drop(store);
     let mut reopened =
         Store::open(&dir.path().join("state"), &dir.path().join("key"), &id).unwrap();
     reopened.publish_scoped_evidence(&pool, view()).unwrap();
-    let anchor: (i64, String) = reopened
-        .db
-        .query_row(
-            "SELECT height,hash FROM payment_anchors WHERE pool_id=?1",
-            [&pool],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
-    assert_eq!(anchor, (100, "original".into()));
-    assert_eq!(
-        reopened
-            .db
-            .query_row("SELECT MIN(turn) FROM funding_progress", [], |r| r
-                .get::<_, i64>(0))
-            .unwrap(),
-        7
-    );
+    assert_eq!(reopened.status().unwrap().state_schema_version, 23);
 }
