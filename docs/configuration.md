@@ -1464,6 +1464,17 @@ initiate HTTP, refresh catalogs or alter tool descriptions. Receipt age, identit
 partitioning and expiry are described in [architecture](architecture.md#wallet-selection-and-network-isolation)
 and [resource limits](local-resource-limits.md).
 
+Managed API results also carry their own latest validated offer in a separate MCP
+JSON text block, including errors after validation. `x402_pricing.amount` is an
+exact decimal string, `currency` is `USDC` and `basis` is `observed_offer`. It is
+independent of the shared hint cache and does not represent settlement or the sum
+of multiple authorizations. Calls with no validated offer and static SDK signing
+produce no pricing block. A final unsigned success after a payer handoff retains
+any target offer validated earlier in that logical invocation, including when a
+configured API relay delivers the response. Relay fees do not supply a target offer.
+See [output boundaries](architecture.md#mcp-and-output-boundaries)
+for block order and body-only convenience methods.
+
 ## Automatic discovery disk cache
 
 Deployments with an **existing** `treasury.state_dir` automatically use its

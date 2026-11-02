@@ -1,11 +1,12 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use x402_treazury::mcp_wire::McpResponse;
-use x402_treazury::output::{HttpOutput, ImageLimits, ResponseMapping};
+use x402_treazury::output::{HttpOutput, ImageLimits, ObservedPrice, ResponseMapping, ToolOutput};
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
 fn response(bytes: Vec<u8>, mime: &str, paid: bool) -> HttpOutput {
     HttpOutput {
+        observed_price: None,
         advisories: vec![],
         bytes,
         mime_type: Some(mime.into()),
@@ -15,6 +16,91 @@ fn response(bytes: Vec<u8>, mime: &str, paid: bool) -> HttpOutput {
 }
 fn mapping(fields: Value) -> ResponseMapping {
     serde_json::from_value(json!({"images":fields})).unwrap()
+}
+
+#[test]
+fn observed_pricing_is_a_separate_block_after_images_before_advisories() {
+    let mapping: ResponseMapping = serde_json::from_value(json!({
+        "images":[{"pointer":"/payload/image","mime_type":"image/png"}],
+        "omit":["/payload"]
+    }))
+    .unwrap();
+    let mut response = response(
+        serde_json::to_vec(&json!({"payload":{"image":PNG},"id":"retained"})).unwrap(),
+        "application/json",
+        true,
+    );
+    let price = ObservedPrice {
+        amount: alloy_primitives::U256::from(5_000),
+    };
+    response.observed_price = Some(price);
+    response.advisories.push("existing request advisory".into());
+    let output = response
+        .render(Some(&mapping), &Default::default())
+        .unwrap();
+    assert_eq!(output.observed_price, Some(price));
+    assert!(output.payment_may_have_occurred);
+    let content = serde_json::to_value(output.into_content()).unwrap();
+    assert_eq!(content.as_array().unwrap().len(), 5);
+    assert!(content[0]["text"].as_str().unwrap().contains("retained"));
+    assert!(
+        !content[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("x402_pricing")
+    );
+    assert_eq!(content[1]["type"], "image");
+    assert_eq!(content[1]["data"], PNG);
+    assert_eq!(content[1]["mimeType"], "image/png");
+    assert_eq!(
+        serde_json::from_str::<Value>(content[2]["text"].as_str().unwrap()).unwrap(),
+        json!({
+            "x402_pricing":{"amount":"0.005","currency":"USDC","basis":"observed_offer"}
+        })
+    );
+    assert!(
+        content[3]["text"]
+            .as_str()
+            .unwrap()
+            .contains("omitted 1 field")
+    );
+    assert_eq!(content[4]["text"], "existing request advisory");
+}
+
+#[test]
+fn observed_pricing_preserves_original_text_and_body_only_consumers() {
+    let body = " {\"value\":18}\n";
+    for amount in [None, Some(0), Some(1), Some(1_000_000)] {
+        let price = amount.map(|amount| ObservedPrice {
+            amount: alloy_primitives::U256::from(amount),
+        });
+        let mut response = response(body.as_bytes().to_vec(), "application/json", false);
+        response.observed_price = price;
+        let output = response.render(None, &Default::default()).unwrap();
+        assert_eq!(output.observed_price, price);
+        assert_eq!(output.into_text().unwrap(), body);
+        let mut output = ToolOutput::text(body.into());
+        output.observed_price = price;
+        let content = serde_json::to_value(output.into_content()).unwrap();
+        assert_eq!(content[0]["text"], body);
+        assert_eq!(
+            content.as_array().unwrap().len(),
+            if price.is_some() { 2 } else { 1 }
+        );
+        if let Some(price) = price {
+            let block: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(block["x402_pricing"]["amount"], price.to_string());
+        }
+    }
+    let mut output = ToolOutput::text(body.into());
+    output.observed_price = Some(ObservedPrice {
+        amount: alloy_primitives::U256::from(1),
+    });
+    output.advisories.push("existing advisory".into());
+    assert_eq!(
+        output.into_text().unwrap(),
+        format!("{body}\nexisting advisory")
+    );
 }
 #[test]
 fn image_envelopes_preserve_metadata_and_text_remains_unchanged() {

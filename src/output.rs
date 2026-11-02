@@ -1,4 +1,5 @@
 //! Typed, bounded inline image results. No URL fetching, transcoding or artifact storage.
+pub use crate::pricing::ObservedPrice;
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -118,6 +119,7 @@ impl ResponseMapping {
 }
 #[derive(Debug)]
 pub struct HttpOutput {
+    pub observed_price: Option<ObservedPrice>,
     pub advisories: Vec<String>,
     pub bytes: Vec<u8>,
     pub mime_type: Option<String>,
@@ -133,6 +135,7 @@ pub struct InlineImage {
 }
 #[derive(Debug)]
 pub struct ToolOutput {
+    pub observed_price: Option<ObservedPrice>,
     /// Aggregate operation evidence for subsequent fallible output consumers.
     pub payment_may_have_occurred: bool,
     pub advisories: Vec<String>,
@@ -142,6 +145,7 @@ pub struct ToolOutput {
 impl ToolOutput {
     pub fn text(text: String) -> Self {
         Self {
+            observed_price: None,
             payment_may_have_occurred: false,
             text,
             advisories: vec![],
@@ -149,7 +153,7 @@ impl ToolOutput {
         }
     }
     pub fn into_text(self) -> Result<String> {
-        crate::payment::with_payment_context(
+        let result = crate::payment::with_payment_context(
             self.payment_may_have_occurred,
             if self.images.is_empty() {
                 Ok(())
@@ -158,7 +162,11 @@ impl ToolOutput {
                     "image result requires the typed MCP result interface"
                 ))
             },
-        )?;
+        );
+        result.map_err(|error| match self.observed_price {
+            Some(price) => price.attach(error),
+            None => error,
+        })?;
         Ok(if self.advisories.is_empty() {
             self.text
         } else {
@@ -172,6 +180,16 @@ impl ToolOutput {
                 .into_iter()
                 .map(|i| rmcp::model::ContentBlock::image(i.data, i.mime_type)),
         );
+        if let Some(price) = self.observed_price {
+            content.push(rmcp::model::ContentBlock::text(
+                json!({"x402_pricing": {
+                    "amount": price.to_string(),
+                    "currency": "USDC",
+                    "basis": "observed_offer"
+                }})
+                .to_string(),
+            ));
+        }
         content.extend(
             self.advisories
                 .into_iter()
@@ -269,6 +287,7 @@ impl HttpOutput {
         limits: &ImageLimits,
     ) -> Result<ToolOutput> {
         let paid = self.paid_submission || self.relay_payment_may_have_occurred;
+        let observed_price = self.observed_price;
         let advisories = std::mem::take(&mut self.advisories);
         crate::payment::with_payment_context(
             paid,
@@ -276,12 +295,17 @@ impl HttpOutput {
                 .map(|mut output| {
                     output.advisories.extend(advisories);
                     output.payment_may_have_occurred = paid;
+                    output.observed_price = observed_price;
                     output
                 })
                 .inspect_err(|_| {
                     tracing::warn!("API output conversion rejected; no partial result returned");
                 }),
         )
+        .map_err(|error| match observed_price {
+            Some(price) => price.attach(error),
+            None => error,
+        })
     }
     fn render_inner(
         self,
@@ -295,6 +319,7 @@ impl HttpOutput {
             bound(1, limits.max_images, "image_limits.max_images")?;
             let attachment = image(&self.bytes, mime, limits, &mut total)?;
             return Ok(ToolOutput {
+                observed_price: None,
                 payment_may_have_occurred: false,
                 advisories: vec![],
                 text: format!(
@@ -364,6 +389,7 @@ fn mapped_output(
     let advisories = projection::apply(&mut doc, &mapping.omit);
     let text = serde_json::to_string(&doc)?;
     Ok(ToolOutput {
+        observed_price: None,
         payment_may_have_occurred: false,
         advisories,
         text: if images.is_empty() {
@@ -416,6 +442,75 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rendering_errors_retain_observation_display_and_original_typed_causes() {
+        let price = ObservedPrice {
+            amount: alloy_primitives::U256::from(1),
+        };
+        let invalid_text = |observed_price| HttpOutput {
+            observed_price,
+            advisories: vec![],
+            bytes: vec![0xff],
+            mime_type: Some("text/plain".into()),
+            paid_submission: true,
+            relay_payment_may_have_occurred: false,
+        };
+        let original = invalid_text(None)
+            .render(None, &Default::default())
+            .unwrap_err();
+        let error = invalid_text(Some(price))
+            .render(None, &Default::default())
+            .unwrap_err();
+        assert_eq!(error.to_string(), original.to_string());
+        assert!(error.downcast_ref::<std::string::FromUtf8Error>().is_some());
+        assert!(
+            error
+                .downcast_ref::<crate::payment::PossiblePayment>()
+                .is_some()
+        );
+        assert_eq!(ObservedPrice::from_error(&error), Some(price));
+
+        let malformed_mapping: ResponseMapping =
+            serde_json::from_value(json!({"omit":["/private"]})).unwrap();
+        let error = HttpOutput {
+            observed_price: Some(price),
+            advisories: vec![],
+            bytes: b"not JSON".to_vec(),
+            mime_type: Some("application/json".into()),
+            paid_submission: false,
+            relay_payment_may_have_occurred: false,
+        }
+        .render(Some(&malformed_mapping), &Default::default())
+        .unwrap_err();
+        assert!(error.downcast_ref::<serde_json::Error>().is_some());
+        assert_eq!(ObservedPrice::from_error(&error), Some(price));
+    }
+
+    #[test]
+    fn body_only_image_rejection_retains_observation_and_payment_evidence() {
+        let price = ObservedPrice {
+            amount: alloy_primitives::U256::from(5_000),
+        };
+        let output = ToolOutput {
+            observed_price: Some(price),
+            payment_may_have_occurred: true,
+            advisories: vec![],
+            text: "image metadata".into(),
+            images: vec![InlineImage {
+                data: "encoded".into(),
+                mime_type: "image/png".into(),
+            }],
+        };
+        let error = output.into_text().unwrap_err();
+        assert_eq!(ObservedPrice::from_error(&error), Some(price));
+        assert!(
+            error
+                .downcast_ref::<crate::payment::PossiblePayment>()
+                .is_some()
+        );
+        assert!(!error.to_string().contains("0.005"));
+    }
+
+    #[test]
     fn unmapped_promotion_and_default_rendering_accept_the_same_output() {
         let cases: &[(Option<&str>, &[u8], bool)] = &[
             (None, b"plain text", true),
@@ -440,6 +535,7 @@ mod tests {
         let limits = ImageLimits::default();
         for &(mime, bytes, expected) in cases {
             let output = HttpOutput {
+                observed_price: None,
                 advisories: vec![],
                 bytes: bytes.to_vec(),
                 mime_type: mime.map(str::to_owned),
@@ -456,6 +552,7 @@ mod tests {
             let mut bytes = vec![0; size];
             bytes[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
             let output = HttpOutput {
+                observed_price: None,
                 advisories: vec![],
                 bytes,
                 mime_type: Some("image/png".into()),

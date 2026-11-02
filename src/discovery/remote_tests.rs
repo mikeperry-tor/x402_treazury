@@ -163,6 +163,9 @@ fn grouped_output_preserves_native_objects_and_payment_after_later_errors() {
     let native =
         json!({"items":[{"url":"same"},{"url":"same"}],"partial":true,"unknown":{"count":null}});
     let mut paid = ToolOutput::text(native.to_string());
+    paid.observed_price = Some(crate::output::ObservedPrice {
+        amount: alloy_primitives::U256::from(123),
+    });
     paid.payment_may_have_occurred = true;
     paid.advisories.push("original relay evidence".into());
     let mut invalid = ToolOutput::text("not JSON with credential-bearing prose".into());
@@ -181,6 +184,7 @@ fn grouped_output_preserves_native_objects_and_payment_after_later_errors() {
     ]);
     let parsed: Value = serde_json::from_str(&result.text).unwrap();
     assert_eq!(parsed["coinbase"], native);
+    assert!(result.observed_price.is_none());
     assert!(result.payment_may_have_occurred);
     assert_eq!(
         parsed["coinbase_curated"]["local_error"]["payment_may_have_occurred"],
@@ -390,4 +394,31 @@ async fn fixture() {
     assert!(m.inner.lock().unwrap().state.records.is_empty());
     coin_task.abort();
     list_task.abort();
+}
+
+#[test]
+fn cached_document_failure_omits_acquisition_price_but_preserves_liability_and_status() {
+    let price = crate::output::ObservedPrice {
+        amount: alloy_primitives::U256::from(123),
+    };
+    let error = price.attach(
+        anyhow::anyhow!("PRIVATE upstream prose")
+            .context(crate::payment::ResponseFacts::provider(
+                reqwest::StatusCode::BAD_GATEWAY,
+            ))
+            .context(crate::payment::PossiblePayment)
+            .context(crate::payment::ApiExecution { non_read: false }),
+    );
+    let error =
+        crate::discovery_relay::document::SharedFailure::capture(&error, "document unavailable")
+            .error();
+    assert!(crate::output::ObservedPrice::from_error(&error).is_none());
+    assert!(error.is::<crate::payment::PossiblePayment>());
+    assert_eq!(
+        crate::payment::ResponseFacts::from_error(&error)
+            .unwrap()
+            .provider,
+        Some(reqwest::StatusCode::BAD_GATEWAY)
+    );
+    assert!(!format!("{error:#}").contains("PRIVATE"));
 }

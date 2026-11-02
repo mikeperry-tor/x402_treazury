@@ -27,6 +27,7 @@ enum Wire {
     V1(LegacyReceipt),
     Verification,
     Settlement,
+    ChangingSettlement,
     Allowance,
     Prose,
     Generic,
@@ -90,11 +91,16 @@ async fn seller(
         if matches!(f.wire, Wire::V1(_)) {
             return (StatusCode::PAYMENT_REQUIRED, Json(legacy_challenge())).into_response();
         }
+        let mut offer = challenge();
+        if matches!(f.wire, Wire::ChangingSettlement) {
+            offer["accepts"][0]["amount"] =
+                json!((100 * (f.signed.lock().unwrap().len() + 1)).to_string());
+        }
         return (
             StatusCode::PAYMENT_REQUIRED,
             [(
                 "payment-required",
-                STANDARD.encode(serde_json::to_vec(&challenge()).unwrap()),
+                STANDARD.encode(serde_json::to_vec(&offer).unwrap()),
             )],
             "{}",
         )
@@ -264,6 +270,7 @@ async fn seller(
             response
         }
         Wire::Settlement
+        | Wire::ChangingSettlement
         | Wire::Allowance
         | Wire::Oversized
         | Wire::StalledSettlement
@@ -495,6 +502,9 @@ async fn run_private(
     let error = result
         .and_then(Result::err)
         .map_or_else(String::new, |e| {
+            if matches!(wire, Wire::ChangingSettlement) {
+                assert_eq!(crate::output::ObservedPrice::from_error(&e).unwrap().amount, U256::from(200));
+            }
             let presented = super::present_api_error(&e).expect("typed API presentation");
             assert!(!presented.contains("contract call failed"));
             assert!(!presented.contains(crate::rotation::manager::OMITTED_EXTENSIONS));
@@ -539,6 +549,7 @@ async fn run_private(
         Wire::Verification
             | Wire::V1(LegacyReceipt::Verification | LegacyReceipt::Failure)
             | Wire::Settlement
+            | Wire::ChangingSettlement
             | Wire::HeldSuccess
             | Wire::QualifiedThree
             | Wire::Oversized
@@ -682,6 +693,13 @@ async fn captured_inventory_exhausts_and_keeps_every_chargeable_authorization() 
     assert_eq!(signed.len(), 2);
     assert_eq!(requests.len(), 4);
     assert!(error.contains("earlier authorizations may still charge"));
+}
+#[tokio::test]
+async fn traversal_returns_latest_validated_offer_without_summing_authorizations() {
+    let (success, signed, requests, _) = run("GET", Wire::ChangingSettlement, 10).await;
+    assert!(!success);
+    assert_eq!(signed.len(), 2);
+    assert_eq!(requests.len(), 4);
 }
 #[tokio::test]
 async fn prose_allowance_generic_and_malformed_headers_earn_no_retry() {

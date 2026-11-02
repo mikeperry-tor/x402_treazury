@@ -314,9 +314,13 @@ impl Server {
                 result.structured_content = structured;
                 result
             }
-            Err(e) => CallToolResult::error(vec![ContentBlock::text(
-                crate::payment::present_api_error(&e).unwrap_or_else(|| format!("{e:#}")),
-            )]),
+            Err(e) => {
+                let mut output = crate::output::ToolOutput::text(
+                    crate::payment::present_api_error(&e).unwrap_or_else(|| format!("{e:#}")),
+                );
+                output.observed_price = crate::output::ObservedPrice::from_error(&e);
+                CallToolResult::error(output.into_content())
+            }
         };
         if let Some(claim) = claim {
             claim

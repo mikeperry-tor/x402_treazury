@@ -1473,6 +1473,7 @@ async fn agent402_exposes_supported_media_json_and_preserves_request_contracts()
     // automatically decoded into an MCP image or treated as raw binary.
     let pdf = tools.iter().find(|t| t.path == "/api/pdf-merge").unwrap();
     let output = x402_treazury::output::HttpOutput {
+        observed_price: None,
         advisories: vec![],
         bytes: serde_json::to_vec(&json!({"pages":2,"bytes":3,"pdfBase64":"YWJj"})).unwrap(),
         mime_type: Some("application/json".into()),
@@ -1562,6 +1563,7 @@ async fn agentutility_preserves_aliases_json_modes_and_explicit_recommendations(
     let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
     let body = serde_json::json!({"before":{"data_base64":png,"anchor_date":"2025-05-15"},"after":{"data_base64":png,"anchor_date":"2026-05-15"},"content_type":"image/png","attribution":"Copernicus fixture","license":"CC BY-SA 3.0 IGO"});
     let output = HttpOutput {
+        observed_price: None,
         advisories: vec![],
         bytes: serde_json::to_vec(&body).unwrap(),
         mime_type: Some("application/json".into()),
@@ -2394,6 +2396,7 @@ async fn netintel_post_bodies_aliases_and_canonical_image_mapping() {
     assert!(image.response_mapping.is_some());
     let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
     let output = x402_treazury::output::HttpOutput {
+        observed_price: None,
         advisories: vec![],
         bytes: serde_json::to_vec(
             &json!({"image_url":format!("data:image/png;base64,{png}"),"model":"fixture"}),
@@ -2851,6 +2854,7 @@ async fn horizonpulse_free_write_exemption_atomic_price_and_screenshot_mapping()
     let screenshot = tools.iter().find(|t| t.path == "/api/screenshot").unwrap();
     let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
     let output = x402_treazury::output::HttpOutput {
+        observed_price: None,
         advisories: vec![],
         bytes: serde_json::to_vec(&json!({
             "imageBase64":png,"mimeType":"image/png","finalUrl":"https://example.com/",

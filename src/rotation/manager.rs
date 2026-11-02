@@ -38,6 +38,7 @@ pub struct ManagedResponse {
     pub cover: Option<crate::cover::runtime::Call>,
 }
 pub(crate) struct AdmissionObservation<'a> {
+    pub observed_price: Option<&'a mut Option<crate::output::ObservedPrice>>,
     pub through: i64,
     pub attempted: &'a [String],
     pub progress: &'a crate::payment::SubmissionProgress,
@@ -266,6 +267,7 @@ impl ManagedPool {
                             response,
                             cover.as_ref(),
                             AdmissionObservation {
+                                observed_price: None,
                                 progress: &progress,
                                 hint: None,
                                 promotion: None,
@@ -310,6 +312,7 @@ impl ManagedPool {
         observation: AdmissionObservation<'_>,
     ) -> Result<(reqwest::Response, bool, U256)> {
         let AdmissionObservation {
+            observed_price,
             progress,
             hint,
             promotion,
@@ -323,6 +326,11 @@ impl ManagedPool {
         diagnostics::stage("challenge_preparation");
         let (challenge, offer, omitted) =
             prepare_challenge(&response, &self.policy).context(facts)?;
+        if let Some(observed_price) = observed_price {
+            *observed_price = Some(crate::output::ObservedPrice {
+                amount: offer.amount,
+            });
+        }
         if let Some((selected, transport)) = promotion {
             crate::network::global().promote_http(selected, transport);
         }

@@ -205,6 +205,7 @@ impl Manager {
             Ok(output)
             }.await;
             crate::discovery_relay::document::with_payment_context(possible_payment, result)
+                .map_err(crate::output::ObservedPrice::omit)
         }).await?
     }
 }

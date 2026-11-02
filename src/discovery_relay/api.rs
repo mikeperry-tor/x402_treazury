@@ -86,6 +86,7 @@ pub(crate) fn fallback<'a>(
         };
         Ok((
             HttpOutput {
+                observed_price: None,
                 bytes: response.body,
                 mime_type,
                 paid_submission: false,

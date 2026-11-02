@@ -40,6 +40,7 @@ struct Fixture {
     replies: Arc<Mutex<VecDeque<Reply>>>,
     unsigned: Arc<AtomicUsize>,
     signed: Arc<AtomicUsize>,
+    signed_output: Arc<AtomicUsize>,
     rpc: Arc<AtomicUsize>,
 }
 fn challenge(amounts: &[u64]) -> Value {
@@ -49,17 +50,24 @@ async fn fixture() -> Fixture {
     let replies = Arc::new(Mutex::new(VecDeque::<Reply>::new()));
     let unsigned = Arc::new(AtomicUsize::new(0));
     let signed = Arc::new(AtomicUsize::new(0));
+    let signed_output = Arc::new(AtomicUsize::new(500));
     let rpc = Arc::new(AtomicUsize::new(0));
     let balance = Arc::new(AtomicUsize::new(10_000));
     let timestamp = crate::rotation::base::now().unwrap();
     let app=Router::new().route("/items",get({
-        let (replies,unsigned,signed)=(replies.clone(),unsigned.clone(),signed.clone());
+        let (replies,unsigned,signed,signed_output)=(replies.clone(),unsigned.clone(),signed.clone(),signed_output.clone());
         move |headers:HeaderMap| {
-            let (replies,unsigned,signed)=(replies.clone(),unsigned.clone(),signed.clone());
+            let (replies,unsigned,signed,signed_output)=(replies.clone(),unsigned.clone(),signed.clone(),signed_output.clone());
             async move {
                 if headers.contains_key("payment-signature") {
                     signed.fetch_add(1,Ordering::SeqCst);
-                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                    return match signed_output.load(Ordering::SeqCst) {
+                        200 => ([("content-type","application/json")], "{\"temperature\":18}").into_response(),
+                        201 => ([("content-type","application/json")], vec![0xffu8]).into_response(),
+                        202 => ([("content-type","image/png")], STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aFh0AAAAASUVORK5CYII=").unwrap()).into_response(),
+                        203 => ([("content-type","application/json")], vec![b'x'; 2048]).into_response(),
+                        _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                    };
                 }
                 unsigned.fetch_add(1,Ordering::SeqCst);
                 let reply=replies.lock().unwrap().pop_front().expect("unexpected extra HTTP/probe");
@@ -148,6 +156,7 @@ async fn fixture() -> Fixture {
         replies,
         unsigned,
         signed,
+        signed_output,
         rpc,
     }
 }
@@ -203,6 +212,12 @@ async fn valid_selected_lowest_price_learns_before_financial_failure_and_updates
             .is_some_and(|e| e.status == StatusCode::INTERNAL_SERVER_ERROR),
         "{error:#}"
     );
+    assert_eq!(
+        crate::output::ObservedPrice::from_error(&error)
+            .unwrap()
+            .amount,
+        U256::from(7000)
+    );
     assert_eq!(process_hints().get(key), Some(U256::from(7000)));
     assert_eq!(
         f.rpc.load(Ordering::SeqCst),
@@ -253,6 +268,10 @@ async fn invalid_unsupported_overcap_incomplete_and_free_responses_never_teach_o
             };
             let result = f.call(key, reply).await;
             assert_eq!(result.is_ok(), mode == 4);
+            assert!(match &result {
+                Ok(output) => output.observed_price.is_none(),
+                Err(error) => crate::output::ObservedPrice::from_error(error).is_none(),
+            });
             assert_eq!(process_hints().get(learned), Some(U256::from(7000)));
             assert!(process_hints().saved_receipt(learned) == Some(receipt));
             assert!(process_hints().get(absent).is_none());
@@ -311,6 +330,12 @@ async fn cached_price_above_a_changed_cap_does_not_veto_a_cheaper_current_offer(
     );
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
     assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        crate::output::ObservedPrice::from_error(&error)
+            .unwrap()
+            .amount,
+        U256::from(6000)
+    );
     assert_eq!(process_hints().get(key), Some(U256::from(6000)));
     let db = rusqlite::Connection::open(f._dir.path().join("state/state.sqlite")).unwrap();
     assert_eq!(
@@ -361,17 +386,196 @@ async fn earlier_headers_with_late_body_cannot_overwrite_a_newer_lower_price() {
         process_hints().get(key).is_none(),
         "unvalidated envelope cannot teach from headers alone"
     );
-    assert!(
-        f.call(key, Reply::Challenge(challenge(&[3000])))
-            .await
-            .is_err()
+    let second = f
+        .call(key, Reply::Challenge(challenge(&[3000])))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        crate::output::ObservedPrice::from_error(&second)
+            .unwrap()
+            .amount,
+        U256::from(3000)
     );
     let newer = process_hints().saved_receipt(key).unwrap();
     release.add_permits(1);
-    assert!(first.await.unwrap().is_err());
+    let first = first.await.unwrap().unwrap_err();
+    assert_eq!(
+        crate::output::ObservedPrice::from_error(&first)
+            .unwrap()
+            .amount,
+        U256::from(9000)
+    );
     assert_eq!(process_hints().get(key), Some(U256::from(3000)));
     assert!(process_hints().saved_receipt(key) == Some(newer));
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn managed_mcp_outputs_keep_their_offer_across_success_media_and_errors() {
+    use crate::mcp_wire::McpResponse;
+    let f = fixture().await;
+    let tools = crate::catalog::build_tools(
+        &Default::default(),
+        &json!({"paths":{"/items":{"get":{}}}}),
+        "priced",
+    )
+    .unwrap();
+    let mut calls = 0;
+    let mut signatures = 0;
+    for discovered in [false, true] {
+        let mut server = crate::server::Server::new(
+            tools.clone(),
+            f.client
+                .clone()
+                .with_download_limits(1024, crate::limits::HELP_BYTES),
+            f.base.clone(),
+            None,
+        );
+        server.discover_on_demand = discovered;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let http = crate::network::NetworkContext::new(Default::default())
+            .unwrap()
+            .discovery(&endpoint, None)
+            .unwrap();
+        let serving = tokio::spawn(async move {
+            axum::serve(listener, crate::server::http_app(server, "fixture".into()))
+                .await
+                .unwrap()
+        });
+        for (mode, amount, is_error, blocks) in [
+            (200, 5000, false, 2),
+            (202, 1, false, 3),
+            (201, 7000, true, 2),
+            (203, 7000, true, 2),
+            (500, 9000, true, 2),
+        ] {
+            f.signed_output.store(mode, Ordering::SeqCst);
+            f.replies
+                .lock()
+                .unwrap()
+                .push_back(Reply::Challenge(challenge(&[amount])));
+            let params = if discovered {
+                json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":"priced_items","arguments":{}}})
+            } else {
+                json!({"name":"priced_items","arguments":{}})
+            };
+            let result: Value = http
+                .post(&endpoint)
+                .bearer_auth("fixture")
+                .header("accept", "application/json, text/event-stream")
+                .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":params}))
+                .send()
+                .await
+                .unwrap()
+                .mcp_json()
+                .await
+                .unwrap();
+            assert_eq!(
+                result["result"]["isError"].as_bool().unwrap_or(false),
+                is_error,
+                "{result}"
+            );
+            let content = result["result"]["content"].as_array().unwrap();
+            assert_eq!(content.len(), blocks, "{result}");
+            let price: Value =
+                serde_json::from_str(content.last().unwrap()["text"].as_str().unwrap()).unwrap();
+            assert_eq!(
+                price,
+                json!({"x402_pricing":{"amount":crate::output::ObservedPrice { amount: U256::from(amount) }.to_string(),"currency":"USDC","basis":"observed_offer"}})
+            );
+            assert!(result["result"].get("structuredContent").is_none());
+            if mode == 200 {
+                assert_eq!(content[0]["text"], "{\"temperature\":18}");
+            }
+            if mode == 202 {
+                assert_eq!(content[1]["type"], "image");
+            }
+            if is_error {
+                assert!(
+                    content[0]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains("Do not retry automatically.")
+                );
+            }
+            calls += 1;
+            signatures += 1;
+        }
+        serving.abort();
+    }
+    assert_eq!(f.unsigned.load(Ordering::SeqCst), calls);
+    assert_eq!(f.signed.load(Ordering::SeqCst), signatures);
+    assert_eq!(f.rpc.load(Ordering::SeqCst), 0);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn managed_body_rejection_retains_offer_status_and_liability_without_replay() {
+    let f = fixture().await;
+    f.signed_output.store(203, Ordering::SeqCst);
+    f.replies
+        .lock()
+        .unwrap()
+        .push_back(Reply::Challenge(challenge(&[17])));
+    let error = f
+        .client
+        .clone()
+        .with_download_limits(1024, crate::limits::HELP_BYTES)
+        .execute_response_scoped(
+            f.route(),
+            &SubmissionProgress::default(),
+            Some(f.key("/items")),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        crate::output::ObservedPrice::from_error(&error)
+            .unwrap()
+            .amount,
+        U256::from(17)
+    );
+    assert_eq!(
+        super::ResponseFacts::from_error(&error).unwrap().provider,
+        Some(reqwest::StatusCode::OK)
+    );
+    assert!(error.is::<crate::limits::DownloadLimit>());
+    assert!(error.is::<super::PossiblePayment>());
+    let presented = super::present_api_error(&error).unwrap();
+    assert!(presented.contains("max_response_bytes=1024"));
+    assert_eq!(presented.matches("Do not retry automatically.").count(), 1);
+    assert_eq!(f.unsigned.load(Ordering::SeqCst), 1);
+    assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(f.rpc.load(Ordering::SeqCst), 0);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn raw_calls_capture_without_a_hint_key_and_zero_is_not_synthesized_free() {
+    let f = fixture().await;
+    for amount in [0, 1] {
+        f.replies
+            .lock()
+            .unwrap()
+            .push_back(Reply::Challenge(challenge(&[amount])));
+        let result = f
+            .client
+            .execute_manual_raw(f.route(), Default::default())
+            .await;
+        let price = match result {
+            Ok(output) => output.observed_price,
+            Err(error) => crate::output::ObservedPrice::from_error(&error),
+        };
+        assert_eq!(
+            price.map(|price| price.amount),
+            (amount > 0).then(|| U256::from(amount))
+        );
+        assert!(process_hints().get(f.key("/items")).is_none());
+    }
+    assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
+    assert_eq!(f.signed.load(Ordering::SeqCst), 1);
+    assert_eq!(f.rpc.load(Ordering::SeqCst), 0);
     f.close().await;
 }
 

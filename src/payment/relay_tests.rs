@@ -13,7 +13,14 @@ use axum::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, sync::Mutex, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 use tokio_util::sync::CancellationToken;
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP8sAAAAASUVORK5CYII=";
@@ -31,6 +38,7 @@ struct Event {
 #[derive(Clone, Default)]
 struct Fixture {
     events: Arc<Mutex<Vec<Event>>>,
+    rpc_calls: Arc<AtomicUsize>,
     signed_held: CancellationToken,
     signed_release: CancellationToken,
     origin_held: CancellationToken,
@@ -57,10 +65,10 @@ fn signer(headers: &HeaderMap) -> Option<String> {
             .to_ascii_lowercase()
     })
 }
-fn challenge(url: &str) -> Response {
+fn challenge(url: &str, amount: u64) -> Response {
     let challenge = json!({"x402Version":2,"resource":{"url":url},"accepts":[{
         "scheme":"exact","network":"eip155:8453","asset":USDC,
-        "amount":"1","payTo":"0x0000000000000000000000000000000000000003",
+        "amount":amount.to_string(),"payTo":"0x0000000000000000000000000000000000000003",
         "maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}
     }]});
     (
@@ -133,9 +141,19 @@ async fn origin(
     });
     let kind = scenario(&case);
     let kind = kind.strip_prefix("manual-").unwrap_or(kind);
+    if matches!(kind, "handoff-relay" | "handoff-free") {
+        if fixture.events(&case).len() == 1 {
+            return challenge(&target, 17);
+        }
+        return if kind == "handoff-free" {
+            ([("content-type", "text/plain")], "target free").into_response()
+        } else {
+            StatusCode::FORBIDDEN.into_response()
+        };
+    }
     if kind.starts_with("origin-paid") || kind.starts_with("origin-signed") {
         if signed.is_none() {
-            return challenge(&target);
+            return challenge(&target, 1);
         }
         return match kind {
             "origin-signed400" => (
@@ -241,7 +259,7 @@ async fn relay(
             )
                 .into_response();
         }
-        return challenge(&endpoint);
+        return challenge(&endpoint, 1);
     }
     if kind == "held" {
         fixture.signed_held.cancel();
@@ -365,6 +383,7 @@ fn unsigned_api_relay_policy_and_financial_ownership_in_isolated_processes() {
         "tor-default",
         "tor-auth",
         "tor-local-refused",
+        "managed-handoff",
     ] {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .env_clear().envs(std::env::var("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
@@ -385,11 +404,182 @@ impl reqwest::dns::Resolve for ResolveLocal {
         Box::pin(async move { Ok(Box::new([address].into_iter()) as reqwest::dns::Addrs) })
     }
 }
+async fn managed_handoff(fixture: &Fixture, relay: Arc<SearchRelay>) {
+    use crate::rotation::{
+        base::BaseRpc,
+        manager::ManagedPool,
+        store::{Store, StoreHandle},
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = Store::create(
+        &dir.path().join("state"),
+        &dir.path().join("key"),
+        1,
+        b"fixture",
+    )
+    .unwrap();
+    let pool = crate::rotation::test_capacity::declare_and_allocate!(
+        state,
+        "handoff",
+        crate::rotation::test_capacity::two_reserves("0.01"),
+        Some(U256::from(10_000)),
+        0
+    )
+    .unwrap();
+    let wallets = state
+        .wallet_page(&pool, -1, state.wallet_boundary(&pool).unwrap(), 64)
+        .unwrap();
+    assert_eq!(wallets.len(), 2);
+    for (index, (_, wallet, _)) in wallets.iter().enumerate() {
+        state
+            .record_credit(
+                wallet,
+                if index == 0 { "1" } else { "10000" },
+                "fixture",
+                100,
+            )
+            .unwrap();
+    }
+    let funding_jobs = state.funding_jobs().unwrap().len();
+    let (store, worker) = StoreHandle::spawn(state);
+    let manager = ManagedPool::new(
+        store.clone(),
+        pool.clone(),
+        BaseRpc::new("https://api.example.com/rpc", 12).unwrap(),
+        SpendPolicy::dollars("0.01").unwrap(),
+    )
+    .unwrap();
+    let client = PaidClient::managed(Arc::new(manager))
+        .with_source_identity("handoff-fixture")
+        .with_document_relay(Some(relay));
+    let mut relay_signatures = 0;
+    for (kind, target_offer, body, target_requests, relay_requests) in [
+        ("handoff-relay", Some(17u64), "relay result", 2, 2),
+        ("handoff-free", Some(17), "target free", 2, 0),
+        ("status403", None, "relay result", 1, 2),
+    ] {
+        // Zero-price initial selection chooses the first eligible wallet. The
+        // actual offer makes the second estimate preferable before any signature.
+        let progress = SubmissionProgress::default();
+        let output = client
+            .execute_response_observed(route("GET", kind), &progress)
+            .await
+            .unwrap();
+        assert_eq!(
+            output.observed_price.map(|price| price.amount),
+            target_offer.map(U256::from)
+        );
+        assert!(!output.paid_submission);
+        assert_eq!(output.relay_payment_may_have_occurred, relay_requests > 0);
+        assert_eq!(progress.possible(), relay_requests > 0);
+        assert_eq!(output.bytes, body.as_bytes());
+        assert_eq!(
+            output.advisories.as_slice(),
+            if relay_requests > 0 {
+                vec![crate::discovery_relay::api::POSSIBLE_PAYMENT_ADVISORY.to_owned()]
+            } else {
+                Vec::new()
+            }
+        );
+        let content = output
+            .render(None, &Default::default())
+            .unwrap()
+            .into_content();
+        assert_eq!(content[0].as_text().unwrap().text, body);
+        if target_offer.is_some() {
+            assert_eq!(
+                serde_json::from_str::<Value>(&content[1].as_text().unwrap().text).unwrap(),
+                json!({"x402_pricing":{"amount":"0.000017","currency":"USDC","basis":"observed_offer"}})
+            );
+        } else {
+            assert!(
+                !content
+                    .iter()
+                    .filter_map(|block| block.as_text())
+                    .any(|text| text.text.contains("x402_pricing"))
+            );
+        }
+        let events = fixture.events(&format!("GET-{kind}"));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.provider.is_none())
+                .count(),
+            target_requests
+        );
+        assert!(
+            events
+                .iter()
+                .filter(|event| event.provider.is_none())
+                .all(|event| event.signer.is_none())
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.provider.is_some())
+                .count(),
+            relay_requests
+        );
+        let signed = events
+            .iter()
+            .filter(|event| event.provider.is_some() && event.signer.is_some())
+            .count();
+        assert_eq!(signed, usize::from(relay_requests > 0));
+        relay_signatures += signed;
+    }
+    assert_eq!(fixture.rpc_calls.load(Ordering::SeqCst), 0);
+    client.drain().await;
+    let unchanged_pool = pool.clone();
+    let after = store
+        .call(move |s| {
+            assert_eq!(s.funding_jobs()?.len(), funding_jobs);
+            assert!(s.status()?.treasury_operations.is_empty());
+            s.wallet_page(&unchanged_pool, -1, s.wallet_boundary(&unchanged_pool)?, 64)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        after, wallets,
+        "handoff and relay fallback cannot allocate or replace wallets"
+    );
+    let db = rusqlite::Connection::open_with_flags(
+        dir.path().join("state/state.sqlite"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mut query = db
+        .prepare("SELECT amount FROM payment_attempts ORDER BY rowid")
+        .unwrap();
+    let amounts = query
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(
+        amounts,
+        vec!["1"; relay_signatures],
+        "only actual relay authorizations are journaled"
+    );
+    drop(query);
+    drop(db);
+    drop(client);
+    drop(store);
+    worker.await.unwrap();
+}
+
 async fn fixture(mode: &str) {
     let fixture = Fixture::default();
     let app = axum::Router::new()
         .route("/target/{case}", any(origin))
         .route("/relay/{provider}", any(relay))
+        .route(
+            "/rpc",
+            any(|State(fixture): State<Fixture>| async move {
+                fixture.rpc_calls.fetch_add(1, Ordering::SeqCst);
+                StatusCode::INTERNAL_SERVER_ERROR
+            }),
+        )
         .with_state(fixture.clone());
     let (address, server) = crate::test_tls::serve(app).await;
     let proxy = crate::test_socks::Socks::start(
@@ -407,7 +597,7 @@ async fn fixture(mode: &str) {
     let refused = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let refused_address = refused.local_addr().unwrap();
     drop(refused);
-    let tor = mode != "direct";
+    let tor = !matches!(mode, "direct" | "managed-handoff");
     let retries = match mode {
         "tor0" => Some(0),
         "tor1" => Some(1),
@@ -432,6 +622,11 @@ async fn fixture(mode: &str) {
     }
     crate::network::install_test_context(network);
     let configured = relay_fixture();
+    if mode == "managed-handoff" {
+        managed_handoff(&fixture, configured).await;
+        server.abort();
+        return;
+    }
     let client = attached(configured.clone());
     if matches!(mode, "tor-auth" | "tor-local-refused") {
         for method in ["GET", "POST"] {

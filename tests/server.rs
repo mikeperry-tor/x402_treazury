@@ -84,6 +84,11 @@ async fn direct_and_discovered_api_errors_keep_status_without_diagnostic_chains(
                 .await
                 .unwrap();
             assert_eq!(result["result"]["isError"], true, "{result}");
+            assert_eq!(
+                result["result"]["content"].as_array().unwrap().len(),
+                1,
+                "opaque static SDK offers have no observation"
+            );
             let status = StatusCode::from_u16(code).unwrap();
             assert_eq!(
                 result["result"]["content"][0]["text"],

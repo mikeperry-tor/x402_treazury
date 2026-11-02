@@ -656,10 +656,18 @@ impl PaidClient {
         };
         self.run_owned(
             diagnostics::scope(async move {
+                let mut observed_price = None;
                 let result = client
-                    .execute_response_owned(route, headers, &progress, operation)
+                    .execute_response_owned(
+                        route,
+                        headers,
+                        &progress,
+                        operation,
+                        &mut observed_price,
+                    )
                     .await
-                    .and_then(|(output, unsigned_promotion, status)| {
+                    .and_then(|(mut output, unsigned_promotion, status)| {
+                        output.observed_price = observed_price;
                         diagnostics::stage("output_conversion");
                         let (output, valid) =
                             finish(output, status).map_err(|error| match status {
@@ -674,7 +682,13 @@ impl PaidClient {
                 diagnostics::finish(&result, &progress, client.relay_call);
                 with_payment_context(
                     progress.possible(),
-                    result.map_err(|error| execution.attach(error)),
+                    result.map_err(|error| {
+                        let error = match observed_price {
+                            Some(price) => price.attach(error),
+                            None => error,
+                        };
+                        execution.attach(error)
+                    }),
                 )
             })
             .instrument(span),
@@ -687,6 +701,7 @@ impl PaidClient {
         headers: crate::discovery::raw::ManualRawHeaders,
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
+        observed_price: &mut Option<crate::output::ObservedPrice>,
     ) -> Result<(
         crate::output::HttpOutput,
         Option<(
@@ -817,6 +832,7 @@ impl PaidClient {
                             response,
                             cover.as_ref(),
                             crate::rotation::manager::AdmissionObservation {
+                                observed_price: Some(&mut *observed_price),
                                 progress,
                                 hint: operation.zip(receipt),
                                 promotion: Some((&selected, &transport)),
@@ -1214,6 +1230,7 @@ impl PaidClient {
             .context(facts));
         }
         Ok(crate::output::HttpOutput {
+            observed_price: None,
             advisories: vec![],
             bytes,
             mime_type: if head {

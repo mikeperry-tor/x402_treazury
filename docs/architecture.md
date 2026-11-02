@@ -374,6 +374,22 @@ transport boundaries. A bounded
 or unsupported response produces explicit evidence, never a silently truncated
 success. Typed results flow through `PaidClient::execute_response`,
 `BoundTool::invoke_output` and `Server::invoke_output`, including dynamic fallback.
+A managed target call retains its latest fully validated offer through response
+conversion and failures, independently of shared price hints and other calls.
+MCP appends one complete JSON text block after body text and images, before
+advisories: `{"x402_pricing":{"amount":"0.005","currency":"USDC","basis":"observed_offer"}}`.
+The amount uses exact decimal USDC units. It describes the observed offer, not
+settlement or a total across authorizations. Body projection and `structuredContent`
+remain unchanged. Text-only Rust convenience methods return body text without this
+block; clients concatenating all text blocks must handle the adjacent JSON object.
+Calls without a validated offer and opaque static SDK signing omit the block.
+A final unsigned success, including delivery through a configured API relay after
+a payer handoff, still carries the latest target offer validated earlier in the
+same logical invocation. It does not describe a new charge for that final response.
+Relay fees, cached help acquisition and grouped directory
+children and combined source-details acquisitions do not become a scalar price
+for the outer result, including failures.
+
 Text-only Rust convenience methods reject attachments. Image mapping and validation
 contracts are in the [provider guide](../providers/README.md).
 For unsuccessful API responses, the internal error chain retains the upstream body
