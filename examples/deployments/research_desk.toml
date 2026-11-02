@@ -29,7 +29,7 @@ socks_endpoint = "127.0.0.1:9150"
 isolation_namespace = "x402_treazury"
 socks_auth = "tor_extended"
 connect_timeout_seconds = 120
-request_timeout_seconds = 240
+read_timeout_seconds = 240
 
 # Paid fallback for blocked catalog/help GETs. Paid API calls retain their
 # listener bindings.

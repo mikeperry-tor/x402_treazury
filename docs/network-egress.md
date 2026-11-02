@@ -313,12 +313,10 @@ polling and financial recovery retain their own rules; see
 verification, identity-bound pooling and ordinary error classification remain
 unchanged.
 
-For compatibility, network `request_timeout_seconds` is an alias for
-`read_timeout_seconds`, with its literal value now specifying inactivity. Provider
-`timeout`, import `fetch_timeout_seconds` and CLI
-`--timeout` are accepted as legacy spellings. New configurations use only
-`read_timeout_seconds` / `--read-timeout-seconds`. Authored Tor examples
-now specify 60 seconds; operator-owned files are not rewritten automatically.
+Use `read_timeout_seconds` in network and provider/source configuration, or
+`--read-timeout-seconds` for a standalone CLI override. Unknown or obsolete names
+are rejected by strict parsing. Authored Tor examples specify 60 seconds;
+operator-owned files are not rewritten automatically.
 
 Base read RPCs, complete chain views and receipt verification use connection and
 read-inactivity timeouts, with no separate total deadline in either network mode.
@@ -352,8 +350,7 @@ chunked and lengthless bodies. Oversized responses produce a redacted typed fail
 without retrying that endpoint. Configured fallback discards the partial view and
 reacquires all evidence; it cannot reuse a balance from the rejected response.
 Managed payment admission has no overall elapsed-time deadline, including while
-waiting for its pool gate. Legacy wallet `wait_seconds` is accepted but ignored
-with a warning and omitted from effective configuration.
+waiting for its pool gate.
 
 Treasury gRPC uses the network connection and read-inactivity settings in both
 modes. The injected transport measures each response independently, below protobuf

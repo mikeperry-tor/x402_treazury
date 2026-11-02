@@ -578,7 +578,7 @@ async fn standalone_precedence_and_invalid_options_need_no_credentials() {
                 "tools",
                 "--provider",
                 "provider.toml",
-                "--timeout",
+                "--read-timeout-seconds",
                 invalid,
             ],
             &[],
@@ -961,28 +961,6 @@ async fn source_maintenance_has_explicit_operator_commands() {
             assert!(conflict.contains("cannot be used with"), "{conflict}");
         }
     }
-}
-
-#[tokio::test]
-async fn removed_wallet_pool_fails_before_opening_state_with_migration_guidance() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = run(
-        dir.path(),
-        &[
-            "wallet",
-            "pool",
-            "--name",
-            "old",
-            "--funding-amount-usdc",
-            "2",
-        ],
-        &[],
-    )
-    .await;
-    assert!(!output.status.success());
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains("wallet pool was removed"), "{error}");
-    assert!(error.contains("wallet bootstrap --config FILE"), "{error}");
 }
 
 #[tokio::test]

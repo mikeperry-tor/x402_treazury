@@ -132,7 +132,6 @@ pub struct Config {
     pub cover_traffic_enabled: Option<bool>,
     pub allow_http1: bool,
     pub allow_tls12: bool,
-    #[serde(alias = "timeout")]
     pub read_timeout_seconds: Option<f64>,
     pub max_response_bytes: usize,
     pub max_help_bytes: usize,

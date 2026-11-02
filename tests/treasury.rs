@@ -123,30 +123,6 @@ fn wallet_cli_initializes_restores_and_refuses_overwrite_without_secrets_in_outp
         )
     );
     let id = initial["state"]["treasury_id"].as_str().unwrap();
-    let before_removed_command = std::fs::read(state.join("state.sqlite")).unwrap();
-    let output = run(vec![
-        "wallet",
-        "pool",
-        "--state-dir",
-        state.to_str().unwrap(),
-        "--key-file",
-        key.to_str().unwrap(),
-        "--treasury-id",
-        id,
-        "--name",
-        "research",
-        "--funding-amount-usdc",
-        "5",
-    ]);
-    assert!(!output.status.success());
-    let error = String::from_utf8(output.stderr).unwrap();
-    assert!(error.contains("wallet pool was removed"), "{error}");
-    assert!(error.contains("wallet bootstrap --config FILE"), "{error}");
-    assert!(!error.contains(SEED));
-    assert_eq!(
-        std::fs::read(state.join("state.sqlite")).unwrap(),
-        before_removed_command
-    );
     // Explicit temporary-store setup retains the address/key persistence coverage
     // without reintroducing a CLI allocation path or fabricating funded readiness.
     {

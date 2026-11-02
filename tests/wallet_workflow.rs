@@ -218,7 +218,7 @@ fn conflicting_wallet_inputs_and_missing_explicit_endpoint_fail_before_creation(
 }
 
 #[test]
-fn wallet_clap_conflicts_and_legacy_config_alias_preserve_resolution_boundaries() {
+fn wallet_clap_conflicts_and_config_placement_preserve_resolution_boundaries() {
     let dir = tempfile::tempdir().unwrap();
     let binary = env!("CARGO_BIN_EXE_x402_treazury");
     let run = |args: &[&str]| {
@@ -289,7 +289,7 @@ fn wallet_clap_conflicts_and_legacy_config_alias_preserve_resolution_boundaries(
     std::fs::write(&config,"version=1\nservers={}\n[treasury]\nstate_dir='state'\nmax_refund_shielding_fee_zec='0.001'\nid='11111111-1111-4111-8111-111111111111'\nindexer_url_env='MISSING'\n").unwrap();
     for args in [
         vec!["wallet", "--config", "deployment.toml", "init"],
-        vec!["wallet", "init", "--meta-config", "deployment.toml"],
+        vec!["wallet", "init", "--config", "deployment.toml"],
     ] {
         let output = run(&args);
         assert!(!output.status.success());

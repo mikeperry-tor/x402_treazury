@@ -12,7 +12,7 @@ async fn composition_replaces_fields_and_resolves_paths_at_their_declaration() {
 spec = "catalog.json"
 prefix = "stable"
 tags = ["A", "B"]
-timeout = 90
+read_timeout_seconds = 90
 allow_http1 = true
 allow_tls12 = true
 max_response_bytes = 100
@@ -29,7 +29,7 @@ description = "Old"
     let source = toml::from_str(
         r#"extends = "../provider.toml"
 tags = []
-timeout = 42
+read_timeout_seconds = 42
 allow_http1 = false
 http_cache_enabled = false
 catalog_cache_ttl_seconds = 0
@@ -113,16 +113,14 @@ async fn composition_rejects_json_unknown_fields_nested_extends_and_invalid_limi
         "spec = 'api.json'\nunknown = true",
         "spec = 'api.json'\ncatalog_cache_ttl_seconds = -1",
         "spec = 'api.json'\ncatalog_cache_ttl_seconds = 1.5",
-        "spec = 'api.json'\ntimeout = 0",
+        "spec = 'api.json'\nread_timeout_seconds = 0",
         "extends = ['a.toml']",
         "spec = 'api.json'\nmax_response_bytes = 0",
         "spec = 'api.json'\nmax_help_bytes = 0",
         "spec = 'api.json'\nmax_spec_bytes = 0",
         "spec = 'api.json'\nmax_response_bytes = -1",
-        "config = 'old.json'",
         "spec = 'api.json'\nallow_http1 = 'yes'",
         "spec = 'api.json'\nallow_tls12 = 1",
-        "spec = 'api.json'\nprobe_methods = ['POST']",
     ] {
         std::fs::write(&path, invalid).unwrap();
         assert!(config::load(&path).await.is_err(), "{invalid}");
@@ -134,6 +132,13 @@ async fn composition_rejects_json_unknown_fields_nested_extends_and_invalid_limi
     .unwrap();
     std::fs::write(&path, "extends = 'provider.toml'").unwrap();
     assert!(format!("{:#}", config::load(&path).await.err().unwrap()).contains("nested extends"));
+    std::fs::write(
+        dir.path().join("provider.toml"),
+        "spec='api.json'\nread_timeout_seconds='invalid'",
+    )
+    .unwrap();
+    std::fs::write(&path, "extends='provider.toml'\nread_timeout_seconds=42").unwrap();
+    assert!(config::load(&path).await.is_err());
 }
 
 #[tokio::test]
@@ -526,34 +531,6 @@ async fn comprehensive_example_enables_source_wallet_discovery_offline() {
         );
     }
     assert!(social["providers_search_remote_tool_instructions_text"].is_null());
-}
-
-#[tokio::test]
-async fn read_timeout_composition_preserves_general_alias_and_rejects_probe_alias() {
-    let dir = tempfile::tempdir().unwrap();
-    let provider = dir.path().join("provider.toml");
-    std::fs::write(&provider, "spec='api.json'\nread_timeout_seconds=90").unwrap();
-    let resolve = |text: &str| toml::from_str(text).unwrap();
-    let source = dir.path().join("source.toml");
-    let inherited = config::resolve(resolve("extends='provider.toml'\ntimeout=42"), &source)
-        .await
-        .unwrap();
-    assert_eq!(inherited.settings.read_timeout_seconds, Some(42.0));
-    assert!(inherited.origins["read_timeout_seconds"].ends_with("source.toml"));
-    let explicit = config::resolve(resolve("spec='api.json'\nread_timeout_seconds=5"), &source)
-        .await
-        .unwrap();
-    assert_eq!(explicit.settings.read_timeout_seconds, Some(5.0));
-    for text in [
-        "spec='api.json'\ntimeout=42\nread_timeout_seconds=60",
-        "spec='api.json'\ntimeout=42\nprobe_timeout=0",
-        "spec='api.json'\nprobe_timeout=5",
-    ] {
-        assert!(config::resolve(resolve(text), &source).await.is_err());
-    }
-    let historical: x402_treazury::catalog::Config =
-        serde_json::from_value(json!({"spec":"api.json","timeout":30.0})).unwrap();
-    assert_eq!(historical.read_timeout_seconds, Some(30.0));
 }
 
 #[tokio::test]

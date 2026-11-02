@@ -9,7 +9,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 pub struct WalletArgs {
     /// Deployment configuration; bootstrap also consumes wallet and funding settings.
-    #[arg(long, alias = "meta-config", env = "X402_TREAZURY_CONFIG", global = true, conflicts_with_all = ["state_dir", "key_file", "treasury_id"])]
+    #[arg(long, env = "X402_TREAZURY_CONFIG", global = true, conflicts_with_all = ["state_dir", "key_file", "treasury_id"])]
     config: Option<PathBuf>,
     #[arg(long, global = true)]
     network_config: Option<PathBuf>,
@@ -59,14 +59,6 @@ enum Action {
         #[arg(long)]
         destination: PathBuf,
     },
-    /// Removed: configure managed reserves and use wallet bootstrap.
-    #[command(hide = true)]
-    Pool {
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        funding_amount_usdc: Option<String>,
-    },
     /// Refresh the treasury and configured managed USDC wallets; never starts funding.
     Sync {
         /// Print machine-readable JSON.
@@ -104,12 +96,6 @@ enum Action {
 }
 
 fn network_override(args: &WalletArgs) -> Result<Option<crate::network::NetworkConfig>> {
-    if matches!(args.command, Action::Pool { .. }) {
-        anyhow::bail!(
-            "wallet pool was removed; configure managed wallet reserves and explicit max_api_payment_usdc in the deployment, then use wallet bootstrap --config FILE"
-        );
-    }
-
     anyhow::ensure!(
         args.network_config.is_none()
             || !matches!(
@@ -184,7 +170,6 @@ fn resolve_args_with_network(
     }
     let treasury_id = resolve_administrative_identity(&args.command, &state_dir, expected)?;
     Ok(match args.command {
-        Action::Pool { .. } => unreachable!("removed command rejected before state access"),
         Action::Status { .. } => Command::Status {
             state_dir,
             key_file,

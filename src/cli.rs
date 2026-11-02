@@ -84,7 +84,7 @@ pub enum Sources {
     },
     /// List persisted agent-added sources and saved tools without fetching or modifying them.
     Inspect {
-        #[arg(long, alias = "meta-config", env = "X402_TREAZURY_CONFIG")]
+        #[arg(long, env = "X402_TREAZURY_CONFIG")]
         config: PathBuf,
     },
 }
@@ -92,7 +92,7 @@ pub enum Sources {
 #[derive(ClapArgs, Default)]
 pub struct Input {
     /// Deployment configuration. Standalone overrides belong in its TOML instead.
-    #[arg(long = "config", alias = "meta-config", env = "X402_TREAZURY_CONFIG")]
+    #[arg(long = "config", env = "X402_TREAZURY_CONFIG")]
     meta_config: Option<PathBuf>,
     /// Reusable provider TOML for standalone serving or inspection.
     #[arg(long = "provider")]
@@ -123,7 +123,7 @@ pub struct Input {
     #[arg(long)]
     max_spec_bytes: Option<usize>,
     /// Maximum HTTP read inactivity in seconds; overrides the network default.
-    #[arg(long, alias = "timeout")]
+    #[arg(long)]
     read_timeout_seconds: Option<f64>,
 }
 
@@ -170,7 +170,7 @@ pub struct Serve {
 #[derive(ClapArgs)]
 pub struct Warm {
     /// Deployment whose existing treasury state directory and cache policy are used.
-    #[arg(long, alias = "meta-config", env = "X402_TREAZURY_CONFIG")]
+    #[arg(long, env = "X402_TREAZURY_CONFIG")]
     pub config: PathBuf,
     /// Replace network/relay settings; --direct still explicitly selects direct fetching.
     #[arg(long)]
@@ -207,7 +207,7 @@ pub struct Route {
 #[derive(ClapArgs)]
 #[group(required = true, multiple = false)]
 pub struct Location {
-    #[arg(long = "config", alias = "meta-config", env = "X402_TREAZURY_CONFIG")]
+    #[arg(long = "config", env = "X402_TREAZURY_CONFIG")]
     meta_config: Option<PathBuf>,
     #[arg(long = "provider")]
     config: Option<String>,

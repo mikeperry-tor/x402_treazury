@@ -122,33 +122,8 @@ pub fn retirement_remainder(s: &str) -> Result<u64> {
     Ok(amount.to::<u64>())
 }
 
-// Derive the schema once, while inspecting removed keys before typed parsing.
-// Remote Self generates inherent serde helpers; these trait adapters retain the
-// migration errors even when an obsolete setting has a malformed value.
-macro_rules! impl_config_serde {
-    ($config:ident) => {
-        impl Serialize for $config {
-            fn serialize<S: serde::Serializer>(
-                &self,
-                serializer: S,
-            ) -> std::result::Result<S::Ok, S::Error> {
-                Self::serialize(self, serializer)
-            }
-        }
-        impl<'de> Deserialize<'de> for $config {
-            fn deserialize<D: serde::Deserializer<'de>>(
-                deserializer: D,
-            ) -> std::result::Result<Self, D::Error> {
-                let value = serde_json::Value::deserialize(deserializer)?;
-                reject_replaced_settings::<D::Error>(&value, stringify!($config))?;
-                Self::deserialize(value).map_err(serde::de::Error::custom)
-            }
-        }
-    };
-}
-
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(remote = "Self", tag = "mode", deny_unknown_fields)]
+#[serde(tag = "mode", deny_unknown_fields)]
 pub enum WalletConfig {
     #[serde(rename = "static")]
     Static {
@@ -165,14 +140,10 @@ pub enum WalletConfig {
         #[serde(default)]
         max_funding_spend_zec: Option<String>,
         max_conversion_overhead_percent: u32,
-        /// Compatibility only: admission no longer has an elapsed-time deadline.
-        #[serde(default, skip_serializing)]
-        wait_seconds: Option<u64>,
         #[serde(default = "attempts")]
         max_attempts: u32,
     },
 }
-impl_config_serde!(WalletConfig);
 
 impl WalletConfig {
     pub fn managed(&self) -> bool {
@@ -194,9 +165,7 @@ impl WalletConfig {
                 max_api_payment_usdc,
                 max_funding_spend_zec,
                 max_conversion_overhead_percent,
-                wait_seconds,
                 max_attempts,
-                ..
             } => {
                 reserves.validate()?;
                 retirement_remainder(max_retirement_remainder_usdc)
@@ -210,12 +179,6 @@ impl WalletConfig {
                     *max_conversion_overhead_percent <= 100,
                     "max_conversion_overhead_percent must be an integer from 0 to 100"
                 );
-                if wait_seconds.is_some() {
-                    tracing::warn!(
-                        setting = "wait_seconds",
-                        "Obsolete wallet setting ignored; payment admission has no total timeout"
-                    );
-                }
                 ensure!(*max_attempts > 0, "invalid managed wallet limits");
             }
         }
@@ -280,7 +243,7 @@ fn nonempty_path<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<
     nonempty_string(d).map(PathBuf::from)
 }
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(remote = "Self", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct TreasuryConfig {
     /// Optional expected identity; empty until resolved from existing state at runtime.
     #[serde(
@@ -317,7 +280,6 @@ pub struct TreasuryConfig {
     #[serde(default = "confirmations")]
     pub confirmations: u64,
 }
-impl_config_serde!(TreasuryConfig);
 
 impl TreasuryConfig {
     pub fn indexer_endpoint(&self, lookup: impl Fn(&str) -> Option<String>) -> Result<String> {
@@ -413,7 +375,7 @@ impl TreasuryConfig {
     }
 }
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(remote = "Self", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub struct FundingConfig {
     /// Managed serving funds bootstrap and replacement wallets unless disabled.
     #[serde(default = "enabled")]
@@ -438,7 +400,6 @@ pub struct FundingConfig {
     #[serde(default = "quote_window")]
     pub quote_deadline_seconds: u64,
 }
-impl_config_serde!(FundingConfig);
 
 impl FundingConfig {
     /// Runtime resolution shared by serving and qualification. Inspection never reads env.
@@ -529,77 +490,5 @@ impl FundingConfig {
             "invalid funding limits"
         );
         Ok(())
-    }
-}
-
-fn reject_replaced_settings<E: serde::de::Error>(
-    value: &serde_json::Value,
-    scope: &str,
-) -> std::result::Result<(), E> {
-    let Some(fields) = value.as_object() else {
-        return Ok(());
-    };
-    for name in [
-        "daily_funding_limit_usdc",
-        "total_funding_limit_usdc",
-        "daily_treasury_spend_limit_zec",
-    ] {
-        if fields.contains_key(name) {
-            return Err(E::custom(format!(
-                "{name} was removed; remove this aggregate budget setting. Actual spendable treasury funds govern enabled funding; retain per-operation safeguards and separately authorized qualification limits"
-            )));
-        }
-    }
-    for name in ["max_sync_age_seconds", "base_max_block_age_seconds"] {
-        if fields.contains_key(name) {
-            return Err(E::custom(format!(
-                "{name} was removed; remove this local balance-age setting. SDK input selection and protocol transaction validity govern spending"
-            )));
-        }
-    }
-    if scope == "WalletConfig"
-        && fields.get("mode").and_then(serde_json::Value::as_str) == Some("zcash_rotation")
-    {
-        for name in ["funding_amount_usdc", "max_funding_amount_usdc"] {
-            if fields.contains_key(name) {
-                return Err(E::custom(format!(
-                    "managed {name} moved to reserves.small (and optional reserves.large); configure explicit max_api_payment_usdc and migrate stopped wallet state separately"
-                )));
-            }
-        }
-        if fields.contains_key("limit_payments_to_funding_target") {
-            return Err(E::custom(
-                "limit_payments_to_funding_target was removed; choose explicit max_api_payment_usdc preserving your intended per-payment authority; reserve targets no longer cap payments",
-            ));
-        }
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod retired_age_tests {
-    use super::*;
-    #[test]
-    fn removed_age_settings_fail_explicitly_before_value_parsing() {
-        for value in [
-            serde_json::json!(0),
-            serde_json::json!(300),
-            serde_json::json!("invalid"),
-        ] {
-            for key in ["max_sync_age_seconds", "base_max_block_age_seconds"] {
-                let mut document = serde_json::json!({});
-                document[key] = value.clone();
-                let error = if key == "max_sync_age_seconds" {
-                    serde_json::from_value::<TreasuryConfig>(document)
-                        .err()
-                        .unwrap()
-                } else {
-                    serde_json::from_value::<FundingConfig>(document)
-                        .err()
-                        .unwrap()
-                };
-                assert!(error.to_string().contains(&format!("{key} was removed")));
-            }
-        }
     }
 }

@@ -544,8 +544,8 @@ so process-global network policy and environment do not leak between cases. They
 inspect every command's fields without executing it, including configuration and
 network installation order, path defaults, identity assertions and birthday endpoint
 selection. Missing/malformed state and configuration have explicit expectations.
-Real executable fixtures separately cover Clap conflicts, aliases, catalog-free
-administration and preservation of existing state. Resolution-only tests do not
+Real executable fixtures separately cover Clap conflicts, config placement,
+catalog-free administration and preservation of existing state. Resolution-only tests do not
 claim to exercise funded command execution.
 
 Resumption fixtures compare complete eligibility output and ordered failures for

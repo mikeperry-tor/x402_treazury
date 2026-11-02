@@ -60,7 +60,6 @@ pub struct NetworkPolicy {
     /// Fresh owner-bound Tor scopes after the initial unsigned attempt.
     pub tor_isolation_retries: Option<usize>,
     /// Maximum HTTP read inactivity, identically in direct and Tor mode.
-    #[serde(alias = "request_timeout_seconds")]
     pub read_timeout_seconds: Option<u64>,
 }
 impl NetworkPolicy {

@@ -24,11 +24,11 @@ description = "Free — no payment required. Submit a borrower intent (wallet, U
 description = "Free — no payment required. All currently-open intents from both sides — the live order book. Matching requires overlap on duration first (borrower's needed term ≤ lender's max), then rate, then amount + collateral fit."
 
 [overrides.regimeshift_intent_intent_id_match]
-description = "Free — no payment required. Long-poll for a match on an open intent: holds the connection up to wait seconds (max 300) and returns immediately when a match is found, otherwise a timeout packet — re-poll on timeout. Run this server with --timeout 320 so the long poll survives. stream=true (newline-delimited JSON) is not usable through MCP — leave it false."
+description = "Free. Wait for a match on an open intent for up to wait seconds (max 300). Returns a match or a timeout result; poll again after a timeout. Keep stream=false for MCP results."
 
 [overrides.regimeshift_intent_intent_id_match.params]
 wait = "Seconds to hold the connection waiting for a match (up to 300)."
-stream = "Ignore — ndjson streaming is not usable through MCP; leave false."
+stream = "Keep false; MCP returns complete JSON results."
 
 [overrides.regimeshift_intent_intent_id_matches]
 description = "Free — no payment required. All matches for an intent plus its fill status (the sweep view): every match behind a partially-filled lender intent, each with the full signed quote payload, plus filled vs remaining capacity."
