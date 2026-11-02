@@ -109,6 +109,7 @@ pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> 
         .unwrap_or_else(|_| json!({"available":false,"reason":"status_observation_unavailable"}));
     Ok(payment)
 }
+// Lifecycle versioning is independent of status JSON and database formats.
 fn lifecycle(db: &Connection, status: &Status) -> Result<Value> {
     let jobs: Vec<_> = status
         .funding_jobs
@@ -140,7 +141,7 @@ fn lifecycle(db: &Connection, status: &Status) -> Result<Value> {
         })
         .collect::<Result<_>>()?;
     Ok(
-        json!({"schema_version":status.schema_version,"state_schema_version":status.state_schema_version,"treasury_id":status.treasury_id,"pools":status.pools,
+        json!({"schema_version":2,"state_schema_version":status.state_schema_version,"treasury_id":status.treasury_id,"pools":status.pools,
             "funding_jobs":jobs,"source_operations":operations}),
     )
 }
@@ -185,16 +186,10 @@ fn read(db: &Connection) -> Result<Value> {
         "SELECT id,pool_id,wallet_id,generation,amount,state,payer,payee,nonce,valid_after,valid_before,requirements_hash FROM payment_attempts ORDER BY id",
     )?;
     let attempts=stmt.query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"wallet":r.get::<_,String>(2)?,"generation":r.get::<_,i64>(3)?,"amount":r.get::<_,String>(4)?,"state":r.get::<_,String>(5)?,"payer":r.get::<_,Option<String>>(6)?,"payee":r.get::<_,Option<String>>(7)?,"nonce":r.get::<_,Option<String>>(8)?,"valid_after":r.get::<_,Option<i64>>(9)?,"valid_before":r.get::<_,Option<i64>>(10)?,"requirements_hash":r.get::<_,Option<String>>(11)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    // Historical resolved attempts have no classified evidence; never infer it.
-    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    let resolutions = if version < 11 {
-        Vec::new()
-    } else {
-        db.prepare("SELECT attempt_id,outcome,height,hash,block_time FROM payment_resolutions ORDER BY attempt_id")?
+    let resolutions = db.prepare("SELECT attempt_id,outcome,height,hash,block_time FROM payment_resolutions ORDER BY attempt_id")?
         .query_map([], |r| Ok(json!({"attempt_id":r.get::<_,String>(0)?,"outcome":r.get::<_,String>(1)?,
             "height":r.get::<_,i64>(2)?,"hash":r.get::<_,String>(3)?,"block_time":r.get::<_,i64>(4)?})))?
-        .collect::<rusqlite::Result<Vec<_>>>()?
-    };
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     let preparations = db.prepare("SELECT operation_id,preparation FROM operation_network WHERE preparation IS NOT NULL UNION ALL SELECT id,preparation FROM outgoing ORDER BY 1")?
         .query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,Vec<u8>>(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -448,6 +443,48 @@ mod tests {
             "100"
         );
         assert_eq!(exact["balance_evidence"]["available_after_atomic"], "83");
+        // Exact labels require the original saved support. A presentation refusal
+        // must not repair or rewrite accepted admission records.
+        let original = store.qualification_state().unwrap()["payment_attempts"].clone();
+        for (column, contradicted, restored) in [
+            ("balance", "99".to_owned(), "100".to_owned()),
+            ("block_height", "11".to_owned(), "12".to_owned()),
+            ("block_hash", format!("0x{:064x}", 3), hash.clone()),
+        ] {
+            store
+                .db
+                .execute(
+                    &format!(
+                        "UPDATE payment_admission_evidence SET {column}=?1 WHERE attempt_id='new'"
+                    ),
+                    [&contradicted],
+                )
+                .unwrap();
+            let saved: (Option<String>, Option<i64>, Option<String>, Option<String>) = store.db.query_row(
+                "SELECT balance,block_height,block_hash,support FROM payment_admission_evidence WHERE attempt_id='new'",
+                [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+            ).unwrap();
+            assert!(store.qualification_payment("new").is_err(), "{column}");
+            let after: (Option<String>, Option<i64>, Option<String>, Option<String>) = store.db.query_row(
+                "SELECT balance,block_height,block_hash,support FROM payment_admission_evidence WHERE attempt_id='new'",
+                [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+            ).unwrap();
+            assert_eq!(saved, after);
+            assert_eq!(
+                store.qualification_state().unwrap()["payment_attempts"],
+                original
+            );
+            store
+                .db
+                .execute(
+                    &format!(
+                        "UPDATE payment_admission_evidence SET {column}=?1 WHERE attempt_id='new'"
+                    ),
+                    [&restored],
+                )
+                .unwrap();
+        }
+        assert_eq!(store.qualification_payment("new").unwrap(), exact);
         store
             .db
             .execute(

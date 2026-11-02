@@ -54,7 +54,8 @@ is 1, status JSON is version 5, bootstrap JSON is version 3, deployment TOML is
 version 1, and the current SDK wallet format is 45. These numbers are not evidence
 of obsolete support and need not match. Removing `Status.legacy_refunds` requires
 status JSON version 6; retain bootstrap
-JSON version 3 with its nested current status. Lifecycle evidence has its own
+JSON version 3. Qualification snapshots carry nested current status separately.
+Lifecycle evidence has its own
 version 2 contract, independent of status JSON and database versions. Document
 these output boundaries rather than silently reusing an incompatible contract.
 

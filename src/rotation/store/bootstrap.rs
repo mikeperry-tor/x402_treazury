@@ -623,8 +623,23 @@ mod tests {
     fn current_status_contract_has_explicit_authority_and_claims() {
         let (_dir, store, _pool) = fixture();
         let value = serde_json::to_value(store.status().unwrap()).unwrap();
-        assert_eq!(value["schema_version"], 5);
+        assert_eq!(value["schema_version"], 6);
         assert_eq!(value["state_schema_version"], 23);
+        let snapshot = store.qualification_state().unwrap();
+        assert_eq!(snapshot["treasury_status"], value);
+        assert_eq!(snapshot["lifecycle"]["schema_version"], 2);
+        assert_eq!(snapshot["lifecycle"]["state_schema_version"], 23);
+        assert_eq!(snapshot["lifecycle"]["pools"], value["pools"]);
+        let job = &snapshot["lifecycle"]["funding_jobs"][0];
+        assert!(
+            crate::qualification::lifecycle::restart::observed(
+                &snapshot["lifecycle"],
+                job["pool_id"].as_str().unwrap(),
+                job["id"].as_str().unwrap(),
+                crate::qualification::lifecycle::restart::Checkpoint::QueuedRefill,
+            )
+            .unwrap()
+        );
         let keys: Vec<_> = value["pools"][0]
             .as_object()
             .unwrap()

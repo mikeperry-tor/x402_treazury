@@ -363,13 +363,23 @@ overlap assertion. Existing paid cases are never replayed to obtain new timing.
 ## Rotation and lifecycle assertions
 
 Managed admission and receipt events include public lifecycle observations for
-rotation/refill assertions. Schema 2 includes the stable group generation, independent reserve-slot generations, ACTIVE/READY/RETAINED/RETIRED roles, and funding-job
-identities/phases and source-operation submission states, without keys, signed
+rotation/refill assertions. Lifecycle schema 2 is independent of status JSON 6 and
+database schema 23; nested `treasury_status` in qualification snapshots uses the
+status contract. Bootstrap summaries remain version 3. Schema 2 includes the stable
+group generation, independent reserve-slot generations, ACTIVE/READY/RETAINED/RETIRED
+roles, funding-job identities/phases and source-operation submission states, without keys, signed
 bytes, quote bodies or upstream error prose. Response observation failure retains
 the seller receipt with an explicit unavailable marker and warning. Pending-state
 bracketing measures the signed-request future through final headers, not the full
 MCP response-body interval. Rotation and lifecycle execution use these observations;
 lifecycle additionally verifies one graceful application restart during its first refill.
+Managed bootstrap consumes the current enabled group's `inventory_ready` and
+`serving_ready` observations. Funded READY reserve inventory can satisfy them
+before an ACTIVE wallet exists; source-only completion does not substitute for
+recorded destination credit. Current database inspection accepts only schema 23:
+unsupported older or future stores fail without conversion or journal mutation.
+Original payment/source obligations and private evidence remain owned; rejection
+never refunds reservations or grants replay authority.
 Current admission events carry `ownership_evidence_version=1`: READY requires the original small/large slot and claim generation; ACTIVE/RETAINED requires no reserve claim. Validation uses the immutable journal-time values. Older unmarked evidence remains readable without inventing ownership facts.
 The phase order is topological: dependencies must name earlier phases. Scenario
 fields live in `[phases.scenario]` and inappropriate fields are rejected.

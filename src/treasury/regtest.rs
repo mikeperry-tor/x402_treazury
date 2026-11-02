@@ -626,7 +626,6 @@ async fn refunds_run(cli: bool) -> Result<()> {
     .await?;
     treasury.configure_sync(settings.clone());
     treasury.sync_once(&stop).await?;
-    assert!(treasury.status().await?.legacy_refunds.is_none());
     let mut retained_shield = None;
     for fail_commit in [false, true] {
         let before = treasury.status().await?.treasury_operations.len();
@@ -819,7 +818,6 @@ async fn refunds_run(cli: bool) -> Result<()> {
             operation_cost(&state, &op)?,
             (0, i64::try_from(prepared.facts().unwrap().fee_zatoshis)?)
         );
-        assert!(treasury.status().await?.legacy_refunds.is_none());
     }
     treasury.close().await?;
     chain.passed = true;

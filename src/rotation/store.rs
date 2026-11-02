@@ -29,7 +29,6 @@ mod reserve_replacement;
 pub(crate) mod source_reconciliation;
 pub use reporting::{BalancePointStatus, RetirementAccounting, RuntimeBalanceEvidence};
 pub mod preparation;
-pub mod refunds;
 pub(crate) mod scheduling;
 pub(crate) mod selection;
 use super::error::AdmissionError;
@@ -67,7 +66,6 @@ pub struct Status {
     pub sync_complete: bool,
     pub treasury_operations: Vec<OperationStatus>,
     pub funding_jobs: Vec<funding::FundingJob>,
-    pub legacy_refunds: Option<Vec<refunds::RefundStatus>>,
 }
 /// Persisted observations, never an authorization to spend on their own.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -496,7 +494,7 @@ impl Store {
                 .db
                 .query_row("PRAGMA user_version", [], |r| r.get(0))?;
             ensure!(
-                matches!(version, 21..=23),
+                version == 23,
                 "unsupported state schema; stopped-service conversion required"
             );
         }
@@ -537,7 +535,6 @@ impl Store {
         };
         store.snapshot()?;
         configure(&store.db)?;
-        admission_schema(&store.db)?;
         evidence::initialize_runtime(&store.db)?;
         source_reconciliation::initialize(&store.db)?;
         Ok(store)
@@ -1008,7 +1005,7 @@ pub fn treasury_id(dir: &Path) -> Result<String> {
 fn read_runtime_identity(db: &Connection) -> Result<String> {
     let schema: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(schema, 21..=23),
+        schema == 23,
         "unsupported state schema; stopped-service conversion required"
     );
     let mut query = db.prepare("SELECT id,version,network,account FROM instance")?;
@@ -1069,44 +1066,33 @@ pub(crate) fn inspect_wallet_snapshot(
     })
 }
 fn read_status(db: &Connection) -> Result<Status> {
-    let (id, birthday, version): (String, u32, u32) =
+    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    ensure!(
+        version == 23,
+        "unsupported state schema; stopped-service conversion required"
+    );
+    let (id, birthday, instance_version): (String, u32, u32) =
         db.query_row("SELECT id,birthday,version FROM instance", [], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         })?;
-    ensure!(version == 1, "unsupported state schema");
+    ensure!(instance_version == 1, "unsupported state schema");
     let revision = db.query_row("SELECT MAX(revision) FROM snapshots", [], |r| r.get(0))?;
-    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    let mut pools = reporting::read_pools(db, version)?;
-    let sync: Option<SyncObservation> = if version >= 2 {
-        db.query_row(
+    let mut pools = reporting::read_pools(db)?;
+    let sync: Option<SyncObservation> = db
+        .query_row(
             "SELECT observation FROM treasury_sync WHERE singleton=1",
             [],
             |r| r.get::<_, String>(0),
         )
         .optional()?
         .map(|s| serde_json::from_str(&s))
-        .transpose()?
-    } else {
-        None
-    };
-    let outgoing_pending = if version >= 21 {
-        preparation::preparation_pending(db)?
-    } else {
-        db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
-            [],
-            |r| r.get(0),
-        )?
-    };
+        .transpose()?;
+    let outgoing_pending = preparation::preparation_pending(db)?;
     let sync_complete = sync.as_ref().is_some_and(|observation| {
         observation.phase == SyncPhase::Ready && observation.snapshot_revision == revision
     });
-    let treasury_operations = reporting::read_operations(db, version)?;
-    let funding_jobs = if version >= 4 {
-        funding::read_jobs(db)?
-    } else {
-        vec![]
-    };
+    let treasury_operations = reporting::read_operations(db)?;
+    let funding_jobs = funding::read_jobs(db)?;
     for pool in &mut pools {
         pool.funding_degraded = pool
             .reserve_claims
@@ -1123,13 +1109,8 @@ fn read_status(db: &Connection) -> Result<Status> {
             });
     }
     Ok(Status {
-        schema_version: 5,
+        schema_version: 6,
         state_schema_version: version,
-        legacy_refunds: if (7..21).contains(&version) {
-            Some(refunds::read_refunds(db)?)
-        } else {
-            None
-        },
         funding_jobs,
         treasury_operations,
         sync_complete,
@@ -1267,23 +1248,6 @@ impl StoreHandle {
     }
 }
 
-// Additive admission schema, versioned independently of the encrypted record format.
-fn admission_schema(db: &Connection) -> Result<()> {
-    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    ensure!(
-        matches!(version, 21..=23),
-        "unsupported state schema; private-state conversion requires separate authorization; a code rollback is not a state downgrade"
-    );
-    // Additive lookup optimization for existing schema16 stores; financial
-    // records and the state format are unchanged.
-    db.execute_batch(
-        "CREATE INDEX IF NOT EXISTS wallet_role_sequence ON wallets(pool_id,role,sequence);
-         CREATE INDEX IF NOT EXISTS wallet_live_sequence ON wallets(pool_id,sequence) WHERE role!='RETIRED';
-         CREATE INDEX IF NOT EXISTS funding_claim_lookup ON funding_jobs(pool_id,allocation_kind,claim_generation);
-         CREATE INDEX IF NOT EXISTS funding_recovery_job ON funding_recovery(job_id,operation_id);",
-    )?;
-    Ok(())
-}
 pub(crate) struct PreparedPayment {
     pub id: String,
     pub wallet: String,

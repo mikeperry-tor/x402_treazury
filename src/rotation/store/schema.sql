@@ -1,5 +1,5 @@
--- Fresh schema23 only. Legacy conversion has a separate strict preflight.
--- Historical stores may retain unused payment_anchors and funding_progress.turn.
+-- Current schema23. Unsupported stores are rejected without conversion.
+-- Current stores may retain unused payment_anchors and funding_progress.turn.
 -- They are never read/written by runtime code; no destructive cleanup is needed.
 CREATE TABLE instance(id TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version=1),birthday INTEGER NOT NULL,network TEXT NOT NULL CHECK(network='mainnet'),account INTEGER NOT NULL CHECK(account=0));
 CREATE TABLE snapshots(revision INTEGER PRIMARY KEY,bytes BLOB NOT NULL);
@@ -47,7 +47,7 @@ CREATE TABLE wallet_retirements(
  recorded_at INTEGER NOT NULL);
 CREATE INDEX wallet_role_sequence ON wallets(pool_id,role,sequence);
 CREATE UNIQUE INDEX one_active ON wallets(pool_id) WHERE role='ACTIVE';
--- The serialized owner checks pending work; legacy stores can retain several unfinished originals.
+-- The serialized owner checks pending work while preserving unfinished originals.
 CREATE UNIQUE INDEX payment_reconciliation_sequence ON payment_attempts(reconciliation_sequence);
 CREATE INDEX payment_pending_sequence ON payment_attempts(pool_id,state,reconciliation_sequence);
 CREATE INDEX payment_wallet_state ON payment_attempts(wallet_id,state);
@@ -82,3 +82,7 @@ CREATE INDEX wallet_pending_balance ON wallets(pool_id,sequence) WHERE refresh_p
 CREATE INDEX IF NOT EXISTS funding_progress_unsettled_requests ON funding_progress(job_id,operation_id) WHERE quote IS NOT NULL AND NOT(typeof(provider_success)='integer' AND provider_success!=0) AND NOT(typeof(provider_failed)='integer' AND provider_failed!=0) AND NOT(typeof(provider_refunded)='integer' AND provider_refunded!=0);
 CREATE INDEX IF NOT EXISTS funding_recovery_unsettled_requests ON funding_recovery(job_id,operation_id) WHERE quote IS NOT NULL AND NOT(typeof(provider_success)='integer' AND provider_success!=0) AND NOT(typeof(provider_failed)='integer' AND provider_failed!=0) AND NOT(typeof(provider_refunded)='integer' AND provider_refunded!=0);
 CREATE INDEX IF NOT EXISTS outgoing_pending ON outgoing(id) WHERE state='PREPARED';
+
+CREATE TABLE source_disposition_history(id TEXT NOT NULL REFERENCES outgoing(id), submission TEXT NOT NULL, height INTEGER, revision INTEGER REFERENCES snapshots(revision), PRIMARY KEY(id,submission,revision));
+CREATE TABLE payment_resolution_history(attempt_id TEXT NOT NULL REFERENCES payment_attempts(id), outcome TEXT NOT NULL,height INTEGER NOT NULL,hash TEXT NOT NULL,block_time INTEGER NOT NULL,support TEXT);
+CREATE INDEX resolution_history_attempt ON payment_resolution_history(attempt_id);

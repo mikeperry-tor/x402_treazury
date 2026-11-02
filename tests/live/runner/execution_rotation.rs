@@ -238,6 +238,17 @@ impl Controller {
             tick(child, deadline, stop).await?;
         }
     }
+    fn payer_changed(&self, after: &Value) -> Result<bool> {
+        let active = |value: &Value| -> Result<Option<Value>> {
+            Ok(pool(value, &self.pool)?["addresses"]
+                .as_array()
+                .context("wallet inventory missing")?
+                .iter()
+                .find(|wallet| wallet["role"] == "ACTIVE")
+                .map(|wallet| wallet["id"].clone()))
+        };
+        Ok(active(after)? != active(&self.before)?)
+    }
     pub(super) fn before_case(&self, id: &str) -> Result<()> {
         if self.round.service_cases.iter().any(|c| c == id) {
             ensure!(
@@ -277,16 +288,7 @@ impl Controller {
             .context("observed generation missing")?;
         let current_schema = after["schema_version"] == 2;
         let changed = if current_schema {
-            let active = |value: &Value| -> Result<Value> {
-                Ok(pool(value, &self.pool)?["addresses"]
-                    .as_array()
-                    .context("wallet inventory missing")?
-                    .iter()
-                    .find(|w| w["role"] == "ACTIVE")
-                    .context("active wallet missing")?["id"]
-                    .clone())
-            };
-            active(&after)? != active(&self.before)?
+            self.payer_changed(&after)?
         } else {
             generation != self.generation
         };
@@ -393,13 +395,20 @@ mod tests {
                 service_cases: vec!["service".into()],
             },
             round_index: 0,
-            before: json!({}),
+            before: json!({"schema_version":2,"pools":[{"id":"p","addresses":[{"id":"ready","role":"READY"}]}]}),
             pool: "p".into(),
             generation: 0,
             job: None,
             consumed: false,
             state: PathBuf::new(),
         };
+        // Initial funded inventory need not have an ACTIVE predecessor.
+        assert!(!controller.payer_changed(&controller.before).unwrap());
+        let mut promoted = controller.before.clone();
+        promoted["pools"][0]["addresses"][0]["role"] = json!("ACTIVE");
+        assert!(controller.payer_changed(&promoted).unwrap());
+        controller.before = promoted.clone();
+        assert!(!controller.payer_changed(&promoted).unwrap());
         controller.before_case("deplete").unwrap();
         assert!(controller.before_case("service").is_err());
         assert!(controller.before_case("unreviewed").is_err());

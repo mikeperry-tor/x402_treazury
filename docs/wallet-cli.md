@@ -381,16 +381,18 @@ random EVM keys, pending payment authorizations or the rotation journal.
 
 The embedded Zingolib v7 SDK reads older wallet snapshots and writes SDK wallet
 format 45 on the next save, including the finite-sync and transparent-scan fields.
-Opening an owned schema-21 or schema-22 treasury upgrades its database additively
-to schema 23. Earlier binaries reject that version: they cannot enforce archived
-swap fulfillment against replacement deposits. Existing source history and snapshot
-references remain preserved, including the guard against automatic disclosure of
-previously closed originals. Historical rows do not reopen settled swap workflows.
-Read-only status/identity inspection accepts schemas 21, 22 and 23 without upgrading.
-Encrypted records, identities and journaled transaction bytes retain their
-formats. Stop serving and take a complete
-backup before upgrading. Older v6 application binaries cannot reopen a format-45
-SDK snapshot. A pre-upgrade backup is not a safe rollback after new financial work:
+The application accepts database schema 23 only, for owner opens and read-only
+status, identity and qualification inspection. Older and future versions fail
+before changing source state; opening them does not convert them. Canonical fresh
+stores include current source-disposition and payment-resolution histories. A
+schema-23 store interrupted before those empty histories were initialized can
+finish their idempotent initialization under exclusive ownership without
+rewriting financial records. Existing history and snapshot references remain
+preserved, including the guard against automatic disclosure of previously closed
+originals. Historical rows do not reopen settled swap workflows. Encrypted
+records, identities and journaled transaction bytes retain their formats. Stop
+serving and take a complete backup before a software upgrade. Older v6 application
+binaries cannot reopen a format-45 SDK snapshot. A pre-upgrade backup is not a safe rollback after new financial work:
 restoring it would discard the newer accepted operations and liabilities. Preserve
 the current state and use a compatible application for recovery.
 
@@ -983,13 +985,24 @@ not automatically detectable; a code rollback is not a state downgrade.
 
 ## Versioned capacity output
 
-Wallet status JSON uses `schema_version: 5`; bootstrap uses `schema_version: 3`. Status additionally
-reports `state_schema_version`. Historical qualification report files retain their
-original interpretation; none of these observations grants payment or retry authority.
+Wallet status JSON uses `schema_version: 6` and reports `state_schema_version: 23`.
+Version 6 removes the obsolete `legacy_refunds` projection; current refund-address
+ownership and shielding remain supported. Qualification lifecycle observations
+use their own `schema_version: 2`; the status version is never copied into them.
+Bootstrap summaries retain `schema_version: 3`. These are separate from SDK wallet
+format 45, instance/encrypted-record/AAD version 1 and backup manifest format 1.
+Saved report files remain untouched; none of these observations grants payment,
+funding or replay authority.
 Each funding job's additive `provider_observed_at` field exposes the existing
 database observation timestamp for its last validated provider response, including
 pending/unknown responses; it is null if unavailable. It is not provider
 `updatedAt`. This presentation change adds no persisted fields or schema version.
+
+Unsupported owner opens preserve the complete state directory before writable
+initialization. Live read-only SQLite inspection preserves database and existing
+financial journal bytes; SQLite may create WAL/SHM coordination files or update
+SHM reader metadata. It uses a coherent read transaction so committed WAL data
+remains visible while the owner is running.
 
 Bootstrap reports `serving_ready_groups`, `inventory_ready_groups`, and
 `captured_completed_groups` separately. The captured command waits only for its
@@ -1035,8 +1048,8 @@ have no bridge obligation. Source confirmation or expiry, completion labels and
 unattributed returned coins alone cannot establish delivery closure.
 Low-balance traversal rotates payment selection without deleting keys or funds.
 
-Production storage preflight rejects unsupported legacy schemas without changing
-source state. `wallet recover` reconciles supported accepted work; it cannot
-manufacture missing immutable destination-readiness evidence or convert an
+Production storage preflight rejects every database schema except 23, including
+future versions, without changing source state. `wallet recover` reconciles
+supported accepted work; it cannot manufacture missing immutable destination-readiness evidence or convert an
 unsupported schema. Preserve complete backups and all accepted obligations; an
 old backup cannot safely undo subsequent financial work.

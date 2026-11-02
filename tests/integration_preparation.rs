@@ -605,7 +605,8 @@ fn identity_fixture_child(name: &str) {
         .output()
         .unwrap();
     assert!(
-        result.status.success(),
+        result.status.success()
+            && String::from_utf8_lossy(&result.stdout).contains("1 passed; 0 failed"),
         "{} {}",
         String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr)

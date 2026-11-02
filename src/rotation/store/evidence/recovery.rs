@@ -2,8 +2,8 @@
 use super::*;
 
 pub(in crate::rotation::store) fn initialize_history(db: &Connection) -> Result<()> {
-    // Additive audit evidence, independent of encrypted record formats. Older
-    // binaries still see the conservatively reopened original liabilities.
+    // Complete interrupted current-schema initialization without rewriting
+    // original liabilities or existing audit evidence.
     db.execute_batch("CREATE TABLE IF NOT EXISTS payment_resolution_history(
         attempt_id TEXT NOT NULL REFERENCES payment_attempts(id),
         outcome TEXT NOT NULL,height INTEGER NOT NULL,hash TEXT NOT NULL,

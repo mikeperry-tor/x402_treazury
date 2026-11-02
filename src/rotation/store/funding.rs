@@ -4,8 +4,8 @@ pub(super) const RECOVERY_COUNT_SQL: &str = "SELECT COUNT(*) FROM funding_recove
 
 use super::*;
 
-/// Keep the USDC result separate from the nominal sizing authority. Legacy
-/// output quotes (including pre-mode journals) use the same amount for both.
+/// Keep the USDC result separate from nominal sizing authority. Accepted output
+/// quotes, including journals without an explicit mode, use one amount for both.
 fn quote_amounts(value: &serde_json::Value) -> Result<(String, String)> {
     match value["request"]["swapType"].as_str() {
         Some("EXACT_INPUT") => {
@@ -156,52 +156,6 @@ impl FundingFacts {
     pub fn source_reconciliation_needed(&self) -> bool {
         !self.provider_success && self.source_pending && self.source_attempts > 0
     }
-}
-
-/// Historical conversion preflight fixture. Runtime opens now require the current schema
-/// before any mutation; this preserves the original unsupported-proof regression.
-#[cfg(test)]
-pub(super) fn preflight_funding_upgrade(db: &Connection, version: u32) -> Result<()> {
-    if version >= 15 {
-        return Ok(());
-    }
-    let has_jobs: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='funding_jobs')",
-        [],
-        |r| r.get(0),
-    )?;
-    if has_jobs {
-        let legacy_complete: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM funding_jobs WHERE state='COMPLETE')",
-            [],
-            |r| r.get(0),
-        )?;
-        ensure!(
-            !legacy_complete,
-            "legacy_destination_readiness_support_missing: explicit conversion preflight required"
-        );
-    }
-    for table in [
-        "funding_jobs",
-        "payment_attempts",
-        "outgoing",
-        "budget_entries",
-    ] {
-        let exists: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-            [table],
-            |r| r.get(0),
-        )?;
-        if exists {
-            // Identifiers come only from the fixed table list above.
-            let occupied: bool =
-                db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {table})"), [], |r| {
-                    r.get(0)
-                })?;
-            ensure!(!occupied, "legacy_financial_state_requires_conversion");
-        }
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -897,104 +851,6 @@ fn derive_operation_phase(db: &Connection, job: &str, operation: &str) -> Result
     Ok(())
 }
 
-/// Structural historical D validity is distinct from whether its original support
-/// remains undisputed. Fresh payment evidence can establish current capacity.
-pub(crate) fn readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<bool> {
-    let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    if version >= 19 {
-        return initial_credit_recorded(db, wallet);
-    }
-    legacy_readiness_recorded_valid(db, wallet)
-}
-fn legacy_readiness_recorded_valid(db: &Connection, wallet: &str) -> Result<bool> {
-    type Saved = (
-        String,
-        String,
-        String,
-        String,
-        i64,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-    );
-    let saved:Option<Saved>=db.query_row("SELECT f.readiness_support,f.readiness_requirement,f.readiness_capacity,f.readiness_hash,f.readiness_height,f.readiness_latest_hash,f.readiness_endpoint,f.readiness_checkpoint_hash,f.readiness_disputed,f.readiness_operation,j.operation_id,w.address,j.accepted_output,j.accepted_recipient,f.target FROM funding_jobs f JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id WHERE f.wallet_id=?1 AND f.readiness_requirement IS NOT NULL",[wallet],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?,r.get(11)?,r.get(12)?,r.get(13)?,r.get(14)?))).optional().map_err(|error| {
-        if matches!(error, rusqlite::Error::InvalidColumnType(..) | rusqlite::Error::FromSqlConversionFailure(..) | rusqlite::Error::IntegralValueOutOfRange(..)) {
-            anyhow::Error::new(error).context(crate::rotation::base::evidence::EvidenceFailure::MalformedSupport)
-        } else {
-            error.into()
-        }
-    })?;
-    let Some((
-        support,
-        requirement,
-        capacity,
-        hash,
-        height,
-        latest,
-        endpoint,
-        checkpoint,
-        _dispute,
-        correlation,
-        operation,
-        address,
-        accepted,
-        recipient,
-        original,
-    )) = saved
-    else {
-        return Ok(false);
-    };
-    (|| -> Result<bool> {
-        let support: super::evidence::BalanceSupport = serde_json::from_str(&support)?;
-        support.observation.validate()?;
-        ensure!(
-            support.observation.wallet == wallet
-                && support
-                    .observation
-                    .address
-                    .parse::<alloy_primitives::Address>()?
-                    == address.parse::<alloy_primitives::Address>()?,
-            "readiness support wallet mismatch"
-        );
-        ensure!(
-            support.observation.available() == amount(&capacity)?
-                && amount(&capacity)? >= amount(&requirement)?
-                && support.observation.confirmed.anchor.hash == hash
-                && i64::try_from(support.observation.confirmed.anchor.height)? == height
-                && support.observation.latest.anchor.hash == latest
-                && support.observation.endpoint == endpoint
-                && support.checkpoint.as_ref().map(|a| a.hash.as_str()) == checkpoint.as_deref(),
-            "readiness support tuple mismatch"
-        );
-        if let Some(correlation) = correlation {
-            ensure!(
-                correlation == operation
-                    && accepted.as_deref() == Some(requirement.as_str())
-                    && recipient
-                        .as_deref()
-                        .context("readiness accepted recipient missing")?
-                        .parse::<alloy_primitives::Address>()?
-                        == address.parse::<alloy_primitives::Address>()?,
-                "readiness operation correlation mismatch"
-            );
-        } else {
-            ensure!(
-                requirement == original && accepted.is_none(),
-                "external readiness requirement mismatch"
-            );
-        }
-        Ok(true)
-    })()
-    .context(crate::rotation::base::evidence::EvidenceFailure::MalformedSupport)
-}
-
 /// Source work and bridge delivery are independent original obligations.
 /// NEAR terminal outcomes dispose of delivery; local source expiry alone does not.
 pub fn destination_obligation_pending(db: &Connection, wallet: &str) -> Result<bool> {
@@ -1624,16 +1480,7 @@ pub(super) fn read_jobs(db: &Connection) -> Result<Vec<FundingJob>> {
     read_jobs_matching(db, None, true)
 }
 fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Result<Vec<FundingJob>> {
-    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    // Historical read-only schemas need not contain provider observation metadata.
-    let provider_observed_at = if version >= 21 {
-        "j.provider_observed_at"
-    } else {
-        "NULL"
-    };
-    let query = format!(
-        "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,CASE WHEN {version}<15 AND f.state='COMPLETE' THEN '\"COMPLETE\"' ELSE j.phase END,j.operation_id,j.attempts,j.next_poll,j.last_error,{provider_observed_at} FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id"
-    );
+    let query = "SELECT f.id,w.pool_id,p.name,w.id,w.address,f.target,j.phase,j.operation_id,j.attempts,j.next_poll,j.last_error,j.provider_observed_at FROM funding_jobs f LEFT JOIN funding_progress j ON j.job_id=f.id JOIN wallets w ON w.id=f.wallet_id JOIN pools p ON p.id=w.pool_id";
     let query = if job.is_some() {
         format!("{query} WHERE f.id=?1")
     } else {
@@ -1687,9 +1534,9 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
             last_error,
             provider_observed_at,
         ) = r.context("missing or invalid funding operation journal")?;
-        let (started_at, error_streak, timed_out): (Option<i64>, u32, bool) = if version >= 9 {
-            // Keep execution/stepping failures outside the diagnostic-value fallback.
-            db.query_row(
+        // Keep execution/stepping failures outside the diagnostic-value fallback.
+        let (started_at, error_streak, timed_out): (Option<i64>, u32, bool) = db
+            .query_row(
                 "SELECT started_at,error_streak,timed_out FROM funding_health WHERE job_id=?1",
                 [&id],
                 |r| {
@@ -1709,10 +1556,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
             )
             .optional()?
             .unwrap_or(Ok((None, 0, false)))
-            .context(super::scheduling::FundingDecodeFailure)?
-        } else {
-            (None, 0, false)
-        };
+            .context(super::scheduling::FundingDecodeFailure)?;
         // Runtime routing may recover established work without trusting a damaged
         // display phase. Actual phase transitions still enforce their stored CAS.
         let parsed_phase: FundingPhase = if strict {
@@ -1724,7 +1568,7 @@ fn read_jobs_matching(db: &Connection, job: Option<&str>, strict: bool) -> Resul
                 .and_then(|phase| serde_json::from_str(&phase).ok())
                 .unwrap_or(FundingPhase::RecoveryRequired)
         };
-        // Also normalize historical completed rows for read-only wallet status.
+        // Completion reporting keeps stale diagnostics out of established success.
         let last_error = if parsed_phase == FundingPhase::Complete {
             completed_error(last_error.as_deref()).map(str::to_owned)
         } else {
@@ -1769,7 +1613,7 @@ mod completion_tests {
     use super::*;
 
     #[test]
-    fn provider_observation_time_is_advisory_and_compatible_with_old_reports() {
+    fn provider_observation_time_is_advisory_even_when_malformed() {
         let (_dir, store, job) = fixture();
         for (value, expected) in [
             ("NULL", None),
@@ -1799,9 +1643,6 @@ mod completion_tests {
                 expected
             );
         }
-        // Older read-only status remains usable even without the column.
-        store.db.execute_batch("ALTER TABLE funding_progress DROP COLUMN provider_observed_at; PRAGMA user_version=20;").unwrap();
-        assert_eq!(read_jobs(&store.db).unwrap()[0].provider_observed_at, None);
     }
 
     #[test]
@@ -1879,6 +1720,83 @@ mod completion_tests {
         .unwrap();
         let job = store.funding_jobs().unwrap().remove(0);
         (dir, store, job)
+    }
+
+    #[test]
+    fn mode_less_quote_keeps_exact_bytes_and_rejects_invalid_or_excess_terms() {
+        let (dir, mut store, job) = fixture();
+        let quote = |mode: Option<&str>, amount: &str| {
+            let mut value = serde_json::json!({
+                "request": {"amount": amount, "recipient": job.recipient},
+                "accepted_label": "original terms"
+            });
+            if let Some(mode) = mode {
+                value["request"]["swapType"] = serde_json::json!(mode);
+            }
+            format!(" \n{value}\n").into_bytes()
+        };
+        for rejected in [quote(Some("UNSUPPORTED"), "10"), quote(None, "11")] {
+            let changes = store.db.total_changes();
+            assert!(store.save_funding_quote(&job.id, &rejected).is_err());
+            assert_eq!(
+                store.funding_job(&job.id).unwrap().unwrap().phase,
+                FundingPhase::Allocated
+            );
+            let saved: Option<Vec<u8>> = store
+                .db
+                .query_row(
+                    "SELECT quote FROM funding_progress WHERE job_id=?1",
+                    [&job.id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(saved.is_none());
+            assert_eq!(store.db.total_changes(), changes);
+            assert!(store.operation(&job.operation_id).is_err());
+            assert!(store.preparation_intent(&job.operation_id).is_err());
+        }
+        let accepted = quote(None, "10");
+        store.save_funding_quote(&job.id, &accepted).unwrap();
+        let identity = store.id().to_owned();
+        drop(store);
+        let mut store = Store::open(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            &identity,
+        )
+        .unwrap();
+        assert_eq!(store.funding_quote(&job.id).unwrap().as_slice(), accepted);
+        store.save_funding_quote(&job.id, &accepted).unwrap();
+        assert!(
+            store
+                .save_funding_quote(&job.id, &quote(None, "9"))
+                .is_err()
+        );
+        assert!(
+            store
+                .accepted_quote_suits_current_claim(&job.id, &job.operation_id)
+                .unwrap()
+        );
+        store
+            .db
+            .execute(
+                "UPDATE reserve_claims SET target='9',maximum_output='9' WHERE wallet_id=?1",
+                [&job.wallet_id],
+            )
+            .unwrap();
+        assert!(
+            !store
+                .accepted_quote_suits_current_claim(&job.id, &job.operation_id)
+                .unwrap()
+        );
+        assert_eq!(store.funding_quote(&job.id).unwrap().as_slice(), accepted);
+        assert_eq!(
+            store.funding_job(&job.id).unwrap().unwrap().phase,
+            FundingPhase::Quoted
+        );
+        assert!(store.operation(&job.operation_id).is_err());
+        assert!(store.preparation_intent(&job.operation_id).is_err());
+        assert_eq!(store.funding_recovery_count(&job.id).unwrap(), 0);
     }
 
     #[test]
@@ -2266,49 +2184,6 @@ mod completion_tests {
             )
             .unwrap();
         assert_eq!(count_after, count);
-    }
-
-    #[test]
-    fn legacy_upgrade_preflight_preserves_schema_and_exact_stored_bytes() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE funding_jobs(id TEXT PRIMARY KEY,state TEXT); CREATE TABLE outgoing(id TEXT PRIMARY KEY,raw BLOB); INSERT INTO funding_jobs VALUES('job','COMPLETE'); INSERT INTO outgoing VALUES('operation',X'00FF0102'); PRAGMA user_version=12;").unwrap();
-        let before: (String, Vec<u8>) = db
-            .query_row(
-                "SELECT f.state,o.raw FROM funding_jobs f CROSS JOIN outgoing o",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        let error = preflight_funding_upgrade(&db, 12).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .starts_with("legacy_destination_readiness_support_missing")
-        );
-        let version: u32 = db
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap();
-        let after: (String, Vec<u8>) = db
-            .query_row(
-                "SELECT f.state,o.raw FROM funding_jobs f CROSS JOIN outgoing o",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(version, 12);
-        assert_eq!(before, after);
-        db.execute("UPDATE funding_jobs SET state='QUEUED'", [])
-            .unwrap();
-        assert!(
-            preflight_funding_upgrade(&db, 12)
-                .unwrap_err()
-                .to_string()
-                .contains("legacy_financial_state_requires_conversion")
-        );
-        db.execute_batch("DELETE FROM funding_jobs; DELETE FROM outgoing;")
-            .unwrap();
-        preflight_funding_upgrade(&db, 12).unwrap();
-        preflight_funding_upgrade(&Connection::open_in_memory().unwrap(), 0).unwrap();
     }
 
     #[test]

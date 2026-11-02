@@ -631,8 +631,8 @@ Canonical SDK records match the transaction's committed effects, allowing valid
 v5 authorization-data variants; the original disclosed bytes remain unchanged.
 See [SDK transaction identity](zingo-integration.md) for the ZIP 244 boundary.
 Completed source work is not re-audited or reopened after restart or SDK chain
-replacement. Schema-22 historical source dispositions and referenced snapshots
-remain readable audit evidence; they do not drive a lifetime reconciliation pass.
+replacement. Retained source dispositions and referenced snapshots remain audit
+evidence in current stores; they do not drive a lifetime reconciliation pass.
 For records reopened by an earlier implementation, the existing read-only history
 guard still forbids automatic disclosure of previously closed originals. Actual
 unfinished originals keep their existing owner and exact journals.
@@ -859,8 +859,10 @@ cannot erase an uncertain input owner or authorize a replacement deposit.
 
 `rotation/store.rs` keeps treasury snapshots, EVM keys, funding/outgoing records,
 roles, accepted calculations and payment authorizations in one versioned database.
-Sensitive records are authenticated-encrypted with a separate 32-byte key and
-record identity bindings; public metadata still links addresses and operations.
+The current database contract is schema 23, independent of public output, SDK
+and encryption formats; see [versioned output](wallet-cli.md#versioned-capacity-output).
+Sensitive records are authenticated-encrypted with a separate 32-byte key and record
+identity bindings; public metadata still links addresses and operations.
 The directory, key, database, ownership lock and SQLite sidecars have filesystem
 protections. Wrong key, corruption or identity mismatch never initializes an empty
 replacement wallet.
@@ -1209,10 +1211,12 @@ Accepted calculations, exact selected inputs, signed bytes and submission intent
 survive cancellation and failed local acknowledgment. Source expiry recovery checks
 the exact authenticated original, buried finite inclusive consensus expiry and
 completed canonical SDK coverage; a refund is never proof
-of non-submission. Owned schema-21/22 stores upgrade additively to schema 23, preserving
-financial evidence and encrypted formats. Older binaries reject schema 23 because
-they cannot enforce archived fulfillment against a replacement deposit. Unsupported state schemas
-are rejected before mutation, without private-state conversion.
+of non-submission. Owner opens and read-only inspection accept only database
+schema 23; older and future versions fail before source-state mutation, without
+private-state conversion. Current interrupted initialization may finish empty
+source-disposition and payment-resolution histories idempotently. Existing history,
+exact accepted bytes, identities, snapshot references and liabilities remain
+preserved; initialization does not reopen completed work or authorize disclosure.
 
 Failed SDK capabilities reconstruct and exited funding/reconciliation tasks resume
 through existing ownership. Automatic shielding recovers owned transparent capital

@@ -269,7 +269,6 @@ mod tests {
             serde_json::json!(["operation"])
         );
         assert!(store.request_broadcast("operation", 1, 1, false).is_err());
-        assert!(store.status()?.legacy_refunds.is_none());
         Ok(())
     }
 }

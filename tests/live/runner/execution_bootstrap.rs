@@ -1,24 +1,23 @@
 //! Wait for production bootstrap; never promotes, allocates or changes balances.
 use super::*;
 pub(super) fn ready(snapshot: &Value, pools: &[String]) -> Result<bool> {
+    ensure!(
+        snapshot["treasury_status"]["schema_version"] == 6,
+        "unsupported bootstrap status version"
+    );
     let actual = snapshot["treasury_status"]["pools"]
         .as_array()
         .context("bootstrap pool snapshot missing")?;
     Ok(pools.iter().all(|name| {
         actual.iter().any(|p| {
             p["name"] == *name
-                && if snapshot["treasury_status"]["schema_version"] == 2 {
-                    p["inventory_ready"] == true
-                } else {
-                    p["bootstrapped"] == true
-                }
                 && p["enabled"] == true
-                && p["addresses"]
-                    .as_array()
-                    .is_some_and(|wallets| wallets.iter().any(|w| w["role"] == "ACTIVE"))
+                && p["inventory_ready"] == true
+                && p["serving_ready"] == true
         })
     }))
 }
+
 pub(super) async fn wait(
     registry: &mut Registry,
     manifest: &Manifest,
@@ -212,26 +211,75 @@ pub(crate) fn waiting_count(
 mod tests {
     use super::*;
     #[test]
-    fn capacity_readiness_requires_configured_inventory_without_source_completion() {
+    fn capacity_readiness_uses_current_store_inventory_without_an_active_wallet() {
+        crate::identity_fixture_child("execution::bootstrap::tests::capacity_readiness_child");
+    }
+    // BaseRpc owns process-global direct network policy; the cover fixture
+    // independently installs Tor policy. Preserve both real boundaries in isolation.
+    #[test]
+    #[ignore = "isolated network owner; invoked by parent"]
+    fn capacity_readiness_child() {
+        use alloy_primitives::U256;
+        use x402_treazury::rotation::store::{AllocationKind, Store};
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::create(
+            &dir.path().join("state"),
+            &dir.path().join("key"),
+            1,
+            b"fixture",
+        )
+        .unwrap();
+        let pool = store
+            .ensure_capacity_group(
+                "a",
+                &crate::capacity_fixture::small_reserve("1"),
+                Some(U256::from(1_000_000)),
+                0,
+            )
+            .unwrap();
+        let job = store
+            .allocate_capacity_kind(&pool, AllocationKind::Small, true)
+            .unwrap()
+            .unwrap();
+        let wallet = store
+            .funding_jobs()
+            .unwrap()
+            .into_iter()
+            .find(|funding| funding.id == job)
+            .unwrap()
+            .wallet_id;
         let names = vec!["a".into()];
-        let mut snapshot = json!({"treasury_status":{"schema_version":2,"pools":[{"name":"a","enabled":true,"inventory_ready":true,"addresses":[{"role":"ACTIVE"}]}],"funding_jobs":[{"phase":"SWAPPING"}]}});
-        assert!(ready(&snapshot, &names).unwrap());
-        snapshot["treasury_status"]["pools"][0]["inventory_ready"] = json!(false);
+        let snapshot = store.qualification_state().unwrap();
+        assert_eq!(snapshot["treasury_status"]["schema_version"], 6);
+        assert_eq!(snapshot["treasury_status"]["state_schema_version"], 23);
+        assert_eq!(snapshot["lifecycle"]["schema_version"], 2);
         assert!(!ready(&snapshot, &names).unwrap());
+        crate::rpc_evidence::credit(&mut store, &wallet, "1000000", 100).unwrap();
+        let snapshot = store.qualification_state().unwrap();
+        assert!(
+            snapshot["treasury_status"]["pools"][0]["addresses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|wallet| wallet["role"] == "READY")
+        );
+        assert!(ready(&snapshot, &names).unwrap());
+        store.disable_pool("a").unwrap();
+        assert!(!ready(&store.qualification_state().unwrap(), &names).unwrap());
     }
     #[test]
-    fn readiness_uses_production_bootstrap_and_does_not_demand_an_unspent_active_on_resume() {
+    fn readiness_requires_each_enabled_groups_current_inventory_and_serving_identity() {
         let names = vec!["a".into(), "b".into()];
-        let mut snapshot = json!({"treasury_status":{"pools":[
-            {"name":"a","enabled":true,"bootstrapped":true,"addresses":[{"role":"ACTIVE","confirmed_balance":"1"}]},
-            {"name":"b","enabled":true,"bootstrapped":false,"addresses":[{"role":"ALLOCATED","confirmed_balance":"2000000"}]}
+        let mut snapshot = json!({"treasury_status":{"schema_version":6,"pools":[
+            {"name":"a","enabled":true,"inventory_ready":true,"serving_ready":true},
+            {"name":"b","enabled":true,"inventory_ready":false,"serving_ready":true}
         ]}});
         assert!(!ready(&snapshot, &names).unwrap());
-        snapshot["treasury_status"]["pools"][1]["bootstrapped"] = json!(true);
-        assert!(!ready(&snapshot, &names).unwrap());
-        snapshot["treasury_status"]["pools"][1]["addresses"][0]["role"] = json!("ACTIVE");
+        snapshot["treasury_status"]["pools"][1]["inventory_ready"] = json!(true);
         assert!(ready(&snapshot, &names).unwrap());
-        snapshot["treasury_status"]["pools"][0]["enabled"] = json!(false);
+        snapshot["treasury_status"]["pools"][1]["serving_ready"] = json!(false);
         assert!(!ready(&snapshot, &names).unwrap());
+        snapshot["treasury_status"]["schema_version"] = json!(5);
+        assert!(ready(&snapshot, &names).is_err());
     }
 }
