@@ -236,6 +236,83 @@ fn agproxy(status: u16, body: &str, truncated: bool) -> Value {
 }
 
 #[tokio::test]
+async fn search_rejects_status_and_body_then_retains_each_paid_outcome_without_replay() {
+    // Synthetic search schema: the Search contract must invoke its consumer's
+    // validator, rather than accepting any parseable JSON as Catalog does.
+    fn validate(bytes: &[u8]) -> Result<()> {
+        let body: Value = serde_json::from_slice(bytes)?;
+        ensure!(body["results"].is_array(), "missing search results");
+        Ok(())
+    }
+    let harness = Harness::new(vec![
+        (Format::Curl, curl(503, r#"{"results":[]}"#)),
+        (
+            Format::Agproxy,
+            agproxy(200, r#"{"error":"not search results"}"#, false),
+        ),
+        (
+            Format::Agproxy,
+            agproxy(
+                200,
+                r#"{"results":[{"url":"https://example.com/tool"}]}"#,
+                false,
+            ),
+        ),
+    ])
+    .await;
+    let state = Arc::new(tokio::sync::Mutex::new(State::default()));
+    let response = harness
+        .acquire(
+            &target(Method::GET),
+            Contract::Search(validate),
+            4096,
+            Some(state.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status, 200);
+    assert_eq!(response.via, "agproxy");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&response.body).unwrap()["results"][0]["url"],
+        "https://example.com/tool"
+    );
+    assert!(response.payment_may_have_occurred);
+    let keys = harness.sequence.cache_keys("wallet");
+    {
+        let retained = state.lock().await;
+        assert_eq!(retained.outcomes.len(), 3);
+        assert!(retained.stopped.is_empty());
+        for (key, reason) in keys.iter().zip(["http_status", "response_rejected"]) {
+            let failure = retained.outcomes[&(key.clone(), TARGET.into())]
+                .as_ref()
+                .err()
+                .unwrap();
+            assert_eq!(failure.reason, reason);
+            assert!(failure.possible && failure.advance);
+        }
+    }
+    let cached = harness
+        .acquire(
+            &target(Method::GET),
+            Contract::Search(validate),
+            4096,
+            Some(state),
+        )
+        .await
+        .unwrap();
+    assert!(Arc::ptr_eq(&response, &cached));
+    assert!(cached.payment_may_have_occurred);
+    harness.assert_order(&[
+        (0, false),
+        (0, true),
+        (1, false),
+        (1, true),
+        (2, false),
+        (2, true),
+    ]);
+}
+
+#[tokio::test]
 async fn definitive_curl_target_failure_advances_once_to_authored_agproxy_entry() {
     let harness = Harness::new(vec![
         (Format::Curl, curl(403, "blocked")),

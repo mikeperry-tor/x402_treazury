@@ -310,6 +310,13 @@ map and verify rejection without a journal entry, balance change or signed dispa
 These are synthetic local contracts;
 they establish neither vendor deduplication nor live payment/authentication qualification.
 
+Managed payload validation uses one local SDK signature to check refusal of changed
+payment identities, amount, accepted terms and validity before journal acceptance.
+The Search relay contract uses a synthetic response validator and three authored
+providers to check status/body rejection, retained possible charges and cached reuse
+without replay. Pure URL and cover configuration tests cover password-only userinfo
+and reserved padding-header namespaces without creating network transports.
+
 ## Test boundaries
 
 | Area | Principal tests / contract |
