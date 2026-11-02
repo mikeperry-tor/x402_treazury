@@ -525,6 +525,10 @@ current generations advance, durable recovery-count boundaries and assessment
 without writes. Store-level tests cover claim history and obstruction dispositions;
 owner tests cover cancellation and drain. These are complementary checks, not an
 exhaustive enumeration of concurrency schedules.
+Recovery eligibility and startup actionability remain separate: an accepted quote
+can keep startup waiting while the worker may recover its original operation.
+Bootstrap also distinguishes treasury-wide pending source work from the captured
+operation's own source liability when explaining spendable-fund shortages.
 
 Runner orchestration fixtures use real registry reservations, local MCP requests,
 completion records, settlement inspection and owned child close/reopen. Test-only

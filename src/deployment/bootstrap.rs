@@ -337,7 +337,7 @@ fn assess_startup_paths(
     let mut logged = 0;
     for path in paths {
         path_count += 1;
-        let disposition = path.disposition(maximum, group.source_pending);
+        let disposition = path.disposition(maximum, group.treasury_source_pending);
         if disposition == StartupDisposition::DestinationReady {
             continue;
         }
@@ -347,7 +347,7 @@ fn assess_startup_paths(
             logged += 1;
             let waiting_for = if path.job.phase
                 == crate::rotation::store::funding::FundingPhase::Quoted
-                && group.source_pending
+                && group.treasury_source_pending
             {
                 "another treasury transaction to confirm"
             } else {
