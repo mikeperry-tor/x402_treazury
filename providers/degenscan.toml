@@ -12,19 +12,25 @@ instructions_text = "Preserve event timestamps, sources and heuristic confidence
 
 # The guide documents keyless x402 prices omitted by the subscription-oriented schema.
 [overrides.degenscan_carry_funding_matrix]
-description = "Retrieve annualised funding, mark, open interest, volume and spot availability for Hyperliquid perps across dexes. Supports keyless per-call x402 as well as the vendor subscription. Cost: ~$0.03/call [vendor guide]."
+description = "Retrieve annualised funding, mark, open interest, volume and spot availability for Hyperliquid perps across dexes. Supports keyless per-call x402 as well as the vendor subscription."
+pricing_description = "Cost: ~$0.03/call [vendor guide]."
 
 [overrides.degenscan_carry_xdex]
-description = "Compare same-ticker funding across HIP-3 dexes, including current and 14-day spreads, positive-hour share, basis and liquidity. Supports keyless per-call x402. Cost: ~$0.05/call [vendor guide]."
+description = "Compare same-ticker funding across HIP-3 dexes, including current and 14-day spreads, positive-hour share, basis and liquidity. Supports keyless per-call x402."
+pricing_description = "Cost: ~$0.05/call [vendor guide]."
 
 [overrides.degenscan_carry_spot_perp]
-description = "Compare main-dex perp funding with spot, including current and 14-day funding, positive-hour share and basis. Supports keyless per-call x402. Cost: ~$0.03/call [vendor guide]."
+description = "Compare main-dex perp funding with spot, including current and 14-day funding, positive-hour share and basis. Supports keyless per-call x402."
+pricing_description = "Cost: ~$0.03/call [vendor guide]."
 
 [overrides.degenscan_carry_history_coin]
-description = "Retrieve hourly funding, premium, mark, open interest and volume history for coin beyond Hyperliquid's 500-hour retention. Prefix HIP-3 coins with their dex, e.g. xyz:NBIS. Supports keyless per-call x402. Cost: ~$0.02/call [vendor guide]."
+description = "Retrieve hourly funding, premium, mark, open interest and volume history for coin beyond Hyperliquid's 500-hour retention. Prefix HIP-3 coins with their dex, e.g. xyz:NBIS. Supports keyless per-call x402."
+pricing_description = "Cost: ~$0.02/call [vendor guide]."
 
 [overrides.degenscan_carry_naked]
-description = "Retrieve Hyperliquid funding extremes without an available hedge leg. Supports keyless per-call x402. Cost: ~$0.01/call [vendor guide]."
+description = "Retrieve Hyperliquid funding extremes without an available hedge leg. Supports keyless per-call x402."
+pricing_description = "Cost: ~$0.01/call [vendor guide]."
 
 [overrides.degenscan_carry_watchdog]
-description = "Retrieve Carry Oracle market and dex health. Supports keyless per-call x402. Cost: ~$0.01/call [vendor guide]."
+description = "Retrieve Carry Oracle market and dex health. Supports keyless per-call x402."
+pricing_description = "Cost: ~$0.01/call [vendor guide]."

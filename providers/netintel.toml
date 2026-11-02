@@ -21,34 +21,45 @@ description = "Read NetIntel’s endpoint index and usage guide. Use exposed sch
 images = [{ pointer = "/image_url", encoding = "data_uri" }]
 
 [overrides.netintel_phone_intel_analyze]
-description = "Validate and normalize phone to E.164, international and national formats. Supply country_hint when no dial code is present. Line-type classification covers NANP and UK; other countries return unknown. This is not subscriber identity, scam history or proof of reachability. Cost: ~$0.05/call [spec]."
+description = "Validate and normalize phone to E.164, international and national formats. Supply country_hint when no dial code is present. Line-type classification covers NANP and UK; other countries return unknown. This is not subscriber identity, scam history or proof of reachability."
+pricing_description = "Cost: ~$0.05/call [spec]."
 
 [overrides.netintel_ip_report_full]
-description = "Retrieve geolocation, ASN, DNSBL status, threat reputation and aggregate risk for ip. Preserve per-section availability and timestamps; partial failures are not clean results. IPv6 skips IPv4-only blacklist checks. Cost: ~$0.20/call [spec]."
+description = "Retrieve geolocation, ASN, DNSBL status, threat reputation and aggregate risk for ip. Preserve per-section availability and timestamps; partial failures are not clean results. IPv6 skips IPv4-only blacklist checks."
+pricing_description = "Cost: ~$0.20/call [spec]."
 
 [overrides.netintel_ip_reputation_analyze]
-description = "Screen ip against AbuseIPDB and AlienVault OTX, returning threat categories, source data and risk_score (higher means more danger). Preserve unavailable signals and timestamps. Cost: ~$0.05/call [spec]."
+description = "Screen ip against AbuseIPDB and AlienVault OTX, returning threat categories, source data and risk_score (higher means more danger). Preserve unavailable signals and timestamps."
+pricing_description = "Cost: ~$0.05/call [spec]."
 
 [overrides.netintel_ip_blacklist_check]
-description = "Check IPv4 ip against 15 DNS blacklists. Returns per-list findings and listing counts; unavailable checks do not establish a clean result. Cost: ~$0.05/call [spec]."
+description = "Check IPv4 ip against 15 DNS blacklists. Returns per-list findings and listing counts; unavailable checks do not establish a clean result."
+pricing_description = "Cost: ~$0.05/call [spec]."
 
 [overrides.netintel_cert_transparency_lookup]
-description = "Search crt.sh certificate-transparency records for domain, optionally including subdomains. Returns indexed certificates, discovered names, issuers and validity dates up to limit; coverage is not exhaustive. Cost: ~$0.01/call [spec]."
+description = "Search crt.sh certificate-transparency records for domain, optionally including subdomains. Returns indexed certificates, discovered names, issuers and validity dates up to limit; coverage is not exhaustive."
+pricing_description = "Cost: ~$0.01/call [spec]."
 
 [overrides.netintel_ssl_analyze]
-description = "Inspect domain at optional port for TLS certificate-chain, protocol and weak-key issues. Returns certificate details, supported protocols, warnings and a grade. Cost: ~$0.007/call [spec]."
+description = "Inspect domain at optional port for TLS certificate-chain, protocol and weak-key issues. Returns certificate details, supported protocols, warnings and a grade."
+pricing_description = "Cost: ~$0.007/call [spec]."
 
 [overrides.netintel_security_headers_analyze]
-description = "Fetch target URL or domain and assess ten HTTP security headers, including CSP, HSTS and framing policy. Returns observed headers, issues and a grade. Cost: ~$0.01/call [spec]."
+description = "Fetch target URL or domain and assess ten HTTP security headers, including CSP, HSTS and framing policy. Returns observed headers, issues and a grade."
+pricing_description = "Cost: ~$0.01/call [spec]."
 
 [overrides.netintel_url_safety_check]
-description = "Check url against URLhaus malware indicators and phishing heuristics. Returns threat classification, confidence and any known malware family; no findings do not prove safety. Cost: ~$0.01/call [spec]."
+description = "Check url against URLhaus malware indicators and phishing heuristics. Returns threat classification, confidence and any known malware family; no findings do not prove safety."
+pricing_description = "Cost: ~$0.01/call [spec]."
 
 [overrides.netintel_typosquat_scan]
-description = "Generate typo, homoglyph and alternate-TLD variants of domain and check registration, up to limit. Returns registered lookalikes; registration alone does not establish impersonation or malicious use. Cost: ~$0.05/call [spec]."
+description = "Generate typo, homoglyph and alternate-TLD variants of domain and check registration, up to limit. Returns registered lookalikes; registration alone does not establish impersonation or malicious use."
+pricing_description = "Cost: ~$0.05/call [spec]."
 
 [overrides.netintel_dnssec_validate]
-description = "Inspect domain DNSSEC records and validating-resolver evidence over DNS-over-HTTPS. Returns DS, DNSKEY, RRSIG and NSEC/NSEC3 findings, resolver validation and a chain assessment. Cost: ~$0.03/call [spec]."
+description = "Inspect domain DNSSEC records and validating-resolver evidence over DNS-over-HTTPS. Returns DS, DNSKEY, RRSIG and NSEC/NSEC3 findings, resolver validation and a chain assessment."
+pricing_description = "Cost: ~$0.03/call [spec]."
 
 [overrides.netintel_dns_propagation_check]
-description = "Compare domain record_type across ten public DNS resolvers. Returns per-resolver answers, failures and consistency; this sample does not prove global propagation. Cost: ~$0.03/call [spec]."
+description = "Compare domain record_type across ten public DNS resolvers. Returns per-resolver answers, failures and consistency; this sample does not prove global propagation."
+pricing_description = "Cost: ~$0.03/call [spec]."

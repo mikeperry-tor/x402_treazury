@@ -83,6 +83,14 @@ the endpoint as a whole. Neither case proves a configured provider has no APIs.
 No speculative near-miss list is produced: OR-term retrieval already returns tools
 matching some of the query, and enumeration is the explicit fallback.
 
+Ranking and matching use canonical fallback descriptions. Returned API descriptions
+and fresh direct MCP definitions can show the latest applicable observed offer,
+without changing ranking, counts, catalog generation or continuation cursors.
+Expiry restores fallback pricing; clients retaining an old list may retain an old
+description. Rendering reads the existing trusted source/revision, operation,
+wallet-group and transport-scoped cache; it sends no requests and grants no payment
+authority. See [pricing metadata](configuration.md#pricing-metadata-and-runtime-hints).
+
 Tool ranking uses only the captured endpoint/source-filtered snapshot, so
 inaccessible or unrelated tools cannot influence relevance or counts. Provider
 ranking uses only the shipped metadata collection. The shared ranker builds no

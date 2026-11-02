@@ -14,40 +14,52 @@ help_url = "https://docs.oneshotagent.com/api-reference/web-search.md"
 instructions_text = "Search returns results inline. Public discovery tools do not provide authenticated job retrieval or account workflows."
 
 [overrides.oneshot_search]
-description = "Search the web and return structured results inline. Vendor-listed price: $0.001/request. query is 1–500 characters; max_results is 1–20 (default 5). Prefer the smallest useful count."
+description = "Search the web and return structured results inline. query is 1–500 characters; max_results is 1–20 (default 5). Prefer the smallest useful count."
+pricing_description = "Vendor-listed price: $0.001/request."
 
 [overrides.oneshot_help]
 description = "Read OneShot's search request and response guide. Legacy payment-header examples are not setup steps."
 
 [overrides.oneshot_well_known_acp_manifest_json]
-description = "Stripe Agent Commerce Protocol — describes the seller and products. Free."
+description = "Stripe Agent Commerce Protocol — describes the seller and products."
+pricing_description = "Free."
 
 [overrides.oneshot_health]
-description = "Service health check. Free."
+description = "Service health check."
+pricing_description = "Free."
 
 [overrides.oneshot_v1_soul]
-description = "Browse all souls (legacy). Free."
+description = "Browse all souls (legacy)."
+pricing_description = "Free."
 
 [overrides.oneshot_v1_soul_browse]
-description = "Browse souls with pagination. Free."
+description = "Browse souls with pagination."
+pricing_description = "Free."
 
 [overrides.oneshot_v1_soul_search]
-description = "Search souls. Free."
+description = "Search souls."
+pricing_description = "Free."
 
 [overrides.oneshot_v1_soul_service_types]
-description = "Get standard service type taxonomy. Free."
+description = "Get standard service type taxonomy."
+pricing_description = "Free."
 
 [overrides.oneshot_v1_soul_stats]
-description = "Marketplace statistics. Free."
+description = "Marketplace statistics."
+pricing_description = "Free."
 
 [overrides.oneshot_v1_soul_templates]
-description = "Get service templates. Free."
+description = "Get service templates."
+pricing_description = "Free."
 
 [overrides.oneshot_v1_soul_wallet]
-description = "Reserved sub-paths (`browse`, `search`, `service-types`, `templates`, `stats`, `register`) are matched first. Free."
+description = "Reserved sub-paths (`browse`, `search`, `service-types`, `templates`, `stats`, `register`) are matched first."
+pricing_description = "Free."
 
 [overrides.oneshot_v1_stats]
-description = "Public service statistics. Free."
+description = "Public service statistics."
+pricing_description = "Free."
 
 [overrides.oneshot_v1_status]
-description = "Dependency health, separate from process liveness. Free."
+description = "Dependency health, separate from process liveness."
+pricing_description = "Free."

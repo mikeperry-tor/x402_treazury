@@ -12,52 +12,68 @@ help_url = "https://api.brazilayer.com/llms.txt"
 [overrides]
 
 [overrides.brazilayer_health]
-description = "Free. Service status and data reference month."
+description = "Service status and data reference month."
+pricing_description = "Free."
 
 [overrides.brazilayer_ferramentas]
-description = "Free tools index."
+description = "Tools index."
+pricing_description = "Free."
 
 [overrides.brazilayer_ferramentas_cnpj_valor]
-description = "Free — no payment required. Check digits, normalized 14-digit form, punctuated form, 8-digit root (economic group) and headquarters/branch flag. Pure arithmetic — no database lookup. Use it before paying: an invalid CNPJ never resolves in any paid endpoint."
+description = "Check digits, normalized 14-digit form, punctuated form, 8-digit root (economic group) and headquarters/branch flag. Pure arithmetic — no database lookup. Use it before paying: an invalid CNPJ never resolves in any paid endpoint."
+pricing_description = "Free — no payment required."
 
 [overrides.brazilayer_ferramentas_cpf_valor]
-description = "Free — no payment required. Check-digit validation only. Pure arithmetic: nothing is stored or looked up, and the response never echoes the full number — only the masked form."
+description = "Check-digit validation only. Pure arithmetic: nothing is stored or looked up, and the response never echoes the full number — only the masked form."
+pricing_description = "Free — no payment required."
 
 [overrides.brazilayer_cnpj_amostra]
-description = "Free full sample (format of /v1/empresa/{cnpj}/completo) for one fixed CNPJ"
+description = "Full sample (format of /v1/empresa/{cnpj}/completo) for one fixed CNPJ"
+pricing_description = "Free."
 
 [overrides.brazilayer_integridade_amostra]
-description = "Free sample screening response (real sanctioned company)"
+description = "Sample screening response (real sanctioned company)"
+pricing_description = "Free."
 
 [overrides.brazilayer_licitacoes_amostra]
-description = "Free sample of the supplier-contracts response"
+description = "Sample of the supplier-contracts response"
+pricing_description = "Free."
 
 [overrides.brazilayer_bcb_amostra]
-description = "Free sample of the Central Bank check response"
+description = "Sample of the Central Bank check response"
+pricing_description = "Free."
 
 [overrides.brazilayer_empresa_amostra]
-description = "Free sample of the enriched profile (a sanctioned company with public contracts)"
+description = "Sample of the enriched profile (a sanctioned company with public contracts)"
+pricing_description = "Free."
 
 [overrides.brazilayer_mercado_amostra]
-description = "Free sample of the markets dataset (news + indicators)"
+description = "Sample of the markets dataset (news + indicators)"
+pricing_description = "Free."
 
 [overrides.brazilayer_pacotes_amostra]
-description = "Free list of the packs, what each contains and what it saves"
+description = "List of the packs, what each contains and what it saves"
+pricing_description = "Free."
 
 [overrides.brazilayer_commodities_amostra]
-description = "Free sample of the commodity signals dataset"
+description = "Sample of the commodity signals dataset"
+pricing_description = "Free."
 
 [overrides.brazilayer_fundos_amostra]
-description = "Free sample of the fund industry dataset"
+description = "Sample of the fund industry dataset"
+pricing_description = "Free."
 
 [overrides.brazilayer_tributos_amostra]
-description = "Free sample of the tax reform dataset"
+description = "Sample of the tax reform dataset"
+pricing_description = "Free."
 
 [overrides.brazilayer_cadeias_amostra]
-description = "Free sample of a full causal chain"
+description = "Sample of a full causal chain"
+pricing_description = "Free."
 
 [overrides.brazilayer_desmatamento_amostra]
-description = "Free sample of the deforestation dataset"
+description = "Sample of the deforestation dataset"
+pricing_description = "Free."
 
 [overrides.brazilayer_cnpj_busca]
 
@@ -70,7 +86,8 @@ nome = "Full-text on legal and trade names (Portuguese, accent-insensitive). Exa
 nome = "Person or entity name (full-text, accent-insensitive); at least 3 characters."
 
 [overrides.brazilayer_integridade_consulta_cnpj]
-description = "Screens a Brazilian company against CEIS, CNEP, CEPIM, the slave-labor\nblacklist (MTE) and leniency agreements. Legal-entity records only.\nSources updated daily. Price: $0.01 per call (vendor summary)."
+description = "Screens a Brazilian company against CEIS, CNEP, CEPIM, the slave-labor\nblacklist (MTE) and leniency agreements. Legal-entity records only.\nSources updated daily."
+pricing_description = "Price: $0.01 per call (vendor summary)."
 
 [overrides.brazilayer_help]
 description = "Read Brazilayer's API guide, response conventions, coverage and pricing. Fetched on demand and cached for this process."

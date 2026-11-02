@@ -29,7 +29,8 @@ description = "Read the public Hyperliquid account at address: equity, leverage,
 address = "Public Hyperliquid account address: 0x followed by 40 hexadecimal characters."
 
 [overrides.smartperps_preview]
-description = "Preview cohort bias and long/short trader counts for symbol, with snapshot age, coverage and confidence. Omits notional, flows and individual positions. Free; limited to ten requests per minute per IP."
+description = "Preview cohort bias and long/short trader counts for symbol, with snapshot age, coverage and confidence. Omits notional, flows and individual positions. Limited to ten requests per minute per IP."
+pricing_description = "Free."
 
 [overrides.smartperps_help]
 description = "Read SmartPerps route prices, public data sources, cohort methodology, freshness rules and coverage limits."

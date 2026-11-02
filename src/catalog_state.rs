@@ -1,5 +1,7 @@
 //! One immutable generation binds definitions, routes and payers for every listener.
 #[cfg(test)]
+mod description_tests;
+#[cfg(test)]
 mod operation_url_tests;
 
 use crate::discovery_relay::document::{self, SharedFailure};
@@ -177,6 +179,37 @@ impl HelpBinding {
     }
 }
 impl BoundTool {
+    fn execution_scope(&self) -> (PaidClient, Option<crate::pricing::runtime::OperationKey>) {
+        let client = match &self.source {
+            Some((source, _)) => self.client.clone().with_source_identity(source),
+            None => self.client.clone(),
+        };
+        let client = if self.tool.request_url.is_some() {
+            client.public_destinations()
+        } else {
+            client
+        };
+        let operation = client.operation_key(
+            self.source
+                .as_ref()
+                .map(|(id, revision)| (id.as_str(), *revision)),
+            &self.tool.method,
+            &self.tool.path,
+            self.tool.request_url.as_deref().unwrap_or(&self.base),
+        );
+        (client, operation)
+    }
+
+    pub(crate) fn description(&self) -> String {
+        if self.tool.help_url.is_some() {
+            return self.tool.description.clone();
+        }
+        let (_, operation) = self.execution_scope();
+        let price = operation
+            .and_then(|key| crate::pricing::runtime::process_hints().get(key))
+            .map(|amount| crate::output::ObservedPrice { amount });
+        self.tool.render_description(price)
+    }
     pub async fn invoke(
         &self,
         args: &serde_json::Map<String, serde_json::Value>,
@@ -206,26 +239,11 @@ impl BoundTool {
                 })
                 .await?
         } else {
-            let client = match &self.source {
-                Some((source, _)) => self.client.clone().with_source_identity(source),
-                None => self.client.clone(),
-            };
-            let client = if self.tool.request_url.is_some() {
-                client.public_destinations()
-            } else {
-                client
-            };
+            let (client, operation) = self.execution_scope();
             client
                 .execute_rendered_scoped(
                     self.tool.route(&self.base, args)?,
-                    client.operation_key(
-                        self.source
-                            .as_ref()
-                            .map(|(id, revision)| (id.as_str(), *revision)),
-                        &self.tool.method,
-                        &self.tool.path,
-                        self.tool.request_url.as_deref().unwrap_or(&self.base),
-                    ),
+                    operation,
                     self.tool.response_mapping.as_ref(),
                     &self.tool.image_limits,
                 )

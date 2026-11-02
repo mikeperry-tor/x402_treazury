@@ -88,6 +88,9 @@ pub(super) fn build(
     for tool in &mut tools {
         tool.name = names[&tool.name].clone();
         tool.description = rebind(&tool.description, &names);
+        if let Some(rendering) = &mut tool.description_rendering {
+            rendering.base = rebind(&rendering.base, &names);
+        }
     }
     let instructions = settings
         .instructions_text

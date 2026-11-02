@@ -241,13 +241,14 @@ URL at `https://api.socialfetch.dev`.
 
 Credit prose comes from `x-socialfetch-credits-pricing`. The provider's
 `credit_pricing` setting converts structured `x-socialfetch-pricing` metadata
-into per-tool USDC estimates, including metered costs and maximums, while retaining
-that prose. This includes Instagram v2 `include` surcharges and the recognized
+into fallback per-tool USDC estimates, including metered costs and maximums, while
+retaining that prose. An applicable observed offer replaces this complete generated
+pricing section. The fallback includes Instagram v2 `include` surcharges and recognized
 `always` / `fixed_price_only` exact-payment hints; those hints do not select payment
 behavior. The configured 0.014 USDC/credit is a historical estimate, not a verified
-current x402 tariff; the payment challenge remains authoritative. Instruction
-overrides and platform filters retain estimates. No endpoint sweep is needed. Fetching the live spec still requires one startup
-request. Use a 90-second timeout for slow search/transcript calls.
+current x402 tariff; the payment challenge remains authoritative. Platform filters
+do not change conversion. No endpoint sweep is needed. Fetching the live spec still
+requires one startup request. Use a 90-second timeout for slow search/transcript calls.
 
 `tests/fixtures/socialfetch_openapi.json` is a scoped source capture for real
 version/tag, credit, public-child and ownership contracts, plus the Twitter
@@ -279,7 +280,10 @@ Person/company enrich and search. The spec carries prices
 docs; `overrides` restores the two semantic notes the spec lacks — "free on
 no match" on the enrich tools and "free when the result set is empty /
 recommended size 1-5" on the search tools — plus the curated `min_likelihood`
-and `size` hints. Tool schemas are closed via `additional_properties = false`.
+and `size` hints. Numeric tariffs live in `pricing_description`; per-match and
+size-scaled billing and free unmatched/empty results remain in `description` when
+an observed request price is displayed. Tool schemas are closed via
+`additional_properties = false`.
 
 ## botsmith.toml — x402.botsmith.dev
 
@@ -381,7 +385,9 @@ BTC/ETH options (GEX, IV surface, implied probabilities), ML forecasts
 ($0.05) with a **free** `kronos_track_record` accuracy audit, macro context,
 and the $0.10 all-in-one `briefing`. The `/api/v1` anchor keeps existing tool names short. Prices
 live in vendor prose (the spec's `x-x402` extension has the wrong shape for
-`pricing_key`). No startup endpoint pricing requests are made. Vendor prose and the free `kronos_track_record` override remain.
+`pricing_key`). No startup endpoint pricing requests are made. Vendor prose
+remains; `kronos_track_record` stores its own free tariff in `pricing_description`
+and keeps the paid forecast-ledger alternative in its description.
 Actual paid calls still use the live challenge and enforce spend caps.
 
 The `/api/v1` anchor preserves existing names; an empty fallback exposes the
@@ -410,7 +416,8 @@ contract is pinned by `tests/provider_catalogs.rs`. The authored projection pres
 `concordance_catalog` and `concordance_healthz` without changing wire paths.
 Catalog discovery completes the source/series lookup workflow; the research-desk
 deployment shares it with business and finance. Authored descriptions refer to
-callable tool names; digest describes structured aggregation without vendor
+callable tool names; search and series overrides separate their numeric tariffs
+into `pricing_description`. Digest describes structured aggregation without vendor
 operating-cost rationale. The existing
 native `concordance_help` fetches the exact `/llms.txt` document, faithfully
 representing that fourth public resource without a duplicate HTTP tool.
@@ -1515,7 +1522,9 @@ explicit funding-policy choice, independent of generic header support.
 
 The guide advertises five-minute quotes, catalog reads at $0.002 and each status
 poll at $0.001. Purchase prices come from the quote; the guide's unpaid probe
-fallback starts at $0.01. Status progresses to `received` or `expired`, with `sms_code` and
+fallback starts at $0.01. Purchase and status overrides retain those numeric hints
+in `pricing_description`, while quote authority and per-call polling remain in
+their descriptions. Status progresses to `received` or `expired`, with `sms_code` and
 `sms_text` on receipt. `x-payment-info` supplies price hints; the guide advertises
 x402 exact USDC on Base. Help includes unsupported top-ups, called out in its
 tool description. Public schema/guide inspection and offline routing tests do
@@ -1575,7 +1584,8 @@ establish complete comment retrieval. These operations remain available in
 the reusable provider regardless of the deployment's narrower selection.
 
 Degenscan's six Carry reads support keyless per-call x402 despite the schema's
-subscription/API-key descriptions. Their guide prices are retained in overrides;
+subscription/API-key descriptions. Their guide prices are retained in explicit
+`pricing_description` override fragments;
 an unsigned funding-matrix probe returned an x402 Base USDC offer for $0.03.
 Other `x-price-usd` values are numeric USD/call hints, displayed as raw pricing
 metadata. The public oracle workflow returns a forecast ID from submission and
@@ -1830,6 +1840,9 @@ business/domain and requires manual handover, so that lifecycle is excluded.
 Doctor test purchases remain supported as provider-mediated calls: the vendor
 charges each attempt, keeps unused price differences and may deliver no upstream
 result. Their nominal $0.01 metadata is not the total when a seller price is given.
+The doctor-buy description retains the seller-price fee formula and quote-only
+option alongside any observed offer: these describe conditional billing rather
+than a fixed tariff for the current request.
 They are omitted from the research deployment.
 
 A later pair of paid Polish-registry and court searches returned HTTP 402
@@ -1880,7 +1893,8 @@ from this deployment; this is editorial selection, not a compatibility exclusion
 
 The remote OpenAPI exposes POST JSON contracts. Prices are published in operation
 prose rather than a structured per-operation payment extension. Selected overrides
-retain those estimates. Screenshot JSON has optional image_base64 and a short-lived
+retain those tariffs in `pricing_description` even without `pricing_key`.
+Screenshot JSON has optional image_base64 and a short-lived
 image_url; it remains JSON because a required image mapping would reject the valid
 include_base64=false result. No automatic URL fetch or image decoding is implied.
 Route matrices can fall back to straight-line distance with a detour factor;

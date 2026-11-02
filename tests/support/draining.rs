@@ -10,6 +10,7 @@ fn binding(h: &Harness, method: &str) -> BoundTool {
             image_limits: Default::default(),
             name: method.into(),
             description: "draining fixture".into(),
+            description_rendering: None,
             method: method.into(),
             path: "/pay".into(),
             request_url: None,

@@ -300,8 +300,9 @@ API catalog disk-cache default; per-source catalog overrides remain independent.
 See [local resource limits](local-resource-limits.md). Their trusted key includes
 source/revision, method/OpenAPI template, wallet group and transport scope; request
 arguments cannot choose that scope. Receipt order controls updates, including lower
-prices. Restart, expiry and eviction lose only a selection estimate. They cause
-no probe, cached-challenge reuse or new payment authority.
+prices. Restart, expiry and eviction discard the advisory selection estimate and
+restore fallback display pricing. They cause no probe, cached-challenge reuse or
+new payment authority.
 A valid observed offer can update a hint even when current Store authority refuses
 financial admission; that hint grants no permission to sign.
 

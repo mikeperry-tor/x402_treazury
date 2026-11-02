@@ -13,7 +13,8 @@ instructions_text = "Prefer precise quoted phrases joined with AND and assignee,
 omit = ["/results/*/figures"]
 
 [overrides.google_patents_search]
-description = "Search Google Patents with precise phrase/field queries and optional assignee, office or date filters. Broad free text can rank noisily. Returns patent IDs, snippets, dates and links; figure inventories are omitted. Empty results are valid. Cost: ~$0.02/call [spec]."
+description = "Search Google Patents with precise phrase/field queries and optional assignee, office or date filters. Broad free text can rank noisily. Returns patent IDs, snippets, dates and links; figure inventories are omitted. Empty results are valid."
+pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.google_patents_search.params]
 q = 'Prefer "exact phrase" AND "another phrase". Narrow with TI=(...), AB=(...), CL=(...), or CPC=CODE/low using a verified code; broad text can rank noisily.'
@@ -21,7 +22,8 @@ num = "Start at 10 and inspect relevance before requesting more. Range 10-100."
 sort = "Date order: new or old by filing date. Omit for relevance; changing date order does not narrow the query."
 
 [overrides.google_patents_patent]
-description = "Retrieve a patent by patent_id returned from search, including abstract, claims, inventors, assignees, dates, classifications, family applications and PDF link. Preserve missing fields and verify legal conclusions against original records. Cost: ~$0.02/call [spec]."
+description = "Retrieve a patent by patent_id returned from search, including abstract, claims, inventors, assignees, dates, classifications, family applications and PDF link. Preserve missing fields and verify legal conclusions against original records."
+pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.google_patents_help]
 description = "Read this Atlas bridge's request and pricing guide."

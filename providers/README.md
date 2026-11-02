@@ -225,7 +225,15 @@ the provider caveats. Follow the [concise pricing rule](../docs/agent-sources.md
 preserve operation tariffs, metering units, paid options and charged-error facts;
 omit repeated estimate, settlement and generic retry warnings. Keep guide/spec
 discrepancies in provider caveats. Description overrides replace generated pricing,
-so removing their authored tariff requires preserving a useful fallback price.
+so put repository-authored current-call tariffs in the override's
+`pricing_description` alongside its pricing-free `description`. This includes
+unconditional free-price assertions. Both fragments form the fallback description;
+an observed offer replaces only the tariff fragment. Keep metering conditions,
+charged errors, free-on-no-match behavior and paid options in the description.
+Prices for a different tool or conditional fee formulas can remain when they
+explain the workflow. Preserve arbitrary vendor prose and description-only external
+overrides without inferring tariff ownership from their text. See
+[pricing metadata](../docs/configuration.md#pricing-metadata-and-runtime-hints).
 Provider-specific tests and fixtures need a concrete quirk, historical
 failure or authored transformation. Prefer small faithful inputs and assertions
 for that responsibility, with synthetic shared tests for generic behavior. A new

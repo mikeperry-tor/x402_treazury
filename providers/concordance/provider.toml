@@ -14,10 +14,12 @@ pricing_key = "x-payment-info"
 [overrides]
 
 [overrides.concordance_search]
-description = "Search aggregated news, filings, court opinions, papers, government records and developer discussions. Results include source, category, title, content, URL and publication time. Optional source/category/since filters; limit 1–100 (default 20). $0.01/call."
+description = "Search aggregated news, filings, court opinions, papers, government records and developer discussions. Results include source, category, title, content, URL and publication time. Optional source/category/since filters; limit 1–100 (default 20)."
+pricing_description = "$0.01/call."
 
 [overrides.concordance_series]
-description = "Tabular time-series lookup by source + series_id: economic indicators (FRED, World Bank, UN Comtrade), crypto TVL (DefiLlama), weather (open_meteo), and stock quotes (finnhub/twelvedata/polygon). Optional start/end date range; returns [{observed_at, value}] points. $0.01 per call. Use concordance_catalog for current source and series IDs."
+description = "Tabular time-series lookup by source + series_id: economic indicators (FRED, World Bank, UN Comtrade), crypto TVL (DefiLlama), weather (open_meteo), and stock quotes (finnhub/twelvedata/polygon). Optional start/end date range; returns [{observed_at, value}] points. Use concordance_catalog for current source and series IDs."
+pricing_description = "$0.01 per call."
 
 [overrides.concordance_series.params]
 source = "Catalog source slug: arxiv, core, courtlistener, defillama, finnhub, gdelt, govinfo, hackernews, open_meteo, polygon, regulations_gov, sec_edgar, stackexchange, twelvedata, un_comtrade, wikipedia, world_bank, fred."

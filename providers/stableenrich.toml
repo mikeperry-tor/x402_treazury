@@ -22,13 +22,16 @@ stream = "Omit or set false. Treazury returns completed tool responses, not incr
 description = "Read StableEnrich’s API reference and pricing. AgentCash tool names/wrappers and async/SIWX workflows in the guide do not apply to these tools."
 
 [overrides.stableenrich_google_maps_text_search_partial]
-description = "Search Google Maps places (partial). For pagination, repeat the full original body including textQuery with its pageToken; the token belongs to that search. Cost: ~$0.02/call [spec]."
+description = "Search Google Maps places (partial). For pagination, repeat the full original body including textQuery with its pageToken; the token belongs to that search."
+pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.stableenrich_google_maps_text_search_full]
-description = "Search Google Maps places (full). For pagination, repeat the full original body including textQuery with its pageToken; the token belongs to that search. Cost: ~$0.08/call [spec]."
+description = "Search Google Maps places (full). For pagination, repeat the full original body including textQuery with its pageToken; the token belongs to that search."
+pricing_description = "Cost: ~$0.08/call [spec]."
 
 [overrides.stableenrich_companyenrich_org_enrich]
-description = "Enrich a company by domain. Verify identity: openai.com has resolved to the wrong entity; x.com returns 404, so use twitter.com. Employees/revenue are ranges; total_funding can lag funding rounds and excludes M&A. Cost: ~$0.06/call [spec]."
+description = "Enrich a company by domain. Verify identity: openai.com has resolved to the wrong entity; x.com returns 404, so use twitter.com. Employees/revenue are ranges; total_funding can lag funding rounds and excludes M&A."
+pricing_description = "Cost: ~$0.06/call [spec]."
 
 # Unsigned Tor probes verified HTTP/2 identity-encoded byte ranges at offsets 0 and 1024.
 # Use the static resource instead of the range-ignoring catalog; keep default cover budgets.

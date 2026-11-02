@@ -49,71 +49,94 @@ domain = "Primary root domain to check for exposed LLM/AI API keys (provide `dom
 domain = "Primary root domain to check for exposed machine/CI-CD credentials in stealer logs (provide `domain` and/or `vendor_domains`)."
 
 [overrides.relayshield_scan_url]
-description = "Scan a URL (`http://` or `https://`) for phishing or malware using synchronous heuristic signals (Google Safe Browsing, RDAP domain age, and RelayShield IOC corpus `malware_families` attribution). Also returns a VirusTotal `analysis_id`, which cannot be polled through this catalog because `GET /v1/payg/result/{analysis_id}` is omitted from `openapi.json`. Cost: ~$0.05/call [spec]."
+description = "Scan a URL (`http://` or `https://`) for phishing or malware using synchronous heuristic signals (Google Safe Browsing, RDAP domain age, and RelayShield IOC corpus `malware_families` attribution). Also returns a VirusTotal `analysis_id`, which cannot be polled through this catalog because `GET /v1/payg/result/{analysis_id}` is omitted from `openapi.json`."
+pricing_description = "Cost: ~$0.05/call [spec]."
 
 
 [overrides.relayshield_v1_email_check]
-description = "Screen a parsed email’s authentication, sender/name, phrasing, links and attachment names. Extract from_address, from_name, subject, body_text, links and attachment_names first; raw RFC822 is not parsed. Vendor contract: free; no payment required."
+description = "Screen a parsed email’s authentication, sender/name, phrasing, links and attachment names. Extract from_address, from_name, subject, body_text, links and attachment_names first; raw RFC822 is not parsed."
+pricing_description = "Vendor contract: free; no payment required."
 
 [overrides.relayshield_v1_link_check]
-description = "Check criminal IOC, Google Safe Browsing and domain-age signals. Supply url or urls (up to 25). The best verdict is unknown, never safe. Public callers share a per-IP daily allowance; a batch counts once per URL. Vendor contract: free; no payment required."
+description = "Check criminal IOC, Google Safe Browsing and domain-age signals. Supply url or urls (up to 25). The best verdict is unknown, never safe. Public callers share a per-IP daily allowance; a batch counts once per URL."
+pricing_description = "Vendor contract: free; no payment required."
 
 [overrides.relayshield_v1_wallet_risk]
-description = "Detect the chain from address and screen sanctions and abuse sources. Public callers share the link-check per-IP allowance. Vendor contract: free; no payment required."
+description = "Detect the chain from address and screen sanctions and abuse sources. Public callers share the link-check per-IP allowance."
+pricing_description = "Vendor contract: free; no payment required."
 
 [overrides.relayshield_breach]
-description = "Check whether an email address appears in known data breaches. Returns breach count, source names, dates, and exposed data types (passwords, emails, etc). Call before trusting a new user identity or granting elevated access. Cost: ~$0.10/call [spec]. Vendor bills successful calls."
+description = "Check whether an email address appears in known data breaches. Returns breach count, source names, dates, and exposed data types (passwords, emails, etc). Call before trusting a new user identity or granting elevated access. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.10/call [spec]."
 
 [overrides.relayshield_agent_bait_scan]
-description = "Scan a GitHub repository URL or owner/repo for agent-facing instructions that request remote execution, instruction overrides or credential-file access. Checks referenced domains against criminal indicators and returns findings. Cost: ~$0.50/call [spec]."
+description = "Scan a GitHub repository URL or owner/repo for agent-facing instructions that request remote execution, instruction overrides or credential-file access. Checks referenced domains against criminal indicators and returns findings."
+pricing_description = "Cost: ~$0.50/call [spec]."
 
 [overrides.relayshield_domain]
-description = "Find phishing lookalikes of domain, including typosquats, homoglyphs and suspicious registration patterns. Returns matched domains found in the wild. Cost: ~$0.50/call [spec]."
+description = "Find phishing lookalikes of domain, including typosquats, homoglyphs and suspicious registration patterns. Returns matched domains found in the wild."
+pricing_description = "Cost: ~$0.50/call [spec]."
 
 [overrides.relayshield_mcp_registry_risk]
-description = "Assess server_url for MCP registry and supply-chain risk, including unverified publishers and known-malicious servers. Returns a verdict and findings. Cost: ~$0.35/call [spec]."
+description = "Assess server_url for MCP registry and supply-chain risk, including unverified publishers and known-malicious servers. Returns a verdict and findings."
+pricing_description = "Cost: ~$0.35/call [spec]."
 
 [overrides.relayshield_nhi_exposure]
-description = "Check domain and/or vendor_domains for exposed machine, service-account and CI/CD credentials in criminal stealer logs. Returns findings and severity. Cost: ~$0.40/call [spec]."
+description = "Check domain and/or vendor_domains for exposed machine, service-account and CI/CD credentials in criminal stealer logs. Returns findings and severity."
+pricing_description = "Cost: ~$0.40/call [spec]."
 
 [overrides.relayshield_oauth_watchlist]
-description = "Check email for connected-app credential exposure associated with known SaaS breaches. Returns matched apps, breach details and revoke-access links. Cost: ~$0.30/call [spec]."
+description = "Check email for connected-app credential exposure associated with known SaaS breaches. Returns matched apps, breach details and revoke-access links."
+pricing_description = "Cost: ~$0.30/call [spec]."
 
 [overrides.relayshield_session_risk]
-description = "Check email for stolen session cookies in criminal archives, including adversary-in-the-middle (AiTM) exposure. Returns session findings and severity. Cost: ~$0.30/call [spec]."
+description = "Check email for stolen session cookies in criminal archives, including adversary-in-the-middle (AiTM) exposure. Returns session findings and severity."
+pricing_description = "Cost: ~$0.30/call [spec]."
 
 [overrides.relayshield_identity_graph]
-description = "Correlate an email address against the criminal breach/stealer corpus to surface linked phone numbers, secondary domains, and other identifiers tied to the same compromised identity. Call to map the blast radius of a known compromise across an organization. Cost: ~$0.35/call [spec]. Vendor bills successful calls."
+description = "Correlate an email address against the criminal breach/stealer corpus to surface linked phone numbers, secondary domains, and other identifiers tied to the same compromised identity. Call to map the blast radius of a known compromise across an organization. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.35/call [spec]."
 
 [overrides.relayshield_identity_risk_score]
-description = "Return a domain security score (0–100), grade and factors across breach, infostealer, ransomware, session, CVE and threat-actor exposure. Cost: ~$0.35/call [spec]. Vendor bills successful calls."
+description = "Return a domain security score (0–100), grade and factors across breach, infostealer, ransomware, session, CVE and threat-actor exposure. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.35/call [spec]."
 
 [overrides.relayshield_infostealer]
-description = "Check whether an email address's credentials were harvested by infostealer malware and appear in a criminal stealer-log marketplace. Call to catch device-level compromise before stolen session cookies or saved passwords are used for account takeover. Cost: ~$0.15/call [spec]. Vendor bills successful calls."
+description = "Check whether an email address's credentials were harvested by infostealer malware and appear in a criminal stealer-log marketplace. Call to catch device-level compromise before stolen session cookies or saved passwords are used for account takeover. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.15/call [spec]."
 
 [overrides.relayshield_ip_intel]
-description = "Look up passive DNS resolution history and reputation for a domain or IP address. For a domain: which IPs it has resolved to over time. For an IP: which hostnames have resolved to it, plus malicious/suspicious vendor detection counts. Call to pivot from an indicator to its infrastructure history during an investigation. Cost: ~$0.10/call [spec]. Vendor bills successful calls."
+description = "Look up passive DNS resolution history and reputation for a domain or IP address. For a domain: which IPs it has resolved to over time. For an IP: which hostnames have resolved to it, plus malicious/suspicious vendor detection counts. Call to pivot from an indicator to its infrastructure history during an investigation. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.10/call [spec]."
 
 [overrides.relayshield_ransomware_risk]
-description = "Check whether a domain appears on a known ransomware group's victim/leak-site list, and whether pre-ransomware credential harvesting was detected beforehand. Call to assess active ransomware exposure for a domain, not just historical breach history. Cost: ~$0.40/call [spec]. Vendor bills successful calls."
+description = "Check whether a domain appears on a known ransomware group's victim/leak-site list, and whether pre-ransomware credential harvesting was detected beforehand. Call to assess active ransomware exposure for a domain, not just historical breach history. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.40/call [spec]."
 
 [overrides.relayshield_secret_scan]
-description = "Scan public GitHub, npm, PyPI, Docker Hub, Hugging Face and Postman artifacts for exposed credential patterns associated with domain and/or vendor_domains. Cost: ~$0.35/call [spec]. Vendor bills successful calls."
+description = "Scan public GitHub, npm, PyPI, Docker Hub, Hugging Face and Postman artifacts for exposed credential patterns associated with domain and/or vendor_domains. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.35/call [spec]."
 
 [overrides.relayshield_sim_swap]
-description = "Check recent SIM-swap or carrier-port signals for phone (E.164). Vendor carrier availability is degraded/unavailable; a failed lookup supplies no verdict. Cost: ~$0.25/call [spec]. Vendor bills successful calls."
+description = "Check recent SIM-swap or carrier-port signals for phone (E.164). Vendor carrier availability is degraded/unavailable; a failed lookup supplies no verdict. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.25/call [spec]."
 
 [overrides.relayshield_supply_chain]
-description = "Check up to 10 vendor domains for combined breach, infostealer, and dark-web risk exposure in one call. Returns a composite risk score per vendor. Call to assess third-party API/vendor risk before an agent integrates with or continues calling an external service. Cost: ~$0.10/call [spec]. Vendor bills successful calls."
+description = "Check up to 10 vendor domains for combined breach, infostealer, and dark-web risk exposure in one call. Returns a composite risk score per vendor. Call to assess third-party API/vendor risk before an agent integrates with or continues calling an external service. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.10/call [spec]."
 
 [overrides.relayshield_tech_stack_cve]
-description = "Check tech_stack product names against CISA KEV and high-EPSS CVEs. Supply the declared stack directly; domain requires an unavailable stored account profile. Cost: ~$0.20/call [spec]. Vendor bills successful calls."
+description = "Check tech_stack product names against CISA KEV and high-EPSS CVEs. Supply the declared stack directly; domain requires an unavailable stored account profile. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.20/call [spec]."
 
 [overrides.relayshield_wallet_risk]
-description = "Screen address for scam, exploit, drainer and sanctions associations. Preserve observed_at, valid_for_seconds, expires_at and degraded. Vendor freshness: flagged 24h, clean 1h, degraded 5m; missing signals do not prove safety. Cost: ~$0.05/call [spec]. Vendor bills successful calls."
+description = "Screen address for scam, exploit, drainer and sanctions associations. Preserve observed_at, valid_for_seconds, expires_at and degraded. Vendor freshness: flagged 24h, clean 1h, degraded 5m; missing signals do not prove safety. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.05/call [spec]."
 
 [overrides.relayshield_scamkit_fingerprint]
-description = "Fingerprint a phishing kit using url or html, or supply kind=\"malware\" with signals. URL fetching uses static HTML without JavaScript; supply rendered html for JS-heavy pages. observed_telemetry is caller-supplied; JA3/JA4 is not computed. Supplied html has no URL malware attribution. Preserve family_status (approved/suggested), confidence and evidence. Cost: ~$0.50/call [spec]. Vendor bills successful calls."
+description = "Fingerprint a phishing kit using url or html, or supply kind=\"malware\" with signals. URL fetching uses static HTML without JavaScript; supply rendered html for JS-heavy pages. observed_telemetry is caller-supplied; JA3/JA4 is not computed. Supplied html has no URL malware attribution. Preserve family_status (approved/suggested), confidence and evidence. Vendor bills successful calls."
+pricing_description = "Cost: ~$0.50/call [spec]."
 
 [overrides.relayshield_campaign_scan]
-description = "Scan up to 25 campaign indicators; supply at least one indicator array. Returns correlated findings, per-indicator results, citations and per-endpoint errors. Preserve degraded=true and truncated_subcalls when upstream results are incomplete. Cost: ~$5.50/call [spec]. Vendor bills successful calls."
+description = "Scan up to 25 campaign indicators; supply at least one indicator array. Returns correlated findings, per-indicator results, citations and per-endpoint errors. Preserve degraded=true and truncated_subcalls when upstream results are incomplete. Vendor bills successful calls."
+pricing_description = "Cost: ~$5.50/call [spec]."

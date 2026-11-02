@@ -252,10 +252,24 @@ async fn paid_operation_urls() {
         let output = output.unwrap();
         assert!(output.text.contains(host));
         assert!(output.payment_may_have_occurred);
+        assert_eq!(
+            output.observed_price.unwrap().amount,
+            U256::from(if host == "api.example.com" { 100 } else { 200 })
+        );
     }
     for (key, amount) in keys.into_iter().zip([100u64, 200]) {
         assert_eq!(process_hints().get(key), Some(U256::from(amount)));
     }
+    assert!(
+        tools[0]
+            .description()
+            .contains("Observed cost: ~$0.0001/call.")
+    );
+    assert!(
+        tools[1]
+            .description()
+            .contains("Observed cost: ~$0.0002/call.")
+    );
     let gateway_key = effective
         .operation_key(
             Some(("same-source", 1)),

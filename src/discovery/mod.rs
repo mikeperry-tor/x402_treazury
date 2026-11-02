@@ -966,7 +966,7 @@ fn page(
     ensure!(offset <= values.len(), "invalid cursor");
     let end = offset.saturating_add(limit).min(values.len());
     let items: Vec<_> = values[offset..end].iter().map(|t| json!({
-        "tool_id":t.tool.name, "description":t.tool.description, "input_schema":t.tool.input_schema
+        "tool_id":t.tool.name, "description":t.description(), "input_schema":t.tool.input_schema
     })).collect();
     let mut result = json!({
         "items":items,

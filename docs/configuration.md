@@ -1459,8 +1459,8 @@ never send endpoint requests to discover prices. Actual calls still acquire a fr
 unsigned x402 challenge and enforce the selected payer's payment authority.
 
 Validated challenges from actual managed calls can teach the passive runtime price
-hint cache. Hints advise existing wallet selection; they never authorize signing,
-initiate HTTP, refresh catalogs or alter tool descriptions. Receipt age, identity
+hint cache. Hints advise existing wallet selection and fresh MCP descriptions; they never
+authorize signing, initiate HTTP or refresh catalogs. Receipt age, identity
 partitioning and expiry are described in [architecture](architecture.md#wallet-selection-and-network-isolation)
 and [resource limits](local-resource-limits.md).
 
@@ -1814,7 +1814,8 @@ Optional `billableDomainErrors` entries name an error `code`, `httpStatus` and
 costs. Error charges cannot exceed `maxCredits`.
 Recognized `x402ExactPolicy` hints (`always`, `fixed_price_only`) leave credit
 estimates unchanged; payment negotiation still uses the actual challenge.
-Original credit prose remains alongside the estimate. Missing, malformed or unknown
+The canonical fallback retains original credit prose alongside the estimate.
+A live observed offer replaces that entire generated pricing section. Missing, malformed or unknown
 metadata retains that prose and the configured rate, explicitly marks the per-call
 estimate unavailable, and logs one WARN summary per catalog build. The summary
 identifies the provider prefix, configured metadata key, affected-operation count
@@ -1825,16 +1826,43 @@ source builds or catalog reloads each report their own summary. Payment limits a
 unchanged.
 
 SocialFetch enables this using the historical 0.014 USDC/credit estimate; it is not
-a verified current x402 tariff. Every converted tool names the configured rate and
+a verified current x402 tariff. The fallback names the configured rate and
 states that the payment challenge is authoritative. Source instruction overrides
-and tag filtering (including `comprehensive.toml`) preserve these per-tool estimates.
+and tag filtering (including `comprehensive.toml`) preserve these fallback estimates.
 An explicit tool description override still replaces the generated description.
 
 MCP server instructions preserve authored guidance and include this caveat once:
 
 > Prices are estimates or sampled payment offers, not guaranteed quotes. Costs may vary with arguments; metered charges may be below the displayed maximum. Unknown does not mean free.
 
-Authored description overrides apply last, and description limits remain explicit.
+Fresh MCP tool definitions and tool-search results replace generated pricing with
+`Observed cost: ~$0.005/call.` when a matching validated managed offer remains in
+the runtime cache. Amounts use exact decimal USDC; no units are inferred from
+vendor tariffs. Expiry restores the complete fallback. No notification or client
+cache refresh is promised. Canonical search text, catalog generation, cursors,
+CLI inspection and persisted definitions retain the fallback.
+
+Authored description overrides apply last. A description-only override remains
+opaque: observations append to it. Separate an authored current-call tariff when
+it should be replaced, including a claim that the call is free:
+
+```toml
+[overrides.example_search]
+description = "Search records. Billed per returned record; empty results are free."
+pricing_description = "Cost: ~$0.01/record [spec]."
+```
+
+`pricing_description` must be a string paired with a string `description`. The
+fallback joins both with one space even without `pricing_key`; the observed
+rendering uses the description plus one observed line. Preserve billing conditions,
+quotas, paid options and prices of other operations in the description. This
+explicit field does not parse arbitrary vendor prose. Runtime rendering metadata
+is not serialized; imported registrations rebuild it from their provider settings.
+
+`max_description_chars` keeps its existing generated-fallback behavior, including
+its visible truncation marker. Authored override fallbacks retain their existing
+limit bypass. New observed renderings apply the configured limit to the complete
+base plus observed line and mark any truncation visibly.
 Display prices and runtime hints are informational: each paid invocation still
 obtains a fresh challenge and enforces its spend cap before signing.
 

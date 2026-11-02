@@ -12,7 +12,7 @@ fn authored() -> AcceptedProvider {
         exclude_operations: vec!["GET /v1/skip".into()],
         help_url: Some("https://api.example.com/help".into()),
         instructions_text: Some("Use original_read and original_*; original_missing is unsupported. https://docs.example.com/original_read".into()),
-        overrides: json!({"original_read":{"description":"Call original_read, then original_help; preserve original_missing. https://docs.example.com/original_read"}}),
+        overrides: json!({"original_read":{"description":"Call original_read, then original_help; preserve original_missing. https://docs.example.com/original_read", "pricing_description":"Cost: $0.01/call."}}),
         response_mappings: serde_json::from_value(json!({"POST /v1/read":{"images":[{"pointer":"/image_url","encoding":"data_uri"}]}})).unwrap(),
         read_timeout_seconds: Some(93.0),
         allow_http1: true,
@@ -92,6 +92,24 @@ fn canonical_curated_configuration_applies_before_dynamic_renaming() {
     assert!(
         read.description
             .contains("https://docs.example.com/original_read")
+    );
+    assert!(read.description.ends_with("Cost: $0.01/call."));
+    let observed = Some(crate::output::ObservedPrice {
+        amount: alloy_primitives::U256::from(5_000),
+    });
+    let rendered = read.render_description(observed);
+    assert!(rendered.contains("Call dyn_custom__read, then dyn_custom__help"));
+    assert!(rendered.contains("https://docs.example.com/original_read"));
+    assert!(rendered.ends_with("Observed cost: ~$0.005/call."));
+    assert!(!rendered.contains("Cost: $0.01/call."));
+    let saved = import::saved_tools(&candidate, document().to_string().as_bytes()).unwrap();
+    assert_eq!(
+        saved
+            .iter()
+            .find(|tool| tool.name == read.name)
+            .unwrap()
+            .render_description(observed),
+        rendered
     );
     assert_eq!(
         read.input_schema["properties"]["symbol"]["description"],

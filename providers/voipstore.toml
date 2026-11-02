@@ -15,10 +15,12 @@ instructions_text = "Find service_id and country_id in the catalog, obtain a quo
 description = "Get a price quote for service_id and country_id from the catalog, with an optional operator preference. Quotes lock the price for five minutes. Pass the returned quote ID as X-Quote-Id when purchasing with the same selection."
 
 [overrides.voipstore_orders]
-description = "Buy one virtual number using a current X-Quote-Id from the quote tool and matching service_id, country_id and operator. Purchase price is set by the quote; unpaid probes advertise a fallback from $0.01. Treazury supplies Idempotency-Key automatically. Returns an order_id for SMS status polling. No prepaid top-up is required."
+description = "Buy one virtual number using a current X-Quote-Id from the quote tool and matching service_id, country_id and operator. Purchase price is set by the quote. Treazury supplies Idempotency-Key automatically. Returns an order_id for SMS status polling. No prepaid top-up is required."
+pricing_description = "Unpaid probes advertise a fallback from $0.01."
 
 [overrides.voipstore_orders_order_id]
-description = "Read SMS status for an order_id returned by a purchase. Poll until status is received or expired; received SMS includes sms_code and sms_text. Each status call is advertised at $0.001."
+description = "Read SMS status for an order_id returned by a purchase. Poll until status is received or expired; received SMS includes sms_code and sms_text. Status polling is priced per call."
+pricing_description = "Each status call is advertised at $0.001."
 
 [overrides.voipstore_help]
 description = "Read VoIPStore's virtual-number and SMS API guide. Treazury supplies Idempotency-Key automatically. The guide also describes prepaid top-ups, which are unavailable through this provider."

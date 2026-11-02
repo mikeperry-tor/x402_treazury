@@ -13,7 +13,8 @@ help_url = "https://kronossignals.com/llms.txt"
 [overrides]
 
 [overrides.kronos_track_record]
-description = "Free. Forecast-accuracy summary: hit_rate, resolved count, per-asset breakdown, Brier score and the last 20 resolved forecasts. Use kronos_forecast_ledger for paginated history ($0.02/call)."
+description = "Forecast-accuracy summary: hit_rate, resolved count, per-asset breakdown, Brier score and the last 20 resolved forecasts. Use kronos_forecast_ledger for paginated history ($0.02/call)."
+pricing_description = "Free."
 
 [overrides.kronos_help]
 description = "Read Kronos's API guide, asset coverage, signal interpretation and pricing. Guide examples may cover more tools; follow exposed schemas. Fetched on demand and cached for this process."

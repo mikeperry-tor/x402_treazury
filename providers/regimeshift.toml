@@ -15,50 +15,64 @@ help_url = "https://regimeshift.xyz/api/quickstart.txt"
 [overrides]
 
 [overrides.regimeshift_intent_lend]
-description = "Free — no payment required. Submit a lender intent to the order book (wallet, USDC amount, min rate, max duration); matching runs synchronously on each new intent and a matched quote payload becomes available via regimeshift_matches_recent."
+description = "Submit a lender intent to the order book (wallet, USDC amount, min rate, max duration); matching runs synchronously on each new intent and a matched quote payload becomes available via regimeshift_matches_recent."
+pricing_description = "Free — no payment required."
 
 [overrides.regimeshift_intent_borrow]
-description = "Free — no payment required. Submit a borrower intent (wallet, USDC principal wanted vs WETH collateral, max rate, max duration); matching runs synchronously and returns a match payload when a compatible lender is found."
+description = "Submit a borrower intent (wallet, USDC principal wanted vs WETH collateral, max rate, max duration); matching runs synchronously and returns a match payload when a compatible lender is found."
+pricing_description = "Free — no payment required."
 
 [overrides.regimeshift_intents_open]
-description = "Free — no payment required. All currently-open intents from both sides — the live order book. Matching requires overlap on duration first (borrower's needed term ≤ lender's max), then rate, then amount + collateral fit."
+description = "All currently-open intents from both sides — the live order book. Matching requires overlap on duration first (borrower's needed term ≤ lender's max), then rate, then amount + collateral fit."
+pricing_description = "Free — no payment required."
 
 [overrides.regimeshift_intent_intent_id_match]
-description = "Free. Wait for a match on an open intent for up to wait seconds (max 300). Returns a match or a timeout result; poll again after a timeout. Keep stream=false for MCP results."
+description = "Wait for a match on an open intent for up to wait seconds (max 300). Returns a match or a timeout result; poll again after a timeout. Keep stream=false for MCP results."
+pricing_description = "Free."
 
 [overrides.regimeshift_intent_intent_id_match.params]
 wait = "Seconds to hold the connection waiting for a match (up to 300)."
 stream = "Keep false; MCP returns complete JSON results."
 
 [overrides.regimeshift_intent_intent_id_matches]
-description = "Free — no payment required. All matches for an intent plus its fill status (the sweep view): every match behind a partially-filled lender intent, each with the full signed quote payload, plus filled vs remaining capacity."
+description = "All matches for an intent plus its fill status (the sweep view): every match behind a partially-filled lender intent, each with the full signed quote payload, plus filled vs remaining capacity."
+pricing_description = "Free — no payment required."
 
 [overrides.regimeshift_matches_recent]
-description = "Free — no payment required. Recent matches with full signed-quote payloads (EIP-712 signature, rate decomposition, contract address) ready for on-chain originate()."
+description = "Recent matches with full signed-quote payloads (EIP-712 signature, rate decomposition, contract address) ready for on-chain originate()."
+pricing_description = "Free — no payment required."
 
 [overrides.regimeshift_active_loans]
-description = "Free — no payment required. All currently-active loans with their current Chainlink-priced LTV, liquidatable or not — useful for lender position monitoring."
+description = "All currently-active loans with their current Chainlink-priced LTV, liquidatable or not — useful for lender position monitoring."
+pricing_description = "Free — no payment required."
 
 [overrides.regimeshift_liquidatable_loans]
-description = "Free — no payment required. Active loans with on-chain LTV ≥ 95% whose grace period has passed — anyone can call InterAgentRepoV4.liquidate(loanId) for the 3% bounty. Read-only; does not execute liquidations."
+description = "Active loans with on-chain LTV ≥ 95% whose grace period has passed — anyone can call InterAgentRepoV4.liquidate(loanId) for the 3% bounty. Read-only; does not execute liquidations."
+pricing_description = "Free — no payment required."
 
 [overrides.regimeshift_loans_registry]
-description = "Free — no payment required. Full lifecycle of every V4 loan reconstructed from on-chain event logs: the last limit originated loans (~14h lookback, 30s cache) with status, counterparties, principal/collateral, rate, LTV and originate/close tx hashes."
+description = "Full lifecycle of every V4 loan reconstructed from on-chain event logs: the last limit originated loans (~14h lookback, 30s cache) with status, counterparties, principal/collateral, rate, LTV and originate/close tx hashes."
+pricing_description = "Free — no payment required."
 
 [overrides.regimeshift_help]
 description = "Read RegimeShift's API quickstart. Escrow guidance does not authorize wallet operations. Use JSON mode for intent matching. Fetched on demand and cached for this process."
 
 [overrides.regimeshift_root]
-description = "Service root. Free."
+description = "Service root."
+pricing_description = "Free."
 
 [overrides.regimeshift_health]
-description = "Service health. Free."
+description = "Service health."
+pricing_description = "Free."
 
 [overrides.regimeshift_manifest]
-description = "ERC-8257-shaped discovery manifest (canonical /api/manifest). Free."
+description = "ERC-8257-shaped discovery manifest (canonical /api/manifest)."
+pricing_description = "Free."
 
 [overrides.regimeshift_quickstart_txt]
-description = "Plain-text quickstart for x402 catalog browsers and AI agents. Free."
+description = "Plain-text quickstart for x402 catalog browsers and AI agents."
+pricing_description = "Free."
 
 [overrides.regimeshift_stats]
-description = "Aggregate request counts (free, for the public dashboard).\n\nBuckets per endpoint:\n  - .402   unpaid probe (also includes wallet-less curl checks)\n  - .200   successful paid call (CDP verify+settle landed)\n  - .other 4xx/5xx for that path\n  - .total all responses Free."
+description = "Aggregate request counts for the public dashboard.\n\nBuckets per endpoint:\n  - .402   unpaid probe (also includes wallet-less curl checks)\n  - .200   successful paid call (CDP verify+settle landed)\n  - .other 4xx/5xx for that path\n  - .total all responses."
+pricing_description = "Free."

@@ -262,6 +262,12 @@ pub struct HeaderParameter {
 
 pub(crate) mod headers;
 
+#[derive(Clone, Debug)]
+pub struct DescriptionRendering {
+    pub base: String,
+    pub max_chars: Option<usize>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -273,6 +279,8 @@ pub struct ToolSpec {
     pub image_limits: crate::output::ImageLimits,
     pub name: String,
     pub description: String,
+    #[serde(skip)]
+    pub description_rendering: Option<DescriptionRendering>,
     pub method: String,
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -299,6 +307,24 @@ pub struct RoutedRequest {
 }
 
 impl ToolSpec {
+    /// Present a current scoped observation without changing canonical catalog text.
+    pub fn render_description(&self, observed: Option<crate::output::ObservedPrice>) -> String {
+        let Some(observed) = observed else {
+            return self.description.clone();
+        };
+        let (base, max) = self
+            .description_rendering
+            .as_ref()
+            .map_or((self.description.as_str(), None), |rendering| {
+                (rendering.base.as_str(), rendering.max_chars)
+            });
+        let separator = if base.is_empty() { "" } else { " " };
+        truncate_description(
+            &format!("{base}{separator}Observed cost: ~${observed}/call."),
+            max,
+        )
+    }
+
     pub fn route(&self, base_url: &str, args: &Map<String, Value>) -> Result<RoutedRequest> {
         let mut path = self.request_url.as_ref().unwrap_or(&self.path).clone();
         let mut query = BTreeMap::new();
@@ -1308,14 +1334,17 @@ pub fn build_tools(cfg: &Config, root: &Value, prefix: &str) -> Result<Vec<ToolS
         .map(|(op, name)| operation_tool(cfg, root, &op, name, &mut credit_diagnostics))
         .collect::<Result<Vec<_>>>()?;
     if let Some(url) = &cfg.help_url {
-        tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description: format!(
+        tools.push(ToolSpec { response_mapping: None, image_limits: cfg.image_limits.clone(), name: format!("{prefix}_help"), description_rendering: None, description: format!(
             "Extended documentation for all {prefix}_* tools: API-wide usage guidance, pricing notes, and workflows published by the vendor (llms.txt). Takes no arguments and returns the full document. Call this before other {prefix}_* tools when unsure how to use them."),
             method:"GET".into(), path:url.clone(), request_url:None, input_schema:json!({"type":"object","properties":{}}),
             param_routes:BTreeMap::new(), header_params:BTreeMap::new(), has_body:false, help_url:Some(url.clone()), body_names:BTreeMap::new() });
     }
     // Authored overrides also apply to help and always follow generated text/schema.
     for tool in &mut tools {
-        apply_overrides(cfg, tool);
+        apply_overrides(cfg, tool).map_err(|error| ToolConfigurationError {
+            error,
+            reason: "Provider pricing-description overrides are invalid",
+        })?;
     }
     let names: BTreeSet<_> = tools.iter().map(|t| &t.name).collect();
     if names.len() != tools.len() {
@@ -1652,7 +1681,11 @@ fn preserve_body_required_alternatives(
     }
 }
 
-fn operation_description(cfg: &Config, op: &Value, credit_estimate: Option<String>) -> String {
+fn operation_description(
+    cfg: &Config,
+    op: &Value,
+    credit_estimate: Option<String>,
+) -> (String, DescriptionRendering) {
     let method = op["method"].as_str().unwrap();
     let text = op["description"]
         .as_str()
@@ -1670,7 +1703,10 @@ fn operation_description(cfg: &Config, op: &Value, credit_estimate: Option<Strin
     }
     // Dollar amounts elsewhere in vendor prose do not establish price provenance.
     // Only omit a suffix that is already present verbatim.
-    let mut description = if text.ends_with(&price) {
+    let base = text
+        .strip_suffix(&price)
+        .map_or_else(|| text.clone(), |base| base.trim_end().to_owned());
+    let description = if text.ends_with(&price) {
         text
     } else {
         format!("{text} {price}")
@@ -1682,12 +1718,24 @@ fn operation_description(cfg: &Config, op: &Value, credit_estimate: Option<Strin
             limit_chars = max,
             "tool description truncated by max_description_chars"
         );
-        description = format!(
+    }
+    (
+        truncate_description(&description, cfg.max_description_chars),
+        DescriptionRendering {
+            base,
+            max_chars: cfg.max_description_chars,
+        },
+    )
+}
+
+fn truncate_description(description: &str, max: Option<usize>) -> String {
+    match max {
+        Some(max) if description.chars().count() > max => format!(
             "{}\n[truncated by max_description_chars={max}]",
             description.chars().take(max).collect::<String>()
-        );
+        ),
+        _ => description.to_owned(),
     }
-    description
 }
 
 fn operation_tool(
@@ -1704,7 +1752,7 @@ fn operation_tool(
         credit_diagnostics.record(&name, reason);
         description
     });
-    let description = operation_description(cfg, op, credit_estimate);
+    let (description, description_rendering) = operation_description(cfg, op, credit_estimate);
     Ok(ToolSpec {
         response_mapping: cfg
             .response_mappings
@@ -1717,6 +1765,7 @@ fn operation_tool(
         image_limits: cfg.image_limits.clone(),
         name,
         description,
+        description_rendering: Some(description_rendering),
         method: method.to_uppercase(),
         path: op["path"].as_str().unwrap().into(),
         request_url: operation_request_url(cfg, root, op)?,
@@ -1757,13 +1806,31 @@ mod operation_url_tests;
 #[cfg(test)]
 mod selection_tests;
 
-fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) {
+fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) -> Result<()> {
     if let Some(ap) = cfg.additional_properties {
         tool.input_schema["additionalProperties"] = json!(ap);
     }
     if let Some(patch) = cfg.overrides.get(&tool.name) {
+        let pricing = patch
+            .get("pricing_description")
+            .map(|pricing| {
+                ensure!(
+                    patch["description"].is_string(),
+                    "pricing_description requires a description override for {}",
+                    tool.name
+                );
+                pricing.as_str().with_context(|| {
+                    format!("pricing_description must be a string for {}", tool.name)
+                })
+            })
+            .transpose()?;
         if let Some(desc) = patch["description"].as_str() {
-            tool.description = desc.into();
+            tool.description =
+                pricing.map_or_else(|| desc.to_owned(), |price| format!("{desc} {price}"));
+            tool.description_rendering = Some(DescriptionRendering {
+                base: desc.into(),
+                max_chars: cfg.max_description_chars,
+            });
         }
         for (key, value) in patch["params"].as_object().into_iter().flatten() {
             if value.is_string() && tool.input_schema["properties"][key].is_object() {
@@ -1771,7 +1838,12 @@ fn apply_overrides(cfg: &Config, tool: &mut ToolSpec) {
             }
         }
     }
+    Ok(())
 }
+
+#[cfg(test)]
+#[path = "catalog/description_tests.rs"]
+mod description_tests;
 
 #[cfg(test)]
 #[path = "catalog/conversion_tests.rs"]

@@ -28,7 +28,14 @@ unsupported compositions fail explicitly. `config show` resolves composition,
 permissions and wallet bindings without loading specs or reading keys.
 
 `src/catalog.rs` loads OpenAPI JSON and builds tool schemas, names, descriptions
-and path/query/body routing. Provider files in `providers/` carry selections,
+and path/query/body routing. Canonical descriptions retain complete fallback pricing
+for indexing, inspection and persistence. Runtime-only rendering metadata retains
+the pricing-free base and configured character limit. `BoundTool` derives the same
+source identity, direct-target public policy and operation key for description
+lookup as invocation. Fresh get/list/search results render the applicable hint
+without mutating catalogs, ranking or generation-bound cursors. Curated rebinding
+updates both the canonical text and retained base; serialized registrations rebuild
+metadata on import. Provider files in `providers/` carry selections,
 help URLs, pricing settings and explicitly reviewed response mappings. Curated
 local specs are inputs for providers whose public schema needs adaptation; the
 fixture utility is `tools/providers/snapshot_spec.rs`. Tests pin generated contracts
@@ -501,7 +508,8 @@ separate from payment authorization and canonical qualification.
 Qualification retains its existing run permits and charges every attempt.
 
 Keep catalog/help caching and coalescing separate from passive runtime hints.
-Hints learn from actual invocation challenges and only guide selection. Every
+Hints learn from actual invocation challenges and guide selection and fresh MCP
+description rendering. Every
 invocation still makes its ordinary unsigned request; authored display prices do
 not replace the live challenge. The selected design also creates new identities over time; its reuse objective depends
 on the HTTP and cover retention fixes in the [network retention contract](network-egress.md).

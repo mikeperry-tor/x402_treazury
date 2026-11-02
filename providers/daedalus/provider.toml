@@ -54,4 +54,5 @@ help_url = "https://agents.daedalusdevelopmentgroup.com/llms.txt"
 instructions_text = "Supply your stable X-Agent-Id when requested; use the same identity for related calls. Signed DDG verdicts attest the vendor's checks, not completeness or independent certification. Preserve unknowns and evidence scope."
 
 [overrides.daedalus_security_audit_deep]
-description = "Audit supplied code or files for static security findings. Returns evidence, remediation and a vendor-signed certificate; preserve detector coverage and unknowns. Cost: ~$0.01/call [spec]."
+description = "Audit supplied code or files for static security findings. Returns evidence, remediation and a vendor-signed certificate; preserve detector coverage and unknowns."
+pricing_description = "Cost: ~$0.01/call [spec]."

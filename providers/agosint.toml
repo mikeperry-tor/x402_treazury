@@ -35,22 +35,29 @@ name = "Person, company, vessel, or aircraft name. Pass exactly one of name or w
 wallet = "Crypto address (BTC, ETH, TRON, USDT, etc.). Pass exactly one of wallet or name; birth_date, country, kind, and threshold are not used with wallet."
 
 [overrides.agosint_company]
-description = "Look up a legal entity in Czechia, Norway, UK, France, Finland, US SEC or GLEIF. Pass exactly one of id, name, lei, vat or domain; country is required with id/name and unused with other keys. Cost: ~$0.02/call [spec]."
+description = "Look up a legal entity in Czechia, Norway, UK, France, Finland, US SEC or GLEIF. Pass exactly one of id, name, lei, vat or domain; country is required with id/name and unused with other keys."
+pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.agosint_company_de]
-description = "Retrieve German Handelsregister records, officers and history. Prefer small limit batches; registry fan-out can take 90–120 seconds. Cost: ~$0.056–$0.152/call [spec]."
+description = "Retrieve German Handelsregister records, officers and history. Prefer small limit batches; registry fan-out can take 90–120 seconds."
+pricing_description = "Cost: ~$0.056–$0.152/call [spec]."
 
 [overrides.agosint_due_diligence]
-description = "Combine official registry identity, LEI/parents, VAT validation, company/officer sanctions and domain checks with sources. Pass exactly one of id, name, lei, vat or domain; country is required with id/name and unused with other keys. Cost: ~$0.10/call [spec]."
+description = "Combine official registry identity, LEI/parents, VAT validation, company/officer sanctions and domain checks with sources. Pass exactly one of id, name, lei, vat or domain; country is required with id/name and unused with other keys."
+pricing_description = "Cost: ~$0.10/call [spec]."
 
 [overrides.agosint_domain]
-description = "Retrieve domain registration, DNS/mail security, TLS, hosting and identifiable company information. These are phishing-risk signals, not a legitimacy guarantee. Cost: ~$0.015/call [spec]."
+description = "Retrieve domain registration, DNS/mail security, TLS, hosting and identifiable company information. These are phishing-risk signals, not a legitimacy guarantee."
+pricing_description = "Cost: ~$0.015/call [spec]."
 
 [overrides.agosint_network]
-description = "Look up network ownership, announced prefixes, origin AS, country, RPKI status and abuse contact. Pass exactly one public IP address or ASN (autonomous system number). Cost: ~$0.015/call [spec]."
+description = "Look up network ownership, announced prefixes, origin AS, country, RPKI status and abuse contact. Pass exactly one public IP address or ASN (autonomous system number)."
+pricing_description = "Cost: ~$0.015/call [spec]."
 
 [overrides.agosint_vat]
-description = "Validate EU VAT through VIES or Norwegian VAT through the national register. Returns registered name/address and, when caller VAT is supplied, a VIES consultation number. Cost: ~$0.015/call [spec]."
+description = "Validate EU VAT through VIES or Norwegian VAT through the national register. Returns registered name/address and, when caller VAT is supplied, a VIES consultation number."
+pricing_description = "Cost: ~$0.015/call [spec]."
 
 [overrides.agosint_sanctions]
-description = "Screen official OFAC, EU and UK lists with match scores and publication dates. Pass exactly one of name or wallet; birth_date, country, kind and threshold apply only to name. A screening aid, not a compliance determination. Cost: ~$0.015/call [spec]."
+description = "Screen official OFAC, EU and UK lists with match scores and publication dates. Pass exactly one of name or wallet; birth_date, country, kind and threshold apply only to name. A screening aid, not a compliance determination."
+pricing_description = "Cost: ~$0.015/call [spec]."

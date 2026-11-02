@@ -67,10 +67,11 @@ impl Server {
             instructions,
         }
     }
-    fn definition(t: &ToolSpec) -> Tool {
+    fn definition(bound: &catalog_state::BoundTool) -> Tool {
+        let t = &bound.tool;
         Tool::new(
             t.name.clone(),
-            t.description.clone(),
+            bound.description(),
             Arc::new(t.input_schema.as_object().unwrap().clone()),
         )
     }
@@ -203,7 +204,7 @@ impl ServerHandler for Server {
         }
         catalog_state::find(&snapshot, &self.catalog_server, name)
             .ok()
-            .map(|t| Self::definition(&t.tool))
+            .map(Self::definition)
     }
     async fn list_tools(
         &self,
@@ -238,7 +239,7 @@ impl ServerHandler for Server {
             meta: Some(meta),
             tools: management
                 .into_iter()
-                .chain(api.iter().map(|bound| Self::definition(&bound.tool)))
+                .chain(api.iter().map(Self::definition))
                 .collect(),
             ..Default::default()
         })
