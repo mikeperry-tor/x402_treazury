@@ -47,6 +47,15 @@ Eligibility, retry permission and startup classification preserve
 the exact selected inputs, accepted quote, signed bytes, attempt count and claim
 ownership, and do not create replacement work.
 
+Reconstruction's cheap error contract retries unavailable SDK snapshots and
+busy/locked Store reads through contextual errors, while corruption and shared
+owner failures propagate. `tests/treasury_sync/recovery.rs` uses the actual
+`wallet recover-expired` command with the existing empty-chain RPC fixture:
+missing-operation failure follows a completed scan, and first-signal cancellation
+checkpoints an interrupted scan. Both release the wallet for reopen, preserve
+addresses and create no funding or submission. Canonical signed-expiry behavior
+is covered by the separate source lifecycle fixtures.
+
 The late-archived-success fixture in `treasury::lifecycle_tests::terminal` uses the
 real actor to retain a disclosed replacement after destination completion. A
 following independent command must finish after maintenance without duplicating
