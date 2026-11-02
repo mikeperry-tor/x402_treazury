@@ -133,6 +133,12 @@ that runtime performs no ZEC discovery. Listener-binding tests retain the orderi
 that tools become available before these background observations complete. These
 local fixtures do not qualify live settlement or Tor.
 
+Finite Base discovery consumes its captured pass after exhaustion or a transient
+inventory read failure; a failure is reported without extending or retrying that
+frontier. Recurring requested observations retain their independent retries. Pass
+completion does not imply SOCKS readiness or completion of already accepted reads;
+explicit reconciliation still drains those reads and checks unfinished retirement.
+
 ## Reproducible measurement
 
 ```sh

@@ -30,6 +30,12 @@ struct Completion {
     id: Option<String>,
     result: Result<()>,
 }
+// None ends only this captured finite pass, not SOCKS readiness or recurring work.
+struct InitialPass {
+    through: i64,
+    cursor: i64,
+    page: VecDeque<(i64, Option<String>)>,
+}
 impl ManagedPool {
     pub async fn reconcile(&self) -> Result<()> {
         let owner = self
@@ -81,15 +87,17 @@ impl ManagedPool {
         // Capture once: new allocations never extend this startup/inspection pass.
         let pool = self.pool.clone();
         let mut first_error = None;
-        let boundary = read_result(
+        let mut initial = read_result(
             self.store.call(move |s| s.wallet_boundary(&pool)).await,
             &mut first_error,
         )?
-        .unwrap_or(-1);
-        let mut cursor = -1;
+        .filter(|through| *through >= 0)
+        .map(|through| InitialPass {
+            through,
+            cursor: -1,
+            page: VecDeque::new(),
+        });
         let mut pending_cursor = -1;
-        let mut page = VecDeque::<(i64, Option<String>)>::new();
-        let mut startup_complete = boundary < 0;
         let mut startup_ready = one_pass;
         let network = crate::network::global();
         let socks = network.wait_for_startup_socks();
@@ -109,14 +117,18 @@ impl ManagedPool {
             let mut capacity_deferred = false;
             // The finite pass is independent of recurring requested work. Its
             // failed reads report failure; only explicit requests retain retries.
-            while startup_ready && !startup_complete && active.len() < BALANCE_READS {
-                if let Some((sequence, id)) = page.pop_front() {
-                    cursor = sequence;
+            while startup_ready
+                && active.len() < BALANCE_READS
+                && let Some(pass) = initial.as_mut()
+            {
+                if let Some((sequence, id)) = pass.page.pop_front() {
+                    pass.cursor = sequence;
                     self.schedule_balance(id, true, &mut active, &mut reads, &mut first_error);
                     continue;
                 }
                 let pool = self.pool.clone();
-                let upper = boundary;
+                let upper = pass.through;
+                let cursor = pass.cursor;
                 let rows = read_result(
                     self.store
                         .call(move |s| s.advisory_wallet_page(&pool, cursor, upper))
@@ -124,15 +136,17 @@ impl ManagedPool {
                     &mut first_error,
                 )?;
                 match rows {
-                    Some(rows) if !rows.is_empty() => page = rows.into(),
-                    _ => startup_complete = true,
+                    Some(rows) if !rows.is_empty() => pass.page = rows.into(),
+                    _ => initial = None,
                 }
             }
             capacity_deferred |= startup_ready
                 && active.len() == BALANCE_READS
-                && page
-                    .iter()
-                    .any(|(_, id)| id.as_ref().is_none_or(|wallet| !active.contains(wallet)));
+                && initial.as_ref().is_some_and(|pass| {
+                    pass.page
+                        .iter()
+                        .any(|(_, id)| id.as_ref().is_none_or(|wallet| !active.contains(wallet)))
+                });
             if !one_pass {
                 let pool = self.pool.clone();
                 let pending = read_result(
@@ -216,7 +230,7 @@ impl ManagedPool {
                     "Advisory balance observation capacity reached; remaining inventory retained for a later pass"
                 );
             }
-            if one_pass && startup_complete && reads.is_empty() {
+            if one_pass && initial.is_none() && reads.is_empty() {
                 let pool = self.pool.clone();
                 let pending = self
                     .store
