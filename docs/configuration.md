@@ -1507,13 +1507,15 @@ Relay catalogs use the same local TTL, measured from the original completed rela
 response so sharing it cannot renew its lifetime.
 
 The local-policy cache key causes one initial miss for catalogs written by older
-versions; those disposable entries are left for eviction.
+versions; those disposable entries are left for eviction. Missing or incompatible
+current cache metadata also causes a quiet miss and a fresh origin request, without
+reusing saved validators.
 
 Keys separate exact URLs, discovery network/isolation policy, transport flags,
 timeouts, limits and resource kind. The owner-only SQLite cache holds at most
 4,096 entries and 128 MiB of payload/metadata, evicting oldest entries with a log.
 Its database is capped at 144 MiB; rollback journals can temporarily add up to
-another database-sized file. Cache errors log a fixed warning and fall back to
+another database-sized file. Cache I/O errors log a fixed warning and fall back to
 normal origin loading, without retrying a failed origin request. Oversized origin
 catalogs still fail with the normal `max_spec_bytes` error. Cache contents may
 reveal provider interests; treat the directory as private disposable state. To

@@ -601,8 +601,7 @@ Busy errors can be retried with the same selector. Persistence follows operator
 configuration.
 Durable source records, UUIDs, revisions, hashes and tombstones remain internal and
 available through operator inspection; no registration-result receipt ledger is
-needed. Old registry receipt fields are ignored on read and omitted on later saves.
-These were registration bookkeeping, not payment or financial journals.
+needed. These source records are separate from payment and financial journals.
 
 Search with optional `source_name` and a targeted query, or omit the source filter
 to search all available endpoint tools. Results contain readable `tool_id`, complete
@@ -688,7 +687,7 @@ generated schemas above 256 KiB, names above 512 bytes, external/unresolved/cycl
 references, and per-path/operation server overrides. Accepted live documents total
 at most 128 MiB; serialized registry state is at most 256 MiB. Stored registration
 records, including removed records, are governed by that same serialized byte bound
-on save and load. Record/receipt counts introduce no separate admission or reload
+on save and load. Record counts introduce no separate admission or reload
 gate. Resource-limit
 rejections emit WARN diagnostics with safe counts, thresholds and adjustment
 settings where applicable. Rejected mutations, terminal transport failures and rejected destination/reference/server
@@ -747,7 +746,11 @@ serving is stopped. Never delete or replace its ownership sidecar while serving.
 Registry files and sidecars cannot alias configuration or treasury paths. Each
 endpoint uses its own registry file; exclusive ownership prevents two endpoints
 from opening the same file. Saved records owned by another endpoint fail restoration
-without altering the registry.
+without altering the registry, including when all saved records are tombstones.
+A new empty database initializes the current registry format. Unsupported snapshot
+fields and malformed structure fail both restoration and inspection; neither path
+converts the snapshot or discards accepted records. Invalid saved record identities
+fail restoration, while inspection preserves and displays saved identity metadata.
 
 `config show` inspects configuration without opening registry state or secrets.
 `sources inspect --config FILE` returns an object keyed by endpoint ID, with each

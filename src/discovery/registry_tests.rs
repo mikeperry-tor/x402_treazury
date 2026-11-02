@@ -193,7 +193,6 @@ fn write_records(file: &std::path::Path, records: Vec<Record>) {
             .into_iter()
             .map(|record| (record.id.clone(), record))
             .collect(),
-        ..Default::default()
     };
     store::Store::open(file, &[]).unwrap().save(&state).unwrap();
 }

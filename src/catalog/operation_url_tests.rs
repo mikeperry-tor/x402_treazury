@@ -72,17 +72,21 @@ fn operation_urls_preserve_identity_and_route_each_service_with_original_argumen
             expected
         );
     }
-    // Legacy serialized tools keep base/path routing; new tools retain the template.
+    // Current serializers omit an absent template; that roundtrip keeps base/path routing.
     let saved = serde_json::to_value(item).unwrap();
-    let restored: ToolSpec = serde_json::from_value(saved.clone()).unwrap();
+    let restored: ToolSpec = serde_json::from_value(saved).unwrap();
     assert_eq!(restored.request_url, item.request_url);
-    let mut legacy = saved;
-    legacy.as_object_mut().unwrap().remove("request_url");
-    assert!(
-        serde_json::from_value::<ToolSpec>(legacy)
+    let fallback = tools.iter().find(|t| t.name == "api_fallback").unwrap();
+    let saved = serde_json::to_value(fallback).unwrap();
+    assert!(saved.get("request_url").is_none());
+    let restored: ToolSpec = serde_json::from_value(saved).unwrap();
+    assert!(restored.request_url.is_none());
+    assert_eq!(
+        restored
+            .route("https://gateway.example.com/api", &Map::new())
             .unwrap()
-            .request_url
-            .is_none()
+            .url,
+        "https://gateway.example.com/api/fallback"
     );
 }
 

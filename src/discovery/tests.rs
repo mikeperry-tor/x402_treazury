@@ -317,6 +317,20 @@ fn registry_ownership_aliases_corruption_and_inspection_do_not_overwrite() {
     assert!(store::inspect(&file).is_err());
     assert!(!file.exists());
     let store = store::Store::open(&file, &[]).unwrap();
+    let initialized = store.load().unwrap();
+    assert_eq!(initialized.generation, 0);
+    assert!(initialized.records.is_empty());
+    assert_eq!(
+        store::inspect(&file).unwrap(),
+        json!({"generation":0,"sources":[]})
+    );
+    assert_eq!(
+        rusqlite::Connection::open(&file)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
+            .unwrap(),
+        1
+    );
     assert!(store::Store::open(&file, &[]).is_err());
     drop(store);
     assert!(store::Store::open(&file, std::slice::from_ref(&file)).is_err());
@@ -329,18 +343,75 @@ fn registry_ownership_aliases_corruption_and_inspection_do_not_overwrite() {
     assert_eq!(std::fs::read(&bad).unwrap(), b"not a database");
 }
 
-#[test]
-fn existing_registry_rows_cannot_silently_default_to_empty_state() {
+#[tokio::test]
+async fn unsupported_and_malformed_registry_snapshots_do_not_overwrite_or_publish() {
     let tmp = tempfile::tempdir().unwrap();
     let file = tmp.path().join("registry.sqlite");
-    let store = store::Store::open(&file, &[]).unwrap();
-    drop(store);
-    let db = rusqlite::Connection::open(&file).unwrap();
-    db.execute("INSERT INTO snapshot(id,json) VALUES(1,'{}')", [])
-        .unwrap();
-    drop(db);
-    assert!(store::Store::open(&file, &[]).unwrap().load().is_err());
-    assert!(store::inspect(&file).is_err());
+    let m = manager(Some(file.clone())).await;
+    let added = add(&m, "saved", "", "").await;
+    let id = registered_id(&m, &added);
+    let saved = serde_json::to_value(&m.inner.lock().unwrap().state).unwrap();
+    drop(m);
+    let mut unsupported = saved.clone();
+    unsupported["receipts"] = json!({"obsolete-result":null});
+    let mut malformed = saved.clone();
+    malformed.as_object_mut().unwrap().remove("generation");
+    let mut invalid_identity = saved;
+    invalid_identity["records"][&id]["revision"] = json!(0);
+    for (snapshot, inspect_rejects) in [
+        (unsupported, true),
+        (malformed, true),
+        (invalid_identity, false),
+    ] {
+        let raw = serde_json::to_string_pretty(&snapshot).unwrap();
+        let db = rusqlite::Connection::open(&file).unwrap();
+        db.execute("UPDATE snapshot SET json=?1 WHERE id=1", [&raw])
+            .unwrap();
+        drop(db);
+        let configured = with_registry(listeners(true), Some(file.clone()));
+        let catalog = Arc::new(CatalogState::new(CatalogSnapshot {
+            views: configured
+                .keys()
+                .map(|owner| (owner.clone(), vec![]))
+                .collect(),
+            ..Default::default()
+        }));
+        assert!(
+            Manager::new(
+                configured,
+                BTreeMap::from([("shared".into(), payer())]),
+                catalog.clone(),
+                vec![],
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(catalog.read().generation, 0);
+        assert!(catalog.read().views.values().all(Vec::is_empty));
+        // Inspection does not acquire ownership or repair saved identity metadata.
+        let inspected = store::inspect(&file);
+        assert_eq!(inspected.is_err(), inspect_rejects);
+        if let Ok(inspected) = inspected {
+            assert_eq!(inspected["generation"], snapshot["generation"]);
+            assert_eq!(inspected["sources"][0]["id"], id);
+            assert_eq!(inspected["sources"][0]["revision"], 0);
+        }
+        let db = rusqlite::Connection::open(&file).unwrap();
+        let after: String = db
+            .query_row("SELECT json FROM snapshot WHERE id=1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            after, raw,
+            "refusal and inspection must preserve original bytes, generation and records"
+        );
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
+                .unwrap(),
+            1
+        );
+        // A failed Manager open releases exclusive ownership for operator repair.
+        assert!(store::Store::open(&file, &[]).is_ok());
+    }
 }
 
 #[test]
@@ -3432,69 +3503,67 @@ async fn automatic_source_names_are_readable_collision_safe_and_duplicate_safe()
 }
 
 #[tokio::test]
-async fn legacy_registry_bookkeeping_does_not_block_restore_or_registration() {
+async fn current_registry_tombstones_survive_remove_reopen_and_registration() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("registry.sqlite");
     let m = manager(Some(file.clone())).await;
-    add(&m, "saved", "", "").await;
-    let mut saved = serde_json::to_value(&m.inner.lock().unwrap().state).unwrap();
-    // A count of historical registrations must not make accepted state unreloadable.
-    let mut tombstone = saved["records"]
-        .as_object()
-        .unwrap()
-        .values()
-        .next()
-        .unwrap()
-        .clone();
-    tombstone["removed"] = json!(true);
-    tombstone["document"] = json!("");
-    for index in 1..=10001 {
-        let id = Uuid::from_u128(index).to_string();
-        tombstone["id"] = json!(id);
-        saved["records"][&id] = tombstone.clone();
-    }
-    // Old receipts have no authority and are ignored without imposing their old capacity.
-    saved["receipts"] = Value::Object(
-        (0..10001)
-            .map(|index| (format!("legacy-{index}"), Value::Null))
-            .collect(),
-    );
+    let added = add(&m, "saved", "", "").await;
+    let id = registered_id(&m, &added);
+    assert_eq!(m.inner.lock().unwrap().state.generation, 1);
     drop(m);
+    let config = operator_config(dir.path(), &file);
+    maintain_cli(&config, "writer", &id, false).await.unwrap();
+    let inspected = store::inspect(&file).unwrap();
+    assert_eq!(inspected["generation"], 2);
+    assert_eq!(inspected["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(inspected["sources"][0]["id"], id);
+    assert_eq!(inspected["sources"][0]["revision"], 2);
+    assert_eq!(inspected["sources"][0]["removed"], true);
+    assert_eq!(inspected["sources"][0]["tools"], json!([]));
+    let tombstone = store::Store::open(&file, &[]).unwrap().load().unwrap();
+    let tombstone = serde_json::to_value(&tombstone).unwrap();
     let db = rusqlite::Connection::open(&file).unwrap();
-    db.execute(
-        "UPDATE snapshot SET json=?1 WHERE id=1",
-        [serde_json::to_string(&saved).unwrap()],
+    let raw: String = db
+        .query_row("SELECT json FROM snapshot WHERE id=1", [], |row| row.get(0))
+        .unwrap();
+    drop(db);
+    // Tombstones retain the same authenticated endpoint ownership as live records.
+    let mut foreign = listeners(true);
+    foreign.get_mut("reader").unwrap().source_registry_file = Some(file.clone());
+    let catalog = Arc::new(CatalogState::new(CatalogSnapshot::default()));
+    let error = Manager::new(
+        foreign,
+        BTreeMap::from([("shared".into(), payer())]),
+        catalog,
+        vec![],
     )
+    .await
+    .err()
     .unwrap();
+    assert!(error.to_string().contains("another endpoint"));
+    let db = rusqlite::Connection::open(&file).unwrap();
+    assert_eq!(
+        db.query_row("SELECT json FROM snapshot WHERE id=1", [], |row| row
+            .get::<_, String>(0))
+            .unwrap(),
+        raw
+    );
     drop(db);
     let m = manager(Some(file.clone())).await;
-    assert_eq!(m.catalog.read().views["writer"].len(), 2);
+    assert_eq!(m.inner.lock().unwrap().state.generation, 2);
+    assert!(m.catalog.read().views["writer"].is_empty());
     register_spec(&m, "writer", "new", "new.json", spec())
         .await
         .unwrap();
-    assert_eq!(m.catalog.read().views["writer"].len(), 4);
+    assert_eq!(m.catalog.read().views["writer"].len(), 2);
+    assert!(m.catalog.read().views["reader"].is_empty());
     drop(m);
-    let db = rusqlite::Connection::open(&file).unwrap();
-    let stored: String = db
-        .query_row("SELECT json FROM snapshot WHERE id=1", [], |row| row.get(0))
-        .unwrap();
-    assert!(
-        serde_json::from_str::<Value>(&stored)
-            .unwrap()
-            .get("receipts")
-            .is_none()
-    );
-    assert_eq!(
-        serde_json::from_str::<Value>(&stored).unwrap()["records"]
-            .as_object()
-            .unwrap()
-            .len(),
-        10003
-    );
-    drop(db);
-    let restored = manager(Some(file)).await;
-    assert_eq!(restored.catalog.read().views["writer"].len(), 4);
-    assert_eq!(restored.inner.lock().unwrap().state.records.len(), 10003);
+    let restored = manager(Some(file.clone())).await;
+    assert_eq!(restored.catalog.read().views["writer"].len(), 2);
+    let state = serde_json::to_value(&restored.inner.lock().unwrap().state).unwrap();
+    assert_eq!(state["generation"], 3);
+    assert_eq!(state["records"].as_object().unwrap().len(), 2);
+    assert_eq!(state["records"][&id], tombstone["records"][&id]);
 }
 
 #[tokio::test]

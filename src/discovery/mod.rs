@@ -66,19 +66,6 @@ struct Record {
 struct State {
     generation: u64,
     records: BTreeMap<String, Record>,
-    // Read old registration snapshots without retaining their unused result ledger.
-    #[serde(
-        default,
-        rename = "receipts",
-        deserialize_with = "ignore_registration_receipts",
-        skip_serializing
-    )]
-    _legacy_receipts: (),
-}
-fn ignore_registration_receipts<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> std::result::Result<(), D::Error> {
-    serde::de::IgnoredAny::deserialize(deserializer).map(|_| ())
 }
 struct Inner {
     base: CatalogSnapshot,
