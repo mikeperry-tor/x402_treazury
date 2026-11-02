@@ -3,15 +3,6 @@
 use super::*;
 use pepper_sync::wallet::{NoteInterface, OutputInterface, SaplingNote};
 
-struct NoDisclosure;
-impl TransactionSubmission for NoDisclosure {
-    async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
-        panic!("relocated-note recovery cannot submit original work");
-    }
-    async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
-        panic!("canonical relocated-note recovery needs no inclusion hint");
-    }
-}
 async fn sapling_address(owner: &mut Treasury) -> String {
     let client = owner.client.as_mut().unwrap();
     client
@@ -145,7 +136,7 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
             note.nullifier().unwrap()
         };
         let premature = owner
-            .recover_expired(job.operation_id.clone(), &mut NoDisclosure, &stop)
+            .recover_expired(job.operation_id.clone(), &stop)
             .await
             .unwrap_err();
         assert_eq!(
@@ -218,7 +209,7 @@ async fn relocated_sapling_note_closes_expired_original_when_unspent_or_spent_ca
             chain.mine_empty_blocks(remaining);
         }
         owner
-            .recover_expired(job.operation_id.clone(), &mut NoDisclosure, &stop)
+            .recover_expired(job.operation_id.clone(), &stop)
             .await
             .unwrap();
         {

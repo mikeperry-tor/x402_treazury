@@ -553,7 +553,8 @@ restart-safe outgoing journal. Refund principal becomes shielded spendable only
 after the shielding transaction confirms. Expired funding deposits use automatic
 recovery or `wallet recover --config servers.toml`. For an individual shielding
 operation, the advanced `wallet recover-expired --config servers.toml --operation-id UUID`
-remains available with serving stopped. Expiry recovery requires one completed
+remains available with serving stopped. It never submits or rebroadcasts a
+transaction. Expiry recovery requires one completed
 canonical tip scan beyond original expiry by the configured confirmation count,
 with the same Ready snapshot revision and coverage checked at publication. The
 exact authenticated transaction supplies its signed finite expiry. Current old

@@ -36,10 +36,7 @@ pub(crate) fn evidence_outcome(error: &anyhow::Error) -> Option<RecoveryOutcome>
     Some(match error.downcast_ref::<Evidence>()? {
         Evidence::ConfirmationPending => RecoveryOutcome::Waiting("zcash_confirmations_pending"),
         Evidence::ExpiryNotBuried => RecoveryOutcome::Waiting("waiting_for_transaction_expiry"),
-        Evidence::TipLag
-        | Evidence::StaleSync
-        | Evidence::ChainChanged
-        | Evidence::ConfirmationMismatch => {
+        Evidence::TipLag | Evidence::StaleSync | Evidence::ConfirmationMismatch => {
             RecoveryOutcome::Waiting("waiting_for_fresh_canonical_sync")
         }
         Evidence::TransactionMismatch => {
@@ -249,7 +246,7 @@ impl Treasury {
             // not scan again merely to publish its already-established proof.
             self.recover_expired_scanned(operation_id, stop).await?;
         } else {
-            self.recover_expired(operation_id, sender, stop).await?;
+            self.recover_expired(operation_id, stop).await?;
         }
         let id = job.id.clone();
         let operation = job.operation_id.clone();
@@ -456,7 +453,6 @@ mod tests {
             Evidence::ExpiryNotBuried,
             Evidence::TipLag,
             Evidence::StaleSync,
-            Evidence::ChainChanged,
             Evidence::TransactionMismatch,
             Evidence::ConfirmationMismatch,
             Evidence::ConfirmationPending,

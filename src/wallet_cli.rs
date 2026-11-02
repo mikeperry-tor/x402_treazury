@@ -679,18 +679,12 @@ async fn recover_expired(
     network: crate::rotation::store::TreasuryNetwork,
     policy: Option<&crate::network::NetworkConfig>,
 ) -> Result<crate::treasury::Treasury> {
-    let (mut treasury, settings) = configured(&meta_config, network, policy).await?;
-    let indexer = settings.indexer_endpoint(|name| std::env::var(name).ok())?;
-    let mut sender = crate::treasury::submission::GrpcSubmission::with_network(
-        indexer.clone(),
-        indexer,
-        network,
-    )?;
+    let (mut treasury, _) = configured(&meta_config, network, policy).await?;
     let stop = tokio_util::sync::CancellationToken::new();
     let result = finish_on_shutdown(
         "wallet_command",
         &stop,
-        treasury.recover_expired(operation_id, &mut sender, &stop),
+        treasury.recover_expired(operation_id, &stop),
     )
     .await;
     if let Err(error) = result {

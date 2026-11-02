@@ -1353,15 +1353,6 @@ async fn sdk_confirmation_finishes_original_source_without_indexer_agreement_or_
 
 #[tokio::test]
 async fn expired_original_closes_after_another_canonical_transaction_spends_its_inputs() {
-    struct NoLookup;
-    impl TransactionSubmission for NoLookup {
-        async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
-            panic!("expiry recovery cannot submit");
-        }
-        async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
-            panic!("canonical input proof needs no indexer corroboration");
-        }
-    }
     async fn prepare(owner: &mut Treasury, name: &str) -> (FundingJob, PreparedTransaction) {
         let pool = owner
             .ensure_capacity_group(
@@ -1429,7 +1420,7 @@ async fn expired_original_closes_after_another_canonical_transaction_spends_its_
     let operation = job.operation_id.clone();
     let initial = original.bytes().to_vec();
     owner
-        .recover_expired(operation.clone(), &mut NoLookup, &stop)
+        .recover_expired(operation.clone(), &stop)
         .await
         .unwrap();
     store
