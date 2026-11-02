@@ -40,6 +40,13 @@ with lookup and submission doubles that panic if called. Canonical expiry does
 not consult external inclusion hints, so these tests do not repeat the journey
 for unused mempool and confirmed hint values.
 
+The Store bootstrap fixture covers operation-backed recovery without proving:
+accepted or confirmed nonterminal originals stay waiting; bound failed/refunded
+outcomes permit worker recovery while startup still observes the accepted quote.
+Eligibility, retry permission and startup classification preserve
+the exact selected inputs, accepted quote, signed bytes, attempt count and claim
+ownership, and do not create replacement work.
+
 The late-archived-success fixture in `treasury::lifecycle_tests::terminal` uses the
 real actor to retain a disclosed replacement after destination completion. A
 following independent command must finish after maintenance without duplicating
