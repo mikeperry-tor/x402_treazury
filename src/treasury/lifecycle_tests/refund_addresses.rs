@@ -261,10 +261,16 @@ async fn mixed_ua_refund_shields_owned_transparent_receiver_without_rebinding() 
             chain.mine_block(vec![funding]);
             chain.mine_empty_blocks(2);
         }
+        let parses = crate::treasury::prover::parse_count();
         let prepared = owner
             .shield_refund(job.id.clone(), 30_000, &CancellationToken::new())
             .await
             .unwrap();
+        assert_eq!(
+            crate::treasury::prover::parse_count(),
+            parses,
+            "transparent shielding must not parse Sapling parameters"
+        );
         let transaction = submission::decode(prepared.bytes()).unwrap();
         let inputs = transaction.transparent_bundle().unwrap();
         assert_eq!(inputs.vin.len(), 1);

@@ -11,6 +11,7 @@ mod inputs;
 mod lifecycle_tests;
 mod observation;
 mod owned_transparent;
+mod prover;
 mod publication;
 mod reconstruction;
 pub mod recovery;

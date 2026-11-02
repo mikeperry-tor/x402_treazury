@@ -36,7 +36,7 @@ named above:
 | Application code | Upstream origin | Purpose of the local adapter |
 | --- | --- | --- |
 | [`src/network/indexer.rs`](../src/network/indexer.rs) | `zingo-netutils/src/lib.rs`: `GrpcIndexer` and its `Indexer` implementation; `zingo-netutils/src/globally_public.rs`: its `TransparentIndexer` implementation | Thirteen indexer and six transparent-indexer RPC delegations use the application's identity-bound SOCKS/progress transport. Upstream's private client uses tonic `Channel` and its constructors establish the SDK's transport. The adapter retains request/response conventions while the application owns network construction and inactivity handling. |
-| [`src/treasury/send/prover.rs`](../src/treasury/send/prover.rs) | `zingolib/src/wallet/utils.rs`: `LazySaplingProver` | A `OnceLock` initializes embedded Sapling parameters on first use, and `SpendProver`/`OutputProver` implementations delegate to `zcash_proofs::prover::LocalTxProver`. Upstream's adapter is crate-private; the application needs this behavior when calling backend transaction creation directly, including avoiding Sapling parameter parsing for Orchard-only sends. |
+| [`src/treasury/prover.rs`](../src/treasury/prover.rs) | `zingolib/src/wallet/utils.rs`: `LazySaplingProver` | A `OnceLock` initializes embedded Sapling parameters on first use, and `SpendProver`/`OutputProver` implementations delegate to `zcash_proofs::prover::LocalTxProver`. Upstream's adapter is crate-private; deposit and shielding calculations share this adapter when calling backend transaction creation directly, avoiding Sapling parameter parsing when no Sapling proof is requested. |
 
 Both files retain upstream copyright and revision attribution in their source
 headers. [`vendor/ZINGO-LICENSE-MIT`](../vendor/ZINGO-LICENSE-MIT) preserves the
@@ -233,9 +233,9 @@ financial work.
 The upstream SDK build script obtains and embeds standard parameter-cache files
 through `SAPLING_SPEND_PARAMS` and `SAPLING_OUTPUT_PARAMS`; it does not copy them
 into its source checkout. Pre-populate the standard cache for an offline first
-build. Deposit proving reads embedded bytes lazily. Unchanged backend shielding
-uses `LocalTxProver::with_default_location` to read the provisioned runtime cache;
-it does not download parameters. Legacy v6 `vendor/zingolib/zcash-params/*.params`
+build. Deposit and shielding proving read embedded bytes lazily when a Sapling
+proof is requested; neither requires a runtime parameter cache or downloads
+parameters. Legacy v6 `vendor/zingolib/zcash-params/*.params`
 copies remain ignored, unused and preserved. Build-time acquisition is outside
 runtime Tor routing.
 
