@@ -20,7 +20,6 @@ and CLI usage. Maintained implementation and operational explanations live here:
 | [Reproducible builds](reproducible-builds.md) | Toolchain, dependency pins and vendored patch ownership |
 
 [Plans](plans/) describe unfinished work, including artifact storage,
-[obsolete compatibility and test pruning](plans/prune_deadcode_and_tests.md),
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
 [observed pricing in descriptions and results](plans/observed_pricing_details.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the

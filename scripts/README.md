@@ -224,7 +224,7 @@ The opt-in `measure_startup_tor.py` runner compares unsigned startup time and
 per-process peak RSS through an existing, warmed Tor SOCKS endpoint. It retains
 the daemon and its learning state; see [startup qualification](../tests/STARTUP.md).
 
-The pruning evaluation uses only the pinned
+Condition-only comparisons use the pinned
 [condition analysis workflow](../tests/COVERAGE.md#condition-analysis), with one
 test profile and isolated target directories. The helper selects absolute nightly
 compiler and matching LLVM paths and verifies the compiler revision and wrapper
