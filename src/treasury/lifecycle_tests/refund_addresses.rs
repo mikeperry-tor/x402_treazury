@@ -87,7 +87,7 @@ async fn distant_shielded_refund_is_spendable_after_seed_only_restore() {
 
 #[tokio::test]
 async fn legacy_transparent_refund_binding_survives_encrypted_reopen() {
-    let (dir, _net, mut owner, _endpoint) = funded_fixture(2).await;
+    let (dir, mut owner) = unfunded_fixture().await;
     crate::rotation::test_capacity::treasury_pair(&owner, "legacy_refund", "5", None, 0)
         .await
         .unwrap();
@@ -132,7 +132,7 @@ async fn legacy_transparent_refund_binding_survives_encrypted_reopen() {
 
 #[tokio::test]
 async fn refund_binding_failure_returns_no_address_and_reopens_original_snapshot() {
-    let (dir, _net, mut owner, _endpoint) = funded_fixture(2).await;
+    let (dir, mut owner) = unfunded_fixture().await;
     crate::rotation::test_capacity::treasury_pair(&owner, "refund_failure", "5", None, 0)
         .await
         .unwrap();

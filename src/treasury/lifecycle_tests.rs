@@ -143,6 +143,20 @@ impl TransactionSubmission for GatedSubmission {
     }
 }
 
+async fn unfunded_fixture() -> (tempfile::TempDir, Treasury) {
+    let dir = tempfile::tempdir().unwrap();
+    let owner = Treasury::create_with_network(
+        dir.path().join("state"),
+        dir.path().join("key"),
+        1,
+        Some(Zeroizing::new(SEED.into())),
+        TreasuryNetwork::Synthetic,
+    )
+    .await
+    .unwrap();
+    (dir, owner)
+}
+
 async fn funded_fixture(confirmations: u64) -> (tempfile::TempDir, MockNet, Treasury, String) {
     funded_fixture_amount(confirmations, 1_000_000).await
 }
@@ -151,20 +165,9 @@ async fn funded_fixture_amount(
     confirmations: u64,
     amount: u64,
 ) -> (tempfile::TempDir, MockNet, Treasury, String) {
-    let dir = tempfile::tempdir().unwrap();
-    let state = dir.path().join("state");
-    let key = dir.path().join("key");
+    let (dir, mut owner) = unfunded_fixture().await;
     let net = MockNet::launch().await;
     let endpoint = net.indexer_uri().to_string();
-    let mut owner = Treasury::create_with_network(
-        state.clone(),
-        key.clone(),
-        1,
-        Some(Zeroizing::new(SEED.into())),
-        TreasuryNetwork::Synthetic,
-    )
-    .await
-    .unwrap();
     let address = owner
         .client
         .as_ref()

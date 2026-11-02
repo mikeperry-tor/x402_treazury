@@ -17,6 +17,10 @@ ignored Docker refund fixture still explicitly creates legacy transparent
 bindings to retain high-index discovery and per-address shielding coverage;
 ordinary new refund derivation emits shielded-only UAs.
 
+Binding persistence and failed-binding rollback use fresh unfunded SDK owners and
+encrypted stores. Those contracts need no faucet transaction, indexer or initial
+scan; actual refund discovery and shielding retain their funded SDK fixtures.
+
 Expiry maintenance must consume its completed same-owner canonical scan without
 another indexer request. The shielding-expiry fixture makes the next indexer
 request fail after successful scanning and requires closure with the fault still
