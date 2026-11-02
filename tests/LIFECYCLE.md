@@ -115,6 +115,13 @@ first pass observes completed quote prerequisites, while the reopened pass needs
 new preparation-failure and credit completion evidence. Neither callback counts
 nor old saved health acknowledge a new pass. Store work runs with time resumed.
 
+Scheduler admission distinguishes work that is not due from unavailable metadata
+capacity. The occupied-lane fixture checks that pending inventory drops the former
+and retains the latter, while a completed quote prerequisite retains its exact
+handoff in both cases without starting HTTP. Quote prerequisites retain independent
+inventory progress but execute under source ownership; actual quote HTTP uses its
+own observation slots and cadence.
+
 The actor interruption fixture retains one real retry crossing into offline SDK
 reconstruction. Its command acknowledgement precedes the panic and retry-sleep
 registration; advancing from that acknowledgement would race the retained owner.

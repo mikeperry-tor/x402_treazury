@@ -70,7 +70,7 @@ async fn status_diagnostics_distinguish_responses_publication_and_recovery() {
                 .lock()
                 .unwrap()
                 .admit(&key, Some(&job.phase), 1000, &BTreeSet::new()),
-            Some(true)
+            Admission::Ready
         );
         let request = FundingStatusRequest {
             id: job.id.clone(),
@@ -333,7 +333,7 @@ async fn retrying_observations_are_debug_and_operator_requirements_warn_without_
                 .lock()
                 .unwrap()
                 .admit(&key, Some(&job.phase), 1000, &BTreeSet::new()),
-            Some(true)
+            Admission::Ready
         );
         let log = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
