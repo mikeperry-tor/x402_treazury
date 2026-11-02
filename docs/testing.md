@@ -32,10 +32,11 @@ identify its selected requests, caps, authority and unobserved outcomes.
 Keep ordinary validation on the pinned production compiler and maintained named
 stages. Do not build a cross product of compilers, feature combinations, profiles
 or coverage modes. A future matrix expansion needs an independently demonstrated
-contract and explicit user authorization. The pruning evaluation uses one isolated
-condition-coverage toolchain and test profile, with a default baseline/final pair
-and only focused financial supplements. Nightly analysis is outside `make test`
-and `make check`; it never changes production pins.
+contract and explicit user authorization. A condition comparison uses one isolated
+analysis toolchain and test profile, with a default baseline/final pair and only
+focused financial supplements. Run it for a stated coverage comparison, separately
+from ordinary validation and per-commit reviews. Nightly analysis is outside
+`make test` and `make check`; it never changes production pins.
 
 Reuse passed evidence while its source, feature, profile and relevant inputs remain
 valid; resume unfinished stages after focused fixes. Reruns need changed inputs,
@@ -627,9 +628,9 @@ can still contribute to the application denominator. Compare identical feature
 sets and filters, and explain denominator changes before attributing a percentage
 change to better tests.
 
-The pruning baseline/final evaluation uses only the pinned
-[condition analysis workflow](../tests/COVERAGE.md#condition-analysis), including
-its focused financial supplement. It does not run the other coverage modes.
+A condition-only baseline/final evaluation uses the pinned
+[condition analysis workflow](../tests/COVERAGE.md#condition-analysis), with only
+necessary focused financial supplements. Other coverage modes are separate capabilities.
 
 Branch collection is an optional separate invocation using a compatible nightly
 compiler and matching LLVM tooling:

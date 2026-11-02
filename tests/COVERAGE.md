@@ -16,7 +16,7 @@ not establish a coverage improvement.
 | Grants, source scope, immutable invocation snapshots, concurrent mutations | `src/discovery/tests.rs`, `tests/deployment.rs`, `tests/assignment.rs` |
 | EIP-3009/Permit2 signatures, exact payload, typed insufficient-funds traversal and retained liabilities | `tests/payments.rs`, `tests/managed.rs` |
 | Canonical balances/nonces, credit, quote binding and funding transitions | `tests/base.rs`, `src/rotation/` tests |
-| Encryption, migrations, ownership, unsafe links and atomic backup failures | Treasury/store integrity and filesystem tests, `tests/cli_contracts.rs` |
+| Encryption, unsupported-schema refusal, current initialization, ownership, unsafe links and atomic backup failures | Treasury/store integrity and filesystem tests, `tests/cli_contracts.rs` |
 | MCP auth, routes, fallback, pagination, process shutdown | `tests/server.rs`, `tests/stdio.rs`, `tests/shutdown.rs`, `tests/supervision.rs` |
 | Catalog complexity, concurrent startup, authored prices and passive payment hints | `src/catalog.rs`, `tests/provider_catalogs.rs`, `tests/startup.rs`, `src/pricing/runtime.rs` tests and payment selection tests |
 | Visible byte/display bounds, typed media and error redaction | `tests/download_limits.rs`, `tests/media.rs`, `tests/confidential_errors.rs` |
@@ -37,9 +37,9 @@ The [mutation pilot](../docs/plans/deferred/mutation_testing.md) remains deferre
 
 ## Condition analysis
 
-For the pruning evaluation, use `make coverage-condition` and then
-`make coverage-condition-financial`. These select one condition-only analysis
-workflow with cargo-llvm-cov 0.9.1, compiler revision
+Use `make coverage-condition` for a condition-only evaluation. Add
+`make coverage-condition-financial` when the selected financial contracts need
+its focused coverage. Both use the same analysis workflow with cargo-llvm-cov 0.9.1, compiler revision
 `92b5b8c87c61b20adc9001b41baf587634a74734` (1.101.0-nightly), and its LLVM 23.1.4
 tools. The default installation is `nightly-2026-10-31`;
 `CONDITION_TOOLCHAIN` can name another installation of that exact revision.
@@ -54,9 +54,14 @@ probe compiler, which failed application compilation with
 [Rust regression #165263](https://github.com/rust-lang/rust/issues/165263).
 `-Zcoverage-options=condition` is used without `--branch`; it includes line,
 region, function and branch evidence. It does not prove MC/DC independence or
-exhaustive paths. The completed support probe found MC/DC unsupported; none is
-planned. Do not substitute another mode or run a compiler/profile/feature matrix
-if collection fails; resolve the specific blocker.
+exhaustive paths. The support probe found MC/DC unsupported. Do not substitute
+another mode or run a compiler/profile/feature matrix if collection fails;
+resolve the specific blocker.
+
+This analysis pin emits a future-compatibility trait-depth warning for the deferred
+catalog/paid relay `Send` proof. Preserve the diagnostics and assess actual
+compilation, execution and export; the ordinary production warning gate is separate.
+Do not suppress this diagnostic or raise recursion limits merely to complete analysis.
 
 Default condition and financial reports publish separately to
 `target/coverage-condition` and `target/coverage-condition-financial`.

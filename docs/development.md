@@ -209,7 +209,7 @@ and function coverage, not branch coverage. Optional proving/Docker and live
 funded tests are outside this run. Reports contain local paths and are gitignored.
 
 Use the isolated [condition analysis workflow](../tests/COVERAGE.md#condition-analysis)
-for the pruning baseline/final comparison. It pins the verified compiler revision,
+for a condition-only baseline/final comparison. It pins the verified compiler revision,
 cargo-llvm-cov and matching LLVM tools, preserving condition outcomes and exact
 source hashes. Existing coverage entrypoints do not authorize collecting multiple
 modes. Follow [testing efficiency](testing.md#testing-efficiency); compare ordinary
