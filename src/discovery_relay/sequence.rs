@@ -840,3 +840,47 @@ fn local_references(value: &serde_json::Value) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_acceptance_requires_complete_json_and_refuses_target_challenges() {
+        let mut response = Decoded {
+            status: 200,
+            headers: Default::default(),
+            body: b"{}".to_vec(),
+            truncated: false,
+            delivery_failed: false,
+            final_url: "https://example.com/openapi.json".parse().unwrap(),
+        };
+        assert!(matches!(
+            Contract::Catalog.decision(&response),
+            Decision::Accept
+        ));
+        response.body = b"incomplete JSON".to_vec();
+        assert!(matches!(
+            Contract::Catalog.decision(&response),
+            Decision::Next("catalog_parse")
+        ));
+        response.status = 403;
+        assert!(matches!(
+            Contract::Catalog.decision(&response),
+            Decision::Next("http_status")
+        ));
+        response.status = 402;
+        assert!(matches!(
+            Contract::Catalog.decision(&response),
+            Decision::Terminal("target_payment_required")
+        ));
+        response.headers.insert(
+            "payment-required",
+            "untrusted target challenge".parse().unwrap(),
+        );
+        assert!(matches!(
+            Contract::Catalog.decision(&response),
+            Decision::Terminal("target_payment_required")
+        ));
+    }
+}

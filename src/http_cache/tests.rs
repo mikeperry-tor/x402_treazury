@@ -540,6 +540,33 @@ async fn catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_
             origin.lock().unwrap().mode = 2;
             catalog::load_json_discovery(&cfg).await.unwrap();
             assert!(slot.read().await.unwrap().metadata.fresh());
+            // Missing current metadata is a disposable miss, never a validator source.
+            let mut incompatible =
+                serde_json::to_value(slot.read().await.unwrap().metadata).unwrap();
+            incompatible
+                .as_object_mut()
+                .unwrap()
+                .remove("local_override");
+            let db = open(&slot.directory).unwrap();
+            db.execute(
+                "UPDATE entries SET metadata=?1 WHERE key=?2",
+                params![incompatible.to_string(), slot.key],
+            )
+            .unwrap();
+            drop(db);
+            assert!(slot.read().await.is_none());
+            assert_eq!(
+                catalog::load_json_discovery(&cfg).await.unwrap()["value"],
+                2
+            );
+            {
+                let state = origin.lock().unwrap();
+                assert_eq!(state.calls.len(), 4);
+                assert!(!state.calls[3].contains_key("if-none-match"));
+                assert!(!state.calls[3].contains_key("if-modified-since"));
+            }
+            assert!(slot.read().await.unwrap().metadata.fresh());
+            catalog::load_json_discovery(&cfg).await.unwrap();
         }
         .with_subscriber(subscriber)
         .await;
@@ -562,7 +589,7 @@ async fn catalog_cache_logs_source_hit_revalidation_and_rejected_policy_without_
         assert!(!logs.contains("INFO") && !logs.contains("WARN"), "{logs}");
         assert!(!logs.contains(&url));
         assert!(!logs.contains("private-token"));
-        assert_eq!(origin.lock().unwrap().calls.len(), 3);
+        assert_eq!(origin.lock().unwrap().calls.len(), 4);
         task.abort();
     }
 }

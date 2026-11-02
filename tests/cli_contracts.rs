@@ -237,7 +237,7 @@ async fn source_inspection_lists_saved_tools_without_tokens_catalog_fetches_or_r
     .unwrap();
     db.execute(
         "INSERT INTO snapshot VALUES(1,?1)",
-        [json!({"generation":2,"records":{id:record},"receipts":{}}).to_string()],
+        [json!({"generation":2,"records":{id:record}}).to_string()],
     )
     .unwrap();
     let before = std::fs::read(dir.join("registry.sqlite")).unwrap();
@@ -291,7 +291,7 @@ async fn source_removal_selects_saved_names_and_empty_bulk_removal_preserves_reg
         [json!({"generation":2,"records":{
             selected_id:record(selected_id,"savedname",Value::Null),
             remaining_id:record(remaining_id,"disabledname",json!("saved_catalog_invalid"))
-        },"receipts":{}})
+        }})
         .to_string()],
     )
     .unwrap();
@@ -472,7 +472,7 @@ async fn backup_recovery_and_registry_inspection_are_offline_and_non_destructive
     .unwrap();
     db.execute(
         "INSERT INTO snapshot VALUES(1,?1)",
-        [json!({"generation":7,"records":{},"receipts":{}}).to_string()],
+        [json!({"generation":7,"records":{}}).to_string()],
     )
     .unwrap();
     drop(db);

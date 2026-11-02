@@ -642,6 +642,14 @@ mod tests {
                 "missing intermediate-hop evidence does not exclude an adapter"
             );
         }
+        for (field, value) in [
+            ("url", json!("https://other.example.com/")),
+            ("redirectChain", json!([{}])),
+        ] {
+            let mut invalid = envelope(Format::Curl, &target);
+            invalid[field] = value;
+            assert!(decode(Format::Curl, invalid, &target).is_err(), "{field}");
+        }
         let mut value = envelope(Format::Curl, &target);
         value["redirectChain"] = json!([target.url.as_str(), "https://api.example.com/new"]);
         assert_eq!(
@@ -674,22 +682,51 @@ mod tests {
 
     #[test]
     fn caller_limits_are_typed_terminal_and_head_bodies_are_not_accepted() {
+        if crate::test_log_capture::run_in_child(
+            "discovery_relay::adapters::tests::caller_limits_are_typed_terminal_and_head_bodies_are_not_accepted",
+        ) {
+            return;
+        }
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(log.reopen().unwrap())
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
         let mut target = target();
-        for format in [Format::Curl, Format::Agproxy, Format::Horizonpulse] {
-            let value = envelope(format, &target);
+        target.url = "https://api.example.com/PRIVATE_PATH?token=PRIVATE_TOKEN"
+            .parse()
+            .unwrap();
+        for (format, setting) in [
+            (Format::Curl, "max_spec_bytes"),
+            (Format::Agproxy, "max_response_bytes"),
+            (Format::Horizonpulse, "max_response_bytes"),
+        ] {
+            let mut value = envelope(format, &target);
+            if format == Format::Agproxy {
+                value[0]["body"] = json!("PRIVATE_BODY");
+            } else {
+                value["body"] = json!("PRIVATE_BODY");
+            }
             let error = format
-                .decode(
-                    &serde_json::to_vec(&value).unwrap(),
-                    &target,
-                    1,
-                    "max_response_bytes",
-                )
+                .decode(&serde_json::to_vec(&value).unwrap(), &target, 1, setting)
                 .unwrap_err();
-            assert!(error.is::<crate::limits::DownloadLimit>());
+            let bound = error
+                .downcast_ref::<crate::limits::DownloadLimit>()
+                .unwrap();
+            assert_eq!(bound.setting, setting);
+            assert_eq!(bound.limit, 1);
+            assert!(error.to_string().contains(&format!("{setting}=1")));
+            assert!(!error.to_string().contains("PRIVATE_"));
             target.method = Method::HEAD;
             assert!(decode(format, envelope(format, &target), &target).is_err());
             target.method = Method::GET;
         }
+        let logs = std::fs::read_to_string(log.path()).unwrap();
+        assert!(logs.contains("download limit exceeded") && logs.contains("limit_bytes=1"));
+        assert!(logs.contains("max_spec_bytes") && logs.contains("max_response_bytes"));
+        assert!(!logs.contains("PRIVATE_") && !logs.contains("api.example.com"));
     }
 
     #[test]

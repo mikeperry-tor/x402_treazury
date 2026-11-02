@@ -606,42 +606,6 @@ pub(crate) fn slot(
     slots(cfg, url, kind, limit).into_iter().next()
 }
 
-#[cfg(test)]
-fn decode(
-    bytes: &[u8],
-    url: &str,
-    limit: usize,
-    setting: &'static str,
-    delay: std::time::Duration,
-) -> Result<Response> {
-    let target = adapters::TargetRequest {
-        method: reqwest::Method::GET,
-        url: url.parse()?,
-        headers: Default::default(),
-        body: None,
-        allowed_origins: Vec::new(),
-    };
-    let decoded = adapters::Format::Curl.decode(bytes, &target, limit, setting)?;
-    // Legacy decoder fixture compatibility; runtime callers always use the common traversal.
-    ensure!(
-        matches!(
-            sequence::Contract::Catalog.decision(&decoded),
-            sequence::Decision::Accept
-        ),
-        "relay response rejected"
-    );
-    Ok(Response {
-        status: decoded.status,
-        headers: decoded.headers,
-        body: decoded.body,
-        final_url: decoded.final_url,
-        delay,
-        received: Instant::now(),
-        cache_key: "fixture".into(),
-        via: "curl".into(),
-        payment_may_have_occurred: false,
-    })
-}
 pub(crate) fn log_fallback(cfg: &Config, stage: &str, reason: &str, http_status: Option<u16>) {
     tracing::info!(
         source = cfg
@@ -1275,89 +1239,21 @@ pub(crate) mod tests {
     mod ownership_tests;
 
     #[test]
-    fn rejects_redirects_truncation_wrong_target_and_oversize() {
-        if crate::test_log_capture::run_in_child(
-            "discovery_relay::tests::rejects_redirects_truncation_wrong_target_and_oversize",
-        ) {
-            return;
-        }
-        let log = tempfile::NamedTempFile::new().unwrap();
-        let subscriber = tracing_subscriber::fmt()
-            .without_time()
-            .with_ansi(false)
-            .with_writer(log.reopen().unwrap())
-            .finish();
-        let _guard = tracing::subscriber::set_default(subscriber);
-        for (field, value) in [
-            ("redirectChain", json!([{}])),
-            ("truncated", json!(true)),
-            ("url", json!("https://other.example")),
-            ("statusCode", json!(403)),
-            ("body", json!("truncated JSON")),
-        ] {
-            let mut v = envelope(TARGET);
-            v[field] = value;
-            assert!(
-                decode(
-                    &serde_json::to_vec(&v).unwrap(),
-                    TARGET,
-                    4096,
-                    "max_spec_bytes",
-                    Default::default()
-                )
-                .is_err(),
-                "{field}"
-            );
-        }
-        let err = decode(
-            &serde_json::to_vec(&envelope(TARGET)).unwrap(),
-            TARGET,
-            1,
-            "max_spec_bytes",
-            Default::default(),
-        )
-        .err()
-        .unwrap();
-        assert!(err.to_string().contains("max_spec_bytes=1"));
-        let logs = std::fs::read_to_string(log.path()).unwrap();
-        assert!(logs.contains("download limit exceeded") && logs.contains("limit_bytes=1"));
-        assert!(!logs.contains(TARGET));
-        let mut v = envelope(TARGET);
-        v["statusCode"] = json!(402);
-        assert!(
-            decode(
-                &serde_json::to_vec(&v).unwrap(),
-                TARGET,
-                4096,
-                "max_response_bytes",
-                Default::default()
-            )
-            .is_err()
-        );
-        v["headers"]["payment-required"] =
-            json!(STANDARD.encode(r#"{"accepts":[{"amount":"1000","asset":"USDC"}]}"#));
-        assert!(
-            decode(
-                &serde_json::to_vec(&v).unwrap(),
-                TARGET,
-                4096,
-                "max_response_bytes",
-                Default::default()
-            )
-            .is_err()
-        );
-    }
-    #[test]
     fn sharing_a_response_does_not_renew_origin_freshness() {
-        let mut response = decode(
-            &serde_json::to_vec(&envelope(TARGET)).unwrap(),
-            TARGET,
-            4096,
-            "max_spec_bytes",
-            Default::default(),
-        )
-        .unwrap();
-        response.received = Instant::now() - std::time::Duration::from_secs(601);
+        let response = Response {
+            status: 200,
+            headers: reqwest::header::HeaderMap::from_iter([(
+                reqwest::header::CACHE_CONTROL,
+                "max-age=600".parse().unwrap(),
+            )]),
+            body: Vec::new(),
+            final_url: TARGET.parse().unwrap(),
+            delay: Default::default(),
+            received: Instant::now() - std::time::Duration::from_secs(601),
+            cache_key: "fixture".into(),
+            via: "curl".into(),
+            payment_may_have_occurred: false,
+        };
         assert!(
             !crate::http_cache::Metadata::from_relay_headers(
                 &response.headers,

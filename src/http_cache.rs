@@ -19,7 +19,6 @@ pub(crate) struct Metadata {
     headers: std::collections::BTreeMap<String, String>,
     pub stored: u64,
     pub expires: u64,
-    #[serde(default)]
     local_override: bool,
     // Ephemeral provenance: never written back as authority to revalidate.
     #[serde(skip)]
@@ -547,10 +546,14 @@ impl Slot {
                 [&slot.key],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
-            Ok(Some(Entry {
-                metadata: serde_json::from_str(&metadata)?,
-                data,
-            }))
+            let metadata = match serde_json::from_str(&metadata) {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    tracing::debug!("HTTP cache metadata is incompatible; fetching origin");
+                    return Ok(None);
+                }
+            };
+            Ok(Some(Entry { metadata, data }))
         })
         .await;
         match result {

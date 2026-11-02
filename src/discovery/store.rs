@@ -293,7 +293,6 @@ mod tests {
             .into_iter()
             .map(|record| (record.id.clone(), record))
             .collect(),
-            _legacy_receipts: (),
         };
         store.save(&state).unwrap();
         let contents = || {
