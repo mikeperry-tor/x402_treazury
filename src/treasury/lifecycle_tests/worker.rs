@@ -302,9 +302,7 @@ async fn production_worker_bootstraps_concurrent_groups_and_funds_rotation() {
         .call(|s| {
             for name in ["alpha", "beta"] {
                 let group = s.startup_groups(&[name.into()])?.remove(0);
-                for claims in [None, Some(group.claims.as_slice())] {
-                    assert!(s.startup_obstruction(name, 3, claims)?.is_none());
-                }
+                assert!(s.startup_obstruction(name, 3, &group.claims)?.is_none());
             }
             assert!(s.status()?.sync.unwrap().spendable_shielded_zatoshis > 100_000);
             Ok(())
