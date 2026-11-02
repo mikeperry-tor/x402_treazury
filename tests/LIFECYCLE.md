@@ -170,8 +170,11 @@ bytes and accepted inputs. The [recovery policy](../docs/wallet-rotation.md#reco
 owns the signed-expiry and canonical-coverage requirements. The SDK lifecycle cases
 in the matrix cover completed scans, missing or relocated inputs, reorg/restart
 and same-command scan reuse; run them with `make check-lifecycle`.
-Actual transaction selection and dummy actions are covered by synthetic proving;
-consensus-valid chain release remains the separate expiry consensus scenario. The
+Actual transaction selection and dummy actions are covered by synthetic proving.
+Expiry arithmetic before, at and after activation uses the SDK's public expiry
+helpers; two real backend builds straddle the activation boundary and retain
+transaction expiry, selected-input, output-shape and proposal-cleanup assertions.
+Consensus-valid chain release remains the separate expiry consensus scenario. The
 shielding consensus scenario also injects fee-cap and preparation-commit failures,
 checks unchanged mempool and retention of the same completed bytes through local
 publication and reopen, without another calculation. Compilation

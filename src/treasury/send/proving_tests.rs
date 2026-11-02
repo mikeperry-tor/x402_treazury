@@ -462,12 +462,25 @@ async fn deposit_proposal(client: &mut zingolib::lightclient::LightClient) -> De
 
 #[tokio::test]
 async fn backend_deposit_expiry_before_at_nu7_and_upgrade_boundary() {
+    use zingolib::wallet::expiry::{tx_expiry_delta, tx_expiry_height};
+
+    let chain = zingolib::config::ChainType::Regtest(
+        zingolib::testutils::mock_activation_heights_with(|era| era.set_nu7(Some(100))),
+    );
+    // Additional rule positions need no wallet setup or transaction proof.
+    for (target, delta) in [(81, 40), (99, 40), (100, 120), (101, 120)] {
+        let target = zcash_protocol::consensus::BlockHeight::from_u32(target);
+        assert_eq!(tx_expiry_delta(&chain, target), delta);
+        assert_eq!(tx_expiry_height(&chain, target), target + delta);
+    }
+    // Real backend transactions target immediately before and at activation.
     // Explicit custom schedules exercise ordinary expiry without offline retargeting.
-    for (tip, nu7) in [(98, 100), (99, 100), (100, 100), (80, 100)] {
+    for (tip, nu7) in [(98, 100), (99, 100)] {
         let (_dir, mut client) = synthetic_deposit_client(tip, nu7, false).await;
         let proposal = deposit_proposal(&mut client).await;
         let selected = super::super::inputs::selected_inputs(&proposal).unwrap();
         let target = u32::from(proposal.min_target_height());
+        assert_eq!(target, tip + 1, "backend cases must straddle activation");
         let expected_delta = if target >= nu7 { 120 } else { 40 };
         let before = prover::parse_count();
         let ids = {
