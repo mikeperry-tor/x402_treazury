@@ -1,16 +1,9 @@
 //! Signed expiry closes unfinished source work; the SDK owns current capital.
 use super::*;
-use crate::rotation::transaction::{
-    PreparedTransaction, RecoveryEvidenceError, TransactionSubmission,
-};
+use crate::rotation::transaction::{PreparedTransaction, RecoveryEvidenceError};
 
 impl Treasury {
-    pub async fn recover_expired(
-        &mut self,
-        id: String,
-        _sender: &mut impl TransactionSubmission,
-        stop: &CancellationToken,
-    ) -> Result<()> {
+    pub async fn recover_expired(&mut self, id: String, stop: &CancellationToken) -> Result<()> {
         if self.source_work_fulfilled(&id).await? {
             return Ok(());
         }

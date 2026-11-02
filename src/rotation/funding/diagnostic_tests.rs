@@ -528,10 +528,6 @@ fn canonical_disagreement_reports_automatic_resolution_once_per_error_episode() 
             true,
             anyhow::Error::new(RecoveryEvidenceError::ConfirmationMismatch),
         ),
-        (
-            true,
-            anyhow::Error::new(RecoveryEvidenceError::ChainChanged),
-        ),
         // RecoveryObservation preserves these safe facts without the typed cause.
         (
             true,

@@ -898,7 +898,7 @@ async fn expiry_run(cli: bool) -> Result<()> {
     )?;
     assert!(
         treasury
-            .recover_expired(op.clone(), &mut sender, &stop)
+            .recover_expired(op.clone(), &stop)
             .await
             .unwrap_err()
             .to_string()
@@ -958,9 +958,7 @@ async fn expiry_run(cli: bool) -> Result<()> {
         assert_operation(&recovered, &op, "EXPIRED", 1);
         treasury = cli_fixture.open().await?;
     } else {
-        treasury
-            .recover_expired(op.clone(), &mut sender, &stop)
-            .await?;
+        treasury.recover_expired(op.clone(), &stop).await?;
     }
     let operation = op.clone();
     let original = prepared.bytes().to_vec();

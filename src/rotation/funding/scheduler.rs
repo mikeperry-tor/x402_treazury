@@ -144,10 +144,7 @@ fn report_observation_failure(
     } else if new_requirement
         && (matches!(
             error.downcast_ref::<super::super::transaction::RecoveryEvidenceError>(),
-            Some(
-                super::super::transaction::RecoveryEvidenceError::ConfirmationMismatch
-                    | super::super::transaction::RecoveryEvidenceError::ChainChanged
-            )
+            Some(super::super::transaction::RecoveryEvidenceError::ConfirmationMismatch)
         ) || error.is::<super::super::transaction::ConfirmationObservation>())
     {
         tracing::info!(wallet=%job.pool_name,size=wallet_type,job_id=%job.id,

@@ -51,7 +51,7 @@ async fn completed_expiry_evidence_stays_historical_across_sdk_rebuild_and_resta
             chain.mine_empty_blocks(n);
         }
         owner
-            .recover_expired(job.operation_id.clone(), &mut NoDisclosure, &stop)
+            .recover_expired(job.operation_id.clone(), &stop)
             .await
             .unwrap();
         let operation = job.operation_id.clone();
@@ -328,7 +328,7 @@ async fn fulfilled_archived_request_does_not_starve_disclosed_replacement_after_
         chain.mine_empty_blocks(remaining);
     }
     owner
-        .recover_expired(old.operation_id.clone(), &mut NoDisclosure, &stop)
+        .recover_expired(old.operation_id.clone(), &stop)
         .await
         .unwrap();
     let previous = old.clone();
