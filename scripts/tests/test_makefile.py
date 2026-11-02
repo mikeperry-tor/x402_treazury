@@ -19,14 +19,49 @@ class MakefileTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.root = (Path(self.directory.name) / 'repo with spaces').resolve()
+        self.root = (Path(self.directory.name) / 'repo with spaces é').resolve()
         self.root.mkdir()
         (self.root / 'bin').mkdir()
         shutil.copy(ROOT / 'Makefile', self.root)
         shutil.copy(ROOT / 'rust-toolchain.toml', self.root)
         (self.root / 'scripts').mkdir()
-        for name in ('test-runner.sh', 'test-runner.toml'):
+        for name in ('test-runner.sh', 'test-runner.toml', 'default_targets.py'):
             shutil.copy(ROOT / 'scripts' / name, self.root / 'scripts' / name)
+        (self.root / 'Cargo.toml').write_text("""[package]
+name='root'
+version='0.0.0'
+[[test]]
+name='sdk_compat'
+bench=true
+[[test]]
+name='bench_only'
+bench=true
+harness=false
+[[test]]
+name='disabled'
+bench=false
+[[bench]]
+name='test_only_bench'
+bench=false
+""")
+        def target(kind, name, test=True, required=()):
+            return {'kind': [kind], 'name': name, 'test': test,
+                    'src_path': str(self.root / f'{name}.rs'), 'required-features': list(required)}
+        self.metadata = {'packages': [{'id': 'root', 'manifest_path': str(self.root / 'Cargo.toml'),
+                                      'targets': [target('lib', 'root'), target('bin', 'app'),
+                                                  target('example', 'example'),
+                                                  *[target('test', name) for name in
+                                                    ('sdk_compat', 'payments', 'server', 'crypto_vectors', 'future')],
+                                                  target('test', 'bench_only', False),
+                                                  target('test', 'disabled', False),
+                                                  target('test', 'gated', required=['optional']),
+                                                  target('bench', 'test_only_bench')]},
+                                     {'id': 'tool', 'manifest_path': '/tool/Cargo.toml',
+                                      'targets': [target('test', 'excluded_tool')]}],
+                         'workspace_default_members': ['root'],
+                         'resolve': {'nodes': [{'id': 'root', 'features': []}]}}
+        self.metadata_file = self.root / 'metadata.json'
+        self.metadata_file.write_text(json.dumps(self.metadata, ensure_ascii=False), encoding='utf-8')
         self.log = self.root / 'calls.jsonl'
         version = next(line.split('"')[1] for line in
                        (ROOT / 'rust-toolchain.toml').read_text().splitlines()
@@ -40,12 +75,16 @@ if sys.argv[1:] == ['--version']:
 else:
     with open(os.environ['MAKE_TEST_LOG'], 'a') as log:
         log.write(json.dumps([name, sys.argv[1:], os.environ.get('CARGO_INCREMENTAL'), os.environ.get('PROTOC')]) + '\\n')
+    if os.environ.get('FAIL_ARGUMENT') in sys.argv[1:] and (not os.environ.get('FAIL_COMMAND') or sys.argv[1] == os.environ['FAIL_COMMAND']):
+        sys.exit(43)
+    if name == 'cargo' and sys.argv[1] == 'metadata':
+        print(pathlib.Path(os.environ['MAKE_TEST_METADATA']).read_text())
+    if sys.argv[1] == 'scripts/default_targets.py':
+        os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
     if name == 'cargo' and sys.argv[1] == 'run' and 'tools/protoc/Cargo.toml' in sys.argv:
         if os.environ.get('FAIL_PROTOC'):
             sys.exit(42)
         print('/fixture/protoc with spaces')
-    if os.environ.get('FAIL_ARGUMENT') in sys.argv[1:] and (not os.environ.get('FAIL_COMMAND') or sys.argv[1] == os.environ['FAIL_COMMAND']):
-        sys.exit(43)
 '''
         for name in ('cargo', 'rustc', 'python3'):
             path = self.root / 'bin' / name
@@ -55,7 +94,8 @@ else:
         uname.write_text('#!/bin/sh\nprintf "%s\\n" "${MAKE_TEST_PLATFORM:-Linux}"\n')
         uname.chmod(0o755)
         self.env = dict(os.environ, PATH=f'{self.root / "bin"}:{os.environ["PATH"]}',
-                        MAKE_TEST_LOG=str(self.log), CARGO_INCREMENTAL='inherited')
+                        MAKE_TEST_LOG=str(self.log), MAKE_TEST_METADATA=str(self.metadata_file),
+                        CARGO_INCREMENTAL='inherited')
         for key in ('MAKEFLAGS', 'MFLAGS', 'MAKELEVEL', 'CARGO_ARGS', 'TEST_ARGS',
                     'PROFILE', 'COMPLEXITY_BASE_REF', 'TEST', 'TEST_THREADS', 'PYTHON'):
             self.env.pop(key, None)
@@ -118,7 +158,7 @@ else:
                     self.assertEqual(calls, [])
 
     def test_protoc_failure_cannot_fall_back_or_build(self):
-        for target, count in [('build', 1), ('check-compat', 2)]:
+        for target, count in [('build', 1), ('check-compat', 2), ('check-default-remaining', 1)]:
             with self.subTest(target=target):
                 _, calls = self.make(target, success=False, FAIL_PROTOC='yes', PROTOC='/inherited/protoc')
                 self.assertEqual(len(calls), count)
@@ -131,7 +171,7 @@ else:
             self.assertEqual(calls, [])
 
     def test_help_and_dry_runs_do_not_execute_cargo(self):
-        for args in (['help'], ['-n', 'build'], ['-n', 'check']):
+        for args in (['help'], ['-n', 'build'], ['-n', 'check'], ['-n', 'check-default-remaining']):
             _, calls = self.make(*args, FAKE_RUSTC_VERSION='0.0.0')
             self.assertEqual(calls, [])
 
@@ -184,8 +224,12 @@ else:
                             '--test', 'server', '--test', 'crypto_vectors',
                             '--', '--test-threads=8'),
             ],
-            'check-default': [
-                application('test', '--all-targets', '--', '--test-threads=8'),
+            'check-default-remaining': [
+                ('cargo', ['metadata', '--locked', '--format-version', '1',
+                           '--manifest-path', str(self.root / 'Cargo.toml')]),
+                application('test', '--lib', '--bins', '--examples',
+                            '--bench', 'test_only_bench', '--test', 'bench_only', '--test', 'future',
+                            '--', '--test-threads=8'),
             ],
             **{stage: [application('test', '--features', 'zcash-testutils', '--lib', case, '--', f'--test-threads={threads}')]
                for stage, case, threads in (
@@ -197,12 +241,14 @@ else:
     @staticmethod
     def check_commands(calls):
         return [(call[0], call[1]) for call in calls
-                if 'tools/protoc/Cargo.toml' not in call[1]]
+                if 'tools/protoc/Cargo.toml' not in call[1] and
+                call[1][0] != 'scripts/default_targets.py']
 
     def test_check_preserves_selections_and_orders_static_lints_compat_before_runtime(self):
         stages = self.check_stages()
         (self.root / 'check').touch()
-        _, calls = self.make('-j8', 'check', 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong')
+        _, calls = self.make('-j8', 'check', 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong',
+                             'COMPAT_TESTS=wrong')
         self.assertEqual(self.check_commands(calls), [command for stage in stages.values() for command in stage])
 
     def test_named_check_stages_are_independent_and_ignore_focused_run_overrides(self):
@@ -237,11 +283,11 @@ else:
         expected = [command for stage in self.check_stages().values() for command in stage]
         for flags in ([], ['-j8'], ['-k']):
             for failure in ('vendor/verify.py', '--bins', 'clippy', 'sdk_compat',
-                            '--all-targets',
+                            'future', 'metadata',
                             'treasury::send::proving_tests', 'treasury::lifecycle_tests',
                             'synthetic_address_codec_is_scoped_to_its_test_client'):
                 with self.subTest(flags=flags, failure=failure):
-                    command = 'test' if failure == '--all-targets' else ''
+                    command = 'test' if failure == 'future' else ''
                     _, calls = self.make(*flags, 'check', success=False, FAIL_ARGUMENT=failure, FAIL_COMMAND=command)
                     stop = next(i for i, (_, args) in enumerate(expected) if failure in args and (not command or args[0] == command)) + 1
                     self.assertEqual(self.check_commands(calls), expected[:stop])
@@ -253,6 +299,51 @@ else:
         self.assertIn(('analysis-python', ['scripts/complexity.py', '--base', 'review-base']),
                       self.check_commands(calls))
         self.assertIn(('analysis-python', ['vendor/verify_pepper.py']), self.check_commands(calls))
+        self.assertTrue(any(call[0] == 'analysis-python' and call[1][0] ==
+                            'scripts/default_targets.py' for call in calls))
+
+    def test_standalone_default_and_remainder_repeat_without_result_caches(self):
+        stages = self.check_stages()
+        (self.root / 'check-default').touch()
+        for _ in range(2):
+            _, calls = self.make('check-default', 'CARGO_ARGS=--wrong', 'TEST_ARGS=--wrong')
+            self.assertEqual(self.check_commands(calls),
+                             [('cargo', ['test', '--locked', '--manifest-path', 'Cargo.toml',
+                                         '--all-targets', '--', '--test-threads=8'])])
+            _, calls = self.make('check-compat')
+            self.assertEqual(self.check_commands(calls), stages['check-compat'])
+            _, calls = self.make('check-default-remaining')
+            self.assertEqual(self.check_commands(calls), stages['check-default-remaining'])
+
+    def test_new_target_names_with_spaces_and_macos_runner_are_preserved(self):
+        self.metadata['packages'][0]['targets'].append(
+            {'kind': ['test'], 'name': 'future with spaces', 'test': True,
+             'src_path': str(self.root / 'future with spaces.rs')})
+        self.metadata_file.write_text(json.dumps(self.metadata, ensure_ascii=False), encoding='utf-8')
+        _, calls = self.make('check-default-remaining', 'TEST_THREADS=2 ignored',
+                             MAKE_TEST_PLATFORM='Darwin')
+        metadata = next(call for call in calls if call[1][0] == 'metadata')
+        self.assertEqual(metadata[1], ['metadata', '--locked', '--format-version', '1',
+                                      '--manifest-path', str(self.root / 'Cargo.toml')])
+        actual = calls[-1]
+        self.assertEqual(actual[1][:3], ['--config', str(self.root / 'scripts/test-runner.toml'), 'test'])
+        self.assertIn('future with spaces', actual[1])
+        self.assertNotIn('gated', actual[1])
+        self.assertNotIn('sdk_compat', actual[1])
+        self.assertNotIn('--benches', actual[1])
+        self.assertEqual(actual[1][-2:], ['--', '--test-threads=2 ignored'])
+        self.assertEqual(actual[3], '/fixture/protoc with spaces')
+        self.assertEqual(metadata[3], actual[3])
+
+    def test_invalid_metadata_stops_before_default_test_execution(self):
+        for raw in ['not JSON', '{}', json.dumps({**self.metadata, 'resolve': None}),
+                    json.dumps({**self.metadata, 'workspace_default_members': ['root', 'tool']})]:
+            with self.subTest(raw=raw):
+                self.metadata_file.write_text(raw)
+                result, calls = self.make('check-default-remaining', success=False)
+                self.assertIn('Cannot select default test targets', result.stderr)
+                self.assertFalse(any(call[1][0] == 'test' for call in calls))
+                self.assertEqual(calls[-1][1][0], 'metadata')
 
     def test_compatibility_source_failure_stops_before_bootstrap_and_tests(self):
         _, calls = self.make('check-compat', success=False,
