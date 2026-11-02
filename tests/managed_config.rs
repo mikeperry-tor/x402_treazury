@@ -41,7 +41,6 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
         shown["wallets"]["research"]["reserves"]["small"]["funding_amount_usdc"],
         "2.00"
     );
-    assert!(shown["wallets"]["research"].get("wait_seconds").is_none());
     assert_eq!(
         shown["treasury"]["state_dir"],
         dir.path().join("state/treasury").to_str().unwrap()
@@ -83,10 +82,6 @@ async fn inspection_resolves_paths_and_defaults_without_state_or_credentials() {
         (
             "base_rpc_url_env = \"BASE_RPC\"",
             "base_rpc_url_env = \"BASE_RPC\"\nconfidentiality = \"invalid\"",
-        ),
-        (
-            "max_conversion_overhead_percent = 5",
-            "max_conversion_overhead_percent = 5\nfunding_amount_usdc = \"0.0000001\"",
         ),
     ] {
         std::fs::write(&path, config().replace(from, to)).unwrap();
@@ -271,18 +266,7 @@ fn treasury_endpoint_defaults_overrides_and_missing_references() {
 }
 
 #[test]
-fn funding_limits_are_exact_and_old_names_are_rejected() {
-    use x402_treazury::rotation::config::FundingConfig;
-    for field in ["daily_funding_limit_usdc", "total_funding_limit_usdc"] {
-        let error = toml::from_str::<FundingConfig>(&format!("{field}='20'"))
-            .err()
-            .expect("removed budget must fail")
-            .to_string();
-        assert!(
-            error.contains("was removed") && error.contains("spendable treasury"),
-            "{error}"
-        );
-    }
+fn reserve_funding_limits_are_exact() {
     for (target, max, valid) in [
         ("2", "3", true),
         ("2", "2", true),
@@ -294,27 +278,6 @@ fn funding_limits_are_exact_and_old_names_are_rejected() {
         )).unwrap();
         assert_eq!(config.validate().is_ok(), valid);
     }
-    for obsolete in [
-        "max_input_zec='0.01'",
-        "deposit_size='2'",
-        "max_price_usd='0.1'",
-        "max_fee_bps=500",
-    ] {
-        assert!(
-            toml::from_str::<WalletConfig>(&format!(
-                "mode='zcash_rotation'\nmax_conversion_overhead_percent=5\n{obsolete}"
-            ))
-            .is_err()
-        );
-    }
-    for obsolete in ["daily_input_zec='0.01'", "shield_max_fee_zec='0.001'"] {
-        assert!(
-            toml::from_str::<x402_treazury::rotation::config::TreasuryConfig>(&format!(
-                "state_dir='state'\n{obsolete}"
-            ))
-            .is_err()
-        );
-    }
 }
 
 #[tokio::test]
@@ -324,8 +287,6 @@ async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_o
     ))
     .await
     .unwrap();
-    assert!(shown["funding"].get("daily_funding_limit_usdc").is_none());
-    assert!(shown["funding"].get("total_funding_limit_usdc").is_none());
     assert_eq!(shown["wallets"].as_object().unwrap().len(), 2);
     assert_eq!(
         shown["wallet_summary"]["initial_inventory_target_atomic"],
@@ -348,60 +309,11 @@ async fn comprehensive_example_exposes_reserves_and_per_operation_fee_defaults_o
             "0.001"
         );
     }
-    assert!(
-        shown["treasury"]
-            .get("daily_treasury_spend_limit_zec")
-            .is_none()
-    );
     assert_eq!(
         shown["treasury"]["max_funding_transaction_fee_zec"],
         "0.0003"
     );
     assert_eq!(shown["treasury"]["max_refund_shielding_fee_zec"], "0.0003");
-}
-
-#[tokio::test]
-async fn managed_funding_uses_spendable_treasury_without_aggregate_configuration() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.toml");
-    std::fs::write(&path, config()).unwrap();
-    Deployment::show_config(&path).await.unwrap();
-    for (table, setting) in [
-        ("funding", "daily_funding_limit_usdc"),
-        ("funding", "total_funding_limit_usdc"),
-        ("treasury", "daily_treasury_spend_limit_zec"),
-    ] {
-        std::fs::write(
-            &path,
-            config().replace(&format!("[{table}]"), &format!("[{table}]\n{setting}='20'")),
-        )
-        .unwrap();
-        let error = Deployment::show_config(&path)
-            .await
-            .expect_err("removed setting must fail");
-        let error = format!("{error:#}");
-        assert!(error.contains("was removed"), "{error}");
-        assert!(error.contains(setting), "{error}");
-    }
-    assert!(!dir.path().join("state").exists());
-}
-
-#[tokio::test]
-async fn obsolete_admission_timeout_is_accepted_but_not_exposed_as_effective_config() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("servers.toml");
-    for value in [0, 1, 30, 7200] {
-        std::fs::write(
-            &path,
-            config().replace(
-                "max_conversion_overhead_percent = 5",
-                &format!("max_conversion_overhead_percent = 5\nwait_seconds = {value}"),
-            ),
-        )
-        .unwrap();
-        let shown = Deployment::show_config(&path).await.unwrap();
-        assert!(shown["wallets"]["research"].get("wait_seconds").is_none());
-    }
 }
 
 #[test]
@@ -600,34 +512,6 @@ fn managed_cap_is_explicit_and_independent_of_reserve_targets() {
         config.validate().unwrap();
         let shown = serde_json::to_value(config).unwrap();
         assert_eq!(shown["max_retirement_remainder_usdc"], "0.001");
-        assert!(shown.get("funding_amount_usdc").is_none());
-        assert!(shown.get("limit_payments_to_funding_target").is_none());
-    }
-    for setting in [
-        "funding_amount_usdc='2'",
-        "max_funding_amount_usdc='3'",
-        "limit_payments_to_funding_target=false",
-    ] {
-        let error =
-            toml::from_str::<WalletConfig>(&format!("{setting}\nmax_api_payment_usdc='1'\n{base}"))
-                .err()
-                .expect("replaced setting must fail")
-                .to_string();
-        assert!(
-            error.contains("moved to reserves.small") || error.contains("was removed"),
-            "{error}"
-        );
-    }
-    for setting in [
-        "max_live_wallets=3",
-        "retention=true",
-        "tiers={small='2'}",
-        "small_funding_amount_usdc='2'",
-    ] {
-        assert!(
-            toml::from_str::<WalletConfig>(&format!("{setting}\nmax_api_payment_usdc='1'\n{base}"))
-                .is_err()
-        );
     }
     let static_wallet: WalletConfig =
         toml::from_str("mode='static'\nprivate_key_env='KEY'").unwrap();
@@ -651,21 +535,29 @@ fn config_serde_roundtrips_one_schema_and_rejects_unknown_fields() {
         let mut unknown = json.clone();
         unknown["misspelled_setting"] = serde_json::json!(true);
         assert!(serde_json::from_value::<T>(unknown).is_err());
+        let unknown = format!("misspelled_setting=true\n{text}");
+        assert!(toml::from_str::<T>(&unknown).is_err());
         json
     }
     let wallet = roundtrip::<WalletConfig>("mode='static'\nprivate_key_env='KEY'");
     assert_eq!(wallet["max_api_payment_usdc"], "1.00");
     let wallet = roundtrip::<WalletConfig>(
-        "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\nwait_seconds=123\n[reserves.small]\nfunding_amount_usdc='2'",
+        "mode='zcash_rotation'\nmax_api_payment_usdc='1'\nmax_conversion_overhead_percent=5\n[reserves.small]\nfunding_amount_usdc='2'",
     );
     assert_eq!(wallet["max_attempts"], 3);
     assert_eq!(wallet["max_retirement_remainder_usdc"], "0.001");
-    assert!(wallet.get("wait_seconds").is_none());
     let treasury = roundtrip::<TreasuryConfig>("state_dir='state'");
     assert_eq!(treasury["confirmations"], 3);
     assert_eq!(treasury["max_funding_transaction_fee_zec"], "0.0003");
     assert!(treasury.get("id").is_none());
     assert!(treasury.get("key_file").is_none());
+    // Explicit optional values must not become empty identity/path references.
+    for field in ["id", "key_file", "indexer_url_env", "submission_url_env"] {
+        assert!(
+            toml::from_str::<TreasuryConfig>(&format!("state_dir='state'\n{field}='  '")).is_err(),
+            "{field}"
+        );
+    }
     let funding = roundtrip::<FundingConfig>("");
     assert_eq!(funding["auto_fund"], true);
     assert_eq!(funding["base_confirmations"], 12);

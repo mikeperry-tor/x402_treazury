@@ -10,7 +10,7 @@ Commands run from the repository root; `x402_treazury` means the built executabl
 Use the same deployment file for initialization, inspection, backup, sync and
 serving. Export `X402_TREAZURY_CONFIG` to use it by default; an explicit
 `--config FILE` overrides the environment path. Unset it before using standalone
-`--state-dir`, `--key-file` or `--treasury-id` options. `--meta-config` remains an alias for `--config`. Wallet commands do not
+`--state-dir`, `--key-file` or `--treasury-id` options. Wallet commands do not
 fetch provider catalogs or require listener tokens.
 If `serve` cannot find the configured wallet directory, its error names the
 resolved path. If that is the intended directory for a new wallet, run
@@ -917,9 +917,9 @@ configuration reports that group's unavailable retirement work while scalar
 observations continue; accepted recipients of removed groups remain scalar-only.
 See [configuration](configuration.md) for exact syntax, rejected aggregate settings,
 reopen-only changes, initial inventory and legacy-state rejection.
-Static-wallet payment defaults remain unchanged. Payment admission has no total timeout. Legacy
-`wait_seconds` is accepted but ignored with a warning; remove it from wallet
-configuration. Money fields are decimal strings;
+Static-wallet payment defaults remain unchanged. Payment admission has no total
+timeout. Wallet, treasury and funding configuration accept only current fields;
+unknown or obsolete settings fail strict parsing. Money fields are decimal strings;
 USDC permits six fractional digits and ZEC eight. Singleton treasury/funding
 settings and all risk limits are validated by `config check`/`config show` without
 unlocking state. Endpoint credentials remain environment references. Serving

@@ -29,20 +29,3 @@ fn advertised_prices_preserve_provenance_even_when_amounts_appear_in_prose() {
     assert!(desc("/unknown").contains("Cost: unknown."));
     assert!(!desc("/unknown").contains("X402_MAX_PRICE_USD"));
 }
-
-#[test]
-fn retired_probe_settings_reject_instead_of_silently_disabling_requests() {
-    for (key, value) in [
-        ("probe_pricing", "false"),
-        ("probe_ttl_seconds", "60"),
-        ("probe_concurrency", "2"),
-        ("probe_max_endpoints", "0"),
-        ("probe_methods", "['GET']"),
-        ("probe_timeout", "3"),
-    ] {
-        let error = toml::from_str::<Config>(&format!("spec='spec.json'\n{key}={value}\n"))
-            .err()
-            .unwrap();
-        assert!(error.to_string().contains(key), "{key}: {error}");
-    }
-}

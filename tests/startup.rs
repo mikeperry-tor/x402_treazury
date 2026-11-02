@@ -553,7 +553,7 @@ async fn aliases_share_fetch_and_parse_but_keep_tools_overrides_and_wallets() {
 #[tokio::test]
 async fn alias_fetches_do_not_share_different_timeouts_or_bypass_stricter_limits() {
     for setting in [
-        "timeout=2",
+        "read_timeout_seconds=2",
         "max_spec_bytes=1",
         "allow_http1=true",
         "allow_tls12=true",

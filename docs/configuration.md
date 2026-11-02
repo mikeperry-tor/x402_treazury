@@ -32,7 +32,7 @@ retain their distinct authority and side effects.
 
 `X402_TREAZURY_CONFIG` supplies the default path for every deployment `--config`
 option, including wallet, catalog, config and source commands. An explicit
-`--config FILE` (or `--meta-config FILE`) overrides it. This variable must be in
+`--config FILE` overrides it. This variable must be in
 the process environment; `--env-file` is loaded after CLI parsing. The selected
 deployment retains the same conflicts with standalone provider options and wallet
 `--state-dir`, `--key-file` and `--treasury-id`; unset the variable to use those
@@ -46,7 +46,7 @@ NEAR credentials or automatic funding. Treasury-only deployments need no Base
 configuration; independent per-asset results report partial failure. `wallet status`
 reads saved observations without network traffic. See the
 [CLI output and discovery scope](wallet-cli.md#one-configuration-for-wallet-commands).
-`--meta-config` remains a deployment alias. `--provider FILE` selects a reusable
+`--provider FILE` selects a reusable
 provider for standalone serving and catalog inspection. `--network-config FILE`
 selects a file containing `[network]` and optionally `[relay_fallback]`. It
 replaces the complete deployment `[network]` section for that invocation; omitted
@@ -570,15 +570,13 @@ abandoning accepted work or granting replay authority. See the
 [wallet observation policy](wallet-rotation.md#wallet-observation-policy) for
 startup, explicit sync and requested-refresh scopes.
 
-The old managed top-level `funding_amount_usdc` and `max_funding_amount_usdc` must
-move into named reserve tables. `limit_payments_to_funding_target` is removed:
-choose an explicit payment cap preserving the intended authority. The aggregate
-settings `daily_funding_limit_usdc`, `total_funding_limit_usdc` and
-`daily_treasury_spend_limit_zec` are rejected with migration guidance. Tier/retention
-aliases and `max_live_wallets` are unsupported. Updating configuration never
-converts wallet state. Unsupported legacy schemas are rejected without mutation.
-Existing keys, balances, transactions and liabilities
-must survive. There is no general migration/abandonment framework or manual
+Managed reserve amounts belong in `reserves.small` and optional `reserves.large`;
+`max_api_payment_usdc` sets independent per-payment authority. Configuration uses
+strict current field names: unknown or obsolete settings fail ordinary parsing.
+Aggregate funding budgets and tier/retention aliases are unsupported. Updating
+configuration never converts wallet state. Unsupported legacy schemas are rejected
+without mutation. Existing keys, balances, transactions and liabilities must
+survive. There is no general migration/abandonment framework or manual
 retirement command.
 
 Reserve settings change future authorized allocations, not existing accepted
@@ -1305,14 +1303,11 @@ direct mode retains its two-attempt transport recovery. See [Base policy](wallet
 and [network policy](network-egress.md) for status eligibility, validation and
 provider evidence boundaries. Protocol transaction expiry
 and qualification deadlines remain independent. Managed payment
-admission has no total timeout; legacy wallet `wait_seconds` is ignored with a
-warning and omitted from effective configuration.
-
-Legacy network `request_timeout_seconds` is accepted as an alias with its literal
-value now meaning read inactivity. Provider `timeout`, import
-`fetch_timeout_seconds`, and CLI `--timeout` remain compatibility spellings. Use
-only `read_timeout_seconds` in new configs. Do not combine it with `timeout`. The bundled comprehensive example now
-uses 60 seconds; user-owned local configs retain their existing explicit values.
+admission has no total timeout. Use `read_timeout_seconds` in network and
+provider/source configuration, or `--read-timeout-seconds` for a standalone CLI
+override. Configuration and CLI parsing reject obsolete names. Provider inheritance
+checks typed fields before local overrides, so an override cannot hide a malformed
+inherited value.
 
 For deployment, standalone or wallet commands, use a separate network file:
 

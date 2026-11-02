@@ -112,20 +112,7 @@ pub fn validate(settings: &Config) -> Result<()> {
     }
     Ok(())
 }
-// Canonicalize before composition so legacy timeout overrides retain precedence.
-fn normalize_timeout(table: &mut toml::Table) -> Result<()> {
-    let legacy = table.remove("timeout");
-    ensure!(
-        legacy.is_none() || !table.contains_key("read_timeout_seconds"),
-        "use only read_timeout_seconds, not both read_timeout_seconds and timeout"
-    );
-    if let Some(value) = legacy {
-        table.insert("read_timeout_seconds".into(), value);
-    }
-    Ok(())
-}
 pub async fn resolve(mut local: toml::Table, declaring: &Path) -> Result<ResolvedProvider> {
-    normalize_timeout(&mut local)?;
     let declaring = absolute(declaring)?;
     let mut inherited = toml::Table::new();
     let mut origins = BTreeMap::new();
@@ -135,7 +122,6 @@ pub async fn resolve(mut local: toml::Table, declaring: &Path) -> Result<Resolve
             .context("extends must be a file path string")?;
         let provider = declaring.parent().unwrap().join(relative);
         inherited = read_table(&provider).await?;
-        normalize_timeout(&mut inherited)?;
         ensure!(
             !inherited.contains_key("extends"),
             "provider {}: nested extends is not allowed",
@@ -176,27 +162,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn removed_probe_settings_reject_instead_of_becoming_ignored_configuration() {
-        for setting in [
-            "probe_pricing=false",
-            "probe_ttl_seconds=60",
-            "probe_concurrency=1",
-            "probe_max_endpoints=1",
-            "probe_methods=['GET']",
-            "probe_timeout=30",
-        ] {
-            let table =
-                toml::from_str::<toml::Table>(&format!("spec='schema.json'\n{setting}")).unwrap();
-            let error = toml::Value::Table(table).try_into::<Config>().unwrap_err();
-            assert!(
-                error.to_string().contains("unknown field"),
-                "{setting}: {error}"
-            );
-        }
-    }
-
-    #[test]
-    fn general_timeout_and_credit_validation_do_not_depend_on_probe_code() {
+    fn timeout_and_credit_validation_preserve_current_limits() {
         let mut cfg = Config {
             spec: "schema.json".into(),
             ..Default::default()
@@ -224,11 +190,5 @@ mod tests {
         );
         cfg.credit_pricing.as_mut().unwrap().usdc_per_credit = "0.01".into();
         validate(&cfg).unwrap();
-        let mut legacy = toml::from_str::<toml::Table>("timeout=90").unwrap();
-        normalize_timeout(&mut legacy).unwrap();
-        assert_eq!(legacy["read_timeout_seconds"].as_integer(), Some(90));
-        assert!(!legacy.contains_key("timeout"));
-        legacy.insert("timeout".into(), toml::Value::Integer(30));
-        assert!(normalize_timeout(&mut legacy).is_err());
     }
 }

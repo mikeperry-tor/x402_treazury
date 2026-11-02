@@ -266,10 +266,10 @@ GTM contact lookup: POST tools mirroring the vendor's OpenAPI spec —
 prices via `x-payment-info`, requireds, the ads `platform`/`media_type`
 enums, waterfall-provider detail in summaries. Tool schemas are closed via
 `additional_properties = false`. Waterfall endpoints are slow — run with
-`--timeout 120`.
+`--read-timeout-seconds 120`.
 
 ```bash
-x402_treazury serve --provider providers/deepline.toml --timeout 120
+x402_treazury serve --provider providers/deepline.toml --read-timeout-seconds 120
 ```
 
 ## pdl.toml — People Data Labs (stablepeopledata.dev)
@@ -366,10 +366,10 @@ loan registry. The spec's `servers` block is relative, so the conf pins
 `base_url` to `https://regimeshift.xyz/api`; free endpoints carry overrides
 documenting that they cost nothing (the server would otherwise render its
 default "paid per call" line). The `/v1/intent/{id}/match` tool long-polls up
-to 300s — run with `--timeout 320`.
+to 300s — run with `--read-timeout-seconds 320`.
 
 ```bash
-x402_treazury serve --provider providers/regimeshift.toml --timeout 320
+x402_treazury serve --provider providers/regimeshift.toml --read-timeout-seconds 320
 ```
 
 ## kronos.toml — Kronos Crypto Data (kronossignals.com)

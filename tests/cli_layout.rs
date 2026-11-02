@@ -99,9 +99,6 @@ fn executable_name_version_and_example_inspection_are_portable() {
         };
         let path = root.join(directory).join(example);
         let shown = run(&["config", "show", "--config", path.to_str().unwrap()]);
-        let legacy = run(&["config", "show", "--meta-config", path.to_str().unwrap()]);
-        assert!(legacy.status.success());
-        assert_eq!(shown.stdout, legacy.stdout);
         assert!(
             shown.status.success(),
             "{example}: {}",

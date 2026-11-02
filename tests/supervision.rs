@@ -472,7 +472,7 @@ async fn unsigned_child_uses_discovery_isolation_and_has_no_direct_fallback() {
         config(dir.path(), "http://unsigned.invalid", false);
         let path = dir.path().join("config.toml");
         let network = format!(
-            "[network]\nmode='tor'\nsocks_endpoint='{}'\nconnect_timeout_seconds=1\nrequest_timeout_seconds=1\n",
+            "[network]\nmode='tor'\nsocks_endpoint='{}'\nconnect_timeout_seconds=1\nread_timeout_seconds=1\n",
             proxy.address
         );
         let text = std::fs::read_to_string(&path).unwrap() + &network;

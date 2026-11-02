@@ -462,6 +462,12 @@ fn live_tor_inbound_listeners() {
 
 #[test]
 fn direct_and_tor_share_read_timeout_defaults_and_overrides() {
+    let configured: NetworkPolicy = toml::from_str("read_timeout_seconds=240").unwrap();
+    assert_eq!(configured.read_timeout_seconds, Some(240));
+    assert!(
+        toml::from_str::<NetworkPolicy>("read_timeout_seconds=240\nmisspelled_setting=true")
+            .is_err()
+    );
     for policy in [
         NetworkPolicy::default(),
         NetworkPolicy {
@@ -477,7 +483,6 @@ fn direct_and_tor_share_read_timeout_defaults_and_overrides() {
             Duration::from_millis(50)
         );
         assert_eq!(policy.inspection()["read_timeout_seconds"], 60);
-        assert!(policy.inspection().get("request_timeout_seconds").is_none());
         for value in [1, 60, 600] {
             let ctx = NetworkContext::new(NetworkPolicy {
                 read_timeout_seconds: Some(value),
@@ -496,12 +501,6 @@ fn direct_and_tor_share_read_timeout_defaults_and_overrides() {
             );
         }
     }
-    let old: NetworkPolicy = toml::from_str("request_timeout_seconds = 240").unwrap();
-    assert_eq!(old.read_timeout_seconds, Some(240));
-    assert!(
-        toml::from_str::<NetworkPolicy>("request_timeout_seconds = 240\nread_timeout_seconds = 60")
-            .is_err()
-    );
 }
 
 #[tokio::test]

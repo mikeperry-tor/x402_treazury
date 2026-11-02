@@ -201,14 +201,6 @@ fn configured_actions_return_exact_arguments_before_general_state_access() {
         assert_eq!(resolved(dir.path(), &args), json!({"ok":expected}));
         assert!(!dir.path().join("absent").exists());
     }
-    assert_eq!(
-        resolved(dir.path(), &["pool", "--config", "missing.toml"]),
-        json!({"error":"wallet pool was removed; configure managed wallet reserves and explicit max_api_payment_usdc in the deployment, then use wallet bootstrap --config FILE"})
-    );
-    assert_eq!(
-        resolved(dir.path(), &["pool", "--network-config", "missing.toml"])["error"],
-        "wallet pool was removed; configure managed wallet reserves and explicit max_api_payment_usdc in the deployment, then use wallet bootstrap --config FILE"
-    );
 }
 
 #[test]
