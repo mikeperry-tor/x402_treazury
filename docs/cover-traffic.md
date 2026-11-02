@@ -389,6 +389,10 @@ truncated output cannot qualify a runner result; counters are not durable billin
 See [the integration runner](../tests/live/INTEGRATION.md) for the unsigned fixture
 and local distribution matrix. Local tests cover paid challenge/retry, managed
 promotion, SOCKS separation, actual h2 streams, HPACK, refusal/faults and cleanup.
+Diagnostic cases retain capability transitions, request counts, no paid replay,
+cleanup races and scoped severity/privacy. They avoid complete message or field
+inventories; pure severity classification does not need repeated cached-capability
+setups when that state cannot change the classification.
 Real-Tor unsigned discovery qualification is distinct from funded EVM/rotation
 qualification. More noise or variance alone does not demonstrate less inference.
 

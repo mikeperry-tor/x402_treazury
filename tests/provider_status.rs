@@ -1,88 +1,86 @@
-use std::process::{Command, Output};
+use serde_json::{Value, json};
+use std::process::Command;
+use x402_treazury::{catalog, config, deployment::Deployment};
+#[path = "support/log_capture.rs"]
+mod log_capture;
 
-fn run(path: &std::path::Path, meta: bool, command: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
-        .args(command)
-        .arg(if meta { "--config" } else { "--provider" })
-        .arg(path)
-        .env_clear()
-        .output()
-        .unwrap()
+fn fixture(dir: &std::path::Path) -> Value {
+    let document = json!({"openapi":"3.0.0","servers":[{"url":"https://example.invalid"}],
+        "paths":{"/data":{"get":{"tags":["data"],"responses":{"200":{"description":"ok"}}}}}});
+    std::fs::write(dir.join("spec.json"), document.to_string()).unwrap();
+    document
 }
 
-fn fixture(dir: &std::path::Path) {
-    std::fs::write(
-        dir.join("spec.json"),
-        r#"{"openapi":"3.0.0","servers":[{"url":"https://example.invalid"}],"paths":{"/data":{"get":{"tags":["data"],"responses":{"200":{"description":"ok"}}}}}}"#,
-    ).unwrap();
-}
-
-#[test]
-fn standalone_warns_before_catalog_failure_and_inspection_is_quiet() {
+#[tokio::test]
+async fn advisory_observations_preserve_tools_and_cli_inspection_is_quiet() {
     let dir = tempfile::tempdir().unwrap();
+    let document = fixture(dir.path());
     let path = dir.path().join("source.toml");
-    std::fs::write(
-        &path,
-        r#"
-spec = "missing.json"
-name = "Observed provider"
-reliability_tags = ["intermittent_response_body", "intermittent_response_body"]
-reliability_note = "Dated evidence: paid response lost"
-"#,
-    )
-    .unwrap();
-    let result = run(&path, false, &["serve"]);
-    assert!(!result.status.success());
-    assert!(result.stdout.is_empty());
-    let err = String::from_utf8(result.stderr).unwrap();
+    let baseline = "spec='spec.json'\nprefix='fixture'\ntags=['data']\n";
+    let plain = config::resolve(toml::from_str(baseline).unwrap(), &path)
+        .await
+        .unwrap()
+        .settings;
+    let annotated = format!(
+        "{baseline}reliability_tags=['slow_pricing','intermittent_response_body']\nreliability_note='fixture observation'\n"
+    );
+    let observed = config::resolve(toml::from_str(&annotated).unwrap(), &path)
+        .await
+        .unwrap()
+        .settings;
     assert_eq!(
-        err.matches("Provider reliability observation:").count(),
-        1,
-        "{err}"
+        serde_json::to_value(&observed.reliability_tags).unwrap(),
+        json!(["slow_pricing", "intermittent_response_body"])
     );
-    assert!(err.contains("may still be charged"), "{err}");
-    assert!(err.contains("Dated evidence: paid response lost"), "{err}");
-
-    let result = run(&path, false, &["config", "show"]);
-    assert!(result.status.success(), "{:?}", result);
-    assert!(!String::from_utf8_lossy(&result.stderr).contains("Provider reliability"));
-    assert!(String::from_utf8_lossy(&result.stdout).contains("intermittent_response_body"));
-}
-
-#[test]
-fn historical_slow_pricing_observation_remains_advisory_and_inspection_is_quiet() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("slow-pricing.toml");
-    std::fs::write(&path, "spec = 'missing.json'\nreliability_tags = ['slow_pricing', 'slow_pricing']\nreliability_note = 'Pricing discovery was slow'\n").unwrap();
-    let result = run(&path, false, &["serve"]);
-    assert!(!result.status.success());
-    assert!(result.stdout.is_empty());
-    let log = String::from_utf8(result.stderr).unwrap();
-    assert_eq!(log.matches("Provider reliability observation:").count(), 1);
+    assert_eq!(observed.reliability_note, "fixture observation");
+    let tools = catalog::build_tools(&plain, &document, "fixture").unwrap();
+    let annotated_tools = catalog::build_tools(&observed, &document, "fixture").unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&tools).unwrap(),
+        serde_json::to_value(&annotated_tools).unwrap()
+    );
+    std::fs::write(&path, annotated).unwrap();
+    let shown = Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
+        .args(["catalog", "tools", "--provider"])
+        .arg(&path)
+        .env_clear()
+        .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+        .output()
+        .unwrap();
     assert!(
-        log.contains("Historical price probes encountered long response waits"),
-        "{log}"
+        shown.status.success(),
+        "{}",
+        String::from_utf8_lossy(&shown.stderr)
     );
-    assert!(log.contains("Pricing discovery was slow"), "{log}");
-    let shown = run(&path, false, &["config", "show"]);
-    assert!(shown.status.success());
-    assert!(String::from_utf8_lossy(&shown.stdout).contains("slow_pricing"));
+    let inventory: Value = serde_json::from_slice(&shown.stdout).unwrap();
+    let recommended = observed.recommendation_matcher().unwrap();
+    let expected: Vec<_> = tools
+        .iter()
+        .map(|tool| catalog::ToolInspection {
+            tool,
+            recommended: recommended(&tool.name),
+        })
+        .collect();
+    assert_eq!(inventory, serde_json::to_value(expected).unwrap());
     assert!(!String::from_utf8_lossy(&shown.stderr).contains("Provider reliability"));
 }
 
-#[test]
-fn metadata_preserves_tools_and_only_bound_sources_warn_once() {
+#[tokio::test]
+async fn bound_sources_warn_once_before_catalog_failure() {
+    if log_capture::run_in_child("bound_sources_warn_once_before_catalog_failure") {
+        return;
+    }
+    use tracing::instrument::WithSubscriber;
     let dir = tempfile::tempdir().unwrap();
     fixture(dir.path());
     let path = dir.path().join("deployment.toml");
-    std::fs::write(
-        &path,
-        r#"
+    let configuration = r#"
 version = 1
 [sources.observed]
 spec = "spec.json"
-reliability_tags = ["upstream_timeout", "upstream_timeout"]
-reliability_note = "test observation"
+reliability_tags = ["intermittent_response_body", "intermittent_response_body"]
+reliability_note = "fixture reliability evidence"
 [sources.unused]
 spec = "spec.json"
 reliability_tags = ["catalog_http_403"]
@@ -99,55 +97,62 @@ listen = "127.0.0.1:18082"
 bearer_token_env = "MISSING_TEST_TOKEN"
 wallet = "default"
 sources = ["observed"]
-"#,
-    )
-    .unwrap();
-    for command in [
-        ["config", "check"],
-        ["catalog", "tools"],
-        ["catalog", "tags"],
-        ["config", "show"],
-    ] {
-        let result = run(&path, true, &command);
-        assert!(result.status.success(), "{command:?}: {:?}", result);
-        assert!(!String::from_utf8_lossy(&result.stderr).contains("Provider reliability"));
-    }
-    let result = Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
-        .args(["serve", "--config"])
-        .arg(&path)
-        .env_clear()
-        .env("MISSING_TEST_TOKEN", "fixture-token")
-        .output()
+"#;
+    std::fs::write(&path, configuration).unwrap();
+    let log = tempfile::NamedTempFile::new().unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_env_filter("off,x402_treazury::provider_status=warn")
+        .with_writer(std::sync::Mutex::new(log.reopen().unwrap()))
+        .finish();
+    async {
+        let inspected = Deployment::load_for_inspection(&path, false).await.unwrap();
+        let inventory = inspected.inventory();
+        assert_eq!(inventory.len(), 2);
+        assert!(
+            inventory
+                .iter()
+                .all(|server| server.tools.len() == 1 && server.tools[0].source == "observed")
+        );
+        assert!(std::fs::read_to_string(log.path()).unwrap().is_empty());
+        // Serving warnings precede catalog failure and follow actual endpoint bindings.
+        std::fs::write(
+            &path,
+            configuration.replacen("spec.json", "missing.json", 1),
+        )
         .unwrap();
-    assert!(!result.status.success()); // Missing payer key prevents serving.
-    let err = String::from_utf8(result.stderr).unwrap();
-    assert!(err.contains("MISSING_TEST_KEY"), "{err}");
+        assert!(Deployment::load_for_unsigned_serving(&path).await.is_err());
+    }
+    .with_subscriber(subscriber)
+    .await;
+    let warnings = std::fs::read_to_string(log.path()).unwrap();
     assert_eq!(
-        err.matches("Provider reliability observation:").count(),
+        warnings
+            .lines()
+            .filter(|line| line.contains("WARN"))
+            .count(),
         1,
-        "{err}"
+        "{warnings}"
     );
-    assert!(err.contains("upstream_timeout"), "{err}");
-    assert!(!err.contains("catalog_http_403"), "{err}");
-
-    let standalone = dir.path().join("standalone.toml");
-    std::fs::write(&standalone, "spec = 'spec.json'\ntags = ['data']\n").unwrap();
-    let baseline = run(&standalone, false, &["catalog", "tools"]);
-    assert!(baseline.status.success());
-    std::fs::write(
-        &standalone,
-        "spec = 'spec.json'\ntags = ['data']\nreliability_tags = ['upstream_rate_limited']\n",
-    )
-    .unwrap();
-    let annotated = run(&standalone, false, &["catalog", "tools"]);
-    assert!(annotated.status.success());
-    assert_eq!(baseline.stdout, annotated.stdout);
-    assert!(!String::from_utf8_lossy(&annotated.stderr).contains("Provider reliability"));
+    assert!(
+        warnings.contains("intermittent_response_body"),
+        "{warnings}"
+    );
+    assert!(!warnings.contains("catalog_http_403"), "{warnings}");
+    assert!(
+        warnings.contains("fixture reliability evidence"),
+        "{warnings}"
+    );
+    assert!(warnings.contains("may still be charged"), "{warnings}");
+    assert!(
+        warnings.contains("Do not automatically replay paid calls"),
+        "{warnings}"
+    );
 }
 
 #[tokio::test]
 async fn annotations_inherit_replace_clear_and_reject_unknown_tags() {
-    use x402_treazury::config;
     let dir = tempfile::tempdir().unwrap();
     let provider = dir.path().join("provider.toml");
     std::fs::write(

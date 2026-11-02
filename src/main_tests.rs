@@ -15,7 +15,7 @@ fn force_exit_with_blocked_worker_child() {
             let _ = wait.recv();
         });
         ready.await.unwrap();
-        super::finish(Err(x402_treazury::server::ForcedShutdown.into()));
+        let _ = super::finish(Err(x402_treazury::server::ForcedShutdown.into()));
     });
     // If finish merely returns, teardown waits for the live blocking worker.
     drop(runtime);

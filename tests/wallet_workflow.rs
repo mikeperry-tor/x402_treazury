@@ -359,6 +359,7 @@ fn birthday_connection_failure_is_actionable_and_creates_no_state() {
         .args(["wallet", "init", "--state-dir"])
         .arg(dir.path().join("wallet"))
         .env_clear()
+        .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .env(
             "ZCASH_INDEXER_URL",
             format!("http://127.0.0.1:{port}/private-token"),

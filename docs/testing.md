@@ -114,6 +114,19 @@ assertions stay in that child; the parent verifies successful execution of one
 test. Other fixtures remain parallel; this is not a reason to serialize an entire
 harness.
 
+Exercise ordinary CLI rendering once per distinct output contract. Use direct
+configuration/catalog APIs for advisory metadata and parser combinations; retain
+actual serving-source selection for warning scope. Functional cache lifetime and
+cover capability checks need no prose capture. Narrow diagnostic fixtures still
+verify severity, privacy, failure scope and user guidance alongside real results,
+requests and durable state. Do not replace removed message inventories with full
+field inventories.
+
+Test children that clear their environment preserve only the inherited
+`LLVM_PROFILE_FILE` when present, so isolated condition analysis can observe their
+work. This does not broaden operator-controlled live child environments or permit
+copying ambient credentials and proxies. Keep exact child-test execution checks.
+
 ### Compiler diagnostics and review
 
 `check-clippy` first checks the production library and binaries without test
