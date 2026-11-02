@@ -379,8 +379,11 @@ entire backup as spending material. To restore, stop the original process and us
 original and restored copies simultaneously. A Zcash mnemonic alone cannot restore
 random EVM keys, pending payment authorizations or the rotation journal.
 
-The embedded Zingolib v7 SDK reads older wallet snapshots and writes SDK wallet
-format 45 on the next save, including the finite-sync and transparent-scan fields.
+The application maintains encrypted save/reopen and address continuity coverage
+for the embedded Zingolib v7 SDK's current wallet format 45, including current
+finite-sync and transparent-scan state. SDK roundtrip coverage preserves a newly
+inserted scan target and the next derived address; dependency-owned historical
+readers remain upstream implementation.
 The application accepts database schema 23 only, for owner opens and read-only
 status, identity and qualification inspection. Older and future versions fail
 before changing source state; opening them does not convert them. Canonical fresh

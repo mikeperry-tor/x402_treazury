@@ -475,8 +475,8 @@ impl Treasury {
                 .wallet();
             let mut wallet = wallet.write().await;
             wallet.wallet_settings.min_confirmations = settings.confirmations;
-            // Treasury observations are one-pass scans, including restored v6
-            // snapshots whose sync settings predate finite/continuous selection.
+            // Treasury observations are one-pass scans regardless of the sync
+            // settings in the current saved snapshot.
             wallet.wallet_settings.sync_config.shutdown_on_completion = true;
         }
         let mut observation = self
