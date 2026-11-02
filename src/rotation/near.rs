@@ -902,6 +902,10 @@ mod tests {
     use super::*;
     use crate::test_socks as socks;
 
+    // Public abandon...about BIP39 mnemonic, account 0/address 1. The current
+    // unified-address encoding retains both Orchard and Sapling refund receivers.
+    const PUBLIC_REFUND_UA: &str = "u1twhzfnwvps8vlv20jak2lud8x3j5y9p42unjrq69kvhlsu3yp88e8m4jn9r53369su3mx2e9hjan5kl4pwqkfgetam7v7rzwfduu2q6dp90um6al5zjyk3akns2923va5xyn92f6f5neq9amdshzpj67n2e9ez94qj36hgagpv5ltwk7";
+
     #[tokio::test]
     async fn direct_near_timeouts_log_debug_without_private_url() {
         if crate::test_log_capture::run_in_child(
@@ -1036,15 +1040,9 @@ mod tests {
                 .is_err()
         );
         assert!(validate_quote(request, response, &limits, 2_000_000_000).is_err());
-        let addresses: Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/state/sdk_v6_addresses.json"
-        ))
-        .unwrap();
         let address = zcash_keys::address::Address::decode(
             &zcash_protocol::consensus::Network::MainNetwork,
-            addresses["after_next"][1]["encoded_address"]
-                .as_str()
-                .unwrap(),
+            PUBLIC_REFUND_UA,
         )
         .unwrap();
         let regtest = address.encode(&crate::rotation::store::TreasuryNetwork::Synthetic.chain());
@@ -1526,13 +1524,7 @@ mod tests {
     fn refund_receivers_preserve_exact_quote_binding_and_transparent_deposits() {
         use zcash_keys::address::{Address, UnifiedAddress};
         use zcash_protocol::consensus::Network::{MainNetwork, TestNetwork};
-        let addresses: Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/state/sdk_v6_addresses.json"
-        ))
-        .unwrap();
-        let shielded = addresses["after_next"][1]["encoded_address"]
-            .as_str()
-            .unwrap();
+        let shielded = PUBLIC_REFUND_UA;
         let Address::Unified(ua) = Address::decode(&MainNetwork, shielded).unwrap() else {
             panic!("public unified fixture")
         };

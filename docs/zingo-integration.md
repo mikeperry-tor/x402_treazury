@@ -69,7 +69,7 @@ DNS and no-direct-fallback rules remain in [network policy](network-egress.md).
 
 `src/treasury/mod.rs` runs one public Pepper engine task inside the existing
 isolated session runtime, with local mode/progress state and finite
-`shutdown_on_completion=true` configuration, including restored v6 snapshots.
+`shutdown_on_completion=true` configuration for current saved snapshots.
 Pepper can hold the wallet write lock across asynchronous recovery fetches; the
 engine must remain independently polled while encrypted checkpointing waits for
 that lock. Cancellation destroys the runtime and joins blocking workers before
@@ -177,10 +177,18 @@ spenders remain spent. Actual SDK spendability, bridge terminal outcome and new
 funding authority remain separate. Verified finite expiry can release an attempt
 under current authority without waiting for a negative bridge outcome; the old
 accepted request retains exact-operation status observation, and its later SUCCESS
-prevents an undisclosed replacement. Wallet format 45 and the public
-v6 read/save/reopen/next-address fixture remain documented in
-[wallet administration](wallet-cli.md). Server protocol 0.5.0 capability
-requirements are distinct from the Rust protocol crate version.
+prevents an undisclosed replacement. Application wallet serialization coverage
+uses current SDK format 45. The existing `sdk_compat` offline roundtrip inserts a
+public scan target, checks that it changes serialized sync state, saves and reopens
+that exact state, and preserves addresses and next-address derivation. The
+`treasury` encrypted roundtrip separately preserves wallet addresses and pool keys
+through application storage. Near refund tests use one public unified address with
+Orchard and Sapling receivers, independent of wallet snapshot serialization.
+Dependency-owned historical codecs remain upstream implementation; application
+fixture coverage does not require dependency patches. See
+[wallet administration](wallet-cli.md) for independent storage/output versions and
+backup obligations. Server protocol 0.5.0 capability requirements are distinct from
+the Rust protocol crate version.
 
 SDK calculation is offline; only an atomically committed outgoing journal can
 supply submission authority. Successful exclusive offline reconstruction, with no

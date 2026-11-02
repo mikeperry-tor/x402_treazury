@@ -1,3 +1,4 @@
+use pepper_sync::wallet::traits::SyncWallet;
 use std::num::NonZeroU32;
 #[path = "support/sdk_merge.rs"]
 mod sdk_merge;
@@ -33,14 +34,38 @@ async fn offline_wallet_restore_and_payment_signer_coexist() {
         .unwrap();
     let addresses = client.unified_addresses_json().await.to_string();
     assert_ne!(addresses, "[]");
-    let bytes = client
-        .wallet()
-        .write()
-        .await
-        .save()
-        .unwrap()
-        .expect("new address marks wallet dirty");
+    let target = pepper_sync::wallet::ScanTarget::new(
+        zcash_protocol::consensus::BlockHeight::from_u32(2_000_010),
+        Some(zcash_protocol::TxId::from_bytes([7; 32])),
+    );
+    let (bytes, expected_scan_state) = {
+        let wallet = client.wallet();
+        let mut wallet = wallet.write().await;
+        let state = wallet.get_sync_state_mut().unwrap();
+        let mut before = Vec::new();
+        state.write(&mut before).unwrap();
+        pepper_sync::add_scan_targets(state, &[target]);
+        let mut after = Vec::new();
+        state.write(&mut after).unwrap();
+        assert_ne!(before, after, "the current scan target must be persisted");
+        wallet.mark_dirty();
+        (wallet.save().unwrap().unwrap(), after)
+    };
+    assert_eq!(u64::from_le_bytes(bytes[..8].try_into().unwrap()), 45);
     let mut restored = LightClient::from_bytes(bytes, cfg).await.unwrap();
+    assert!(restored.indexer_uri().is_none());
+    {
+        let wallet = restored.wallet();
+        let mut wallet = wallet.write().await;
+        let state = wallet.get_sync_state_mut().unwrap();
+        let mut saved = Vec::new();
+        state.write(&mut saved).unwrap();
+        assert_eq!(saved, expected_scan_state);
+        pepper_sync::add_scan_targets(state, &[target]);
+        let mut repeated = Vec::new();
+        state.write(&mut repeated).unwrap();
+        assert_eq!(repeated, expected_scan_state);
+    }
     assert_eq!(restored.mnemonic_phrase().as_deref(), Some(MNEMONIC));
     assert_eq!(
         restored.unified_addresses_json().await.to_string(),
