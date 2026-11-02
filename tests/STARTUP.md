@@ -15,6 +15,13 @@ qualification stay strict in these synchronous tests. Its isolated SOCKS subproc
 catalog requests retain origin-based discovery identities: same-origin paths
 share credentials, different origins do not. It does not require real Tor.
 
+`deployment::bootstrap::actor_tests` also exercises explicit wallet bootstrap's
+pending monitor through the real funding worker and local Base adapter. One
+captured claim is already credited; the other completes while its original
+source remains pending. Successful supervisor shutdown and Store reopen retain
+the exact source bytes, attempt and claim identities. This needs no transaction
+proving or synthetic chain; separate worker-drain tests cover blocked accepted work.
+
 Run the focused regression suites sequentially:
 
 ```sh
