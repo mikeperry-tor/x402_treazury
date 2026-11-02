@@ -39,6 +39,11 @@ the retained inventory. Startup unit tests cover a fresh cached JSON document
 whose unsupported header schema prevents generation, and shared failures preserving
 safe acquisition stages and status. Existing accepted-relay-payment cancellation and
 panic fixtures also run with default waiting and verify drain/Store ownership.
+`deployment::lifecycle_tests::funding_failure_keeps_listeners_and_base_reconciliation_available`
+retains both real MCP listeners and the independent scalar RPC after funding
+failure. It waits for the wallet's published `balance_due`, advances only that
+owned cooldown and one maintenance wake, then resumes time for real HTTP and
+Store work. A server handler count alone cannot anchor that advancement.
 `deployment::readiness::tests` verifies the once-only funded startup announcement
 waits for catalog success, every listener and sufficient current estimates across
 all bound pools, including an earlier pool spending while another awaits credit.

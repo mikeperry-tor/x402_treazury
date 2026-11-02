@@ -2261,15 +2261,35 @@ bearer_token_env="TOKEN"
             .unwrap()
             .unwrap()
             .forget();
+        // A handler count precedes client publication. Anchor the virtual clock
+        // only after the shared wallet acquisition has published its cooldown.
+        let next_due = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let due = store.balance_due(&job.wallet_id).await;
+                if due > tokio::time::Instant::now() {
+                    break due;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         failure.send(()).unwrap();
         store
             .call(move |s| s.low_balance(&refresh_pool, &refresh_wallet))
             .await
             .unwrap();
-        // The requested follow-up survives the funding stop and shared wallet
-        // cooldown. This allowance covers the minute floor and local wake tick;
-        // cancelling reconciliation with funding would strand the request.
-        tokio::time::timeout(Duration::from_secs(75), reads.acquire())
+        // Advance the owned cooldown plus one maintenance wake, then run time
+        // normally for actual RPC/MCP IO and Store work. The follow-up must
+        // survive the funding stop without cancelling reconciliation.
+        tokio::time::pause();
+        tokio::time::advance(
+            next_due.saturating_duration_since(tokio::time::Instant::now())
+                + Duration::from_secs(5),
+        )
+        .await;
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(5), reads.acquire())
             .await
             .unwrap()
             .unwrap()
