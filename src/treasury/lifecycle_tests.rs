@@ -177,7 +177,25 @@ async fn funded_fixture_amount(
         .as_str()
         .unwrap()
         .to_owned();
-    let funding = faucet_funding_transaction(vec![(&address, amount, None)]).await;
+    let funding = if amount == 1_000_000 {
+        // This owner always uses SEED/account zero on the fixed Synthetic chain.
+        // The faucet's default schedule and height 21 match the fresh chain below.
+        // Share only public transaction bytes; each owner still scans its own chain.
+        static FUNDING: tokio::sync::OnceCell<(String, Vec<u8>)> =
+            tokio::sync::OnceCell::const_new();
+        let (recipient, bytes) = FUNDING
+            .get_or_init(|| async {
+                (
+                    address.clone(),
+                    faucet_funding_transaction(vec![(&address, amount, None)]).await,
+                )
+            })
+            .await;
+        assert_eq!(recipient, &address, "canonical funding receiver changed");
+        bytes.clone()
+    } else {
+        faucet_funding_transaction(vec![(&address, amount, None)]).await
+    };
     {
         let mut chain = net.chain.write().await;
         chain.mine_empty_blocks(20);

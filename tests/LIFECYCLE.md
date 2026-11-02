@@ -21,6 +21,14 @@ Binding persistence and failed-binding rollback use fresh unfunded SDK owners an
 encrypted stores. Those contracts need no faucet transaction, indexer or initial
 scan; actual refund discovery and shielding retain their funded SDK fixtures.
 
+The common funded fixture proves its canonical faucet transaction once per test
+process and reuses only the recipient and immutable raw bytes. It checks each
+fresh owner's first receiver against that recipient; the amount, memo, synthetic
+activation schedule and funding height remain fixed. Special amounts use their
+own faucet transactions. Every fixture retains a fresh SDK wallet, encrypted
+store and mock chain, inserts the funding transaction once, and performs real SDK
+scanning. No mutable wallet state, accepted journal or submission owner is shared.
+
 Expiry maintenance must consume its completed same-owner canonical scan without
 another indexer request. The shielding-expiry fixture makes the next indexer
 request fail after successful scanning and requires closure with the fault still
