@@ -189,7 +189,7 @@ async fn supervise(
             return Err(error);
         }
     };
-    let initial = check_startup(&store, &names, &attempts, Some(&captured), true).await;
+    let initial = check_startup(&store, &names, &attempts, &captured, true).await;
     if !matches!(initial, Ok(false)) {
         let summary = match initial {
             Ok(_) => bootstrap_summary(&store, &names, &captured).await,
@@ -218,15 +218,7 @@ async fn supervise(
         let mut next_progress = tokio::time::Instant::now();
         loop {
             let progress = tokio::time::Instant::now() >= next_progress;
-            if check_startup(
-                &store,
-                &monitored_names,
-                &attempts,
-                Some(&captured),
-                progress,
-            )
-            .await?
-            {
+            if check_startup(&store, &monitored_names, &attempts, &captured, progress).await? {
                 return bootstrap_summary(&store, &monitored_names, &captured).await;
             }
             if progress {
@@ -274,13 +266,13 @@ async fn capture_startup(
     Ok(captured)
 }
 
-/// A serving pass checks destination ownership; explicit bootstrap checks only
-/// its captured destination jobs. Neither waits for their source-only backlog.
+/// Explicit bootstrap checks only its captured destination jobs, without waiting
+/// for their source-only backlog.
 async fn check_startup(
     store: &StoreHandle,
     names: &BTreeSet<String>,
     attempts: &BTreeMap<String, u32>,
-    captured: Option<&BTreeMap<String, Vec<StartupClaim>>>,
+    captured: &BTreeMap<String, Vec<StartupClaim>>,
     progress: bool,
 ) -> Result<bool> {
     let names: Vec<_> = names.iter().cloned().collect();
@@ -290,13 +282,7 @@ async fn check_startup(
         let groups = store.call(move |s| s.startup_groups(&page)).await?;
         for group in groups {
             ensure!(group.enabled, "bootstrap group disabled");
-            if captured.is_none() && group.serving_ready {
-                continue;
-            }
-            let claims = captured
-                .and_then(|c| c.get(&group.name))
-                .unwrap_or(&group.claims)
-                .clone();
+            let claims = captured.get(&group.name).unwrap_or(&group.claims).clone();
             let maximum = *attempts
                 .get(&group.name)
                 .context("startup funding policy missing")?;
@@ -310,17 +296,14 @@ async fn check_startup(
                 pending,
                 actionable,
             } = assess_startup_paths(paths, maximum, &group, progress);
-            if captured.is_some() && path_count == claims.len() && pending == 0 {
+            if path_count == claims.len() && pending == 0 {
                 continue;
             }
             all_ready = false;
             if !actionable && pending > 0 {
                 let name = group.name.clone();
-                let captured_claims = captured.map(|_| claims.clone());
                 if let Some(obstructions) = store
-                    .call(move |s| {
-                        s.startup_obstruction(&name, maximum, captured_claims.as_deref())
-                    })
+                    .call(move |s| s.startup_obstruction(&name, maximum, &claims))
                     .await?
                 {
                     return Err(StartupObstructed {
@@ -330,8 +313,8 @@ async fn check_startup(
                     .into());
                 }
             }
-            // No job rows is incomplete, never an impossibility proof. Schema16
-            // incorporates enabled vacant claims in this same structural query.
+            // No job rows is incomplete, never an impossibility proof. Enabled
+            // vacant claims remain part of this structural query.
         }
     }
     Ok(all_ready)
@@ -609,8 +592,9 @@ mod tests {
         let (store, owner) = StoreHandle::spawn(state);
         let names = BTreeSet::from(["web".to_owned()]);
         let attempts = BTreeMap::from([("web".to_owned(), 3)]);
+        let captured = capture_startup(&store, &names).await.unwrap();
         assert!(
-            !check_startup(&store, &names, &attempts, None, false)
+            !check_startup(&store, &names, &attempts, &captured, false)
                 .await
                 .unwrap()
         );
@@ -632,7 +616,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let error = check_startup(&store, &names, &attempts, None, false)
+        let error = check_startup(&store, &names, &attempts, &captured, false)
             .await
             .unwrap_err();
         assert!(error.is::<StartupObstructed>());
@@ -644,7 +628,6 @@ mod tests {
         assert!(!message.contains("private fixture prose"));
         assert!(message.contains("insufficient spendable ZEC"));
         assert!(message.contains("cost, amount or authentication policy"));
-        let captured = capture_startup(&store, &names).await.unwrap();
         store
             .call(move |s| {
                 for job in jobs {
@@ -655,12 +638,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            check_startup(&store, &names, &attempts, None, false)
-                .await
-                .unwrap()
-        );
-        assert!(
-            check_startup(&store, &names, &attempts, Some(&captured), false)
+            check_startup(&store, &names, &attempts, &captured, false)
                 .await
                 .unwrap()
         );

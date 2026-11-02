@@ -30,7 +30,7 @@ async fn captured_completion_survives_current_claim_generation_advancement() {
     let attempts = BTreeMap::from([("web".to_owned(), 3)]);
     let captured = capture_startup(&store, &names).await.unwrap();
     assert!(
-        !check_startup(&store, &names, &attempts, Some(&captured), false)
+        !check_startup(&store, &names, &attempts, &captured, false)
             .await
             .unwrap()
     );
@@ -61,12 +61,12 @@ async fn captured_completion_survives_current_claim_generation_advancement() {
     }
     for progress in [false, true] {
         assert!(
-            check_startup(&store, &names, &attempts, Some(&captured), progress)
+            check_startup(&store, &names, &attempts, &captured, progress)
                 .await
                 .unwrap()
         );
         assert!(
-            !check_startup(&store, &names, &attempts, Some(&current), progress)
+            !check_startup(&store, &names, &attempts, &current, progress)
                 .await
                 .unwrap()
         );
@@ -93,13 +93,13 @@ async fn startup_recovery_limit_uses_durable_count_and_inclusive_maximum() {
         for maximum in [3, 4] {
             let attempts = BTreeMap::from([("web".to_owned(), maximum)]);
             assert!(
-                !check_startup(&store, &names, &attempts, Some(&captured), progress)
+                !check_startup(&store, &names, &attempts, &captured, progress)
                     .await
                     .unwrap()
             );
         }
         let attempts = BTreeMap::from([("web".to_owned(), 2)]);
-        let error = check_startup(&store, &names, &attempts, Some(&captured), progress)
+        let error = check_startup(&store, &names, &attempts, &captured, progress)
             .await
             .unwrap_err();
         assert!(error.is::<StartupObstructed>());
@@ -151,8 +151,10 @@ async fn paged_vacancies_remain_incomplete_without_mutation_or_missing_policy_sh
     let mut attempts: BTreeMap<_, _> = names.iter().map(|n| (n.clone(), 3)).collect();
     let last = names.last().unwrap().clone();
     attempts.remove(&last);
+    let captured = capture_startup(&store, &names).await.unwrap();
+    assert_eq!(captured.len(), GROUP_PAGE + 1);
     assert_eq!(
-        check_startup(&store, &names, &attempts, None, false)
+        check_startup(&store, &names, &attempts, &captured, false)
             .await
             .unwrap_err()
             .to_string(),
@@ -160,14 +162,7 @@ async fn paged_vacancies_remain_incomplete_without_mutation_or_missing_policy_sh
     );
     attempts.insert(last, 3);
     assert!(
-        !check_startup(&store, &names, &attempts, None, true)
-            .await
-            .unwrap()
-    );
-    let captured = capture_startup(&store, &names).await.unwrap();
-    assert_eq!(captured.len(), GROUP_PAGE + 1);
-    assert!(
-        !check_startup(&store, &names, &attempts, Some(&captured), true)
+        !check_startup(&store, &names, &attempts, &captured, true)
             .await
             .unwrap()
     );
@@ -213,26 +208,27 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
     let names = BTreeSet::from(["web".to_owned()]);
     let attempts = BTreeMap::from([("web".to_owned(), 3)]);
     let captured = capture_startup(&store, &names).await.unwrap();
-    // Ordinary serving returns before requiring an attempts policy for a ready group.
     assert!(
-        check_startup(&store, &names, &BTreeMap::new(), None, false)
+        store
+            .call(|s| Ok(s.startup_groups(&["web".into()])?.remove(0).serving_ready))
             .await
-            .unwrap()
+            .unwrap(),
+        "current serving readiness does not complete the other captured claim"
     );
     assert_eq!(
-        check_startup(&store, &names, &BTreeMap::new(), Some(&captured), false)
+        check_startup(&store, &names, &BTreeMap::new(), &captured, false)
             .await
             .unwrap_err()
             .to_string(),
         "startup funding policy missing"
     );
     assert!(
-        !check_startup(&store, &names, &attempts, Some(&captured), false)
+        !check_startup(&store, &names, &attempts, &captured, false)
             .await
             .unwrap()
     );
     assert!(
-        !check_startup(&store, &names, &attempts, Some(&BTreeMap::new()), false)
+        !check_startup(&store, &names, &attempts, &BTreeMap::new(), false)
             .await
             .unwrap(),
         "missing captured group must fall back to current claims"
@@ -242,7 +238,7 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
         claim.generation += 100;
     }
     assert!(
-        !check_startup(&store, &names, &attempts, Some(&missing), false)
+        !check_startup(&store, &names, &attempts, &missing, false)
             .await
             .unwrap(),
         "missing historical paths cannot borrow current serving readiness"
@@ -253,7 +249,7 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
         .await
         .unwrap();
     assert!(
-        check_startup(&store, &names, &attempts, Some(&captured), true)
+        check_startup(&store, &names, &attempts, &captured, true)
             .await
             .unwrap()
     );
@@ -262,7 +258,7 @@ async fn serving_readiness_does_not_substitute_for_captured_claim_completion() {
         .execute("UPDATE pools SET enabled=0 WHERE name='web'", [])
         .unwrap();
     assert_eq!(
-        check_startup(&store, &names, &BTreeMap::new(), None, false)
+        check_startup(&store, &names, &BTreeMap::new(), &captured, false)
             .await
             .unwrap_err()
             .to_string(),
@@ -332,7 +328,7 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
         task.await.unwrap();
     }
     assert!(
-        !check_startup(&store, &names, &attempts, Some(&captured), false)
+        !check_startup(&store, &names, &attempts, &captured, false)
             .await
             .unwrap(),
         "a complete first page cannot hide an unfinished final-page claim"
@@ -342,7 +338,7 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
         .await
         .unwrap();
     assert!(
-        check_startup(&store, &names, &attempts, Some(&captured), true)
+        check_startup(&store, &names, &attempts, &captured, true)
             .await
             .unwrap()
     );
@@ -370,7 +366,7 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
     assert_eq!(state.funding_jobs().unwrap().len(), before);
     let (store, worker) = StoreHandle::spawn(state);
     assert!(
-        check_startup(&store, &names, &attempts, Some(&captured), false)
+        check_startup(&store, &names, &attempts, &captured, false)
             .await
             .unwrap()
     );
@@ -384,7 +380,7 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
             &store,
             &other,
             &BTreeMap::from([("unselected".into(), 3)]),
-            None,
+            &captured,
             false
         )
         .await
@@ -400,7 +396,7 @@ async fn concurrent_group_completion_is_scoped_paged_and_stable_after_reopen() {
 }
 
 #[tokio::test]
-async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
+async fn reopened_shortages_are_rechecked_for_captured_bootstrap() {
     let (dir, mut state) = allocated_readiness_fixture();
     let jobs = state.funding_jobs().unwrap();
     let identity = state.id().to_owned();
@@ -428,15 +424,13 @@ async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
     let names = BTreeSet::from(["web".to_owned()]);
     let attempts = BTreeMap::from([("web".to_owned(), 3)]);
     let captured = capture_startup(&store, &names).await.unwrap();
-    // Neither the initial CLI check nor the serving monitor may stop the worker
-    // on a historical diagnostic, even with an old persisted backoff.
-    for scope in [None, Some(&captured)] {
-        assert!(
-            !check_startup(&store, &names, &attempts, scope, false)
-                .await
-                .unwrap()
-        );
-    }
+    // A saved diagnostic cannot stop captured bootstrap progress, even with
+    // an old persisted backoff.
+    assert!(
+        !check_startup(&store, &names, &attempts, &captured, false)
+            .await
+            .unwrap()
+    );
     for (index, job) in jobs.iter().enumerate() {
         let job = job.clone();
         store
@@ -458,13 +452,11 @@ async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
             })
             .await
             .unwrap();
-        for scope in [None, Some(&captured)] {
-            assert!(
-                !check_startup(&store, &names, &attempts, scope, false)
-                    .await
-                    .unwrap()
-            );
-        }
+        assert!(
+            !check_startup(&store, &names, &attempts, &captured, false)
+                .await
+                .unwrap()
+        );
         let job = jobs[index].clone();
         store
             .call(move |s| {
@@ -484,15 +476,13 @@ async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
             .await
             .unwrap();
     }
-    for scope in [None, Some(&captured)] {
-        let error = check_startup(&store, &names, &attempts, scope, false)
-            .await
-            .unwrap_err();
-        assert!(
-            error.is::<StartupObstructed>(),
-            "a newly reproduced shortage still stops startup"
-        );
-    }
+    let error = check_startup(&store, &names, &attempts, &captured, false)
+        .await
+        .unwrap_err();
+    assert!(
+        error.is::<StartupObstructed>(),
+        "a newly reproduced shortage still stops startup"
+    );
     store
         .call(move |s| {
             for job in jobs {
@@ -509,13 +499,11 @@ async fn reopened_shortages_are_rechecked_for_bootstrap_and_serve() {
         })
         .await
         .unwrap();
-    for scope in [None, Some(&captured)] {
-        assert!(
-            check_startup(&store, &names, &attempts, scope, false)
-                .await
-                .unwrap()
-        );
-    }
+    assert!(
+        check_startup(&store, &names, &attempts, &captured, false)
+            .await
+            .unwrap()
+    );
     drop(store);
     worker.await.unwrap();
 }

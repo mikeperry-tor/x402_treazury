@@ -223,14 +223,9 @@ impl Store {
         &self,
         name: &str,
         max_attempts: u32,
-        captured: Option<&[StartupClaim]>,
+        claims: &[StartupClaim],
     ) -> Result<Option<Vec<(String, &'static str)>>> {
         let group = self.startup_groups(&[name.to_owned()])?.remove(0);
-        let serving = captured.is_none();
-        if serving && group.serving_ready {
-            return Ok(None);
-        }
-        let claims = captured.unwrap_or(&group.claims);
         let paths = self.startup_claim_paths(&group.pool, claims)?;
         if paths.len() != claims.len() {
             return Ok(None);
@@ -243,7 +238,7 @@ impl Store {
                         blocked.push((path.job.id, reason));
                     }
                 }
-                StartupDisposition::DestinationReady if !serving => {}
+                StartupDisposition::DestinationReady => {}
                 _ => return Ok(None),
             }
         }
@@ -451,6 +446,11 @@ mod tests {
     fn provider_reports_do_not_obstruct_live_original_observation() {
         use crate::rotation::{near::SwapStatus, transaction::TransactionFacts};
         let (_dir, mut store, _pool) = fixture();
+        let captured = store
+            .startup_groups(&["configured".into()])
+            .unwrap()
+            .remove(0)
+            .claims;
         let jobs = store.funding_jobs().unwrap();
         for job in &jobs {
             let quote = serde_json::to_vec(
@@ -469,13 +469,18 @@ mod tests {
         }
         assert!(
             store
-                .startup_obstruction("configured", 3, None)
+                .startup_obstruction("configured", 3, &captured)
                 .unwrap()
                 .is_none()
         );
         // The untouched quote above is closed without spending recovery authority.
         // Use a fresh current source to exercise live accepted and published work.
         let (_dir, mut store, pool) = fixture();
+        let captured = store
+            .startup_groups(&["configured".into()])
+            .unwrap()
+            .remove(0)
+            .claims;
         let jobs = store.funding_jobs().unwrap();
         let job = &jobs[0];
         store
@@ -501,7 +506,7 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .startup_obstruction("configured", 3, None)
+                .startup_obstruction("configured", 3, &captured)
                 .unwrap()
                 .is_none(),
             "accepted original work still has an observation owner"
@@ -527,14 +532,14 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .startup_obstruction("configured", 3, None)
+                .startup_obstruction("configured", 3, &captured)
                 .unwrap()
                 .is_none()
         );
         store.confirm_spend(&job.operation_id).unwrap();
         assert!(
             store
-                .startup_obstruction("configured", 3, None)
+                .startup_obstruction("configured", 3, &captured)
                 .unwrap()
                 .is_none(),
             "canonical source confirmation can still be followed by destination credit"
@@ -781,13 +786,7 @@ mod tests {
         assert!(paths.iter().all(|path| path.destination_ready));
         assert!(
             store
-                .startup_obstruction("configured", 3, None)
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            store
-                .startup_obstruction("configured", 3, Some(&group.claims))
+                .startup_obstruction("configured", 3, &group.claims)
                 .unwrap()
                 .is_none()
         );
@@ -804,6 +803,11 @@ mod tests {
     #[test]
     fn obstruction_requires_every_path_and_rechecks_worker_facts() {
         let (_dir, mut store, pool) = fixture();
+        let captured = store
+            .startup_groups(&["configured".into()])
+            .unwrap()
+            .remove(0)
+            .claims;
         let jobs = store.funding_jobs().unwrap();
         for order in [[0, 1], [1, 0]] {
             for job in &jobs {
@@ -829,7 +833,7 @@ mod tests {
                 .unwrap();
             assert!(
                 store
-                    .startup_obstruction("configured", 3, None)
+                    .startup_obstruction("configured", 3, &captured)
                     .unwrap()
                     .is_none(),
                 "one blocked quote cannot forecast group exhaustion"
@@ -851,7 +855,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 store
-                    .startup_obstruction("configured", 3, None)
+                    .startup_obstruction("configured", 3, &captured)
                     .unwrap()
                     .unwrap()
                     .len(),
@@ -895,7 +899,7 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .startup_obstruction("configured", 3, None)
+                .startup_obstruction("configured", 3, &captured)
                 .unwrap()
                 .is_none()
         );
@@ -924,6 +928,7 @@ mod typed_condition_tests {
             0,
         )?;
         let jobs = store.funding_jobs()?;
+        let captured = store.startup_groups(&["typed".into()])?.remove(0).claims;
         for job in &jobs {
             store.defer_funding(
                 &job.id,
@@ -932,7 +937,7 @@ mod typed_condition_tests {
                 false,
             )?;
         }
-        assert!(store.startup_obstruction("typed", 3, None)?.is_none());
+        assert!(store.startup_obstruction("typed", 3, &captured)?.is_none());
         for job in &jobs {
             store.observe_funding_condition(
                 &job.id,
@@ -942,24 +947,30 @@ mod typed_condition_tests {
             store.defer_funding(&job.id, 0, Some("arbitrary diagnostic"), false)?;
         }
         assert_eq!(
-            store.startup_obstruction("typed", 3, None)?.unwrap().len(),
+            store
+                .startup_obstruction("typed", 3, &captured)?
+                .unwrap()
+                .len(),
             2
         );
         for job in &jobs {
             store.observe_funding_condition(&job.id, "obsolete-operation", None)?;
         }
         assert_eq!(
-            store.startup_obstruction("typed", 3, None)?.unwrap().len(),
+            store
+                .startup_obstruction("typed", 3, &captured)?
+                .unwrap()
+                .len(),
             2
         );
         for job in &jobs {
             store.observe_funding_condition(&job.id, &job.operation_id, None)?;
         }
-        assert!(store.startup_obstruction("typed", 3, None)?.is_none());
+        assert!(store.startup_obstruction("typed", 3, &captured)?.is_none());
         store.pause_new_funding();
         assert!(
             store
-                .startup_obstruction("typed", 3, None)?
+                .startup_obstruction("typed", 3, &captured)?
                 .unwrap()
                 .iter()
                 .all(|(_, reason)| *reason == "funding_disabled")

@@ -203,7 +203,8 @@ create no target-signing or uncertain-outcome replay authority.
 Serving binds listeners before starting initial or
 replacement funding, including when a relay payer has no capacity. The dormant
 owners start in the serving lifecycle. `deployment/bootstrap.rs` remains the
-catalog-free explicit `wallet bootstrap` path with captured-claim completeness.
+catalog-free explicit `wallet bootstrap` path. Its initial check and pending
+monitor both check completeness of the captured claims.
 Reserve vacancies follow their exact current claims; there is no separate initial allocation. Warming starts no funding workers. Origin freshness and relay provenance
 remain distinct from ordinary HTTP cache entries. See
 [paid discovery relay](configuration.md#relay-fallback).
