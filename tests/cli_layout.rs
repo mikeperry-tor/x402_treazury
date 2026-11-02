@@ -132,7 +132,11 @@ fn deployment_config_environment_applies_to_each_command_and_cli_wins() {
     let dir = tempfile::tempdir().unwrap();
     let run = |args: &[&str], config: Option<&str>| {
         let mut command = Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
-        command.env_clear().current_dir(dir.path()).args(args);
+        command
+            .env_clear()
+            .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
+            .current_dir(dir.path())
+            .args(args);
         if let Some(config) = config {
             command.env("X402_TREAZURY_CONFIG", config);
         }

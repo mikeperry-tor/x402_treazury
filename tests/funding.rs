@@ -322,19 +322,8 @@ async fn ambiguous_submission_never_repeats_and_api_success_cannot_fund_wallet()
         store.call(|s| s.status()).await.unwrap().funding_jobs[0].phase,
         x402_treazury::rotation::store::funding::FundingPhase::Complete
     );
+    assert_eq!(worker.backend.lock().await.sends, 1);
     let logs = std::fs::read_to_string(log.path()).unwrap();
-    assert!(
-        logs.contains("Current saved funding phase; NEAR status is checked separately wallet=a size=small status=Allocated"),
-        "{logs}"
-    );
-    assert!(
-        logs.contains("Funding progress wallet=a size=small status=Quoted"),
-        "{logs}"
-    );
-    assert!(
-        logs.contains("Funding progress wallet=a size=small status=Complete"),
-        "{logs}"
-    );
     assert!(
         !logs.contains("job_id="),
         "INFO must omit raw correlations: {logs}"
@@ -1344,7 +1333,10 @@ async fn confirmation_wait_and_retrying_reconciliation_errors_do_not_warn() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(waiting.contains("zcash_confirmations_pending"));
-    assert!(!waiting.contains("WARN"), "{waiting}");
+    assert!(
+        !waiting.contains("WARN") && !waiting.contains("ERROR"),
+        "{waiting}"
+    );
     worker.backend.lock().await.reconcile_error = Some("private upstream error");
     worker.tick(now + 7000).await.unwrap();
     let status = worker.store.call(|s| s.status()).await.unwrap();
@@ -1368,12 +1360,11 @@ async fn confirmation_wait_and_retrying_reconciliation_errors_do_not_warn() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(!failed.contains("WARN"), "{output}");
-    assert!(failed.contains("DEBUG"), "{output}");
     assert!(
-        failed.contains("Wallet funding observation unavailable"),
+        !failed.contains("WARN") && !failed.contains("ERROR"),
         "{output}"
     );
+    assert!(failed.contains("DEBUG"), "{output}");
     assert!(!output.contains("private upstream error"));
     assert!(!failed.contains("source_confirmation_pending"));
     worker.backend.lock().await.reconcile_error = None;

@@ -5,9 +5,11 @@ failure and caller cancellation closing active requests, untouched queued source
 serial/parallel inventory equality, compatible alias sharing (concurrent and queued),
 strict-limit/timeout separation, shared-download cancellation and fresh loads,
 per-alias overrides/filters/wallets, strict configuration, and JSON stdout with
-progress on stderr. The CLI visibility regression keeps readiness at INFO and
-local reads, cache policies, origin fetches and alias sharing at DEBUG, with the
-complete tool inventory on stdout. The synchronous unsigned-serving loader can omit optional
+progress on stderr. The CLI boundary regression parses the complete tool inventory,
+checks its tool count, and retains meaningful stderr progress without exposing
+endpoint addresses. Readiness remains INFO; routine local reads, cache policies,
+origin fetches and alias sharing remain DEBUG under the logging policy. The
+synchronous unsigned-serving loader can omit optional
 remote failures with explicit unavailable status; required sources, inspection and
 qualification stay strict in these synchronous tests. Its isolated SOCKS subprocess verifies that concurrent
 catalog requests retain origin-based discovery identities: same-origin paths

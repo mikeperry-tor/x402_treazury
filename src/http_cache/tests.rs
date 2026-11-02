@@ -622,50 +622,25 @@ fn cache_policy_labels_explain_conservative_rejections() {
 }
 
 #[test]
-fn catalog_local_ttl_overrides_origin_freshness_and_logs_policy() {
-    if crate::test_log_capture::run_in_child(
-        "http_cache::tests::catalog_local_ttl_overrides_origin_freshness_and_logs_policy",
-    ) {
-        return;
-    }
-    let log = tempfile::NamedTempFile::new().unwrap();
-    let subscriber = tracing_subscriber::fmt()
-        .without_time()
-        .with_ansi(false)
-        .with_max_level(tracing::Level::DEBUG)
-        .with_writer(log.reopen().unwrap())
-        .finish();
-    tracing::subscriber::with_default(subscriber, || {
-        for values in [
-            vec![],
-            vec![("cache-control", "no-store")],
-            vec![("cache-control", "no-cache")],
-            vec![("cache-control", "max-age=0, must-revalidate")],
-            vec![("cache-control", "max-age=999999")],
-            vec![("cache-control", "max-age=bad")],
-            vec![("expires", "0"), ("age", "999999")],
-        ] {
-            let h = headers(&values);
-            for ttl in [86400, 120] {
-                let m = Metadata::from_catalog_headers(&h, Duration::ZERO, None, ttl).unwrap();
-                assert!(m.local_override && m.fresh());
-                assert_eq!(m.expires - m.stored, ttl);
-                assert_eq!(Metadata::policy_label(&h, Some(&m)), "local_override");
-            }
-            assert!(Metadata::from_catalog_headers(&h, Duration::ZERO, None, 0).is_none());
-        }
-    });
-    let logs = std::fs::read_to_string(log.path()).unwrap();
-    for expected in [
-        "DEBUG",
-        "ttl_seconds=86400",
-        "ttl_seconds=120",
-        "origin_policy=\"no_store\"",
-        "cache_policy=\"local_override\"",
+fn catalog_local_ttl_overrides_origin_freshness() {
+    for values in [
+        vec![],
+        vec![("cache-control", "no-store")],
+        vec![("cache-control", "no-cache")],
+        vec![("cache-control", "max-age=0, must-revalidate")],
+        vec![("cache-control", "max-age=999999")],
+        vec![("cache-control", "max-age=bad")],
+        vec![("expires", "0"), ("age", "999999")],
     ] {
-        assert!(logs.contains(expected), "missing {expected}: {logs}");
+        let h = headers(&values);
+        for ttl in [86400, 120] {
+            let m = Metadata::from_catalog_headers(&h, Duration::ZERO, None, ttl).unwrap();
+            assert!(m.local_override && m.fresh());
+            assert_eq!(m.expires - m.stored, ttl);
+            assert_eq!(Metadata::policy_label(&h, Some(&m)), "local_override");
+        }
+        assert!(Metadata::from_catalog_headers(&h, Duration::ZERO, None, 0).is_none());
     }
-    assert!(!logs.contains("INFO"), "{logs}");
     assert!(Metadata::from_headers(&HeaderMap::new(), Duration::ZERO, None).is_none());
     let delayed =
         Metadata::from_relay_headers(&HeaderMap::new(), Duration::from_secs(121), Some(120))

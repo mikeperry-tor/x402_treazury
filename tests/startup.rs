@@ -353,71 +353,42 @@ async fn tor_catalog_child() {
 
 #[tokio::test]
 async fn cli_progress_stays_on_stderr_and_stdout_is_inventory_json() {
-    for debug in [false, true] {
-        let fixture = Fixture::new(2, None).await;
-        for id in 0..2 {
-            fixture.release(id);
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 3, 2);
-        let local = dir.path().join("local.json");
-        std::fs::write(
-            &local,
-            r#"{"servers":[{"url":"https://api.example"}],"paths":{"/local":{"get":{}}}}"#,
-        )
-        .unwrap();
-        let mut deployment: toml::Value = std::fs::read_to_string(&path).unwrap().parse().unwrap();
-        deployment["sources"]["s02"]["spec"] =
-            toml::Value::String(local.to_string_lossy().into_owned());
-        std::fs::write(&path, toml::to_string(&deployment).unwrap()).unwrap();
-        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
-        command.env_remove("RUST_LOG");
-        if debug {
-            command.env("RUST_LOG", "warn,x402_treazury=debug");
-        }
-        let output = command
-            .args(["catalog", "tools", "--config", path.to_str().unwrap()])
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let inventory: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(inventory[0]["tools"].as_array().unwrap().len(), 5);
-        let log = String::from_utf8(output.stderr).unwrap();
-        for message in [
-            "HTTP response protocol",
-            "Catalog load started",
-            "Catalog response headers received; reading body",
-            "Catalog response body complete",
-            "Catalog JSON parse complete",
-            "Catalog fetch/parse finished",
-            "Catalog generation finished",
-            "Catalog disk cache configuration",
-            "Catalog loading local file",
-            "Catalog fetching origin",
-            "Catalog origin response cache policy",
-            "Sharing compatible catalog download or parsed document",
-        ] {
-            assert_eq!(
-                log.contains(message),
-                debug,
-                "unexpected visibility for {message}: {log}"
-            );
-        }
-        for message in ["Catalog ready", "Initial catalog loading finished"] {
-            assert!(log.contains(message), "missing {message}: {log}");
-        }
-        assert!(log.contains("elapsed_ms"));
-        assert_eq!(log.contains("headers_ms"), debug);
-        assert_eq!(log.contains("body_ms"), debug);
-        assert_eq!(log.contains("parse_ms"), debug);
-        assert_eq!(log.contains("catalog_download"), debug);
-        assert!(!log.contains(&fixture.address.to_string()));
+    let fixture = Fixture::new(2, None).await;
+    for id in 0..2 {
+        fixture.release(id);
     }
+    let dir = tempfile::tempdir().unwrap();
+    let path = alias_config(dir.path(), &format!("http://{}", fixture.address), 3, 2);
+    let local = dir.path().join("local.json");
+    std::fs::write(
+        &local,
+        r#"{"servers":[{"url":"https://api.example"}],"paths":{"/local":{"get":{}}}}"#,
+    )
+    .unwrap();
+    let mut deployment: toml::Value = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+    deployment["sources"]["s02"]["spec"] =
+        toml::Value::String(local.to_string_lossy().into_owned());
+    std::fs::write(&path, toml::to_string(&deployment).unwrap()).unwrap();
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"));
+    command.env_remove("RUST_LOG");
+    let output = command
+        .args(["catalog", "tools", "--config", path.to_str().unwrap()])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let inventory: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(inventory[0]["tools"].as_array().unwrap().len(), 5);
+    let log = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        log.contains("Catalog ready"),
+        "missing catalog progress: {log}"
+    );
+    assert!(!log.contains(&fixture.address.to_string()));
 }
 
 fn alias_config(

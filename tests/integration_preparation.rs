@@ -219,6 +219,7 @@ async fn filtered_tool_and_invalid_arguments_never_prepare() {
 async fn build_info_is_credential_free_and_matches_compiled_library() {
     let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
+        .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .arg("build-info")
         .output()
         .await
@@ -854,6 +855,7 @@ bearer_token_env="TOKEN"
     std::fs::write(&m.deployment, deployment).unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
         .env_clear()
+        .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
         .args(["config", "check"])
         .arg("--config")
         .arg(&m.deployment)
@@ -1013,6 +1015,7 @@ spec="missing.json"
         tokio::process::Command::new(env!("CARGO_BIN_EXE_x402_treazury"))
             .kill_on_drop(true)
             .env_clear()
+            .envs(std::env::var_os("LLVM_PROFILE_FILE").map(|value| ("LLVM_PROFILE_FILE", value)))
             .env("INDEXER", &endpoint)
             .args(["wallet", "sync", "--json", "--config"])
             .arg(&config)

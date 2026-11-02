@@ -1,5 +1,7 @@
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
+#[path = "support/log_capture.rs"]
+mod log_capture;
 #[path = "support/funding_quote.rs"]
 mod quote_fixture;
 #[path = "support/zcash_transaction.rs"]
@@ -1035,25 +1037,9 @@ fn bridge_target_and_quote_commit_atomically_and_survive_restart() {
 
 #[tokio::test]
 async fn canonical_depletion_is_debug_without_an_sdk_balance_admission_gate() {
-    // Isolate tracing's callsite interest cache from concurrent tests that emit
-    // the same event without a subscriber.
-    const CHILD: &str = "TREAZURY_TEST_TREASURY_WARNING_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        let result = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "canonical_depletion_is_debug_without_an_sdk_balance_admission_gate",
-                "--nocapture",
-            ])
-            .env(CHILD, "1")
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&result.stdout),
-            String::from_utf8_lossy(&result.stderr)
-        );
+    if log_capture::run_in_child(
+        "canonical_depletion_is_debug_without_an_sdk_balance_admission_gate",
+    ) {
         return;
     }
     use std::sync::{Arc, Mutex};
@@ -1117,8 +1103,33 @@ async fn canonical_depletion_is_debug_without_an_sdk_balance_admission_gate() {
         0
     )
     .unwrap();
-    let mut status = store.status().unwrap();
-    let wallets = status.pools.remove(0).addresses;
+    let jobs = store.funding_jobs().unwrap();
+    let mut initial_status = store.status().unwrap();
+    let wallets = initial_status.pools.remove(0).addresses;
+    let assert_inventory = |store: &Store, role: &str, amounts: [&str; 2], credited: bool| {
+        let status = store.status().unwrap();
+        assert_eq!(status.pools[0].addresses.len(), wallets.len());
+        assert_eq!(status.funding_jobs.len(), jobs.len());
+        for (wallet, balance) in wallets.iter().zip(amounts) {
+            let current = status.pools[0]
+                .addresses
+                .iter()
+                .find(|a| a.id == wallet.id)
+                .unwrap();
+            assert_eq!(current.role, role);
+            assert_eq!(current.confirmed_balance, balance);
+            assert_eq!(current.destination_recorded, credited);
+        }
+        for job in &jobs {
+            assert_eq!(
+                store
+                    .funding_facts(&job.id, &job.operation_id)
+                    .unwrap()
+                    .initial_credit_recorded,
+                credited
+            );
+        }
+    };
     let amounts = |first: u64, second: u64| {
         [
             (wallets[0].id.clone(), first),
@@ -1129,6 +1140,7 @@ async fn canonical_depletion_is_debug_without_an_sdk_balance_admission_gate() {
     // Initial zeroes are unfunded allocations, not exhaustion.
     let view = rpc_evidence::acquire(store.chain_query(&pool).unwrap(), amounts(0, 0), 100).await;
     store.reconcile_pool(&pool, view).unwrap();
+    assert_inventory(&store, "ALLOCATED", ["0", "0"], false);
     let view = rpc_evidence::acquire(
         store.chain_query(&pool).unwrap(),
         amounts(1_000_000, 1_000_000),
@@ -1136,6 +1148,7 @@ async fn canonical_depletion_is_debug_without_an_sdk_balance_admission_gate() {
     )
     .await;
     store.reconcile_pool(&pool, view).unwrap();
+    assert_inventory(&store, "READY", ["1000000", "1000000"], true);
     let view = rpc_evidence::acquire(
         store.chain_query(&pool).unwrap(),
         amounts(1, 1_000_000),
@@ -1144,7 +1157,9 @@ async fn canonical_depletion_is_debug_without_an_sdk_balance_admission_gate() {
     .await;
     store.reconcile_pool(&pool, view).unwrap();
     assert!(capture.0.lock().unwrap().is_empty());
+    assert_inventory(&store, "READY", ["1", "1000000"], true);
     // An incomplete view must roll back without reporting depletion.
+    let before = serde_json::to_value(status(&dir.path().join("state")).unwrap()).unwrap();
     let mut incomplete = rpc_evidence::acquire(
         store.chain_query(&pool).unwrap(),
         amounts(0, 1_000_000),
@@ -1153,6 +1168,11 @@ async fn canonical_depletion_is_debug_without_an_sdk_balance_admission_gate() {
     .await;
     incomplete.balances.remove(&wallets[1].id);
     assert!(store.reconcile_pool(&pool, incomplete).is_err());
+    assert_eq!(
+        serde_json::to_value(status(&dir.path().join("state")).unwrap()).unwrap(),
+        before
+    );
+    assert_inventory(&store, "READY", ["1", "1000000"], true);
     assert!(capture.0.lock().unwrap().is_empty());
     let view = rpc_evidence::acquire(
         store.chain_query(&pool).unwrap(),
@@ -1168,6 +1188,7 @@ async fn canonical_depletion_is_debug_without_an_sdk_balance_admission_gate() {
     )
     .await;
     store.reconcile_pool(&pool, view).unwrap();
+    assert_inventory(&store, "READY", ["0", "1000000"], true);
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
     assert_eq!(logs.matches("evm_wallet_depleted").count(), 1);
     assert!(logs.contains("DEBUG") && !logs.contains("WARN") && !logs.contains("ERROR"));
@@ -1176,6 +1197,7 @@ async fn canonical_depletion_is_debug_without_an_sdk_balance_admission_gate() {
     capture.0.lock().unwrap().clear();
     let view = rpc_evidence::acquire(store.chain_query(&pool).unwrap(), amounts(0, 0), 700).await;
     store.reconcile_pool(&pool, view).unwrap();
+    assert_inventory(&store, "READY", ["0", "0"], true);
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
     assert_eq!(logs.matches("evm_wallet_depleted").count(), 1);
     assert!(logs.contains("DEBUG") && !logs.contains("WARN") && !logs.contains("ERROR"));

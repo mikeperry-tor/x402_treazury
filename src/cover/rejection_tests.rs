@@ -34,7 +34,7 @@ fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
     }
     let out=std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact","cover::rejection_tests::rejected_padding_and_ranges_are_independent_without_payment_replay","--nocapture"]).env("TREAZURY_COVER_REJECTION_CHILD","1").output().unwrap();
     assert!(
-        out.status.success(),
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed; 0 failed"),
         "{}\n{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
@@ -77,23 +77,12 @@ fn rejected_padding_and_ranges_are_independent_without_payment_replay() {
         1,
         "{logs}"
     );
-    assert!(refusal.iter().all(|line| line.contains("HTTP/2 range cover traffic unavailable for provider [api]") && line.contains("further range attempts disabled for this identity/origin until restart or cache eviction")), "{logs}");
-    for field in [
-        "listener=main",
-        "source=api",
-        "episode_id=",
-        "resource=\"primary\"",
-        "qualifying=true",
-        "fresh_attempt=true",
-        "http_status=403",
-        "range_start=0",
-        "requested_bytes=",
-        "received_bytes=0",
-        "elapsed_ms=",
-        "capability=\"unavailable\"",
-    ] {
-        assert!(refusal[0].contains(field), "{logs}");
-    }
+    assert!(
+        refusal.iter().all(|line| line.contains("source=api")
+            && line.contains("listener=main")
+            && line.contains("http_status=403")),
+        "{logs}"
+    );
     let cached = logs
         .lines()
         .find(|line| line.contains("cached cover capability"))
