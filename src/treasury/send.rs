@@ -1,8 +1,7 @@
 //! Serialized, calculate-only deposit preparation and durable submission control.
-mod prover;
 #[cfg(all(test, feature = "zcash-testutils"))]
 mod proving_tests;
-use super::{SyncPhase, Treasury};
+use super::{SyncPhase, Treasury, prover};
 use crate::rotation::{
     base::now,
     transaction::{

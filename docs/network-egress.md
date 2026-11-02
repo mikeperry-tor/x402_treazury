@@ -569,10 +569,10 @@ storage-encryption secret. Changing it requires a new versioned domain separator
   the transport still removes total `grpc-timeout` metadata and owns response
   inactivity below protobuf assembly. SDK online constructors, URI setters,
   migration transmission and optional nym/price workers are not used.
-- Sapling parameters are downloaded/embedded at build time. Deposit proving reads
-  embedded bytes lazily; unchanged backend shielding reads the provisioned standard
-  parameter cache. Neither runtime path downloads parameters. Cargo/build traffic
-  is outside the runtime policy.
+- Sapling parameters are downloaded/embedded at build time. Deposit and shielding
+  proving read embedded bytes lazily when a Sapling proof is requested. Neither
+  runtime path requires the parameter cache or downloads parameters. Cargo/build
+  traffic is outside the runtime policy.
 - reqwest uses `no_proxy`, explicit `socks5h` when enabled, no redirects, and no
   automatic retries. Both reqwest and tonic SOCKS paths use hyper-util's authenticated
   SOCKS5 connector with remote DNS. Authentication negotiation cannot downgrade to

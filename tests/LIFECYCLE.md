@@ -11,8 +11,10 @@ explicit shielded-refund shielding request performs no RPC, calculation or new
 operation. Persisted mixed T+Orchard and T+Sapling bindings pass through
 `shield_refund` into real SDK shielding proposals and proofs, selecting only the
 funded owned transparent input while preserving the exact binding and leaving
-submission attempts at zero. Persisted TEX and invalid encodings reject before
-sync or preparation instead of reporting that shielding is unnecessary. The
+submission attempts at zero. These transparent-to-shielded calculations also
+assert that the shared lazy prover does not parse Sapling parameters. Persisted
+TEX and invalid encodings reject before sync or preparation instead of reporting
+that shielding is unnecessary. The
 ignored Docker refund fixture still explicitly creates legacy transparent
 bindings to retain high-index discovery and per-address shielding coverage;
 ordinary new refund derivation emits shielded-only UAs.

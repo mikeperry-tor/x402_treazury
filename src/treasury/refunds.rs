@@ -181,8 +181,7 @@ impl Treasury {
                 zip32::AccountId::ZERO,
             )
             .map_err(|_| anyhow::anyhow!("treasury key derivation failed"))?;
-            let prover = zcash_proofs::prover::LocalTxProver::with_default_location()
-                .context("Sapling parameters unavailable")?;
+            let prover = prover::LazySaplingProver::default();
             let id = operation.clone();
             self.healthy = false;
             let stop_for_acceptance = stop.clone();
