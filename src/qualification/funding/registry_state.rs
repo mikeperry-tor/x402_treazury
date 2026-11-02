@@ -423,13 +423,9 @@ fn validate_payments(db: &Connection, run: &str, old: &Value, current: &Value) -
     let before = index(array(old, "payment_attempts")?, "id")?;
     let after = index(array(current, "payment_attempts")?, "id")?;
     for (id, prior) in &before {
-        let Some(now) = after.get(id) else {
-            ensure!(
-                prior["state"] == "ADMITTED",
-                "baseline signed payment attempt disappeared"
-            );
-            continue;
-        };
+        let now = after
+            .get(id)
+            .context("baseline signed payment attempt disappeared")?;
         for field in ["pool", "wallet", "generation", "amount"] {
             ensure!(
                 now[field] == prior[field],
@@ -444,13 +440,6 @@ fn validate_payments(db: &Connection, run: &str, old: &Value, current: &Value) -
         let count: i64 = db.query_row("SELECT COUNT(*) FROM events WHERE run=?1 AND kind='application_payment' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.attempt_id')=?2", params![run,id], |r| r.get(0))?;
         if count == 0 && attempt["state"] == "RESOLVED" {
             validate_prior_payment(db, run, id, attempt, current)?;
-            continue;
-        }
-        if count == 0 && attempt["state"] == "ADMITTED" {
-            tracing::warn!(
-                category = "qualification_unsigned_admission",
-                "unsubmitted admission lacks correlation; production reconciliation may discard it; case reservations remain charged"
-            );
             continue;
         }
         ensure!(
@@ -524,30 +513,28 @@ fn validate_prior_payment(
         reserved,
         "earlier payment needs its original charged case and matching observed settlement; reconcile that run first"
     );
-    let legacy_single:bool=db.query_row("SELECT (SELECT COUNT(*) FROM events WHERE run=?1 AND kind='application_payment' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2)=1 AND EXISTS(SELECT 1 FROM cases WHERE run=?1 AND id=?2 AND settlement=?3)",params![prior_run,case,outcome],|r|r.get(0))?;
-    if !legacy_single {
-        let rows=db.prepare("SELECT detail FROM events WHERE run=?1 AND kind='payment_observed' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2")?.query_map(params![prior_run,case],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut matched = 0;
-        for raw in rows {
-            let observed = qualification::bounded(raw)?;
-            for row in observed["attempts"]
-                .as_array()
-                .context("per-attempt settlement observation missing")?
-            {
-                if row["attempt_id"] == id {
-                    ensure!(
-                        &row["resolution"] == *resolution,
-                        "earlier attempt canonical observation differs"
-                    );
-                    matched += 1;
-                }
+    let rows=db.prepare("SELECT detail FROM events WHERE run=?1 AND kind='payment_observed' AND json_extract(CASE WHEN json_valid(detail) THEN detail END,'$.case')=?2")?.query_map(params![prior_run,case],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut matched = 0;
+    for raw in rows {
+        let observed = qualification::bounded(raw)?;
+        for row in observed["attempts"]
+            .as_array()
+            .context("per-attempt settlement observation missing")?
+        {
+            if row["attempt_id"] == id {
+                ensure!(
+                    &row["resolution"] == *resolution,
+                    "earlier attempt canonical observation differs"
+                );
+                matched += 1;
             }
         }
-        ensure!(
-            matched == 1,
-            "earlier attempt needs exactly one original canonical observation"
-        );
     }
+    ensure!(
+        matched == 1,
+        "earlier attempt needs exactly one original canonical observation"
+    );
+
     Ok(())
 }
 
@@ -981,6 +968,38 @@ mod tests {
             [event.to_string()],
         )
         .unwrap();
+        assert!(
+            guard.validate_state(&state).is_err(),
+            "aggregate settlement is not an original canonical observation"
+        );
+        let observation = |state: &Value| json!({"case":"paid","attempts":state["payment_resolutions"].as_array().unwrap().iter().map(|r|json!({"attempt_id":r["attempt_id"],"resolution":r})).collect::<Vec<_>>()});
+        let observed = observation(&state);
+        db.execute(
+            "INSERT INTO events(run,kind,detail,at) VALUES('previous','payment_observed',?1,0)",
+            [observed.to_string()],
+        )
+        .unwrap();
+        guard.validate_state(&state).unwrap();
+        let mut changed = observed.clone();
+        changed["attempts"][0]["resolution"]["hash"] = json!(format!("0x{:064x}", 2));
+        db.execute(
+            "UPDATE events SET detail=?1 WHERE kind='payment_observed'",
+            [changed.to_string()],
+        )
+        .unwrap();
+        assert!(guard.validate_state(&state).is_err());
+        db.execute(
+            "UPDATE events SET detail=?1 WHERE kind='payment_observed'",
+            [observed.to_string()],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO events(run,kind,detail,at) VALUES('previous','payment_observed',?1,0)",
+            [observed.to_string()],
+        )
+        .unwrap();
+        assert!(guard.validate_state(&state).is_err());
+        db.execute("DELETE FROM events WHERE rowid=(SELECT MAX(rowid) FROM events WHERE kind='payment_observed')", []).unwrap();
         guard.validate_state(&state).unwrap();
         assert_eq!(
             db.query_row(
@@ -1011,12 +1030,25 @@ mod tests {
         .unwrap();
         assert!(guard.validate_state(&state).is_err());
         db.execute(
+            "UPDATE cases SET settlement='USED' WHERE run='previous'",
+            [],
+        )
+        .unwrap();
+        state["payment_resolutions"][0]["outcome"] = json!("EXPIRED_UNUSED");
+        assert!(
+            guard.validate_state(&state).is_err(),
+            "canonical observation must match this exact attempt"
+        );
+        db.execute(
             "UPDATE cases SET settlement='EXPIRED_UNUSED' WHERE run='previous'",
             [],
         )
         .unwrap();
-        assert!(guard.validate_state(&state).is_err());
-        state["payment_resolutions"][0]["outcome"] = json!("EXPIRED_UNUSED");
+        db.execute(
+            "UPDATE events SET detail=?1 WHERE kind='payment_observed'",
+            [observation(&state).to_string()],
+        )
+        .unwrap();
         guard.validate_state(&state).unwrap();
         // A retry can use B while A proves unused; aggregate case USED must
         // preserve A's distinct canonical outcome when a later run is reviewed.
@@ -1043,10 +1075,9 @@ mod tests {
         )
         .unwrap();
         assert!(guard.validate_state(&state).is_err());
-        let observed = json!({"case":"paid","attempts":state["payment_resolutions"].as_array().unwrap().iter().map(|r|json!({"attempt_id":r["attempt_id"],"resolution":r})).collect::<Vec<_>>()});
         db.execute(
-            "INSERT INTO events(run,kind,detail,at) VALUES('previous','payment_observed',?1,0)",
-            [observed.to_string()],
+            "UPDATE events SET detail=?1 WHERE kind='payment_observed'",
+            [observation(&state).to_string()],
         )
         .unwrap();
         guard.validate_state(&state).unwrap();
@@ -1083,17 +1114,47 @@ mod tests {
         assert!(guard.validate_state(&state).is_err());
     }
     #[test]
-    fn unsigned_admission_cleanup_cannot_erase_signed_liabilities() {
+    fn signed_baseline_payment_cannot_disappear_or_lose_correlation() {
         let (_dir, guard, db, mut state) = fixture();
+        db.execute_batch(
+            "ALTER TABLE cases ADD COLUMN reservation INTEGER; UPDATE cases SET reservation=20000;",
+        )
+        .unwrap();
+        let reservation = || {
+            db.query_row(
+                "SELECT reservation FROM cases WHERE run='run' AND id='case'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
         let clean = state.clone();
-        state["payment_attempts"] = json!([{"id":"attempt","pool":"p","wallet":"a","generation":0,"amount":"1","state":"ADMITTED"}]);
+        state["payment_attempts"] = json!([{"id":"attempt","pool":"p","wallet":"a","generation":0,"amount":"1","state":"POSSIBLY_SUBMITTED"}]);
+        baseline(&db, &state);
+        assert!(
+            guard
+                .validate_state(&clean)
+                .unwrap_err()
+                .to_string()
+                .contains("baseline signed payment attempt disappeared")
+        );
+        assert_eq!(reservation(), 20000);
+        assert!(
+            guard
+                .validate_state(&state)
+                .unwrap_err()
+                .to_string()
+                .contains("payment liability requires correlated application evidence")
+        );
+        assert_eq!(reservation(), 20000);
+        let event = json!({"attempt_id":"attempt","case":"case","pool":"p","wallet":"a","generation":0,"amount":"1"});
+        db.execute(
+            "INSERT INTO events(run,kind,detail,at) VALUES('run','application_payment',?1,0)",
+            [event.to_string()],
+        )
+        .unwrap();
         guard.validate_state(&state).unwrap();
-        baseline(&db, &state);
-        guard.validate_state(&clean).unwrap();
-        state["payment_attempts"][0]["state"] = json!("POSSIBLY_SUBMITTED");
-        baseline(&db, &state);
-        assert!(guard.validate_state(&clean).is_err());
-        assert!(guard.validate_state(&state).is_err());
+        assert_eq!(reservation(), 20000);
     }
 
     fn permit_rows(db: &Connection) -> Vec<Vec<Vec<rusqlite::types::Value>>> {

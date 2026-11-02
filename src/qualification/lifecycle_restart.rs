@@ -10,7 +10,15 @@ pub enum Checkpoint {
     SubmittedDeposit,
 }
 
-fn selected<'a>(state: &'a Value, pool: &str, job: &str) -> Result<(&'a Value, &'a Value)> {
+fn selected<'a>(
+    state: &'a Value,
+    pool: &str,
+    job: &str,
+) -> Result<(&'a Value, &'a Value, &'a Value)> {
+    ensure!(
+        state["schema_version"] == 2,
+        "unsupported lifecycle evidence version"
+    );
     let pools = indexed(state, "pools")?;
     let jobs = indexed(state, "funding_jobs")?;
     let selected_pool = *pools.get(pool).context("restart pool missing")?;
@@ -32,31 +40,28 @@ fn selected<'a>(state: &'a Value, pool: &str, job: &str) -> Result<(&'a Value, &
             && wallet["target"] == selected_job["target"],
         "restart funding wallet binding differs"
     );
-    if state["schema_version"] == 2 {
-        ensure!(
-            (wallet["role"] == "READY" && wallet["destination_recorded"] == true)
-                || (wallet["role"] == "ALLOCATED" && pending(selected_job)),
-            "restart destination readiness differs"
-        );
-        let claim = selected_pool["reserve_claims"]
-            .as_array()
-            .context("restart reserve claims missing")?
-            .iter()
-            .find(|claim| claim["wallet_id"] == wallet["id"])
-            .context("restart replacement claim missing")?;
-        ensure!(
-            claim["enabled"] == true
-                && (wallet["role"] != "READY" || claim["destination_ready"] == true),
-            "restart claim not ready"
-        );
-    } else {
-        ensure!(
-            (wallet["role"] == "READY" && selected_job["phase"] == "COMPLETE")
-                || (wallet["role"] == "ALLOCATED" && pending(selected_job)),
-            "restart funding role/phase differs"
-        );
-    }
-    Ok((selected_pool, selected_job))
+    ensure!(
+        (wallet["role"] == "READY" && wallet["destination_recorded"] == true)
+            || (wallet["role"] == "ALLOCATED" && pending(selected_job)),
+        "restart destination readiness differs"
+    );
+    let claim = selected_pool["reserve_claims"]
+        .as_array()
+        .context("restart reserve claims missing")?
+        .iter()
+        .find(|claim| claim["wallet_id"] == wallet["id"])
+        .context("restart replacement claim missing")?;
+    ensure!(
+        matches!(claim["slot"].as_str(), Some("small" | "large"))
+            && claim["generation"].as_u64().is_some(),
+        "restart claim identity missing"
+    );
+    ensure!(
+        claim["enabled"] == true
+            && (wallet["role"] != "READY" || claim["destination_ready"] == true),
+        "restart claim not ready"
+    );
+    Ok((selected_pool, selected_job, claim))
 }
 
 fn source<'a>(state: &'a Value, job: &Value) -> Result<Option<&'a Value>> {
@@ -128,7 +133,7 @@ fn attempts(operation: Option<&Value>) -> Result<u64> {
 /// False means this exact checkpoint was not observed. Never manufacture a hit
 /// from a later COMPLETE state, even if the operation must have passed through it.
 pub fn observed(state: &Value, pool: &str, job: &str, checkpoint: Checkpoint) -> Result<bool> {
-    let (_, job) = selected(state, pool, job)?;
+    let (_, job, _) = selected(state, pool, job)?;
     let operation = source(state, job)?;
     let submissions = attempts(operation)?;
     match checkpoint {
@@ -149,8 +154,14 @@ fn unchanged(before: &Value, after: &Value, pool: &str, job: &str) -> Result<()>
             && before["treasury_id"] == after["treasury_id"],
         "restart treasury changed"
     );
-    let (old_pool, old_job) = selected(before, pool, job)?;
-    let (new_pool, new_job) = selected(after, pool, job)?;
+    let (old_pool, old_job, old_claim) = selected(before, pool, job)?;
+    let (new_pool, new_job, new_claim) = selected(after, pool, job)?;
+    for field in ["slot", "generation", "wallet_id"] {
+        ensure!(
+            old_claim[field] == new_claim[field],
+            "restart changed the replacement reserve claim"
+        );
+    }
     let old_jobs = indexed(before, "funding_jobs")?;
     let new_jobs = indexed(after, "funding_jobs")?;
     let bindings = |jobs: &std::collections::BTreeMap<&str, &Value>| {
@@ -283,7 +294,7 @@ pub fn continuity(
     );
     unchanged(observed_state, drained, pool, job)?;
     unchanged(drained, reopened, pool, job)?;
-    let (_, completed) = selected(reopened, pool, job)?;
+    let (_, completed, _) = selected(reopened, pool, job)?;
     Ok(
         json!({"pool":pool,"job":job,"operation_id":completed["operation_id"],
         "checkpoint":match checkpoint { Checkpoint::QueuedRefill => "queued_refill", Checkpoint::SubmittedDeposit => "submitted_deposit" },
@@ -297,7 +308,7 @@ mod tests {
     use super::*;
 
     fn queued() -> Value {
-        json!({"treasury_id":"t","pools":[{"id":"p","name":"pool","generation":1,"addresses":[
+        json!({"schema_version":2,"treasury_id":"t","pools":[{"id":"p","name":"pool","generation":1,"reserve_claims":[{"slot":"small","generation":1,"wallet_id":"replacement","enabled":true,"destination_ready":false}],"addresses":[
             {"id":"active","address":"0x01","role":"ACTIVE","target":"2000000"},
             {"id":"replacement","address":"0x02","role":"ALLOCATED","target":"2000000"}
         ]}],"funding_jobs":[{"id":"j","pool_id":"p","wallet_id":"replacement","recipient":"0x02",
@@ -313,6 +324,8 @@ mod tests {
         let mut state = submitted();
         state["funding_jobs"][0]["phase"] = json!("COMPLETE");
         state["pools"][0]["addresses"][1]["role"] = json!("READY");
+        state["pools"][0]["addresses"][1]["destination_recorded"] = json!(true);
+        state["pools"][0]["reserve_claims"][0]["destination_ready"] = json!(true);
         state["source_operations"][0]["submission"] = json!("CONFIRMED");
         state
     }
@@ -324,6 +337,32 @@ mod tests {
             assert!(!observed(&ready(), "p", "j", checkpoint).unwrap());
             assert!(continuity(&ready(), &ready(), &ready(), "p", "j", checkpoint).is_err());
         }
+        let mut unsupported = queued();
+        unsupported["schema_version"] = Value::Null;
+        assert!(observed(&unsupported, "p", "j", Checkpoint::QueuedRefill).is_err());
+        for pointer in [
+            "/pools/0/addresses/1/destination_recorded",
+            "/pools/0/reserve_claims/0/enabled",
+            "/pools/0/reserve_claims/0/destination_ready",
+        ] {
+            let mut invalid = ready();
+            *invalid.pointer_mut(pointer).unwrap() = json!(false);
+            assert!(
+                observed(&invalid, "p", "j", Checkpoint::SubmittedDeposit).is_err(),
+                "{pointer}"
+            );
+        }
+        for (field, value) in [("slot", json!("unknown")), ("generation", Value::Null)] {
+            let mut invalid = queued();
+            invalid["pools"][0]["reserve_claims"][0][field] = value;
+            assert!(
+                observed(&invalid, "p", "j", Checkpoint::QueuedRefill).is_err(),
+                "{field}"
+            );
+        }
+        let mut missing = ready();
+        missing["pools"][0]["reserve_claims"] = json!([]);
+        assert!(observed(&missing, "p", "j", Checkpoint::SubmittedDeposit).is_err());
         let mut ambiguous = submitted();
         ambiguous["source_operations"][0]["submission"] = json!("UNKNOWN");
         assert!(!observed(&ambiguous, "p", "j", Checkpoint::SubmittedDeposit).unwrap());
@@ -350,6 +389,25 @@ mod tests {
             "p",
             "j",
             Checkpoint::SubmittedDeposit,
+        )
+        .unwrap();
+        // This proof binds the selected replacement; it does not freeze other
+        // reserve settings. Destination readiness may advance during the drain.
+        let mut observed = queued();
+        observed["pools"][0]["reserve_claims"].as_array_mut().unwrap().push(
+            json!({"slot":"large","generation":0,"wallet_id":null,"enabled":false,"destination_ready":false})
+        );
+        let mut progressed = ready();
+        progressed["pools"][0]["reserve_claims"].as_array_mut().unwrap().push(
+            json!({"slot":"large","generation":0,"wallet_id":null,"enabled":true,"destination_ready":false})
+        );
+        continuity(
+            &observed,
+            &progressed,
+            &progressed,
+            "p",
+            "j",
+            Checkpoint::QueuedRefill,
         )
         .unwrap();
         // An unsigned bridge minimum can increase before preparation.
@@ -425,6 +483,8 @@ mod tests {
         for (pointer, value) in [
             ("/treasury_id", json!("another")),
             ("/pools/0/generation", json!(2)),
+            ("/pools/0/reserve_claims/0/generation", json!(2)),
+            ("/pools/0/reserve_claims/0/slot", json!("large")),
             ("/pools/0/addresses/0/role", json!("RETIRED")),
             ("/pools/0/addresses/0/address", json!("changed")),
             ("/funding_jobs/0/operation_id", json!("new_operation")),

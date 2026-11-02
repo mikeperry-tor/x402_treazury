@@ -211,15 +211,11 @@ impl Registry {
             ensure!(
                 !reviewed.unsigned
                     && claim["session"] == event["session"]
-                    && ((event["stage"] == "admitted_before_signing"
-                        && event.get("admission_evidence_version").is_none())
-                        || (event["stage"] == "signed_admission_pending"
-                            && event["admission_evidence_version"] == 2)),
+                    && event["stage"] == "signed_admission_pending"
+                    && event["admission_evidence_version"] == 2,
                 "payment differs from accepted case"
             );
-            if event.get("ownership_evidence_version").is_some() {
-                x402_treazury::qualification::validate_admission_balance(&event)?;
-            }
+            x402_treazury::qualification::validate_admission_balance(&event)?;
             let amount: u64 = event["amount"]
                 .as_str()
                 .context("payment amount missing")?

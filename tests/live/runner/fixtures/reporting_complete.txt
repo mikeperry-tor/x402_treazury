@@ -31,7 +31,7 @@ Registry-wide charged API reservations: **$0.060000**; source reservations: **20
 
 ## Persisted treasury accounting
 
-Treasury-wide saved observations include history outside this run. These are not fresh chain reads or new spending authority. Refund outputs are reported separately, not subtracted again from costs. Missing observations do not establish zero balances.
+Treasury-wide saved observations include history outside this run. These are not fresh chain reads or new spending authority. Source reservations and refund-output totals are unavailable from current SDK transaction facts. Missing observations do not establish zero balances.
 
 Changes since registry authorization (may span multiple runs; not payment or fresh-chain proofs):
 
@@ -40,17 +40,17 @@ Changes since registry authorization (may span multiple runs; not payment or fre
 | Principal | 100 | 100 | 0 |
 | Fees | 8 | 8 | 0 |
 | Consumed cost | 108 | 108 | 0 |
-| Treasury reservations | 100 | 70 | -30 |
-| Refund outputs | 10 | 10 | 0 |
-Aggregate USDC balance change: unobserved (missing wallet anchors).
-Saved shielded ZEC changes: confirmed **0 zatoshis**, spendable **0 zatoshis**; funding, change confirmation and external transfers may affect these values.
-Run-attributed source costs: principal **100 zatoshis**, fees **5 zatoshis**, consumed **105 zatoshis**; treasury reservations **0 zatoshis**. Registry unreleased bounds: **110 zatoshis**; released bounds: **0 zatoshis**; attempts without treasury budget evidence: **0**. Refund outputs: **10 zatoshis**, reported separately. Registry bounds remain conservative after settlement and are not additional spending.
+| Treasury reservations | unavailable | unavailable | unavailable |
+| Refund outputs | unavailable | unavailable | unavailable |
+Aggregate USDC balance change: unobserved (missing wallet estimates).
+Saved shielded ZEC changes: confirmed **0 zatoshis**, spendable **-10 zatoshis**; funding, change confirmation and external transfers may affect these values.
+Run-attributed source costs: principal **100 zatoshis**, fees **5 zatoshis**, consumed **105 zatoshis**; treasury reservations **unavailable zatoshis**. Registry unreleased bounds: **110 zatoshis**; released bounds: **0 zatoshis**; attempts without transaction facts: **0**. Refund outputs: **unavailable zatoshis**, reported separately. Registry bounds remain conservative after settlement and are not additional spending.
 
-Snapshot 1: recorded principal **100 zatoshis**, recorded fees **8 zatoshis**, consumed cost **108 zatoshis**, pending source reservations **70 zatoshis**, refund outputs **10 zatoshis**.
+Snapshot 1: recorded principal **100 zatoshis**, recorded fees **8 zatoshis**, consumed cost **108 zatoshis**, pending source reservations **unavailable zatoshis**, refund outputs **unavailable zatoshis**.
 Saved unresolved payment exposure: **5 USDC atomic**; not a verified debit or available balance.
 Saved shielded ZEC: confirmed **60 zatoshis**, spendable **50 zatoshis** (freshness not asserted).
 
-| Wallet role | Wallets | Anchored observations | Unobserved | Saved balance (USDC atomic) |
+| Wallet role | Wallets | Available estimates | Unobserved | Saved balance (USDC atomic) |
 | --- | ---: | ---: | ---: | ---: |
 | ACTIVE | 1 | 1 | 0 | 0 |
 | ALLOCATED | 1 | 0 | 1 | 0 |

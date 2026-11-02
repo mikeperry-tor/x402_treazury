@@ -653,15 +653,20 @@ fn managed_application_report_distinguishes_admission_from_settlement_and_refuse
             .unwrap();
         registry.dispatching("test_run", "call").unwrap();
         registry.event("test_run", "application_claim", &json!({"case":"call","session":"session","server":"main","source":"api","tool":"api_read","mode":"managed","started_micros":0}), 10).unwrap();
-        let mut event = json!({"case":"call","session":"session","stage":"admitted_before_signing","amount":"1","attempt_id":"attempt"});
-        if version != 0 {
-            event["stage"] = json!("signed_admission_pending");
+        let mut event = json!({"case":"call","session":"session","stage":"signed_admission_pending","admission_evidence_version":2,"ownership_evidence_version":1,"payer_role":"ACTIVE","reserve_slot":null,"claim_generation":null,"balance_evidence":{"schema_version":3,"estimate_atomic":null},"amount":"1","attempt_id":"attempt"});
+        if version == 0 {
+            event["stage"] = json!("admitted_before_signing");
+            event
+                .as_object_mut()
+                .unwrap()
+                .remove("admission_evidence_version");
+        } else {
             event["admission_evidence_version"] = json!(version);
         }
         registry
             .event("test_run", "application_payment", &event, 10)
             .unwrap();
-        if version == 3 {
+        if version != 2 {
             assert!(registry.application_evidence("test_run").is_err());
             continue;
         }
@@ -713,8 +718,6 @@ fn settlement_observation_requires_canonical_reason_or_drained_unsigned_evidence
         ("RESOLVED", Some("EXPIRED_UNUSED"), false, "EXPIRED_UNUSED"),
         ("RESOLVED", None, true, "PENDING"),
         ("POSSIBLY_SUBMITTED", None, true, "PENDING"),
-        ("ADMITTED", None, false, "PENDING"),
-        ("ADMITTED", None, true, "NOT_SIGNED"),
         ("MISSING", None, false, "PENDING"),
         ("MISSING", None, true, "NOT_SIGNED"),
     ] {
@@ -732,7 +735,7 @@ fn settlement_observation_requires_canonical_reason_or_drained_unsigned_evidence
             10,
         )
         .unwrap();
-        r.event("test_run", "application_payment", &json!({"case":"call","session":"session","stage":"admitted_before_signing","amount":"1","attempt_id":"attempt","pool":"p","wallet":"w","generation":0}), 10).unwrap();
+        r.event("test_run", "application_payment", &json!({"case":"call","session":"session","stage":"signed_admission_pending","admission_evidence_version":2,"ownership_evidence_version":1,"payer_role":"ACTIVE","reserve_slot":null,"claim_generation":null,"balance_evidence":{"schema_version":3,"estimate_atomic":null},"amount":"1","attempt_id":"attempt","pool":"p","wallet":"w","generation":0}), 10).unwrap();
         r.finish_managed("test_run", "call", Some(b"{}"), true)
             .unwrap();
         let mut snapshot = json!({"treasury_status":{"treasury_id":f.manifest.treasury_id},"payment_attempts":[],"payment_resolutions":[]});
@@ -765,28 +768,44 @@ fn settlement_observation_requires_canonical_reason_or_drained_unsigned_evidence
 
 #[test]
 fn later_success_never_hides_an_earlier_pending_authorization() {
-    for earlier in [None,Some("EXPIRED_UNUSED"),Some("USED")] {
-        let f=Fixture::new();
-        let mut r=f.open();
+    for earlier in [None, Some("EXPIRED_UNUSED"), Some("USED")] {
+        let f = Fixture::new();
+        let mut r = f.open();
         f.prepare(&mut r);
-        r.reserve_batch("test_run","batch", &["call".into()],10).unwrap();
-        r.dispatching("test_run","call").unwrap();
+        r.reserve_batch("test_run", "batch", &["call".into()], 10)
+            .unwrap();
+        r.dispatching("test_run", "call").unwrap();
         r.event("test_run","application_claim",&json!({"case":"call","session":"s","server":"main","source":"api","tool":"api_read","mode":"managed","started_micros":0}),10).unwrap();
-        r.event("test_run","application_finished",&json!({"case":"call","session":"s","is_error":false,"finished_micros":1}),10).unwrap();
-        let mut attempts=Vec::new();
-        let mut resolutions=Vec::new();
-        for (id,outcome) in [("a",earlier),("b",Some("USED"))] {
-            r.event("test_run","application_payment",&json!({"case":"call","session":"s","stage":"admitted_before_signing","amount":"1","attempt_id":id,"pool":"p","wallet":id,"generation":0}),10).unwrap();
+        r.event(
+            "test_run",
+            "application_finished",
+            &json!({"case":"call","session":"s","is_error":false,"finished_micros":1}),
+            10,
+        )
+        .unwrap();
+        let mut attempts = Vec::new();
+        let mut resolutions = Vec::new();
+        for (id, outcome) in [("a", earlier), ("b", Some("USED"))] {
+            r.event("test_run","application_payment",&json!({"case":"call","session":"s","stage":"signed_admission_pending","admission_evidence_version":2,"ownership_evidence_version":1,"payer_role":"ACTIVE","reserve_slot":null,"claim_generation":null,"balance_evidence":{"schema_version":3,"estimate_atomic":null},"amount":"1","attempt_id":id,"pool":"p","wallet":id,"generation":0}),10).unwrap();
             attempts.push(json!({"id":id,"pool":"p","wallet":id,"generation":0,"amount":"1","state":if outcome.is_some(){"RESOLVED"}else{"POSSIBLY_SUBMITTED"}}));
-            if let Some(outcome)=outcome {resolutions.push(json!({"attempt_id":id,"outcome":outcome,"height":12,"hash":"block","block_time":100}));}
+            if let Some(outcome) = outcome {
+                resolutions.push(json!({"attempt_id":id,"outcome":outcome,"height":12,"hash":"block","block_time":100}));
+            }
         }
-        r.finish_managed("test_run","call",Some(b"{}"),true).unwrap();
-        let snapshot=json!({"treasury_status":{"treasury_id":f.manifest.treasury_id},"payment_attempts":attempts,"payment_resolutions":resolutions});
-        r.apply_settlement("test_run",&snapshot,true).unwrap();
-        let report=r.report(Some("test_run"),12).unwrap();
-        assert_eq!(report["cases"][0]["settlement"],if earlier.is_some(){"USED"}else{"PENDING"});
-        assert_eq!(reserved(&r),20000);
-        assert_eq!(r.application_evidence("test_run").unwrap()["payment_attempts_correlated"],2);
+        r.finish_managed("test_run", "call", Some(b"{}"), true)
+            .unwrap();
+        let snapshot = json!({"treasury_status":{"treasury_id":f.manifest.treasury_id},"payment_attempts":attempts,"payment_resolutions":resolutions});
+        r.apply_settlement("test_run", &snapshot, true).unwrap();
+        let report = r.report(Some("test_run"), 12).unwrap();
+        assert_eq!(
+            report["cases"][0]["settlement"],
+            if earlier.is_some() { "USED" } else { "PENDING" }
+        );
+        assert_eq!(reserved(&r), 20000);
+        assert_eq!(
+            r.application_evidence("test_run").unwrap()["payment_attempts_correlated"],
+            2
+        );
         assert!(r.verified_debits("test_run").unwrap().is_empty());
     }
 }
@@ -800,7 +819,7 @@ fn seller_receipts_are_correlated_but_never_promoted_to_chain_evidence() {
     r.dispatching("test_run", "call").unwrap();
     let payer = format!("0x{:040x}", 1);
     r.event("test_run","application_claim",&json!({"case":"call","session":"s","server":"main","source":"api","tool":"api_read","mode":"managed","started_micros":0}),10).unwrap();
-    r.event("test_run","application_payment",&json!({"case":"call","session":"s","stage":"admitted_before_signing","amount":"1","attempt_id":"a","address":payer}),10).unwrap();
+    r.event("test_run","application_payment",&json!({"case":"call","session":"s","stage":"signed_admission_pending","admission_evidence_version":2,"ownership_evidence_version":1,"payer_role":"ACTIVE","reserve_slot":null,"claim_generation":null,"balance_evidence":{"schema_version":3,"estimate_atomic":null},"amount":"1","attempt_id":"a","address":payer}),10).unwrap();
     let receipt = json!({"case":"call","session":"s","attempt_id":"a","receipt":{"classification":"seller_success","network":"eip155:8453","transaction":format!("0x{:064x}",2),"payer":payer}});
     r.event("test_run", "application_receipt", &receipt, 10)
         .unwrap();
@@ -833,14 +852,20 @@ fn seller_receipts_are_correlated_but_never_promoted_to_chain_evidence() {
     assert_eq!(reserved(&r), 20000);
     assert_eq!(before["cases"], after["cases"]);
     assert_eq!(r.verified_debits("test_run").unwrap().len(), 1);
-    let mut earlier=json!({"case":"call","session":"s","stage":"admitted_before_signing","amount":"1","attempt_id":"earlier","address":payer});
-    r.event("test_run","application_payment",&earlier,10).unwrap();
-    assert!(r.verified_debits("test_run").unwrap().is_empty(),"later debit cannot hide unresolved earlier charge");
-    let observed=json!({"case":"call","attempts":[{"attempt_id":"earlier","resolution":{"attempt_id":"earlier","outcome":"EXPIRED_UNUSED","height":42,"hash":format!("0x{:064x}",4),"block_time":1000}}]});
-    r.event("test_run","payment_observed",&observed,10).unwrap();
-    assert_eq!(r.verified_debits("test_run").unwrap().len(),1);
-    earlier["attempt_id"]=json!("unknown");
-    r.event("test_run","application_payment",&earlier,10).unwrap();
+    let mut earlier = json!({"case":"call","session":"s","stage":"signed_admission_pending","admission_evidence_version":2,"ownership_evidence_version":1,"payer_role":"ACTIVE","reserve_slot":null,"claim_generation":null,"balance_evidence":{"schema_version":3,"estimate_atomic":null},"amount":"1","attempt_id":"earlier","address":payer});
+    r.event("test_run", "application_payment", &earlier, 10)
+        .unwrap();
+    assert!(
+        r.verified_debits("test_run").unwrap().is_empty(),
+        "later debit cannot hide unresolved earlier charge"
+    );
+    let observed = json!({"case":"call","attempts":[{"attempt_id":"earlier","resolution":{"attempt_id":"earlier","outcome":"EXPIRED_UNUSED","height":42,"hash":format!("0x{:064x}",4),"block_time":1000}}]});
+    r.event("test_run", "payment_observed", &observed, 10)
+        .unwrap();
+    assert_eq!(r.verified_debits("test_run").unwrap().len(), 1);
+    earlier["attempt_id"] = json!("unknown");
+    r.event("test_run", "application_payment", &earlier, 10)
+        .unwrap();
     assert!(r.verified_debits("test_run").unwrap().is_empty());
     let db = rusqlite::Connection::open(f.state.join("live-integration/registry.sqlite")).unwrap();
     db.execute("UPDATE events SET detail=json_set(detail,'$.proof.amount_atomic','2') WHERE kind='application_debit_verified'",[]).unwrap();
@@ -889,24 +914,19 @@ fn rotation_fixture() -> Fixture {
     f
 }
 fn rotation_states(treasury: &str) -> (Value, Value) {
-    let wallet = |id, n, role| json!({"id":id,"address":format!("0x{n:040x}"),"role":role,"target":"2000000"});
-    let before = json!({"treasury_id":treasury,"pools":[{"id":"p","name":"pool","generation":0,"addresses":[wallet("a",1,"ACTIVE"),wallet("b",2,"READY")]}],"funding_jobs":[]});
-    let after = json!({"treasury_id":treasury,"pools":[{"id":"p","name":"pool","generation":1,"addresses":[wallet("a",1,"RETIRED"),wallet("b",2,"ACTIVE"),wallet("c",3,"ALLOCATED")]}],"funding_jobs":[{"id":"job","pool_id":"p","wallet_id":"c","recipient":format!("0x{:040x}",3),"target":"2000000","phase":"ALLOCATED"}]});
+    let wallet = |id, n, role| json!({"id":id,"address":format!("0x{n:040x}"),"role":role,"target":"2000000","destination_recorded":role!="ALLOCATED"});
+    let before = json!({"schema_version":2,"treasury_id":treasury,"pools":[{"id":"p","name":"pool","generation":0,"addresses":[wallet("a",1,"ACTIVE"),wallet("b",2,"READY")],"reserve_claims":[{"slot":"small","enabled":true,"generation":0,"wallet_id":"b","destination_ready":true}]}],"funding_jobs":[],"source_operations":[]});
+    let after = json!({"schema_version":2,"treasury_id":treasury,"pools":[{"id":"p","name":"pool","generation":0,"addresses":[wallet("a",1,"RETAINED"),wallet("b",2,"ACTIVE"),wallet("c",3,"ALLOCATED")],"reserve_claims":[{"slot":"small","enabled":true,"generation":1,"wallet_id":"c","destination_ready":false}]}],"funding_jobs":[{"id":"job","pool_id":"p","wallet_id":"c","recipient":format!("0x{:040x}",3),"target":"2000000","operation_id":"op","phase":"ALLOCATED"}],"source_operations":[]});
     (before, after)
 }
+
 #[test]
 fn capacity_consumption_vacancy_durably_stops_depletion_before_refill_allocation() {
     let f = rotation_fixture();
     let mut r = f.open();
     f.prepare(&mut r);
     let run = &f.manifest.run_id;
-    let (mut before, mut after) = rotation_states(&f.manifest.treasury_id);
-    before["schema_version"] = json!(2);
-    after["schema_version"] = json!(2);
-    before["pools"][0]["addresses"][1]["destination_recorded"] = json!(true);
-    before["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":0,"wallet_id":"b","destination_ready":true}]);
-    after["pools"][0]["generation"] = json!(0);
-    after["pools"][0]["addresses"][0]["role"] = json!("RETAINED");
+    let (before, mut after) = rotation_states(&f.manifest.treasury_id);
     after["pools"][0]["addresses"].as_array_mut().unwrap().pop();
     after["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":1,"wallet_id":null,"destination_ready":false}]);
     after["funding_jobs"] = json!([]);
@@ -1017,7 +1037,7 @@ fn rotation_boundary_refuses_inflight_tail_and_premature_service_atomically() {
 }
 
 #[test]
-fn rotation_boundaries_require_new_jobs_and_consecutive_generations() {
+fn rotation_boundaries_require_new_jobs_and_consecutive_reserve_claims() {
     let mut f = rotation_fixture();
     let mut second = match &f.manifest.phases[0].scenario {
         crate::manifest::Scenario::Rotation { rounds, .. } => rounds[0].clone(),
@@ -1066,17 +1086,49 @@ fn rotation_boundaries_require_new_jobs_and_consecutive_generations() {
     );
     let mut ready = after;
     ready["pools"][0]["addresses"][2]["role"] = json!("READY");
+    ready["pools"][0]["addresses"][2]["destination_recorded"] = json!(true);
+    ready["pools"][0]["reserve_claims"][0]["destination_ready"] = json!(true);
     ready["funding_jobs"][0]["phase"] = json!("COMPLETE");
     let mut rotated = ready.clone();
-    rotated["pools"][0]["generation"] = json!(2);
-    rotated["pools"][0]["addresses"][1]["role"] = json!("RETIRED");
+    rotated["pools"][0]["addresses"][1]["role"] = json!("RETAINED");
     rotated["pools"][0]["addresses"][2]["role"] = json!("ACTIVE");
     let address = format!("0x{:040x}", 4);
     rotated["pools"][0]["addresses"]
         .as_array_mut()
         .unwrap()
-        .push(json!({"id":"d","address":address,"role":"ALLOCATED","target":"2000000"}));
+        .push(json!({"id":"d","address":address,"role":"ALLOCATED","target":"2000000","destination_recorded":false}));
+    rotated["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":2,"wallet_id":"d","destination_ready":false}]);
     rotated["funding_jobs"].as_array_mut().unwrap().push(json!({"id":"second_job","pool_id":"p","wallet_id":"d","recipient":address,"target":"2000000","phase":"ALLOCATED"}));
+    // A coherent boundary may consume the next slot, but cannot change the
+    // existing group's identity between rounds.
+    let mut changed_before = ready.clone();
+    let mut changed_after = rotated.clone();
+    changed_before["pools"][0]["generation"] = json!(2);
+    changed_after["pools"][0]["generation"] = json!(2);
+    assert_eq!(
+        x402_treazury::qualification::lifecycle::consumed_reserve(
+            &changed_before,
+            &changed_after,
+            "p"
+        )
+        .unwrap()
+        .as_deref(),
+        Some("second_job"),
+    );
+    assert_eq!(
+        r.stop_depletion(run, "smoke", 1, &changed_before, &changed_after, 10)
+            .unwrap_err()
+            .to_string(),
+        "rotation boundaries reused or skipped a generation",
+    );
+    assert_eq!(reserved(&r), 60000);
+    let mut skipped_claim = rotated.clone();
+    skipped_claim["pools"][0]["reserve_claims"][0]["generation"] = json!(3);
+    assert!(
+        r.stop_depletion(run, "smoke", 1, &ready, &skipped_claim, 10)
+            .is_err()
+    );
+    assert_eq!(reserved(&r), 60000);
     assert!(
         r.stop_depletion(run, "smoke", 1, &ready, &rotated, 10)
             .unwrap()
@@ -1222,10 +1274,15 @@ fn source_attribution_is_bound_to_run_and_frozen_at_capture() {
     assert_eq!(attributed["registry_unreleased_bounds_zatoshis"], 110);
     assert_eq!(attributed["attempts_without_transaction_facts"], 1);
     db.execute("UPDATE events SET detail=json_remove(detail,'$.source_attempts') WHERE kind='accounting_observed'",[]).unwrap();
+    let snapshot = || {
+        db.query_row("SELECT detail,(SELECT SUM(reservation) FROM cases) FROM events WHERE kind='accounting_observed'", [], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?))).unwrap()
+    };
+    let before = snapshot();
+    assert!(r.report(Some(&run), 6).is_err());
     assert_eq!(
-        r.report(Some(&run), 6).unwrap()["treasury_accounting"]["observations"][0]["run_source_accounting"]
-            ["status"],
-        "unobserved"
+        snapshot(),
+        before,
+        "unsupported accounting must preserve evidence and reservations"
     );
 }
 

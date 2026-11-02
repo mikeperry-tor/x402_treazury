@@ -27,63 +27,57 @@ pub(crate) fn conservative_balance(evidence: &Value) -> Result<U256> {
             .context("balance amount missing")?
             .parse()?)
     };
-    match evidence.get("schema_version") {
-        // Historical records used this name for min(confirmed, latest). Reading
-        // them must neither relabel it as an exact value nor increase capacity.
-        None => amount("confirmed_balance_atomic"),
-        Some(version) if version.as_u64() == Some(2) => {
-            let confirmed = amount("confirmed_balance_atomic")?;
-            let latest = amount("latest_balance_atomic")?;
-            let conservative = amount("conservative_balance_atomic")?;
-            ensure!(
-                conservative == confirmed.min(latest),
-                "conservative balance disagrees with exact observations"
-            );
-            let height = evidence["block_height"]
-                .as_u64()
-                .context("confirmed balance height missing")?;
-            let latest_height = evidence["latest_block_height"]
-                .as_u64()
-                .context("latest balance height missing")?;
-            ensure!(
-                latest_height > height,
-                "invalid balance observation heights"
-            );
-            for field in ["block_hash", "latest_block_hash"] {
-                evidence[field]
-                    .as_str()
-                    .context("balance hash missing")?
-                    .parse::<B256>()?;
-            }
-            Ok(conservative)
-        }
-        _ => anyhow::bail!("unknown balance evidence version"),
+    ensure!(
+        evidence["schema_version"] == 2,
+        "unknown balance evidence version"
+    );
+    let confirmed = amount("confirmed_balance_atomic")?;
+    let latest = amount("latest_balance_atomic")?;
+    let conservative = amount("conservative_balance_atomic")?;
+    ensure!(
+        conservative == confirmed.min(latest),
+        "conservative balance disagrees with exact observations"
+    );
+    let height = evidence["block_height"]
+        .as_u64()
+        .context("confirmed balance height missing")?;
+    let latest_height = evidence["latest_block_height"]
+        .as_u64()
+        .context("latest balance height missing")?;
+    ensure!(
+        latest_height > height,
+        "invalid balance observation heights"
+    );
+    for field in ["block_hash", "latest_block_hash"] {
+        evidence[field]
+            .as_str()
+            .context("balance hash missing")?
+            .parse::<B256>()?;
     }
+    Ok(conservative)
 }
 
 pub fn validate_admission_balance(payment: &Value) -> Result<()> {
-    if let Some(version) = payment.get("ownership_evidence_version") {
-        ensure!(
-            version.as_u64() == Some(1),
-            "unknown admission ownership evidence version"
-        );
-        let slot = payment
-            .get("reserve_slot")
-            .context("admission reserve slot missing")?;
-        let generation = payment
-            .get("claim_generation")
-            .context("admission claim generation missing")?;
-        match payment["payer_role"].as_str() {
-            Some("READY") => ensure!(
-                matches!(slot.as_str(), Some("small" | "large")) && generation.as_u64().is_some(),
-                "READY admission lacks exact reserve claim"
-            ),
-            Some("ACTIVE" | "RETAINED") => ensure!(
-                slot.is_null() && generation.is_null(),
-                "non-reserve admission carries a reserve claim"
-            ),
-            _ => anyhow::bail!("admission payer role is not payment eligible"),
-        }
+    ensure!(
+        payment["ownership_evidence_version"] == 1,
+        "unknown admission ownership evidence version"
+    );
+    let slot = payment
+        .get("reserve_slot")
+        .context("admission reserve slot missing")?;
+    let generation = payment
+        .get("claim_generation")
+        .context("admission claim generation missing")?;
+    match payment["payer_role"].as_str() {
+        Some("READY") => ensure!(
+            matches!(slot.as_str(), Some("small" | "large")) && generation.as_u64().is_some(),
+            "READY admission lacks exact reserve claim"
+        ),
+        Some("ACTIVE" | "RETAINED") => ensure!(
+            slot.is_null() && generation.is_null(),
+            "non-reserve admission carries a reserve claim"
+        ),
+        _ => anyhow::bail!("admission payer role is not payment eligible"),
     }
     if payment["balance_evidence"]["schema_version"] == 3 {
         let cost: U256 = payment["amount"]
@@ -132,10 +126,11 @@ mod tests {
     #[test]
     fn exact_balances_do_not_replace_conservative_admission_arithmetic() {
         let evidence = json!({"schema_version":2,"confirmed_balance_atomic":"80","latest_balance_atomic":"30","conservative_balance_atomic":"30","reserved_before_atomic":"5","reserved_after_atomic":"12","available_after_atomic":"18","block_height":12,"block_hash":format!("0x{:064x}",1),"latest_block_height":24,"latest_block_hash":format!("0x{:064x}",2)});
-        let payment = json!({"amount":"7","balance_evidence":evidence});
+        let payment = json!({"amount":"7","ownership_evidence_version":1,"payer_role":"ACTIVE","reserve_slot":null,"claim_generation":null,"balance_evidence":evidence});
         validate_admission_balance(&payment).unwrap();
         for (field, value) in [
             ("schema_version", json!(4)),
+            ("schema_version", Value::Null),
             ("latest_balance_atomic", Value::Null),
             ("conservative_balance_atomic", json!("80")),
             ("available_after_atomic", json!("68")),
@@ -154,7 +149,7 @@ mod tests {
 
     #[test]
     fn versioned_ownership_requires_exact_original_role_and_claim() {
-        let mut payment = json!({"amount":"7","ownership_evidence_version":1,"payer_role":"READY","reserve_slot":"small","claim_generation":2,"balance_evidence":{"confirmed_balance_atomic":"20","reserved_before_atomic":"5","reserved_after_atomic":"12","available_after_atomic":"8","block_height":12,"block_hash":format!("0x{:064x}",1)}});
+        let mut payment = json!({"amount":"7","ownership_evidence_version":1,"payer_role":"READY","reserve_slot":"small","claim_generation":2,"balance_evidence":{"schema_version":2,"latest_balance_atomic":"20","conservative_balance_atomic":"20","latest_block_height":24,"latest_block_hash":format!("0x{:064x}",2),"confirmed_balance_atomic":"20","reserved_before_atomic":"5","reserved_after_atomic":"12","available_after_atomic":"8","block_height":12,"block_hash":format!("0x{:064x}",1)}});
         validate_admission_balance(&payment).unwrap();
         for (field, value) in [
             ("ownership_evidence_version", json!(2)),
@@ -171,12 +166,27 @@ mod tests {
         payment["reserve_slot"] = Value::Null;
         payment["claim_generation"] = Value::Null;
         validate_admission_balance(&payment).unwrap();
+        payment["claim_generation"] = json!(2);
+        assert!(validate_admission_balance(&payment).is_err());
+        payment["claim_generation"] = Value::Null;
         payment.as_object_mut().unwrap().remove("reserve_slot");
         assert!(validate_admission_balance(&payment).is_err());
     }
     #[test]
+    fn advisory_admission_requires_authority_but_not_balance_or_solvency() {
+        let mut payment = json!({"amount":"7","ownership_evidence_version":1,"payer_role":"ACTIVE","reserve_slot":null,"claim_generation":null,"balance_evidence":{"schema_version":3,"estimate_atomic":null}});
+        validate_admission_balance(&payment).unwrap();
+        payment["balance_evidence"]["estimate_atomic"] = json!("0");
+        validate_admission_balance(&payment).unwrap();
+        payment["ownership_evidence_version"] = Value::Null;
+        assert!(validate_admission_balance(&payment).is_err());
+        payment["ownership_evidence_version"] = json!(1);
+        payment["amount"] = json!("0");
+        assert!(validate_admission_balance(&payment).is_err());
+    }
+    #[test]
     fn accounting_rejects_overspending_missing_exposure_and_arithmetic_overflow() {
-        let payment = json!({"amount":"7","balance_evidence":{"confirmed_balance_atomic":"20","reserved_before_atomic":"5","reserved_after_atomic":"12","available_after_atomic":"8","block_height":12,"block_hash":format!("0x{:064x}",1)}});
+        let payment = json!({"amount":"7","ownership_evidence_version":1,"payer_role":"ACTIVE","reserve_slot":null,"claim_generation":null,"balance_evidence":{"schema_version":2,"latest_balance_atomic":"20","conservative_balance_atomic":"20","latest_block_height":24,"latest_block_hash":format!("0x{:064x}",2),"confirmed_balance_atomic":"20","reserved_before_atomic":"5","reserved_after_atomic":"12","available_after_atomic":"8","block_height":12,"block_hash":format!("0x{:064x}",1)}});
         validate_admission_balance(&payment).unwrap();
         for (field, value) in [
             ("confirmed_balance_atomic", json!("11")),
@@ -191,6 +201,20 @@ mod tests {
             wrong["balance_evidence"][field] = value;
             assert!(validate_admission_balance(&wrong).is_err(), "{field}");
         }
+        let mut overspent = payment.clone();
+        for field in [
+            "confirmed_balance_atomic",
+            "latest_balance_atomic",
+            "conservative_balance_atomic",
+        ] {
+            overspent["balance_evidence"][field] = json!("11");
+        }
+        assert!(
+            validate_admission_balance(&overspent)
+                .unwrap_err()
+                .to_string()
+                .contains("admission exposure exceeds")
+        );
         assert!(validate_admission_balance(&json!({"amount":"7"})).is_err());
         let mut zero = payment;
         zero["amount"] = json!("0");

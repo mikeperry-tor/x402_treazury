@@ -1,12 +1,18 @@
+fn wallet(id: &str, n: u64, role: &str) -> Value {
+    json!({"id":id,"address":format!("0x{n:040x}"),"role":role,"target":"2000000"})
+}
 fn capacity_fixture() -> (Value, Value) {
-    let (mut before, mut after) = promoted();
-    before["schema_version"] = json!(2);
-    after["schema_version"] = json!(2);
-    after["pools"][0]["generation"] = json!(0);
-    after["pools"][0]["addresses"][0]["role"] = json!("RETAINED");
-    before["pools"][0]["addresses"][1]["destination_recorded"] = json!(true);
-    before["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":4,"wallet_id":"ready","destination_ready":true}]);
-    after["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,"generation":5,"wallet_id":"new","destination_ready":false}]);
+    let before = json!({"schema_version":2,"treasury_id":"treasury","pools":[{
+        "id":"p","name":"pool","generation":0,
+        "addresses":[wallet("old",1,"ACTIVE"),
+            {"id":"ready","address":format!("0x{:040x}",2),"role":"READY","target":"2000000","destination_recorded":true}],
+        "reserve_claims":[{"slot":"small","enabled":true,"generation":4,"wallet_id":"ready","destination_ready":true}]
+    }],"funding_jobs":[]});
+    let after = json!({"schema_version":2,"treasury_id":"treasury","pools":[{
+        "id":"p","name":"pool","generation":0,
+        "addresses":[wallet("old",1,"RETAINED"),wallet("ready",2,"ACTIVE"),wallet("new",3,"ALLOCATED")],
+        "reserve_claims":[{"slot":"small","enabled":true,"generation":5,"wallet_id":"new","destination_ready":false}]
+    }],"funding_jobs":[{"id":"replacement","pool_id":"p","wallet_id":"new","recipient":format!("0x{:040x}",3),"target":"2000000","operation_id":"op","phase":"ALLOCATED"}]});
     (before, after)
 }
 

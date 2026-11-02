@@ -88,13 +88,12 @@ impl Registry {
                 observation["data"]["treasury_id"] == manifest.treasury_id,
                 "accounting treasury mismatch"
             );
-            let attributed = match observation.get("source_attempts") {
-                None => json!({"status":"unobserved"}),
-                Some(value) => crate::accounting_attribution::source(
-                    &observation["data"],
-                    value.as_array().context("invalid attributed attempts")?,
-                )?,
-            };
+            let attributed = crate::accounting_attribution::source(
+                &observation["data"],
+                observation["source_attempts"]
+                    .as_array()
+                    .context("invalid attributed attempts")?,
+            )?;
             result.push(json!({"session":session,"observed_at":at,"summary":crate::accounting::summarize(&observation["data"])?,"run_source_accounting":attributed,"baseline_comparison":crate::accounting_baseline::compare(&baseline,&observation["data"])?}));
         }
         Ok(

@@ -241,7 +241,7 @@ fn render_api_accounting(
 
 fn render_treasury_accounting(out: &mut String, report: &Value) -> Result<()> {
     if let Some(observations) = report["treasury_accounting"]["observations"].as_array() {
-        out.push_str("\n## Persisted treasury accounting\n\nTreasury-wide saved observations include history outside this run. These are not fresh chain reads or new spending authority. Refund outputs are reported separately, not subtracted again from costs. Missing observations do not establish zero balances.\n");
+        out.push_str("\n## Persisted treasury accounting\n\nTreasury-wide saved observations include history outside this run. These are not fresh chain reads or new spending authority. Source reservations and refund-output totals are unavailable from current SDK transaction facts. Missing observations do not establish zero balances.\n");
         if observations.is_empty() {
             out.push_str("No clean-shutdown accounting snapshot was recorded.\n");
         }
@@ -259,18 +259,14 @@ fn render_treasury_observation(out: &mut String, observation: &Value, index: usi
     if attributed["scope"] == "run_funding_permits" {
         writeln!(
             out,
-            "Run-attributed source costs: principal **{} zatoshis**, fees **{} zatoshis**, consumed **{} zatoshis**; treasury reservations **{} zatoshis**. Registry unreleased bounds: **{} zatoshis**; released bounds: **{} zatoshis**; attempts without treasury budget evidence: **{}**. Refund outputs: **{} zatoshis**, reported separately. Registry bounds remain conservative after settlement and are not additional spending.",
+            "Run-attributed source costs: principal **{} zatoshis**, fees **{} zatoshis**, consumed **{} zatoshis**; treasury reservations **{} zatoshis**. Registry unreleased bounds: **{} zatoshis**; released bounds: **{} zatoshis**; attempts without transaction facts: **{}**. Refund outputs: **{} zatoshis**, reported separately. Registry bounds remain conservative after settlement and are not additional spending.",
             atomics(&attributed["recorded_principal_zatoshis"])?,
             atomics(&attributed["recorded_fees_zatoshis"])?,
             atomics(&attributed["recorded_consumed_zatoshis"])?,
             optional_atomics(&attributed["source_reserved_zatoshis"])?,
             atomics(&attributed["registry_unreleased_bounds_zatoshis"])?,
             atomics(&attributed["registry_released_bounds_zatoshis"])?,
-            optional_atomics(
-                attributed
-                    .get("attempts_without_transaction_facts")
-                    .unwrap_or(&attributed["attempts_without_treasury_budget"])
-            )?,
+            atomics(&attributed["attempts_without_transaction_facts"])?,
             optional_atomics(&attributed["recorded_refund_outputs_zatoshis"])?
         )?;
     } else {
@@ -306,7 +302,7 @@ fn render_treasury_observation(out: &mut String, observation: &Value, index: usi
             atomics(&summary["zec_observation"]["spendable_shielded_zatoshis"])?
         )?;
     }
-    out.push_str("\n| Wallet role | Wallets | Anchored observations | Unobserved | Saved balance (USDC atomic) |\n| --- | ---: | ---: | ---: | ---: |\n");
+    out.push_str("\n| Wallet role | Wallets | Available estimates | Unobserved | Saved balance (USDC atomic) |\n| --- | ---: | ---: | ---: | ---: |\n");
     for role in ["ACTIVE", "READY", "RETAINED", "ALLOCATED", "RETIRED"] {
         let row = &summary["wallet_roles"][role];
         if row.is_null() {
@@ -323,7 +319,7 @@ fn render_treasury_observation(out: &mut String, observation: &Value, index: usi
             out,
             "| {role} | {} | {} | {} | {balance} |",
             atomics(&row["wallets"])?,
-            optional_atomics(&row["anchored_observations"])?,
+            atomics(&row["available_estimates"])?,
             atomics(&row["unobserved_wallets"])?
         )?;
     }
@@ -351,7 +347,7 @@ fn render_baseline_comparison(out: &mut String, observation: &Value) -> Result<(
             )?;
         }
         if comparison["wallets"]["aggregate_change_atomic"].is_null() {
-            out.push_str("Aggregate USDC balance change: unobserved (missing wallet anchors).\n");
+            out.push_str("Aggregate USDC balance change: unobserved (missing wallet estimates).\n");
         } else {
             writeln!(
                 out,
@@ -670,7 +666,7 @@ mod tests {
             "lifecycle":[],"network":"owned_control_audit_required"});
         let data = crate::accounting::fixture();
         let mut historical = data.clone();
-        historical["source_budget_entries"][2]["reserved"] = json!(100);
+        historical["sync"]["spendable_shielded_zatoshis"] = json!(60);
         value["treasury_accounting"] = json!({"observations":[{
             "session":"secret-session",
             "summary":crate::accounting::summarize(&data).unwrap(),
@@ -834,7 +830,7 @@ mod tests {
         let mut value = report();
         let data = crate::accounting::fixture();
         let mut historical = data.clone();
-        historical["source_budget_entries"][2]["reserved"] = json!(100);
+        historical["sync"]["spendable_shielded_zatoshis"] = json!(60);
         let comparison = crate::accounting_baseline::compare(
             &crate::accounting_baseline::snapshot(&historical),
             &data,
@@ -842,9 +838,12 @@ mod tests {
         .unwrap();
         value["treasury_accounting"] = json!({"observations":[{"summary":crate::accounting::summarize(&data).unwrap(),"baseline_comparison":comparison}]});
         let text = markdown(&value).unwrap();
-        assert!(text.contains("| Treasury reservations | 100 | 70 | -30 |"));
+        assert!(
+            text.contains("| Treasury reservations | unavailable | unavailable | unavailable |")
+        );
+        assert!(text.contains("spendable **-10 zatoshis**"));
         assert!(text.contains("may span multiple runs"));
-        assert!(text.contains("unobserved (missing wallet anchors)"));
+        assert!(text.contains("unobserved (missing wallet estimates)"));
         assert!(!text.contains("private-"));
         value["treasury_accounting"]["observations"][0]["baseline_comparison"]["source"]["recorded_fees_zatoshis"]
             ["change"] = json!("private-content");
