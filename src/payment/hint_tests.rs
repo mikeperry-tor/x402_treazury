@@ -407,6 +407,17 @@ async fn earlier_headers_with_late_body_cannot_overwrite_a_newer_lower_price() {
     );
     assert_eq!(process_hints().get(key), Some(U256::from(3000)));
     assert!(process_hints().saved_receipt(key) == Some(newer));
+    let tools = crate::catalog::build_tools(&Default::default(), &json!({"paths":{
+        "/items/{id}":{"get":{"summary":"Read item.","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}]}}
+    }}), "priced").unwrap();
+    let name = tools[0].name.clone();
+    let server = crate::server::Server::new(tools, f.client.clone(), f.base.clone(), None);
+    use rmcp::ServerHandler;
+    assert_eq!(
+        server.get_tool(&name).unwrap().description.as_deref(),
+        Some("Read item. Observed cost: ~$0.003/call.")
+    );
+    drop(server);
     assert_eq!(f.unsigned.load(Ordering::SeqCst), 2);
     f.close().await;
 }
@@ -500,6 +511,51 @@ async fn managed_mcp_outputs_keep_their_offer_across_success_media_and_errors() 
                         .contains("Do not retry automatically.")
                 );
             }
+            let listing_request = if discovered {
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"x402_treazury_tools_search","arguments":{"query":"priced_items"}}})
+            } else {
+                json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}})
+            };
+            let listing: Value = http
+                .post(&endpoint)
+                .bearer_auth("fixture")
+                .header("accept", "application/json, text/event-stream")
+                .json(&listing_request)
+                .send()
+                .await
+                .unwrap()
+                .mcp_json()
+                .await
+                .unwrap();
+            let description = if discovered {
+                assert_eq!(listing["result"]["content"].as_array().unwrap().len(), 1);
+                let search: Value =
+                    serde_json::from_str(listing["result"]["content"][0]["text"].as_str().unwrap())
+                        .unwrap();
+                assert_eq!(search["items"][0]["tool_id"], "priced_items");
+                assert_eq!(listing["result"]["structuredContent"], search);
+                search["items"][0]["description"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            } else {
+                let tool = listing["result"]["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|tool| tool["name"] == "priced_items")
+                    .unwrap();
+                tool["description"].as_str().unwrap().to_owned()
+            };
+            assert_eq!(
+                description,
+                format!(
+                    "GET /items Observed cost: ~${}/call.",
+                    crate::output::ObservedPrice {
+                        amount: U256::from(amount)
+                    }
+                )
+            );
             calls += 1;
             signatures += 1;
         }

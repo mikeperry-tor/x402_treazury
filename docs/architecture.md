@@ -383,6 +383,9 @@ success. Typed results flow through `PaidClient::execute_response`,
 `BoundTool::invoke_output` and `Server::invoke_output`, including dynamic fallback.
 A managed target call retains its latest fully validated offer through response
 conversion and failures, independently of shared price hints and other calls.
+For overlapping calls, a later-finishing call can report `0.009` while a fresh
+description shows `0.003` from an offer received later. Completion order does not
+replace the newer shared hint or change either call's own observation.
 MCP appends one complete JSON text block after body text and images, before
 advisories: `{"x402_pricing":{"amount":"0.005","currency":"USDC","basis":"observed_offer"}}`.
 The amount uses exact decimal USDC units. It describes the observed offer, not

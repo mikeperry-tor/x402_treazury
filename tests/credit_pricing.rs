@@ -256,6 +256,29 @@ async fn comprehensive_subsets_inherit_conversion_despite_endpoint_instruction_o
                     .any(|t| cfg.tags.iter().any(|wanted| t == wanted))
             );
         }
+        if let Some(profile) = selected
+            .iter()
+            .find(|tool| tool.name == "socialfetch_twitter_profiles_handle")
+        {
+            let fallback = profile.description.clone();
+            assert!(fallback.contains("1 credit per successful request."));
+            assert!(fallback.contains("0.014"));
+            let observed = Some(x402_treazury::output::ObservedPrice {
+                amount: alloy_primitives::U256::from(5_000),
+            });
+            let rendered = profile.render_description(observed);
+            assert_eq!(
+                rendered,
+                "Get an X (Twitter) profile by handle or numeric user id. Observed cost: ~$0.005/call."
+            );
+            assert!(!rendered.contains("1 credit per successful request."));
+            assert!(!rendered.contains("Estimated cost:"));
+            assert!(!rendered.contains("0.014"));
+            assert!(!rendered.contains("[conf]"));
+            assert_eq!(profile.render_description(observed), rendered);
+            assert_eq!(profile.render_description(None), fallback);
+            assert_eq!(profile.description, fallback);
+        }
         let name = selected[0].name.clone();
         cfg.overrides = json!({name.clone():{"description":"Operator description."}});
         let overridden = catalog::build_tools(&cfg, &document, "socialfetch").unwrap();

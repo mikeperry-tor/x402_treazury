@@ -2,6 +2,92 @@
 use serde_json::Value;
 use std::path::Path;
 
+fn assert_observed_tariff(
+    tool: &x402_treazury::catalog::ToolSpec,
+    tariff: &str,
+    retained: &[&str],
+) {
+    let fallback = tool.description.clone();
+    assert!(fallback.contains(tariff), "{}: {fallback}", tool.name);
+    let observed = Some(x402_treazury::output::ObservedPrice {
+        amount: alloy_primitives::U256::from(5_000),
+    });
+    let rendered = tool.render_description(observed);
+    assert_eq!(rendered.matches("Observed cost: ~$0.005/call.").count(), 1);
+    assert!(!rendered.contains(tariff), "{}: {rendered}", tool.name);
+    for text in retained {
+        assert!(rendered.contains(text), "{}: {rendered}", tool.name);
+    }
+    assert_eq!(tool.render_description(observed), rendered);
+    assert_eq!(tool.render_description(None), fallback);
+    assert_eq!(tool.description, fallback);
+}
+
+#[tokio::test]
+async fn authored_tariffs_preserve_unmatched_billing_and_other_tool_prices() {
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+
+    // HALOWERK's authored override is its only usable structured display tariff.
+    let cfg = config::load(&root.join("providers/halowerk.toml"))
+        .await
+        .unwrap()
+        .settings;
+    assert!(cfg.pricing_key.is_none());
+    let doc = serde_json::json!({"paths":{"/v1/geocode":{"post":{"summary":"Geocode"}}}});
+    let tools = catalog::build_tools(&cfg, &doc, "halowerk").unwrap();
+    let geocode = tools
+        .iter()
+        .find(|tool| tool.name == "halowerk_geocode")
+        .unwrap();
+    assert!(!geocode.description.contains("Cost: unknown."));
+    assert_observed_tariff(
+        geocode,
+        "Cost: ~$0.001/call [spec].",
+        &[
+            "reverse-geocode lat/lon",
+            "normalized address components, coordinates and confidence",
+        ],
+    );
+
+    // PDL's unmatched-result billing condition survives replacement of its tariff.
+    let cfg = config::load(&root.join("providers/pdl.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value = serde_json::from_str(include_str!("fixtures/pdl_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "pdl").unwrap();
+    let enrich = tools
+        .iter()
+        .find(|tool| tool.name == "pdl_company_enrich")
+        .unwrap();
+    assert_observed_tariff(
+        enrich,
+        "$0.10 per match.",
+        &[
+            "Billed per match; requests with no match are free.",
+            "Provide at least one identifier",
+        ],
+    );
+
+    // Kronos's own free tariff is distinct from the other tool's paid alternative.
+    let cfg = config::load(&root.join("providers/kronos.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value = serde_json::from_str(include_str!("fixtures/kronos_openapi.json")).unwrap();
+    let tools = catalog::build_tools(&cfg, &doc, "kronos").unwrap();
+    let record = tools
+        .iter()
+        .find(|tool| tool.name == "kronos_track_record")
+        .unwrap();
+    assert_observed_tariff(
+        record,
+        "Free.",
+        &["Brier score", "kronos_forecast_ledger", "$0.02/call"],
+    );
+}
+
 #[tokio::test]
 async fn banking_compliance_projects_typed_post_bodies_and_excludes_unmodeled_campaign() {
     use serde_json::json;
@@ -1828,6 +1914,27 @@ async fn relayshield_catalog_and_phone_companion_preserve_contracts() {
     doc["paths"]["/v1/payg/new-public-check"] =
         serde_json::json!({"post":{"description":"new supported request"}});
     let tools = catalog::build_tools(&cfg, &doc, "relayshield").unwrap();
+    let ip_intel = tools
+        .iter()
+        .find(|tool| tool.name == "relayshield_ip_intel")
+        .unwrap();
+    assert_observed_tariff(
+        ip_intel,
+        "Cost: ~$0.10/call [spec].",
+        &[
+            "passive DNS resolution history",
+            "Vendor bills successful calls.",
+        ],
+    );
+    let link_check = tools
+        .iter()
+        .find(|tool| tool.name == "relayshield_v1_link_check")
+        .unwrap();
+    assert_observed_tariff(
+        link_check,
+        "Vendor contract: free; no payment required.",
+        &["per-IP daily allowance", "a batch counts once per URL"],
+    );
     for suffix in ["email_check", "link_check", "wallet_risk"] {
         let public = tools
             .iter()
