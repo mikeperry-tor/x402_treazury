@@ -182,8 +182,11 @@ alone does not qualify those Docker-dependent assertions.
 
 Synthetic proving also checks a calculated transaction whose journal publication
 fails. The existing owner retains completed bytes and the durable accepted-input
-claim; after local publication succeeds, reopen preserves those identical bytes.
-No second calculation or broadcast occurs. Run it with:
+claim; local publication retry, proof/facts verification, pending-input
+unspendability and encrypted reopen share that single calculated transaction.
+No second calculation or broadcast occurs. The scan/lookup race lifecycle fixture
+separately asserts normal preparation returns a healthy owner, clears the completed
+calculation and advances its snapshot revision once. Run proving with:
 
 ```sh
 make test CARGO_ARGS='--offline --features zcash-testutils --lib treasury::send::proving_tests' TEST_ARGS='--test-threads=1'

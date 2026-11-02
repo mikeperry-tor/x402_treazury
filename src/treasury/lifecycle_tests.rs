@@ -254,7 +254,10 @@ async fn inclusion_after_wallet_scan_waits_without_resubmitting_or_releasing_inp
         .remove(0);
     let deadline = now().unwrap() + 7200;
     save_quotes(&owner.store, vec![job.clone()], deadline).await;
+    let revision = owner.revision;
     let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+    assert!(owner.healthy && owner.completed.is_none());
+    assert_eq!(owner.revision, revision + 1);
     let raw = prepared.bytes().to_vec();
     let mut sender = MineDuringLookup {
         net,

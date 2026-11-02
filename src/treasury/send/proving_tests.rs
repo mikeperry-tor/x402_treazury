@@ -31,7 +31,6 @@ fn varint(mut n: u64) -> Vec<u8> {
 #[tokio::test]
 async fn funded_preparation_proves_and_restores_identical_pending_bytes() {
     qualify_preparation(PreparationCase::PublicationFailure).await;
-    qualify_preparation(PreparationCase::Published).await;
     qualify_preparation(PreparationCase::Unfunded).await;
 }
 
@@ -42,7 +41,6 @@ async fn calculation_failure_clears_proposal_but_retains_accepted_inputs() {
 
 #[derive(Clone, Copy)]
 enum PreparationCase {
-    Published,
     PublicationFailure,
     Unfunded,
     CalculationFailure,
@@ -247,88 +245,58 @@ async fn qualify_preparation(case: PreparationCase) {
         server.abort();
         return;
     }
-    if matches!(case, PreparationCase::PublicationFailure) {
-        let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
-        db.execute_batch("CREATE TRIGGER reject_prepare BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture prepared commit failure'); END;").unwrap();
-        let revision = treasury.revision;
-        let error = treasury.prepare(request()).await.err().unwrap();
-        assert!(format!("{error:#}").contains("fixture prepared commit failure"));
-        assert!(!treasury.healthy);
-        assert_eq!(treasury.revision, revision);
-        let status = treasury.status().await.unwrap();
-        assert!(
-            !status.outgoing_pending,
-            "failed insert publishes no raw bytes"
-        );
-        assert!(
-            treasury.completed.is_some(),
-            "the live owner retains its calculation"
-        );
-        assert!(status.treasury_operations.is_empty());
-        let id = operation.clone();
-        let selected = treasury
-            .store
-            .call(move |s| {
-                assert!(s.require_unstarted_preparation(&id).is_err());
-                assert!(s.prepared_bytes(&id).is_err());
-                s.prepared_inputs(&id)
-            })
+    let db = rusqlite::Connection::open(state.join("state.sqlite")).unwrap();
+    db.execute_batch("CREATE TRIGGER reject_prepare BEFORE INSERT ON outgoing BEGIN SELECT RAISE(ABORT,'fixture prepared commit failure'); END;").unwrap();
+    let revision = treasury.revision;
+    let error = treasury.prepare(request()).await.err().unwrap();
+    assert!(format!("{error:#}").contains("fixture prepared commit failure"));
+    assert!(!treasury.healthy);
+    assert_eq!(treasury.revision, revision);
+    let status = treasury.status().await.unwrap();
+    assert!(
+        !status.outgoing_pending,
+        "failed insert publishes no raw bytes"
+    );
+    assert!(
+        treasury.completed.is_some(),
+        "the live owner retains its calculation"
+    );
+    assert!(status.treasury_operations.is_empty());
+    let id = operation.clone();
+    let accepted_inputs = treasury
+        .store
+        .call(move |s| {
+            assert!(s.require_unstarted_preparation(&id).is_err());
+            assert!(s.prepared_bytes(&id).is_err());
+            s.prepared_inputs(&id)
+        })
+        .await
+        .unwrap();
+    assert_eq!(accepted_inputs.len(), 1);
+    assert!(
+        treasury
+            .prepare(request())
             .await
-            .unwrap();
-        assert_eq!(selected.len(), 1);
-        assert!(
-            treasury
-                .prepare(request())
-                .await
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("requires reopen")
-        );
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            1,
-            "retry after failure must not reach the indexer"
-        );
-        db.execute_batch("DROP TRIGGER reject_prepare;").unwrap();
-        drop(db);
-        let saved = treasury.publish_completed().await.unwrap();
-        let exact = saved.bytes().to_vec();
-        assert!(treasury.healthy && treasury.completed.is_none());
-        assert_eq!(treasury.revision, revision + 1);
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            1,
-            "local publication retry never recalculates or calls the indexer"
-        );
-        treasury.close().await.unwrap();
-        let restored = Treasury::open(state, key, treasury_id).await.unwrap();
-        assert_eq!(restored.revision, revision + 1);
-        let id = operation.clone();
-        assert_eq!(
-            restored
-                .store
-                .call(move |s| s.prepared_bytes(&id))
-                .await
-                .unwrap()
-                .as_slice(),
-            exact
-        );
-        assert!(restored.status().await.unwrap().outgoing_pending);
-        restored
-            .store
-            .call(move |s| {
-                assert_eq!(s.prepared_inputs(&operation)?, selected);
-                assert!(s.require_unstarted_preparation(&operation).is_err());
-                Ok(())
-            })
-            .await
-            .unwrap();
-        restored.close().await.unwrap();
-        server.abort();
-        return;
-    }
-    let prepared = treasury.prepare(request()).await.unwrap();
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("requires reopen")
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "retry after failure must not reach the indexer"
+    );
+    db.execute_batch("DROP TRIGGER reject_prepare;").unwrap();
+    drop(db);
+    let prepared = treasury.publish_completed().await.unwrap();
+    assert!(treasury.healthy && treasury.completed.is_none());
+    assert_eq!(treasury.revision, revision + 1);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "local publication retry never recalculates or calls the indexer"
+    );
     let facts = prepared.facts().unwrap().clone();
     assert_eq!(facts.amount_zatoshis, 50_000);
     assert!(facts.fee_zatoshis > 0 && facts.fee_zatoshis <= 20_000);
@@ -342,6 +310,10 @@ async fn qualify_preparation(case: PreparationCase) {
         .await
         .unwrap();
     assert_eq!(selected.len(), 1);
+    assert_eq!(
+        selected, accepted_inputs,
+        "publication retains original inputs"
+    );
     assert!(
         tx.orchard_bundle().unwrap().actions().len() > selected.len(),
         "dummy actions are excluded from selected input ownership"
@@ -365,6 +337,7 @@ async fn qualify_preparation(case: PreparationCase) {
     let restored = Treasury::open(state, key, treasury_id).await.unwrap();
     assert_eq!(restored.addresses().await.unwrap(), addresses);
     assert_eq!(restored.revision, revision);
+    assert!(restored.status().await.unwrap().outgoing_pending);
     let id = operation.clone();
     let recovered = restored
         .store
@@ -390,6 +363,8 @@ async fn qualify_preparation(case: PreparationCase) {
     restored
         .store
         .call(move |s| {
+            assert_eq!(s.prepared_inputs(&operation)?, selected);
+            assert!(s.require_unstarted_preparation(&operation).is_err());
             assert!(s.abandon_unprepared(&operation).is_err());
             assert!(s.require_preparation_available().is_err());
             Ok(())
