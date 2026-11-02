@@ -56,6 +56,27 @@ pub(super) fn retryable(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reconstruction_retries_unavailable_snapshots_and_busy_reads_but_not_corruption() {
+        assert!(retryable(
+            &anyhow::Error::new(SnapshotUnavailable).context("reading committed SDK snapshot")
+        ));
+        for code in [rusqlite::ffi::SQLITE_BUSY, rusqlite::ffi::SQLITE_LOCKED] {
+            let error = anyhow::Error::new(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                None,
+            ))
+            .context("reading committed treasury state");
+            assert!(retryable(&error), "read contention can recover: {error:#}");
+        }
+        let corrupt = anyhow::Error::new(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+            None,
+        ))
+        .context("reading committed treasury state");
+        assert!(!retryable(&corrupt), "corruption must reach the owner");
+        assert!(!retryable(&anyhow::anyhow!("store worker stopped")));
+    }
     const SEED: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
     async fn fixture() -> (tempfile::TempDir, Treasury) {
         let dir = tempfile::tempdir().unwrap();

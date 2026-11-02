@@ -1,5 +1,7 @@
 #[path = "support/capacity.rs"]
 mod capacity_fixture;
+#[path = "treasury_sync/recovery.rs"]
+mod recovery;
 #[path = "treasury_sync/retirement.rs"]
 mod retirement;
 #[path = "support/zcash_transaction.rs"]
