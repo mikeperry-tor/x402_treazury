@@ -20,6 +20,10 @@ pub fn depletion_estimate(
         );
     }
     let state = &observation["state"];
+    ensure!(
+        state["schema_version"] == 2,
+        "unsupported lifecycle evidence version"
+    );
     let pools = state["pools"]
         .as_array()
         .context("observation pools missing")?;
@@ -35,37 +39,32 @@ pub fn depletion_estimate(
     let wallets = pool["addresses"]
         .as_array()
         .context("observed wallets missing")?;
-    let active = if state["schema_version"] == 2 && !wallets.iter().any(|w| w["role"] == "ACTIVE") {
+    let active = if !wallets.iter().any(|w| w["role"] == "ACTIVE") {
         None
     } else {
         Some(wallet(wallets, "ACTIVE")?)
     };
-    let ready = if state["schema_version"] == 2 {
-        let claims = pool["reserve_claims"]
-            .as_array()
-            .context("depletion reserve claims missing")?;
-        let mut candidates = wallets
-            .iter()
-            .filter(|wallet| {
-                wallet["role"] == "READY"
-                    && claims.iter().any(|claim| {
-                        claim["enabled"] == true
-                            && claim["destination_ready"] == true
-                            && claim["wallet_id"] == wallet["id"]
-                    })
-            })
-            .map(|wallet| Ok((available_balance(&observation["balances"], wallet)?, wallet)))
-            .collect::<Result<Vec<_>>>()?;
-        candidates.retain(|(amount, _)| *amount >= price);
-        candidates
-            .sort_by_key(|(amount, wallet)| (*amount, wallet["id"].as_str().unwrap_or_default()));
-        candidates
-            .first()
-            .context("no current funded reserve covers reviewed price")?
-            .1
-    } else {
-        wallet(wallets, "READY")?
-    };
+    let claims = pool["reserve_claims"]
+        .as_array()
+        .context("depletion reserve claims missing")?;
+    let mut candidates = wallets
+        .iter()
+        .filter(|wallet| {
+            wallet["role"] == "READY"
+                && claims.iter().any(|claim| {
+                    claim["enabled"] == true
+                        && claim["destination_ready"] == true
+                        && claim["wallet_id"] == wallet["id"]
+                })
+        })
+        .map(|wallet| Ok((available_balance(&observation["balances"], wallet)?, wallet)))
+        .collect::<Result<Vec<_>>>()?;
+    candidates.retain(|(amount, _)| *amount >= price);
+    candidates.sort_by_key(|(amount, wallet)| (*amount, wallet["id"].as_str().unwrap_or_default()));
+    let ready = candidates
+        .first()
+        .context("no current funded reserve covers reviewed price")?
+        .1;
     ensure!(
         active.is_none_or(|active| active["id"] != ready["id"]),
         "active and standby identities coincide"
@@ -88,21 +87,17 @@ pub fn depletion_estimate(
         standby >= price,
         "funded standby cannot cover the reviewed depletion price"
     );
-    let retained_calls = if state["schema_version"] == 2 {
-        wallets
-            .iter()
-            .filter(|wallet| wallet["role"] == "RETAINED")
-            .try_fold(U256::ZERO, |sum, wallet| -> Result<U256> {
-                ensure!(
-                    wallet["destination_recorded"] == true,
-                    "retained readiness support missing"
-                );
-                sum.checked_add(available_balance(balances, wallet)? / price)
-                    .context("retained call estimate overflow")
-            })?
-    } else {
-        U256::ZERO
-    };
+    let retained_calls = wallets
+        .iter()
+        .filter(|wallet| wallet["role"] == "RETAINED")
+        .try_fold(U256::ZERO, |sum, wallet| -> Result<U256> {
+            ensure!(
+                wallet["destination_recorded"] == true,
+                "retained readiness support missing"
+            );
+            sum.checked_add(available_balance(balances, wallet)? / price)
+                .context("retained call estimate overflow")
+        })?;
     let needed = available
         .checked_div(price)
         .context("invalid depletion price")?
@@ -144,24 +139,18 @@ fn available_balance(balances: &Value, wallet: &Value) -> Result<U256> {
     let id = wallet["id"]
         .as_str()
         .context("observed wallet ID missing")?;
-    let conservative = match balances.get("schema_version") {
-        None => number(
-            balances["confirmed"][id]
-                .as_str()
-                .context("wallet was not refreshed by observed RPC view")?,
-        )?,
-        Some(version) if version.as_u64() == Some(2) => {
-            let evidence = &balances["wallets"][id];
-            ensure!(
-                evidence["schema_version"] == 2
-                    && evidence["block_height"] == balances["block_height"]
-                    && evidence["block_hash"] == balances["block_hash"],
-                "wallet balance lacks the observed pool anchor"
-            );
-            super::conservative_balance(evidence)?
-        }
-        _ => anyhow::bail!("unknown pool balance evidence version"),
-    };
+    ensure!(
+        balances["schema_version"] == 2,
+        "unknown pool balance evidence version"
+    );
+    let evidence = &balances["wallets"][id];
+    ensure!(
+        evidence["schema_version"] == 2
+            && evidence["block_height"] == balances["block_height"]
+            && evidence["block_hash"] == balances["block_hash"],
+        "wallet balance lacks the observed pool anchor"
+    );
+    let conservative = super::conservative_balance(evidence)?;
     let unresolved = balances["unresolved"]
         .as_object()
         .context("unresolved exposure missing")?
@@ -181,13 +170,22 @@ fn available_balance(balances: &Value, wallet: &Value) -> Result<U256> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn balance(confirmed: u64, latest: u64) -> Value {
+        json!({"schema_version":2,"confirmed_balance_atomic":confirmed.to_string(),
+            "latest_balance_atomic":latest.to_string(),"conservative_balance_atomic":confirmed.min(latest).to_string(),
+            "block_height":12,"block_hash":format!("0x{:064x}",1),
+            "latest_block_height":24,"latest_block_hash":format!("0x{:064x}",2)})
+    }
     fn observation() -> Value {
-        json!({"pool":"p","pool_name":"pool","state":{"pools":[{"id":"p","name":"pool","generation":3,"addresses":[{"id":"a","role":"ACTIVE"},{"id":"b","role":"READY"}]}]},"balances":{"block_height":12,"block_hash":format!("0x{:064x}",1),"confirmed":{"a":"80","b":"200"},"unresolved":{}}})
+        json!({"pool":"p","pool_name":"pool","state":{"schema_version":2,"pools":[{"id":"p","name":"pool","generation":3,
+            "addresses":[{"id":"a","role":"ACTIVE"},{"id":"b","role":"READY","destination_recorded":true}],
+            "reserve_claims":[{"slot":"small","generation":3,"enabled":true,"destination_ready":true,"wallet_id":"b"}]}]},
+            "balances":{"schema_version":2,"block_height":12,"block_hash":format!("0x{:064x}",1),
+                "wallets":{"a":balance(80,80),"b":balance(200,200)},"unresolved":{}}})
     }
     #[test]
     fn ready_only_start_estimates_the_first_payment_as_the_promotion() {
         let mut value = observation();
-        value["state"]["schema_version"] = json!(2);
         value["state"]["pools"][0]["addresses"]
             .as_array_mut()
             .unwrap()
@@ -209,18 +207,8 @@ mod tests {
     #[test]
     fn versioned_pool_observations_estimate_from_conservative_balances() {
         let mut value = observation();
-        let balances = &mut value["balances"];
-        balances["schema_version"] = json!(2);
-        balances.as_object_mut().unwrap().remove("confirmed");
-        for (wallet, confirmed, latest) in [("a", 80, 30), ("b", 200, 250)] {
-            balances["wallets"][wallet] = json!({
-                "schema_version":2,"confirmed_balance_atomic":confirmed.to_string(),
-                "latest_balance_atomic":latest.to_string(),
-                "conservative_balance_atomic":confirmed.min(latest).to_string(),
-                "block_height":12,"block_hash":format!("0x{:064x}",1),
-                "latest_block_height":24,"latest_block_hash":format!("0x{:064x}",2)
-            });
-        }
+        value["balances"]["wallets"]["a"] = balance(80, 30);
+        value["balances"]["wallets"]["b"] = balance(200, 250);
         let estimate = depletion_estimate(&value, "20", 2).unwrap();
         assert_eq!(estimate["estimated_calls"], 2);
         assert_eq!(estimate["active_available_atomic"], "30");
@@ -243,7 +231,6 @@ mod tests {
     #[test]
     fn current_inventory_estimate_includes_retained_capacity_and_multiple_reserves() {
         let mut value = observation();
-        value["state"]["schema_version"] = json!(2);
         value["state"]["pools"][0]["addresses"]
             .as_array_mut()
             .unwrap()
@@ -251,8 +238,8 @@ mod tests {
                 json!({"id":"r","role":"RETAINED","destination_recorded":true}),
                 json!({"id":"large","role":"READY"}),
             ]);
-        value["balances"]["confirmed"]["r"] = json!("40");
-        value["balances"]["confirmed"]["large"] = json!("500");
+        value["balances"]["wallets"]["r"] = balance(40, 40);
+        value["balances"]["wallets"]["large"] = balance(500, 500);
         value["state"]["pools"][0]["reserve_claims"] = json!([
             {"slot":"small","enabled":true,"destination_ready":true,"wallet_id":"b"},
             {"slot":"large","enabled":true,"destination_ready":true,"wallet_id":"large"}]);
@@ -274,7 +261,7 @@ mod tests {
             4
         );
         let mut empty = value;
-        empty["balances"]["confirmed"]["a"] = json!("0");
+        empty["balances"]["wallets"]["a"] = balance(0, 0);
         assert_eq!(
             depletion_estimate(&empty, "20", 1).unwrap()["estimated_calls"],
             1
@@ -283,10 +270,13 @@ mod tests {
     #[test]
     fn missing_or_inconsistent_balances_cannot_estimate_depletion() {
         for (pointer, value) in [
-            ("/balances/confirmed/a", Value::Null),
-            ("/balances/confirmed/b", Value::Null),
-            ("/balances/confirmed/a", json!("not-a-number")),
-            ("/balances/confirmed/b", json!("1")),
+            ("/balances/wallets/a", Value::Null),
+            ("/balances/wallets/b", Value::Null),
+            (
+                "/balances/wallets/a/confirmed_balance_atomic",
+                json!("not-a-number"),
+            ),
+            ("/balances/wallets/b", balance(1, 1)),
             ("/balances/block_hash", json!("invalid")),
             ("/state/pools/0/addresses/1/role", json!("ALLOCATED")),
         ] {
@@ -305,8 +295,17 @@ mod tests {
         pending["balances"]["unresolved"]["a"] = json!("101");
         assert!(depletion_estimate(&pending, "20", 10).is_err());
         assert!(depletion_estimate(&observation(), "0", 10).is_err());
+        let mut unsupported = observation();
+        unsupported["state"]["schema_version"] = Value::Null;
+        assert!(depletion_estimate(&unsupported, "20", 10).is_err());
         let mut huge = observation();
-        huge["balances"]["confirmed"]["a"] = json!(U256::MAX.to_string());
+        for field in [
+            "confirmed_balance_atomic",
+            "latest_balance_atomic",
+            "conservative_balance_atomic",
+        ] {
+            huge["balances"]["wallets"]["a"][field] = json!(U256::MAX.to_string());
+        }
         huge["balances"]["unresolved"] = json!({});
         assert!(depletion_estimate(&huge, "1", usize::MAX).is_err());
     }

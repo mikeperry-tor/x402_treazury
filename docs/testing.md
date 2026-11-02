@@ -566,10 +566,17 @@ exhaustively enumerate concurrency schedules.
 
 Current treasury reporting fixtures retain immutable principal/fee facts, encrypted
 preparation identity, unresolved work and advisory wallet estimates. Deleted budget
-and refund projections are unavailable rather than invented zero. Historical
-reports remain readable. Baseline, attribution, registry ownership/reopen and report
+and refund projections are unavailable rather than invented zero. Unsupported
+historical report formats are refused without rewriting saved evidence or releasing
+execution reservations. Baseline, attribution, registry ownership/reopen and report
 fixtures preserve original qualification charges and unknowns. These summaries
-never supply current spending authority.
+never supply current spending authority. Current lifecycle 2, exact balance 2,
+advisory admission balance 3 and ownership 1 are distinct contracts. Current intent
+marker 2 and original per-attempt canonical observations remain required for earlier
+runs, including single-attempt cases; aggregate case outcomes cannot replace them.
+Current restart fixtures pin the selected reserve claim while allowing unrelated
+inventory and readiness progress. Unsupported saved admission presentation leaves
+original attempts, exact support and ordinary reconciliation intact.
 
 Deployment validation fixtures pin complete static and managed wallet resolutions,
 ordered contextual failures, listener address uniqueness and port-zero exceptions,

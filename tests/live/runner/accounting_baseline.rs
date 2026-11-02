@@ -39,38 +39,19 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
         snapshot["treasury_status"]["treasury_id"] == current["treasury_id"],
         "baseline accounting treasury mismatch"
     );
-    let has_wallets = snapshot.get("wallet_observations").is_some();
-    let mut historical = snapshot.clone();
-    // Old baselines retain source facts but not wallet observation anchors.
-    // Exclude wallet/payment projection rather than inventing anchored balances.
-    if !has_wallets {
-        historical["wallet_observations"] = json!([]);
-        historical["payment_attempts"] = json!([]);
-    }
-    let before = crate::accounting::capture(&historical)?;
+    let before = crate::accounting::capture(snapshot)?;
     let old = crate::accounting::summarize(&before)?;
     let new = crate::accounting::summarize(current)?;
-    let modern = current["schema_version"] == 2 || before["schema_version"] == 2;
-    if current["schema_version"] == 2 && before["schema_version"] == 2 {
-        let owners = rows(current, "source_preparations", "operation_id");
-        for entry in before["source_preparations"].as_array().unwrap() {
-            ensure!(owners.get(entry["operation_id"].as_str().unwrap()).is_some_and(|v|v["preparation_sha256"] == entry["preparation_sha256"] && (entry["prepared_record_sha256"].is_null() || v["prepared_record_sha256"] == entry["prepared_record_sha256"])), "baseline calculation changed or disappeared");
-        }
-    }
-    if !modern {
-    let entries = rows(current, "source_budget_entries", "id");
-
-    for entry in before["source_budget_entries"].as_array().unwrap() {
-        if entry["consumed"].as_u64().unwrap() > 0 {
-            let saved = entries
-                .get(entry["id"].as_str().unwrap())
-                .context("baseline consumed operation disappeared")?;
-            ensure!(
-                saved["consumed"] == entry["consumed"],
-                "baseline consumed cost changed"
-            );
-        }
-    }
+    let owners = rows(current, "source_preparations", "operation_id");
+    for entry in before["source_preparations"].as_array().unwrap() {
+        ensure!(
+            owners
+                .get(entry["operation_id"].as_str().unwrap())
+                .is_some_and(|v| v["preparation_sha256"] == entry["preparation_sha256"]
+                    && (entry["prepared_record_sha256"].is_null()
+                        || v["prepared_record_sha256"] == entry["prepared_record_sha256"])),
+            "baseline calculation changed or disappeared"
+        );
     }
     let ops = rows(current, "operations", "operation_id");
     for op in before["operations"].as_array().unwrap() {
@@ -82,34 +63,6 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
             "baseline transaction facts changed"
         );
     }
-    if !modern {
-    let refunds: BTreeMap<_, _> = current["refunds"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| {
-            (
-                (
-                    v["txid"].as_str().unwrap(),
-                    v["output_index"].as_u64().unwrap(),
-                ),
-                v,
-            )
-        })
-        .collect();
-    for refund in before["refunds"].as_array().unwrap() {
-        let saved = refunds
-            .get(&(
-                refund["txid"].as_str().unwrap(),
-                refund["output_index"].as_u64().unwrap(),
-            ))
-            .context("baseline refund disappeared")?;
-        ensure!(
-            saved["amount"] == refund["amount"] && saved["operation_id"] == refund["operation_id"],
-            "baseline refund changed"
-        );
-    }
-    }
     let mut deltas = serde_json::Map::new();
     for field in [
         "recorded_principal_zatoshis",
@@ -119,7 +72,10 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
         "recorded_refund_outputs_zatoshis",
     ] {
         if old[field].is_null() || new[field].is_null() {
-            deltas.insert(field.into(), json!({"baseline":old[field],"observed":new[field],"change":null}));
+            deltas.insert(
+                field.into(),
+                json!({"baseline":old[field],"observed":new[field],"change":null}),
+            );
             continue;
         }
         let a = old[field].as_u64().unwrap();
@@ -129,7 +85,7 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
             json!({"baseline":a,"observed":b,"change":(i128::from(b)-i128::from(a)).to_string()}),
         );
     }
-    let wallets = if has_wallets {
+    let wallets = {
         let old_wallets = rows(&before, "wallets", "id");
         let new_wallets = rows(current, "wallets", "id");
         ensure!(
@@ -152,8 +108,6 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
         json!({"status":"recorded","baseline_roles":old["wallet_roles"],"observed_roles":new["wallet_roles"],
             "added_wallets":new_wallets.len()-old_wallets.len(),
             "aggregate_change_atomic":if all_observed(&old)&&all_observed(&new){json!(difference(total(&old)?,total(&new)?))}else{Value::Null}})
-    } else {
-        json!({"status":"unobserved","reason":"historical_baseline_lacks_wallet_anchors"})
     };
     let zec = if !old["zec_observation"].is_null() && !new["zec_observation"].is_null() {
         let mut values = serde_json::Map::new();
@@ -173,28 +127,23 @@ pub fn compare(snapshot: &Value, current: &Value) -> Result<Value> {
 
 #[cfg(test)]
 pub(crate) fn snapshot(data: &Value) -> Value {
-    json!({"treasury_status":{"treasury_id":data["treasury_id"],"treasury_operations":data["operations"],"refunds":data["refunds"],"sync":data["sync"]},"source_budget_entries":data["source_budget_entries"],"payment_attempts":data["payment_attempts"],"wallet_observations":data["wallets"]})
+    json!({"treasury_status":{"schema_version":6,"treasury_id":data["treasury_id"],"sync":data["sync"]},
+        "lifecycle":{"schema_version":2,"source_operations":data["operations"]},
+        "source_preparations":data["source_preparations"],"payment_attempts":data["payment_attempts"],"wallet_observations":data["wallets"]})
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn modern_baseline_preserves_original_calculation_and_prepared_record_identity() {
-        let mut current = crate::accounting::fixture();
-        current["schema_version"] = json!(2);
-        current["source_budget_entries"] = Value::Null;
-        current["refunds"] = Value::Null;
-        current["operations"][1]["facts"]["amount_zatoshis"] = json!(0);
-        current["source_preparations"] = json!([
-            {"operation_id":"deposit", "preparation_sha256":"a".repeat(64), "prepared_record_sha256":"d".repeat(64)},
-            {"operation_id":"shield", "preparation_sha256":"b".repeat(64), "prepared_record_sha256":"e".repeat(64)},
-            {"operation_id":"calculation-only", "preparation_sha256":"c".repeat(64), "prepared_record_sha256":null}
-        ]);
-        let mut baseline = snapshot(&current);
-        baseline["source_preparations"] = current["source_preparations"].clone();
-        baseline["lifecycle"] = json!({"source_operations":current["operations"]});
+    fn baseline_preserves_original_calculation_and_prepared_record_identity() {
+        let current = crate::accounting::fixture();
+        let baseline = snapshot(&current);
         let unchanged = compare(&baseline, &current).unwrap();
-        assert_eq!(unchanged["source"]["recorded_consumed_zatoshis"]["change"], "0");
+        assert_eq!(
+            unchanged["source"]["recorded_consumed_zatoshis"]["change"],
+            "0"
+        );
         assert!(unchanged["source"]["source_reserved_zatoshis"]["change"].is_null());
         assert!(unchanged["source"]["recorded_refund_outputs_zatoshis"]["change"].is_null());
 
@@ -220,33 +169,23 @@ mod tests {
     fn pending_source_confirmation_adds_cost_without_recounting_history() {
         let after = crate::accounting::fixture();
         let mut before = after.clone();
-        before["source_budget_entries"][0]["consumed"] = json!(0);
-        before["source_budget_entries"][0]["reserved"] = json!(110);
         before["operations"][0]["submission"] = json!("PREPARED");
-        before["refunds"] = json!([]);
         let result = compare(&snapshot(&before), &after).unwrap();
         assert_eq!(
             result["source"]["recorded_consumed_zatoshis"]["change"],
             "105"
         );
         assert_eq!(result["source"]["recorded_fees_zatoshis"]["change"], "5");
-        assert_eq!(
-            result["source"]["recorded_refund_outputs_zatoshis"]["change"],
-            "10"
-        );
-        assert_eq!(
-            result["source"]["source_reserved_zatoshis"]["change"],
-            "-110"
-        );
+        assert!(result["source"]["recorded_refund_outputs_zatoshis"]["change"].is_null());
+        assert!(result["source"]["source_reserved_zatoshis"]["change"].is_null());
         let mut missing = after.clone();
-        missing["refunds"] = json!([]);
+        missing["operations"].as_array_mut().unwrap().remove(0);
         assert!(compare(&snapshot(&after), &missing).is_err());
     }
     #[test]
-    fn historical_costs_and_unobserved_wallets_are_not_run_debits() {
+    fn saved_costs_and_unknown_estimates_are_not_run_debits() {
         let mut before = crate::accounting::fixture();
         before["wallets"][0]["balance"] = json!("20");
-        before["source_budget_entries"][2]["reserved"] = json!(100);
         let mut after = crate::accounting::fixture();
         after["sync"]["spendable_shielded_zatoshis"] = json!(40);
         let result = compare(&snapshot(&before), &after).unwrap();
@@ -254,34 +193,31 @@ mod tests {
             result["source"]["recorded_consumed_zatoshis"]["change"],
             "0"
         );
-        assert_eq!(
-            result["source"]["source_reserved_zatoshis"]["change"],
-            "-30"
-        );
+        assert!(result["source"]["source_reserved_zatoshis"]["change"].is_null());
         assert_eq!(
             result["zec"]["balances"]["spendable_shielded_zatoshis"]["change"],
             "-10"
         );
         assert!(result["wallets"]["aggregate_change_atomic"].is_null());
         for data in [&mut before, &mut after] {
-            data["wallets"][1]["height"] = json!(100);
-            data["wallets"][1]["hash"] = json!("block");
+            data["wallets"][1]["balance"] = json!("0");
         }
         assert_eq!(
             compare(&snapshot(&before), &after).unwrap()["wallets"]["aggregate_change_atomic"],
             "-20"
         );
-        let mut historical = snapshot(&before);
-        historical
+        let mut missing = snapshot(&before);
+        missing
             .as_object_mut()
             .unwrap()
             .remove("wallet_observations");
-        assert_eq!(
-            compare(&historical, &after).unwrap()["wallets"]["status"],
-            "unobserved"
-        );
+        let retained = missing.clone();
+        assert!(compare(&missing, &after).is_err());
+        assert_eq!(missing, retained);
         after["operations"][0]["facts"]["fee_zatoshis"] = json!(6);
-        after["source_budget_entries"][0]["consumed"] = json!(106);
         assert!(compare(&snapshot(&before), &after).is_err());
+        let mut changed = crate::accounting::fixture();
+        changed["wallets"][0]["pool"] = json!("other-pool");
+        assert!(compare(&snapshot(&crate::accounting::fixture()), &changed).is_err());
     }
 }

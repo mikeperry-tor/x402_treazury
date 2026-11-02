@@ -75,90 +75,110 @@ fn batch(m: &Manifest, config: &Value, events: &[Value], ids: &[String]) -> Resu
         if case.unsigned {
             continue;
         }
-        let payments:Vec<_>=events.iter().filter(|e|e["kind"]=="application_payment" && e["detail"]["case"]==*id).map(|e|&e["detail"]).collect();
-        if payments.is_empty() {return Ok(json!({"status":"incomplete","reason":"missing payment admission"}));}
+        let payments: Vec<_> = events
+            .iter()
+            .filter(|e| e["kind"] == "application_payment" && e["detail"]["case"] == *id)
+            .map(|e| &e["detail"])
+            .collect();
+        if payments.is_empty() {
+            return Ok(json!({"status":"incomplete","reason":"missing payment admission"}));
+        }
         for payment in payments {
-        let find = |kind:&str| -> Result<Option<&Value>> {
-            let mut rows=events.iter().filter(|e|e["kind"]==kind && e["detail"]["case"]==*id && e["detail"]["attempt_id"]==payment["attempt_id"]);
-            let found=rows.next().map(|e|&e["detail"]);
-            ensure!(rows.next().is_none(),"duplicate attempt evidence: {kind}");
-            Ok(found)
-        };
-        let Some(receipt)=find("application_receipt")? else {return Ok(json!({"status":"incomplete","reason":"missing seller observation for an attempted authorization"}));};
-        let debit=find("application_debit_verified")?;
-        let unused=crate::registry::attempt_outcome(events,id,&payment["attempt_id"])?==Some("EXPIRED_UNUSED");
-        if unused {ensure!(debit.is_none(),"unused authorization has a debit proof");}
-        else if debit.is_none() {return Ok(json!({"status":"incomplete","reason":"attempt lacks canonical debit or proven non-use"}));}
-        for correlated in [Some(payment), Some(receipt), debit].into_iter().flatten() {
+            let find = |kind: &str| -> Result<Option<&Value>> {
+                let mut rows = events.iter().filter(|e| {
+                    e["kind"] == kind
+                        && e["detail"]["case"] == *id
+                        && e["detail"]["attempt_id"] == payment["attempt_id"]
+                });
+                let found = rows.next().map(|e| &e["detail"]);
+                ensure!(rows.next().is_none(), "duplicate attempt evidence: {kind}");
+                Ok(found)
+            };
+            let Some(receipt) = find("application_receipt")? else {
+                return Ok(
+                    json!({"status":"incomplete","reason":"missing seller observation for an attempted authorization"}),
+                );
+            };
+            let debit = find("application_debit_verified")?;
+            let unused = crate::registry::attempt_outcome(events, id, &payment["attempt_id"])?
+                == Some("EXPIRED_UNUSED");
+            if unused {
+                ensure!(debit.is_none(), "unused authorization has a debit proof");
+            } else if debit.is_none() {
+                return Ok(
+                    json!({"status":"incomplete","reason":"attempt lacks canonical debit or proven non-use"}),
+                );
+            }
+            for correlated in [Some(payment), Some(receipt), debit].into_iter().flatten() {
+                ensure!(
+                    correlated["session"] == session
+                        && correlated["attempt_id"] == payment["attempt_id"],
+                    "concurrent payment correlation mismatch"
+                );
+            }
+            let wallet = config["wallet_bindings"][&case.server][&case.source]["wallet"]
+                .as_str()
+                .context("reviewed wallet binding missing")?;
             ensure!(
-                correlated["session"] == session
-                    && correlated["attempt_id"] == payment["attempt_id"],
-                "concurrent payment correlation mismatch"
+                payment["pool_name"] == wallet,
+                "concurrent payment used a different wallet binding"
             );
-        }
-        let wallet = config["wallet_bindings"][&case.server][&case.source]["wallet"]
-            .as_str()
-            .context("reviewed wallet binding missing")?;
-        ensure!(
-            payment["pool_name"] == wallet,
-            "concurrent payment used a different wallet binding"
-        );
-        wallets.insert(wallet.to_owned());
-        if payment.get("balance_evidence").is_none() {
-            return Ok(
-                json!({"status":"incomplete","reason":"admission balance accounting not recorded by this application build"}),
+            wallets.insert(wallet.to_owned());
+            if payment.get("balance_evidence").is_none() {
+                return Ok(
+                    json!({"status":"incomplete","reason":"admission balance accounting not recorded by this application build"}),
+                );
+            }
+            x402_treazury::qualification::validate_admission_balance(payment)?;
+            if let Some(debit) = debit {
+                let proof = &debit["proof"];
+                let payer = proof["payer"]
+                    .as_str()
+                    .context("proof payer missing")?
+                    .parse::<alloy_primitives::Address>()?;
+                let nonce = proof["nonce"]
+                    .as_str()
+                    .context("proof nonce missing")?
+                    .parse::<alloy_primitives::B256>()?;
+                ensure!(
+                    nonces.insert((payer, nonce)),
+                    "concurrent calls reused an authorization nonce"
+                );
+                let amount = proof["amount_atomic"]
+                    .as_str()
+                    .context("proof amount missing")?
+                    .parse::<alloy_primitives::U256>()?;
+                let total = totals.entry(wallet.to_owned()).or_default();
+                *total = total
+                    .checked_add(amount)
+                    .context("concurrent debit total overflow")?;
+            }
+            let receipt = &receipt["receipt"];
+            // Older evidence is still useful, but cannot prove these interval assertions.
+            if payment.get("admitted_micros").is_none()
+                || receipt.get("signed_request_started_micros").is_none()
+                || receipt.get("response_observed_micros").is_none()
+            {
+                return Ok(
+                    json!({"status":"incomplete","reason":"payment timing not recorded by this application build"}),
+                );
+            }
+            let paid = interval(
+                &json!({"start":payment["admitted_micros"],"end":receipt["response_observed_micros"]}),
+                "start",
+                "end",
+            )?;
+            let signed = interval(
+                receipt,
+                "signed_request_started_micros",
+                "response_observed_micros",
+            )?;
+            ensure!(
+                app.0 <= paid.0 && paid.0 <= signed.0 && signed.1 <= app.1,
+                "payment timing lies outside application interval"
             );
-        }
-        x402_treazury::qualification::validate_admission_balance(payment)?;
-        if let Some(debit)=debit {
-        let proof = &debit["proof"];
-        let payer = proof["payer"]
-            .as_str()
-            .context("proof payer missing")?
-            .parse::<alloy_primitives::Address>()?;
-        let nonce = proof["nonce"]
-            .as_str()
-            .context("proof nonce missing")?
-            .parse::<alloy_primitives::B256>()?;
-        ensure!(
-            nonces.insert((payer, nonce)),
-            "concurrent calls reused an authorization nonce"
-        );
-        let amount = proof["amount_atomic"]
-            .as_str()
-            .context("proof amount missing")?
-            .parse::<alloy_primitives::U256>()?;
-        let total = totals.entry(wallet.to_owned()).or_default();
-        *total = total
-            .checked_add(amount)
-            .context("concurrent debit total overflow")?;
-        }
-        let receipt = &receipt["receipt"];
-        // Older evidence is still useful, but cannot prove these interval assertions.
-        if payment.get("admitted_micros").is_none()
-            || receipt.get("signed_request_started_micros").is_none()
-            || receipt.get("response_observed_micros").is_none()
-        {
-            return Ok(
-                json!({"status":"incomplete","reason":"payment timing not recorded by this application build"}),
-            );
-        }
-        let paid = interval(
-            &json!({"start":payment["admitted_micros"],"end":receipt["response_observed_micros"]}),
-            "start",
-            "end",
-        )?;
-        let signed = interval(
-            receipt,
-            "signed_request_started_micros",
-            "response_observed_micros",
-        )?;
-        ensure!(
-            app.0 <= paid.0 && paid.0 <= signed.0 && signed.1 <= app.1,
-            "payment timing lies outside application interval"
-        );
-        payment_work.push(paid);
-        signed_requests.push(signed);
+            payment_work.push(paid);
+            signed_requests.push(signed);
         }
     }
     ensure!(
@@ -232,7 +252,7 @@ mod tests {
                 ("application_finished", json!({"finished_micros":100})),
                 (
                     "application_payment",
-                    json!({"pool_name":"pool","admitted_micros":10,"amount":"7","balance_evidence":{"confirmed_balance_atomic":"20","reserved_before_atomic":if index==0 {"0"} else {"7"},"reserved_after_atomic":if index==0 {"7"} else {"14"},"available_after_atomic":if index==0 {"13"} else {"6"},"block_height":10,"block_hash":format!("0x{:064x}",1)}}),
+                    json!({"pool_name":"pool","admitted_micros":10,"amount":"7","ownership_evidence_version":1,"payer_role":"ACTIVE","reserve_slot":null,"claim_generation":null,"balance_evidence":{"schema_version":2,"latest_balance_atomic":"20","conservative_balance_atomic":"20","latest_block_height":22,"latest_block_hash":format!("0x{:064x}",2),"confirmed_balance_atomic":"20","reserved_before_atomic":if index==0 {"0"} else {"7"},"reserved_after_atomic":if index==0 {"7"} else {"14"},"available_after_atomic":if index==0 {"13"} else {"6"},"block_height":10,"block_hash":format!("0x{:064x}",1)}}),
                 ),
                 (
                     "application_receipt",
@@ -290,9 +310,19 @@ mod tests {
             "incomplete"
         );
         let mut overspent = evidence.clone();
-        overspent["runtime_events"][9]["detail"]["balance_evidence"]["confirmed_balance_atomic"] =
-            json!("13");
-        assert!(report(&m, &config, &overspent).is_err());
+        for field in [
+            "confirmed_balance_atomic",
+            "latest_balance_atomic",
+            "conservative_balance_atomic",
+        ] {
+            overspent["runtime_events"][9]["detail"]["balance_evidence"][field] = json!("13");
+        }
+        assert!(
+            report(&m, &config, &overspent)
+                .unwrap_err()
+                .to_string()
+                .contains("admission exposure exceeds")
+        );
         let mut missing = evidence.clone();
         missing["runtime_events"].as_array_mut().unwrap().pop();
         assert_eq!(
@@ -337,15 +367,19 @@ mod tests {
     }
     #[test]
     fn canonical_non_use_preserves_timing_without_inventing_a_debit() {
-        let (m, config, mut evidence)=fixture();
-        let events=evidence["runtime_events"].as_array_mut().unwrap();
-        events.retain(|e| !(e["kind"]=="application_debit_verified" && e["detail"]["case"]=="a"));
-        assert_eq!(report(&m,&config,&evidence).unwrap()[0]["status"],"incomplete");
+        let (m, config, mut evidence) = fixture();
+        let events = evidence["runtime_events"].as_array_mut().unwrap();
+        events
+            .retain(|e| !(e["kind"] == "application_debit_verified" && e["detail"]["case"] == "a"));
+        assert_eq!(
+            report(&m, &config, &evidence).unwrap()[0]["status"],
+            "incomplete"
+        );
         evidence["runtime_events"].as_array_mut().unwrap().push(json!({"kind":"payment_observed","detail":{"case":"a","attempts":[{"attempt_id":"a","resolution":{"attempt_id":"a","outcome":"EXPIRED_UNUSED","height":10,"hash":"canonical","block_time":100}}]}}));
-        let result=report(&m,&config,&evidence).unwrap();
-        assert_eq!(result[0]["status"],"passed");
-        assert_eq!(result[0]["paid_calls"],2);
-        assert_eq!(result[0]["verified_debits_atomic"]["pool"],"7");
+        let result = report(&m, &config, &evidence).unwrap();
+        assert_eq!(result[0]["status"], "passed");
+        assert_eq!(result[0]["paid_calls"], 2);
+        assert_eq!(result[0]["verified_debits_atomic"]["pool"], "7");
     }
     #[test]
     fn overlap_requires_positive_shared_interval() {

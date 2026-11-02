@@ -213,7 +213,7 @@ Markdown leads with the corresponding numbered provider-stage table and then the
 detailed accounting. Private identifiers and provider prose remain omitted. Older
 archives without full source inventories are labelled incomplete and show known
 case sources only. Source accounting is a saved observation; source/job reservations
-are budget bounds, not fees. Lifecycle results retain their original validators.
+are budget bounds, not fees. Lifecycle evaluation accepts the current schema-2 reserve model.
 The network field states direct, external proxy-only or owned-control-audit-required;
 use `audit-tor` for authenticated control evidence. Tor-only failures cannot establish
 Tor causation. Reporting makes no requests and grants no execution authority.
@@ -380,7 +380,7 @@ recorded destination credit. Current database inspection accepts only schema 23:
 unsupported older or future stores fail without conversion or journal mutation.
 Original payment/source obligations and private evidence remain owned; rejection
 never refunds reservations or grants replay authority.
-Current admission events carry `ownership_evidence_version=1`: READY requires the original small/large slot and claim generation; ACTIVE/RETAINED requires no reserve claim. Validation uses the immutable journal-time values. Older unmarked evidence remains readable without inventing ownership facts.
+Current admission events carry `ownership_evidence_version=1`: READY requires the original small/large slot and claim generation; ACTIVE/RETAINED requires no reserve claim. Validation uses the immutable journal-time values. Unmarked historical evidence is unsupported and cannot qualify work; saved files and charged reservations remain intact.
 The phase order is topological: dependencies must name earlier phases. Scenario
 fields live in `[phases.scenario]` and inappropriate fields are rejected.
 Rotation and refill-service scenarios require one `[[phases.scenario.rounds]]`;
@@ -441,16 +441,18 @@ unresolved exposure and lifecycle snapshot while still holding the pool gate.
 Only one response is accepted per request and session; a new request is required
 for a new observation. Failures warn and leave the request unanswered, while
 ordinary reconciliation continues. Existing wallet-isolated RPC and Tor policy
-remain in force. For schema 2, the pure depletion estimator requires an ACTIVE
-wallet and at least one funded READY wallet with an enabled current reserve claim
-that covers the reviewed price. The fresh view must include the relevant ACTIVE,
-READY and RETAINED balances, with no unresolved authorizations. The reviewed list
-must cover `floor(active_available / price) + sum(floor(retained_available / price)) + 1`.
+remain in force. The depletion estimator requires current lifecycle version 2
+and exact balance version 2 evidence, including at least one funded READY wallet
+with an enabled current reserve claim that covers the reviewed price. ACTIVE
+inventory is optional; its available capacity is zero when absent. The fresh view
+must include the relevant ACTIVE, READY and RETAINED balances, with no unresolved
+authorizations. The reviewed list must cover
+`floor(active_available / price) + sum(floor(retained_available / price)) + 1`.
 The final term budgets a paid READY-consumption trigger; selection may reach that
 boundary earlier, leaving only a structurally verified untouched suffix skippable.
-Historical schemas retain their original active/standby calculation. Estimates do
-not authorize new calls or override caps, and the controller must authenticate and
-consume observations promptly.
+Unsupported historical evidence is rejected. Estimates do not authorize new calls
+or override caps, and the controller must authenticate and consume observations
+promptly.
 
 Amounts are decimal strings (USDC six decimal places, ZEC eight), with checked
 integer sums. Zero job/source budgets mean no funding. A paid case must reserve
@@ -608,10 +610,10 @@ After clean managed shutdown, exclusive treasury ownership permits a private
 snapshot correlated to that registered session. Current snapshots retain exact
 accepted preparation/transaction identities and facts, unresolved payment attempts
 and advisory wallet estimates. Removed monetary reservation/refund projections
-are unavailable, not invented zero. Historical formats retain their original
-accounting interpretation. Refund shielding consumes its fee only. Retired funds
-are not active capacity. Historical unanchored default zeros remain unobserved;
-current unavailable estimates are null. Saved observations
+are unavailable, not invented zero. Accounting evaluation accepts current format 2;
+unsupported historical inputs are refused without rewriting saved evidence or
+releasing execution reservations. Refund shielding consumes its fee only. Retired
+funds are not active capacity. Current unavailable estimates are null. Saved observations
 are not fresh chain queries or costs attributable exclusively to the selected run.
 Missing/crashed sessions have no final snapshot.
 
@@ -623,11 +625,13 @@ with their separate block heights/hashes, plus `conservative_balance_atomic`
 New admission `balance_evidence` uses `schema_version=3` and advisory
 `estimate_atomic`, which may be null. Current ownership, amount authority and the
 original authorization journal govern admission; saved balances and reserved-before
-arithmetic do not prove solvency. Historical schema-2 admission records retain
-their original exact support and arithmetic. Unversioned records remain readable:
-their `confirmed` map and `confirmed_balance_atomic` field held conservative
-values and must not be interpreted as exact confirmed-block observations.
-Admissions without saved exact support retain that historical representation.
+arithmetic do not prove solvency. Saved exact admission evidence uses version 2
+with its original exact support and arithmetic. Unversioned balance inputs and
+saved admissions lacking required exact support cannot qualify work. Presentation
+refusal leaves accepted journals and raw attempt/resolution export intact, does
+not block ordinary reconciliation and grants no replay authority. Admission intent
+marker 2 and ownership marker 1 retain the original eligible role; READY ownership
+also records the exact slot and claim generation.
 
 SQLite event details mix plain text and JSON. Guard extraction inside the
 expression (for example, `CASE WHEN json_valid(detail) THEN json_extract(detail,
@@ -635,13 +639,16 @@ expression (for example, `CASE WHEN json_valid(detail) THEN json_extract(detail,
 events must fail explicitly rather than disappear from accounting.
 
 Run attribution uses immutable operation-permit bindings captured with the snapshot,
-never later mutable releases. Separate conservative registry ceilings from
-historical treasury reservations and consumed costs. Missing budget evidence does
-not prove zero cost.
+never later mutable releases. Registry ceilings express separately reviewed
+qualification authority; current source costs come from original accepted
+calculations and SDK transaction facts. Missing facts do not prove zero cost.
 Compare against the hash-verified authorization baseline, which can span runs;
-reservation/balance differences do not prove debits. Old baselines without wallet
-anchors cannot establish aggregate USDC changes. Contradictory costs, transactions,
-refunds or wallet ownership fail comparison. Historical private evidence stays intact.
+advisory estimate differences do not prove debits. Contradictory calculation
+digests, transaction facts or wallet/pool ownership fail comparison. Historical
+private evidence stays intact, including its original charged reservations.
+Every resolved payment from a previous run requires its exact original per-attempt
+canonical observation, even when the case contained only one attempt. Aggregate
+case settlement cannot replace that observation.
 
 Structured records/reports are limited to 16 MiB, accounting snapshots to 10,000 per
 run, report cases/pin revisions to 10,000 and runtime events to 50,000. Baseline

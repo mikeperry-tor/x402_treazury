@@ -174,13 +174,8 @@ impl Controller {
             .find(|p| p["id"] == pool)
             .context("observed pool missing")?;
         ensure!(
-            selected["enabled"] == true
-                && if observation["state"]["schema_version"] == 2 {
-                    selected["inventory_ready"] == true
-                } else {
-                    selected["bootstrapped"] == true
-                },
-            "rotation requires an enabled bootstrapped pool"
+            selected["enabled"] == true && selected["inventory_ready"] == true,
+            "rotation requires enabled ready reserve inventory"
         );
         let price = crate::manifest::usdc(&round.expected_price_usdc)?.to_string();
         let estimate = depletion_estimate(&observation, &price, round.depletion_cases.len())?;
@@ -283,15 +278,7 @@ impl Controller {
             return Ok(());
         }
         let after = snapshot(&self.state).await?;
-        let generation = pool(&after, &self.pool)?["generation"]
-            .as_u64()
-            .context("observed generation missing")?;
-        let current_schema = after["schema_version"] == 2;
-        let changed = if current_schema {
-            self.payer_changed(&after)?
-        } else {
-            generation != self.generation
-        };
+        let changed = self.payer_changed(&after)?;
         if self.consumed {
             let observed = x402_treazury::qualification::lifecycle::consumed_reserve(
                 &self.before,
@@ -357,7 +344,7 @@ impl Controller {
                 tick(child, deadline, stop).await?;
                 continue;
             };
-            let expected_generation = self.generation + u64::from(state["schema_version"] != 2);
+            let expected_generation = self.generation;
             if crate::rotation_report::refill_ready(&state, &self.pool, &job, expected_generation)?
             {
                 registry.event(

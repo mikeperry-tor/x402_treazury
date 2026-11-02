@@ -110,8 +110,6 @@ impl Registry {
                         );
                         canonical.push(json!({"attempt_id":payment["attempt_id"],"resolution":resolution}));
                         Some(outcome.to_owned())
-                    } else if owner_closed && completion && attempt["state"] == "ADMITTED" {
-                        Some("NOT_SIGNED".into())
                     } else {
                         None
                     }

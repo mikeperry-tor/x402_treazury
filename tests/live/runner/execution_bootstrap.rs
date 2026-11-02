@@ -27,7 +27,7 @@ pub(super) async fn wait(
     stop: &CancellationToken,
 ) -> Result<()> {
     eprintln!(
-        "qualification waiting for verified active and configured reserve inventory; no API calls dispatched yet"
+        "qualification waiting for verified serving and configured reserve inventory; no API calls dispatched yet"
     );
     registry.event(
         &manifest.run_id,

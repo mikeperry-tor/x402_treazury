@@ -3,11 +3,15 @@ use crate::{
     manifest::{Manifest, Phase, RotationRound, Scenario},
     registry::Registry,
 };
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 
 fn selected<'a>(state: &'a Value, pool: &str) -> Result<&'a Value> {
+    ensure!(
+        state["schema_version"] == 2,
+        "unsupported rotation lifecycle version"
+    );
     state["pools"]
         .as_array()
         .context("rotation pools missing")?
@@ -43,35 +47,19 @@ pub(crate) fn refill_ready(state: &Value, pool: &str, job: &str, generation: u64
             && wallet["target"] == job["target"],
         "completed refill wallet binding/role mismatch"
     );
-    if state["schema_version"] == 2 {
-        let claim = selected["reserve_claims"]
-            .as_array()
-            .context("refill reserve claims missing")?
-            .iter()
-            .find(|claim| claim["wallet_id"] == wallet["id"])
-            .context("refill current claim missing")?;
-        ensure!(
-            wallet["destination_recorded"] == true
-                && wallet["destination_disputed"].is_null()
-                && claim["enabled"] == true
-                && claim["destination_ready"] == true,
-            "completed refill lacks undisputed destination support"
-        );
-    } else {
-        let target = job["target"]
-            .as_str()
-            .context("refill target missing")?
-            .parse::<U256>()?;
-        ensure!(
-            target > U256::ZERO
-                && wallet.get("balance_estimate_atomic").or_else(||wallet.get("confirmed_balance")).unwrap_or(&Value::Null)
-                    .as_str()
-                    .context("refill balance missing")?
-                    .parse::<U256>()?
-                    >= target,
-            "completed refill lacks confirmed target credit"
-        );
-    }
+    let claim = selected["reserve_claims"]
+        .as_array()
+        .context("refill reserve claims missing")?
+        .iter()
+        .find(|claim| claim["wallet_id"] == wallet["id"])
+        .context("refill current claim missing")?;
+    ensure!(
+        wallet["destination_recorded"] == true
+            && wallet["destination_disputed"].is_null()
+            && claim["enabled"] == true
+            && claim["destination_ready"] == true,
+        "completed refill lacks undisputed destination support"
+    );
     let source = state["source_operations"]
         .as_array()
         .context("refill source evidence missing")?
@@ -96,13 +84,11 @@ fn event<'a>(events: &'a [Value], kind: &str, field: &str, id: &str) -> Result<O
     Ok(value)
 }
 fn round_index(detail: &Value) -> Result<usize> {
-    // Historical single-rotation start/readiness events had no round field.
-    match detail.get("round") {
-        None => Ok(0),
-        Some(value) => Ok(usize::try_from(
-            value.as_u64().context("invalid rotation round index")?,
-        )?),
-    }
+    Ok(usize::try_from(
+        detail["round"]
+            .as_u64()
+            .context("rotation round index missing")?,
+    )?)
 }
 fn round_event<'a>(
     events: &'a [Value],
@@ -387,39 +373,61 @@ fn case_outcomes(
             unresolved.push(id.clone());
             continue;
         }
-        let payments:Vec<_>=events.iter().filter(|e|e["kind"]=="application_payment" && e["detail"]["case"]==*id).map(|e|&e["detail"]).collect();
-        ensure!(!payments.is_empty(),"rotation admission missing");
+        let payments: Vec<_> = events
+            .iter()
+            .filter(|e| e["kind"] == "application_payment" && e["detail"]["case"] == *id)
+            .map(|e| &e["detail"])
+            .collect();
+        ensure!(!payments.is_empty(), "rotation admission missing");
         let mut attempted = std::collections::BTreeSet::new();
         for payment in payments {
-        ensure!(attempted.insert(payment["attempt_id"].as_str().context("rotation attempt ID missing")?),"duplicate rotation evidence: application_payment");
-        let find=|kind:&str| -> Result<&Value> {
-            let mut rows=events.iter().filter(|e|e["kind"]==kind && e["detail"]["case"]==*id && e["detail"]["attempt_id"]==payment["attempt_id"]);
-            let found=rows.next().context("rotation attempt observation missing")?;
-            ensure!(rows.next().is_none(),"duplicate rotation attempt observation");
-            Ok(&found["detail"])
-        };
-        if !verify_case_admission(payment, wallet, observation, round, id, promotion)? {
-            failures.push(id.clone());
-            continue;
-        }
-        if crate::registry::attempt_outcome(events,id,&payment["attempt_id"])? == Some("EXPIRED_UNUSED") {
-            continue;
-        }
-        if round.service_cases.contains(id) {
-            let wallet_name = wallet
-                .as_str()
-                .context("service wallet missing")?
-                .to_owned();
-            service_wallets.insert(wallet_name.clone());
-            let receipt=find("application_receipt")?;
-            let debit=find("application_debit_verified")?;
-            if let Some(evidence) = x402_treazury::qualification::lifecycle::refill_service(
-                payment, receipt, debit, job,
-            )? {
-                overlap_wallets.insert(wallet_name);
-                overlap.push(evidence);
+            ensure!(
+                attempted.insert(
+                    payment["attempt_id"]
+                        .as_str()
+                        .context("rotation attempt ID missing")?
+                ),
+                "duplicate rotation evidence: application_payment"
+            );
+            let find = |kind: &str| -> Result<&Value> {
+                let mut rows = events.iter().filter(|e| {
+                    e["kind"] == kind
+                        && e["detail"]["case"] == *id
+                        && e["detail"]["attempt_id"] == payment["attempt_id"]
+                });
+                let found = rows
+                    .next()
+                    .context("rotation attempt observation missing")?;
+                ensure!(
+                    rows.next().is_none(),
+                    "duplicate rotation attempt observation"
+                );
+                Ok(&found["detail"])
+            };
+            if !verify_case_admission(payment, wallet, observation, round, id, promotion)? {
+                failures.push(id.clone());
+                continue;
             }
-        }
+            if crate::registry::attempt_outcome(events, id, &payment["attempt_id"])?
+                == Some("EXPIRED_UNUSED")
+            {
+                continue;
+            }
+            if round.service_cases.contains(id) {
+                let wallet_name = wallet
+                    .as_str()
+                    .context("service wallet missing")?
+                    .to_owned();
+                service_wallets.insert(wallet_name.clone());
+                let receipt = find("application_receipt")?;
+                let debit = find("application_debit_verified")?;
+                if let Some(evidence) = x402_treazury::qualification::lifecycle::refill_service(
+                    payment, receipt, debit, job,
+                )? {
+                    overlap_wallets.insert(wallet_name);
+                    overlap.push(evidence);
+                }
+            }
         }
     }
     Ok(CaseOutcomes {
@@ -459,15 +467,15 @@ fn verify_case_admission(
     );
     if round.service_cases.iter().any(|case| case == id) && *wallet == round.pool {
         return Ok(payment["pool"] == pool
-                && payment["generation"].as_u64() == Some(generation)
-                && payment["address"]
+            && payment["generation"].as_u64() == Some(generation)
+            && payment["address"]
+                .as_str()
+                .context("service payer missing")?
+                .parse::<Address>()?
+                == active["address"]
                     .as_str()
-                    .context("service payer missing")?
-                    .parse::<Address>()?
-                    == active["address"]
-                        .as_str()
-                        .context("promoted address missing")?
-                        .parse::<Address>()?);
+                    .context("promoted address missing")?
+                    .parse::<Address>()?);
     }
     Ok(true)
 }
@@ -517,7 +525,10 @@ fn verify_refill_readiness(
 mod tests {
     use super::*;
     fn wallet(id: &str, n: u64, role: &str, balance: &str) -> Value {
-        json!({"id":id,"address":format!("0x{n:040x}"),"role":role,"target":"100","confirmed_balance":balance})
+        json!({"id":id,"address":format!("0x{n:040x}"),"role":role,"target":"100","balance_estimate_atomic":balance,"destination_recorded":role!="ALLOCATED","destination_disputed":null})
+    }
+    fn balance(amount: &str) -> Value {
+        json!({"schema_version":2,"confirmed_balance_atomic":amount,"latest_balance_atomic":amount,"conservative_balance_atomic":amount,"block_height":12,"block_hash":format!("0x{:064x}",1),"latest_block_height":24,"latest_block_hash":format!("0x{:064x}",2)})
     }
     type Fixture = (
         Phase,
@@ -530,18 +541,19 @@ mod tests {
     );
     fn fixture() -> Fixture {
         let phase:Phase=serde_json::from_value(json!({"id":"rotation","window":"w","cases":["d","s"],"pools":["pool"],"required":true,"scenario":{"kind":"rotation","refill_slots":1,"rounds":[{"pool":"pool","expected_price_usdc":"0.000010","depletion_cases":["d"],"service_cases":["s"]}]}})).unwrap();
-        let before = json!({"treasury_id":"t","pools":[{"id":"p","name":"pool","generation":0,"addresses":[wallet("a",1,"ACTIVE","0"),wallet("b",2,"READY","100")]}],"funding_jobs":[],"source_operations":[]});
-        let after = json!({"treasury_id":"t","pools":[{"id":"p","name":"pool","generation":1,"addresses":[wallet("a",1,"RETIRED","0"),wallet("b",2,"ACTIVE","90"),wallet("c",3,"ALLOCATED","0")]}],"funding_jobs":[{"id":"j","pool_id":"p","wallet_id":"c","recipient":format!("0x{:040x}",3),"target":"100","operation_id":"op","phase":"ALLOCATED"}],"source_operations":[]});
-        let observation = json!({"session":"session","pool":"p","pool_name":"pool","observed_micros":10,"state":before,"balances":{"block_height":12,"block_hash":format!("0x{:064x}",1),"confirmed":{"a":"0","b":"100"},"unresolved":{}}});
-        let start = json!({"request":"request","estimate":x402_treazury::qualification::depletion_estimate(&observation,"10",1).unwrap()});
+        let before = json!({"schema_version":2,"treasury_id":"t","pools":[{"id":"p","name":"pool","generation":0,"addresses":[wallet("a",1,"ACTIVE","0"),wallet("b",2,"READY","100")],"reserve_claims":[{"slot":"small","enabled":true,"generation":4,"wallet_id":"b","destination_ready":true}]}],"funding_jobs":[],"source_operations":[]});
+        let after = json!({"schema_version":2,"treasury_id":"t","pools":[{"id":"p","name":"pool","generation":0,"addresses":[wallet("a",1,"RETAINED","0"),wallet("b",2,"ACTIVE","90"),wallet("c",3,"ALLOCATED","0")],"reserve_claims":[{"slot":"small","enabled":true,"generation":5,"wallet_id":"c","destination_ready":false}]}],"funding_jobs":[{"id":"j","pool_id":"p","wallet_id":"c","recipient":format!("0x{:040x}",3),"target":"100","operation_id":"op","phase":"ALLOCATED"}],"source_operations":[]});
+        let observation = json!({"session":"session","pool":"p","pool_name":"pool","observed_micros":10,"state":before,"balances":{"schema_version":2,"block_height":12,"block_hash":format!("0x{:064x}",1),"wallets":{"a":balance("0"),"b":balance("100")},"unresolved":{}}});
+        let start = json!({"phase":"rotation","round":0,"request":"request","estimate":x402_treazury::qualification::depletion_estimate(&observation,"10",1).unwrap()});
         let mut ready = after.clone();
         ready["pools"][0]["addresses"][2] = wallet("c", 3, "READY", "100");
+        ready["pools"][0]["reserve_claims"][0]["destination_ready"] = json!(true);
         ready["funding_jobs"][0]["phase"] = json!("COMPLETE");
         ready["source_operations"] =
             json!([{"operation_id":"op","submission":"CONFIRMED","attempts":1}]);
         let mut events = vec![
             json!({"kind":"rotation_promotion","detail":{"phase":"rotation","round":0,"before":before,"after":after,"replacement_job":"j","skipped":[]}}),
-            json!({"kind":"rotation_refill_ready","detail":{"phase":"rotation","job":"j","state":ready}}),
+            json!({"kind":"rotation_refill_ready","detail":{"phase":"rotation","round":0,"job":"j","state":ready}}),
         ];
         let mut cases = Vec::new();
         let mut proofs = std::collections::BTreeMap::new();
@@ -550,7 +562,7 @@ mod tests {
                 json!({"case":id,"execution":"COMPLETED","semantic":"PASSED","settlement":"USED"}),
             );
             events.push(json!({"kind":"application_claim","detail":{"case":id,"server":"main","source":"api","session":"session"}}));
-            let payment = json!({"case":id,"session":"session","attempt_id":id,"pool":"p","pool_name":"pool","generation":1,"address":format!("0x{:040x}",2),"amount":"10","admitted_micros":20,"lifecycle":after});
+            let payment = json!({"case":id,"session":"session","attempt_id":id,"pool":"p","pool_name":"pool","generation":0,"address":format!("0x{:040x}",2),"amount":"10","admitted_micros":20,"lifecycle":after});
             let receipt = json!({"case":id,"session":"session","attempt_id":id,"receipt":{"classification":"seller_success","transaction":id,"signed_request_started_micros":30,"response_observed_micros":40,"lifecycle":{"observed_micros":50,"state":after}}});
             let debit = json!({"case":id,"session":"session","attempt_id":id,"status":"verified","proof":{"payer":payment["address"],"amount_atomic":"10","transaction":id}});
             proofs.insert(id.into(), debit["proof"].clone());
@@ -650,10 +662,22 @@ mod tests {
             );
         }
         let mut wrong = events.clone();
-        wrong.iter_mut().find(|e|e["kind"]=="application_payment" && e["detail"]["case"]=="s").unwrap()["detail"]["generation"]=json!(0);
-        let result=phase_result(&phase,&wrong,&cases,&start,&observation,&config,&proofs).unwrap();
-        assert_ne!(result["status"],"passed");
-        assert_eq!(result["failed_cases"],json!(["s"]));
+        wrong
+            .iter_mut()
+            .find(|e| e["kind"] == "application_payment" && e["detail"]["case"] == "s")
+            .unwrap()["detail"]["generation"] = json!(1);
+        let result = phase_result(
+            &phase,
+            &wrong,
+            &cases,
+            &start,
+            &observation,
+            &config,
+            &proofs,
+        )
+        .unwrap();
+        assert_ne!(result["status"], "passed");
+        assert_eq!(result["failed_cases"], json!(["s"]));
     }
     #[test]
     fn each_service_wallet_must_be_observed_during_the_pending_refill() {
@@ -733,12 +757,14 @@ mod tests {
         assert_eq!(result["unobserved_service_wallets"], json!(["other"]));
     }
     #[test]
-    fn readiness_requires_credit_and_exactly_one_confirmed_source_submission() {
+    fn readiness_requires_current_destination_and_one_confirmed_source_submission() {
         let (_, events, _, _, _, _, _) = fixture();
         let state = &events[1]["detail"]["state"];
-        assert!(refill_ready(state, "p", "j", 1).unwrap());
+        assert!(refill_ready(state, "p", "j", 0).unwrap());
         for (pointer, value) in [
-            ("/pools/0/addresses/2/confirmed_balance", json!("99")),
+            ("/pools/0/addresses/2/destination_recorded", json!(false)),
+            ("/pools/0/reserve_claims/0/destination_ready", json!(false)),
+            ("/pools/0/reserve_claims/0/enabled", json!(false)),
             ("/source_operations/0/attempts", json!(2)),
             (
                 "/source_operations/0/submission",
@@ -748,11 +774,34 @@ mod tests {
         ] {
             let mut wrong = state.clone();
             *wrong.pointer_mut(pointer).unwrap() = value;
-            assert!(refill_ready(&wrong, "p", "j", 1).is_err(), "{pointer}");
+            assert!(refill_ready(&wrong, "p", "j", 0).is_err(), "{pointer}");
         }
+        for (pointer, value, error) in [
+            (
+                "/pools/0/addresses/2/destination_disputed",
+                json!("conflicting destination evidence"),
+                "completed refill lacks undisputed destination support",
+            ),
+            (
+                "/pools/0/reserve_claims",
+                json!([]),
+                "refill current claim missing",
+            ),
+        ] {
+            let mut wrong = state.clone();
+            *wrong.pointer_mut(pointer).unwrap() = value;
+            assert_eq!(
+                refill_ready(&wrong, "p", "j", 0).unwrap_err().to_string(),
+                error,
+                "{pointer}"
+            );
+        }
+        let mut estimate = state.clone();
+        estimate["pools"][0]["addresses"][2]["balance_estimate_atomic"] = json!("0");
+        assert!(refill_ready(&estimate, "p", "j", 0).unwrap());
         let mut pending = state.clone();
         pending["funding_jobs"][0]["phase"] = json!("VERIFYING_CREDIT");
-        assert!(!refill_ready(&pending, "p", "j", 1).unwrap());
+        assert!(!refill_ready(&pending, "p", "j", 0).unwrap());
     }
     #[test]
     fn each_lifecycle_round_uses_only_its_own_cases_and_boundary() {
@@ -861,7 +910,7 @@ mod tests {
             json!({"status":"passed","failed_cases":[],
             "unresolved_cases":[],"rotation_status":"passed","pending_service_status":"observed",
             "pending_service":overlap,"unobserved_service_wallets":[],"replacement_job":"j",
-            "generation":1,"promotion":true,"refill_ready":true,"source_submissions":1})
+            "generation":0,"promotion":true,"refill_ready":true,"source_submissions":1})
         );
         let mut missing = f.clone();
         missing.1.retain(|e| e["kind"] != "rotation_promotion");
@@ -980,7 +1029,11 @@ mod tests {
             f.1.push(duplicate);
             assert_eq!(
                 assess(&f).unwrap_err().to_string(),
-                if matches!(kind,"application_receipt"|"application_debit_verified") {"duplicate rotation attempt observation".to_owned()} else {format!("duplicate rotation evidence: {kind}")}
+                if matches!(kind, "application_receipt" | "application_debit_verified") {
+                    "duplicate rotation attempt observation".to_owned()
+                } else {
+                    format!("duplicate rotation evidence: {kind}")
+                }
             );
         }
         // Case lookup deliberately retains the first match.
@@ -992,17 +1045,8 @@ mod tests {
     #[test]
     fn delayed_replacement_allocation_does_not_rewrite_the_promotion_snapshot() {
         let mut f = fixture();
-        let mut before = f.4["state"].clone();
-        before["schema_version"] = json!(2);
-        before["pools"][0]["addresses"][1]["destination_recorded"] = json!(true);
-        before["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,
-            "generation":4,"wallet_id":"b","destination_ready":true}]);
-        let mut after = f.1[0]["detail"]["after"].clone();
-        after["schema_version"] = json!(2);
-        after["pools"][0]["generation"] = json!(0);
-        after["pools"][0]["addresses"][0]["role"] = json!("RETAINED");
-        after["pools"][0]["reserve_claims"] = json!([{"slot":"small","enabled":true,
-            "generation":5,"wallet_id":"c","destination_ready":false}]);
+        let before = f.4["state"].clone();
+        let after = f.1[0]["detail"]["after"].clone();
         let mut vacant = after.clone();
         vacant["pools"][0]["addresses"]
             .as_array_mut()

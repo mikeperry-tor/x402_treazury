@@ -171,41 +171,31 @@ fn validate(db: &Connection, m: &Manifest, run: &str) -> Result<BTreeSet<String>
                 "rotation boundaries reused or skipped a generation"
             );
         }
-        generations.insert(
-            round.pool.clone(),
-            (
-                pool["id"].clone(),
-                generation
-                    .checked_add(u64::from(event["before"]["schema_version"] != 2))
-                    .context("rotation generation overflow")?,
-            ),
-        );
+        generations.insert(round.pool.clone(), (pool["id"].clone(), generation));
         if let Some(job) = &job {
             ensure!(
                 jobs.insert(job.clone()),
                 "replacement job reused across rotation boundaries"
             );
         }
-        if event["before"]["schema_version"] == 2 {
-            let after_pool = event["after"]["pools"]
-                .as_array()
-                .context("consumption pools missing")?
-                .iter()
-                .find(|p| p["id"] == pool["id"])
-                .context("consumption pool missing")?;
-            let payer = after_pool["addresses"]
-                .as_array()
-                .context("consumption inventory missing")?
-                .iter()
-                .find(|w| w["role"] == "ACTIVE")
-                .context("consumed payer missing")?["id"]
-                .as_str()
-                .context("consumed identity missing")?;
-            ensure!(
-                consumed.insert((round.pool.clone(), payer.to_owned())),
-                "reserve consumption reused across boundaries"
-            );
-        }
+        let after_pool = event["after"]["pools"]
+            .as_array()
+            .context("consumption pools missing")?
+            .iter()
+            .find(|p| p["id"] == pool["id"])
+            .context("consumption pool missing")?;
+        let payer = after_pool["addresses"]
+            .as_array()
+            .context("consumption inventory missing")?
+            .iter()
+            .find(|w| w["role"] == "ACTIVE")
+            .context("consumed payer missing")?["id"]
+            .as_str()
+            .context("consumed identity missing")?;
+        ensure!(
+            consumed.insert((round.pool.clone(), payer.to_owned())),
+            "reserve consumption reused across boundaries"
+        );
         ensure!(
             event["replacement_job"] == json!(job),
             "promotion replacement evidence changed"

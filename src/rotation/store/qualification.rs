@@ -78,29 +78,30 @@ pub(super) fn payment_evidence(db: &Connection, attempt: &str) -> Result<Value> 
                 .context("admission accounting exceeds observed balance")?
                 .to_string()
         );
-        if let Some(encoded) = evidence["support"].as_str() {
-            let support: super::evidence::BalanceSupport =
-                serde_json::from_str(encoded).context("malformed exact admission support")?;
-            support.observation.validate()?;
-            ensure!(
-                balance == support.observation.available()
-                    && evidence["block_height"].as_u64()
-                        == Some(support.observation.confirmed.anchor.height)
-                    && evidence["block_hash"].as_str()
-                        == Some(support.observation.confirmed.anchor.hash.as_str()),
-                "admission balance disagrees with exact support"
+        let encoded = evidence["support"]
+            .as_str()
+            .context("unsupported admission evidence: original exact support missing")?;
+        let support: super::evidence::BalanceSupport =
+            serde_json::from_str(encoded).context("malformed exact admission support")?;
+        support.observation.validate()?;
+        ensure!(
+            balance == support.observation.available()
+                && evidence["block_height"].as_u64()
+                    == Some(support.observation.confirmed.anchor.height)
+                && evidence["block_hash"].as_str()
+                    == Some(support.observation.confirmed.anchor.hash.as_str()),
+            "admission balance disagrees with exact support"
+        );
+        evidence
+            .as_object_mut()
+            .context("admission evidence missing")?
+            .extend(
+                crate::qualification::observed_balance(&support.observation)
+                    .as_object()
+                    .expect("balance evidence object")
+                    .clone(),
             );
-            evidence
-                .as_object_mut()
-                .context("admission evidence missing")?
-                .extend(
-                    crate::qualification::observed_balance(&support.observation)
-                        .as_object()
-                        .expect("balance evidence object")
-                        .clone(),
-                );
-            evidence["support"] = serde_json::to_value(support)?;
-        }
+        evidence["support"] = serde_json::to_value(support)?;
         payment["ownership_evidence_version"] = json!(1);
         crate::qualification::validate_admission_balance(&payment)?;
     }
@@ -182,6 +183,7 @@ fn read(db: &Connection) -> Result<Value> {
             "qualification snapshot exceeds 10000 {label}; export/review support required"
         );
     }
+    let status = read_status(db)?;
     let mut stmt = db.prepare(
         "SELECT id,pool_id,wallet_id,generation,amount,state,payer,payee,nonce,valid_after,valid_before,requirements_hash FROM payment_attempts ORDER BY id",
     )?;
@@ -205,7 +207,6 @@ fn read(db: &Connection) -> Result<Value> {
         .query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let archived = db.prepare("SELECT r.operation_id FROM funding_recovery r WHERE NOT EXISTS(SELECT 1 FROM outgoing o WHERE o.id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM treasury_operations t WHERE t.id=r.operation_id) AND (NOT EXISTS(SELECT 1 FROM operation_network n WHERE n.operation_id=r.operation_id AND n.preparation IS NOT NULL) OR (EXISTS(SELECT 1 FROM funding_quote_refreshes q WHERE q.operation_id=r.operation_id) AND NOT EXISTS(SELECT 1 FROM funding_progress j WHERE j.operation_id=r.operation_id AND j.job_id!=r.job_id))) ORDER BY r.operation_id")?
         .query_map([], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    let status = read_status(db)?;
     let wallets = db.prepare("SELECT id,pool_id,role,balance FROM wallets ORDER BY id")?
         .query_map([],|r|Ok(json!({"id":r.get::<_,String>(0)?,"pool":r.get::<_,String>(1)?,"role":r.get::<_,String>(2)?,"balance":r.get::<_,String>(3).ok().and_then(|v|amount(&v).ok()).map(|v|v.to_string()),"height":null,"hash":null,"observation_model":"advisory_estimate"})))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -355,51 +356,24 @@ mod tests {
         assert_eq!(saved["balance"], "100");
         assert!(saved["height"].is_null());
         assert!(saved["hash"].is_null());
-        let evidence = store.qualification_payment("new").unwrap();
-        assert_eq!(evidence["ownership_evidence_version"], 1);
-        assert_eq!(evidence["payer_role"], "ACTIVE");
-        assert!(evidence["reserve_slot"].is_null());
-        assert!(evidence["claim_generation"].is_null());
-        assert_eq!(store.qualification_exposure(&pool).unwrap()[&wallet], "17");
-        assert_eq!(
-            evidence["lifecycle"]["funding_jobs"]
-                .as_array()
-                .unwrap()
-                .len(),
-            2
-        );
-        store
-            .db
-            .execute(
-                "UPDATE funding_progress SET last_error='private upstream diagnostic'",
-                [],
-            )
-            .unwrap();
+        let original = store.qualification_state().unwrap();
         assert!(
-            !store
-                .qualification_lifecycle()
-                .unwrap()
+            store
+                .qualification_payment("new")
+                .unwrap_err()
                 .to_string()
-                .contains("private upstream diagnostic")
+                .contains("original exact support missing")
         );
-        assert_eq!(
-            evidence["balance_evidence"],
-            json!({"confirmed_balance_atomic":"100","reserved_before_atomic":"10","reserved_after_atomic":"17","available_after_atomic":"83","block_height":12,"block_hash":hash,"support":null,"valid_until":"1000"})
-        );
-        assert!(store.qualification_payment("pending").is_err());
-        store
+        assert_eq!(store.qualification_state().unwrap(), original);
+        let unsupported: Option<String> = store
             .db
-            .execute(
-                "UPDATE payment_attempts SET amount='94' WHERE id='pending'",
+            .query_row(
+                "SELECT support FROM payment_admission_evidence WHERE attempt_id='new'",
                 [],
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(
-            store.qualification_payment("new").unwrap()["balance_evidence"],
-            evidence["balance_evidence"]
-        );
-        // The same historical admission gains exact labels only when its saved
-        // support establishes them. Current wallet balances cannot supply them.
+        assert!(unsupported.is_none());
         let support = super::super::evidence::BalanceSupport {
             observation: crate::rotation::base::evidence::BalanceObservation {
                 wallet: wallet.clone(),
@@ -434,6 +408,57 @@ mod tests {
                 [serde_json::to_string(&support).unwrap()],
             )
             .unwrap();
+        let evidence = store.qualification_payment("new").unwrap();
+        assert_eq!(evidence["ownership_evidence_version"], 1);
+        assert_eq!(evidence["payer_role"], "ACTIVE");
+        assert!(evidence["reserve_slot"].is_null());
+        assert!(evidence["claim_generation"].is_null());
+        assert_eq!(store.qualification_exposure(&pool).unwrap()[&wallet], "17");
+        assert_eq!(
+            evidence["lifecycle"]["funding_jobs"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        store
+            .db
+            .execute(
+                "UPDATE funding_progress SET last_error='private upstream diagnostic'",
+                [],
+            )
+            .unwrap();
+        assert!(
+            !store
+                .qualification_lifecycle()
+                .unwrap()
+                .to_string()
+                .contains("private upstream diagnostic")
+        );
+        assert_eq!(evidence["balance_evidence"]["schema_version"], 2);
+        assert_eq!(
+            evidence["balance_evidence"]["confirmed_balance_atomic"],
+            "300"
+        );
+        assert_eq!(
+            evidence["balance_evidence"]["conservative_balance_atomic"],
+            "100"
+        );
+        assert_eq!(evidence["balance_evidence"]["reserved_before_atomic"], "10");
+        assert_eq!(evidence["balance_evidence"]["reserved_after_atomic"], "17");
+        assert_eq!(evidence["balance_evidence"]["available_after_atomic"], "83");
+        assert!(store.qualification_payment("pending").is_err());
+        store
+            .db
+            .execute(
+                "UPDATE payment_attempts SET amount='94' WHERE id='pending'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            store.qualification_payment("new").unwrap()["balance_evidence"],
+            evidence["balance_evidence"]
+        );
         let exact = store.qualification_payment("new").unwrap();
         assert_eq!(exact["balance_evidence"]["schema_version"], 2);
         assert_eq!(exact["balance_evidence"]["confirmed_balance_atomic"], "300");
@@ -492,6 +517,21 @@ mod tests {
                 [],
             )
             .unwrap();
+        let raw = store.qualification_state().unwrap();
+        assert!(store.qualification_payment("new").is_err());
+        assert_eq!(store.qualification_state().unwrap(), raw);
+        let (support, valid_until): (Option<String>, Option<String>) = store
+            .db
+            .query_row(
+                "SELECT support,valid_until FROM payment_admission_evidence WHERE attempt_id='new'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(support.is_none());
+        assert_eq!(valid_until.as_deref(), Some("1000"));
+        // Presentation failure cannot erase signed attempts or release exposure.
+        assert_eq!(store.qualification_exposure(&pool).unwrap()[&wallet], "101");
         store
             .db
             .execute(
@@ -499,29 +539,20 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert_eq!(
-            store.qualification_payment("new").unwrap()["balance_evidence"]["available_after_atomic"],
-            "83"
-        );
         assert_eq!(store.qualification_exposure(&pool).unwrap()[&wallet], "7");
-        store
-            .db
-            .execute("UPDATE wallets SET block_hash=NULL WHERE id=?1", [wallet])
-            .unwrap();
         assert_eq!(
-            store.qualification_payment("new").unwrap()["balance_evidence"],
-            evidence["balance_evidence"]
+            store.qualification_state().unwrap()["payment_attempts"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
         );
-        store
-            .db
-            .execute(
-                "UPDATE payment_admission_evidence SET reserved_before='94' WHERE attempt_id='new'",
-                [],
-            )
-            .unwrap();
-        assert!(
-            store.qualification_payment("new").is_err(),
-            "corrupted original support cannot justify the admitted payment"
+        // Fresh admissions remain advisory even without a usable balance estimate.
+        store.db.execute("UPDATE payment_admission_evidence SET valid_until=NULL,balance=NULL WHERE attempt_id='new'", []).unwrap();
+        let advisory = store.qualification_payment("new").unwrap();
+        assert_eq!(
+            advisory["balance_evidence"],
+            json!({"schema_version":3,"estimate_atomic":null})
         );
     }
     #[test]

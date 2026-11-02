@@ -668,9 +668,10 @@ async fn rotation_early_guards_preserve_attempted_state_and_reject_second_baseli
                 .registry
                 .request_pool_observation(&f.manifest.run_id, "p", "pool", now().unwrap())
                 .unwrap();
+            let balance = |amount: &str| json!({"schema_version":2,"confirmed_balance_atomic":amount,"latest_balance_atomic":amount,"conservative_balance_atomic":amount,"block_height":1,"block_hash":format!("0x{}","11".repeat(32)),"latest_block_height":2,"latest_block_hash":format!("0x{}","22".repeat(32))});
             let observation = json!({"request":request,"session":application.current.binding.session,"pool":"p","pool_name":"pool","query_started_micros":1,"observed_micros":2,
-                "state":{"treasury_id":f.manifest.treasury_id,"pools":[{"id":"p","name":"pool","generation":0,"addresses":[{"id":"a","role":"ACTIVE"},{"id":"b","role":"READY"}]}]},
-                "balances":{"block_height":1,"block_hash":format!("0x{}", "11".repeat(32)),"confirmed":{"a":"0","b":"20000"},"unresolved":{}}});
+                "state":{"schema_version":2,"treasury_id":f.manifest.treasury_id,"pools":[{"id":"p","name":"pool","generation":0,"addresses":[{"id":"a","role":"ACTIVE","destination_recorded":true},{"id":"b","role":"READY","destination_recorded":true}],"reserve_claims":[{"slot":"small","enabled":true,"generation":0,"wallet_id":"b","destination_ready":true}]}]},
+                "balances":{"schema_version":2,"block_height":1,"block_hash":format!("0x{}", "11".repeat(32)),"wallets":{"a":balance("0"),"b":balance("20000")},"unresolved":{}}});
             let estimate =
                 x402_treazury::qualification::depletion_estimate(&observation, "10000", 1).unwrap();
             f.registry

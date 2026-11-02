@@ -32,130 +32,8 @@ fn role<'a>(wallets: &BTreeMap<&str, &'a Value>, role: &str) -> Result<&'a Value
     ensure!(matching.next().is_none(), "duplicate lifecycle wallet role");
     Ok(found)
 }
-/// Verify exactly one natural promotion and return its unique replacement job ID.
-pub fn promotion(before: &Value, after: &Value, pool: &str) -> Result<String> {
-    if before["schema_version"] == 2 || after["schema_version"] == 2 {
-        return capacity_consumption(before, after, pool)?.context("replacement not yet allocated");
-    }
-    ensure!(
-        before["treasury_id"].is_string() && before["treasury_id"] == after["treasury_id"],
-        "lifecycle treasury mismatch"
-    );
-    let old_pools = indexed(before, "pools")?;
-    let new_pools = indexed(after, "pools")?;
-    let old = old_pools.get(pool).context("previous pool missing")?;
-    let new = new_pools.get(pool).context("promoted pool missing")?;
-    let generation = old["generation"]
-        .as_u64()
-        .context("previous generation missing")?;
-    ensure!(
-        generation.checked_add(1) == new["generation"].as_u64() && old["name"] == new["name"],
-        "promotion generation or pool identity mismatch"
-    );
-    let old_wallets = indexed(old, "addresses")?;
-    let new_wallets = indexed(new, "addresses")?;
-    let active = role(&old_wallets, "ACTIVE")?;
-    let standby = role(&old_wallets, "READY")?;
-    ensure!(
-        new_wallets.len() == old_wallets.len() + 1,
-        "promotion did not retain wallets and allocate exactly one replacement"
-    );
-    for (id, wallet) in &old_wallets {
-        let saved = new_wallets.get(id).context("promotion lost a wallet")?;
-        ensure!(
-            saved["address"] == wallet["address"] && saved["target"] == wallet["target"],
-            "promotion changed an immutable wallet identity/target"
-        );
-        let expected = if wallet["id"] == active["id"] {
-            "RETIRED"
-        } else if wallet["id"] == standby["id"] {
-            "ACTIVE"
-        } else {
-            wallet["role"].as_str().context("wallet role missing")?
-        };
-        ensure!(
-            saved["role"] == expected,
-            "promotion assigned an unexpected wallet role"
-        );
-    }
-    ensure!(
-        role(&new_wallets, "ACTIVE")?["id"] == standby["id"],
-        "funded standby did not become active"
-    );
-    let replacement = new_wallets
-        .iter()
-        .find(|(id, _)| !old_wallets.contains_key(*id))
-        .context("replacement wallet missing")?
-        .1;
-    let address: alloy_primitives::Address = replacement["address"]
-        .as_str()
-        .context("replacement address missing")?
-        .parse()?;
-    for previous_pool in old_pools.values() {
-        for wallet in indexed(previous_pool, "addresses")?.values() {
-            ensure!(
-                wallet["address"]
-                    .as_str()
-                    .context("previous address missing")?
-                    .parse::<alloy_primitives::Address>()?
-                    != address,
-                "replacement reused an address"
-            );
-        }
-    }
-    ensure!(
-        matches!(replacement["role"].as_str(), Some("ALLOCATED" | "READY")),
-        "invalid replacement role"
-    );
-    let old_jobs = indexed(before, "funding_jobs")?;
-    let new_jobs = indexed(after, "funding_jobs")?;
-    for (id, job) in &old_jobs {
-        let saved = new_jobs.get(id).context("promotion lost a funding job")?;
-        for field in ["pool_id", "wallet_id", "recipient"] {
-            ensure!(
-                job[field] == saved[field],
-                "promotion changed an existing funding binding"
-            );
-        }
-    }
-    let mut jobs = new_jobs
-        .iter()
-        .filter(|(id, j)| !old_jobs.contains_key(*id) && j["pool_id"] == pool);
-    let (id, job) = jobs.next().context("replacement funding job missing")?;
-    ensure!(
-        jobs.next().is_none(),
-        "promotion allocated more than one replacement job"
-    );
-    ensure!(
-        job["wallet_id"] == replacement["id"]
-            && job["recipient"] == replacement["address"]
-            && job["target"] == replacement["target"],
-        "replacement funding binding mismatch"
-    );
-    ensure!(
-        replacement["target"]
-            .as_str()
-            .context("replacement target missing")?
-            .parse::<alloy_primitives::U256>()?
-            > alloy_primitives::U256::ZERO,
-        "replacement target must be positive"
-    );
-    ensure!(
-        (replacement["role"] == "READY") == (job["phase"] == "COMPLETE"),
-        "replacement readiness disagrees with completed credit"
-    );
-    Ok((*id).to_owned())
-}
-/// Current reports correlate reserve consumption with its exact replacement slot.
-/// Old immutable reports retain their original schema-specific interpretation.
+/// Verify current reserve consumption; None retains a proven vacant replacement.
 pub fn consumed_reserve(before: &Value, after: &Value, pool: &str) -> Result<Option<String>> {
-    if before["schema_version"] == 2 || after["schema_version"] == 2 {
-        capacity_consumption(before, after, pool)
-    } else {
-        promotion(before, after, pool).map(Some)
-    }
-}
-fn capacity_consumption(before: &Value, after: &Value, pool: &str) -> Result<Option<String>> {
     ensure!(
         before["schema_version"] == 2
             && after["schema_version"] == 2
@@ -452,7 +330,10 @@ pub fn refill_service(
     }
     let after = &observation["state"];
     ensure!(
-        before["treasury_id"].is_string() && before["treasury_id"] == after["treasury_id"],
+        before["schema_version"] == 2
+            && after["schema_version"] == 2
+            && before["treasury_id"].is_string()
+            && before["treasury_id"] == after["treasury_id"],
         "refill observation treasury mismatch"
     );
     let old_jobs = indexed(before, "funding_jobs")?;
@@ -498,23 +379,6 @@ pub fn refill_service(
 mod tests {
     use super::*;
     include!("lifecycle_capacity_tests.rs");
-    fn wallet(id: &str, n: u64, role: &str) -> Value {
-        json!({"id":id,"address":format!("0x{n:040x}"),"role":role,"target":"2000000"})
-    }
-    fn state(generation: u64) -> Value {
-        json!({"treasury_id":"treasury","pools":[{"id":"p","name":"pool","generation":generation,"addresses":[wallet("old",1,"ACTIVE"),wallet("ready",2,"READY")]}],"funding_jobs":[]})
-    }
-    fn promoted() -> (Value, Value) {
-        let before = state(0);
-        let mut after = state(1);
-        after["pools"][0]["addresses"] = json!([
-            wallet("old", 1, "RETIRED"),
-            wallet("ready", 2, "ACTIVE"),
-            wallet("new", 3, "ALLOCATED")
-        ]);
-        after["funding_jobs"] = json!([{"id":"replacement","pool_id":"p","wallet_id":"new","recipient":format!("0x{:040x}",3),"target":"2000000","operation_id":"op","phase":"ALLOCATED"}]);
-        (before, after)
-    }
     #[test]
     fn capacity_consumption_uses_exact_slot_and_destination_not_source_completion() {
         let (before, mut after) = capacity_fixture();
@@ -526,13 +390,19 @@ mod tests {
         vacant["pools"][0]["reserve_claims"][0]["wallet_id"] = Value::Null;
         vacant["funding_jobs"] = json!([]);
         assert_eq!(consumed_reserve(&before, &vacant, "p").unwrap(), None);
-        assert!(promotion(&before, &vacant, "p").is_err());
-        assert_eq!(promotion(&before, &after, "p").unwrap(), "replacement");
+
+        assert_eq!(
+            consumed_reserve(&before, &after, "p").unwrap().as_deref(),
+            Some("replacement")
+        );
         after["pools"][0]["addresses"][2]["role"] = json!("READY");
         after["pools"][0]["addresses"][2]["destination_recorded"] = json!(true);
         after["pools"][0]["reserve_claims"][0]["destination_ready"] = json!(true);
         after["funding_jobs"][0]["phase"] = json!("SWAPPING");
-        assert_eq!(promotion(&before, &after, "p").unwrap(), "replacement");
+        assert_eq!(
+            consumed_reserve(&before, &after, "p").unwrap().as_deref(),
+            Some("replacement")
+        );
         // A fresh reserve-only pool has no previous ACTIVE payer to retain.
         let mut fresh_before = before.clone();
         let mut fresh_after = after.clone();
@@ -545,64 +415,17 @@ mod tests {
             .unwrap()
             .remove(0);
         assert_eq!(
-            promotion(&fresh_before, &fresh_after, "p").unwrap(),
-            "replacement"
+            consumed_reserve(&fresh_before, &fresh_after, "p")
+                .unwrap()
+                .as_deref(),
+            Some("replacement")
         );
         after["pools"][0]["reserve_claims"][0]["generation"] = json!(4);
-        assert!(promotion(&before, &after, "p").is_err());
-    }
-    #[test]
-    fn exactly_one_promotion_preserves_old_identity_and_binds_new_recipient() {
-        let (before, after) = promoted();
-        assert_eq!(promotion(&before, &after, "p").unwrap(), "replacement");
-        for pointer in [
-            "/pools/0/generation",
-            "/pools/0/addresses/0/role",
-            "/pools/0/addresses/1/address",
-            "/funding_jobs/0/wallet_id",
-            "/funding_jobs/0/recipient",
-        ] {
-            let mut wrong = after.clone();
-            *wrong.pointer_mut(pointer).unwrap() = Value::Null;
-            assert!(promotion(&before, &wrong, "p").is_err(), "{pointer}");
-        }
-        let mut wrong = after.clone();
-        wrong["pools"][0]["addresses"][2]["address"] =
-            before["pools"][0]["addresses"][0]["address"].clone();
-        assert!(promotion(&before, &wrong, "p").is_err());
-        let mut wrong = after.clone();
-        let mut job = wrong["funding_jobs"][0].clone();
-        job["id"] = json!("extra");
-        wrong["funding_jobs"].as_array_mut().unwrap().push(job);
-        assert!(promotion(&before, &wrong, "p").is_err());
-        let mut fast = after.clone();
-        fast["pools"][0]["addresses"][2]["role"] = json!("READY");
-        fast["funding_jobs"][0]["phase"] = json!("COMPLETE");
-        promotion(&before, &fast, "p").unwrap();
-    }
-    #[test]
-    fn promotion_rejects_reusing_another_pools_active_or_historical_address() {
-        for role in ["ACTIVE", "READY", "RETIRED"] {
-            let (mut before, mut after) = promoted();
-            let other = json!({"id":"other","name":"other_pool","generation":0,
-                "addresses":[wallet("other_wallet",3,role)]});
-            before["pools"].as_array_mut().unwrap().push(other.clone());
-            after["pools"].as_array_mut().unwrap().push(other);
-            let error = promotion(&before, &after, "p").unwrap_err();
-            assert!(
-                error.to_string().contains("reused an address"),
-                "{role}: {error}"
-            );
-
-            // Independent pools may remain present without blocking a fresh address.
-            before["pools"][1]["addresses"][0] = wallet("other_wallet", 4, role);
-            after["pools"][1]["addresses"][0] = wallet("other_wallet", 4, role);
-            assert_eq!(promotion(&before, &after, "p").unwrap(), "replacement");
-        }
+        assert!(consumed_reserve(&before, &after, "p").is_err());
     }
     #[test]
     fn paid_service_requires_both_pending_observations_and_ordered_correlated_times() {
-        let (_, state) = promoted();
+        let (_, state) = capacity_fixture();
         let payment = json!({"case":"call","session":"s","attempt_id":"a","pool":"other_pool","admitted_micros":10,"amount":"7","address":format!("0x{:040x}",4),"lifecycle":state});
         let receipt = json!({"case":"call","session":"s","attempt_id":"a","receipt":{"classification":"seller_success","transaction":"tx","signed_request_started_micros":20,"response_observed_micros":30,"lifecycle":{"observed_micros":40,"state":state}}});
         let debit = json!({"case":"call","session":"s","attempt_id":"a","status":"verified","proof":{"payer":payment["address"],"amount_atomic":"7","transaction":"tx"}});
