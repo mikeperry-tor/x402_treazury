@@ -16,8 +16,8 @@ pub(crate) struct StartupGroup {
     pub serving_ready: bool,
     /// Enabled current claims are funded and structurally bound.
     pub inventory_ready: bool,
-    /// An owned source reservation is a wait, not proof of capital exhaustion.
-    pub source_pending: bool,
+    /// Treasury-wide owned source work is a wait, not proof of capital exhaustion.
+    pub treasury_source_pending: bool,
     pub claims: Vec<StartupClaim>,
 }
 
@@ -52,51 +52,44 @@ impl StartupPath {
     pub(crate) fn disposition(
         &self,
         max_attempts: u32,
-        source_pending: bool,
+        treasury_source_pending: bool,
     ) -> StartupDisposition {
         use StartupDisposition::*;
         if self.destination_ready {
             return DestinationReady;
         }
-        let reset = self.facts.source_never_disclosed();
-        let expired = self.facts.source_closed
+        let never_disclosed = self.facts.source_never_disclosed();
+        let closed_expired = self.facts.source_closed
             && self
                 .operation
                 .as_ref()
                 .is_some_and(|op| op.submission == "EXPIRED");
+        let provider_terminal = self.facts.provider_failed || self.facts.provider_refunded;
         // Original accepted bytes/outcomes remain observed even if permission to
         // start another attempt has since been disabled or exhausted.
         if self.facts.claim_fulfilled
-            || (!reset
-                && !expired
-                && ((self.facts.provider_incomplete
-                    && !self.facts.provider_failed
-                    && !self.facts.provider_refunded)
-                    || self.facts.preparation_accepted
+            || (!never_disclosed
+                && !closed_expired
+                && (self.facts.preparation_accepted
                     || self.facts.source_pending
-                    || (!(self.facts.provider_failed || self.facts.provider_refunded)
-                        && self
-                            .operation
-                            .as_ref()
-                            .is_some_and(|operation| operation.submission != "EXPIRED"))))
+                    || (!provider_terminal
+                        && (self.facts.provider_incomplete
+                            || self
+                                .operation
+                                .as_ref()
+                                .is_some_and(|operation| operation.submission != "EXPIRED")))))
         {
             return Waiting;
         }
-        let terminal_recovery = expired
-            || (self.facts.provider_failed || self.facts.provider_refunded)
-                && funding::can_recover_facts(self.operation.as_ref(), &self.facts);
-        if (self.facts.provider_failed || self.facts.provider_refunded) && !terminal_recovery {
+        let can_recover_original = funding::can_recover_facts(self.operation.as_ref(), &self.facts);
+        let terminal_recovery = closed_expired || provider_terminal && can_recover_original;
+        if provider_terminal && !terminal_recovery {
             return Obstructed("funding_outcome_requires_review");
         }
         if self.recovery_count > u64::from(max_attempts) {
             return Obstructed("recovery_attempt_limit_reached");
         }
-        if self.job.phase == funding::FundingPhase::RecoveryRequired
-            && !crate::rotation::store::funding::can_recover_facts(
-                self.operation.as_ref(),
-                &self.facts,
-            )
-        {
+        if self.job.phase == funding::FundingPhase::RecoveryRequired && !can_recover_original {
             return Obstructed("preparation_or_swap_requires_review");
         }
         if !self.facts.new_funding_allowed && !terminal_recovery {
@@ -119,11 +112,14 @@ impl StartupPath {
                 | Condition::AuthenticationRequired,
             ) => "funding_policy_requires_review",
             Some(Condition::EvidenceInvalid) => "funding_evidence_requires_review",
-            Some(Condition::InsufficientFunds) if !source_pending => {
+            Some(Condition::InsufficientFunds) if !treasury_source_pending => {
                 "treasury_insufficient_spendable_funds"
             }
             _ => {
-                return if !reset && !expired && (self.facts.accepted_quote || source_pending) {
+                return if !never_disclosed
+                    && !closed_expired
+                    && (self.facts.accepted_quote || treasury_source_pending)
+                {
                     Waiting
                 } else {
                     Actionable
@@ -206,7 +202,7 @@ impl Store {
                 serving_ready: enabled && serving_ready,
                 inventory_ready: enabled && inventory_ready,
                 claims,
-                source_pending: self.db.query_row(
+                treasury_source_pending: self.db.query_row(
                     "SELECT EXISTS(SELECT 1 FROM outgoing WHERE state='PREPARED')",
                     [],
                     |row| row.get(0),
@@ -232,7 +228,7 @@ impl Store {
         }
         let mut blocked = Vec::new();
         for path in paths {
-            match path.disposition(max_attempts, group.source_pending) {
+            match path.disposition(max_attempts, group.treasury_source_pending) {
                 StartupDisposition::Obstructed(reason) => {
                     if blocked.len() < 8 {
                         blocked.push((path.job.id, reason));
