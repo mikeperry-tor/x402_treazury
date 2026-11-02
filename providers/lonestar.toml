@@ -12,4 +12,4 @@ recommended_tools = ["lonestar_macro_macro", "lonestar_rates_rates", "lonestar_r
 pricing_key = "x-payment-info"
 additional_properties = false
 help_url = "https://lonestaroracle.xyz/llms.txt"
-instructions_text = "The vendor quota is 30 requests per 60 seconds across all routes. Contract audits can take minutes. authMode=free is a vendor hint, not a payment guarantee."
+instructions_text = "The vendor quota is 30 requests per 60 seconds across all routes. Contract audits can take minutes."

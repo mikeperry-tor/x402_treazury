@@ -221,8 +221,12 @@ pagination quirks and coverage limitations in the affected tool descriptions or
 parameter notes. Avoid capability inventories already present in tool metadata,
 manual payment/sign/retry steps, client setup, marketing and maintainer provenance
 in agent guidance; keep provenance and compatibility rationale in this guide and
-the provider caveats. Preserve operation prices and billing distinctions rather
-than repeating the server's general pricing caveat. Provider-specific tests and fixtures need a concrete quirk, historical
+the provider caveats. Follow the [concise pricing rule](../docs/agent-sources.md#tool-documentation):
+preserve operation tariffs, metering units, paid options and charged-error facts;
+omit repeated estimate, settlement and generic retry warnings. Keep guide/spec
+discrepancies in provider caveats. Description overrides replace generated pricing,
+so removing their authored tariff requires preserving a useful fallback price.
+Provider-specific tests and fixtures need a concrete quirk, historical
 failure or authored transformation. Prefer small faithful inputs and assertions
 for that responsibility, with synthetic shared tests for generic behavior. A new
 provider requires neither a complete golden/settings snapshot nor paid

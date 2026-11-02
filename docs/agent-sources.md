@@ -206,6 +206,15 @@ constraints without explaining transport fallback costs or implementation mechan
 Distinguish searching the loaded catalog (no provider requests) from remote
 provider discovery and paid tool invocation.
 
+Keep pricing concise. Omit repeated warnings that displayed prices are estimates,
+may vary or do not prove settlement, and generic advice to distrust prices or
+avoid calls. Preserve billing facts that affect requests: metering units, paid
+options, charged errors, non-refundable operations and free quotas becoming paid.
+Keep guide/spec price discrepancies in provider caveats. Authored price text in a
+description override replaces generated pricing; retain its useful tariff unless
+the fallback still supplies that price. Do not parse arbitrary vendor prose to
+remove prices.
+
 Document every parameter in the same concise, task-focused style: its meaning,
 expected value or format, and omission/default behavior and interactions where
 they matter. Use schema types, required fields, enums and bounds for structural

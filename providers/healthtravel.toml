@@ -9,7 +9,7 @@ help_url = "https://api.healthtravel-api.workers.dev/llms.txt"
 instructions_text = "Preserve source dates, identifiers, currencies and coverage. Displayed travel prices are observations, not booking quotes; health datasets retain their source populations, units and publication lags."
 
 [overrides.healthtravel_help]
-description = "Read SiteCheck's health, travel and transport endpoint guide, prices and source coverage. Use exposed schemas for exact inputs. Vendor billing/retry statements do not establish settlement or authorize repeating a failed paid call."
+description = "Read SiteCheck's health, travel and transport endpoint guide, prices and source coverage. Use exposed schemas for exact inputs."
 
 [overrides.healthtravel_health_ema_shortages_safety]
 description = "Search EMA medicine supply-shortage records by medicine or INN words. Supply shortages only; no safety-signal or pharmacovigilance data. Returns status, forms, alternatives, update dates and source links. Results can include resolved shortages and discontinued medicines; a match does not mean an active shortage today."

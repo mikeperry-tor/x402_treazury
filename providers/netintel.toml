@@ -15,7 +15,7 @@ help_url = "https://netintel.dev/llms.txt"
 instructions_text = "Network and infrastructure intelligence. Preserve section availability, source timestamps and partial results. Unavailable signals are not clean results."
 
 [overrides.netintel_help]
-description = "Read NetIntel’s endpoint index and usage guide. Its summary price range and legacy payment-header wording lag the current catalog."
+description = "Read NetIntel’s endpoint index and usage guide. Use exposed schemas for exact inputs."
 
 [response_mappings."POST /ai-image/generate"]
 images = [{ pointer = "/image_url", encoding = "data_uri" }]

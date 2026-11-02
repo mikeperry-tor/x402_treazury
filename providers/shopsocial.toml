@@ -9,7 +9,7 @@ help_url = "https://api.shopsocial-api.workers.dev/llms.txt"
 instructions_text = "Preserve source URLs, observation dates, public-view coverage, unavailable fields and per-item failures. Public feeds and page previews do not establish complete history, hidden contacts or private content."
 
 [overrides.shopsocial_help]
-description = "Read SiteCheck's social and shopping endpoint guide, prices and public-source coverage. Use exposed schemas for exact inputs. Vendor billing/retry statements do not establish settlement or authorize repeating a failed paid call."
+description = "Read SiteCheck's social and shopping endpoint guide, prices and public-source coverage. Use exposed schemas for exact inputs."
 
 [overrides.shopsocial_social_instagram_reel]
 description = "Read recent reels/videos among a public account's 12 newest grid posts and newest IGTV items, including captions, times, views, engagement and duration. Does not cover the complete reels tab or single-reel lookup; throttling can return 503 and unknown users 404."

@@ -42,7 +42,7 @@
     "/api/check": {
       "post": {
         "summary": "Check banking marketing content",
-        "description": "Check text against 56 US banking rules and return violations, warnings, suggestions and regulatory citations. Covers deposit/credit advertising, fair lending and disclosures. Cost: $0.005/call [public discovery].",
+        "description": "Check text against 56 US banking rules and return violations, warnings, suggestions and regulatory citations. Covers deposit/credit advertising, fair lending and disclosures.",
         "requestBody": {
           "required": true,
           "content": {
@@ -97,7 +97,7 @@
     "/api/lookup": {
       "post": {
         "summary": "Search banking compliance rules",
-        "description": "Search a 56-rule US banking database by topic, regulation or product. Returns matching rule IDs and requirements for further verification. Cost: $0.003/call [public discovery].",
+        "description": "Search a 56-rule US banking database by topic, regulation or product. Returns matching rule IDs and requirements for further verification.",
         "requestBody": {
           "required": true,
           "content": {
@@ -156,7 +156,7 @@
     "/api/generate": {
       "post": {
         "summary": "Draft banking social posts",
-        "description": "Draft bank or credit union product posts with disclosure checks against 56 US banking rules. Returns post variations and check results; review before publishing. Cost: $0.10/call [public discovery].",
+        "description": "Draft bank or credit union product posts with disclosure checks against 56 US banking rules. Returns post variations and check results; review before publishing.",
         "requestBody": {
           "required": true,
           "content": {
@@ -263,7 +263,7 @@
     "/api/campaign": {
       "post": {
         "summary": "Generate a seven-day banking campaign",
-        "description": "Generate seven banking social posts. The complete HTTP request contract is unpublished; this operation is excluded from the reusable provider. Cost: $5.00/call [public discovery].",
+        "description": "Generate seven banking social posts. The complete HTTP request contract is unpublished; this operation is excluded from the reusable provider.",
         "requestBody": {
           "content": {
             "application/json": {

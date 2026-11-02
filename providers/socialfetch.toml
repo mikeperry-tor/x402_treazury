@@ -13,7 +13,7 @@ pricing_key = "x-socialfetch-credits-pricing"
 # API-origin catalog/help ignored byte ranges in the 2026-10-16 probe; HTTP/2
 # cover requires 206 responses. Canonical docs use a different origin.
 cover_traffic_enabled = false
-instructions_text = "Prices use credits at approximately $0.014 USDC per credit; tool descriptions include base costs and usage surcharges. socialfetch_linkedin_* uses v1; socialfetch_v2_linkedin_* uses v2. Preserve lookupStatus, partial results and provenance."
+instructions_text = "Configured credit estimates use $0.014 USDC per credit. socialfetch_linkedin_* uses v1; socialfetch_v2_linkedin_* uses v2. Preserve lookupStatus, partial results and provenance."
 
 help_url = "https://www.socialfetch.dev/llms.txt"
 

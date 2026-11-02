@@ -15,7 +15,7 @@ help_url = "https://exa.ai/docs/integrations/payments/x402/quickstart.md"
 instructions_text = "Use exa_search to discover URLs and exa_contents for known URLs. Prices scale with search type, result/page counts and content options."
 
 [overrides.exa_search]
-description = "Search the web and optionally retrieve result contents. Prefer a small numResults and contents.highlights for concise context. Select content options deliberately: summaries add a per-result charge. Search type and requested result count affect price; displayed prices are estimates."
+description = "Search the web and optionally retrieve result contents. Use contents.highlights for concise excerpts. Summaries add a per-result charge; search type and requested result count affect price."
 
 [overrides.exa_search.params]
 stream = "Omit or set false for a completed response."
@@ -26,10 +26,10 @@ endCrawlDate = "Ignored by Exa; omit. Use publication-date filters for publicati
 context = "Deprecated; request contents.highlights or contents.text instead."
 
 [overrides.exa_contents]
-description = "Retrieve page contents from known URLs or Exa document IDs. Supply exactly one of urls or ids. Choose text, highlights or summary as needed. maxAgeHours controls freshness; snapshotAsOf selects historical content. Each requested content type adds a per-page charge; omitted content types default to text. Displayed prices are estimates."
+description = "Retrieve page contents from known URLs or Exa document IDs. Supply exactly one of urls or ids. Choose text, highlights or summary as needed. maxAgeHours controls freshness; snapshotAsOf selects historical content. Each requested content type adds a per-page charge; omitted content types default to text."
 
 [overrides.exa_contents.params]
-urls = "URLs to retrieve. Supply this or ids, never both; prefer small batches because pricing scales with requested pages and content options."
+urls = "URLs to retrieve. Supply this or ids, never both. Pricing scales with requested pages and content options."
 ids = "Exa document IDs to retrieve. Supply this or urls, never both."
 maxAgeHours = "Maximum cache age in hours. Omit to use cached content when available and fetch uncached pages; -1 uses cache only, 0 fetches fresh, positive values fetch pages older than that age."
 snapshotAsOf = "Retrieve the newest stored version at or before an ISO date/time; a date alone means midnight UTC. Historical retrieval never fetches the live page."

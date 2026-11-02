@@ -24,4 +24,4 @@ sort = "Date order: new or old by filing date. Omit for relevance; changing date
 description = "Retrieve a patent by patent_id returned from search, including abstract, claims, inventors, assignees, dates, classifications, family applications and PDF link. Preserve missing fields and verify legal conclusions against original records. Cost: ~$0.02/call [spec]."
 
 [overrides.google_patents_help]
-description = "Read this Atlas bridge's request and pricing guide. The live payment challenge determines the call's terms."
+description = "Read this Atlas bridge's request and pricing guide."

@@ -664,7 +664,7 @@ loading the full multi-product documentation corpus into context.
 Vendor `x-payment-info` supplies dynamic price ranges, but these are not total
 request caps. Requested search type, result/page count and content options affect
 the actual price, calculated upfront. Authored descriptions explain per-result
-summary charges and per-page content choices and recommend small batches.
+summary charges and per-page content choices.
 The x402 guide documents a ten-result search maximum (larger requests are
 clamped) and default text when no content type is requested. Pricing is
 request-dependent. One unsigned
@@ -1390,6 +1390,10 @@ choice. This is schema comparison, not actual-charge qualification. Compatible
 alongside canonical `/v1` tools. The sole documented image path,
 `/ai-image/generate`, retains its explicit PNG data-URI mapping; no alias mapping
 is inferred. Research recommendations are advisory.
+
+The help guide's summary price range and legacy payment-header wording lag the
+current catalog. Operation metadata supplies the configured price hints; payment
+handling belongs to the runtime rather than guide instructions.
 
 ## x402-list.toml — public directory
 

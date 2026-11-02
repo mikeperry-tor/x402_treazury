@@ -42,6 +42,29 @@ Current behavior:
 
 ## Owning contracts and preserved invariants
 
+Execution starts from `0407d2c2228c24907b4b62db8816e713356ca279`, after the
+intervening pruning, treasury and test changes. The original complexity comparison
+baseline remains unchanged. Independent design review found the relevant catalog,
+payment, output and server boundaries substantially intact. Private audit and
+validation evidence lives under `target/observed-pricing/`.
+
+G1 design resolution: retain authored override tariffs during P1. In P3, separate
+known repository-authored tariffs into an explicit `pricing_description` override
+fragment alongside the pricing-free authored description. Compose both for the
+canonical fallback and retain the authored base for observed replacement. This
+preserves tariffs even without `pricing_key`, including HALOWERK and vendor-guide
+prices. External description-only overrides remain opaque and append-only. Migrate
+nontrailing tariff fragments deliberately, retaining billing conditions in the
+base. Cover this narrow configuration contract in shared tests and permanent
+configuration/provider documentation; do not infer ownership by parsing prices.
+
+P1E must retain typed HTTP 402/structured insufficient-funds evidence before the
+traversal drops its response, including later exhaustion and private-header exits.
+Retain known outer status through body/render failures. P3 display key derivation
+must mirror both source identity and `public_destinations()` from execution.
+Existing overrides bypass description limits; preserve their fallback behavior
+while applying the configured limit to the new observed overlay explicitly.
+
 Read the linked contracts before changing their area:
 
 - [Agent source documentation and endpoint instruction placement](../agent-sources.md#tool-documentation),

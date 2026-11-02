@@ -9,7 +9,7 @@ pricing_key = "x-payment-info"
 read_timeout_seconds = 90
 # x402.datakoot.com/llms.txt returns 404; the vendor guide is hosted on the apex domain.
 help_url = "https://datakoot.com/llms.txt"
-instructions_text = "Geocode, weather, elevation and brief_place cover US locations only. Per-operation price metadata differs from the guide summary; displayed prices remain estimates."
+instructions_text = "Geocode, weather, elevation and brief_place cover US locations only."
 
 [overrides.datakoot_help]
 description = "Read Datakoot's catalog and usage guide. Hosted MCP and free subdomain setup does not apply here."
