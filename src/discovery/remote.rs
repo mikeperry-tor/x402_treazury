@@ -55,7 +55,12 @@ pub(super) fn aggregate(results: Vec<(RemoteDirectory, Result<ToolOutput>)>) -> 
     for (directory, result) in results {
         let result = result.and_then(|child| {
             output.payment_may_have_occurred |= child.payment_may_have_occurred;
-            output.advisories.extend(child.advisories);
+            output
+                .advisories
+                .extend(child.advisories.into_iter().filter(|advisory| {
+                    !child.payment_may_have_occurred
+                        || advisory != crate::discovery_relay::api::POSSIBLE_PAYMENT_ADVISORY
+                }));
             crate::payment::with_payment_context(
                 child.payment_may_have_occurred,
                 (|| {
@@ -77,15 +82,13 @@ pub(super) fn aggregate(results: Vec<(RemoteDirectory, Result<ToolOutput>)>) -> 
                 let possible = failure.possible_payment();
                 output.payment_may_have_occurred |= possible;
                 output.advisories.push(format!(
-                    "{} search failed; sibling results remain available.{}",
+                    "{} search failed; sibling results remain available.",
                     directory.key(),
-                    if possible {
-                        " A payment may have occurred; do not automatically repeat this search."
-                    } else {
-                        ""
-                    }
                 ));
                 let mut value = json!({"local_error":{"kind":"directory_request_failed","payment_may_have_occurred":possible}});
+                if let Some(message) = crate::payment::api_error_summary(&error) {
+                    value["local_error"]["message"] = json!(message);
+                }
                 if let Some(status) = failure.status() {
                     value["local_error"]["http_status"] = json!(status);
                 }

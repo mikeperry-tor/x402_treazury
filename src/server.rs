@@ -314,7 +314,9 @@ impl Server {
                 result.structured_content = structured;
                 result
             }
-            Err(e) => CallToolResult::error(vec![ContentBlock::text(format!("{e:#}"))]),
+            Err(e) => CallToolResult::error(vec![ContentBlock::text(
+                crate::payment::present_api_error(&e).unwrap_or_else(|| format!("{e:#}")),
+            )]),
         };
         if let Some(claim) = claim {
             claim

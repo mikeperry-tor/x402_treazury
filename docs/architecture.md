@@ -376,9 +376,18 @@ success. Typed results flow through `PaidClient::execute_response`,
 `BoundTool::invoke_output` and `Server::invoke_output`, including dynamic fallback.
 Text-only Rust convenience methods reject attachments. Image mapping and validation
 contracts are in the [provider guide](../providers/README.md).
-For unsuccessful API responses, the private tool error retains the upstream body
+For unsuccessful API responses, the internal error chain retains the upstream body
 and the unique payment receipt's string `errorReason`/`errorMessage`, without
-copying the full receipt. Logs retain only fixed safe categories. Provider claims
+copying the full receipt. MCP API errors present a concise failure kind and actual
+known provider HTTP status, with one prohibition on automatic retry for potentially
+chargeable or uncertain write work. Local argument corrections remain available.
+Known outer status survives body-read and output-render failures. Explicit relay
+contracts distinguish provider HTTP status from reported destination HTTP status;
+arbitrary provider bodies remain unchanged and supply no inferred attribution.
+Output/download rejections still identify their setting and rejected content.
+Internal causes, qualification categories, liabilities and retry enforcement remain
+unchanged; diagnostic chains and arbitrary upstream prose are not agent content.
+Logs retain only fixed safe categories. Provider claims
 remain unverified and do not authorize replay; see the
 [diagnostic boundary](development.md#diagnostic-context).
 Accepted tool text, JSON and image metadata remain complete through direct and

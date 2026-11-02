@@ -215,6 +215,19 @@ description override replaces generated pricing; retain its useful tariff unless
 the fallback still supplies that price. Do not parse arbitrary vendor prose to
 remove prices.
 
+API execution errors report concise failure kinds and known provider HTTP statuses.
+Local argument errors retain useful request corrections. A documented relay result
+can identify a separate destination status; arbitrary nested `status` fields do
+not. Potentially chargeable or uncertain write failures say not to retry
+automatically. Internal payment/SDK traces and upstream diagnostic prose stay out
+of agent error content. Directory failures retain sibling results and safe error
+messages in their existing envelopes, with one aggregate retry instruction.
+Grouped errors preserve local payment-limit and wallet-availability reasons
+separately from provider rejections. Successful paid directory results also use
+the aggregate retry instruction while retaining other child advisories.
+These local failure reasons also survive relay fallback and cached document
+failures; a relay's payment limit is not a rejection by the target API.
+
 Document every parameter in the same concise, task-focused style: its meaning,
 expected value or format, and omission/default behavior and interactions where
 they matter. Use schema types, required fields, enums and bounds for structural

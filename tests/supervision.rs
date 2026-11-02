@@ -207,10 +207,11 @@ async fn unsigned_child_enforces_auth_refuses_payment_and_drains_on_parent_eof()
         .await
         .unwrap();
     assert_eq!(denied["result"]["isError"], true, "{denied}");
-    assert!(
-        denied.to_string().contains("qualification_payment_denied"),
-        "{denied}"
+    assert_eq!(
+        denied["result"]["content"],
+        json!([{"type":"text","text":"Provider API HTTP 402 Payment Required: payment rejected."}])
     );
+    assert!(denied["result"].get("structuredContent").is_none());
     assert_eq!(v.calls.load(Ordering::SeqCst), 1);
     assert_eq!(v.signed.load(Ordering::SeqCst), 0);
     let task = tokio::spawn(async move {

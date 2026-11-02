@@ -10,7 +10,7 @@ mod http_tests;
 
 /// Provider-reported categories are diagnostic claims, never replay authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ProviderFailure {
+pub(crate) enum ProviderFailure {
     PaymentSettlementFailed,
     InvalidRequestBody,
     TemporarilyUnavailable,

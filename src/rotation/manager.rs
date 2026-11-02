@@ -318,9 +318,11 @@ impl ManagedPool {
         } = observation;
         // Bound foreground owners, including callers awaiting the group gate.
         // The permit lives through the one signed dispatch and cannot cancel it.
-        let _foreground = crate::payment::ownership::foreground()?;
+        let facts = crate::payment::ResponseFacts::provider(response.status());
+        let _foreground = crate::payment::ownership::foreground().context(facts)?;
         diagnostics::stage("challenge_preparation");
-        let (challenge, offer, omitted) = prepare_challenge(&response, &self.policy)?;
+        let (challenge, offer, omitted) =
+            prepare_challenge(&response, &self.policy).context(facts)?;
         if let Some((selected, transport)) = promotion {
             crate::network::global().promote_http(selected, transport);
         }
@@ -329,18 +331,21 @@ impl ManagedPool {
         if let Some((key, receipt)) = hint {
             crate::pricing::runtime::process_hints().learn(key, offer.amount, receipt);
         }
-        let requirements_hash = keccak256(serde_json::to_vec(&offer.raw)?).to_string();
-        let qualification = crate::qualification::payment_context()?;
+        let requirements_hash =
+            keccak256(serde_json::to_vec(&offer.raw).context(facts)?).to_string();
+        let qualification = crate::qualification::payment_context().context(facts)?;
         diagnostics::stage("wallet_admission");
         {
             let selected = self
                 .acquire_candidate(&expected, offer.amount, through, attempted)
-                .await?
+                .await
+                .context(facts)?
                 .context(AdmissionError::WalletNotReady(
                     "no eligible payment identity",
-                ))?;
+                ))
+                .context(facts)?;
             if selected.wallet != expected.wallet {
-                return Err(PayerHandoff(selected).into());
+                return Err(anyhow::Error::new(PayerHandoff(selected)).context(facts));
             }
         }
         #[cfg(test)]
@@ -354,9 +359,12 @@ impl ManagedPool {
             let prepared = self
                 .store
                 .call(move |s| s.prepare_advisory_payment(&pool, amount, &hash, &bound))
-                .await?;
+                .await
+                .context(facts)?;
             diagnostics::stage("signing");
-            let (signature, auth) = sign_authorization(&prepared, &offer, &challenge).await?;
+            let (signature, auth) = sign_authorization(&prepared, &offer, &challenge)
+                .await
+                .context(facts)?;
             // Complete the owned request before accepting financial liability.
             // Direct Rust callers can supply a full HTTP header map; inserting
             // the actual version's signature is the only capacity check needed.
@@ -367,8 +375,8 @@ impl ManagedPool {
             };
             retry
                 .headers_mut()
-                .try_insert(header, signature.parse()?)
-                .map_err(crate::catalog::headers::capacity_error)?;
+                .try_insert(header, signature.parse().context(facts)?)
+                .map_err(|error| facts.attach(crate::catalog::headers::capacity_error(error)))?;
             #[cfg(test)]
             self.admission_test_stage(AdmissionTestStage::Signed {
                 nonce: auth.nonce.clone(),
@@ -382,7 +390,8 @@ impl ManagedPool {
             progress.mark_possible();
             self.store
                 .call(move |s| s.journal_authorization(&prepared, auth, context.as_ref()))
-                .await?;
+                .await
+                .context(facts)?;
             attempt_id
         };
         #[cfg(test)]
@@ -404,6 +413,10 @@ impl ManagedPool {
             diagnostics::response(response);
         }
         if let Some(context) = qualification {
+            let observed = result
+                .as_ref()
+                .ok()
+                .map(|response| crate::payment::ResponseFacts::provider(response.status()));
             let response_observed = context.elapsed_micros();
             let observer = context.clone();
             let lifecycle = self.store.call(move |s| {
@@ -413,12 +426,21 @@ impl ManagedPool {
             context
                 .record_response(
                     attempt_id,
-                    signed_request_started.context("qualification request timing missing")?,
+                    signed_request_started
+                        .context("qualification request timing missing")
+                        .map_err(|error| match observed {
+                            Some(facts) => error.context(facts),
+                            None => error,
+                        })?,
                     response_observed,
                     lifecycle,
                     &result,
                 )
-                .await?;
+                .await
+                .map_err(|error| match observed {
+                    Some(facts) => error.context(facts),
+                    None => error,
+                })?;
         }
         let response = if omitted {
             result.context(OMITTED_EXTENSIONS)?

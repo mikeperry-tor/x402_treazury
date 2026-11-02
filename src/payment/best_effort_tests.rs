@@ -494,7 +494,19 @@ async fn run_private(
     let success = result.as_ref().is_some_and(Result::is_ok);
     let error = result
         .and_then(Result::err)
-        .map_or_else(String::new, |e| format!("{e:#}"));
+        .map_or_else(String::new, |e| {
+            let presented = super::present_api_error(&e).expect("typed API presentation");
+            assert!(!presented.contains("contract call failed"));
+            assert!(!presented.contains(crate::rotation::manager::OMITTED_EXTENSIONS));
+            assert_eq!(presented.matches("Do not retry automatically.").count(), 1);
+            if matches!(wire, Wire::Settlement) && rejects > 2 {
+                assert_eq!(presented, "Provider API HTTP 402 Payment Required: insufficient funds. Do not retry automatically.");
+            }
+            if matches!(wire, Wire::Prose | Wire::Generic) {
+                assert_eq!(presented, "Provider API HTTP 402 Payment Required: payment rejected. Do not retry automatically.");
+            }
+            format!("{e:#}")
+        });
     let signed = f.signed.lock().unwrap().clone();
     let requests = f.requests.lock().unwrap().clone();
     let db = rusqlite::Connection::open(&f.db).unwrap();

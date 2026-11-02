@@ -399,12 +399,13 @@ Sign-In-With-X and other) across payer attempts on the same call, including sign
 or transport failures. Neither omission nor HTTP status proves the root cause.
 Upstream messages, arbitrary extension names, request IDs, credentials, request
 arguments and response bodies remain excluded at every application log level.
-Private failed-tool responses retain the upstream error body and the unique
+Internal failed-call errors retain the upstream error body and the unique
 payment receipt's string-valued `errorReason` and `errorMessage`, even when the
 code is not recognized for logging. Other receipt fields are not copied into the
 error detail. Duplicate receipt headers across both aliases, malformed headers
-and non-string fields supply no private receipt detail. This private error
-projection is untrusted provider prose and must never be logged; it grants no
+and non-string fields supply no private receipt detail. MCP API-error presentation
+uses typed categories and status facts rather than this diagnostic chain. This
+ephemeral error projection is untrusted provider prose and must never be logged; it grants no
 settlement or replay authority, including when a provider reports `charged:false`.
 The Coinbase directory search owner reports a terminal WARN after origin and
 fallback recovery ends, including safe cause/status and possible-charge facts;

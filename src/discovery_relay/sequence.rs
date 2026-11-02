@@ -472,9 +472,10 @@ impl Prepared {
                         Err(failure) => failure.definitive,
                     };
                     let outcome = exchange
-                        .map(|(response, elapsed, possible)| {
+                        .map(|(response, elapsed, possible, provider_status)| {
                             Arc::new(Response {
                                 status: response.status,
+                                provider_status,
                                 headers: response.headers,
                                 body: response.body,
                                 final_url: response.final_url,
@@ -558,6 +559,11 @@ fn checked_cached(
         let mut failure = TargetFailure::new("response_rejected", None, false)
             .at_relay(entry, "local response policy");
         failure.limit = Some((setting, limit));
+        failure.response = Some(crate::payment::ResponseFacts {
+            provider: response.provider_status,
+            destination: StatusCode::from_u16(response.status).ok(),
+            ..Default::default()
+        });
         return Err(failure.error(possible || response.payment_may_have_occurred));
     }
     if possible && !response.payment_may_have_occurred {
@@ -584,7 +590,7 @@ impl Entry {
         outer_limit: Option<usize>,
         help_limit: usize,
         timeout: Option<Duration>,
-    ) -> std::result::Result<(Decoded, Duration, bool), ExchangeFailure> {
+    ) -> std::result::Result<(Decoded, Duration, bool, Option<StatusCode>), ExchangeFailure> {
         let scoped = self.client(client, outer_limit, help_limit, timeout);
         let progress = crate::payment::SubmissionProgress::default();
         let started = Instant::now();
@@ -594,7 +600,7 @@ impl Entry {
             "Requesting the target response from a configured paid relay"
         );
         let result = scoped
-            .execute_response_scoped(
+            .execute_response_scoped_status(
                 RoutedRequest {
                     headers: Default::default(),
                     method: "POST".into(),
@@ -607,7 +613,7 @@ impl Entry {
             )
             .await;
         let possible = progress.possible();
-        let output = result.map_err(|error| {
+        let (output, provider_status) = result.map_err(|error| {
             let typed = error.downcast_ref::<Failure>();
             let cause = typed.map(|f| &f.error).unwrap_or(&error);
             let http = cause.downcast_ref::<crate::payment::HttpFailure>();
@@ -622,6 +628,7 @@ impl Entry {
                 ));
             }
             failure.possible = possible;
+            failure.response = crate::payment::ResponseFacts::from_error(&error);
             failure.advance = !possible
                 && (typed.is_some_and(|f| f.fallback)
                     || cause
@@ -667,6 +674,7 @@ impl Entry {
                     TargetFailure::new(reason, None, attributable || (!possible && !local))
                         .at_relay(self, location);
                 failure.possible = possible;
+                failure.response = provider_status.map(crate::payment::ResponseFacts::provider);
                 if error.is::<crate::limits::DownloadLimit>() {
                     failure.limit = Some((setting, limit));
                 }
@@ -714,7 +722,7 @@ impl Entry {
                     possible_submission = possible,
                     "Configured paid relay supplied a usable target response"
                 );
-                Ok((response, started.elapsed(), possible))
+                Ok((response, started.elapsed(), possible, provider_status))
             }
             decision => {
                 let (reason, advance) = match decision {
@@ -725,6 +733,11 @@ impl Entry {
                 let mut failure = TargetFailure::new(reason, Some(response.status), advance)
                     .at_relay(self, "target response reported by relay");
                 failure.possible = possible;
+                failure.response = Some(crate::payment::ResponseFacts {
+                    provider: provider_status,
+                    destination: StatusCode::from_u16(response.status).ok(),
+                    ..Default::default()
+                });
                 failure.retry_after = crate::network::parse_retry_after(
                     StatusCode::from_u16(response.status).expect("adapter validated HTTP status"),
                     &response.headers,

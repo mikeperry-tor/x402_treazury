@@ -8,6 +8,9 @@ use crate::{
 use anyhow::Result;
 use std::sync::Arc;
 
+pub(crate) const POSSIBLE_PAYMENT_ADVISORY: &str =
+    "This call may have charged; do not automatically repeat this logical call.";
+
 // Relay payment uses PaidClient again with recursive fallback disabled. Erase
 // only this indirect future's type, retaining the existing call owner and Send.
 pub(crate) fn fallback<'a>(
@@ -16,7 +19,8 @@ pub(crate) fn fallback<'a>(
     failure: Failure,
     progress: &'a SubmissionProgress,
     capacity: &'a [Arc<tokio::sync::Semaphore>],
-) -> futures_util::future::BoxFuture<'a, Result<HttpOutput>> {
+) -> futures_util::future::BoxFuture<'a, Result<(HttpOutput, Option<crate::payment::ResponseFacts>)>>
+{
     Box::pin(async move {
         if !failure.fallback || !client.has_document_authority() {
             return Err(failure.error);
@@ -75,19 +79,24 @@ pub(crate) fn fallback<'a>(
                 .and_then(|v| v.to_str().ok())
                 .map(|v| v.split(';').next().unwrap().trim().to_ascii_lowercase())
         };
-        Ok(HttpOutput {
-            bytes: response.body,
-            mime_type,
-            paid_submission: false,
-            relay_payment_may_have_occurred: response.payment_may_have_occurred,
-            advisories: if response.payment_may_have_occurred {
-                vec![
-                    "This call may have charged; do not automatically repeat this logical call."
-                        .into(),
-                ]
-            } else {
-                Vec::new()
+        let facts = crate::payment::ResponseFacts {
+            provider: response.provider_status,
+            destination: reqwest::StatusCode::from_u16(response.status).ok(),
+            ..Default::default()
+        };
+        Ok((
+            HttpOutput {
+                bytes: response.body,
+                mime_type,
+                paid_submission: false,
+                relay_payment_may_have_occurred: response.payment_may_have_occurred,
+                advisories: if response.payment_may_have_occurred {
+                    vec![POSSIBLE_PAYMENT_ADVISORY.into()]
+                } else {
+                    Vec::new()
+                },
             },
-        })
+            Some(facts),
+        ))
     })
 }

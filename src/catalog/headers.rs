@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn capacity_error(_: reqwest::header::MaxSizeReached) -> anyhow::Error {
     tracing::warn!("HTTP request headers exceed the HTTP library's representation capacity");
-    anyhow::anyhow!("HTTP request headers exceed HTTP representation capacity")
+    anyhow::Error::new(Problem(
+        "HTTP request headers exceed HTTP representation capacity; reduce request headers",
+    ))
 }
 
 fn ignored(name: &str) -> bool {

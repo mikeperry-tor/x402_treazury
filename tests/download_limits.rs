@@ -152,7 +152,7 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
     assert_eq!(result["isError"], true);
     let error = result["content"][0]["text"].as_str().unwrap();
     assert!(error.contains("max_response_bytes=7 bytes"));
-    assert!(error.contains("may already have settled"));
+    assert!(error.contains("Do not retry automatically."));
     assert!(!error.contains("PRIVATE-CONTENT"));
     assert_eq!(signed.load(Ordering::SeqCst), 1);
     assert_eq!(unsigned.load(Ordering::SeqCst), 1);
@@ -210,7 +210,6 @@ async fn bounds_are_explicit_in_errors_logs_and_agent_results_without_partial_su
         "no partial content returned",
         "tool description truncated",
         "MCP request rejected",
-        "x402 challenge description truncated",
     ] {
         assert!(log.contains(evidence), "missing {evidence}: {log}");
     }

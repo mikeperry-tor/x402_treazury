@@ -86,6 +86,22 @@ struct Harness {
     events: Arc<Mutex<Vec<Event>>>,
     task: tokio::task::JoinHandle<()>,
 }
+
+#[tokio::test]
+async fn reported_destination_errors_keep_actual_provider_status_and_no_replay() {
+    let harness = Harness::new(vec![(Format::Curl, curl(404, "PRIVATE destination body"))]).await;
+    let error = harness
+        .acquire(&target(Method::GET), Contract::Api, 4096, None)
+        .await
+        .err()
+        .expect("destination rejection");
+    assert_eq!(
+        crate::payment::present_api_error(&error).unwrap(),
+        "Provider API HTTP 200 OK; destination HTTP 404 Not Found. Do not retry automatically."
+    );
+    assert!(error.is::<crate::payment::PossiblePayment>());
+    harness.assert_order(&[(0, false), (0, true)]);
+}
 impl Harness {
     async fn new(entries: Vec<(Format, Value)>) -> Self {
         Self::start(entries, false, None).await

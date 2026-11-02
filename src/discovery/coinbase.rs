@@ -178,7 +178,7 @@ impl Manager {
                         "Coinbase directory search failed; no valid result was obtained"
                     }
                 );
-            })
+            }).map_err(|error| crate::payment::ApiExecution { non_read: false }.attach(error))
         }).await?
     }
 }
@@ -210,21 +210,24 @@ async fn origin(
                 .map_err(|error| Failure::transport(error.without_url()))?;
             network::log_http(&response, "coinbase_search");
             let status = response.status();
+            let facts = crate::payment::ResponseFacts::provider(status);
             if status == reqwest::StatusCode::PARTIAL_CONTENT
                 || response
                     .headers()
                     .contains_key(reqwest::header::CONTENT_RANGE)
             {
                 return Err(Failure::validation(
-                    crate::discovery_relay::document::IncompleteDocument {
+                    anyhow::Error::new(crate::discovery_relay::document::IncompleteDocument {
                         status: status.as_u16(),
-                    }
-                    .into(),
+                    })
+                    .context(facts),
                 ));
             }
             if status != reqwest::StatusCode::OK {
-                let error =
-                    crate::discovery_relay::RelayFailure::http_status(status.as_u16()).into();
+                let error = anyhow::Error::new(crate::discovery_relay::RelayFailure::http_status(
+                    status.as_u16(),
+                ))
+                .context(facts);
                 // An unpaid target challenge is terminal; a relay must not turn it
                 // into another purchase or acquire target signing authority.
                 if status == reqwest::StatusCode::PAYMENT_REQUIRED {
@@ -240,9 +243,10 @@ async fn origin(
             let bytes =
                 crate::limits::read(response, limit, "Coinbase search", "max_response_bytes")
                     .await
-                    .map_err(Failure::body)?;
-            parse_response(&bytes)
-                .map_err(|error| Failure::remote_content(error, FallbackPolicy::RemoteFailures))
+                    .map_err(|error| Failure::body(error.context(facts)))?;
+            parse_response(&bytes).map_err(|error| {
+                Failure::remote_content(error.context(facts), FallbackPolicy::RemoteFailures)
+            })
         },
     )
     .await

@@ -117,14 +117,8 @@ impl RelayFailure {
                 status: Some(partial.status),
             };
         }
-        if let Some(failure) = error.downcast_ref::<TargetFailure>() {
-            return Self {
-                reason: failure.reason,
-                status: failure.status,
-            };
-        }
-        if let Some(failure) = error.downcast_ref::<Self>() {
-            return *failure;
+        if let Some(failure) = Self::retained(error) {
+            return failure;
         }
         if error.is::<crate::qualification::RetryAuthorityDenied>() {
             return Self {
@@ -191,6 +185,16 @@ impl RelayFailure {
     }
     pub(crate) fn kind(&self) -> &'static str {
         self.reason
+    }
+    /// Recognize only existing redacted causes, without classifying arbitrary prose.
+    pub(crate) fn retained(error: &anyhow::Error) -> Option<Self> {
+        error
+            .downcast_ref::<TargetFailure>()
+            .map(|failure| Self {
+                reason: failure.reason,
+                status: failure.status,
+            })
+            .or_else(|| error.downcast_ref::<Self>().copied())
     }
     pub(crate) fn status(&self) -> Option<u16> {
         self.status
@@ -281,6 +285,7 @@ struct TargetFailure {
     retry_after: Option<crate::network::RetryAfter>,
     relay: Option<(&'static str, usize)>,
     location: &'static str,
+    response: Option<crate::payment::ResponseFacts>,
 }
 impl TargetFailure {
     fn new(reason: &'static str, status: Option<u16>, advance: bool) -> Self {
@@ -293,6 +298,7 @@ impl TargetFailure {
             retry_after: None,
             relay: None,
             location: "relay selection",
+            response: None,
         }
     }
     fn at_relay(mut self, entry: &sequence::Entry, location: &'static str) -> Self {
@@ -307,6 +313,11 @@ impl TargetFailure {
             }
             None => self.into(),
         };
+        let error = match self.response {
+            Some(facts) => error.context(facts),
+            None => error,
+        };
+        let error = error.context(crate::payment::ApiExecution { non_read: false });
         if possible || self.possible {
             error.context(document::PossiblePayment)
         } else {
@@ -366,6 +377,7 @@ impl std::fmt::Debug for Relay {
 #[derive(Clone)]
 pub struct Response {
     pub status: u16,
+    pub(crate) provider_status: Option<reqwest::StatusCode>,
     pub headers: reqwest::header::HeaderMap,
     pub body: Vec<u8>,
     pub final_url: reqwest::Url,
@@ -1242,6 +1254,7 @@ pub(crate) mod tests {
     fn sharing_a_response_does_not_renew_origin_freshness() {
         let response = Response {
             status: 200,
+            provider_status: Some(reqwest::StatusCode::OK),
             headers: reqwest::header::HeaderMap::from_iter([(
                 reqwest::header::CACHE_CONTROL,
                 "max-age=600".parse().unwrap(),

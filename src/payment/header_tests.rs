@@ -321,7 +321,7 @@ async fn manual_headers_do_not_replay_signed_failures_or_uncertainty() {
             headers,
             &progress,
             None,
-            |output| Ok((output, true)),
+            |output, _facts| Ok((output, true)),
         ))
         .await;
         assert!(result.is_err());

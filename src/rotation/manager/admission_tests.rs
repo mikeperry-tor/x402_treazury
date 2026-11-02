@@ -79,6 +79,17 @@ async fn direct_payment_header_overflow_creates_no_liability_or_dispatch() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("representation capacity"));
+    assert_eq!(
+        crate::payment::ResponseFacts::from_error(&error)
+            .unwrap()
+            .provider,
+        Some(StatusCode::PAYMENT_REQUIRED)
+    );
+    assert!(
+        crate::payment::present_api_error(&error)
+            .unwrap()
+            .contains("reduce request headers")
+    );
     assert!(!format!("{error:#?}").contains("capacity-secret"));
     assert_eq!(f.signed.load(Ordering::SeqCst), 0);
     let db = f.db();

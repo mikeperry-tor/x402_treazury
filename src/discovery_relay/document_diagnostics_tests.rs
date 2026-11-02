@@ -1,5 +1,74 @@
 use super::*;
 
+#[test]
+fn relay_http_status_keeps_specific_categories_through_shared_failure_caching() {
+    for (status, kind) in [
+        (StatusCode::FORBIDDEN, "access denied"),
+        (StatusCode::NOT_FOUND, "not found"),
+        (StatusCode::TOO_MANY_REQUESTS, "rate limited"),
+        (StatusCode::SERVICE_UNAVAILABLE, "provider unavailable"),
+    ] {
+        let error = anyhow::Error::new(super::super::RelayFailure::http_status(status.as_u16()))
+            .context(crate::payment::ResponseFacts::provider(status))
+            .context(crate::payment::ApiExecution { non_read: false });
+        let expected = format!("Provider API HTTP {status}: {kind}.");
+        assert_eq!(crate::payment::present_api_error(&error).unwrap(), expected);
+        let shared = SharedFailure::capture(&error, "cached relay unavailable");
+        assert_eq!(shared.status(), Some(status.as_u16()));
+        assert_eq!(
+            crate::payment::present_api_error(&shared.error()).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn relay_admission_reasons_survive_presentation_and_shared_failure_caching() {
+    use crate::{discovery_relay::RelayFailure, rotation::error::AdmissionError};
+    for (admission, status, possible, expected) in [
+        (
+            AdmissionError::PriceLimit("PRIVATE payment cap"),
+            Some(StatusCode::PAYMENT_REQUIRED),
+            false,
+            "Provider API HTTP 402 Payment Required: The requested payment exceeds the authorized amount.",
+        ),
+        (
+            AdmissionError::WalletNotReady("PRIVATE wallet identity"),
+            None,
+            false,
+            "No eligible wallet is ready for this payment.",
+        ),
+        (
+            AdmissionError::OutcomeUnknown("PRIVATE transport context"),
+            None,
+            true,
+            "The payment outcome is unknown; reconciliation is required. Do not retry automatically.",
+        ),
+    ] {
+        let original = anyhow::Error::new(admission).context("PRIVATE upstream prose");
+        let safe = RelayFailure::from_error(&original);
+        let mut failure = TargetFailure::new(safe.kind(), safe.status(), false);
+        failure.response = status.map(crate::payment::ResponseFacts::provider);
+        let error = failure.error(possible);
+        assert_eq!(crate::payment::present_api_error(&error).unwrap(), expected);
+        let shared = SharedFailure::capture(&error, "cached help unavailable");
+        assert_eq!(shared.status(), status.map(|status| status.as_u16()));
+        assert_eq!(shared.possible_payment(), possible);
+        let cached = shared.error();
+        assert_eq!(
+            crate::payment::present_api_error(&cached).unwrap(),
+            expected
+        );
+        assert!(!format!("{cached:#}").contains("PRIVATE"));
+        // A second cache boundary retains the already-redacted RelayFailure too.
+        let shared_again = SharedFailure::capture(&cached, "shared acquisition unavailable");
+        assert_eq!(
+            crate::payment::present_api_error(&shared_again.error()).unwrap(),
+            expected
+        );
+    }
+}
+
 fn capture(kind: RequestKind, failure: &Failure, level: tracing::Level) -> String {
     let logs = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()

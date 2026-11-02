@@ -292,6 +292,12 @@ async fn authenticated_mcp_returns_real_image_blocks_and_never_retries_conversio
             .send().await.unwrap().mcp_json().await.unwrap();
         if name == "media_bad" || name == "media_unknown" {
             assert_eq!(result["result"]["isError"], true);
+            if name == "media_bad" {
+                assert_eq!(
+                    result["result"]["content"][0]["text"],
+                    "Provider API HTTP 200 OK: response unavailable."
+                );
+            }
             continue;
         }
         assert_eq!(result["result"]["content"][1]["type"], "image");

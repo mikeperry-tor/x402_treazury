@@ -1,6 +1,7 @@
 //! Authenticated SDK failure leaves Base admission under its original store owner.
 use super::initialization_tests::{env, managed_config, write_spec};
 use super::*;
+use crate::mcp_wire::McpResponse;
 use crate::rotation::store::{AllocationKind, Store};
 use axum::{
     Json, Router,
@@ -580,13 +581,25 @@ async fn base_configuration_failure_preserves_static_service_and_refuses_managed
         let addresses: BTreeMap<_, _> = running.addresses().into_iter().collect();
         let stop = CancellationToken::new();
         let task = tokio::spawn(running.serve(stop.clone()));
-        for (listener, expected) in [("one", "wallet_not_ready"), ("static", "static-ok")] {
-            let response = crate::network::NetworkContext::new(Default::default()).unwrap()
+        for (listener, expected) in [
+            ("one", "Payment wallet unavailable."),
+            ("static", "static-ok"),
+        ] {
+            let response: Value = crate::network::NetworkContext::new(Default::default()).unwrap()
                 .discovery(&format!("http://{}/mcp", addresses[listener]), None).unwrap().post(format!("http://{}/mcp",addresses[listener]))
                 .bearer_auth("fixture-token").header("accept","application/json, text/event-stream")
                 .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api_read","arguments":{}}}))
-                .send().await.unwrap().text().await.unwrap();
-            assert!(response.contains(expected), "{fault}: {response}");
+                .send().await.unwrap().mcp_json().await.unwrap();
+            assert_eq!(
+                response["result"]["content"],
+                json!([{ "type":"text", "text":expected }]),
+                "{fault}: {response}"
+            );
+            assert_eq!(
+                response["result"]["isError"].as_bool().unwrap_or(false),
+                listener == "one"
+            );
+            assert!(response["result"].get("structuredContent").is_none());
             assert_eq!(
                 requests.load(Ordering::SeqCst),
                 usize::from(listener == "static")

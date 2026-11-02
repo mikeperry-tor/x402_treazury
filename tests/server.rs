@@ -28,6 +28,76 @@ async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
 }
 
 #[tokio::test]
+async fn direct_and_discovered_api_errors_keep_status_without_diagnostic_chains() {
+    use axum::{
+        extract::Path,
+        http::{HeaderMap, StatusCode},
+        response::IntoResponse,
+    };
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let signed = Arc::new(AtomicUsize::new(0));
+    let unsigned = Arc::new(AtomicUsize::new(0));
+    let (s, u) = (signed.clone(), unsigned.clone());
+    let (vendor, vendor_task) = serve(Router::new().route("/status/{code}", get(move |Path(code): Path<u16>, headers: HeaderMap| {
+        let (s,u) = (s.clone(),u.clone());
+        async move {
+            if headers.contains_key("payment-signature") {
+                s.fetch_add(1, Ordering::SeqCst);
+                return (StatusCode::from_u16(code).unwrap(), "insufficient_funds PRIVATE SDK trace {} null").into_response();
+            }
+            u.fetch_add(1, Ordering::SeqCst);
+            let challenge = json!({"x402Version":2,"resource":{"url":"https://provider.example/status"},"accepts":[{"scheme":"exact","network":"eip155:8453","asset":x402_treazury::payment::USDC,"amount":"1000","payTo":"0x0000000000000000000000000000000000000003","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]});
+            (StatusCode::PAYMENT_REQUIRED, [("payment-required", STANDARD.encode(serde_json::to_vec(&challenge).unwrap()))]).into_response()
+        }
+    }))).await;
+    let tools = build_tools(&Config::default(), &json!({"paths":{"/status/{code}":{"get":{"parameters":[{"name":"code","in":"path","required":true,"schema":{"type":"integer"}}]}}}}), "fixture").unwrap();
+    for discovered in [false, true] {
+        let client = PaidClient::new(
+            Payer::new(&format!("{:064x}", 1), SpendPolicy::dollars("1").unwrap()).unwrap(),
+        );
+        let mut server = Server::new(tools.clone(), client, vendor.clone(), None);
+        server.discover_on_demand = discovered;
+        let name = tools[0].name.clone();
+        let (base, task) = serve(http_app(server, "token".into())).await;
+        let local = reqwest::Client::new();
+        for (code, kind) in [
+            (402, "payment rejected"),
+            (403, "access denied"),
+            (404, "not found"),
+            (429, "rate limited"),
+            (503, "provider unavailable"),
+        ] {
+            let params = if discovered {
+                json!({"name":"x402_treazury_tool_call","arguments":{"tool_id":name,"arguments":{"code":code}}})
+            } else {
+                json!({"name":name,"arguments":{"code":code}})
+            };
+            let result: Value = local
+                .post(format!("{base}/mcp"))
+                .bearer_auth("token")
+                .header("accept", "application/json, text/event-stream")
+                .json(&json!({"jsonrpc":"2.0","id":code,"method":"tools/call","params":params}))
+                .send()
+                .await
+                .unwrap()
+                .mcp_json()
+                .await
+                .unwrap();
+            assert_eq!(result["result"]["isError"], true, "{result}");
+            let status = StatusCode::from_u16(code).unwrap();
+            assert_eq!(
+                result["result"]["content"][0]["text"],
+                format!("Provider API HTTP {status}: {kind}. Do not retry automatically.")
+            );
+        }
+        task.abort();
+    }
+    assert_eq!(unsigned.load(Ordering::SeqCst), 10);
+    assert_eq!(signed.load(Ordering::SeqCst), 10);
+    vendor_task.abort();
+}
+
+#[tokio::test]
 async fn direct_and_on_demand_calls_route_declared_headers_and_own_distinct_keys() {
     use axum::http::HeaderMap;
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));

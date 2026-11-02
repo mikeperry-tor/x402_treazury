@@ -116,15 +116,9 @@ async fn mcp_burst_across_listeners_retains_every_journal_and_isolates_pools() {
     bounded(async {
         while let Some(result) = calls.join_next().await {
             let (pool, result) = result.unwrap();
-            if result["isError"] == true {
-                assert!(
-                    result.to_string().contains("funding_unavailable"),
-                    "{result}"
-                );
-            } else {
-                assert_eq!(result["content"][0]["text"], "paid");
-                successes[pool] += 1;
-            }
+            assert!(!result["isError"].as_bool().unwrap_or(false), "{result}");
+            assert_eq!(result["content"][0]["text"], "paid");
+            successes[pool] += 1;
         }
     })
     .await;

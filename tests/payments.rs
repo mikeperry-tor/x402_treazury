@@ -681,7 +681,7 @@ async fn unsigned_client_never_signs_valid_v1_v2_or_zero_amount_challenges() {
         let client = PaidClient::unsigned().with_download_limits(1, 1);
         let result = client.clone().execute(route(url)).await.unwrap_err();
         assert!(
-            result.to_string().contains("qualification_payment_denied"),
+            format!("{result:#}").contains("qualification_payment_denied"),
             "{result}"
         );
         assert_eq!(gate.count.load(Ordering::SeqCst), 1);

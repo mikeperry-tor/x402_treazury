@@ -4,7 +4,7 @@
 use crate::catalog::{RoutedRequest, arg_text};
 use alloy_primitives::U256;
 use alloy_signer_local::PrivateKeySigner;
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::Value;
 use std::sync::{Arc, RwLock};
@@ -13,6 +13,10 @@ use x402_chain_eip155::{V2Eip155ExactClient, V2Eip155UptoClient};
 use x402_reqwest::X402Client;
 use x402_types::scheme::client::{PaymentCandidate, PaymentSelector};
 mod document_identity;
+mod presentation;
+pub(crate) use presentation::{
+    ApiExecution, ResponseFacts, present as present_api_error, summary as api_error_summary,
+};
 mod v1;
 pub(crate) use document_identity::Authority;
 pub(crate) use v1::V1ExactClient;
@@ -534,7 +538,7 @@ impl PaidClient {
             Default::default(),
             &SubmissionProgress::default(),
             None,
-            |output| {
+            |output, _status| {
                 let text = output.render(None, &Default::default())?.into_text()?;
                 Ok((text, true))
             },
@@ -582,7 +586,7 @@ impl PaidClient {
             Default::default(),
             &SubmissionProgress::default(),
             operation,
-            move |output| Ok((output.render(mapping.as_ref(), &limits)?, true)),
+            move |output, _status| Ok((output.render(mapping.as_ref(), &limits)?, true)),
         )
         .await
     }
@@ -592,10 +596,26 @@ impl PaidClient {
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
     ) -> Result<crate::output::HttpOutput> {
-        self.execute_finished(route, Default::default(), progress, operation, |output| {
-            let valid = output.is_valid_unmapped();
-            Ok((output, valid))
-        })
+        self.execute_response_scoped_status(route, progress, operation)
+            .await
+            .map(|(output, _status)| output)
+    }
+    pub(crate) async fn execute_response_scoped_status(
+        &self,
+        route: RoutedRequest,
+        progress: &SubmissionProgress,
+        operation: Option<crate::pricing::runtime::OperationKey>,
+    ) -> Result<(crate::output::HttpOutput, Option<reqwest::StatusCode>)> {
+        self.execute_finished(
+            route,
+            Default::default(),
+            progress,
+            operation,
+            |output, facts| {
+                let valid = output.is_valid_unmapped();
+                Ok(((output, facts.and_then(|facts| facts.provider)), valid))
+            },
+        )
         .await
     }
     /// Manual raw input has no registered operation or managed-auth reference.
@@ -613,7 +633,7 @@ impl PaidClient {
             headers,
             &SubmissionProgress::default(),
             None,
-            |output| Ok((output.render(None, &Default::default())?, true)),
+            |output, _status| Ok((output.render(None, &Default::default())?, true)),
         )
         .await
     }
@@ -624,26 +644,38 @@ impl PaidClient {
         headers: crate::discovery::raw::ManualRawHeaders,
         progress: &SubmissionProgress,
         operation: Option<crate::pricing::runtime::OperationKey>,
-        finish: impl FnOnce(crate::output::HttpOutput) -> Result<(T, bool)> + Send + 'static,
+        finish: impl FnOnce(crate::output::HttpOutput, Option<ResponseFacts>) -> Result<(T, bool)>
+        + Send
+        + 'static,
     ) -> Result<T> {
         let client = self.clone();
         let progress = progress.clone();
         let span = diagnostics::span(&self.source_identity, &route.method);
+        let execution = ApiExecution {
+            non_read: !matches!(route.method.as_str(), "GET" | "HEAD"),
+        };
         self.run_owned(
             diagnostics::scope(async move {
                 let result = client
                     .execute_response_owned(route, headers, &progress, operation)
                     .await
-                    .and_then(|(output, unsigned_promotion)| {
+                    .and_then(|(output, unsigned_promotion, status)| {
                         diagnostics::stage("output_conversion");
-                        let (output, valid) = finish(output)?;
+                        let (output, valid) =
+                            finish(output, status).map_err(|error| match status {
+                                Some(facts) => error.context(facts),
+                                None => error,
+                            })?;
                         if valid && let Some((selected, transport)) = unsigned_promotion {
                             crate::network::global().promote_http(&selected, &transport);
                         }
                         Ok(output)
                     });
                 diagnostics::finish(&result, &progress, client.relay_call);
-                with_payment_context(progress.possible(), result)
+                with_payment_context(
+                    progress.possible(),
+                    result.map_err(|error| execution.attach(error)),
+                )
             })
             .instrument(span),
         )
@@ -661,6 +693,7 @@ impl PaidClient {
             Arc<crate::network::HttpTransport>,
             Arc<crate::network::HttpTransport>,
         )>,
+        Option<ResponseFacts>,
     )> {
         self.require_available()?;
         // Pin static signer before any I/O; replacement affects only later calls.
@@ -740,22 +773,24 @@ impl PaidClient {
                             unsigned_only,
                         )
                         .await
-                        .map(|output| (output, None));
+                        .map(|(output, facts)| (output, None, facts));
                 }
             };
             let mut stage_paid = false;
             if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
                 diagnostics::stage("challenge_preparation");
                 if unsigned_only {
-                    crate::qualification::record_challenge(response.headers()).await?;
+                    let facts = ResponseFacts::provider(response.status());
+                    crate::qualification::record_challenge(response.headers())
+                        .await
+                        .context(facts)?;
                     tracing::warn!(
                         code = "qualification_payment_denied",
                         "unsigned qualification case refused HTTP 402; no payment signed or retried"
                     );
-                    bail!(
-                        "qualification_payment_denied: unsigned-only mode; HTTP 402 received; no payment signed or retried"
-                    );
+                    return Err(anyhow::anyhow!("qualification_payment_denied: unsigned-only mode; HTTP 402 received; no payment signed or retried").context(facts));
                 }
+                let challenge_facts = ResponseFacts::provider(response.status());
                 let original_headers = response.headers().clone();
                 let bounded = bound_challenge(response, self.max_response_bytes).await;
                 crate::qualification::record_challenge(
@@ -763,12 +798,16 @@ impl PaidClient {
                         .as_ref()
                         .map_or(&original_headers, |response| response.headers()),
                 )
-                .await?;
-                response = bounded?;
+                .await
+                .context(challenge_facts)?;
+                response = bounded.context(challenge_facts)?;
                 // The unsigned response is complete. The signed attempt gets its
                 // own permits; no acquisition slot spans retry/handoff delays.
                 attempt_capacity.clear();
-                attempt_capacity = self.acquire_attempt_capacity().await?;
+                attempt_capacity = self
+                    .acquire_attempt_capacity()
+                    .await
+                    .context(challenge_facts)?;
                 if let Some(pool) = &self.managed {
                     match pool
                         .pay_with_cover_observed(
@@ -811,17 +850,32 @@ impl PaidClient {
                                     .expect("managed candidate")
                                     .wallet
                                     .clone();
-                                pool.note_insufficient(failed.clone()).await?;
-                                ensure!(!private, PrivatePayerHandoff);
+                                // Retain this rejection only on local exits before the next exchange.
+                                let rejected = ResponseFacts {
+                                    insufficient_funds: true,
+                                    ..ResponseFacts::provider(status)
+                                };
+                                pool.note_insufficient(failed.clone())
+                                    .await
+                                    .context(rejected)?;
+                                ensure!(
+                                    !private,
+                                    anyhow::Error::new(PrivatePayerHandoff).context(rejected)
+                                );
                                 attempted.push(failed);
-                                candidate=Some(pool.next_candidate(cost,through,&attempted).await?
-                                    .context("insufficient_funds: captured eligible wallets exhausted; earlier authorizations may still charge or execute")?);
+                                candidate=Some(pool.next_candidate(cost,through,&attempted).await
+                                    .context(rejected)?
+                                    .context("insufficient_funds: captured eligible wallets exhausted; earlier authorizations may still charge or execute")
+                                    .context(rejected)?);
                                 continue;
                             }
                             response = paid;
                         }
                         Err(error) if error.is::<crate::rotation::manager::PayerHandoff>() => {
-                            ensure!(!private, PrivatePayerHandoff);
+                            ensure!(
+                                !private,
+                                anyhow::Error::new(PrivatePayerHandoff).context(challenge_facts)
+                            );
                             attempted.push(
                                 candidate
                                     .as_ref()
@@ -865,7 +919,8 @@ impl PaidClient {
                 call.response_headers();
             }
             if stage_paid {
-                complete_relay_response(&response, self.relay_call)?;
+                complete_relay_response(&response, self.relay_call)
+                    .context(ResponseFacts::provider(response.status()))?;
             }
             break (
                 response,
@@ -875,6 +930,7 @@ impl PaidClient {
             );
         };
         diagnostics::stage("response_body");
+        let status = response.status();
         let result = self
             .response_output(
                 response,
@@ -887,7 +943,13 @@ impl PaidClient {
         {
             call.complete();
         }
-        let result = result.map(|output| (output, unsigned_promotion));
+        let result = result.map(|output| {
+            (
+                output,
+                unsigned_promotion,
+                Some(ResponseFacts::provider(status)),
+            )
+        });
         if extensions_omitted {
             result.context(crate::rotation::manager::OMITTED_EXTENSIONS)
         } else {
@@ -904,7 +966,7 @@ impl PaidClient {
         payer: Option<&Arc<Payer>>,
         progress: &SubmissionProgress,
         unsigned_only: bool,
-    ) -> Result<crate::output::HttpOutput> {
+    ) -> Result<(crate::output::HttpOutput, Option<ResponseFacts>)> {
         if self.relay_call {
             return Err(failure.into());
         }
@@ -1124,13 +1186,18 @@ impl PaidClient {
             .and_then(|h| STANDARD.decode(h.as_bytes()).ok())
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .and_then(|v| v.get("error").cloned());
+        let facts = ResponseFacts {
+            insufficient_funds: status == reqwest::StatusCode::PAYMENT_REQUIRED
+                && insufficient_funds(response.headers()),
+            ..ResponseFacts::provider(status)
+        };
         let payment_error = (!status.is_success())
             .then(|| diagnostics::payment_response_error(response.headers()))
             .flatten();
         let bytes = crate::limits::read(response, self.max_response_bytes, "API response", "max_response_bytes")
             .await.map_err(|error| if paid_submission {
                 error.context("API response unavailable; a payment may already have settled. Do not automatically retry a paid request")
-            } else { error })?;
+            } else { error }).context(facts)?;
         if !status.is_success() {
             let body = String::from_utf8_lossy(&bytes);
             let mut detail = format!("{} {body}", detail.unwrap_or(Value::Null));
@@ -1139,12 +1206,12 @@ impl PaidClient {
                     "{detail}; provider-reported payment error (settlement unverified): {payment_error}"
                 );
             }
-            return Err(HttpFailure {
+            return Err(anyhow::Error::new(HttpFailure {
                 status,
                 provider_failure: diagnostics::response_body(&bytes),
                 detail,
-            }
-            .into());
+            })
+            .context(facts));
         }
         Ok(crate::output::HttpOutput {
             advisories: vec![],
@@ -1227,7 +1294,8 @@ async fn unsigned_response(
         c.rejected_padding(response.status());
     }
     crate::network::log_http(&response, "payment_challenge");
-    complete_relay_response(&response, relay)?;
+    complete_relay_response(&response, relay)
+        .context(ResponseFacts::provider(response.status()))?;
     // Collect successful unsigned bodies inside the same finite attempt sequence. A body
     // failure cannot restart payer selection or enter the signed dispatch path.
     let response = if let Some((limit, unsigned_only)) = collect_unsigned
@@ -1244,8 +1312,10 @@ async fn unsigned_response(
             .status(response.status())
             .version(response.version());
         *buffered.headers_mut().expect("valid status") = response.headers().clone();
-        let bytes =
-            crate::limits::read(response, limit, "API response", "max_response_bytes").await?;
+        let status = response.status();
+        let bytes = crate::limits::read(response, limit, "API response", "max_response_bytes")
+            .await
+            .context(ResponseFacts::provider(status))?;
         buffered.body(bytes)?.into()
     } else {
         response
@@ -1273,7 +1343,8 @@ async fn static_payment(
     progress: &SubmissionProgress,
 ) -> Result<reqwest::Response> {
     diagnostics::stage("challenge_preparation");
-    sanitize_challenge(&mut response)?;
+    let facts = ResponseFacts::provider(response.status());
+    sanitize_challenge(&mut response).context(facts)?;
     // Selection (asset/network/cap) happens inside the SDK before signing.
     diagnostics::stage("signing");
     let headers = payer
@@ -1281,7 +1352,8 @@ async fn static_payment(
         .client
         .make_payment_headers(response)
         .await
-        .context("x402 challenge rejected or signing failed")?;
+        .context("x402 challenge rejected or signing failed")
+        .context(facts)?;
     crate::network::global().promote_http(selected, transport);
     let mut retry = retry;
     retry.headers_mut().extend(headers);
@@ -1360,7 +1432,7 @@ fn sanitize_challenge(response: &mut reqwest::Response) -> Result<()> {
             && let Some(text) = desc.as_str()
         {
             if text.chars().count() > 500 {
-                tracing::warn!(
+                tracing::debug!(
                     limit_chars = 500,
                     "x402 challenge description truncated for facilitator protocol compatibility"
                 );

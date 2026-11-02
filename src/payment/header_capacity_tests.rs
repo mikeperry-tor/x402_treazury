@@ -56,7 +56,10 @@ fn routed_header_and_body_overflow_returns_value_free_errors() {
             ..route(headers.clone())
         })
         .unwrap_err();
+        let error = ApiExecution { non_read: false }.attach(error);
         assert!(error.to_string().contains("representation capacity"));
+        let presented = super::present_api_error(&error).unwrap();
+        assert!(presented.contains("representation capacity; reduce request headers"));
         assert!(!format!("{error:#?}").contains("private-header-value"));
     }
 }

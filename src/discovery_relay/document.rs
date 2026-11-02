@@ -144,6 +144,7 @@ impl std::error::Error for DocumentStatus {}
 #[derive(Clone, Copy, Debug)]
 enum Cause {
     Other,
+    Relay(super::RelayFailure),
     Status(u16),
     Partial(u16),
     Limit {
@@ -158,6 +159,8 @@ pub(crate) struct SharedFailure {
     reason: &'static str,
     cause: Cause,
     possible: bool,
+    api: Option<crate::payment::ApiExecution>,
+    response: Option<crate::payment::ResponseFacts>,
 }
 impl SharedFailure {
     pub fn capture(error: &anyhow::Error, reason: &'static str) -> Self {
@@ -169,11 +172,12 @@ impl SharedFailure {
             }
         } else if let Some(partial) = error.downcast_ref::<IncompleteDocument>() {
             Cause::Partial(partial.status)
+        } else if let Some(relay) = super::RelayFailure::retained(error) {
+            Cause::Relay(relay)
         } else {
             let status = error
                 .downcast_ref::<DocumentStatus>()
                 .map(|e| e.0)
-                .or_else(|| error.downcast_ref::<TargetFailure>().and_then(|e| e.status))
                 .or_else(|| {
                     error
                         .downcast_ref::<crate::payment::HttpFailure>()
@@ -191,20 +195,32 @@ impl SharedFailure {
             reason,
             cause,
             possible: error.is::<PossiblePayment>(),
+            api: error
+                .downcast_ref::<crate::payment::ApiExecution>()
+                .copied(),
+            response: crate::payment::ResponseFacts::from_error(error),
         }
     }
     pub fn possible_payment(&self) -> bool {
         self.possible
     }
     pub fn status(&self) -> Option<u16> {
+        if let Some(status) = self
+            .response
+            .and_then(|facts| facts.destination.or(facts.provider))
+        {
+            return Some(status.as_u16());
+        }
         match self.cause {
             Cause::Status(status) | Cause::Partial(status) => Some(status),
+            Cause::Relay(relay) => relay.status(),
             _ => None,
         }
     }
     pub fn error(&self) -> anyhow::Error {
         let error = match self.cause {
             Cause::Other => anyhow::anyhow!(self.reason),
+            Cause::Relay(relay) => anyhow::Error::new(relay).context(self.reason),
             Cause::Status(status) => {
                 anyhow::Error::new(DocumentStatus(status)).context(self.reason)
             }
@@ -216,6 +232,14 @@ impl SharedFailure {
                 setting,
                 limit,
             } => crate::limits::exceeded(kind, setting, limit).context(self.reason),
+        };
+        let error = match self.response {
+            Some(facts) => error.context(facts),
+            None => error,
+        };
+        let error = match self.api {
+            Some(api) => error.context(api),
+            None => error,
         };
         if self.possible {
             error.context(PossiblePayment)

@@ -202,6 +202,21 @@ pub(crate) fn text_mime(mime: &str) -> bool {
         )
         || (mime.starts_with("application/") && mime.ends_with("+xml"))
 }
+#[derive(Debug)]
+pub(crate) struct OutputLimit {
+    setting: &'static str,
+    limit: usize,
+}
+impl std::fmt::Display for OutputLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "inline image output exceeds {}={}; content rejected, no partial content returned. Ask the operator to raise {} if appropriate.",
+            self.setting, self.limit, self.setting
+        )
+    }
+}
+impl std::error::Error for OutputLimit {}
 fn bound(actual: usize, limit: usize, setting: &'static str) -> Result<()> {
     if actual > limit {
         tracing::warn!(
@@ -210,9 +225,7 @@ fn bound(actual: usize, limit: usize, setting: &'static str) -> Result<()> {
             limit,
             "output limit exceeded; no partial content returned"
         );
-        anyhow::bail!(
-            "inline image output exceeds {setting}={limit}; content rejected, no partial content returned. Ask the operator to raise {setting} if appropriate."
-        );
+        return Err(OutputLimit { setting, limit }.into());
     }
     Ok(())
 }

@@ -2,6 +2,162 @@ use super::*;
 use crate::discovery::policy::RemoteDirectory;
 
 #[test]
+fn grouped_errors_preserve_status_attribution_and_one_retry_instruction() {
+    let error = anyhow::anyhow!("PRIVATE contract trace")
+        .context(crate::payment::ResponseFacts {
+            provider: Some(reqwest::StatusCode::OK),
+            destination: Some(reqwest::StatusCode::NOT_FOUND),
+            ..Default::default()
+        })
+        .context(crate::payment::PossiblePayment)
+        .context(crate::payment::ApiExecution { non_read: false });
+    let output = super::super::remote::aggregate(vec![
+        (
+            RemoteDirectory::Coinbase,
+            Ok(crate::output::ToolOutput::text("{\"native\":true}".into())),
+        ),
+        (RemoteDirectory::X402List, Err(error)),
+    ]);
+    let parsed: Value = serde_json::from_str(&output.text).unwrap();
+    assert_eq!(parsed["coinbase"], json!({"native":true}));
+    assert_eq!(
+        parsed["x402-list"]["local_error"]["message"],
+        "Provider API HTTP 200 OK; destination HTTP 404 Not Found."
+    );
+    assert!(output.payment_may_have_occurred);
+    assert_eq!(
+        output
+            .advisories
+            .join(" ")
+            .matches("do not automatically repeat")
+            .count(),
+        1
+    );
+    assert!(!output.text.contains("PRIVATE"));
+}
+
+#[test]
+fn grouped_errors_preserve_local_payment_reasons_and_argument_corrections() {
+    use crate::{catalog::diagnostics::Problem, rotation::error::AdmissionError};
+    for (error, expected) in [
+        (
+            anyhow::Error::new(AdmissionError::PriceLimit("PRIVATE configured cap")).context(
+                crate::payment::ResponseFacts::provider(reqwest::StatusCode::PAYMENT_REQUIRED),
+            ),
+            "Provider API HTTP 402 Payment Required: payment exceeds the authorized amount.",
+        ),
+        (
+            anyhow::Error::new(AdmissionError::WalletNotReady("PRIVATE wallet identity")),
+            "Payment wallet unavailable.",
+        ),
+        (
+            anyhow::anyhow!("PRIVATE request detail")
+                .context(Problem("omit the unsupported HTTP header")),
+            "Omit the unsupported HTTP header.",
+        ),
+    ] {
+        let output = super::super::remote::aggregate(vec![
+            (
+                RemoteDirectory::Coinbase,
+                Ok(crate::output::ToolOutput::text("{\"native\":true}".into())),
+            ),
+            (
+                RemoteDirectory::X402List,
+                Err(error.context(crate::payment::ApiExecution { non_read: false })),
+            ),
+        ]);
+        let parsed: Value = serde_json::from_str(&output.text).unwrap();
+        assert_eq!(parsed["coinbase"], json!({"native":true}));
+        assert_eq!(parsed["x402-list"]["local_error"]["message"], expected);
+        assert_eq!(
+            parsed["x402-list"]["local_error"]["payment_may_have_occurred"],
+            false
+        );
+        assert!(!output.payment_may_have_occurred);
+        assert!(!output.text.contains("PRIVATE"));
+    }
+}
+
+#[test]
+fn grouped_errors_preserve_redacted_relay_admission_reasons() {
+    let safe = crate::discovery_relay::RelayFailure::from_error(&anyhow::Error::new(
+        crate::rotation::error::AdmissionError::PriceLimit("PRIVATE relay cap"),
+    ));
+    let error = anyhow::Error::new(safe)
+        .context(crate::payment::ResponseFacts::provider(
+            reqwest::StatusCode::PAYMENT_REQUIRED,
+        ))
+        .context(crate::payment::ApiExecution { non_read: false });
+    let shared =
+        crate::discovery_relay::document::SharedFailure::capture(&error, "relay unavailable");
+    let output =
+        super::super::remote::aggregate(vec![(RemoteDirectory::X402List, Err(shared.error()))]);
+    let parsed: Value = serde_json::from_str(&output.text).unwrap();
+    assert_eq!(
+        parsed["x402-list"]["local_error"]["message"],
+        "Provider API HTTP 402 Payment Required: The requested payment exceeds the authorized amount."
+    );
+    assert_eq!(parsed["x402-list"]["local_error"]["http_status"], 402);
+    assert!(!output.payment_may_have_occurred);
+    assert!(!output.text.contains("PRIVATE"));
+}
+
+#[test]
+fn grouped_paid_success_uses_one_retry_instruction_and_preserves_other_advisories() {
+    let child = crate::output::HttpOutput {
+        observed_price: None,
+        advisories: vec![
+            crate::discovery_relay::api::POSSIBLE_PAYMENT_ADVISORY.into(),
+            "provider response fields were omitted".into(),
+        ],
+        bytes: b"{\"native\":true}".to_vec(),
+        mime_type: Some("application/json".into()),
+        paid_submission: false,
+        relay_payment_may_have_occurred: true,
+    }
+    .render(None, &Default::default())
+    .unwrap();
+    assert!(child.payment_may_have_occurred);
+    assert!(
+        child
+            .advisories
+            .iter()
+            .any(|advisory| { advisory == crate::discovery_relay::api::POSSIBLE_PAYMENT_ADVISORY })
+    );
+    let output = super::super::remote::aggregate(vec![
+        (RemoteDirectory::X402List, Ok(child)),
+        (
+            RemoteDirectory::Coinbase,
+            Ok(crate::output::ToolOutput::text("{\"sibling\":true}".into())),
+        ),
+    ]);
+    let parsed: Value = serde_json::from_str(&output.text).unwrap();
+    assert_eq!(parsed["x402-list"], json!({"native":true}));
+    assert_eq!(parsed["coinbase"], json!({"sibling":true}));
+    assert!(output.payment_may_have_occurred);
+    assert_eq!(
+        output
+            .advisories
+            .join(" ")
+            .matches("do not automatically repeat")
+            .count(),
+        1
+    );
+    assert!(
+        output
+            .advisories
+            .iter()
+            .any(|advisory| advisory == "provider response fields were omitted")
+    );
+    assert!(
+        output
+            .advisories
+            .iter()
+            .any(|advisory| advisory.contains("x402-list.com"))
+    );
+}
+
+#[test]
 fn grouped_output_preserves_native_objects_and_payment_after_later_errors() {
     use crate::output::{InlineImage, ToolOutput};
     let native =

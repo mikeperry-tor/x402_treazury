@@ -662,7 +662,18 @@ async fn fixture() {
     for status in [206, 402] {
         let q = format!("status-{status}");
         let (result, logs) = capture_warnings(invoke(&m, "writer", &q)).await;
-        assert!(result.is_err());
+        let error = result.unwrap_err();
+        let captured = crate::discovery_relay::document::SharedFailure::capture(
+            &error,
+            "directory_request_failed",
+        );
+        assert_eq!(captured.status(), Some(status));
+        let presented = crate::payment::present_api_error(&captured.error()).unwrap();
+        assert!(
+            presented.starts_with(&format!("Provider API HTTP {status}")),
+            "{presented}"
+        );
+        assert!(!presented.contains("Do not retry automatically."));
         if status == 402 {
             assert!(
                 logs.lines()

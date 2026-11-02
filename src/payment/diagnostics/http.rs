@@ -55,8 +55,9 @@ fn header_object(
     }
 }
 
-/// Untrusted receipt prose belongs only in the private tool error, like the
-/// upstream error body. Never pass this projection to tracing or persist it.
+/// Retain untrusted receipt prose only in the internal error chain, like the
+/// upstream error body. Agent presentation uses typed categories instead.
+/// Never pass this projection to tracing or persist it.
 pub(in crate::payment) fn payment_response_error(
     headers: &reqwest::header::HeaderMap,
 ) -> Option<Value> {

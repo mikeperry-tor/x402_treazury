@@ -728,7 +728,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            error.to_string().contains("qualification_payment_denied"),
+            format!("{error:#}").contains("qualification_payment_denied"),
             "{error:#}"
         );
         assert_eq!(requests.load(Ordering::SeqCst), 1);
