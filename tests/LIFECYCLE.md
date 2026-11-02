@@ -33,6 +33,10 @@ Expiry maintenance must consume its completed same-owner canonical scan without
 another indexer request. The shielding-expiry fixture makes the next indexer
 request fail after successful scanning and requires closure with the fault still
 unconsumed, no lookup, no submission and the original bytes/attempts preserved.
+Buried funding and shielding expiry each retain one real pending-expiry journey
+with lookup and submission doubles that panic if called. Canonical expiry does
+not consult external inclusion hints, so these tests do not repeat the journey
+for unused mempool and confirmed hint values.
 
 The late-archived-success fixture in `treasury::lifecycle_tests::terminal` uses the
 real actor to retain a disclosed replacement after destination completion. A

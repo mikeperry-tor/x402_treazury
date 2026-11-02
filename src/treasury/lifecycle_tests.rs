@@ -1450,95 +1450,78 @@ async fn expired_original_closes_after_another_canonical_transaction_spends_its_
 
 #[tokio::test]
 async fn buried_funding_expiry_ignores_stale_inclusion_hints_without_replay_or_new_deposit() {
-    struct StaleHint {
-        confirmed: bool,
-        lookups: usize,
-    }
-    impl TransactionSubmission for StaleHint {
+    struct NoLookup;
+    impl TransactionSubmission for NoLookup {
         async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
-            panic!("recovery cannot submit");
+            panic!("expiry recovery cannot resubmit");
         }
         async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
-            self.lookups += 1;
-            Ok(if self.confirmed {
-                TransactionPresence::Confirmed { height: 24 }
-            } else {
-                TransactionPresence::Mempool
-            })
+            panic!("canonical expiry needs no external inclusion hint");
         }
     }
-    for confirmed in [false, true] {
-        let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
-        let pool = owner
-            .ensure_capacity_group(
-                "expiry_hint".into(),
-                crate::rotation::test_capacity::small_reserve("5"),
-                None,
-                0,
-            )
-            .await
-            .unwrap();
-        owner
-            .allocate_capacity_kind(pool, AllocationKind::Small, true)
-            .await
-            .unwrap();
-        let store = owner.store_handle();
-        let job = store
-            .call(|s| Ok(s.funding_jobs()?.remove(0)))
-            .await
-            .unwrap();
-        let deadline = now().unwrap() + 7200;
-        save_quotes(&store, vec![job.clone()], deadline).await;
-        let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
-        let stop = CancellationToken::new();
-        let mut actual = submission::GrpcSubmission::with_network(
-            endpoint.clone(),
-            endpoint,
-            TreasuryNetwork::Synthetic,
+    let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
+    let pool = owner
+        .ensure_capacity_group(
+            "expiry_hint".into(),
+            crate::rotation::test_capacity::small_reserve("5"),
+            None,
+            0,
         )
+        .await
         .unwrap();
-        owner
-            .submit_prepared(job.operation_id.clone(), &mut actual, false, &stop)
-            .await
-            .unwrap();
-        {
-            let mut chain = net.chain.write().await;
-            let remaining = prepared.facts().unwrap().expiry_height + 2 - chain.tip();
-            chain.mine_empty_blocks(remaining);
-        }
-        // Scheduled source observation reuses this completed current-owner scan;
-        // only the actual expiry input proof requests another completed scan.
-        owner.sync_once(&stop).await.unwrap();
-        let mut sender = StaleHint {
-            confirmed,
-            lookups: 0,
-        };
-        let outcome = owner
-            .recover_funding_observed(job.id.clone(), 3, false, &mut sender, &stop, true)
-            .await
-            .unwrap();
-        assert_eq!(
-            outcome.outcome,
-            recovery::RecoveryOutcome::Waiting("funding_disabled")
-        );
-        assert_eq!(
-            sender.lookups, 0,
-            "a stale hint cannot veto canonical expiry input proof"
-        );
-        let operation = job.operation_id;
-        store
-            .call(move |s| {
-                assert_eq!(s.operation(&operation)?.submission, "EXPIRED");
-                assert_eq!(s.operation(&operation)?.attempts, 1);
-                assert_eq!(s.prepared_bytes(&operation)?.as_slice(), prepared.bytes());
-                assert!(!s.operation_pending(&operation)?);
-                assert_eq!(s.funding_jobs()?.len(), 1);
-                assert_eq!(s.funding_recovery_count(&job.id)?, 1);
-                Ok(())
-            })
-            .await
-            .unwrap();
-        drop(store);
-        owner.close().await.unwrap();
+    owner
+        .allocate_capacity_kind(pool, AllocationKind::Small, true)
+        .await
+        .unwrap();
+    let store = owner.store_handle();
+    let job = store
+        .call(|s| Ok(s.funding_jobs()?.remove(0)))
+        .await
+        .unwrap();
+    let deadline = now().unwrap() + 7200;
+    save_quotes(&store, vec![job.clone()], deadline).await;
+    let prepared = owner.prepare(request(&job, deadline)).await.unwrap();
+    let stop = CancellationToken::new();
+    let mut actual = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint,
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    owner
+        .submit_prepared(job.operation_id.clone(), &mut actual, false, &stop)
+        .await
+        .unwrap();
+    {
+        let mut chain = net.chain.write().await;
+        let remaining = prepared.facts().unwrap().expiry_height + 2 - chain.tip();
+        chain.mine_empty_blocks(remaining);
     }
+    // Scheduled source observation reuses this completed current-owner scan;
+    // only the actual expiry input proof requests another completed scan.
+    owner.sync_once(&stop).await.unwrap();
+    let mut sender = NoLookup;
+    let outcome = owner
+        .recover_funding_observed(job.id.clone(), 3, false, &mut sender, &stop, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        outcome.outcome,
+        recovery::RecoveryOutcome::Waiting("funding_disabled")
+    );
+    let operation = job.operation_id;
+    store
+        .call(move |s| {
+            assert_eq!(s.operation(&operation)?.submission, "EXPIRED");
+            assert_eq!(s.operation(&operation)?.attempts, 1);
+            assert_eq!(s.prepared_bytes(&operation)?.as_slice(), prepared.bytes());
+            assert!(!s.operation_pending(&operation)?);
+            assert_eq!(s.funding_jobs()?.len(), 1);
+            assert_eq!(s.funding_recovery_count(&job.id)?, 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    owner.close().await.unwrap();
 }

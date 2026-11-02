@@ -609,93 +609,76 @@ async fn shielding_callback_scans_are_consumed_before_unrelated_commands() {
 
 #[tokio::test]
 async fn buried_shielding_expiry_ignores_stale_inclusion_hints_without_another_calculation() {
-    struct StaleHint {
-        confirmed: bool,
-        lookups: usize,
-    }
-    impl TransactionSubmission for StaleHint {
+    struct NoLookup;
+    impl TransactionSubmission for NoLookup {
         async fn submit(&mut self, _: BroadcastTransaction) -> Result<SubmissionOutcome> {
-            panic!("recovery cannot resubmit");
+            panic!("expiry recovery cannot resubmit");
         }
         async fn lookup(&mut self, _: &PreparedTransaction) -> Result<TransactionPresence> {
-            self.lookups += 1;
-            Ok(if self.confirmed {
-                TransactionPresence::Confirmed { height: 24 }
-            } else {
-                TransactionPresence::Mempool
-            })
+            panic!("canonical expiry needs no external inclusion hint");
         }
     }
-    for confirmed in [false, true] {
-        let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
-        let addresses = transparent_addresses(&mut owner, 1).await;
-        let funding = faucet_funding_transaction(vec![(&addresses[0], 1_000_000, None)]).await;
-        {
-            let mut chain = net.chain.write().await;
-            chain.mine_block(vec![funding]);
-            chain.mine_empty_blocks(2);
-        }
-        let stop = CancellationToken::new();
-        owner.sync_once(&stop).await.unwrap();
-        let prepared = owner
-            .shield_address(addresses[0].clone(), None, 30_000, &stop)
-            .await
-            .unwrap();
-        let mut actual = submission::GrpcSubmission::with_network(
-            endpoint.clone(),
-            endpoint,
-            TreasuryNetwork::Synthetic,
-        )
+    let (_dir, net, mut owner, endpoint) = funded_fixture(2).await;
+    let addresses = transparent_addresses(&mut owner, 1).await;
+    let funding = faucet_funding_transaction(vec![(&addresses[0], 1_000_000, None)]).await;
+    {
+        let mut chain = net.chain.write().await;
+        chain.mine_block(vec![funding]);
+        chain.mine_empty_blocks(2);
+    }
+    let stop = CancellationToken::new();
+    owner.sync_once(&stop).await.unwrap();
+    let prepared = owner
+        .shield_address(addresses[0].clone(), None, 30_000, &stop)
+        .await
         .unwrap();
-        owner
-            .submit_prepared(
-                prepared.operation_id().to_owned(),
-                &mut actual,
-                false,
-                &stop,
-            )
-            .await
-            .unwrap();
-        {
-            let mut chain = net.chain.write().await;
-            let remaining = prepared.facts().unwrap().expiry_height + 2 - chain.tip();
-            chain.mine_empty_blocks(remaining);
-        }
-        owner.sync_once(&stop).await.unwrap();
-        owner.configure_automatic_shielding(30_000);
-        // Maintenance owns this completed scan. Losing the indexer afterward
-        // cannot veto its already-established expiry proof with another scan.
-        net.chain.write().await.faults.inject(
-            Rpc::LightdInfo,
-            Fault::Fail(tonic::Code::Unavailable, "synthetic indexer offline".into()),
-        );
-        let mut sender = StaleHint {
-            confirmed,
-            lookups: 0,
-        };
-        owner
-            .maintain_owned_transparent(&mut sender, &stop)
-            .await
-            .unwrap();
-        assert_eq!(
-            sender.lookups, 0,
-            "canonical expiry does not require the external hint"
-        );
-        assert_eq!(net.chain.read().await.faults.pending(Rpc::LightdInfo), 1);
-        owner
-            .store
-            .call(move |s| {
-                let operation = prepared.operation_id();
-                assert_eq!(s.operation(operation)?.submission, "EXPIRED");
-                assert_eq!(s.operation(operation)?.attempts, 1);
-                assert_eq!(s.prepared_bytes(operation)?.as_slice(), prepared.bytes());
-                assert!(!s.operation_pending(operation)?);
-                assert_eq!(s.status()?.treasury_operations.len(), 1);
-                assert!(s.funding_jobs()?.is_empty());
-                Ok(())
-            })
-            .await
-            .unwrap();
-        owner.close().await.unwrap();
+    let mut actual = submission::GrpcSubmission::with_network(
+        endpoint.clone(),
+        endpoint,
+        TreasuryNetwork::Synthetic,
+    )
+    .unwrap();
+    owner
+        .submit_prepared(
+            prepared.operation_id().to_owned(),
+            &mut actual,
+            false,
+            &stop,
+        )
+        .await
+        .unwrap();
+    {
+        let mut chain = net.chain.write().await;
+        let remaining = prepared.facts().unwrap().expiry_height + 2 - chain.tip();
+        chain.mine_empty_blocks(remaining);
     }
+    owner.sync_once(&stop).await.unwrap();
+    owner.configure_automatic_shielding(30_000);
+    // Maintenance owns this completed scan. Losing the indexer afterward
+    // cannot veto its already-established expiry proof with another scan.
+    net.chain.write().await.faults.inject(
+        Rpc::LightdInfo,
+        Fault::Fail(tonic::Code::Unavailable, "synthetic indexer offline".into()),
+    );
+    let mut sender = NoLookup;
+    owner
+        .maintain_owned_transparent(&mut sender, &stop)
+        .await
+        .unwrap();
+    assert_eq!(net.chain.read().await.faults.pending(Rpc::LightdInfo), 1);
+    owner
+        .store
+        .call(move |s| {
+            let operation = prepared.operation_id();
+            assert_eq!(s.operation(operation)?.submission, "EXPIRED");
+            assert_eq!(s.operation(operation)?.attempts, 1);
+            assert_eq!(s.prepared_bytes(operation)?.as_slice(), prepared.bytes());
+            assert!(!s.operation_pending(operation)?);
+            assert_eq!(s.status()?.treasury_operations.len(), 1);
+            assert!(s.funding_jobs()?.is_empty());
+            Ok(())
+        })
+        .await
+        .unwrap();
+    owner.close().await.unwrap();
 }
