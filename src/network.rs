@@ -1000,6 +1000,18 @@ fn validate_public_addresses(addresses: &[std::net::SocketAddr]) -> std::io::Res
 mod public_destination_tests {
     use super::*;
     #[test]
+    fn password_only_userinfo_is_rejected_before_transport_creation() {
+        let url = "https://:fixture-password@api.example.com/read";
+        let parsed = reqwest::Url::parse(url).unwrap();
+        assert!(parsed.username().is_empty());
+        assert_eq!(parsed.password(), Some("fixture-password"));
+        assert_eq!(
+            public_url(url).unwrap_err().to_string(),
+            "source URLs require HTTPS without userinfo or fragments"
+        );
+        assert!(public_url("https://api.example.com/read").is_ok());
+    }
+    #[test]
     fn every_dns_answer_is_checked_at_each_resolution() {
         let good = "1.1.1.1:443".parse().unwrap();
         let bad = "127.0.0.1:443".parse().unwrap();

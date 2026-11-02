@@ -47,6 +47,26 @@ fn configured_example_is_valid() {
     );
 }
 #[test]
+fn padding_cannot_use_reserved_payment_proxy_or_credential_headers() {
+    let mut config = example_config();
+    config.validate().unwrap();
+    for name in [
+        "X-PaYmEnT-Padding",
+        "x-forwarded-padding",
+        "x-x402-padding",
+        "x-api-key",
+    ] {
+        config.padding.as_mut().unwrap().header_name = name.into();
+        assert_eq!(
+            config.validate().unwrap_err().to_string(),
+            "padding requires a non-reserved x- extension header",
+            "{name}"
+        );
+    }
+    config.padding.as_mut().unwrap().header_name = "X-Example-Padding".into();
+    config.validate().unwrap();
+}
+#[test]
 fn padding_only_needs_an_active_request_kind_and_agents_cannot_opt_in() {
     let mut config = example_config();
     config.ranges_enabled = false;

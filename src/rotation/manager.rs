@@ -737,6 +737,94 @@ mod offer_tests {
             "amount":amount,"payTo":format!("0x{payee:040x}"),"maxTimeoutSeconds":60,
             "extra":{"name":"USD Coin","version":"2"},"annotation":{"opaque":true}})
     }
+    #[tokio::test]
+    async fn sdk_payload_validation_rejects_changed_authority_and_validity() {
+        // One public, unfunded signer; no Store, RPC or HTTP dispatch is needed
+        // to exercise the boundary between SDK output and journal acceptance.
+        let signer = Arc::new(PrivateKeySigner::from_slice(&[91; 32]).unwrap());
+        let payer = signer.address().to_string();
+        let challenge = serde_json::json!({
+            "x402Version":2,
+            "resource":{"url":"https://example.com/pay"},
+            "accepts":[offer("1", 1)]
+        });
+        let response = reqwest::Response::from(
+            axum::http::Response::builder()
+                .status(402)
+                .header("payment-required", STANDARD.encode(challenge.to_string()))
+                .body(Vec::<u8>::new())
+                .unwrap(),
+        );
+        let (challenge, selected, _) =
+            prepare_challenge(&response, &SpendPolicy { max_atomic: None }).unwrap();
+        let candidates = V2Eip155ExactClient::new(signer).accept(&challenge);
+        let signed = selected.select(&candidates).unwrap().sign().await.unwrap();
+        let payload: Value = serde_json::from_slice(&STANDARD.decode(signed).unwrap()).unwrap();
+        let accepted = validate_payload(&payload, &selected, &payer).unwrap();
+        assert_eq!(accepted.payer, payer);
+        assert_eq!(accepted.payee, selected.payee.to_string());
+        assert!(accepted.valid_after < accepted.valid_before);
+
+        // Independent mutations of a known-valid payload isolate each refusal.
+        // Extreme timestamps avoid a wall-clock boundary or sleeps. The final
+        // after < before operand is implied by the preceding clock checks.
+        for (pointer, replacement, reason) in [
+            (
+                "/x402Version",
+                serde_json::json!(1),
+                "payment payload requirements mismatch",
+            ),
+            (
+                "/accepted/amount",
+                serde_json::json!("2"),
+                "payment payload requirements mismatch",
+            ),
+            (
+                "/payload/authorization/from",
+                serde_json::json!(format!("0x{:040x}", 2)),
+                "payment payload payer or amount mismatch",
+            ),
+            (
+                "/payload/authorization/to",
+                serde_json::json!(format!("0x{:040x}", 2)),
+                "payment payload payer or amount mismatch",
+            ),
+            (
+                "/payload/authorization/value",
+                serde_json::json!("2"),
+                "payment payload payer or amount mismatch",
+            ),
+            (
+                "/payload/authorization/validAfter",
+                serde_json::json!(u64::MAX.to_string()),
+                "invalid signed validity interval",
+            ),
+            (
+                "/payload/authorization/validBefore",
+                serde_json::json!("1"),
+                "invalid signed validity interval",
+            ),
+            (
+                "/payload/authorization/validBefore",
+                serde_json::json!(u64::MAX.to_string()),
+                "invalid signed validity interval",
+            ),
+        ] {
+            let mut changed = payload.clone();
+            *changed.pointer_mut(pointer).unwrap() = replacement;
+            let error = validate_payload(&changed, &selected, &payer).err().unwrap();
+            assert_eq!(error.to_string(), reason, "{pointer}");
+        }
+        let mut permit2 = payload;
+        permit2["payload"]["permit2Authorization"] = serde_json::json!({});
+        assert_eq!(
+            validate_payload(&permit2, &selected, &payer)
+                .err()
+                .unwrap()
+                .to_string(),
+            "unexpected Permit2 payload"
+        );
+    }
     #[test]
     fn successful_description_truncation_is_debug_only() {
         if crate::test_log_capture::run_in_child(
