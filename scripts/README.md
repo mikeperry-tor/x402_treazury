@@ -36,8 +36,9 @@ platform issue and identity boundaries.
 `CARGO_ARGS` is a shell-quoted argument list. For `test` and `clippy`, it **replaces**
 the default `--all-targets`; include that flag explicitly when adding options for
 the complete suite. `TEST_THREADS` selects libtest concurrency for `make test` and
-`check-default` (default 8); use `TEST_THREADS=1` for a serial run. `TEST_ARGS`
-replaces the complete default harness argument list, including that thread setting.
+`check-default` / `check-default-remaining` (default 8); use `TEST_THREADS=1`
+for a serial run. `TEST_ARGS` replaces the complete default harness argument list,
+including that thread setting.
 Do not include the separating `--` in `TEST_ARGS`; Make supplies it.
 `run` accepts both Cargo and application arguments in `CARGO_ARGS`, separated by
 `--`. These are trusted shell fragments, not a structured argument API. Quote the
@@ -58,18 +59,33 @@ Build targets own profile selection: use `PROFILE=NAME` with `build` or
 `build-dev` for incremental dev; Cargo profile flags in `CARGO_ARGS` are rejected.
 `make check` and its named `check-*` stages use fixed selections regardless of
 `CARGO_ARGS` and `TEST_ARGS`. The full check runs static/tooling/complexity/provenance,
-production compiler diagnostics and full feature Clippy, compatibility, default tests, then proving/lifecycle/codec
-stages. It stops on the first failing stage even with `make -k`. Individual stages
-run independently and always execute when requested. See
+production compiler diagnostics and full feature Clippy, compatibility, the remaining
+default targets, then proving/lifecycle/codec stages. It stops on the first failing
+stage even with `make -k`. Individual stages run independently and always execute when requested. See
 [validation order and continuation](../docs/testing.md#validation-order-and-continuation)
 for the stage table, independent review and evidence needed to resume after a fix.
 Coordinate editor-triggered Cargo checks as well as separate Make invocations;
 `.NOTPARALLEL` only serializes one invocation.
 
-`TEST_THREADS` changes only scheduling in `check-default`, not its fixed target
+`TEST_THREADS` changes only scheduling in either default stage, not its fixed target
 selection. The lifecycle stage uses eight test threads; proving and codec stages
 retain one. Build and feature stages remain sequential even when a harness runs
 tests concurrently.
+
+`make check-default` always runs the complete standalone `--all-targets` suite.
+Combined `make check` uses `check-default-remaining` after `check-compat` so its
+four integration targets execute once. The remainder helper obtains locked Cargo
+metadata at execution time, uses its root target inventory/resolved features and
+only the root test/bench `bench` flags omitted by metadata, then passes named
+eligible integration/bench selectors through the existing Cargo runner. Cargo
+keeps library/binary/example gating and harness behavior. Workspace default
+members must still select only the root application; changed scope or inconsistent
+targets fail before remainder tests. Python 3.11+ is required for this helper.
+
+Use `make check-default-remaining` to continue only while earlier compatibility
+evidence remains valid. Explicitly requesting `check-compat` and then standalone
+`check-default` intentionally requests the full suite again. Repeated stages always
+execute; there is no saved-success cache. Help and dry runs do not resolve metadata.
 
 `make check-clippy` runs the production library/binary compiler check followed by
 all-target `zcash-regtest` Clippy. Both use `check_warnings.py` to display Cargo
@@ -99,6 +115,7 @@ available directly.
 | `make build` / `make test` | Cargo-managed protoc; the application always includes Zcash |
 | `scripts/test-runner.sh --cargo cargo test …` | Automatic macOS copied-and-signed test execution; other hosts execute Cargo directly |
 | `make check-compat` | SDK wallet, payment, MCP and cryptographic integration targets with the root lockfile and build cache |
+| `make check-default` / `make check-default-remaining` | Complete standalone default suite / metadata-derived complement after still-valid compatibility evidence |
 | `tools/protoc/` | Independently locked build utility locating the bundled protoc compiler |
 | `generate_crypto_vectors.py` | Independent Python Keccak/EIP-712 reference vectors using pinned script dependencies |
 

@@ -9,6 +9,7 @@ PROFILE ?= release
 TEST_THREADS ?= 8
 TEST_ARGS ?= --test-threads='$(TEST_THREADS)'
 COMPLEXITY_BASE_REF ?= main
+override COMPAT_TESTS := sdk_compat payments server crypto_vectors
 
 # Resolve protoc only when executing an application Cargo command. Keep failures
 # in the assignment visible; an empty/failed helper must never use system protoc.
@@ -33,7 +34,7 @@ done;
 endef
 
 .PHONY: build build-dev test check cargo-check run clippy fmt fmt-check toolchain \
-        check-static check-clippy check-compat check-default check-proving \
+        check-static check-clippy check-compat check-default check-default-remaining check-proving \
         check-lifecycle check-codec \
         coverage coverage-condition coverage-condition-financial coverage-branch coverage-proving coverage-consensus help
 
@@ -87,7 +88,7 @@ check:
 	$(MAKE) check-static
 	$(MAKE) check-clippy
 	$(MAKE) check-compat
-	$(MAKE) check-default
+	$(MAKE) check-default-remaining
 	$(MAKE) check-proving
 	$(MAKE) check-lifecycle
 	$(MAKE) check-codec
@@ -107,10 +108,14 @@ check-clippy: toolchain
 
 check-compat: toolchain
 	$(PYTHON) vendor/verify_pepper.py
-	@$(call application_cargo,test,--test sdk_compat --test payments --test server --test crypto_vectors -- --test-threads='$(TEST_THREADS)')
+	@$(call application_cargo,test,$(foreach name,$(COMPAT_TESTS),--test $(name)) -- --test-threads='$(TEST_THREADS)')
 
 check-default: toolchain
 	@$(call application_cargo,test,--all-targets -- --test-threads='$(TEST_THREADS)')
+
+# Explicit continuation after still-valid compatibility evidence, also used by check.
+check-default-remaining: toolchain
+	@$(call application_cargo,test,-- --test-threads='$(TEST_THREADS)',$(PYTHON) scripts/default_targets.py $(foreach name,$(COMPAT_TESTS),--compat $(name)) --)
 
 check-proving: toolchain
 	@$(call application_cargo,test,--features zcash-testutils --lib treasury::send::proving_tests -- --test-threads=1)
@@ -152,6 +157,7 @@ help:
 	  'make check-clippy       Production compiler warnings and all-target zcash-regtest Clippy' \
 	  'make check-compat       SDK wallet, payment, MCP and crypto integration tests' \
 	  'make check-default      All default application test targets' \
+	  'make check-default-remaining Default targets excluding check-compat integrations' \
 	  'make check-proving      Synthetic treasury proving tests' \
 	  'make check-lifecycle    Synthetic treasury lifecycle tests' \
 	  'make check-codec        Synthetic address-codec isolation test' \

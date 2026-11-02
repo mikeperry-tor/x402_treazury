@@ -72,9 +72,10 @@ The application always includes Zcash. The [Makefile](../Makefile) verifies pinn
 and supplies Cargo-managed protoc; do not append a second `--locked` flag.
 See the [entrypoint reference](../scripts/README.md) for focused test arguments.
 
-`make check` runs the fixed stages below in order and stops at the first failing
-stage, including with `make -k`. Every stage can also run independently; it does
-not implicitly rerun earlier stages. `CARGO_ARGS` and `TEST_ARGS` customize
+`make check` runs the fixed stages below in order, using `check-default-remaining`
+after compatibility, and stops at the first failing stage, including with `make -k`.
+Every stage can also run independently; it does not implicitly rerun earlier
+stages. `CARGO_ARGS` and `TEST_ARGS` customize
 `make test` / `make clippy`, but never narrow a `check-*` stage.
 
 | Stage | Selection |
@@ -82,17 +83,28 @@ not implicitly rerun earlier stages. `CARGO_ARGS` and `TEST_ARGS` customize
 | `check-static` | Formatting, tooling regressions, analyzer tests and CogC/CycC report, vendor provenance |
 | `check-clippy` | Production library/binary compiler check, then all-target Clippy with `zcash-regtest`; emitted compiler warnings from both application and dependencies fail the stage |
 | `check-compat` | SDK wallet, payment, MCP and cryptographic integration tests using the application lockfile |
-| `check-default` | All default application targets, including SDK restore/scan-merge regressions and examples |
+| `check-default-remaining` | All other eligible default root targets, derived from Cargo metadata; the four compatibility integrations already ran |
+| `check-default` (standalone) | Complete `--all-targets` selection, including compatibility integrations and examples; not repeated inside `make check` |
 | `check-proving` | `zcash-testutils` treasury proving tests |
 | `check-lifecycle` | `zcash-testutils` synthetic-chain treasury lifecycle |
 | `check-codec` | `zcash-testutils` address-codec isolation regression |
 
 Default application harnesses use eight libtest threads. `TEST_THREADS=1` selects
-serial execution for `make test` and `make check-default`; other positive counts
-can be measured the same way. `TEST_ARGS` still replaces the whole harness argument
+serial execution for `make test`, `make check-default` and
+`make check-default-remaining`; other positive counts can be measured the same
+way. `TEST_ARGS` still replaces the whole harness argument
 list for focused `make test` runs, while `check-default` retains its complete target
 selection. The lifecycle stage uses eight threads; proving and codec stages keep
 one thread. Feature builds remain sequential.
+
+The combined compatibility/remainder partition uses the same root lockfile,
+default features, test profile and runner. Cargo metadata supplies current targets
+and resolved features; root test/bench declarations supply the bench flag omitted
+by metadata. Library, binary and example selection remains with Cargo; eligible
+integrations and benches are selected by name. A changed workspace default-member
+selection or inconsistent compatibility targets fails explicitly. Standalone
+`check-default` always requests the complete suite; separately requesting it after
+`check-compat` intentionally repeats those integrations. No stage caches success.
 
 `tests/integration_preparation.rs` owns the shared live-runner unit tests and its
 real-executable integration cases. The `live_integration` example has an empty
@@ -173,8 +185,12 @@ from real consumers; a blanket compile-only pass cannot detect stale runtime
 assertions. Once sources are stable, finish the remaining stages:
 
 ```sh
-make check-default check-proving check-lifecycle check-codec
+make check-default-remaining check-proving check-lifecycle check-codec
 ```
+
+`check-default-remaining` requires still-valid earlier compatibility evidence when
+used for continuation. Use `check-default` for an independently requested complete
+default suite.
 
 After a failure, inspect its cause, fix it, and rerun the affected tests or stage.
 Continue with the unfinished named stages. Repeat a passed stage when changed code,
