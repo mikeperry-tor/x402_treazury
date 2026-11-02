@@ -203,11 +203,11 @@ fn credit_failure_backoff_survives_sibling_success_and_uses_completion_time() {
     };
     assert_eq!(
         state.admit(&credit, Some(&job.phase), 1000, &active),
-        Some(true)
+        Admission::Ready
     );
     for kind in [Kind::Source, Kind::Status] {
-        state
-            .admit(
+        assert_eq!(
+            state.admit(
                 &Key {
                     operation: job.operation_id.clone(),
                     kind,
@@ -215,8 +215,9 @@ fn credit_failure_backoff_survives_sibling_success_and_uses_completion_time() {
                 Some(&job.phase),
                 1000,
                 &active,
-            )
-            .unwrap();
+            ),
+            Admission::Ready
+        );
     }
     let jitter = job.id.bytes().map(u64::from).sum::<u64>() % 6;
     for failure in 1..=7 {
@@ -243,11 +244,11 @@ fn credit_failure_backoff_survives_sibling_success_and_uses_completion_time() {
         }
         assert_eq!(
             state.admit(&credit, Some(&job.phase), due - 1, &active),
-            Some(false)
+            Admission::NotDue
         );
         assert_eq!(
             state.admit(&credit, Some(&job.phase), due, &active),
-            Some(true)
+            Admission::Ready
         );
         assert_eq!(state.records[&credit].streak, failure as u32);
     }

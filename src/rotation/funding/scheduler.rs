@@ -194,22 +194,50 @@ fn report_observation_failure(
 }
 
 enum Pending {
-    Work { job: FundingJob, lane: Kind },
+    Credit(FundingJob),
+    Source(FundingJob),
+    QuotePrerequisite(FundingJob),
     Status(FundingStatusRequest),
 }
 impl Pending {
     fn lane(&self) -> Kind {
         match self {
-            Self::Work { lane, .. } => *lane,
+            Self::Credit(_) => Kind::Credit,
+            Self::Source(_) => Kind::Source,
+            Self::QuotePrerequisite(_) => Kind::Quote,
+            Self::Status(_) => Kind::Status,
+        }
+    }
+    fn execution_kind(&self) -> Kind {
+        match self {
+            Self::Credit(_) => Kind::Credit,
+            Self::Source(_) | Self::QuotePrerequisite(_) => Kind::Source,
             Self::Status(_) => Kind::Status,
         }
     }
     fn operation(&self) -> &str {
         match self {
-            Self::Work { job, .. } => &job.operation_id,
+            Self::Credit(job) | Self::Source(job) | Self::QuotePrerequisite(job) => {
+                &job.operation_id
+            }
             Self::Status(request) => &request.operation_id,
         }
     }
+    fn phase(&self) -> Option<&FundingPhase> {
+        match self {
+            Self::Credit(job) | Self::Source(job) | Self::QuotePrerequisite(job) => {
+                Some(&job.phase)
+            }
+            Self::Status(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Admission {
+    Ready,
+    NotDue,
+    MetadataFull,
 }
 
 /// Each lane retains its own bounded inventory pass while sibling work runs.
@@ -598,16 +626,18 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         .await?;
                     job.timed_out = true;
                 }
-                let [credit, status, source, _] = applicable_work(&job, &facts);
-                let wanted = match kind {
-                    Kind::Credit => credit,
-                    Kind::Status => status,
-                    Kind::Source => job.phase != FundingPhase::Allocated && source,
-                    Kind::Quote => job.phase == FundingPhase::Allocated && source,
+                let [credit, _, source, _] = applicable_work(&job, &facts);
+                let item = match kind {
+                    Kind::Credit if credit => Pending::Credit(job),
+                    Kind::Source if job.phase != FundingPhase::Allocated && source => {
+                        Pending::Source(job)
+                    }
+                    Kind::Quote if job.phase == FundingPhase::Allocated && source => {
+                        Pending::QuotePrerequisite(job)
+                    }
+                    _ => continue,
                 };
-                if wanted {
-                    pending.push_back(Pending::Work { job, lane: kind });
-                }
+                pending.push_back(item);
             }
         }
         Ok(())
@@ -625,10 +655,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
         let mut metadata_deferred = false;
         for _ in 0..pending.len() {
             let item = pending.pop_front().unwrap();
-            let kind = match item.lane() {
-                Kind::Quote => Kind::Source,
-                kind => kind,
-            };
+            let kind = item.execution_kind();
             if item.lane() == Kind::Quote
                 && (flight.quote_active == QUOTE_READS
                     || flight.quote_pending.is_some()
@@ -670,31 +697,24 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
             }
             let ready = {
                 let mut state = lease.state.lock().expect("funding schedule lock");
-                state.admit(
-                    &key,
-                    match &item {
-                        Pending::Work { job, .. } => Some(&job.phase),
-                        Pending::Status(_) => None,
-                    },
-                    clock.now(),
-                    &flight.active,
-                )
+                state.admit(&key, item.phase(), clock.now(), &flight.active)
             };
             match ready {
-                Some(false) => continue,
-                None => {
+                Admission::NotDue => continue,
+                Admission::MetadataFull => {
                     metadata_deferred = true;
                     pending.push_back(item);
                     continue;
                 }
-                Some(true) => {}
+                Admission::Ready => {}
             }
             flight.active.insert(key);
-            if let Pending::Status(request) = item {
-                flight.status_active += 1;
-                let reader = reader.clone();
-                let store = self.store.clone();
-                flight.reads.push(
+            match item {
+                Pending::Status(request) => {
+                    flight.status_active += 1;
+                    let reader = reader.clone();
+                    let store = self.store.clone();
+                    flight.reads.push(
                         async move {
                             let (id, operation) = (request.id.clone(), request.operation_id.clone());
                             let result = async {
@@ -719,13 +739,8 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         }
                         .boxed(),
                     );
-                continue;
-            }
-            let Pending::Work { job, .. } = item else {
-                unreachable!()
-            };
-            match kind {
-                Kind::Credit => {
+                }
+                Pending::Credit(job) => {
                     flight.credit_active += 1;
                     let reader = reader.clone();
                     flight.reads.push(
@@ -738,9 +753,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                         .boxed(),
                     );
                 }
-                Kind::Status => unreachable!(),
-                Kind::Quote => unreachable!(),
-                Kind::Source => {
+                Pending::Source(job) | Pending::QuotePrerequisite(job) => {
                     flight.source_active = true;
                     let worker = self.clone();
                     let lease = lease.clone();
@@ -821,7 +834,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                 clock.now(),
                 &flight.active,
             );
-            if admitted == Some(true) {
+            if admitted == Admission::Ready {
                 flight.active.insert(key);
                 flight.quote_active += 1;
                 let reader = reader.clone();
@@ -837,7 +850,7 @@ impl<B: FundingBackend + Send + 'static> FundingWorker<B> {
                     .boxed(),
                 );
             } else {
-                if admitted.is_none() {
+                if admitted == Admission::MetadataFull {
                     tracing::debug!(
                         limit_records = RECORDS,
                         "Funding scheduling metadata capacity reached; pending quote retained"
@@ -1217,7 +1230,7 @@ impl State {
         phase: Option<&FundingPhase>,
         now: u64,
         active: &BTreeSet<Key>,
-    ) -> Option<bool> {
+    ) -> Admission {
         if key.kind == Kind::Source
             && phase == Some(&FundingPhase::Allocated)
             && self
@@ -1228,10 +1241,14 @@ impl State {
                 })
                 .is_some_and(|record| record.due > now)
         {
-            return Some(false);
+            return Admission::NotDue;
         }
         if let Some(record) = self.records.get(key) {
-            return Some(record.due <= now);
+            return if record.due <= now {
+                Admission::Ready
+            } else {
+                Admission::NotDue
+            };
         }
         if self
             .records
@@ -1240,14 +1257,17 @@ impl State {
             .count()
             == RECORDS
         {
-            let old = self
+            let Some(old) = self
                 .records
                 .iter()
                 .filter(|(other, record)| {
                     other.kind == key.kind && record.due <= now && !active.contains(*other)
                 })
                 .min_by_key(|(_, record)| record.due)
-                .map(|(key, _)| key.clone())?;
+                .map(|(key, _)| key.clone())
+            else {
+                return Admission::MetadataFull;
+            };
             self.records.remove(&old);
             tracing::debug!(limit_records = RECORDS, observation = ?key.kind,
                 "Funding scheduling metadata capacity reached; due inactive record evicted");
@@ -1265,7 +1285,7 @@ impl State {
                 condition: None,
             },
         );
-        Some(due <= now)
+        Admission::Ready
     }
     fn complete(
         &mut self,

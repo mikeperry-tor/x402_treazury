@@ -155,7 +155,7 @@ fn typed_conditions_survive_sibling_success_until_their_own_lane_clears() {
                 100,
                 &active
             ),
-            Some(true)
+            Admission::Ready
         );
     }
     state.complete(
@@ -238,7 +238,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
             };
             assert_eq!(
                 state.admit(&key, Some(&job.phase), 100, &active),
-                Some(true)
+                Admission::Ready
             );
             if n == 0 {
                 active.insert(key);
@@ -258,7 +258,10 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
             operation: "next-operation".into(),
             kind,
         };
-        assert_eq!(state.admit(&next, Some(&job.phase), 100, &active), None);
+        assert_eq!(
+            state.admit(&next, Some(&job.phase), 100, &active),
+            Admission::MetadataFull
+        );
         let due = state
             .records
             .values()
@@ -275,12 +278,15 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
         };
         assert_eq!(
             state.admit(&retry, Some(&jobs[1].phase), due - 1, &active),
-            Some(false)
+            Admission::NotDue
         );
-        assert_eq!(state.admit(&next, Some(&job.phase), due - 1, &active), None);
+        assert_eq!(
+            state.admit(&next, Some(&job.phase), due - 1, &active),
+            Admission::MetadataFull
+        );
         assert_eq!(
             state.admit(&next, Some(&job.phase), due, &active),
-            Some(true)
+            Admission::Ready
         );
         assert!(
             state.records.contains_key(&protected),
@@ -299,7 +305,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
         active.remove(&protected);
         assert_eq!(
             state.admit(&protected, Some(&jobs[0].phase), due, &active),
-            Some(false)
+            Admission::NotDue
         );
         // A new operation on the same job has independent retry metadata.
         let mut replacement = jobs[0].clone();
@@ -310,7 +316,7 @@ fn saturated_retry_records_preserve_active_work_and_unelapsed_backoff() {
         };
         assert_eq!(
             state.admit(&replacement_key, Some(&replacement.phase), due, &active),
-            Some(true)
+            Admission::Ready
         );
         assert!(
             state.records.contains_key(&protected),
@@ -393,10 +399,7 @@ async fn occupied_observation_lanes_report_once_per_pass_and_preserve_pending_wo
         kind: Kind::Quote,
     };
     flight.active.insert(quote_key.clone());
-    let mut duplicate = VecDeque::from([Pending::Work {
-        job: job.clone(),
-        lane: Kind::Quote,
-    }]);
+    let mut duplicate = VecDeque::from([Pending::QuotePrerequisite(job.clone())]);
     worker.dispatch_pending(&mut duplicate, &mut flight, &reads, &lease, &clock);
     assert_eq!(duplicate.len(), 1);
     assert!(std::fs::read_to_string(log.path()).unwrap().is_empty());
@@ -407,20 +410,16 @@ async fn occupied_observation_lanes_report_once_per_pass_and_preserve_pending_wo
     flight.source_active = true;
     let mut pending: VecDeque<_> = [Kind::Credit, Kind::Status, Kind::Source, Kind::Quote]
         .into_iter()
-        .map(|lane| {
-            if lane == Kind::Status {
-                Pending::Status(FundingStatusRequest {
-                    id: job.id.clone(),
-                    operation_id: job.operation_id.clone(),
-                    pool_name: job.pool_name.clone(),
-                    wallet_id: job.wallet_id.clone(),
-                })
-            } else {
-                Pending::Work {
-                    job: job.clone(),
-                    lane,
-                }
-            }
+        .map(|lane| match lane {
+            Kind::Credit => Pending::Credit(job.clone()),
+            Kind::Source => Pending::Source(job.clone()),
+            Kind::Quote => Pending::QuotePrerequisite(job.clone()),
+            Kind::Status => Pending::Status(FundingStatusRequest {
+                id: job.id.clone(),
+                operation_id: job.operation_id.clone(),
+                pool_name: job.pool_name.clone(),
+                wallet_id: job.wallet_id.clone(),
+            }),
         })
         .collect();
     worker.dispatch_pending(&mut pending, &mut flight, &reads, &lease, &clock);
@@ -459,14 +458,11 @@ async fn occupied_observation_lanes_report_once_per_pass_and_preserve_pending_wo
                 clock.now(),
                 &flight.active
             ),
-            Some(true)
+            Admission::Ready
         );
         flight.active.insert(key);
     }
-    pending.push_back(Pending::Work {
-        job: job.clone(),
-        lane: Kind::Credit,
-    });
+    pending.push_back(Pending::Credit(job.clone()));
     worker.dispatch_pending(&mut pending, &mut flight, &reads, &lease, &clock);
     assert_eq!(pending.len(), 1);
     assert!(flight.reads.is_empty());
@@ -476,6 +472,87 @@ async fn occupied_observation_lanes_report_once_per_pass_and_preserve_pending_wo
         && line.contains("metadata_deferred=true")
         && line.contains("metadata_capacity_per_kind=256")));
     assert!(!logs.contains(&job.operation_id));
+
+    // A not-due inventory copy can be rediscovered; it must not occupy the
+    // bounded page the way metadata saturation does.
+    let mut delayed = job.clone();
+    delayed.operation_id = "retained-0".into();
+    let delayed_key = Key {
+        operation: delayed.operation_id.clone(),
+        kind: Kind::Credit,
+    };
+    flight.active.remove(&delayed_key);
+    lease.state.lock().unwrap().complete(
+        (&delayed.id, &delayed.operation_id),
+        Kind::Credit,
+        clock.now(),
+        RetrySchedule::Poll(60, false),
+        None,
+        None,
+    );
+    pending.clear();
+    pending.push_back(Pending::Credit(delayed));
+    worker.dispatch_pending(&mut pending, &mut flight, &reads, &lease, &clock);
+    assert!(pending.is_empty());
+    assert!(flight.reads.is_empty());
+
+    // A completed prerequisite is different: both metadata pressure and a
+    // not-due quote must retain the exact handoff without starting HTTP.
+    flight.quote_active = 0;
+    for index in 0..RECORDS {
+        let key = Key {
+            operation: format!("retained-quote-{index}"),
+            kind: Kind::Quote,
+        };
+        assert_eq!(
+            lease
+                .state
+                .lock()
+                .unwrap()
+                .admit(&key, Some(&job.phase), clock.now(), &flight.active),
+            Admission::Ready
+        );
+        flight.active.insert(key);
+    }
+    let request = quote(&job);
+    flight.quote_pending = Some((job.clone(), request.clone()));
+    worker.dispatch_quote(&mut flight, &reads, &lease, &clock);
+    let retained = flight.quote_pending.as_ref().unwrap();
+    assert_eq!(retained.0.operation_id, job.operation_id);
+    assert_eq!(
+        serde_json::to_value(&retained.1).unwrap(),
+        serde_json::to_value(&request).unwrap()
+    );
+    assert!(flight.reads.is_empty());
+    assert_eq!(flight.quote_active, 0);
+    {
+        let mut state = lease.state.lock().unwrap();
+        state.records.remove(&Key {
+            operation: "retained-quote-0".into(),
+            kind: Kind::Quote,
+        });
+        assert_eq!(
+            state.admit(&quote_key, Some(&job.phase), clock.now(), &flight.active),
+            Admission::Ready
+        );
+        state.complete(
+            (&job.id, &job.operation_id),
+            Kind::Quote,
+            clock.now(),
+            RetrySchedule::Poll(60, false),
+            None,
+            None,
+        );
+    }
+    worker.dispatch_quote(&mut flight, &reads, &lease, &clock);
+    let retained = flight.quote_pending.as_ref().unwrap();
+    assert_eq!(retained.0.operation_id, job.operation_id);
+    assert_eq!(
+        serde_json::to_value(&retained.1).unwrap(),
+        serde_json::to_value(&request).unwrap()
+    );
+    assert!(flight.reads.is_empty());
+    assert_eq!(flight.quote_active, 0);
     drop(lease);
     drop(worker);
     drop(store);
@@ -576,7 +653,7 @@ async fn obsolete_completions_cannot_mutate_a_replacement_operation() {
             .lock()
             .unwrap()
             .admit(&key, None, 1000, &BTreeSet::new()),
-        Some(true)
+        Admission::Ready
     );
     worker
         .publish_status(
@@ -2889,7 +2966,7 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
         };
         assert_eq!(
             state.admit(&key, Some(&job.phase), 1000, &active),
-            Some(true)
+            Admission::Ready
         );
         state.complete(
             (&job.id, &job.operation_id),
@@ -2902,11 +2979,11 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
         if kind != Kind::Quote {
             assert_eq!(
                 state.admit(&key, Some(&job.phase), 1059, &active),
-                Some(false)
+                Admission::NotDue
             );
             assert_eq!(
                 state.admit(&key, Some(&job.phase), 1061, &active),
-                Some(true)
+                Admission::Ready
             );
         }
     }
@@ -2948,7 +3025,7 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
     );
     assert_eq!(
         state.admit(&source, Some(&job.phase), due - 1, &active),
-        Some(false)
+        Admission::NotDue
     );
     // Only a successful completion of this exact source clears its failure.
     state.complete(
@@ -2962,7 +3039,7 @@ fn source_and_status_floor_and_failed_source_backoff_survive_local_wakes() {
     state.advance_source(&job.operation_id, due);
     assert_eq!(
         state.admit(&source, Some(&job.phase), due, &active),
-        Some(true)
+        Admission::Ready
     );
 }
 
