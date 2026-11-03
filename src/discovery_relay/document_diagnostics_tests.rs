@@ -92,6 +92,11 @@ fn capture(kind: RequestKind, failure: &Failure, level: tracing::Level) -> Strin
 
 #[test]
 fn speculative_failures_are_debug_and_hidden_at_info() {
+    if crate::test_log_capture::run_in_child(
+        "discovery_relay::document::diagnostics_tests::speculative_failures_are_debug_and_hidden_at_info",
+    ) {
+        return;
+    }
     let failure = Failure::status(
         anyhow::anyhow!("PRIVATE_UPSTREAM_PROSE"),
         StatusCode::NOT_FOUND,
@@ -124,6 +129,11 @@ fn speculative_failures_are_debug_and_hidden_at_info() {
 
 #[test]
 fn partial_document_reason_is_independent_of_http_status() {
+    if crate::test_log_capture::run_in_child(
+        "discovery_relay::document::diagnostics_tests::partial_document_reason_is_independent_of_http_status",
+    ) {
+        return;
+    }
     for status in [200, 206] {
         let failure = Failure::validation(IncompleteDocument { status }.into());
         let logs = capture(RequestKind::Document, &failure, tracing::Level::INFO);
@@ -139,6 +149,11 @@ fn partial_document_reason_is_independent_of_http_status() {
 
 #[test]
 fn byte_limit_rejection_retains_safe_fields_at_the_callers_severity() {
+    if crate::test_log_capture::run_in_child(
+        "discovery_relay::document::diagnostics_tests::byte_limit_rejection_retains_safe_fields_at_the_callers_severity",
+    ) {
+        return;
+    }
     let failure = Failure::body(
         crate::limits::DownloadLimit {
             kind: "document",

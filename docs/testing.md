@@ -122,7 +122,8 @@ every host, so use `TEST_THREADS` when local measurements justify another count.
 Diagnostic fixtures whose callsites are also reached by subscriberless siblings
 use the [log-capture guard](../tests/support/log_capture.rs) to run in an exact child
 process. A sibling's first use can otherwise cache disabled tracing interest
-without the fixture's scoped subscriber. All severity, count, privacy and financial
+without the fixture's scoped subscriber. This also applies to synchronous
+`tracing::subscriber::with_default` captures. All severity, count, privacy and financial
 assertions stay in that child; the parent verifies successful execution of one
 test. Other fixtures remain parallel; this is not a reason to serialize an entire
 harness.

@@ -1037,6 +1037,11 @@ pub(crate) mod tests {
 
     #[test]
     fn terminal_relay_warning_retains_target_cause_and_prior_payment_uncertainty() {
+        if crate::test_log_capture::run_in_child(
+            "discovery_relay::tests::terminal_relay_warning_retains_target_cause_and_prior_payment_uncertainty",
+        ) {
+            return;
+        }
         for prior_payment in [false, true] {
             let log = tempfile::NamedTempFile::new().unwrap();
             let subscriber = tracing_subscriber::fmt()
@@ -1071,6 +1076,11 @@ pub(crate) mod tests {
 
     #[test]
     fn fallback_selection_is_info_and_does_not_claim_a_paid_request_started() {
+        if crate::test_log_capture::run_in_child(
+            "discovery_relay::tests::fallback_selection_is_info_and_does_not_claim_a_paid_request_started",
+        ) {
+            return;
+        }
         let log = tempfile::NamedTempFile::new().unwrap();
         let subscriber = tracing_subscriber::fmt()
             .without_time()
