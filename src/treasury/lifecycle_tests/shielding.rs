@@ -101,16 +101,21 @@ async fn automatic_shielding_expiry_closes_work_despite_orphaned_selected_input(
         let blocks = expiry + 2 - chain.tip();
         chain.mine_empty_blocks(blocks);
     }
-    // Count the completed reorg scan and the maintenance that consumes it;
-    // expiry must not require a second canonical scan from the same owner.
+    // Distinguish the reorg scan consumed by expiry from the later scan for
+    // newly calculated shielding. Expiry must close before that new scan.
     let db = rusqlite::Connection::open(dir.path().join("state/state.sqlite")).unwrap();
     db.execute_batch(
-        "CREATE TABLE fixture_completed_scans (observation TEXT NOT NULL);
+        "CREATE TABLE fixture_original (id TEXT NOT NULL);
+        CREATE TABLE fixture_completed_scans (observation TEXT NOT NULL, original_submission TEXT NOT NULL);
         CREATE TRIGGER record_completed_scan AFTER INSERT ON treasury_sync
         WHEN json_extract(NEW.observation,'$.phase')='ready'
-        BEGIN INSERT INTO fixture_completed_scans VALUES(NEW.observation); END;",
+        BEGIN INSERT INTO fixture_completed_scans
+        SELECT NEW.observation,submission FROM treasury_operations
+        WHERE id=(SELECT id FROM fixture_original); END;",
     )
     .unwrap();
+    db.execute("INSERT INTO fixture_original VALUES(?1)", [&operation])
+        .unwrap();
     if owner.sync_once(&stop).await.is_err() {
         owner.sync_once(&stop).await.unwrap();
     }
@@ -136,24 +141,38 @@ async fn automatic_shielding_expiry_closes_work_despite_orphaned_selected_input(
         .maintain_owned_transparent(&mut sender, &stop)
         .await
         .unwrap();
-    let completed: Vec<SyncObservation> = db
-        .prepare("SELECT observation FROM fixture_completed_scans")
+    let completed: Vec<(SyncObservation, String)> = db
+        .prepare(
+            "SELECT observation,original_submission FROM fixture_completed_scans ORDER BY rowid",
+        )
         .unwrap()
-        .query_map([], |row| row.get::<_, String>(0))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .unwrap()
-        .map(|value| serde_json::from_str(&value.unwrap()).unwrap())
+        .map(|value| {
+            let (observation, original_submission) = value.unwrap();
+            (
+                serde_json::from_str(&observation).unwrap(),
+                original_submission,
+            )
+        })
         .collect();
     assert_eq!(
         completed.len(),
-        1,
-        "expiry consumes the one completed reorg scan without another canonical scan"
+        2,
+        "one reorg scan closes the original; new shielding requires its own submission scan"
+    );
+    assert_ne!(completed[0].1, "EXPIRED");
+    assert_eq!(
+        completed[1].1, "EXPIRED",
+        "expiry cannot require the new shielding scan"
     );
     assert!(
-        completed
-            .iter()
-            .all(|scan| scan.at_observed_tip() && scan.height.unwrap() >= u64::from(expiry) + 2)
+        completed.iter().all(
+            |(scan, _)| scan.at_observed_tip() && scan.height.unwrap() >= u64::from(expiry) + 2
+        )
     );
-    assert!(!owner.status().await.unwrap().outgoing_pending);
     owner
         .store
         .call({
@@ -169,12 +188,8 @@ async fn automatic_shielding_expiry_closes_work_despite_orphaned_selected_input(
         })
         .await
         .unwrap();
-    // Only the next pass may select newly spendable capital under current
-    // authority. It calculates new bytes after proven expiry, never rebroadcasts.
-    owner
-        .maintain_owned_transparent(&mut sender, &stop)
-        .await
-        .unwrap();
+    // The same pass selects newly spendable capital under current authority
+    // after proven expiry, using new bytes rather than rebroadcasting.
     let next = load_pending(&owner).await;
     assert_ne!(next.operation_id(), operation);
     assert_ne!(next.bytes(), prepared.bytes());
@@ -330,12 +345,8 @@ async fn automatic_shielding_is_per_address_keeps_uncertain_bytes_and_recovers_u
         .maintain_owned_transparent(&mut sender, &stop)
         .await
         .unwrap();
-    assert!(!owner.status().await.unwrap().outgoing_pending);
-    // A later maintenance pass handles the independent address, never linking it.
-    owner
-        .maintain_owned_transparent(&mut sender, &stop)
-        .await
-        .unwrap();
+    // Closing the first original immediately permits independent address work
+    // in this maintenance pass, without linking the two shielding identities.
     let second = load_pending(&owner).await;
     selected_and_owned(&second, 2_000_000);
     assert_ne!(second.network_identity().unwrap(), first_identity);

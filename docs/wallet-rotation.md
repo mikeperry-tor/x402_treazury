@@ -118,6 +118,8 @@ input ownership: the pinned SDK permits fee-only proposals, which cannot recover
 capital. Uneconomic/empty addresses do not block independent addresses. No
 principal reservation, attribution requirement or funding-claim reopening is added.
 The explicit per-address command remains available.
+When maintenance closes the last pending source obligation, independent shielding
+can proceed in that same pass under the existing pending-work, input and fee checks.
 
 Zingolib selects inputs and calculates standard network fees. The application
 checks the actual proposal against configured per-operation fee/spend safeguards,

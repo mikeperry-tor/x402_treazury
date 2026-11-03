@@ -12,7 +12,6 @@ impl Treasury {
         stop: &CancellationToken,
     ) -> Result<()> {
         let mut after = None;
-        let mut had_pending = false;
         loop {
             let cursor = after.clone();
             let page = self
@@ -24,7 +23,6 @@ impl Treasury {
             }
             for id in page {
                 after = Some(id.clone());
-                had_pending = true;
                 if stop.is_cancelled() {
                     return Ok(());
                 }
@@ -35,9 +33,6 @@ impl Treasury {
                     diagnostics::report_shielding_failure(&error, Some(&id));
                 }
             }
-        }
-        if had_pending {
-            return Ok(());
         }
         let Some(max_fee) = self.automatic_shielding_fee else {
             return Ok(());
