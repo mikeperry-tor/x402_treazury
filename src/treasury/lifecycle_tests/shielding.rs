@@ -661,9 +661,9 @@ async fn buried_shielding_expiry_ignores_stale_inclusion_hints_without_another_c
         chain.mine_empty_blocks(remaining);
     }
     owner.sync_once(&stop).await.unwrap();
-    owner.configure_automatic_shielding(30_000);
-    // Maintenance owns this completed scan. Losing the indexer afterward
-    // cannot veto its already-established expiry proof with another scan.
+    // Leave fresh automatic shielding disabled: this pass only closes the
+    // original using its completed scan. Losing the indexer afterward cannot
+    // veto that expiry proof or authorize another calculation.
     net.chain.write().await.faults.inject(
         Rpc::LightdInfo,
         Fault::Fail(tonic::Code::Unavailable, "synthetic indexer offline".into()),
