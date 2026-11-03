@@ -5,11 +5,11 @@ and CLI usage. Maintained implementation and operational explanations live here:
 
 | Guide | Subject |
 | --- | --- |
-| [Configuration](configuration.md) | TOML composition, [source distribution](configuration.md#source-tool-distribution), tool filters, provider compatibility and pricing |
+| [Configuration](configuration.md) | TOML composition, [source distribution](configuration.md#source-tool-distribution), tool filters, provider compatibility and [pricing](configuration.md#pricing-metadata-and-runtime-hints) |
 | [Wallet CLI](wallet-cli.md) | Treasury commands, funding configuration and recovery |
 | [Development](development.md) | Local checks, coverage and complexity tooling |
 | [Zingo integration](zingo-integration.md) | SDK boundaries, Pepper patches and adapted-code attribution |
-| [Architecture](architecture.md) | Catalog generation, MCP execution, ownership and the [wallet selection/isolation decision](architecture.md#wallet-selection-and-network-isolation) |
+| [Architecture](architecture.md) | Catalog generation, [MCP output](architecture.md#mcp-and-output-boundaries), execution, ownership and the [wallet selection/isolation decision](architecture.md#wallet-selection-and-network-isolation) |
 | [Wallet rotation](wallet-rotation.md) | Treasury ownership, payment admission, reserve claims, retained capacity, [automatic retirement](wallet-rotation.md#automatic-retirement), funding and recovery |
 | [Network egress](network-egress.md) | Direct/Tor factory, isolation identities, timeout policy and SDK boundaries |
 | [Local resource limits](local-resource-limits.md) | Existing failure thresholds, cache lifetimes and maintenance cadence for troubleshooting |
@@ -21,7 +21,6 @@ and CLI usage. Maintained implementation and operational explanations live here:
 
 [Plans](plans/) describe unfinished work, including artifact storage,
 [discovery keywords and recommended tools](plans/discovery_improvements.md),
-[observed pricing in descriptions and results](plans/observed_pricing_details.md),
 [OpenAPI authentication](plans/openapi_authentication.md) and the
 [remaining vendor retirement assessments](plans/vendor_retirement.md).
 The [seed recovery plan](plans/seed_based_wallet_recovery.md) covers derivation,
