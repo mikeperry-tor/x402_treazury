@@ -736,6 +736,11 @@ async fn static_provider_failure_and_result_caches_remain_independent() {
 
 #[tokio::test]
 async fn smaller_cached_response_bound_keeps_typed_failure_and_payment_warning_without_io() {
+    if crate::test_log_capture::run_in_child(
+        "discovery_relay::list_tests::smaller_cached_response_bound_keeps_typed_failure_and_payment_warning_without_io",
+    ) {
+        return;
+    }
     let log = tempfile::NamedTempFile::new().unwrap();
     let subscriber = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::WARN)
@@ -1172,6 +1177,11 @@ async fn unsigned_provider_501_drops_stalled_body_before_next_paid_provider() {
 
 #[tokio::test]
 async fn catalog_relay_diagnostics_identify_each_failure_and_fallback_outcome() {
+    if crate::test_log_capture::run_in_child(
+        "discovery_relay::list_tests::catalog_relay_diagnostics_identify_each_failure_and_fallback_outcome",
+    ) {
+        return;
+    }
     for (
         first,
         second,
