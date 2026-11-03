@@ -1109,6 +1109,11 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn relay_errors_preserve_safe_causes_without_authorizing_paid_retries() {
+        if crate::test_log_capture::run_in_child(
+            "discovery_relay::tests::relay_errors_preserve_safe_causes_without_authorizing_paid_retries",
+        ) {
+            return;
+        }
         for (reason, reject, stall, limit) in [
             ("http_status", true, false, 4096),
             ("read_inactivity", false, true, 4096),
@@ -1288,6 +1293,11 @@ pub(crate) mod tests {
     }
     #[tokio::test]
     async fn blocked_catalog_falls_back_once_and_only_relay_cache_reuses_result() {
+        if crate::test_log_capture::run_in_child(
+            "discovery_relay::tests::blocked_catalog_falls_back_once_and_only_relay_cache_reuses_result",
+        ) {
+            return;
+        }
         for status in [
             400, 403, 408, 429, 500, 502, 503, 504, 501, 404, 200, 302, 307,
         ] {
