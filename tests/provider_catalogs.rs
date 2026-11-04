@@ -2702,6 +2702,11 @@ async fn locus_discovery_and_gateway_preserve_complete_source_contracts() {
     let doc: Value = serde_json::from_str(include_str!("../providers/locus/openapi.json")).unwrap();
     let raw: Value = serde_json::from_str(include_str!("fixtures/locus_openapi.json")).unwrap();
     let tools = catalog::build_tools(&cfg, &doc, "locus").unwrap();
+    assert!(tools.iter().all(|tool| {
+        !tool
+            .description
+            .contains("npx @velinussage/locus-agent-skill add")
+    }));
     for path in [
         "/.well-known/locus-tools.json",
         "/.well-known/locus-agent-endpoints.json",
@@ -2743,7 +2748,19 @@ async fn locus_discovery_and_gateway_preserve_complete_source_contracts() {
             .iter()
             .map(|n| n.as_str().unwrap())
             .collect();
-    assert_eq!(free, names);
+    let writes = BTreeSet::from(["locus_agent_feedback", "locus_request_coverage"]);
+    for name in &writes {
+        let op = &raw["paths"][format!("/api/{name}")]["post"];
+        assert_eq!(
+            op["x-locus-access"]["sideEffect"],
+            "aggregate-participation"
+        );
+        assert!(!names.contains(name));
+    }
+    assert_eq!(
+        free.difference(&writes).copied().collect::<BTreeSet<_>>(),
+        names
+    );
     let call = tools.iter().find(|t| t.name == "locus_call").unwrap();
     let args = json!({"name":"locus_coverage_check","arguments":{"place":"1 Main St"}});
     let route = call
@@ -2754,15 +2771,31 @@ async fn locus_discovery_and_gateway_preserve_complete_source_contracts() {
     // Preserve the full paid request schema and body-required flag. The authored
     // projection omits the dialect annotation and media examples; those examples
     // remain complete in the independently captured source object.
-    let source_body = &raw["paths"]["/api/locus-place-report"]["post"]["requestBody"];
-    let projected_body = &doc["paths"]["/api/locus-place-report"]["post"]["requestBody"];
-    let mut source_schema = source_body["content"]["application/json"]["schema"].clone();
-    source_schema.as_object_mut().unwrap().remove("$schema");
-    assert_eq!(
-        projected_body["content"]["application/json"]["schema"],
-        source_schema
-    );
-    assert_eq!(projected_body["required"], source_body["required"]);
+    for path in [
+        "/api/locus-place-report",
+        "/api/locus-metro-permits",
+        "/api/locus-owner-programs",
+        "/api/locus-place-facts",
+        "/api/locus-valuation-challenge",
+        "/api/locus-before-you-sign-dossier",
+        "/api/locus-escrow-insurance-dossier",
+        "/api/locus-groundwater-drawdown",
+        "/api/locus-property-tax-protest-packet",
+        "/api/locus-seller-readiness-packet",
+    ] {
+        let source_body = &raw["paths"][path]["post"]["requestBody"];
+        let projected_body = &doc["paths"][path]["post"]["requestBody"];
+        let mut expected = source_body["content"]["application/json"]["schema"].clone();
+        expected.as_object_mut().unwrap().remove("$schema");
+        assert_eq!(
+            projected_body["content"]["application/json"]["schema"], expected,
+            "{path}"
+        );
+        assert_eq!(
+            projected_body["required"], source_body["required"],
+            "{path}"
+        );
+    }
     let paid = tools
         .iter()
         .find(|t| t.path == "/api/locus-place-report")
@@ -2916,7 +2949,7 @@ async fn straits_public_formats_preserve_routes_tiers_and_historical_meaning() {
         "https://straits.live/api"
     );
     assert!(
-        doc["x-catalog-source"]
+        doc["x-catalog-source"]["prior_catalog_origin"]
             .as_str()
             .unwrap()
             .contains("straits_digest.json")
@@ -3013,6 +3046,20 @@ async fn apexfaucet_repairs_documented_inputs_without_exposing_owned_purchases()
         assert_eq!(request.body, Some(payload));
         assert!(request.query.is_empty());
     }
+    let verdict = tools
+        .iter()
+        .find(|tool| tool.path == "/api/x402/token-verdict")
+        .unwrap();
+    assert_eq!(verdict.input_schema["required"], json!(["tokenAddress"]));
+    let trust = tools
+        .iter()
+        .find(|tool| tool.path == "/api/x402/agent-trust")
+        .unwrap();
+    assert!(trust.input_schema["properties"]["address"]["pattern"].is_string());
+    for removed in ["/api/x402/weather-now", "/api/x402/web-search"] {
+        assert!(doc["paths"].get(removed).is_none());
+        assert!(!tools.iter().any(|tool| tool.path == removed));
+    }
     let image = tools
         .iter()
         .find(|tool| tool.path == "/api/x402/image-generate")
@@ -3059,9 +3106,13 @@ async fn apexfaucet_repairs_documented_inputs_without_exposing_owned_purchases()
         "/api/x402/market-feature",
         "/api/x402/room-meal",
         "/api/x402/room-upgrade",
+        "/api/x402/pay-safe-credits",
     ] {
         assert!(doc["paths"].get(path).is_some());
-        assert!(!tools.iter().any(|tool| tool.path == path));
+        assert!(
+            !tools.iter().any(|tool| tool.path == path),
+            "unsupported purchase exposed: {path}"
+        );
     }
     for path in [
         "/api/x402/page-extract",
@@ -3072,5 +3123,96 @@ async fn apexfaucet_repairs_documented_inputs_without_exposing_owned_purchases()
         "/api/x402/bloodstream-call",
     ] {
         assert!(tools.iter().any(|tool| tool.path == path), "hidden: {path}");
+    }
+}
+
+#[tokio::test]
+async fn straits_preserves_paged_ticks_export_resolution_and_input_cadence() {
+    use serde_json::json;
+    use x402_treazury::{catalog, config};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cfg = config::load(&root.join("providers/straits/provider.toml"))
+        .await
+        .unwrap()
+        .settings;
+    let doc: Value =
+        serde_json::from_str(include_str!("../providers/straits/openapi.json")).unwrap();
+    let witness: Value =
+        serde_json::from_str(include_str!("fixtures/catalogs/straits-history.json")).unwrap();
+    for (path, original) in witness["paths"].as_object().unwrap() {
+        assert_eq!(&doc["paths"][path], original, "{path}");
+    }
+    assert_eq!(
+        doc["x-catalog-source"]["premium_openapi"]["url"],
+        "https://straits.live/openapi.json"
+    );
+    let tools = catalog::build_tools(&cfg, &doc, "straits").unwrap();
+    let markets = tools
+        .iter()
+        .find(|tool| tool.name == "straits_markets")
+        .unwrap();
+    assert_eq!(markets.input_schema["properties"]["limit"]["default"], 50);
+    assert!(
+        markets.input_schema["properties"]["venue"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("manifold"))
+    );
+    let market_args = json!({"venue":"manifold","limit":50});
+    let market_request = markets
+        .route(
+            cfg.base_url.as_deref().unwrap(),
+            market_args.as_object().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(market_request.query["venue"], "manifold");
+    assert_eq!(market_request.query["limit"], 50);
+    let oil = tools
+        .iter()
+        .find(|tool| tool.name == "straits_oil")
+        .unwrap();
+    assert_eq!(oil.input_schema["properties"]["limit"]["maximum"], 2000);
+    let history = tools
+        .iter()
+        .find(|tool| tool.name == "straits_history_feed")
+        .unwrap();
+    assert_eq!(history.input_schema["properties"]["days"]["maximum"], 7);
+    assert_eq!(
+        history.input_schema["properties"]["before"]["type"],
+        "string"
+    );
+    let args = json!({"feed":"index-5min","days":7,"before":"2026-10-01T00:00:00Z"});
+    let route = history
+        .route(cfg.base_url.as_deref().unwrap(), args.as_object().unwrap())
+        .unwrap();
+    assert_eq!(
+        route.url,
+        "https://straits.live/api/premium/history/index-5min"
+    );
+    assert_eq!(route.query["days"], 7);
+    assert_eq!(route.query["before"], "2026-10-01T00:00:00Z");
+    assert!(
+        history.description.contains("nextBefore")
+            && history.description.contains("without charge")
+    );
+    let export = tools
+        .iter()
+        .find(|tool| tool.name == "straits_export")
+        .unwrap();
+    assert!(export.description.contains("older daily aggregates"));
+    let risk = tools
+        .iter()
+        .find(|tool| tool.name == "straits_risk_premium")
+        .unwrap();
+    assert!(
+        risk.description.contains("weekly IMF") && risk.description.contains("more than a week")
+    );
+    for path in [
+        "/api/premium/stream",
+        "/api/premium/stream/session",
+        "/api/premium/webhooks",
+        "/api/premium/webhooks/{id}",
+    ] {
+        assert!(!tools.iter().any(|tool| tool.path == path));
     }
 }

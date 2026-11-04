@@ -71,6 +71,14 @@ headers through persisted or directly constructed routing metadata.
 A declared Idempotency-Key is generated once per routed invocation and retained
 in the request cloned by existing unsigned and signed attempts. It is not a caller
 argument and grants no retry authority. See [header contracts](configuration.md#openapi-header-parameters-and-idempotency).
+
+Tool input schemas describe supported caller contracts; argument routing is not
+complete JSON Schema validation. Narrowing an enum advertises a supported subset,
+not a runtime authorization boundary: nonconforming arguments can still be sent
+upstream. Descriptions must distinguish unsupported choices from enforced rejection.
+Per-payment authority, destination policy and accepted-work ownership retain their
+independent runtime checks.
+
 Schema conversion is not a general-purpose OpenAPI implementation;
 for example, file uploads and asynchronous job orchestration are unsupported.
 

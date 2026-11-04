@@ -1,11 +1,11 @@
-description = "Rendered web pages, open-source research, company records and public blockchain intelligence."
+description = "Rendered web pages, open-source research, company records, public blockchain intelligence and market data."
 spec = "apexfaucet-openapi.json"
 name = "APEX Faucet"
 base_url = "https://apexfaucet.xyz"
 prefix = "apexfaucet"
 include = ["/api/x402", ""]
-# Identity assets and persistent purchases need an owner beyond a rotating payer.
-exclude_operations = ["GET /api/x402/arc-passport", "GET /api/x402/x1-passport", "GET /api/x402/market-feature", "GET /api/x402/room-meal", "GET /api/x402/room-upgrade"]
+# Identity assets, persistent purchases and prepaid bearer credits need retained ownership.
+exclude_operations = ["POST /api/x402/arc-passport", "POST /api/x402/x1-passport", "GET /api/x402/market-feature", "GET /api/x402/room-meal", "GET /api/x402/room-upgrade", "GET /api/x402/pay-safe-credits"]
 pricing_key = "x-payment-info"
 help_url = "https://apexfaucet.xyz/llms.txt"
 recommended_tools = ["apexfaucet_page_extract", "apexfaucet_page_markdown", "apexfaucet_web_read", "apexfaucet_pdf_text", "apexfaucet_site_extract", "apexfaucet_site_map", "apexfaucet_research_search", "apexfaucet_company_check", "apexfaucet_help"]
@@ -43,12 +43,9 @@ pricing_description = "Cost: ~$0.003/call [spec]."
 description = "Resolve company identity using GLEIF and SEC EDGAR by name, LEI or US ticker. Returns registration facts, reported parents and eight recent filings. Nonexact names are flagged; absent companies are answered before payment. Not sanctions or credit screening."
 pricing_description = "Cost: ~$0.005/call [spec]."
 
-[overrides.apexfaucet_web_search]
-description = "Search the live web for q (3-200 characters). Dispatcher uses an available x402Atlas or AgentBIT backend and identifies it with its upstream payment receipt. No available backend is refused before payment."
-pricing_description = "Cost: ~$0.015/call [spec]."
 
 [overrides.apexfaucet_chat_completions]
-description = "Generate a completed OpenAI-compatible chat response with messages, optional model, max_tokens, temperature and tools. Up to about 4,000 input and 1,024 output tokens; no streaming. Supports gpt-oss, Llama and Qwen models listed in model."
+description = "Generate a completed OpenAI-compatible chat response with messages, optional model, max_tokens, temperature and tools. Up to about 4,000 input and 1,024 output tokens; no streaming. Supports gpt-oss, Llama and Qwen models, with model-specific reasoning_effort. Paid model failures are recorded and refunded."
 pricing_description = "Cost: ~$0.002/call [spec]."
 
 [overrides.apexfaucet_image_generate]
@@ -65,3 +62,83 @@ pricing_description = "Cost: ~$0.02/call [spec]."
 
 [overrides.apexfaucet_help]
 description = "Read APEX's service and payment guide. It also describes unsupported identity purchases and external wallet workflows; use exposed tool schemas."
+
+[overrides.apexfaucet_arc_exit_weather]
+description = "Measure whether an Arc lending vault can return amount USDC now, with current liquidity and its 24-hour low. Omit vault to select an eligible high-rate vault. Returns a signed, expiring observation; rates are snapshots."
+pricing_description = "Cost: ~$0.005/call [spec]."
+
+[overrides.apexfaucet_arc_payee_batch]
+description = "Screen up to 20 comma-separated Arc payees for address-poisoning, blacklist and sanctions signals. Returns one signed verdict per payee; optional payer and amount can bind vouchers. A verdict does not send funds."
+pricing_description = "Cost: ~$0.02/call [spec]."
+
+[overrides.apexfaucet_arc_payee_check]
+description = "Screen an Arc payee for address-poisoning, blacklist and sanctions signals. Optional payer adds counterparty lookalikes; payer and amount can bind a signed voucher. Returns evidence and a verdict without sending funds."
+pricing_description = "Cost: ~$0.005/call [spec]."
+
+[overrides.apexfaucet_check_duplicate]
+description = "Check and record a payment fingerprint from resource, payee, amount and nonce. Returns a signed freshness verdict within window; repeating a fingerprint can change the verdict to DUPLICATE. This does not verify settlement or authorize payment."
+pricing_description = "Cost: ~$0.003/call [spec]."
+
+[overrides.apexfaucet_check_duplicate_batch]
+description = "Check and record up to 20 payment fingerprints supplied as a JSON-encoded items array. Returns one signed freshness verdict per row; duplicates within the batch are recorded in order. Oversized batches are refused before recording or charging."
+pricing_description = "Cost: ~$0.01/call [spec]."
+
+[overrides.apexfaucet_door_glyph_round]
+description = "Generate an SVG glyph for a past drand quicknet round. Returns artwork, public randomness, BLS signature and a SHA-256 receipt for independent verification."
+pricing_description = "Cost: ~$0.005/call [spec]."
+
+[overrides.apexfaucet_door_reading_round]
+description = "Generate a 12-round drand quicknet SVG artwork, its twelve words and a sentence. Returns randomness, signatures and an artwork receipt; this is generative art."
+pricing_description = "Cost: ~$0.01/call [spec]."
+
+[overrides.apexfaucet_funding_gap]
+description = "Rank current Hyperliquid funding spreads against Binance, Bybit, Bitget and Gate after published base-tier taker fees over a 24-hour hold. Returns direction, gross/net APR, fees, OI, volume and observed persistence. Preserve missing venues and USDC/USDT distinctions."
+pricing_description = "Cost: ~$0.01/call [spec]."
+
+[overrides.apexfaucet_funding_rates]
+description = "Read perp funding rates across Hyperliquid, Binance, Bybit, Bitget and Gate with native funding intervals, hourly normalization, volume and open interest. Boards require $5 million 24-hour volume on one venue and quotes from two venues. Preserves venue failures; Hyperliquid uses USDC and the other venues use USDT. No fee-adjusted spread ranking."
+pricing_description = "Cost: ~$0.001/call [spec]. Fewer than two answering venues is refused before payment."
+
+[overrides.apexfaucet_pay_preflight]
+description = "Screen an Arc payee and optionally check and record a payment fingerprint. Supply resource, nonce and amount together for the duplicate check; otherwise it is NOT_CHECKED and records nothing. Returns signed observations without sending funds."
+pricing_description = "Cost: ~$0.01/call [spec]."
+
+[overrides.apexfaucet_pay_safe]
+description = "Check a payee, optional resource price/delivery history and optional payment fingerprint on Arc or Base. Supply resource, nonce and amount together to check and record duplicates. Returns a signed verdict; missing nonce prevents PASS. Does not send funds."
+pricing_description = "Cost: ~$0.01/call [spec]."
+
+[overrides.apexfaucet_pay_safe_batch]
+description = "Run up to 10 pay-safe checks from a JSON-encoded items array. Common chain, payer and window fill omitted item values. Duplicate checks record fingerprints; oversized batches are refused before recording or charging. Returns signed verdicts without sending funds."
+pricing_description = "Cost: ~$0.03/call [spec]."
+
+[overrides.apexfaucet_pay_safe_lite]
+description = "Screen only a payee on Arc or Base for blacklist and available poisoning/sanctions signals. Optional payer and amount bind the observation. No duplicate, catalog-price or delivery check runs; the result cannot be PASS and sends no funds."
+pricing_description = "Cost: ~$0.002/call [spec]."
+
+[overrides.apexfaucet_poison_events]
+description = "Read a page of observed Arc USDC address-poisoning transfers with victim, poisoner, imitated address and transaction evidence. Continue with nextAfterBlock and nextAfterTx together to avoid repeating boundary-block events."
+pricing_description = "Cost: ~$0.01/call [spec]."
+
+[overrides.apexfaucet_prediction_movers]
+description = "Find open Polymarket markets with the largest odds changes over window, filtered by 24-hour USD volume. Returns prices, bid/ask, volume, liquidity, end dates and links from the most-traded market sample."
+pricing_description = "Cost: ~$0.003/call [spec]."
+
+[overrides.apexfaucet_prediction_odds]
+description = "Search open Polymarket and Kalshi markets by topic q. Returns outcome prices, available bid/ask, volume, liquidity/open interest, end dates and links, with venue failures identified. No matching market is uncharged."
+pricing_description = "Cost: ~$0.003/call [spec]."
+
+[overrides.apexfaucet_stablecoin_pegs]
+description = "Compare 15 major Ethereum/Solana stablecoins using executable 1,000-unit route quotes, peg deviations and on-chain supply. Returns contract identities, quote costs and timestamps; EUR pegs use the ECB reference rate. Snapshot age can reach five minutes."
+pricing_description = "Cost: ~$0.003/call [spec]."
+
+[overrides.apexfaucet_tokenized_stocks]
+description = "Read verified Solana xStock token identities, market prices, liquidity and volume. Optional symbol adds simulated $1,000 buy/sell quotes and lookalike tokens. Prices are for tokens rather than exchange-listed shares; no trade is submitted."
+pricing_description = "Cost: ~$0.005/call [spec]."
+
+[overrides.apexfaucet_x1_movers]
+description = "Read the 15 largest 24-hour gains and losses among traded X1 tokens, with XNT prices and volume. Uses the screener index rather than a live swap quote."
+pricing_description = "Cost: ~$0.003/call [spec]."
+
+[overrides.apexfaucet_x1_search]
+description = "Search the X1 screener index by token name, symbol or mint. Returns up to ten matches with mint, XNT price and 24-hour change; unindexed mints can return no matches."
+pricing_description = "Cost: ~$0.002/call [spec]."

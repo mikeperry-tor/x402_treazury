@@ -150,7 +150,10 @@ OpenAPI plus overrides, full pinned relays and multi-source authored catalogs:
 2. Compare original method/path contracts and generated tools, including filtered
    additions, GET/POST pairs, authentication, lifecycle, body alternatives, references,
    routing, pricing/metering and charged-error conditions. Do not infer missing
-   schemas, enums or prices. For multi-source projections, reconcile each actual
+   schemas, enums or prices. Check exact compatibility exclusions and response
+   mappings against current methods as well as tool names; a method change must
+   not reopen an unsupported workflow or strand its output mapping.
+   For multi-source projections, reconcile each actual
    authority explicitly; a convenient schema alone does not establish fidelity.
 3. Propose ordinary TOML/JSON edits. For full copies use the exact staged bytes;
    for authored catalogs implement direct reviewed edits from the evidence packet.

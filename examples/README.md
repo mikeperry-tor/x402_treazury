@@ -71,6 +71,22 @@ The reusable provider retains compatible diagnostic and operational tools. See
 [provider caveats](../providers/CAVEATS.md#blockchain-money-map) for sample limits,
 persistent report URLs and caller-owned notary secrets.
 
+APEX adds contract-reviewed market-data reads on finance. Its sampled funding-rate
+board and Otto's targeted funding/OI read both offered $0.001, with different venues
+and fields, so both remain selected. Old APEX weather and web-search routes are gone;
+this desk already uses Exa for search and Otto/2s for weather. Otto's sampled
+current-plus-five-day weather matched 2s current conditions; both use Open-Meteo.
+
+Locus adds broader groundwater monitoring-well history beside its free one-well
+preview, while new printable dossiers remain unselected pending distinct coverage
+comparison. Its free call gateway exposes reads; vendor-listed feedback and coverage
+participation writes have no replay/deduplication contract and are unsupported here.
+New water/owner-context reads and groundwater are reflected in property search hints.
+Straits paged history is selected on world for older full index ticks: seven-day
+pages use before/nextBefore and preserve response cadence; older bulk exports use
+daily aggregates and remain a documented alternative. These choices preserve source
+coverage and resolution rather than relying on tool names alone.
+
 APEX's two rendered readers retrieved the JavaScript test page, and its research
 search returned credited OpenAlex and Hacker News results. Research search is
 shared with science/social; it does not replace full paper retrieval or discussion

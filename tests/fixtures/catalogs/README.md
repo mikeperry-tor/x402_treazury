@@ -156,10 +156,11 @@ explicitly synthetic because no complete local vendor capture is available.
 
 | Input | Actual consumers and fidelity contract |
 | --- | --- |
+| Straits history | Three complete current premium path objects independently verify seven-day cursor pages, full response contracts, older export resolution and weekly risk-input lag. |
 | SocialFetch | Twitter profile for both public demos, live presets and request validation; YouTube and versioned LinkedIn platform/name selection; captured Instagram hosted-media tariff and Web search/ask credit conversion; public monitor source versus real parent/instance/event ownership; webhook endpoint/redelivery and Auth witnesses. All complete original objects and references remain. The newer Instagram include-tariff rules also have independent synthetic regressions; this older capture does not invent newer routes. |
 | x402-list | Three independent directory read schemas are compared to the embedded implementation; public score/assessment/suggestion and actual submit/ownership witnesses test reusable-provider boundaries. Categories remains for the tracked help-outage example's selected source. |
 | Concordance | Nine complete original path objects: six paid requests compare against authored inlining, and three public GETs compare after removing only authored free-price hints. Native lazy help faithfully uses the exact `/llms.txt` URL without a duplicate source fixture operation. |
-| Locus | All 123 complete free REST objects verify bidirectional gateway-name coverage, both complete public manifests verify free enrichment, four job/result objects retain real lifecycle evidence, and place-report compares its entire original request schema (minus only `$schema`) and body-required flag to the authored projection. Raw media examples remain intact in the source; the authored projection omits them. Runtime wrapped gateway inputs and paid flat inputs remain distinct. |
+| Locus | All 137 complete free REST objects verify the 135 supported gateway reads and two explicit participation-write exclusions, both complete public manifests verify free enrichment, four job/result objects retain real lifecycle evidence, and changed/new paid reports compare their entire original request schemas (minus only `$schema`) and body-required flags to the authored projection. Raw media examples remain intact in the source; the authored projection omits them. Runtime wrapped gateway inputs and paid flat inputs remain distinct. |
 | NewsGurus | Keep all 49 raw resources: unique whole-projection fidelity compares real templates, schemas, required lists, prices, prose and response examples against the production projection. This is a justified full capture, not a provider-wide snapshot rule. |
 
 Refresh these inputs together with their actual consumers: `tests/socialfetch.rs`,
@@ -169,6 +170,7 @@ SocialFetch demos deliberately use the scoped capture and select only the real
 Twitter profile contract; it is not a complete offline SocialFetch inventory.
 The generic `snapshot_spec` synthetic regression retains response-only removal,
 Unicode, reference preservation and deterministic byte coverage without a vendor
-byte-stability golden. Unconsumed Apollo/Straits raw captures are not retained;
-Straits' authored production catalog is preserved in full. All runtime projections,
+byte-stability golden. Unconsumed Apollo/Straits whole captures are not retained. The three-path
+`catalogs/straits-history.json` now witnesses paged tick history, older export
+resolution and risk-input cadence; the authored production catalog remains separate. All runtime projections,
 Kronos/RegimeShift runtime inputs and payment evidence remain intact.

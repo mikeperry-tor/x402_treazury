@@ -98,4 +98,9 @@ sources = [{ url = "https://stabletravel.dev/openapi.json", purpose = "schema" }
 [straits]
 intent = "authored"
 guidance = "providers/CAVEATS.md#straitstoml--straitslive-hormuz-monitor-straitslive"
-# Authored free/premium projection; configured help supplies current guide evidence.
+# Published OpenAPI is the premium request authority; configured help and the
+# human API guide describe the separately authored free catalog.
+sources = [
+    { url = "https://straits.live/openapi.json", purpose = "schema" },
+    { url = "https://straits.live/api", purpose = "guide" },
+]

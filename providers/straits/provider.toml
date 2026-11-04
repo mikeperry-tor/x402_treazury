@@ -6,14 +6,14 @@ base_url = "https://straits.live"
 prefix = "straits"
 include = ["/api/premium", "/api/v1", "/api", ""]
 additional_properties = false
-instructions_text = "Respect published format quotas; prefer status or snapshot for polling. hormuz-snapshot and cape-snapshot are historical feeds frozen on 2026-08-28. With both tiers selected, vessels_get is the paid manifest and vessels_get_2 the free count summary; either alone is named vessels. CSV, RSS and HTML return text."
+instructions_text = "Free JSON routes allow 60 requests/minute and 1,000/day per IP; respect other published format quotas. Prefer status or snapshot for polling. hormuz-snapshot and cape-snapshot are historical feeds frozen on 2026-08-28. With both tiers selected, vessels_get is the paid manifest and vessels_get_2 the free count summary; either alone is named vessels. CSV, RSS and HTML return text."
 help_url = "https://straits.live/llms.txt"
 pricing_key = "x-payment-info"
 
 [overrides]
 
 [overrides.straits_index]
-description = "The two 0-100 Hormuz Index composites - Crisis Pressure (current state) and Escalation Forecast (30-day outlook) - with bands and per-component breakdowns. Recomputed every 5 minutes."
+description = "Read the two 0-100 Hormuz Index composites: Crisis Pressure describes current conditions; Escalation Forecast combines prediction-market odds and the Brent-WTI spread without a fixed horizon. Returns bands, component breakdowns and history; recomputed every 10 minutes."
 pricing_description = "Free — no payment required."
 
 [overrides.straits_ais_gaps]
@@ -25,7 +25,7 @@ description = "JSON archive of every daily brief: 3-6 bullets, a short summary, 
 pricing_description = "Free — no payment required."
 
 [overrides.straits_carriers]
-description = "Top container carriers by TEU capacity and their Hormuz posture (suspended, rerouting, limited, transiting), vessels-trapped count, trapped TEU, and per-carrier surcharge in USD per TEU. hormuzPosture is the operative field: 5+ carriers stopped within 60-day advisories drives the 'effectively closed' verdict. Hand-curated; refreshed weekly."
+description = "Read carrier Hormuz posture, trapped vessels/capacity and surcharges where stated in a carrier notice. surchargeUnit can be per container or per TEU; amounts are null when unreported. Five stopped carriers with advisory dates within 60 days drive the dashboard closure verdict. Hand-curated weekly."
 pricing_description = "Free — no payment required."
 
 [overrides.straits_chokepoints]
@@ -37,7 +37,7 @@ description = "Cushing, Oklahoma WTI-delivery-hub inventories from the EIA weekl
 pricing_description = "Free — no payment required."
 
 [overrides.straits_events]
-description = "Indexed strikes, ship incidents, closures, and negotiations with source attribution - GDELT auto-pull every 15 minutes plus hand-curated events."
+description = "Read a source-cited timeline of strikes, ship incidents, closures and negotiations. Combines news-wire and RSS pulls every 15 minutes with hand-curated events; GDELT supplements the feed. count is headline rows; stories groups reports of the same incident."
 pricing_description = "Free — no payment required."
 
 [overrides.straits_gas]
@@ -57,11 +57,11 @@ description = "Marine war-risk high-risk areas from the Lloyd's Joint War Commit
 pricing_description = "Free — no payment required."
 
 [overrides.straits_markets]
-description = "Top Hormuz / Iran-conflict / oil-shock contracts from Kalshi and Polymarket, strict keyword-filtered. Underlying feed every 15 minutes."
+description = "Read Hormuz, Iran-conflict and oil-shock odds from Kalshi, Polymarket and Manifold. Returns up to 50 matching rows; preserve total/truncated, market dates and sources. Rows flag index exclusions and incomplete Kalshi ladders."
 pricing_description = "Free — no payment required."
 
 [overrides.straits_oil]
-description = "Rolling Brent and WTI prices from intraday front-month futures contracts (Yahoo Finance chart data, continuous quotes as fallback, EIA daily backstop). Underlying feed every 10 minutes; not edge-cached."
+description = "Read stored Brent and WTI futures observations. Points are irregularly spaced; use since for a time window. latest can switch to an EIA dated spot close when futures are stale over two hours; inspect latest.sourceKind and latest.observedAt. Source feed every ten minutes; edge cache five minutes."
 pricing_description = "Free — no payment required."
 
 [overrides.straits_pipelines]
@@ -77,7 +77,7 @@ description = "Count of vessels visible on AIS in the Persian Gulf window whose 
 pricing_description = "Free — no payment required."
 
 [overrides.straits_since]
-description = "Compares current state to a caller-provided anchor timestamp and raises a material flag once any of: 24h+ elapsed, Brent moved 1%+, any new event, any carrier posture change, transit delta 3+, or stranded delta 5+. 60-second edge cache."
+description = "Compare state with ISO anchor at. material triggers on 24 hours elapsed, a 1% Brent move, a new event/carrier advisory, or a 30-hull transit/stranded delta; smaller hull deltas are null. Anchors under six hours or over 90 days return material=false without deltas. For anchors older than 72 hours, event counts are minima. Cached up to 60 seconds."
 pricing_description = "Free — no payment required."
 
 [overrides.straits_spr]
@@ -89,7 +89,7 @@ description = "Anchored-vessel count inside the Persian Gulf bounding box, hourl
 pricing_description = "Free — no payment required."
 
 [overrides.straits_tick]
-description = "Bare-minimum payload for polling: Brent price, 24-hour change, transit and stranded counts, plus a verifiedAt anchor. 30-second edge cache."
+description = "Read a compact state tick with Brent, transit/stranded counts and verifiedAt. Recomputed at most once every 120 seconds; edge-cached for 120 seconds. Brent can be an EIA dated spot close when futures are stale over two hours; inspect oil.sourceKind and oil.observedAt."
 pricing_description = "Free — no payment required."
 
 [overrides.straits_trade_impact]
@@ -103,3 +103,20 @@ pricing_description = "Free — no payment required."
 [overrides.straits_transits_by_type]
 description = "Hourly cross-tab of vessels in transit by type (tanker, cargo, military, other); the military count is a floor - the response's methodology field explains how type is resolved."
 pricing_description = "Free — no payment required."
+
+[overrides.straits_history_feed]
+description = "Read a historical series selected by feed. index-5min retains its wire name; current ticks are ten minutes apart and older pages can contain five-minute ticks; use days up to 7 and response nextBefore as before to page older ticks. Transit history is daily; stranded and AIS-gap series contain hourly buckets with gaps. Preserve response resolution and coverage."
+pricing_description = "Cost: ~$0.01/call [spec]. Invalid before values return 400 without charge."
+
+[overrides.straits_history_feed.params]
+feed = "Historical series to retrieve. index-5min returns the original index tick history; other feeds use their own published daily or hourly resolution."
+days = "Index history window in days; defaults to seven. Use before to retrieve earlier pages."
+before = "Exclusive ISO date or timestamp ending an index-history page; omit for the latest page, then pass response nextBefore to continue."
+
+[overrides.straits_export]
+description = "Download selected historical feeds as JSON or multi-section CSV. stranded and ais-gaps retain up to a year; transits retains full history. Index ticks cover only the latest seven days, with older daily aggregates; use the history tool and before for older tick-level data."
+pricing_description = "Cost: ~$0.25/call [spec]."
+
+[overrides.straits_risk_premium]
+description = "Read a modeled war-risk transit insurance multiple with drivers, confidence and a separately labeled static insurance reference. Recomputed every ten minutes, but its weekly IMF throughput input can lag by more than a week. Preserve input dates and model/source distinctions."
+pricing_description = "Cost: ~$0.05/call [spec]."

@@ -396,15 +396,16 @@ send_tools = [
   { to = "finance" },
 ]
 
-# Retain flags, risk premiums and compact observations; brief/export/history_feed
-# duplicate available feeds.
+# Retain flags, risk premiums, observations and paged index tick history.
+# Historical index ticks need before/nextBefore paging beyond seven days.
 [sources.straits]
 extends = "../../providers/straits/provider.toml"
 send_tools = [
   { to = "exclude", tools = [
     "brief",
+    # History now preserves older tick detail; export costs $0.25 and older index
+    # rows are daily aggregates. Remove this exclusion if bulk daily export is needed.
     "export",
-    "history_feed",
   ] },
   { to = "world" },
 ]
@@ -744,6 +745,18 @@ send_tools = [{ to = "exclude" }]
 [sources.locus]
 extends = "../../providers/locus/provider.toml"
 send_tools = [
+  # New printable dossiers remain available in the reusable provider, but their
+  # distinct coverage/quality versus the selected place report and free gateway
+  # is unqualified. Remove the respective exclusion after that comparison.
+  { to = "exclude", tools = [
+    "locus_before_you_sign_dossier", # $1.19 buyer/area evidence bundle.
+    "locus_escrow_insurance_dossier", # $0.89; vendor no-insurance guidance conflicts with this purpose.
+    "locus_property_tax_protest_packet", # $0.89 tax-appeal evidence bundle.
+    "locus_seller_readiness_packet", # $0.85 permit/disclosure bundle.
+  ] },
+  # Broader paid monitoring-well history complements the free one-well preview;
+  # neither describes the property's own well without independent identification.
+  { to = "property", tools = ["locus_groundwater_drawdown"] },
   { to = "exclude", tools = [
     # Free equivalents use locus_call; retain complementary paid records and reports below.
     "well_known_locus_agent_endpoints_json", # Large discovery manifest duplicates the selected compact list/call workflow.
@@ -996,6 +1009,15 @@ send_tools = [
   { to = "web", tools = ["page_extract", "page_markdown"] },
   { to = ["science", "social"], tools = ["research_search"] },
   { to = "travel", tools = ["flight_deals"] },
+  # APEX and Otto funding both offered $0.001. Keep APEX's multi-coin normalized
+  # venue board alongside Otto's targeted OI/positioning and different venues.
+  # Other market reads below are contract-reviewed; this does not qualify every route.
+  { to = "finance", tools = [
+    "funding_rates", "funding_gap", "stablecoin_pegs", "tokenized_stocks",
+    "prediction_odds", "prediction_movers", "x1_movers", "x1_search",
+  ] },
+  # Removed APEX web-search/weather-now were not selected here: Exa remains web
+  # search; Otto weather plus 2s current/forecast reads retain weather coverage.
   { to = "exclude" },
 ]
 
@@ -1167,7 +1189,7 @@ bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
 instructions_text = "Financial and macro research: equities, options, forex, commodities, interest rates, economic series, Brazil market data, on-chain assets, DeFi, derivatives and prediction markets. Banking copy checks and rule summaries are advisory; use business for authoritative eCFR text. Wallet research can return partial coverage and persistent unlisted reports. Use business for organizations and filings; use property for parcel and site records. Inspect company-fact start/end periods; interim flows may be fiscal year-to-date, while balances are point-in-time."
-discovery_search_tool_instructions_text = "Finance keywords: Horizon Pulse, SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Banking Compliance, bank advertising, Reg DD, Reg Z, APY disclosures, banking copy checks, Blockchain Money Map, BMM, EVM wallet snapshot, transaction status, transaction decode, saved wallet report, SmartPerps, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
+discovery_search_tool_instructions_text = "Finance keywords: APEX funding rates, funding intervals, hourly normalized funding, cross-venue funding, stablecoin peg, executable quote, EURC, tokenized stocks, prediction odds, prediction market movers, X1 movers, X1 token search, Horizon Pulse, SEC company facts, EDGAR XBRL, US-GAAP, annual financial facts, quarterly financial facts, reporting periods, Banking Compliance, bank advertising, Reg DD, Reg Z, APY disclosures, banking copy checks, Blockchain Money Map, BMM, EVM wallet snapshot, transaction status, transaction decode, saved wallet report, SmartPerps, Hyperliquid public cohort positioning, long short bias, notional flows, liquidation bands, FIGI, ISIN, CUSIP, SEDOL, LEI, security identifiers, issuer resolution, ticker, equity, option, forex, commodity, energy, rates, inflation, GDP, treasury, yield curve, FOMC, COT, Brazil, B3, fund, housing, mortgage rates, home prices, wallet, token, DeFi, TVL, yield, perp, funding, open interest, liquidation, candles, order book, order flow, capital flow, ETF, positioning, holders, trending, token launch, KOL, whale, forecast, Polymarket, Solana, stablecoin, RootData, CoinAnk, NOFX, Vergex, Arkham, prediction markets, SOFR, lending, loans, economic release calendar, backtesting, short interest, squeeze, technical indicators, 2s, twos, FDIC, BLS, Bureau of Labor Statistics, BEA, Federal Reserve, FRED, government statistics, economic releases, World Bank, tax reference, international economic indicators."
 
 
 [servers.property]
@@ -1176,8 +1198,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "financials"
 discover_on_demand = true
-instructions_text = "Property, parcel, local-government, zoning, lease, environmental and site research. For Locus, use the free list/call gateway for coverage and record checks before paid reports. Preserve record dates, coverage and uncertainty; estimates are not appraisals."
-discovery_search_tool_instructions_text = "Property keywords: FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, Locus, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, local legislation, ordinances, municipal code, city council, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, Whitepages, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD, income limits, Fair Market Rents, housing assistance, NFIP claims, flood insurance."
+instructions_text = "Property, parcel, local-government, zoning, lease, environmental and site research. For Locus, use the free list/call gateway for coverage and record checks before paid reports. Preserve record dates, coverage and uncertainty; estimates are not appraisals. Locus groundwater drawdown describes monitoring wells, not a parcel well; the free gateway preview covers one well and the paid read has broader coverage. Locus use restrictions remain: no tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
+discovery_search_tool_instructions_text = "Property keywords: groundwater drawdown, USGS monitoring wells, groundwater depth history, streamflow versus normal, drought history, water supply status, boil-water notices, lead service lines, contractor licensing, estate property, foreclosure process, housing counseling, seller disclosures, FEMA flood-map change notices, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, Locus, US address, parcel, assessor, assessed value, recorded sale, property tax, comparable sales, rent estimate, real estate, lease, CMBS, commercial mortgage maturity, municipal finances, local policy, local legislation, ordinances, municipal code, city council, permits, permit closeout, listing claims, flood, environmental records, air quality history, smoke, emissions inventory, utilities, coverage preflight, zoning, land use, wildfire, landslide, radon, PFAS, water quality, groundwater, soil, terrain, wetlands, transit, roads, municipal bonds, government meetings, county industry, housing stock, relief programs, assessment appeals, solar, roof, sunlight, Whitepages, property ownership, residents, NYC, PLUTO, ACRIS, DOB permits, HPD violations, soil, flood zone, EPA facilities, HUD, income limits, Fair Market Rents, housing assistance, NFIP claims, flood insurance."
 
 [servers.security]
 listen = "127.0.0.1:3017"
@@ -1194,8 +1216,8 @@ allowed_hosts = ["host.docker.internal", "127.0.0.1"]
 bearer_token_env = "X402_TREAZURY_MCP_TOKEN"
 wallet = "global"
 discover_on_demand = true
-instructions_text = "Geopolitical, shipping, energy, agricultural and physical-world research, including offshore oil/gas leases and satellite observations. Preserve observed-at and scene timestamps and distinguish current observations from historical baselines. Aviation coverage supplies weather observations/forecasts, in-flight hazards and accident records. Geocoding and FCC spectrum geographies add location context. Use travel for flight prices, status, schedules, airports and trip routes."
-discovery_search_tool_instructions_text = "World keywords: Hormuz, strait, shipping, vessel, oil, Brent, energy, grid, power, weather, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades, FEMA, disaster declarations, disaster assistance, public assistance, hazard mitigation, disaster recovery, 2s, twos, METAR, TAF, SIGMET, NTSB, aviation weather, airport weather, air safety, aircraft accidents, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, USDA, drought, climate, water, maritime, space, geocoding, HS, customs, dangerous goods."
+instructions_text = "Geopolitical, shipping, energy, agricultural and physical-world research, including offshore oil/gas leases and satellite observations. Preserve observed-at and scene timestamps and distinguish current observations from historical baselines. Aviation coverage supplies weather observations/forecasts, in-flight hazards and accident records. Geocoding and FCC spectrum geographies add location context. Straits index history pages at most seven days; pass nextBefore as before for older tick data and preserve cadence/resolution. Use travel for flight prices, status, schedules, airports and trip routes."
+discovery_search_tool_instructions_text = "World keywords: Manifold, Kalshi, Polymarket, geopolitical prediction markets, Straits historical index, tick history, time series, historical vessel counts, tick-level history, Hormuz, strait, shipping, vessel, oil, Brent, energy, grid, power, weather, hazard, conflict, country, region, Africa, Asia, Europe, LATAM, MENA, Brazil, deforestation, commodities, offshore leases, Gulf of Mexico, satellite, Copernicus, scene, latitude, longitude, agriculture, crops, coffee, soy, minerals, supply chains, federal contract opportunities, congressional trades, FEMA, disaster declarations, disaster assistance, public assistance, hazard mitigation, disaster recovery, 2s, twos, METAR, TAF, SIGMET, NTSB, aviation weather, airport weather, air safety, aircraft accidents, FCC spectrum licence market areas, CMA, BTA, MTA, PEA, Census block, USDA, drought, climate, water, maritime, space, geocoding, HS, customs, dangerous goods."
 
 # Destination and leisure research shares the existing global payer pool.
 [servers.travel]

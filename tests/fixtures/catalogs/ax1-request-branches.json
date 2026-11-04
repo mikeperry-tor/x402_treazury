@@ -14,7 +14,7 @@
             "base",
             "solana"
           ],
-          "description": "Default base. Solana requires chain=solana and deployment readiness; inspect supported_token_chains in the unsigned quote."
+          "description": "Default base. Solana requires chain=solana and deployment readiness; supported chains are listed in supported_token_chains of the unsigned quote."
         },
         "requestKey": {
           "type": "string",

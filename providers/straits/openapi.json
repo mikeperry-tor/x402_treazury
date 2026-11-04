@@ -13,27 +13,16 @@
   "paths": {
     "/api/premium/brief": {
       "get": {
+        "operationId": "getBrief",
         "summary": "AI-assisted daily situation brief as structured JSON, by date or latest",
         "tags": [
           "Premium"
         ],
-        "parameters": [
-          {
-            "description": "YYYY-MM-DD; omit for the latest brief",
-            "in": "query",
-            "name": "date",
-            "required": false,
-            "schema": {
-              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-              "type": "string"
-            }
-          }
-        ],
         "x-payment-info": {
           "price": {
-            "amount": "0.010000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.010000"
           },
           "protocols": [
             {
@@ -41,25 +30,162 @@
             }
           ]
         },
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "description": "YYYY-MM-DD; omit for the latest brief",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          }
+        ],
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Daily situation brief",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "date": {
+                      "type": "string"
+                    },
+                    "bullets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "summary": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "brent": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "transitsToday": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "generatedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "schema",
+                    "date",
+                    "bullets"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/premium/bunker": {
       "get": {
+        "operationId": "getBunker",
         "summary": "Bunker & marine-fuel prices ($/tonne): current VLSFO/IFO380/MGO for Fujairah, Singapore, Rotterdam, plus the derived Fujairah premium over each benchmark hub",
         "tags": [
           "Premium"
         ],
-        "parameters": [],
         "x-payment-info": {
           "price": {
-            "amount": "0.020000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.020000"
           },
           "protocols": [
             {
@@ -68,48 +194,141 @@
           ]
         },
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Current bunker prices with derived Fujairah spreads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Newest port reading"
+                    },
+                    "oldestAsOf": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true,
+                      "description": "Oldest port reading"
+                    },
+                    "stale": {
+                      "type": "boolean",
+                      "description": "true when ANY port reading is older than 12 hours"
+                    },
+                    "ports": {
+                      "type": "array",
+                      "description": "One row per port: portKey, portLabel, vlsfo, ifo380, mgo ($/tonne, null when a grade was unavailable), currency, unit, asOf (when we last checked), priceDate (YYYY-MM-DD date of the quote, null when unknown), stale (true when that port was last checked over 12 hours ago)",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "spreads": {
+                      "type": "object",
+                      "description": "Fujairah VLSFO premium over each hub: fujairahVsSingaporeVlsfo, fujairahVsRotterdamVlsfo (positive = Fujairah dearer; null when a grade is absent or either port is stale)"
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "schema",
+                    "ports"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/premium/export": {
       "get": {
-        "summary": "Bulk history export: index-5min, stranded, and ais-gaps cap at 365 days of retained history; transits returns its full retained history instead",
+        "operationId": "getExport",
+        "summary": "Bulk history export: stranded and ais-gaps cap at 365 days; transits is full history; index-5min is every tick for the last 7 days and daily before that",
         "tags": [
           "Premium"
         ],
-        "parameters": [
-          {
-            "description": "Comma-separated subset of index-5min, stranded, ais-gaps, transits; omit for all",
-            "in": "query",
-            "name": "feeds",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "json (default) or csv for a multi-section download",
-            "in": "query",
-            "name": "format",
-            "required": false,
-            "schema": {
-              "default": "json",
-              "enum": [
-                "json",
-                "csv"
-              ],
-              "type": "string"
-            }
-          }
-        ],
         "x-payment-info": {
           "price": {
-            "amount": "0.250000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.250000"
           },
           "protocols": [
             {
@@ -117,53 +336,137 @@
             }
           ]
         },
+        "parameters": [
+          {
+            "name": "feeds",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated subset of index-5min, stranded, ais-gaps, transits; omit for all. The index-5min series holds 7 days of tick points (10 minutes apart since 2026-11-03) (crisisPressure, escalationForecast) plus daily open/close/min/max/mean/band rows (crisisPressureDaily, escalationForecastDaily) from the daily rollup, and states its resolution, window and paging route in its resolution, window and note fields. Older 5-minute ticks: /api/premium/history/index-5min?before=.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "json (default) or csv for a multi-section download",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            }
+          }
+        ],
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Multi-series archive (JSON, or CSV when format=csv)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/premium/history/{feed}": {
       "get": {
-        "summary": "Historical series: stranded and AIS-gap counts (hourly, capped at one year, growing), 5-min index, daily transits",
+        "operationId": "getHistory",
+        "summary": "Historical series: stranded and AIS-gap counts (hourly buckets with gaps, capped at one year, growing), 5-min index (7 days a page, pageable with before), daily transits",
         "tags": [
           "Premium"
         ],
-        "parameters": [
-          {
-            "description": "index-5min: both Hormuz indices at 5-minute cadence. transits: complete daily IMF PortWatch history, enriched per day with the 7-day moving average, pre-crisis-baseline deviation, and reopening-threshold headroom. stranded: hourly stranded-vessel counts, up to a year. ais-gaps: hourly AIS-dark counts, up to a year.",
-            "in": "path",
-            "name": "feed",
-            "required": true,
-            "schema": {
-              "enum": [
-                "index-5min",
-                "transits",
-                "stranded",
-                "ais-gaps"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "index-5min only: window in days, 1-30 (default 7)",
-            "in": "query",
-            "name": "days",
-            "required": false,
-            "schema": {
-              "default": 7,
-              "maximum": 30,
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
         "x-payment-info": {
           "price": {
-            "amount": "0.010000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.010000"
           },
           "protocols": [
             {
@@ -171,25 +474,291 @@
             }
           ]
         },
+        "parameters": [
+          {
+            "name": "feed",
+            "in": "path",
+            "required": true,
+            "description": "index-5min: both Hormuz indices at every tick (10 minutes apart since 2026-11-03 12:32Z, 5 before), pages of 7 days at most (a larger days value is cut to 7), page back with before to reach the full history. transits: complete daily IMF PortWatch history, enriched per day with the 7-day moving average, pre-crisis-baseline deviation, and reopening-threshold headroom. stranded: hourly stranded-vessel counts, up to a year. ais-gaps: hourly AIS-dark counts, up to a year.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "index-5min",
+                "transits",
+                "stranded",
+                "ais-gaps"
+              ]
+            }
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "index-5min only: window in days, 1-7 (default 7). A larger value is cut to 7; page back with before.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 7,
+              "default": 7
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "description": "index-5min only: ISO-8601 date or timestamp ending the window, exclusive (default now). Pass the previous response nextBefore to page back through the full tick history. An invalid value returns 400 and is not charged.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Historical series; the body varies by feed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string"
+                    },
+                    "feed": {
+                      "type": "string",
+                      "enum": [
+                        "index-5min",
+                        "transits",
+                        "stranded",
+                        "ais-gaps"
+                      ]
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "count": {
+                      "type": "number",
+                      "description": "Rows returned"
+                    },
+                    "truncated": {
+                      "type": "boolean",
+                      "description": "True when the read hit its ceiling, so older rows exist that this call did not return. Always false for index-5min, which reads only the requested window."
+                    },
+                    "expectedHours": {
+                      "type": "number",
+                      "description": "stranded and ais-gaps only: hours from the first to the last returned point, inclusive"
+                    },
+                    "missingHours": {
+                      "type": "number",
+                      "description": "stranded and ais-gaps only: expectedHours minus the points returned"
+                    },
+                    "droppedPartialBuckets": {
+                      "type": "number",
+                      "description": "stranded only: partial-census buckets removed from the series"
+                    },
+                    "completenessNote": {
+                      "type": "string",
+                      "description": "stranded and ais-gaps only: how to read the gaps. truncated refers only to the retention cap."
+                    },
+                    "days": {
+                      "type": "number",
+                      "description": "index-5min only: the window actually served, 1-7. Smaller than the days you asked for when the request was cut to 7."
+                    },
+                    "crisisPressure": {
+                      "type": "array",
+                      "description": "index-5min only: Crisis Pressure series, one point per tick",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "escalationForecast": {
+                      "type": "array",
+                      "description": "index-5min only: Escalation Forecast series, one point per tick",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "points": {
+                      "type": "array",
+                      "description": "transits, stranded and ais-gaps only; index-5min carries crisisPressure and escalationForecast instead. transits rows add ma7, baselineDelta and thresholdHeadroom to each PortWatch day; stranded rows are hourly total/anchored/stopped/transit/stranded.",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "baseline": {
+                      "type": "number",
+                      "description": "transits only: the frozen pre-crisis daily baseline"
+                    },
+                    "reopeningThreshold": {
+                      "type": "number",
+                      "description": "transits only: the 7-day-MA level the reopening markets resolve on"
+                    },
+                    "resolution": {
+                      "description": "transits: object, the distance-to-resolution outlook. index-5min: the string \"5min\", the sampling of crisisPressure and escalationForecast."
+                    },
+                    "window": {
+                      "type": "object",
+                      "description": "index-5min only: the window served, { from, to, days, maxDays, clamped, requestedDays }. clamped is true when your days value was cut to maxDays (7); requestedDays then holds what you sent."
+                    },
+                    "olderAvailable": {
+                      "type": "boolean",
+                      "description": "index-5min only: true when ticks older than window.from exist; page back with before=nextBefore"
+                    },
+                    "oldestTick": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "index-5min only: timestamp of the oldest stored tick"
+                    },
+                    "nextBefore": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "index-5min only: the earliest timestamp returned; pass it as before for the next older page. Null when no older ticks exist (olderAvailable is false)."
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "index-5min, stranded and ais-gaps: how to read the series, including how to page"
+                    },
+                    "basis": {
+                      "type": "string",
+                      "description": "stranded only: how the counts were measured after basisChangedAt"
+                    },
+                    "basisChangedAt": {
+                      "type": "string",
+                      "description": "stranded only: date of the latest series break. Do not difference across it. The latest (2026-09-26) moved vessels with an hour-old AIS fix out of the counts, stepping stranded down about 30%; the one before (2026-07-30) stepped counts up about 3.4x on total."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "schema",
+                    "feed",
+                    "count"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown feed (not charged). Body carries the valid feeds[] list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "unknown_feed"
+                    },
+                    "feeds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "feeds"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/premium/hormuz/flags": {
       "get": {
+        "operationId": "getHormuzFlags",
         "summary": "Hormuz flag rollup: live-AIS vessel population by flag state, with per-flag sanctioned tallies",
         "tags": [
           "Premium"
         ],
-        "parameters": [],
         "x-payment-info": {
           "price": {
-            "amount": "0.010000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.010000"
           },
           "protocols": [
             {
@@ -198,37 +767,175 @@
           ]
         },
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Flag rollup over the live vessel population",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "health": {
+                      "type": "object",
+                      "description": "AIS source + trusted flag; numbers are untrustworthy when not trusted"
+                    },
+                    "vessel_count": {
+                      "type": "number"
+                    },
+                    "distinct_flags": {
+                      "type": "number"
+                    },
+                    "sanctioned_count": {
+                      "type": "number"
+                    },
+                    "sanctioned_share": {
+                      "type": "number",
+                      "description": "0-1 fraction of the population that is OFAC-listed"
+                    },
+                    "darkFleetTotal": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Tankers we stopped receiving for 3 to 24 hours: a floor on lost signals, not a count of evasions. Null while the AIS-dark feed is stale."
+                    },
+                    "darkFleetSignificant": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "description": "False when darkFleetTotal sits within what the same waters lose at the ambient rate. Null while the feed is stale or the control fields are missing."
+                    },
+                    "darkFleetExpected": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Dark tankers expected at the ambient rate, cell by cell"
+                    },
+                    "darkFleetStratifiedZ": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Stratified z of observed against expected dark tankers"
+                    },
+                    "top_flags": {
+                      "type": "array",
+                      "description": "Top flag states by vessel count; each carries a sanctioned_count",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "omitted": {
+                      "type": "object",
+                      "description": "Fields intentionally not provided (no source): top_operators, direction"
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "schema",
+                    "top_flags"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/premium/hormuz/risk-screen": {
       "get": {
+        "operationId": "getHormuzRiskScreen",
         "summary": "Shadow-fleet risk screen: the live-AIS vessel population ranked worst-first, each hull with its risk band, typed reasons, and sanctions-body matches (flagged hulls by default; ?all=1 for every screened hull)",
         "tags": [
           "Premium"
         ],
-        "parameters": [
-          {
-            "description": "Set to 1 to include the cleared low-band hulls; default returns only the flagged hulls (high + moderate). counts always cover the screened population, that is every hull seen on AIS inside the active window.",
-            "in": "query",
-            "name": "all",
-            "required": false,
-            "schema": {
-              "enum": [
-                "1"
-              ],
-              "type": "string"
-            }
-          }
-        ],
         "x-payment-info": {
           "price": {
-            "amount": "0.020000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.020000"
           },
           "protocols": [
             {
@@ -236,25 +943,190 @@
             }
           ]
         },
+        "parameters": [
+          {
+            "name": "all",
+            "in": "query",
+            "required": false,
+            "description": "Set to 1 to include the cleared low-band hulls; default returns only the flagged hulls (high + moderate). counts always cover the screened population, that is every hull seen on AIS inside the active window.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Ranked per-vessel risk screen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "health": {
+                      "type": "object",
+                      "description": "AIS source + trusted flag; the screen is untrustworthy when not trusted"
+                    },
+                    "counts": {
+                      "type": "object",
+                      "description": "Whole-population tallies: total, high, moderate, low, sanctioned, dark, spoofed"
+                    },
+                    "darkFleetTotal": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Tankers we stopped receiving for 3 to 24 hours: a floor on lost signals, not a count of evasions. Null while the AIS-dark feed is stale."
+                    },
+                    "darkFleetSignificant": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "description": "False when darkFleetTotal sits within what the same waters lose at the ambient rate. Null while the feed is stale or the control fields are missing."
+                    },
+                    "darkFleetExpected": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Dark tankers expected at the ambient rate, cell by cell"
+                    },
+                    "darkFleetStratifiedZ": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Stratified z of observed against expected dark tankers"
+                    },
+                    "reasonKey": {
+                      "type": "object",
+                      "description": "Human labels for the reason codes (ofac_sdn, ais_dark, foc_tanker, imo_spoofed: a tanker or cargo ship whose IMO fails its check digit)"
+                    },
+                    "vesselsInclude": {
+                      "type": "string",
+                      "enum": [
+                        "flagged",
+                        "all"
+                      ],
+                      "description": "Which hulls the vessels array carries (flagged = high + moderate; all with ?all=1)"
+                    },
+                    "vessels": {
+                      "type": "array",
+                      "description": "Per-hull rows ranked worst-first: mmsi, imo, name, flag, band, reasons[] (codes), sanctionedBy[] (ofac/uk). Flagged hulls only by default; ?all=1 adds the cleared low band.",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "schema",
+                    "vessels",
+                    "counts"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/premium/risk-premium": {
       "get": {
-        "summary": "War-risk transit premium nowcast: a live modeled war-risk insurance multiple (Nx over the peace baseline, 1x-80x scale) for the strait, recomputed every 5 minutes from throughput, escalation, OVX, and event signals, with the standing straits.live insurance-estimate multiple carried as a static reference",
+        "operationId": "getRiskPremium",
+        "summary": "War-risk transit premium nowcast: a live modeled war-risk insurance multiple (Nx over the peace baseline, 1x-80x scale) for the strait, recomputed every 10 minutes from weekly IMF PortWatch throughput (can run more than a week behind), escalation, OVX, and event signals, with the standing straits.live insurance-estimate multiple carried as a static reference",
         "tags": [
           "Premium"
         ],
-        "parameters": [],
         "x-payment-info": {
           "price": {
-            "amount": "0.050000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.050000"
           },
           "protocols": [
             {
@@ -263,24 +1135,161 @@
           ]
         },
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Live modeled war-risk premium with drivers, a static insurance-estimate reference, and confidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "modeledMultiple": {
+                      "type": "number",
+                      "description": "Live modeled war-risk multiple, 1x (peace) to 80x (top of the published curve). The headline figure."
+                    },
+                    "band": {
+                      "type": "string",
+                      "enum": [
+                        "baseline",
+                        "elevated",
+                        "uneconomic",
+                        "severe",
+                        "closure-level"
+                      ]
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "description": "0-1; degrades when driver feeds are stale/missing or escalation-market volume is thin"
+                    },
+                    "reference": {
+                      "type": "object",
+                      "description": "Static context: straitsEstimateMultiple (the standing straits.live insurance-estimate multiple, manually set and infrequently changed; not a Joint War Committee figure), asOf, source, and a note. jwcMultiple carries the same value for compatibility and is deprecated (see reference.deprecated). NOT a live comparator."
+                    },
+                    "vlccWarPremiumUsd": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "VLCC war-premium band (low/high USD per voyage): the curated market-reported range, estimated separately from modeledMultiple, so the two will not divide exactly"
+                    },
+                    "drivers": {
+                      "type": "object",
+                      "description": "Per-driver score, raw value, health, and weight: throughput, escalation, ovx, event"
+                    },
+                    "degraded": {
+                      "type": "array",
+                      "description": "Drivers that were stale or missing and dropped out of the estimate",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "schema",
+                    "modeledMultiple",
+                    "band",
+                    "confidence"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/premium/snapshot": {
       "get": {
+        "operationId": "getSnapshot",
         "summary": "One-call snapshot: everything the Strait of Hormuz crisis monitor knows",
         "tags": [
           "Premium"
         ],
-        "parameters": [],
         "x-payment-info": {
           "price": {
-            "amount": "0.020000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.020000"
           },
           "protocols": [
             {
@@ -289,35 +1298,176 @@
           ]
         },
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Full dashboard snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "What this call was charged, e.g. \"$0.02\""
+                    },
+                    "status": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "open",
+                        "restricted",
+                        "closed",
+                        null
+                      ],
+                      "description": "Null only when neither PortWatch nor AIS produced a usable transit count"
+                    },
+                    "verdict": {
+                      "type": "object",
+                      "description": "Status verdict with basis"
+                    },
+                    "oil": {
+                      "type": "object",
+                      "description": "Latest Brent and WTI with the 24h change. Brent is normally a front-month futures print. When the futures feed has been stale over 2h, an EIA daily Dated Brent spot close can stand in as a backstop and can sit $20 or more off futures: oil.sourceKind is 'eia' (null otherwise) and oil.observedAt is the trading day of that close. oil.marketTime: the trade time the upstream reported for the Brent quote; oil.updatedAt is when we last checked."
+                    },
+                    "oilHistory": {
+                      "type": "array",
+                      "description": "Oil price points behind the sparkline",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "dailyTransits": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "IMF PortWatch daily transit count vs pre-crisis baseline. Null on cold start, before fetchPortWatchTransits has run."
+                    },
+                    "insurance": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "War-risk insurance detail. Null when no curated estimate is stored."
+                    },
+                    "insuranceMultiple": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "The multiple alone, e.g. 40 for 40x normal. Null once the quote is older than 14 days; see insurance.figuresStale."
+                    },
+                    "hormuzIndex": {
+                      "type": "object",
+                      "description": "Crisis Pressure and Escalation Forecast composites with component audit"
+                    },
+                    "dataHealth": {
+                      "type": "object",
+                      "description": "Per-section freshness: source + verifiedAt, plus authoredAt on hand-curated sections"
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "schema",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/premium/vessel/{imo}": {
       "get": {
+        "operationId": "getVesselDossier",
         "summary": "Single-vessel sanctions + risk dossier by IMO: unified multi-body (OFAC + UK) sanctions, identity, risk band, dark-activity",
         "tags": [
           "Premium"
         ],
-        "parameters": [
-          {
-            "description": "7-digit IMO number of the vessel",
-            "in": "path",
-            "name": "imo",
-            "required": true,
-            "schema": {
-              "pattern": "^\\d{7}$",
-              "type": "string"
-            }
-          }
-        ],
         "x-payment-info": {
           "price": {
-            "amount": "0.020000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.020000"
           },
           "protocols": [
             {
@@ -325,25 +1475,165 @@
             }
           ]
         },
+        "parameters": [
+          {
+            "name": "imo",
+            "in": "path",
+            "required": true,
+            "description": "7-digit IMO number of the vessel",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{7}$"
+            }
+          }
+        ],
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Single-vessel dossier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "imo": {
+                      "type": "string"
+                    },
+                    "sanctioned": {
+                      "type": "boolean"
+                    },
+                    "identity": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Merged name, flag, ship type, tonnage, year built, owner"
+                    },
+                    "sanctions": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "Unified multi-body view: listedBy plus a bodies[] array (OFAC and/or UK) each with its own detail and listing date"
+                    },
+                    "riskBand": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "darkActivity": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "AIS-gap record if the vessel has gone dark"
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "schema",
+                    "imo",
+                    "sanctioned"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "IMO not listed by OFAC or the UK and no dark-activity record (not charged)"
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/premium/vessels": {
       "get": {
+        "operationId": "getVessels",
         "summary": "Per-vessel intelligence: live-AIS manifest, sanctioned-in-strait, risk bands, raw AIS positions",
         "tags": [
           "Premium"
         ],
-        "parameters": [],
         "x-payment-info": {
           "price": {
-            "amount": "0.020000",
+            "mode": "fixed",
             "currency": "USD",
-            "mode": "fixed"
+            "amount": "0.020000"
           },
           "protocols": [
             {
@@ -352,8 +1642,148 @@
           ]
         },
         "responses": {
-          "default": {
-            "description": "Provider response; response schema is not modeled in this local catalog."
+          "200": {
+            "description": "Vessel intelligence bundle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "asOf": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "ais": {
+                      "type": "object",
+                      "description": "Latest raw AIS positions with a trust predicate (source + trusted flag)"
+                    },
+                    "manifest": {
+                      "type": "object",
+                      "description": "Live-AIS vessel manifest (MMSI-keyed; flag derived from the MMSI MID)",
+                      "properties": {
+                        "count": {
+                          "type": "number"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "vessels": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    },
+                    "sanctionedInStrait": {
+                      "type": "object",
+                      "description": "OFAC-sanctioned vessels the AIS feed listed at the last join, with program detail. A hull's last fix can be up to 12 hours old: fixAgeMin and matchedAt age each row. count is null and stale true when the join has not run for 2 hours."
+                    },
+                    "sanctionsReference": {
+                      "type": "object",
+                      "description": "OFAC + UK sanctions reference-list sizes; per-IMO multi-body detail at /api/premium/vessel/{imo}"
+                    },
+                    "riskBands": {
+                      "type": "object",
+                      "description": "Per-vessel risk bands keyed by MMSI and IMO"
+                    },
+                    "darkFleet": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "description": "AIS-dark rollup: count, baseline7d, baselineSampleHours, vesselsTracked, updatedAt, and topVessels[] (up to 20 named vessels). Null until the first hourly sample exists, and null while the AIS-dark feed is stale."
+                    },
+                    "darkFleetSignificance": {
+                      "type": "object",
+                      "description": "Reads darkFleet.count against ambient dropout: significant (false when the count sits within what the same waters lose at the ambient rate), expected (dark tankers expected at that rate) and stratifiedZ (the test statistic). All three are null while the feed is stale or the control fields are missing."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "schema",
+                    "manifest"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment Required. The signed x402 challenge is in the base64 PAYMENT-REQUIRED response header; the JSON body is informational.",
+            "headers": {
+              "PAYMENT-REQUIRED": {
+                "description": "Base64 x402 v2 challenge: accepts[] entries of scheme, network, amount, asset, payTo.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "payment_required"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "price": {
+                      "type": "string",
+                      "description": "Decimal USD with a leading $, e.g. \"$0.02\""
+                    },
+                    "network": {
+                      "type": "string",
+                      "description": "CAIP-2 chain id, e.g. eip155:8453 for Base"
+                    },
+                    "asset": {
+                      "type": "string",
+                      "const": "USDC"
+                    },
+                    "docs": {
+                      "type": "string"
+                    },
+                    "openapi": {
+                      "type": "string"
+                    },
+                    "mcp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message",
+                    "price",
+                    "network",
+                    "asset"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited: 30 requests per 60 seconds per client IP, one sliding window shared across all /api/premium/* routes. Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining and X-RateLimit-Reset are set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "const": "rate_limited"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }
@@ -361,7 +1791,7 @@
     "/api/index": {
       "get": {
         "summary": "Hormuz Index: Crisis Pressure and Escalation Forecast composites",
-        "description": "The two 0-100 Hormuz Index composites - Crisis Pressure (current state) and Escalation Forecast (30-day outlook) - with bands and per-component breakdowns. Recomputed every 5 minutes.",
+        "description": "Read the two 0-100 Hormuz Index composites: Crisis Pressure describes current conditions; Escalation Forecast combines prediction-market odds and the Brent-WTI spread without a fixed horizon. Returns bands, component breakdowns and history; recomputed every 10 minutes.",
         "tags": [
           "Free"
         ],
@@ -391,13 +1821,13 @@
     "/api/v1/oil": {
       "get": {
         "summary": "Brent and WTI time-series",
-        "description": "Rolling Brent and WTI prices from intraday front-month futures contracts (Yahoo Finance chart data, continuous quotes as fallback, EIA daily backstop). Underlying feed every 10 minutes; not edge-cached.",
+        "description": "Read stored Brent and WTI futures observations. Points are irregularly spaced; use since for a time window. latest can switch to an EIA dated spot close when futures are stale over two hours; inspect latest.sourceKind and latest.observedAt. Source feed every ten minutes; edge cache five minutes.",
         "tags": [
           "Free"
         ],
         "parameters": [
           {
-            "description": "Point count (default 168 = about 7 days hourly, max 2000).",
+            "description": "Newest stored points to return; spacing is irregular, so this is not a fixed number of hours. Use since for a time window.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -444,7 +1874,7 @@
     "/api/v1/events": {
       "get": {
         "summary": "War and diplomacy timeline",
-        "description": "Indexed strikes, ship incidents, closures, and negotiations with source attribution - GDELT auto-pull every 15 minutes plus hand-curated events.",
+        "description": "Read a source-cited timeline of strikes, ship incidents, closures and negotiations. Combines news-wire and RSS pulls every 15 minutes with hand-curated events; GDELT supplements the feed. count is headline rows; stories groups reports of the same incident.",
         "tags": [
           "Free"
         ],
@@ -497,7 +1927,7 @@
     "/api/v1/markets": {
       "get": {
         "summary": "Prediction-market odds",
-        "description": "Top Hormuz / Iran-conflict / oil-shock contracts from Kalshi and Polymarket, strict keyword-filtered. Underlying feed every 15 minutes.",
+        "description": "Read Hormuz, Iran-conflict and oil-shock odds from Kalshi, Polymarket and Manifold. Returns up to 50 matching rows; preserve total/truncated, market dates and sources. Rows flag index exclusions and incomplete Kalshi ladders.",
         "tags": [
           "Free"
         ],
@@ -508,7 +1938,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 20,
+              "default": 50,
               "maximum": 50,
               "minimum": 1,
               "type": "integer"
@@ -522,7 +1952,8 @@
             "schema": {
               "enum": [
                 "kalshi",
-                "polymarket"
+                "polymarket",
+                "manifold"
               ],
               "type": "string"
             }
@@ -788,7 +2219,7 @@
     "/api/v1/carriers": {
       "get": {
         "summary": "Carrier suspensions",
-        "description": "Top container carriers by TEU capacity and their Hormuz posture (suspended, rerouting, limited, transiting), vessels-trapped count, trapped TEU, and per-carrier surcharge in USD per TEU. hormuzPosture is the operative field: 5+ carriers stopped within 60-day advisories drives the 'effectively closed' verdict. Hand-curated; refreshed weekly.",
+        "description": "Read carrier Hormuz posture, trapped vessels/capacity and surcharges where stated in a carrier notice. surchargeUnit can be per container or per TEU; amounts are null when unreported. Five stopped carriers with advisory dates within 60 days drive the dashboard closure verdict. Hand-curated weekly.",
         "tags": [
           "Free"
         ],
@@ -871,7 +2302,7 @@
     "/api/v1/tick": {
       "get": {
         "summary": "Lightweight tick",
-        "description": "Bare-minimum payload for polling: Brent price, 24-hour change, transit and stranded counts, plus a verifiedAt anchor. 30-second edge cache.",
+        "description": "Read a compact state tick with Brent, transit/stranded counts and verifiedAt. Recomputed at most once every 120 seconds; edge-cached for 120 seconds. Brent can be an EIA dated spot close when futures are stale over two hours; inspect oil.sourceKind and oil.observedAt.",
         "tags": [
           "Free"
         ],
@@ -886,7 +2317,7 @@
     "/api/v1/since": {
       "get": {
         "summary": "'While you were away' deltas",
-        "description": "Compares current state to a caller-provided anchor timestamp and raises a material flag once any of: 24h+ elapsed, Brent moved 1%+, any new event, any carrier posture change, transit delta 3+, or stranded delta 5+. 60-second edge cache.",
+        "description": "Compare state with ISO anchor at. material triggers on 24 hours elapsed, a 1% Brent move, a new event/carrier advisory, or a 30-hull transit/stranded delta; smaller hull deltas are null. Anchors under six hours or over 90 days return material=false without deltas. For anchors older than 72 hours, event counts are minima. Cached up to 60 seconds.",
         "tags": [
           "Free"
         ],
@@ -1140,7 +2571,7 @@
     "/data/hormuz-index.csv": {
       "get": {
         "summary": "Hormuz indices CSV",
-        "description": "Free — no payment required. Both indices and bands at five-minute resolution over the last seven days.",
+        "description": "Free — no payment required. Both Hormuz indices and bands at the current ten-minute cadence over the last seven days.",
         "tags": [
           "Free"
         ],
@@ -1370,7 +2801,19 @@
       }
     }
   },
-  "x-catalog-source": "git:37494402c22f5897bf8660101a7a9784c621f6af:confs/straits/straits_digest.json",
+  "x-catalog-source": {
+    "premium_openapi": {
+      "url": "https://straits.live/openapi.json",
+      "sha256": "6fb9564fffec25b5f2737ddc6a9c47091c1bb56c0563cb5af19248f8bbceb6b2"
+    },
+    "free_contract_guide": "https://straits.live/api",
+    "current_usage_guide": {
+      "url": "https://straits.live/llms.txt",
+      "sha256": "bf02b85c0ef28fe5f67d3e78065727eaa43e4a746378abc4a6201b3a1884dc3c"
+    },
+    "projection": "Preserve complete supported premium GET contracts from vendor OpenAPI alongside the authored free catalog; omit token-authenticated SSE/session and owned webhook lifecycles.",
+    "prior_catalog_origin": "git:37494402c22f5897bf8660101a7a9784c621f6af:confs/straits/straits_digest.json"
+  },
   "x-public-documentation": {
     "url": "https://straits.live/api",
     "scope": "Additional public GET request contracts authored from the human API documentation. No endpoint responses were fetched. Undocumented response fields and query parameters are not inferred. Existing x-catalog-source records the original digest basis.",
@@ -1390,6 +2833,7 @@
       "/sanctioned-vessels/feed.xml",
       "/briefs/feed.xml",
       "/embed"
-    ]
+    ],
+    "sha256": "3adcaf9f95763ba2506d61d4499c4d4f579f2d1cb0bd984dab9e8af15478712e"
   }
 }

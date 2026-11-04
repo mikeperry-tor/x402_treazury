@@ -129,3 +129,94 @@ async fn horizon_company_facts_use_reviewed_post_on_dynamic_company_endpoints() 
         );
     }
 }
+
+#[tokio::test]
+async fn authored_market_groundwater_and_history_additions_have_intended_destinations() {
+    let apex = research_source(
+        "apexfaucet",
+        include_str!("../providers/apexfaucet-openapi.json"),
+    )
+    .await;
+    let finance = apex
+        .iter()
+        .find(|server| server.server == "finance")
+        .unwrap();
+    assert!(finance.discover_on_demand);
+    for name in [
+        "apexfaucet_funding_rates",
+        "apexfaucet_stablecoin_pegs",
+        "apexfaucet_prediction_odds",
+    ] {
+        assert!(
+            finance.tools.iter().any(|entry| entry.tool.name == name),
+            "{name}"
+        );
+    }
+    assert!(
+        !apex
+            .iter()
+            .flat_map(|server| &server.tools)
+            .any(|entry| entry.tool.path == "/api/x402/pay-safe-credits")
+    );
+    let locus = research_source("locus", include_str!("../providers/locus/openapi.json")).await;
+    let property = locus
+        .iter()
+        .find(|server| server.server == "property")
+        .unwrap();
+    assert!(
+        property
+            .tools
+            .iter()
+            .any(|entry| entry.tool.name == "locus_locus_groundwater_drawdown")
+    );
+    assert!(
+        !property
+            .tools
+            .iter()
+            .any(|entry| entry.tool.name == "locus_locus_before_you_sign_dossier")
+    );
+    let straits =
+        research_source("straits", include_str!("../providers/straits/openapi.json")).await;
+    let world = straits
+        .iter()
+        .find(|server| server.server == "world")
+        .unwrap();
+    let history = world
+        .tools
+        .iter()
+        .find(|entry| entry.tool.name == "straits_history_feed")
+        .unwrap();
+    assert!(world.discover_on_demand);
+    assert_eq!(
+        history.tool.input_schema["properties"]["days"]["maximum"],
+        7
+    );
+    assert!(
+        history.tool.input_schema["properties"]
+            .get("before")
+            .is_some()
+    );
+    assert!(
+        !world
+            .tools
+            .iter()
+            .any(|entry| entry.tool.name == "straits_export")
+    );
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let config: toml::Value = toml::from_str(
+        &std::fs::read_to_string(root.join("examples/deployments/research_desk.toml")).unwrap(),
+    )
+    .unwrap();
+    for (endpoint, term) in [
+        ("finance", "funding intervals"),
+        ("property", "groundwater drawdown"),
+        ("world", "tick history"),
+    ] {
+        assert!(
+            config["servers"][endpoint]["discovery_search_tool_instructions_text"]
+                .as_str()
+                .unwrap()
+                .contains(term)
+        );
+    }
+}

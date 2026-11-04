@@ -1,4 +1,4 @@
-description = "Cited US property and public-record context, zoning, permits, flood and environmental reports."
+description = "Cited US property and public records, zoning, permits, flood, water conditions and owner reports."
 # Public discovery manifests and tested same-origin static paths ignored unsigned byte ranges.
 # Disable optional cover; ordinary API requests retain their configured network policy.
 cover_traffic_enabled = false
@@ -9,15 +9,15 @@ base_url = "https://api.locus.report"
 prefix = "locus"
 include = ["/api", "/tools", ""]
 help_url = "https://api.locus.report/llms.txt"
-instructions_text = "For US public-record research, start with locus_list(compact=true), then obtain category schemas with compact=false before locus_call(name=..., arguments={...}). Use free coverage/lane checks before paid reports; many paid atoms duplicate free calls. Preserve dates, provenance and unknowns. Feedback/coverage requests are writes and require a requested purpose. Omit delivery webhook options; report headers are unavailable over MCP. Do not use Locus for tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
+instructions_text = "For US public-record research, start with locus_list(compact=true), then obtain category schemas with compact=false before locus_call(name=..., arguments={...}). Use free coverage/lane checks before paid reports; many paid atoms duplicate free calls. Preserve dates, provenance and unknowns. The gateway supports public reads; feedback and coverage-demand writes are unsupported. Omit delivery webhook options; report headers are unavailable over MCP. Do not use Locus for tenant screening, lending, insurance, employment, background checks, appraisal, valuation, policing or safe/unsafe labels."
 pricing_key = "x-payment-info"
 
 [overrides.locus_list]
-description = "Discover free Locus tools. Start with compact=true for names/categories; use category with compact=false to retrieve exact input schemas before calling locus_call."
+description = "Discover the vendor's free Locus catalog. Start with compact=true for names/categories; use category with compact=false for input schemas before locus_call. Vendor-listed feedback and coverage-demand writes are not supported by locus_call."
 pricing_description = "No payment required."
 
 [overrides.locus_call]
-description = "Call a free Locus tool using its name and schema-valid inputs inside arguments. Covers coverage/lane preflight, parcel, policy, hazard and public-record reads. Feedback and coverage requests are writes; use only for an explicitly requested purpose."
+description = "Call a free Locus read using its name and schema-valid inputs inside arguments. Covers coverage/lane preflight, parcel, policy, hazard and public records. Feedback and coverage-demand writes are unsupported."
 pricing_description = "No payment required."
 
 [overrides.locus_locus_air_quality_history]
@@ -90,3 +90,23 @@ pricing_description = "Cost: ~$0.01/call [spec]."
 
 [overrides.locus_locus_permit_closeout_check.params]
 delivery = "Unsupported in this integration: omit this webhook/status-token delivery option; use the direct response."
+
+[overrides.locus_locus_before_you_sign_dossier]
+description = "Collect a cited pre-signing buyer dossier for one US address: parcel identity, nearby parcels, flood/environmental records, sales and local legislation, with printable HTML/PDF. Run free coverage checks first; fewer than two resolved evidence lanes is uncharged."
+pricing_description = "Cost: ~$1.19/call [spec]."
+
+[overrides.locus_locus_escrow_insurance_dossier]
+description = "Collect public-record context for an owner facing an escrow increase or insurance nonrenewal. Returns tax/exemption deadlines, flood/insurance source pointers and RESPA calendar context with printable HTML/PDF. Thin evidence below two resolved lanes is uncharged; verify official applicability."
+pricing_description = "Cost: ~$0.89/call [spec]."
+
+[overrides.locus_locus_groundwater_drawdown]
+description = "Compare USGS daily monitoring-well depth near a US address or coordinates with one-, three- and five-year history. Preserves well distance and coverage; a monitoring well is not the property well. No qualifying well or source failure is uncharged. The free gateway returns a one-well preview."
+pricing_description = "Cost: ~$0.05/call [spec]."
+
+[overrides.locus_locus_property_tax_protest_packet]
+description = "Collect cited property-tax protest evidence for a US address: recorded sales, assessment position, notice dates and appeal pointers with printable HTML/PDF. This prepares a review packet, not an appraisal or a filed protest. Fewer than two resolved evidence lanes is uncharged."
+pricing_description = "Cost: ~$0.89/call [spec]."
+
+[overrides.locus_locus_seller_readiness_packet]
+description = "Collect cited pre-listing records for a US address: published permits and inspection states, permit closeout, assessor baseline, disclosure pointers, code/flood notices and special-district levies. Returns JSON and printable HTML/PDF; fewer than two resolved lanes is uncharged."
+pricing_description = "Cost: ~$0.85/call [spec]."

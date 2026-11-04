@@ -114,7 +114,7 @@ reusable provider; no account session or local background owner is required.
 | Concordance | Preserve authored price/ref enrichment; free catalog discovery completes series lookup. |
 | Curl | Authored request/response relay contract; the relay accepts unsigned upstream GET requests. |
 | Glassnode | Authored metadata-to-metric workflow; deeper bulk paths cannot be addressed by the current gateway template. |
-| Locus | Authored list/call gateway covers all 114 free REST duals; two public unified discovery manifests are separate compatible contracts. Batch/update job lifecycle remains unsupported. |
+| Locus | Authored list/call gateway covers compatible free REST reads; two public unified discovery manifests are separate compatible contracts. Batch/update job lifecycle remains unsupported. |
 | News Gurus | Bazaar projection preserves real templates and includes agent-status; advice is separate from compatibility. |
 | Straits | Authored free/premium contracts, historical feeds and JSON/CSV/RSS/HTML outputs; ordinary vessel collision naming. |
 | RelayShield phone companion | Authored vendor-omitted endpoint, with separate payment/version and unknown-result limitations. |
@@ -527,35 +527,45 @@ The authored `providers/locus/openapi.json` exposes paid POST resources, a
 free list/call gateway, public discovery manifests and lazy help. Prices are
 embedded from the spec's `x-payment-info.price` blocks ($0.01–$2.49 per call),
 with a **two-tool free gateway** mirroring the vendor's own remote-MCP shape: `locus_list`
-(catalog of the 123 captured free tools with `compact`/`category` query knobs) and
-`locus_call` (wrapped `{name, arguments}` body; the `name` enum pins the 123
-valid tools, and the spec's oneOf-of-123-wrappers body — which the flattener
-cannot expose — is rewritten into that flat form). Design notes:
+(the vendor's 137-tool free catalog with `compact`/`category` query knobs) and
+`locus_call` (wrapped `{name, arguments}` body; its `name` enum retains 135 public
+reads, with the vendor's full-object wrapper alternatives rewritten into that flat
+form). Operation descriptions omit vendor client-install commands; that cleanup leaves
+the existing request, price, billing and response projection unchanged. Design notes:
 
 - The spec's `/api/locus_*` underscore routes are free REST duals of the same
   tools, but their slugs collide with the paid `/api/locus-*` hyphen twins
-  under path-derived naming, so the free tier rides the gateway instead. All 123
-  captured free REST routes occur in the gateway enum: no functionality is lost
-  by this representation. The public `/.well-known/locus-tools.json` unified
+  under path-derived naming, so supported free reads ride the gateway instead.
+  The source's 137 free REST names are compared to the 135 read names in the
+  gateway enum; the two participation-write exceptions are explicit below. The public
+  `/.well-known/locus-tools.json` unified
   free/paid schema directory and `/.well-known/locus-agent-endpoints.json` bundle
   directory are distinct contracts preserved as complete captured objects with
   authored free-price hints. The empty naming fallback preserves their full names;
-  `/api` and `/tools` anchors retain existing names. Bidirectional source/gateway
-  name equality verifies coverage without discarding actual original schemas.
+  `/api` and `/tools` anchors retain existing names. Bidirectional supported-source/
+  gateway name equality verifies coverage without discarding actual original schemas.
 - Refresh from the vendor `https://api.locus.report/openapi.json`, recording its
   SHA-256 in the authored catalog and scoped fixture. Preserve complete paid
   request schemas and body-required flags, removing only the root `$schema`
   annotation and omitting content-level request examples; preserve method and price. Review new routes
   for authentication, authority and unfinished lifecycles before adding them.
-  Rebuild the gateway enum from all free REST duals, retain the compact/category
-  list knobs, and copy both complete public manifest operations with only a free
-  price hint added. Refresh the independent fixture's complete free operations,
-  discovery operations, place-report request and four omitted job/result witnesses
+  Rebuild the gateway enum from supported free REST reads, retaining the two
+  participation-write exclusions and compact/category list knobs, and copy both
+  complete public manifest operations with only a free price hint added. Refresh
+  the independent fixture's complete free operations, discovery operations, changed/
+  new paid requests and four omitted job/result witnesses
   from the vendor source, preserving local reference closure.
 - Many paid atoms explicitly duplicate free gateway records. Keep price/coverage
-  choices in deployment exclusions. The gateway also exposes feedback and
-  coverage-request writes; it is not exclusively read-only. Schema lookup through
-  `locus_list` is necessary because `arguments` remains a generic JSON object.
+  choices in deployment exclusions. The authored call gateway omits the free
+  `locus_agent_feedback` and `locus_request_coverage` aggregate-participation writes:
+  their contracts publish no idempotency/request key or retry/deduplication guarantee,
+  and the latter increments a place-demand counter. The payment-gated unsigned POST
+  assumption does not cover these unprotected mutations. Vendor list/discovery still
+  describes them, but they are not supported/advertised call choices. Schemas describe
+  caller contracts, not a runtime authorization boundary; nonconforming arguments
+  can still reach the provider through routing. See [schema contracts and execution](../docs/architecture.md#catalog-configuration-and-execution).
+  Other paid synchronous writes remain supported where their actual contracts
+  permit them. Look up schemas with `locus_list`, because `arguments` remains a generic JSON object.
 - The vendor quotes four payment rails; the live 402 puts plain EIP-3009
   USDC-on-Base first in `accepts[]`, which is what our EVM wallet pays (the
   SDK filters the Solana/Tempo/Circle-Gateway entries out).
@@ -573,6 +583,17 @@ cannot expose — is rewritten into that flat form). Design notes:
 - Satellite `includeImagery=true` returns optional base64 fields without a configured
   image mapping. Encoded fields remain ordinary JSON; no automatic extraction
   or hosted-image fetch is implied.
+- New paid dossiers and tax/seller packets deliver synchronous JSON with optional
+  printable HTML/PDF, not an owned job requiring poll/token recovery. They remain
+  reusable but unselected in the research desk until distinct coverage and quality
+  are compared against the existing place report/free gateway. The broad vendor
+  guidance still prohibits insurance use while publishing an owner insurance-
+  nonrenewal dossier. That inconsistency also needs clarification; no narrower
+  underwriting-only exception is inferred. The groundwater
+  drawdown read has broader USGS monitoring-well coverage than its free one-well
+  preview and is selected on property; a monitoring well is not a property's well.
+  New free reads include water-supply/lead-line/boil-notice context, streamflow/drought,
+  contractor licensing, flood-map changes and owner disclosure/process pointers.
 - Slow: place-report can take tens of seconds, environmental-context 60–90s.
 
 ```bash
@@ -582,8 +603,10 @@ x402_treazury serve --provider providers/locus/provider.toml
 ## straits.toml — Straits.live Hormuz monitor (straits.live)
 
 The authored catalog exposes free and premium resources tagged `Free` / `Premium`;
-listener tag selection can mount either tier. Original premium GET request objects
-retain their digest provenance. Additional free contracts come from the vendor's
+listener tag selection can mount either tier. Ten supported premium GET objects,
+including full responses, come from the current vendor OpenAPI; provenance retains
+its hash, the usage-guide hash and the prior authored origin. The 38 authored free
+contracts remain intact and come from the vendor's
 [human API documentation](https://straits.live/api), rather than the premium-only
 OpenAPI document. Known free additions carry explicit zero-price hints; no endpoint
 response or current service health was verified.
@@ -595,13 +618,33 @@ without browser execution. `/report` renders the same daily-brief prose already
 represented by `/api/v1/briefs`. The retired Hormuz and Cape snapshot feeds remain
 available as historical data frozen on 2026-08-28; their retirement markers must
 not be interpreted as live observations. Respect published per-format quotas and
-upstream timestamps/staleness indicators.
+upstream timestamps/staleness indicators. The published free JSON quota is 60 per
+minute plus 1,000 per day per IP; a pass changes vendor quotas, not Treazury authority.
+Markets default to 50 rows and include Manifold. Current tick caching is 120 seconds.
+Historical-delta thresholds are 30 hulls, anchors outside six hours to 90 days return
+no deltas, and older-than-72-hour event counts can be minima. Oil points are irregular
+stored observations; inspect sourceKind/observedAt for stale-futures EIA spot fallback
+and the five-minute edge cache. Carrier surcharge units may be per container or per
+TEU, with null amounts when no notice states them.
+The escalation index has no fixed forecast horizon. Its current cadence is ten
+minutes; events combine news-wire/RSS and manual curation with supplemental GDELT,
+and market context includes Manifold alongside Kalshi and Polymarket.
+
+Index history pages at most seven days, with optional exclusive `before` and
+response `nextBefore` for older ticks; invalid cursors return 400 without charge.
+The literal feed name `index-5min` remains stable even though current ticks are ten
+minutes apart and older pages can be five minutes. Export includes recent ticks
+but older index rows are daily OHLC/min/max/mean/band aggregates; history supplies
+older tick-level data. Risk-premium recomputation is ten-minute, while weekly IMF
+inputs can lag over a week. Preserve cadence, periods, resolution and input dates.
+The research desk now selects paged history and keeps the costlier bulk/daily export
+as a documented reusable alternative.
 
 With both tiers enabled, ordinary collision naming produces `straits_vessels_get`
 for the paid manifest and `straits_vessels_get_2` for free counts. A single-tier
 catalog names its selected operation `straits_vessels`. The free count request
 supports optional `flagged=true` and `region=hormuz|cape`; Cape returns null counts
-because it is not measured. Other existing names and requests remain unchanged.
+because it is not measured. Tier selection preserves those free request contracts.
 
 Session creation and the token-authenticated premium SSE stream remain outside
 this catalog, as do subscription-secret webhook lifecycle operations requiring a
@@ -1050,7 +1093,9 @@ make test CARGO_ARGS='--offline --example snapshot_agentutility'
 ```
 
 Review request/description/pricing changes, new aliases, tags and response envelopes.
-Review actual supported boundaries and focused transformation/request regressions
+Current speech guidance uses model-specific voice IDs (including the Kokoro mapping
+for onyx); URI-typed video URLs and voice/model compatibility remain source-authored
+constraints, not locally invented enums. Review actual supported boundaries and focused transformation/request regressions
 alongside updates; do not restore a fixed inventory or research-default gate. The snapshot does not refresh at runtime;
 no custom registry adapter is introduced into serving or agent source registration.
 
@@ -1973,15 +2018,16 @@ and research tools without hiding other compatible operations from the provider.
 
 `apexfaucet-openapi.json` is an authored repair of the complete public
 `https://apexfaucet.xyz/openapi.json`, with its source hash, documentation URL and
-refresh instructions in `x-treazury-provenance`. The vendor incorrectly declares
-chat-completions, token-verdict and base-token-verdict as GET with no inputs while
-their descriptions explicitly require POST JSON. The authored asset supplies
-those documented methods and bodies. It also supplies the documented prompt and
-steps query parameters omitted from image-generate. Missing query inputs named
+refresh instructions in `x-treazury-provenance`. The vendor now supplies the POST
+bodies for chat-completions, token-verdict and base-token-verdict, so their former
+method/body repairs are removed. Current token-verdict requires tokenAddress and
+makes chain optional. The remaining authored asset supplies the documented prompt
+and steps query parameters omitted from image-generate. Missing query inputs named
 in vendor descriptions are restored for trades/candles/volume windows, launch and
 archive pagination, contract-read arguments and block, token/recipient/payment
 filters, wallet tokens, impact sizes, marketplace search and agent-trust's
-alternative URL/address/agent identifiers. JSON argument arrays and comma-separated
+alternative URL/agent identifiers. The current vendor-supplied address parameter
+and its EVM pattern are retained unchanged. JSON argument arrays and comma-separated
 values stay wire strings. Exact route/field pairs are recorded in the asset's
 `query_input_repairs`; other operations and vendor metadata are preserved.
 Refresh from the vendor document and reapply only repairs
@@ -1991,8 +2037,10 @@ asset into an inventory/settings test fixture.
 Arc/X1 passport creation transfers a persistent identity asset to the payment
 signer and requires an owner beyond a rotating payer. Market featured slots and
 room meal/upgrade purchases create persistent paid placement or owned property.
-These five operations remain excluded pending ownership support. Read-only
-financial measurements and quotes remain available. Bloodstream prediction
+These operations remain excluded pending ownership support. The pay-safe-credits
+product is also excluded: it sells prepaid checks and returns a bearer token for
+later consumption, rather than an immediate independent result. Read-only financial
+measurements and quotes remain available. Bloodstream prediction
 submission has no stake or payout and remains supported: its description makes
 the persistent record under the paying wallet explicit. Ask-flux also publishes
 its answer and the question hash on chain; publication alone does not establish
@@ -2007,8 +2055,20 @@ final URLs, HTTP status, truncation, skipped pages and source-specific errors.
 Rendered extraction does not prove the requested agreement or document was found.
 Research-search returns source results, not full paper text or Hacker News
 comments. Company-check provides identity and recent filing links, not general
-EDGAR full-text search. The web-search dispatcher names x402Atlas or AgentBIT as
-its upstream and is not independent evidence of another search backend's health.
+EDGAR full-text search. The former web-search and weather-now routes are absent
+from the current primary catalog. They were not selected by the research desk;
+Exa retains web search, and Otto plus 2s retain weather coverage. The sampled Otto
+and 2s current weather agreed but share Open-Meteo, so they offer gateway rather
+than upstream redundancy; Otto also supplies a five-day forecast.
+
+New funding boards/gap estimates, stablecoin peg measurements, tokenized-stock
+quotes, prediction odds/movers and X1 reads remain ordinary market observations.
+APEX funding and Otto funding both offered $0.001 in representative calls. APEX's
+multi-coin venue/interval-normalized board complements Otto's targeted OI/positioning
+and different venues; neither is a cheaper equivalent of the other. Preserve quote
+units, venue failures, board truncation/coverage and observed timestamps. Fewer
+than two answering venues is refused before payment. These readings do not execute
+trades or authorize money movement.
 
 A flight-deals call returned thirty London-origin return fares in GBP with
 travel dates and affiliate booking links. It reads Aviasales searches cached for
